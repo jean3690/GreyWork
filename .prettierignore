@@ -1,0 +1,7 @@
+dist
+node_modules
+target
+*.gen.ts
+pnpm-lock.yaml
+apps/desktop/src-tauri/gen
+.omo

@@ -1,0 +1,23 @@
+/* shadcn/ui 主题变量 · 直接引用 tokens.css 语义 token（单一来源，随 v6 机加工工作台自动跟随）。
+ * Tailwind 工具类的 @theme inline 映射位于 app 级 tailwind.css（tailwind 入口唯一处）。 */
+:root {
+  --background: var(--ink);
+  --foreground: var(--text);
+  --card: var(--panel);
+  --card-foreground: var(--text);
+  --popover: var(--panel);
+  --popover-foreground: var(--text);
+  --primary: var(--accent);
+  --primary-foreground: var(--accent-ink);
+  --secondary: var(--panel-2);
+  --secondary-foreground: var(--text);
+  --muted: var(--panel-2);
+  --muted-foreground: var(--dim);
+  --accent: var(--panel-2);
+  --accent-foreground: var(--text);
+  --destructive: var(--orange);
+  --border: var(--line);
+  --input: var(--line-2);
+  --ring: var(--accent);
+  --radius: 0.625rem;
+}

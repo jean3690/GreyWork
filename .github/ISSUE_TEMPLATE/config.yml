@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 设计与计划文档
+    url: https://github.com/jean/greyWork/tree/master/.omo/plans
+    about: 架构裁决与落地计划（redesign-workbench / acp-integration）先读这里
