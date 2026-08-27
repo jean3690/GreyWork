@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "skills": {
+    "acp": {
+      "source": "agentclientprotocol.com",
+      "sourceUrl": "https://agentclientprotocol.com/",
+      "sourceType": "well-known",
+      "computedHash": "df8e834726ba1f1d6ff788647ae97bd06188c4edaab4c9f27f87ce2a046b6bab",
+      "wellKnownDigest": "sha256:9c86de2a96cd37e03ddeb8f2680259b6270a32bba434096458226be88d55068c"
+    },
+    "frontend-design": {
+      "source": "anthropics/skills",
+      "sourceType": "github",
+      "skillPath": "skills/frontend-design/SKILL.md",
+      "computedHash": "4eabc66183767153e404b39d1b839b1c37f2d82d86f0a0d7e880a579d8d62336"
+    },
+    "setup-matt-pocock-skills": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/setup-matt-pocock-skills/SKILL.md",
+      "computedHash": "552b0f48b9fe054aa93c5d432fefbd7bd9645e3f2d20b4e22432453a81800b21"
+    }
+  }
+}

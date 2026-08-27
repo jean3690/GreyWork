@@ -1,0 +1,145 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - button "后退" [ref=e6] [cursor=pointer]
+      - button "前进" [ref=e9] [cursor=pointer]
+      - button "新对话" [ref=e12] [cursor=pointer]
+    - textbox "搜索历史对话、插件" [ref=e19]:
+      - /placeholder: 搜索历史对话、插件…
+    - generic [ref=e20]:
+      - navigation "主舞台导航" [ref=e21]:
+        - button [ref=e22] [cursor=pointer]
+        - button [ref=e27] [cursor=pointer]
+        - button [ref=e32] [cursor=pointer]
+        - button [ref=e36] [cursor=pointer]
+        - button [ref=e40] [cursor=pointer]
+      - generic [ref=e46]:
+        - paragraph [ref=e47]: Projects
+        - generic [ref=e48]:
+          - generic [ref=e49]:
+            - button "GreyWork 主仓▸" [ref=e50] [cursor=pointer]
+            - button "Cesium WebGL 降级排查2 小时前" [ref=e51] [cursor=pointer]
+            - button "命令守卫单测补齐昨天" [ref=e52] [cursor=pointer]
+            - button "插件市场远程源接入周一" [ref=e53] [cursor=pointer]
+          - button "城市数据洞察▸" [ref=e55] [cursor=pointer]
+          - button "普通对话▸" [ref=e57] [cursor=pointer]
+      - generic [ref=e58]:
+        - paragraph [ref=e59]: Chats
+        - button [ref=e61] [cursor=pointer]
+    - generic [ref=e65]:
+      - button "设置" [ref=e66] [cursor=pointer]
+      - text: JF
+  - generic [ref=e70]:
+    - banner [ref=e71]:
+      - generic [ref=e72]:
+        - generic [ref=e73]: GreyWork
+        - generic [ref=e75]: /
+        - strong: GreyWork 主仓
+        - generic [ref=e76]: /
+        - generic [ref=e77]: Chat·Cowork
+      - group "运行模式" [ref=e78]:
+        - button "Local" [ref=e79] [cursor=pointer]
+        - button "Worktree" [ref=e80] [cursor=pointer]
+        - button "Cloud" [ref=e81] [cursor=pointer]
+      - combobox [ref=e83] [cursor=pointer]:
+        - generic: OpenAI Compatible
+      - generic [ref=e86]:
+        - button "IDE" [disabled] [ref=e87] [cursor=pointer]
+        - button "侧边栏" [ref=e94] [cursor=pointer]
+        - button "成果展示区" [ref=e97] [cursor=pointer]
+    - generic [ref=e100]:
+      - main [ref=e101]:
+        - generic [ref=e102]:
+          - generic [ref=e103]:
+            - strong [ref=e108]: GreyWork 助手
+            - generic [ref=e109]: 空闲
+            - generic "未配置已启用的模型供应商，当前为演示时间线；可在 设置 → 模型供应商 配置" [ref=e110]: 演示管线
+          - generic [ref=e112]:
+            - paragraph [ref=e113]: Cowork · 派工台
+            - heading "把任务交给工作台" [level=1] [ref=e118]
+            - paragraph [ref=e119]: 普通对话模式 · 未绑定项目，纯聊天
+            - generic [ref=e120]:
+              - button "报告 梳理项目本周改动并生成日报 ↵ ↵" [ref=e121] [cursor=pointer]:
+                - generic [ref=e122]: 报告
+                - generic [ref=e123]: 梳理项目本周改动并生成日报
+                - generic [ref=e124]: ↵
+                - text: ↵
+              - button "测试 跑一遍测试，修复失败的用例 ↵ ↵" [ref=e125] [cursor=pointer]:
+                - generic [ref=e126]: 测试
+                - generic [ref=e127]: 跑一遍测试，修复失败的用例
+                - generic [ref=e128]: ↵
+                - text: ↵
+              - button "重构 重构工作台三栏布局组件 ↵ ↵" [ref=e129] [cursor=pointer]:
+                - generic [ref=e130]: 重构
+                - generic [ref=e131]: 重构工作台三栏布局组件
+                - generic [ref=e132]: ↵
+                - text: ↵
+              - button "分析 分析站点客流数据并输出报表 ↵ ↵" [ref=e133] [cursor=pointer]:
+                - generic [ref=e134]: 分析
+                - generic [ref=e135]: 分析站点客流数据并输出报表
+                - generic [ref=e136]: ↵
+                - text: ↵
+          - generic [ref=e137]:
+            - generic [ref=e138]:
+              - button "附件 / 计划模式 / 目标" [ref=e139] [cursor=pointer]
+              - textbox "消息输入" [ref=e141]:
+                - /placeholder: 给 GreyWork 下达任务，输入 @ 引用插件 / 技能…
+              - button "发送" [disabled] [ref=e142]
+            - generic [ref=e146]:
+              - group "权限档位" [ref=e147]:
+                - button "只读" [ref=e148] [cursor=pointer]
+                - button "允许编辑" [ref=e151] [cursor=pointer]
+                - button "完全执行" [ref=e155] [cursor=pointer]
+              - button "ACP · OpenCode ▾" [ref=e161] [cursor=pointer]:
+                - text: ACP · OpenCode
+                - generic [ref=e163]: ▾
+              - generic [ref=e165]:
+                - button "low" [ref=e166] [cursor=pointer]
+                - button "medium" [ref=e167] [cursor=pointer]
+                - button "high" [ref=e168] [cursor=pointer]
+                - button "xhigh" [ref=e169] [cursor=pointer]
+              - button "速度 ×1.5" [ref=e170] [cursor=pointer]
+              - button "计划" [ref=e171] [cursor=pointer]
+              - generic [ref=e172]: Enter 发送 · Shift+Enter 换行
+      - complementary [ref=e173]:
+        - generic [ref=e174]:
+          - button "文件" [ref=e175] [cursor=pointer]
+          - button "Diff" [ref=e176] [cursor=pointer]
+          - button "预览" [ref=e177] [cursor=pointer]
+          - button "终端" [ref=e178] [cursor=pointer]
+          - button "交付物" [ref=e179] [cursor=pointer]
+          - button "Review" [ref=e180] [cursor=pointer]
+          - button "Sources" [ref=e181] [cursor=pointer]
+        - generic [ref=e182]:
+          - generic [ref=e183]:
+            - generic [ref=e184]: 文件 · 4
+            - button "文件" [ref=e185] [cursor=pointer]
+          - generic [ref=e187]:
+            - button "data/" [expanded] [ref=e188] [cursor=pointer]
+            - generic [ref=e194]:
+              - button "stations.csv" [ref=e195] [cursor=pointer]
+              - button "删除 data/stations.csv" [ref=e200] [cursor=pointer]
+            - button "packages/" [expanded] [ref=e204] [cursor=pointer]
+            - button "shell/" [expanded] [ref=e210] [cursor=pointer]
+            - button "src/" [expanded] [ref=e216] [cursor=pointer]
+            - generic [ref=e222]:
+              - button "reasoning.ts" [ref=e223] [cursor=pointer]
+              - button "删除 packages/shell/src/reasoning.ts" [ref=e228] [cursor=pointer]
+            - button "reports/" [expanded] [ref=e232] [cursor=pointer]
+            - generic [ref=e238]:
+              - button "城市态势报告.md" [ref=e239] [cursor=pointer]
+              - button "删除 reports/城市态势报告.md" [ref=e244] [cursor=pointer]
+            - button "src/" [expanded] [ref=e248] [cursor=pointer]
+            - button "plugins/" [expanded] [ref=e254] [cursor=pointer]
+            - generic [ref=e260]:
+              - button "index.ts" [ref=e261] [cursor=pointer]
+              - button "删除 src/plugins/index.ts" [ref=e266] [cursor=pointer]
+    - contentinfo [ref=e270]:
+      - generic "当前分支" [ref=e271]: feature/plugin-market
+      - text: Token —
+      - generic "Web 预览环境" [ref=e276]: Web 预览
+    - navigation "底部导航" [ref=e277]:
+      - button "对话" [ref=e278] [cursor=pointer]
+      - button "Agent" [ref=e281] [cursor=pointer]
+      - button "市场" [ref=e285] [cursor=pointer]
+      - button "设置" [ref=e290] [cursor=pointer]

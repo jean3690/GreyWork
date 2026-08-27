@@ -1,0 +1,51 @@
+import type { PluginManifest } from "./types";
+
+/** 内置插件市场（后续可替换为远程 Marketplace JSON） */
+export const SAMPLE_MARKET_MANIFESTS: PluginManifest[] = [
+  {
+    id: "skill-gis",
+    kind: "skill",
+    name: "GIS 分析 Skill",
+    version: "0.2.1",
+    entry: "skills/gis.md",
+    description: "GeoJSON/MBTiles 空间分析与可视化指令集",
+    author: { name: "GreyWork" },
+    tags: ["skill", "gis"],
+    tools: ["read_geojson", "spatial_query"],
+  },
+  {
+    id: "ext-github",
+    kind: "extension",
+    type: "connector",
+    name: "GitHub Connector",
+    version: "0.1.4",
+    entry: "connectors/github.ts",
+    description: "Issue / PR / 代码评审接入",
+    author: { name: "GreyWork" },
+    tags: ["extension", "github"],
+    permissions: ["github:read", "github:write"],
+    contributes: { commands: ["github.list-issues"] },
+  },
+  {
+    id: "mcp-cesium",
+    kind: "mcp-server",
+    name: "Cesium MCP",
+    version: "0.3.0",
+    description: "CesiumJS 数字地球 MCP 桥接",
+    author: { name: "Community" },
+    tags: ["mcp", "3d"],
+    transport: "streamable-http",
+    url: "http://localhost:9100/mcp",
+  },
+  {
+    id: "skill-report",
+    kind: "skill",
+    name: "报告生成 Skill",
+    version: "0.1.0",
+    entry: "skills/report.md",
+    description: "分析结果一键转 Markdown/PDF 报告",
+    author: { name: "GreyWork" },
+    tags: ["skill", "report"],
+    tools: ["render_report"],
+  },
+];

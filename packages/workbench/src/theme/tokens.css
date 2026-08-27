@@ -1,0 +1,108 @@
+/* GreyWork 设计令牌 · 单一来源（v7：AionUi 式冷白纸面 · 墨键，2026-08-27）
+ * 语义名沿用 ui-design.md；结构性布局变量使用 --gw- 前缀。
+ * 唯一定义处：任何组件不得另行硬编码这些值；shadcn 主题由 theme/shadcn.css 派生。
+ * 视觉语言：浅色默认 —— 冷白纸面主区 / 纯白面板 / 墨黑主键；彩色只出现在
+ * 助手头像（--aion-*）与状态信号（--amber/--cyan/--mint 等）。深色保留机加工暖石墨。 */
+@import "@fontsource-variable/archivo/wdth.css";
+@import "@fontsource-variable/jetbrains-mono";
+
+:root {
+  color-scheme: light;
+  font-family: var(--font-ui);
+  font-size: 15px;
+
+  /* 字族：UI/展示 = Archivo（DIN 系工业怪诞体，含 wdth 轴，铭牌标签用扩展字宽）；
+   * 遥测/代码 = JetBrains Mono；中文回退系统黑体。 */
+  --font-ui: "Archivo Variable", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-display: "Archivo Variable", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, "Cascadia Mono", monospace;
+
+  /* 语义 token（浅色默认：冷白主区 / 纯白面板 / 发丝边框 / 墨黑文字） */
+  --ink: #f6f7f9;
+  --panel: #ffffff;
+  --panel-2: #eceef1;
+  --side: #f0f1f4;
+  --line: #e4e6ea;
+  --line-2: #cfd3da;
+  --text: #17181d;
+  --dim: #5f636b;
+  --dim2: #9aa0a8;
+  /* 用户消息气泡（浅灰纸团） */
+  --bubble: #e9ebef;
+  /* 终端 / SQL 控制台固定深底（artifact 不随主题翻转） */
+  --console: #0a111b;
+
+  /* AionUI 多色系统：不同 Agent / 助手卡使用不同主题色（仅 Agent 语义，不作主强调） */
+  --aion-blue: #3b82f6;
+  --aion-green: #10b981;
+  --aion-orange: #f59e0b;
+  --aion-violet: #8b5cf6;
+  --aion-red: #ef4444;
+
+  /* 状态信号（浅底加深半档保证可读） */
+  --amber: #d9830a;
+  --cyan: #3f6ae0;
+  --violet: #7c53e8;
+  --mint: #0f9d6c;
+  --orange: #dd5a36;
+
+  /* 主强调：墨黑按钮 / 激活态（AionUi 式黑白主键）；hi 为悬停亮阶 */
+  --accent: #17181d;
+  --accent-ink: #ffffff;
+  --accent-hi: #34373e;
+
+  /* 结构性布局变量 */
+  --gw-sidebar-w: 260px;
+  /* 旧版 ProjectRail 的兼容别名；新壳层统一使用 --gw-sidebar-w。 */
+  --gw-rail-w: var(--gw-sidebar-w);
+  --gw-topbar-h: 56px;
+  --gw-side-w: 420px;
+  --gw-statusbar-h: 24px;
+}
+
+/* 深色模式 = 原机加工暖石墨（v6），整体语义不变。 */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ink: #141519;
+  --panel: #1b1d22;
+  --panel-2: #23262c;
+  --side: #17191d;
+  --line: #2d3138;
+  --line-2: #3b4049;
+  --text: #eceae3;
+  --dim: #9da1a4;
+  --dim2: #6c7076;
+  --bubble: #2a2d33;
+  --amber: #ffb224;
+  --cyan: #4e7cff;
+  --violet: #8b5cf6;
+  --mint: #34d399;
+  --orange: #ef6c4d;
+  --accent: #ffb224;
+  --accent-ink: #201403;
+  --accent-hi: #ffcb5c;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-theme="system"] {
+    color-scheme: dark;
+    --ink: #141519;
+    --panel: #1b1d22;
+    --panel-2: #23262c;
+    --side: #17191d;
+    --line: #2d3138;
+    --line-2: #3b4049;
+    --text: #eceae3;
+    --dim: #9da1a4;
+    --dim2: #6c7076;
+    --bubble: #2a2d33;
+    --amber: #ffb224;
+    --cyan: #4e7cff;
+    --violet: #8b5cf6;
+    --mint: #34d399;
+    --orange: #ef6c4d;
+    --accent: #ffb224;
+    --accent-ink: #201403;
+    --accent-hi: #ffcb5c;
+  }
+}

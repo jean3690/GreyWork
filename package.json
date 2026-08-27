@@ -1,0 +1,38 @@
+{
+  "name": "greywork",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "packageManager": "pnpm@11.21.0",
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=9"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @greywork/desktop dev",
+    "dev:desktop": "pnpm --filter @greywork/desktop dev",
+    "tauri": "pnpm --filter @greywork/desktop tauri",
+    "build": "pnpm --filter @greywork/desktop build",
+    "build:desktop": "pnpm --filter @greywork/desktop build",
+    "typecheck": "pnpm -r --if-present run typecheck",
+    "lint": "eslint .",
+    "test": "pnpm -r --if-present run test",
+    "check": "pnpm typecheck && pnpm build",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "eslint": "^9.36.0",
+    "eslint-plugin-vue": "^10.4.0",
+    "eslint-config-prettier": "^10.1.8",
+    "@vue/eslint-config-typescript": "^14.6.0",
+    "typescript-eslint": "^8.44.0",
+    "prettier": "^3.6.2",
+    "@eslint/js": "^9.36.0",
+    "globals": "^16.4.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.1.6"
+  }
+}

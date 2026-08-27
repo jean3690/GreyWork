@@ -1,0 +1,13 @@
+node_modules/
+dist/
+apps/desktop/src-tauri/target/
+.playwright*
+*.log
+*.png
+.env
+.env.*
+!.env.example
+.pnpm-store/
+aionUi*.png
+.omo/
+coverage/

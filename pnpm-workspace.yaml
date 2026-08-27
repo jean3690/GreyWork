@@ -1,0 +1,14 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+# pnpm 11 配置项放在 workspace manifest 中（camelCase）
+verifyDepsBeforeRun: false
+linkWorkspacePackages: true
+preferWorkspacePackages: true
+sharedWorkspaceLockfile: true
+autoInstallPeers: true
+
+allowBuilds:
+  esbuild: false
+  vue-demi: false

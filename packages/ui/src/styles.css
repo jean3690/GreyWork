@@ -1,0 +1,79 @@
+.forge-panel {
+  --fp-line: #1e2c3e;
+  --fp-text: #e8f0fa;
+  --fp-dim: #8fa6be;
+  --fp-accent: #ffb85c;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid var(--fp-line);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0)), #0e141d;
+  color: var(--fp-text);
+  font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+.forge-panel--cyan {
+  --fp-accent: #3ed6e8;
+}
+
+.forge-panel--violet {
+  --fp-accent: #9e88ff;
+}
+
+.forge-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.forge-panel__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--fp-dim);
+}
+
+.forge-panel__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--fp-accent);
+  box-shadow: 0 0 10px var(--fp-accent);
+}
+
+.forge-panel__meta {
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+  color: var(--fp-dim);
+}
+
+.forge-panel__title {
+  margin: 0;
+  font-family: "Space Grotesk", "Noto Sans SC", sans-serif;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.forge-panel__body {
+  flex: 1;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--fp-text);
+}
+
+.forge-panel__footer {
+  padding-top: 10px;
+  border-top: 1px solid var(--fp-line);
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+  color: var(--fp-dim);
+}

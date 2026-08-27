@@ -1,0 +1,22 @@
+{
+  "name": "@greywork/integrations",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "~5.6.2",
+    "vitest": "^3.2.4"
+  },
+  "dependencies": {
+    "@greywork/acp": "workspace:*"
+  }
+}
