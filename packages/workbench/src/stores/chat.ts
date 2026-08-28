@@ -6,6 +6,8 @@ import { createLlmClient } from "@greywork/llm";
 import { buildLlmHistory, selectLlmProvider } from "./chat-llm";
 import { exportToXlsx } from "../lib/xlsx";
 import { exportToPptx } from "../lib/pptx";
+import { extractDashboardTitle, specToHtml } from "../lib/genui";
+import { appEvents } from "../events";
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { i18n } from "../i18n";
@@ -225,6 +227,11 @@ export const useChatStore = defineStore("chat", () => {
           source: "assistant-pipeline",
         });
         message.artifacts = [...(message.artifacts ?? []), artifactId];
+        appEvents.emit("artifact:created", {
+          name: isReport ? "weekly-report.md" : "task-result.md",
+          format: "md",
+          source: "assistant-pipeline",
+        });
         // 表格意图：额外产出一个 xlsx 交付物（引擎生成 → VFS 二进制落盘 → Artifacts 卡片）
         if (/表|Excel|xlsx|客流|站点/i.test(message.content) || /表/.test(firstLabel)) {
           void exportToXlsx([
@@ -247,6 +254,7 @@ export const useChatStore = defineStore("chat", () => {
                 source: "assistant-pipeline",
                 format: "xlsx",
               });
+              appEvents.emit("artifact:created", { name: "task-result.xlsx", format: "xlsx", source: "assistant-pipeline" });
             })
             .catch(() => undefined);
         }
@@ -271,6 +279,42 @@ export const useChatStore = defineStore("chat", () => {
                 source: "assistant-pipeline",
                 format: "pptx",
               });
+              appEvents.emit("artifact:created", { name: "task-brief.pptx", format: "pptx", source: "assistant-pipeline" });
+            })
+            .catch(() => undefined);
+        }
+        // 界面意图：GenUI 产出静态 HTML 可视化 → VFS → 预览面板（preview:request 联动）
+        if (/界面|仪表盘|看板|dashboard|genui/i.test(message.content) || /界面|仪表盘|看板/.test(firstLabel)) {
+          const html = specToHtml({
+            title: `${extractDashboardTitle(message.content)} · GenUI`,
+            subtitle: `来源会话：${message.content.slice(0, 24)}…`,
+            kpis: [
+              { label: "总客流", value: "12,384" },
+              { label: "峰值日", value: "周六" },
+              { label: "环比", value: "+8.2%" },
+            ],
+            table: {
+              headers: ["站点", "客流", "占比"],
+              rows: [
+                ["北京站", "4,281", "80%"],
+                ["上海站", "3,650", "62%"],
+                ["深圳站", "2,134", "40%"],
+              ],
+            },
+          });
+          const path = `reports/genui/dashboard-${Date.now()}.html`;
+          void vfsStore
+            .write(path, html)
+            .then(() => {
+              const name = path.split("/").pop() ?? "dashboard.html";
+              artifactStore.pushArtifact({
+                name,
+                meta: "HTML · 可视化产物",
+                type: "report",
+                source: "assistant-pipeline",
+                format: "html",
+              });
+              appEvents.emit("artifact:created", { name, format: "html", source: "assistant-pipeline" });
             })
             .catch(() => undefined);
         }

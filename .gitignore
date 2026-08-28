@@ -11,3 +11,6 @@ apps/desktop/src-tauri/target/
 aionUi*.png
 .omo/
 coverage/
+
+# 本地开发链接：greyAgent 为独立仓库，软链接引用其实时源码（不纳入版本库）
+/greyAgent

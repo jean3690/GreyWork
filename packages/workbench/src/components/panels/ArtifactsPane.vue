@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onUnmounted, ref, watch } from "vue";
 import { FileText, FileSpreadsheet } from "lucide-vue-next";
 import MarkdownText from "../MarkdownText.vue";
 import { useArtifactStore } from "../../stores/artifact";
 import { workspaceFs } from "../../stores/vfs";
+import { appEvents } from "../../events";
 import type { Artifact } from "../../types";
 import { useI18n } from "vue-i18n";
 
@@ -54,11 +55,20 @@ async function downloadArtifact(artifact: Artifact): Promise<void> {
   }
 }
 
+/** HTML 产物：请求预览面板加载（跨面板联动，经 appEvents）。 */
+function previewHtml(artifact: Artifact): void {
+  if (artifact.format !== "html") return;
+  appEvents.emit("preview:request", { path: `reports/genui/${artifact.name}` });
+}
+
 void loadPreview();
 watch(
   () => artifactStore.artifacts.length,
   () => void loadPreview(),
 );
+// 事件驱动：异步产物完成通知（chat mock 管线 / 导出）→ 刷新预览；组件卸载时取消订阅。
+const unsubscribeArtifact = appEvents.on("artifact:created", () => void loadPreview());
+onUnmounted(unsubscribeArtifact);
 </script>
 
 <template>
@@ -75,7 +85,9 @@ watch(
           ><span>{{ a.meta }} · {{ a.source }}</span>
         </div>
         <span v-if="a.format === 'xlsx' || a.format === 'pptx'" class="artifact__badge">{{ a.format === "xlsx" ? "XLSX" : "PPTX" }}</span>
-        <button v-if="a.format === 'xlsx' || a.format === 'pptx'" class="btn btn--mini" @click="downloadArtifact(a)">
+        <span v-else-if="a.format === 'html'" class="artifact__badge">HTML</span>
+        <button v-if="a.format === 'html'" class="btn btn--mini" @click="previewHtml(a)">{{ t("panels.artifacts.preview") }}</button>
+        <button v-else-if="a.format === 'xlsx' || a.format === 'pptx'" class="btn btn--mini" @click="downloadArtifact(a)">
           {{ t("panels.artifacts.download") }}
         </button>
         <button v-else class="btn btn--mini">{{ t("panels.artifacts.open") }}</button>
