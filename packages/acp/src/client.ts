@@ -5,6 +5,7 @@ import type {
   AcpPermissionOptionInfo,
   AcpPermissionRequestPayload,
   AcpPromptResult,
+  AcpSandboxMode,
   AcpSessionConfigOption,
   AcpSessionInfo,
   AcpSessionOpened,
@@ -75,7 +76,6 @@ export class WebSocketTransport implements AcpTransport {
     this.emit({ kind: "started", payload: { handle: 1 } });
     return 1;
   }
-
   async openSession(_handle: number, cwd: string): Promise<AcpSessionOpened> {
     this.assertConfigured();
     const result = (await this.request("session/new", { cwd, mcpServers: [] })) as {
@@ -232,7 +232,8 @@ export class WebSocketTransport implements AcpTransport {
 export interface AcpClient {
   readonly transportId: "tauri-ipc" | "websocket";
   isAvailable(): boolean;
-  startAgent(agentCmd: string, tier: PermissionTier): Promise<number>;
+  /** sandbox 非 off 时宿主以 OS 沙盒包裹 agent；workspace 为沙盒可写锚定目录。 */
+  startAgent(agentCmd: string, tier: PermissionTier, sandbox?: AcpSandboxMode, workspace?: string | null): Promise<number>;
   openSession(handle: number, cwd: string): Promise<AcpSessionOpened>;
   setSessionConfig(handle: number, configId: string, value: string | boolean): Promise<AcpSessionConfigOption[]>;
   prompt(handle: number, text: string): Promise<AcpPromptResult>;
@@ -247,7 +248,7 @@ export function createAcpClient(transport: AcpTransport = defaultTransport()): A
   return {
     transportId: transport.id,
     isAvailable: () => transport.available ?? transport.id === "tauri-ipc",
-    startAgent: (cmd, tier) => transport.startAgent(cmd, tier),
+    startAgent: (cmd, tier, sandbox, workspace) => transport.startAgent(cmd, tier, sandbox, workspace),
     openSession: (handle, cwd) => transport.openSession(handle, cwd),
     setSessionConfig: (handle, configId, value) => transport.setSessionConfig(handle, configId, value),
     prompt: (handle, text) => transport.prompt(handle, text),
@@ -276,6 +277,7 @@ export type {
   AcpPermissionOptionInfo,
   AcpPermissionRequestPayload,
   AcpPromptResult,
+  AcpSandboxMode,
   AcpSessionConfigOption,
   AcpSessionInfo,
   AcpSessionOpened,

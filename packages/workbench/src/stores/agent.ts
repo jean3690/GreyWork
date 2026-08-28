@@ -105,7 +105,7 @@ export const useAgentStore = defineStore("agent", () => {
       const provider = agentProviders.value.find((provider) => provider.id === selectedProviderId.value);
       if (!provider) throw new Error(t("errors.acpNotSelected"));
       const workspace = await resolveWorkspace();
-      handle = await acpAdapter.startAgent(provider.command, settings.permissionTier);
+      handle = await acpAdapter.startAgent(provider.command, settings.permissionTier, settings.sandboxMode, workspace);
       const { sessionId } = await acpAdapter.openSession(handle, workspace);
       const { threadId, message } = chat.startAcpTurn(sub.prompt, sub.role);
       subtaskSessions.set(sub.id, { handle, sessionId, threadId, messageId: message.id });
@@ -361,7 +361,7 @@ export const useAgentStore = defineStore("agent", () => {
     }
     await ensureListener();
     try {
-      acpHandle.value = await acpAdapter.startAgent(provider.command, settings.permissionTier);
+      acpHandle.value = await acpAdapter.startAgent(provider.command, settings.permissionTier, settings.sandboxMode, workspace);
       const opened = await acpAdapter.openSession(acpHandle.value, workspace);
       acpSessionId.value = opened.sessionId;
       acpConfigOptions.value = opened.configOptions;

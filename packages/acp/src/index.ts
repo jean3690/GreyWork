@@ -10,6 +10,7 @@ export type {
   AcpPermissionOptionInfo,
   AcpPermissionRequestPayload,
   AcpPromptResult,
+  AcpSandboxMode,
   AcpSessionConfigOption,
   AcpSessionInfo,
   AcpSessionOpened,

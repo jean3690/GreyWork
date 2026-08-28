@@ -4,6 +4,7 @@ import type {
   AcpPermissionOptionInfo,
   AcpPermissionRequestPayload,
   AcpPromptResult,
+  AcpSandboxMode,
   AcpSessionConfigOption,
   AcpSessionOpened,
   PermissionTier,
@@ -16,7 +17,7 @@ import type {
 export interface AcpAgentAdapter {
   provider: "acp";
   isAvailable(): boolean;
-  startAgent(agentCmd: string, tier: PermissionTier): Promise<number>;
+  startAgent(agentCmd: string, tier: PermissionTier, sandbox?: AcpSandboxMode, workspace?: string | null): Promise<number>;
   openSession(handle: number, cwd: string): Promise<AcpSessionOpened>;
   setSessionConfig(handle: number, configId: string, value: string | boolean): Promise<AcpSessionConfigOption[]>;
   prompt(handle: number, text: string): Promise<AcpPromptResult>;
@@ -30,7 +31,7 @@ export function createAcpAgentAdapter(client: AcpClient): AcpAgentAdapter {
   return {
     provider: "acp",
     isAvailable: () => client.isAvailable(),
-    startAgent: (agentCmd, tier) => client.startAgent(agentCmd, tier),
+    startAgent: (agentCmd, tier, sandbox, workspace) => client.startAgent(agentCmd, tier, sandbox, workspace),
     openSession: (handle, cwd) => client.openSession(handle, cwd),
     setSessionConfig: (handle, configId, value) => client.setSessionConfig(handle, configId, value),
     prompt: (handle, text) => client.prompt(handle, text),

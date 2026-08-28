@@ -214,6 +214,12 @@ export const zhCN = {
     planMode: "计划模式",
     on: "开",
     off: "关",
+    sandboxLabel: "ACP 沙盒",
+    sandbox: {
+      off: { label: "关闭", desc: "直启 agent 进程，不做 OS 级隔离（进程边界 + 宿主权限守卫仍在）。" },
+      fs: { label: "文件系统隔离", desc: "bwrap 包裹：系统路径只读、工作区可写、/tmp 隔离、网络关闭。需系统安装 bwrap。" },
+      full: { label: "隔离 + 网络", desc: "同文件系统隔离，但放行网络（agent 可联网搜索 / MCP）。" },
+    },
     workspaceDir: "ACP 工作区目录",
     workspaceDirPlaceholder: "留空 = 桌面主目录（宿主校验绝对路径且非根）",
     registryTitle: "能力注册表",

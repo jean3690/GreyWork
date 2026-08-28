@@ -34,6 +34,14 @@ export const PERM_LABELS: Record<PermTier, string> = {
   auto: "settings.permissions.auto.label",
 };
 
+/** 沙盒档位（方案 2 P1：宿主 OS 级隔离）。label/desc 为 i18n key。 */
+export type SandboxMode = "off" | "fs" | "full";
+export const SANDBOX_MODES: { value: SandboxMode; label: string; desc: string }[] = [
+  { value: "off", label: "settings.sandbox.off.label", desc: "settings.sandbox.off.desc" },
+  { value: "fs", label: "settings.sandbox.fs.label", desc: "settings.sandbox.fs.desc" },
+  { value: "full", label: "settings.sandbox.full.label", desc: "settings.sandbox.full.desc" },
+];
+
 export type RunMode = "local" | "worktree" | "cloud";
 export type ThemeMode = "dark" | "light" | "system";
 export const RUN_MODES: { value: RunMode; label: string; hint: string }[] = [
@@ -59,6 +67,8 @@ const settingsStorage = createJsonStorage<SavedSettings>(
 /** 全局设置：权限档位 / 计划模式 / token 快照 / 供应商芯片 / 已启用插件。 */
 export const useSettingsStore = defineStore("settings", () => {
   const permissionTier = ref<PermTier>("daily");
+  /** 沙盒档位：off 直启；fs = bwrap 文件系统隔离 + 网络关闭；full = 隔离 + 网络放行。 */
+  const sandboxMode = ref<SandboxMode>("off");
   /** 运行模式（顶栏胶囊）；worktree/cloud 为宿主能力预留，当前仅 local 生效。 */
   const runMode = ref<RunMode>("local");
   /** ACP 会话工作区目录（空 = 桌面主目录；宿主侧校验绝对路径且非根）。 */
@@ -134,6 +144,7 @@ export const useSettingsStore = defineStore("settings", () => {
 
   return {
     permissionTier,
+    sandboxMode,
     runMode,
     workspaceDir,
     planMode,

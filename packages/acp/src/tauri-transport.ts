@@ -3,6 +3,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AcpEventEnvelope,
   AcpPromptResult,
+  AcpSandboxMode,
   AcpSessionConfigOption,
   AcpSessionInfo,
   AcpSessionOpened,
@@ -16,8 +17,8 @@ const EVENT_NAME = "acp://event";
 export class TauriIpcTransport implements AcpTransport {
   readonly id = "tauri-ipc" as const;
 
-  async startAgent(agentCmd: string, tier: PermissionTier): Promise<number> {
-    return invoke<number>("acp_start", { agentCmd, tier });
+  async startAgent(agentCmd: string, tier: PermissionTier, sandbox?: AcpSandboxMode, workspace?: string | null): Promise<number> {
+    return invoke<number>("acp_start", { agentCmd, tier, sandbox, workspace });
   }
 
   async openSession(handle: number, cwd: string): Promise<AcpSessionOpened> {
