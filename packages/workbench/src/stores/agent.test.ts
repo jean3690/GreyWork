@@ -522,3 +522,95 @@ describe("并行编排（dispatchRun）", () => {
     expect(h.startAgent).toHaveBeenCalledTimes(1); // 仅 planner
   });
 });
+
+describe("replan（执行中调整计划）", () => {
+  /** 建立一次真实链路 run：planner 分解为 2 个子任务并全部完成。 */
+  async function setupDoneRun(agentStore: ReturnType<typeof useAgentStore>): Promise<string> {
+    let handleSeq = 0;
+    let sessionSeq = 0;
+    h.startAgent.mockImplementation(() => Promise.resolve(++handleSeq));
+    h.openSession.mockImplementation(() => Promise.resolve({ sessionId: `session-${++sessionSeq}`, configOptions: [] }));
+    h.prompt.mockImplementation(() => new Promise<unknown>(() => undefined));
+
+    void agentStore.dispatchRun("分析客流数据");
+    await vi.waitFor(() => expect(h.prompt).toHaveBeenCalledWith(1, expect.stringContaining("你是任务编排器")));
+    emit({
+      kind: "session-update",
+      payload: {
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { text: '[{"role":"researcher","prompt":"抓取数据"},{"role":"geo-analyst","prompt":"空间聚类"}]' },
+        },
+      },
+    });
+    const chat = useChatStore();
+    chat.flushPendingContent();
+    emit({ kind: "prompt-done", payload: { handle: 1, response: {} } });
+    await vi.waitFor(() => expect(agentStore.runs[0]?.subtasks).toHaveLength(2));
+    // 等待两个子任务各自完成 startAgent/openSession（session 已注册，handle 2/3）
+    await vi.waitFor(() => expect(h.startAgent).toHaveBeenCalledTimes(3));
+    emit({ kind: "prompt-done", payload: { handle: 2, response: {} } });
+    emit({ kind: "prompt-done", payload: { handle: 3, response: {} } });
+    await vi.waitFor(() => expect(agentStore.runs[0]?.status).toBe("done"));
+    return agentStore.runs[0]?.id ?? "";
+  }
+
+  it("cancelSubtask 移除 pending 子任务，run 继续推进", async () => {
+    h.isAvailable.mockImplementation(() => false);
+    const agentStore = useAgentStore();
+    void agentStore.dispatchRun("梳理改动");
+    await vi.waitFor(() => expect(agentStore.runs[0]?.subtasks).toHaveLength(2));
+
+    const runId = agentStore.runs[0]?.id ?? "";
+    const subId = agentStore.runs[0]?.subtasks[0]?.id ?? "";
+    await agentStore.cancelSubtask(runId, subId);
+
+    expect(agentStore.runs[0]?.subtasks).toHaveLength(1);
+    await vi.waitFor(() => expect(agentStore.runs[0]?.status).toBe("done"), { timeout: 3000 });
+  });
+
+  it("cancelSubtask 取消 running 子任务：停进程并出队，剩余子任务不受影响", async () => {
+    const agentStore = useAgentStore();
+    const runId = await setupDoneRun(agentStore); // 结束后追加逻辑
+    // 追加一个 pending 子任务再取消它（队列出队路径）
+    agentStore.addSubtask(runId, "builder", "补做清理");
+    await vi.waitFor(() => expect(agentStore.runs[0]?.subtasks).toHaveLength(3));
+    const added = agentStore.runs[0]?.subtasks[2];
+    await agentStore.cancelSubtask(runId, added?.id ?? "");
+    expect(agentStore.runs[0]?.subtasks).toHaveLength(2);
+    expect(agentStore.runs[0]?.status).toBe("done");
+  });
+
+  it("addSubtask 追加子任务并派发：handle/session 递增、prompt 再次调用", async () => {
+    const agentStore = useAgentStore();
+    const runId = await setupDoneRun(agentStore);
+    const promptsBefore = h.prompt.mock.calls.length;
+
+    agentStore.addSubtask(runId, "builder", "补做清理");
+
+    await vi.waitFor(() => expect(agentStore.runs[0]?.subtasks).toHaveLength(3));
+    await vi.waitFor(() => expect(h.prompt.mock.calls.length).toBeGreaterThan(promptsBefore));
+    expect(agentStore.runs[0]?.status).toBe("running");
+
+    // 新子任务完成 → run 恢复 done
+    await vi.waitFor(() => expect(h.startAgent).toHaveBeenCalledTimes(4)); // 新 session 已注册
+    emit({ kind: "prompt-done", payload: { handle: 4, response: {} } });
+    await vi.waitFor(() => expect(agentStore.runs[0]?.status).toBe("done"));
+  });
+
+  it("retrySubtask 重置失败子任务重新派发，run 恢复 running", async () => {
+    const agentStore = useAgentStore();
+    const runId = await setupDoneRun(agentStore);
+    const promptsBefore = h.prompt.mock.calls.length;
+
+    // 人为置失败，模拟某子任务执行失败
+    const target = agentStore.runs[0]?.subtasks[0];
+    if (target) target.status = "failed";
+    agentStore.retrySubtask(runId, target?.id ?? "");
+
+    expect(agentStore.runs[0]?.status).toBe("running");
+    // retry 立即重跑：子任务应很快进入 running 并再次调用 prompt
+    await vi.waitFor(() => expect(h.prompt.mock.calls.length).toBeGreaterThan(promptsBefore));
+    await vi.waitFor(() => expect(agentStore.runs[0]?.subtasks[0]?.status).toBe("running"));
+  });
+});

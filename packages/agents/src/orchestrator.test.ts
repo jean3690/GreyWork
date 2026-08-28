@@ -36,7 +36,9 @@ describe("parsePlan", () => {
     expect(plan).toHaveLength(3);
     expect(plan?.[0]).toMatchObject({ role: "researcher", prompt: "抓取客流数据", status: "pending" });
     expect(plan?.[1]).toMatchObject({ role: "geo-analyst", prompt: "空间聚类" });
-    expect(plan?.[1]?.id).toBe("sub-2");
+    // id 全局唯一（parsePlan 与 createSubtask 共享计数）
+    expect(new Set(plan?.map((sub) => sub.id)).size).toBe(plan?.length);
+    expect(plan?.[0]?.id).toMatch(/^sub-\d+$/);
     // 非法角色回退 builder；空 prompt 被跳过
     expect(plan?.[2]).toMatchObject({ role: "builder", prompt: "非法角色" });
   });

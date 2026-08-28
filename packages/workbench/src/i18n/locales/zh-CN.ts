@@ -153,6 +153,10 @@ export const zhCN = {
       done: "完成",
       failed: "失败",
     },
+    retry: "重试该子任务",
+    cancel: "取消该子任务",
+    addSubtask: "追加",
+    addSubtaskPlaceholder: "追加子任务指令（builder）…",
   },
   settings: {
     title: "设置",
