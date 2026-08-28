@@ -6,7 +6,6 @@
 ┌─────────────────────────────────────────────────────────────┐
 │ apps/desktop (Tauri 桌面壳)                                  │
 ├─────────────────────────────────────────────────────────────┤
-│ packages/ui          共享组件 / 视觉令牌                      │
 │ packages/shell       会话 / 模型供应商 / 插件市场 / AI 循环策略 │
 │ packages/llm         模型供应商客户端（openai-compatible 流式）│
 │ packages/editor      文件系统 / Git / CodeMirror / 文档表格预览     │
@@ -32,7 +31,7 @@
 | Skill / Extension / MCP 标准接口                         | `@greywork/plugins`      |
 | 命令守卫（限制 AI 每一条命令）                           | `@greywork/plugins`      |
 | GitHub / Jira / Slack 接入                               | `@greywork/integrations` |
-| 文件系统 / CodeMirror / 文档与表格预览 / Git                 | `@greywork/editor`       |
+| 文件系统 / CodeMirror / 文档与表格预览 / Git             | `@greywork/editor`       |
 | CesiumJS 3D 数字地球 / 3D Tiles                          | `@greywork/spatial`      |
 | MapLibre 2D/3D 地图 / MBTiles / GeoJSON                  | `@greywork/gis`          |
 | 多 Agent 并行编排（采集→分析→报告）                      | `@greywork/agents`       |
@@ -45,9 +44,8 @@
 ## 依赖方向
 
 - `apps/*` 可依赖任意 `packages/*`。
-- 领域包（agents / spatial / gis / analytics）只依赖 `@greywork/core`，保持领域逻辑与 UI 解耦。
+- 领域包（agents / spatial / gis / analytics）只依赖 `@greywork/core`，保持领域逻辑与 UI 解耦。例外：`@greywork/spatial` 依赖 `@greywork/gis`（同为空间领域，示例城市点同源派生，避免双份数据）。
 - `packages/shell` 依赖 `@greywork/agents` 与 `@greywork/plugins`，是平台的“宿主”。
-- `packages/ui` 只依赖 `vue`，允许领域包作为数据来源，不反向依赖领域包。
 - 禁止 `packages/*` 相互反向依赖 `apps/*`。
 
 ## 新增领域包

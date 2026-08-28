@@ -1,18 +1,16 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import {
-  REASONING_EFFORTS,
-  createCliSessionManager,
-  createDefaultCliIntegrations,
-  type CliIntegration,
-  type ReasoningEffort,
-} from "@greywork/shell";
+import { useI18n } from "vue-i18n";
+import { REASONING_EFFORTS, createCliSessionManager, type ReasoningEffort } from "@greywork/shell";
 import { Brain, Cpu, Plug, Settings2, Terminal } from "lucide-vue-next";
 import { capabilitySeam } from "../plugins/loader";
 import { Button, Badge, DataTable, Input, Select, Switch, type TableColumn } from "../components/ui";
 import { useSettingsStore, type ThemeMode } from "../stores/settings";
 import { getPluginMarket, persistRegisteredMcp, removeRegisteredMcp } from "../state/pluginMarket";
 import { PROVIDER_TONES } from "../lib/tones";
+import type { AppLocale } from "../i18n";
+
+const { t } = useI18n();
 
 /* ===== 一切皆插件：能力注册表（loader 双向联动，常驻可达） ===== */
 const registryIds = ref<readonly string[]>(capabilitySeam.activeIds());
@@ -38,28 +36,43 @@ const settings = useSettingsStore();
 const activeSettingsTab = ref<"providers" | "cli" | "reasoning" | "general" | "mcp">("providers");
 
 const settingsTabs = [
-  { value: "providers" as const, label: "模型供应商", icon: Cpu },
-  { value: "cli" as const, label: "CLI 接入", icon: Terminal },
-  { value: "reasoning" as const, label: "推理等级", icon: Brain },
-  { value: "mcp" as const, label: "MCP 服务器", icon: Plug },
-  { value: "general" as const, label: "通用", icon: Settings2 },
+  { value: "providers" as const, label: "settings.tabs.providers", icon: Cpu },
+  { value: "cli" as const, label: "settings.tabs.cli", icon: Terminal },
+  { value: "reasoning" as const, label: "settings.tabs.reasoning", icon: Brain },
+  { value: "mcp" as const, label: "settings.tabs.mcp", icon: Plug },
+  { value: "general" as const, label: "settings.tabs.general", icon: Settings2 },
 ];
 
-const cliIntegrations = ref<CliIntegration[]>(createDefaultCliIntegrations());
 const cliSessionManager = createCliSessionManager();
 const cliSessions = ref(
   cliSessionManager.list().map((session) => ({
     ...session,
-    statusLabel: session.status === "running" ? "运行中" : "已结束",
+    statusLabel: session.status === "running" ? t("common.running") : t("common.finished"),
   })),
 );
-const reasoningEffort = ref<ReasoningEffort>("medium");
+/** 推理等级单源：读写当前选中模型供应商的 reasoningEffort（settings 持久化）。 */
+const activeProviderEffort = computed<ReasoningEffort>({
+  get: () => {
+    const provider = settings.modelProviders.find((provider) => provider.id === settings.selectedModelProviderId);
+    return provider?.reasoningEffort ?? "auto";
+  },
+  set: (value) => {
+    const provider = settings.modelProviders.find((provider) => provider.id === settings.selectedModelProviderId);
+    if (provider) provider.reasoningEffort = value;
+  },
+});
+const hasActiveProvider = computed(() => settings.modelProviders.some((provider) => provider.id === settings.selectedModelProviderId));
 const settingsTheme = computed<ThemeMode>({
   get: () => settings.theme,
   set: (value) => {
     settings.theme = value;
   },
 });
+/** 语言选项（computed：locale 切换后 label 随翻译刷新）。 */
+const languageOptions = computed<{ label: string; value: AppLocale }[]>(() => [
+  { label: t("settings.language.zhCN"), value: "zh-CN" },
+  { label: t("settings.language.enUS"), value: "en-US" },
+]);
 const saveState = ref<"idle" | "saved" | "error">("idle");
 
 function applyTheme(theme: ThemeMode): void {
@@ -91,26 +104,26 @@ const providerKindOptions = [
   { label: "OpenAI Compatible", value: "openai-compatible" },
   { label: "Anthropic", value: "anthropic" },
   { label: "Ollama", value: "ollama" },
-  { label: "自定义", value: "custom" },
+  { label: t("settings.providerKinds.custom"), value: "custom" },
 ];
-const reasoningOptions = REASONING_EFFORTS.map((item) => ({ label: item.label, value: item.value }));
+const reasoningOptions = REASONING_EFFORTS.map((item) => ({ label: t(item.label), value: item.value }));
 const themeOptions = [
-  { label: "深色", value: "dark" },
-  { label: "浅色", value: "light" },
-  { label: "跟随系统", value: "system" },
+  { label: t("settings.theme.dark"), value: "dark" },
+  { label: t("settings.theme.light"), value: "light" },
+  { label: t("settings.theme.system"), value: "system" },
 ];
 
 const cliColumns: TableColumn[] = [
   { title: "CLI", key: "cliId", width: 120 },
-  { title: "会话", key: "title" },
-  { title: "状态", key: "status", width: 90 },
-  { title: "操作", key: "statusLabel", width: 90 },
+  { title: t("settings.cliColumns.session"), key: "title" },
+  { title: t("settings.cliColumns.status"), key: "status", width: 90 },
+  { title: t("settings.cliColumns.actions"), key: "statusLabel", width: 90 },
 ];
 
 function addModelProvider(): void {
   settings.modelProviders.push({
     id: "custom-" + Date.now(),
-    name: "自定义供应商",
+    name: t("settings.customProviderName"),
     kind: "custom",
     baseUrl: "https://api.example.com/v1",
     model: "your-model",
@@ -125,26 +138,17 @@ function removeModelProvider(id: string): void {
 }
 
 function startCliSession(cliId: string): void {
-  const cli = cliIntegrations.value.find((item) => item.id === cliId);
-  cliSessionManager.start(cliId, (cli?.name ?? cliId) + " · 新会话");
+  const cli = settings.cliIntegrations.find((item) => item.id === cliId);
+  cliSessionManager.start(cliId, (cli?.name ?? cliId) + t("settings.newSession"));
   cliSessions.value = cliSessionManager.list().map((session) => ({
     ...session,
-    statusLabel: session.status === "running" ? "运行中" : "已结束",
+    statusLabel: session.status === "running" ? t("common.running") : t("common.finished"),
   }));
 }
 
 function saveSettings(): void {
   try {
-    localStorage.setItem(
-      "greywork.settings",
-      JSON.stringify({
-        reasoningEffort: reasoningEffort.value,
-        theme: settings.theme,
-        selectedModelProviderId: settings.selectedModelProviderId,
-        cli: cliIntegrations.value,
-        modelProviders: settings.modelProviders,
-      }),
-    );
+    settings.persist();
     saveState.value = "saved";
   } catch (error) {
     console.error("settings save failed", error);
@@ -158,26 +162,26 @@ function saveSettings(): void {
     <div class="view__head">
       <div>
         <p class="view__eyebrow">SETTINGS</p>
-        <h1 class="view__title">设置</h1>
-        <p class="view__sub">模型供应商 · CLI 接入 · 推理等级 · MCP · 通用。</p>
+        <h1 class="view__title">{{ t("settings.title") }}</h1>
+        <p class="view__sub">{{ t("settings.sub") }}</p>
       </div>
       <div class="view__actions">
-        <span v-if="saveState === 'saved'" class="footnote">已保存</span>
-        <span v-else-if="saveState === 'error'" class="footnote text-destructive">保存失败</span>
-        <Button @click="saveSettings">保存设置</Button>
+        <span v-if="saveState === 'saved'" class="footnote">{{ t("common.saved") }}</span>
+        <span v-else-if="saveState === 'error'" class="footnote text-destructive">{{ t("common.saveFailed") }}</span>
+        <Button @click="saveSettings">{{ t("common.save") }}</Button>
       </div>
     </div>
     <div class="settings-shell">
-      <nav class="settings-nav" aria-label="设置分区">
+      <nav class="settings-nav" :aria-label="t('settings.navLabel')">
         <button
-          v-for="t in settingsTabs"
-          :key="t.value"
+          v-for="tab in settingsTabs"
+          :key="tab.value"
           class="settings-nav__item"
-          :class="{ active: activeSettingsTab === t.value }"
-          @click="activeSettingsTab = t.value"
+          :class="{ active: activeSettingsTab === tab.value }"
+          @click="activeSettingsTab = tab.value"
         >
-          <component :is="t.icon" class="size-4" />
-          {{ t.label }}
+          <component :is="tab.icon" class="size-4" />
+          {{ t(tab.label) }}
         </button>
       </nav>
       <div class="settings-body">
@@ -190,57 +194,60 @@ function saveSettings(): void {
                 }}</span>
                 <div class="setting-card__meta">
                   <strong>{{ p.name }}</strong>
-                  <span>{{ p.model || "未配置模型" }}</span>
+                  <span>{{ p.model || t("settings.noModel") }}</span>
                 </div>
-                <Badge :type="p.enabled ? 'success' : 'default'" round>{{ p.enabled ? "在线" : "停用" }}</Badge>
+                <Badge :type="p.enabled ? 'success' : 'default'" round>{{ p.enabled ? t("common.enabled") : t("common.disabled") }}</Badge>
                 <Switch v-model="p.enabled" />
               </div>
               <div class="setting-fields">
-                <Input v-model="p.name" placeholder="名称" class="h-8 text-xs" />
+                <Input v-model="p.name" :placeholder="t('settings.name')" class="h-8 text-xs" />
                 <Select v-model="p.kind" :options="providerKindOptions" trigger-class="h-8" />
                 <Input v-model="p.baseUrl" placeholder="Base URL" class="h-8 text-xs" />
-                <Input v-model="p.model" placeholder="模型（如 gpt-4o / claude-sonnet-4-5）" class="h-8 text-xs" />
-                <Input v-model="p.apiKeyEnv" placeholder="API Key 环境变量" class="h-8 text-xs" />
+                <Input v-model="p.model" :placeholder="t('settings.modelPlaceholder')" class="h-8 text-xs" />
+                <Input v-model="p.apiKeyEnv" :placeholder="t('settings.apiKeyEnv')" class="h-8 text-xs" />
                 <Select v-model="p.reasoningEffort" :options="reasoningOptions" trigger-class="h-8" />
               </div>
-              <Button variant="ghost" size="sm" @click="removeModelProvider(p.id)">删除</Button>
+              <Button variant="ghost" size="sm" @click="removeModelProvider(p.id)">{{ t("common.delete") }}</Button>
             </div>
           </div>
-          <Button size="sm" @click="addModelProvider">新增供应商</Button>
+          <Button size="sm" @click="addModelProvider">{{ t("settings.addProvider") }}</Button>
         </div>
 
         <div v-show="activeSettingsTab === 'cli'" class="pt-5">
           <div class="settings-grid">
-            <div v-for="c in cliIntegrations" :key="c.id" class="setting-card">
+            <div v-for="c in settings.cliIntegrations" :key="c.id" class="setting-card">
               <div class="setting-card__head">
                 <Badge :type="c.available ? 'success' : 'warning'" round>{{ c.kind }}</Badge>
                 <strong>{{ c.name }}</strong>
-                <Button size="sm" @click="startCliSession(c.id)">启动会话</Button>
+                <Button size="sm" @click="startCliSession(c.id)">{{ t("settings.startSession") }}</Button>
               </div>
               <div class="setting-fields">
-                <Input v-model="c.command" placeholder="CLI 命令（如 opencode / claude / pi）" class="h-8 text-xs" />
+                <Input v-model="c.command" :placeholder="t('settings.cliCommand')" class="h-8 text-xs" />
                 <Select v-model="c.reasoningEffort" :options="reasoningOptions" trigger-class="h-8" />
               </div>
             </div>
           </div>
-          <div class="settings-subhead">CLI 会话</div>
+          <div class="settings-subhead">{{ t("settings.cliSessions") }}</div>
           <DataTable :columns="cliColumns" :data="cliSessions" class="text-xs" />
         </div>
 
         <div v-show="activeSettingsTab === 'reasoning'" class="pt-5">
+          <p v-if="!hasActiveProvider" class="footnote mb-3">{{ t("settings.noProviderHint") }}</p>
           <div class="reasoning-list">
             <label v-for="e in REASONING_EFFORTS" :key="e.value" class="reasoning-item">
-              <input v-model="reasoningEffort" type="radio" :value="e.value" />
+              <input v-model="activeProviderEffort" type="radio" :value="e.value" :disabled="!hasActiveProvider" />
               <span
-                ><strong>{{ e.label }}</strong
-                ><em>{{ e.description }}</em></span
+                ><strong>{{ t(e.label) }}</strong
+                ><em>{{ t(e.description) }}</em></span
               >
             </label>
           </div>
         </div>
 
         <div v-show="activeSettingsTab === 'mcp'" class="pt-5">
-          <div class="settings-subhead">MCP 服务器 · {{ mcpServers.length }} 个已登记</div>
+          <div class="settings-subhead">
+            {{ t("settings.tabs.mcp") }} · {{ t("settings.mcpRegisteredCount", { count: mcpServers.length }) }}
+          </div>
           <div class="mcp-list">
             <div v-for="server in mcpServers" :key="server.id" class="mcp-row">
               <span class="mcp-row__dot" :class="{ on: isMcpInstalled(server.id) }"></span>
@@ -252,47 +259,63 @@ function saveSettings(): void {
             </div>
           </div>
           <p v-if="!mcpServers.length" class="footnote">
-            尚无登记的 MCP 服务器 —— 在「插件市场」搜索官方 MCP Registry（如 github / filesystem / sqlite）登记后，可在此处开关。
+            {{ t("settings.mcpEmpty") }}
           </p>
         </div>
 
         <div v-show="activeSettingsTab === 'general'" class="pt-5">
           <div class="settings-grid settings-grid--single">
             <div class="setting-card">
-              <div class="setting-card__head"><strong>主题</strong></div>
+              <div class="setting-card__head">
+                <strong>{{ t("settings.language.label") }}</strong>
+              </div>
+              <Select v-model="settings.locale" :options="languageOptions" trigger-class="h-8" />
+            </div>
+            <div class="setting-card">
+              <div class="setting-card__head">
+                <strong>{{ t("settings.themeLabel") }}</strong>
+              </div>
               <Select v-model="settingsTheme" :options="themeOptions" trigger-class="h-8" />
             </div>
             <div class="setting-card">
-              <div class="setting-card__head"><strong>当前推理等级</strong></div>
+              <div class="setting-card__head">
+                <strong>{{ t("settings.currentReasoning") }}</strong>
+              </div>
               <div class="chips">
-                <Badge round type="info">{{ reasoningEffort }}</Badge>
+                <Badge round type="info">{{ activeProviderEffort }}</Badge>
                 <Badge round type="warning">{{ settingsTheme }}</Badge>
               </div>
             </div>
             <div class="setting-card">
-              <div class="setting-card__head"><strong>权限档位</strong></div>
+              <div class="setting-card__head">
+                <strong>{{ t("settings.permissionTierLabel") }}</strong>
+              </div>
               <div class="chips">
                 <Badge round type="info">{{ settings.permissionTier }}</Badge
-                ><Badge round :type="settings.planMode ? 'success' : 'default'">计划模式 {{ settings.planMode ? "开" : "关" }}</Badge>
+                ><Badge round :type="settings.planMode ? 'success' : 'default'"
+                  >{{ t("settings.planMode") }} {{ settings.planMode ? t("settings.on") : t("settings.off") }}</Badge
+                >
               </div>
             </div>
             <div class="setting-card">
-              <div class="setting-card__head"><strong>ACP 工作区目录</strong></div>
-              <Input v-model="settings.workspaceDir" placeholder="留空 = 桌面主目录（宿主校验绝对路径且非根）" class="h-8 text-xs" />
+              <div class="setting-card__head">
+                <strong>{{ t("settings.workspaceDir") }}</strong>
+              </div>
+              <Input v-model="settings.workspaceDir" :placeholder="t('settings.workspaceDirPlaceholder')" class="h-8 text-xs" />
             </div>
           </div>
           <div class="setting-card" data-testid="registry-panel">
             <div class="setting-card__head">
-              <strong>能力注册表</strong>
+              <strong>{{ t("settings.registryTitle") }}</strong>
               <Badge round :type="builtinActive ? 'success' : 'warning'">{{
-                builtinActive ? "core.builtin 已启用" : "core.builtin 已停用"
+                builtinActive ? t("settings.coreBuiltinEnabled") : t("settings.coreBuiltinDisabled")
               }}</Badge>
             </div>
-            <p class="footnote">一切皆插件：内置清单贡献全部 mode 与面板槽位；停用后画布摘除全部标签，路由访问将回退。</p>
-            <Button v-if="builtinActive" variant="destructive" size="sm" data-testid="deactivate-builtin" @click="toggleBuiltin(false)"
-              >停用 core.builtin</Button
-            >
-            <Button v-else size="sm" data-testid="activate-builtin" @click="toggleBuiltin(true)">启用 core.builtin</Button>
+            <p class="footnote">{{ t("settings.registryHint") }}</p>
+            <Button v-if="builtinActive" variant="destructive" size="sm" data-testid="deactivate-builtin" @click="toggleBuiltin(false)">{{
+              t("settings.disableBuiltin")
+            }}</Button>
+            <Button v-else size="sm" data-testid="activate-builtin" @click="toggleBuiltin(true)">{{ t("settings.enableBuiltin") }}</Button>
           </div>
         </div>
       </div>

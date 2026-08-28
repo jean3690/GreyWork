@@ -1,9 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
+import { isTauriRuntime } from "@greywork/core";
 import type { SkillsMarketTransport } from "./types";
-
-function isTauriRuntime(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-}
 
 /** 桌面端传输：搜索/下载/安装/卸载全部经 Rust 宿主（skills_market.rs）。 */
 export class TauriSkillsTransport implements SkillsMarketTransport {

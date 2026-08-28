@@ -13,6 +13,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@greywork/core": "workspace:*",
     "@greywork/agents": "workspace:*",
     "@greywork/plugins": "workspace:*",
     "@tauri-apps/api": "^2.11.1"

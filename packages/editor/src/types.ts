@@ -31,13 +31,17 @@ export interface CommitResult {
 export interface WorkspaceFileSystem {
   readFile(path: string): Promise<string>;
   writeFile(path: string, content: string): Promise<void>;
+  /** 写入二进制文件（xlsx 等产物）。二进制独立存储，不参与 snapshot/git/diff。 */
+  writeBinary(path: string, data: Uint8Array): Promise<void>;
+  /** 读取二进制文件；非二进制路径抛错。 */
+  readBinary(path: string): Promise<Uint8Array>;
   /** 删除文件（不存在时抛错）。 */
   delete(path: string): Promise<void>;
   /** 重命名 / 移动文件（源不存在时抛错；目标直接覆盖）。 */
   rename(from: string, to: string): Promise<void>;
   list(dir?: string): Promise<FileEntry[]>;
   exists(path: string): Promise<boolean>;
-  /** 全量快照（path → content），供 git 基线与调试。 */
+  /** 全量快照（path → content），供 git 基线与调试。不含二进制文件。 */
   snapshot(): Record<string, string>;
 }
 

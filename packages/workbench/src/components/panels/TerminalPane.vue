@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref } from "vue";
+import { useI18n } from "vue-i18n";
 
+const { t } = useI18n();
 const termLines = ref<string[]>(["GreyWork Shell v0.9.2 — 输入 help 查看可用命令"]);
 const termInput = ref("");
 
@@ -40,7 +42,7 @@ function runTerm(): void {
       </div>
       <div class="term__input">
         <span>greywork ~ %</span>
-        <input v-model="termInput" spellcheck="false" aria-label="终端输入" @keydown.enter="runTerm" />
+        <input v-model="termInput" spellcheck="false" :aria-label="t('panels.terminal.inputAria')" @keydown.enter="runTerm" />
       </div>
     </div>
   </div>

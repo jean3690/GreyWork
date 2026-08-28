@@ -149,6 +149,16 @@ export const useVfsStore = defineStore("vfs", () => {
     await refreshStatus();
   }
 
+  /** 写入二进制产物（xlsx 等）：入文件清单，不参与文本编辑与 git diff。 */
+  async function writeBinary(path: string, data: Uint8Array): Promise<void> {
+    await workspaceFs.writeBinary(path, data);
+    if (!paths.value.includes(path)) paths.value = [...paths.value, path].sort();
+  }
+
+  async function readBinary(path: string): Promise<Uint8Array> {
+    return workspaceFs.readBinary(path);
+  }
+
   async function remove(path: string): Promise<void> {
     await workspaceFs.delete(path);
     paths.value = paths.value.filter((candidate) => candidate !== path);
@@ -157,5 +167,19 @@ export const useVfsStore = defineStore("vfs", () => {
 
   void refreshStatus();
 
-  return { paths, activePath, activeContent, savedContent, changes, dirty, open, saveActive, write, remove, refreshStatus };
+  return {
+    paths,
+    activePath,
+    activeContent,
+    savedContent,
+    changes,
+    dirty,
+    open,
+    saveActive,
+    write,
+    writeBinary,
+    readBinary,
+    remove,
+    refreshStatus,
+  };
 });

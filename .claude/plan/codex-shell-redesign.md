@@ -19,25 +19,25 @@
 
 ## 文件清单
 
-| # | 文件 | 动作 |
-|---|------|------|
-| 1 | theme/tokens.css | 暗色翻转 + 布局变量（--gw-sidebar-w/--gw-side-w/--gw-statusbar-h；去 rail） |
-| 2 | theme/shadcn.css | 暗色同步 |
-| 3 | theme/base.css | shell 布局重写；rail 样式删除；sidebar/statusbar/code-block 新增；硬编码浅色清扫；断点调整 |
-| 4 | plugins/types.ts | UiRegionId += "shellSidebar" |
-| 5 | plugins/registry.ts | projectRail×3 → shellSidebar×3；activityPanel 排序 Diff/预览/终端/交付物/Review/Sources |
-| 6 | plugins/loader.test.ts | 区域计数同步 |
-| 7 | stores/settings.ts | runMode + 权限档重标签（只读/允许编辑/完全执行） |
-| 8 | components/ShellSidebar.vue | 新，容器渲染 shellSidebar 槽位 + 搜索 |
-| 9 | components/sidebar/*.vue | SidebarEntries/SidebarProjects/SidebarUser 三段 |
-| 10 | components/TopBar.vue | 重排：项目/会话/模式胶囊/模型/动作；搜索与 PermissionSwitch 迁出 |
-| 11 | components/StatusBar.vue | 新 24px |
-| 12 | components/MarkdownText.vue | 新轻量渲染（围栏代码块/行内 code/粗体/链接） |
-| 13 | views/ChatView.vue | 去模型选择；composer 盾牌档+计划开关+Cmd+Enter；Markdown 接入 |
-| 14 | components/panels/DiffsPane.vue | 分组 diff + 动作条（commit 真实/PR 禁用） |
-| 15 | AppShell.vue | 新壳层结构 + 状态栏 |
-| 16 | 删除 | ProjectRail.vue、rail/*、PermissionSwitch.vue（无引用后） |
-| 17 | docs/ui-design.md | 布局/配色章节同步 |
+| #   | 文件                            | 动作                                                                                       |
+| --- | ------------------------------- | ------------------------------------------------------------------------------------------ |
+| 1   | theme/tokens.css                | 暗色翻转 + 布局变量（--gw-sidebar-w/--gw-side-w/--gw-statusbar-h；去 rail）                |
+| 2   | theme/shadcn.css                | 暗色同步                                                                                   |
+| 3   | theme/base.css                  | shell 布局重写；rail 样式删除；sidebar/statusbar/code-block 新增；硬编码浅色清扫；断点调整 |
+| 4   | plugins/types.ts                | UiRegionId += "shellSidebar"                                                               |
+| 5   | plugins/registry.ts             | projectRail×3 → shellSidebar×3；activityPanel 排序 Diff/预览/终端/交付物/Review/Sources    |
+| 6   | plugins/loader.test.ts          | 区域计数同步                                                                               |
+| 7   | stores/settings.ts              | runMode + 权限档重标签（只读/允许编辑/完全执行）                                           |
+| 8   | components/ShellSidebar.vue     | 新，容器渲染 shellSidebar 槽位 + 搜索                                                      |
+| 9   | components/sidebar/\*.vue       | SidebarEntries/SidebarProjects/SidebarUser 三段                                            |
+| 10  | components/TopBar.vue           | 重排：项目/会话/模式胶囊/模型/动作；搜索与 PermissionSwitch 迁出                           |
+| 11  | components/StatusBar.vue        | 新 24px                                                                                    |
+| 12  | components/MarkdownText.vue     | 新轻量渲染（围栏代码块/行内 code/粗体/链接）                                               |
+| 13  | views/ChatView.vue              | 去模型选择；composer 盾牌档+计划开关+Cmd+Enter；Markdown 接入                              |
+| 14  | components/panels/DiffsPane.vue | 分组 diff + 动作条（commit 真实/PR 禁用）                                                  |
+| 15  | AppShell.vue                    | 新壳层结构 + 状态栏                                                                        |
+| 16  | 删除                            | ProjectRail.vue、rail/\*、PermissionSwitch.vue（无引用后）                                 |
+| 17  | docs/ui-design.md               | 布局/配色章节同步                                                                          |
 
 ## 诚实边界（不造假）
 

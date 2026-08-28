@@ -57,6 +57,8 @@ export interface Artifact {
   /** 来源 agent / 管线 */
   source: string;
   createdAt: number;
+  /** 产物文件格式（预览/下载据此路由）；缺省按 name 后缀推断。 */
+  format?: "md" | "csv" | "xlsx";
 }
 
 export interface ReviewItem {

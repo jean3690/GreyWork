@@ -55,10 +55,21 @@ fn completions_url(base_url: &str) -> String {
     }
 }
 
-/// 构造流式请求体。推理档位等供应商特有参数 Phase 1 不透传，
-/// 避免不支持的模型拒绝整个请求。
-fn chat_request_body(model: &str, messages: &[LlmChatMessage]) -> serde_json::Value {
-    serde_json::json!({
+/// 推理等级 → openai `reasoning_effort`。auto/空/未知不传；max 收敛为 high（openai 无 max 档）。
+fn openai_reasoning_effort(effort: &str) -> Option<&'static str> {
+    match effort.trim().to_ascii_lowercase().as_str() {
+        "low" => Some("low"),
+        "medium" => Some("medium"),
+        "high" => Some("high"),
+        "max" => Some("high"),
+        _ => None,
+    }
+}
+
+/// 构造流式请求体。推理档位映射为 openai `reasoning_effort`，
+/// 仅对显式档位（low/medium/high/max）添加，避免不支持的模型拒绝整个请求。
+fn chat_request_body(model: &str, messages: &[LlmChatMessage], reasoning_effort: &str) -> serde_json::Value {
+    let mut body = serde_json::json!({
         "model": model,
         "stream": true,
         "messages": messages
@@ -68,7 +79,11 @@ fn chat_request_body(model: &str, messages: &[LlmChatMessage]) -> serde_json::Va
                 "content": message.content,
             }))
             .collect::<Vec<_>>(),
-    })
+    });
+    if let Some(effort) = openai_reasoning_effort(reasoning_effort) {
+        body["reasoning_effort"] = serde_json::json!(effort);
+    }
+    body
 }
 
 /// 解析一条 SSE data 行为增量文本；非流式完整响应由调用方单独处理。
@@ -104,6 +119,7 @@ pub async fn llm_chat_start(
     model: String,
     api_key_env: String,
     messages: Vec<LlmChatMessage>,
+    reasoning_effort: String,
 ) -> Result<u64, String> {
     let base_url = base_url.trim().to_string();
     if base_url.is_empty() || model.trim().is_empty() {
@@ -121,7 +137,7 @@ pub async fn llm_chat_start(
 
     let mut request = client
         .post(completions_url(&base_url))
-        .json(&chat_request_body(model.trim(), &messages));
+        .json(&chat_request_body(model.trim(), &messages, &reasoning_effort));
     if !api_key.is_empty() {
         request = request.bearer_auth(api_key);
     }
@@ -301,10 +317,32 @@ mod tests {
                 content: "hi".into(),
             },
         ];
-        let body = chat_request_body("gpt-test", &messages);
+        let body = chat_request_body("gpt-test", &messages, "high");
         assert_eq!(body["model"], "gpt-test");
         assert_eq!(body["stream"], true);
+        assert_eq!(body["reasoning_effort"], "high");
         assert_eq!(body["messages"].as_array().unwrap().len(), 2);
         assert_eq!(body["messages"][0]["role"], "system");
+    }
+
+    #[test]
+    fn openai_reasoning_effort_maps_explicit_tiers_only() {
+        assert_eq!(openai_reasoning_effort("low"), Some("low"));
+        assert_eq!(openai_reasoning_effort("medium"), Some("medium"));
+        assert_eq!(openai_reasoning_effort("high"), Some("high"));
+        // max 收敛为 high（openai 无 max 档）
+        assert_eq!(openai_reasoning_effort("max"), Some("high"));
+        // auto / 空 / 未知 → 不传，避免模型拒绝请求
+        assert_eq!(openai_reasoning_effort("auto"), None);
+        assert_eq!(openai_reasoning_effort(""), None);
+        assert_eq!(openai_reasoning_effort("ultra"), None);
+        // 大小写不敏感
+        assert_eq!(openai_reasoning_effort("HIGH"), Some("high"));
+    }
+
+    #[test]
+    fn request_body_omits_reasoning_effort_when_auto() {
+        let body = chat_request_body("gpt-test", &[], "auto");
+        assert!(body.get("reasoning_effort").is_none());
     }
 }

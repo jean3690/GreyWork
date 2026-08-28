@@ -2,6 +2,7 @@
  * 远程技能安装记录（localStorage 持久化）。文件实体落在工作区
  * `.agents/skills/<skillId>/`，此处只保存展示与卸载所需的元数据。
  */
+import { createJsonStorage } from "@greywork/core";
 
 export interface RemoteSkillRecord {
   sourceId: string;
@@ -28,17 +29,15 @@ function isRemoteSkillRecord(value: unknown): value is RemoteSkillRecord {
   );
 }
 
+const remoteSkillsStorage = createJsonStorage<RemoteSkillRecord[]>(
+  STORAGE_KEY,
+  (value): value is RemoteSkillRecord[] => Array.isArray(value) && value.every(isRemoteSkillRecord),
+);
+
 export function loadRemoteSkills(): RemoteSkillRecord[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    const parsed: unknown = raw ? JSON.parse(raw) : [];
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter(isRemoteSkillRecord);
-  } catch {
-    return [];
-  }
+  return remoteSkillsStorage.read() ?? [];
 }
 
 export function saveRemoteSkills(records: RemoteSkillRecord[]): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+  remoteSkillsStorage.write(records);
 }

@@ -32,30 +32,11 @@ export interface WebSearchProviderConfig {
   enabled: boolean;
 }
 
-export interface PluginMarketEntry {
-  id: string;
-  name: string;
-  version: string;
-  author: string;
-  description: string;
-  tags: string[];
-  downloads: number;
-  rating: number;
-}
-
 export interface AiLoopPolicy {
   maxRounds: number;
   commandGuard: CommandPolicy;
   toolAllowlist?: string[];
   requireApproval?: string[];
-}
-
-export interface ShellState {
-  sessions: SessionMeta[];
-  modelProviders: ModelProviderConfig[];
-  webSearchProviders: WebSearchProviderConfig[];
-  pluginMarket: PluginMarketEntry[];
-  aiLoopPolicy: AiLoopPolicy;
 }
 
 export interface SessionManager {

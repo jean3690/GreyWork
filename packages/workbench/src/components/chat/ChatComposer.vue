@@ -1,14 +1,17 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { CHAT_EFFORTS, useChatStore, type ChatEffort } from "../../stores/chat";
+import { REASONING_EFFORTS, type ReasoningEffort } from "@greywork/shell";
+import { useChatStore } from "../../stores/chat";
 import { PERMISSION_TIERS, useSettingsStore } from "../../stores/settings";
 import { useProjectStore } from "../../stores/project";
 import { getPluginMarket } from "../../state/pluginMarket";
-import { Paperclip, Plus, Send, Shield, ShieldCheck, ShieldOff, Square, X } from "lucide-vue-next";
+import { Paperclip, Plus, Send, Shield, ShieldCheck, ShieldOff, SlidersHorizontal, Square, X } from "lucide-vue-next";
 import { Button, Dialog, FilePick, Select, type SelectOption, Switch } from "../ui";
 import type { AcpSessionConfigOption } from "@greywork/acp";
 import { useAgentStore } from "../../stores/agent";
+import { useI18n } from "vue-i18n";
 
+const { t } = useI18n();
 const chat = useChatStore();
 const settings = useSettingsStore();
 const agentStore = useAgentStore();
@@ -20,18 +23,15 @@ const attachments = defineModel<string[]>("attachments", { default: () => [] });
 
 const inputEl = ref<HTMLTextAreaElement | null>(null);
 const plusMenuOpen = ref(false);
+const advancedOpen = ref(false);
 const mentionOpen = ref(false);
 const confirmOpen = ref(false);
 const acpPopOpen = ref(false);
 const acpConfigError = ref("");
 
-const selectedProvider = computed(() =>
-  agentStore.agentProviders.find((p) => p.id === agentStore.selectedProviderId),
-);
+const selectedProvider = computed(() => agentStore.agentProviders.find((p) => p.id === agentStore.selectedProviderId));
 
-const acpSelectOptions = computed(() =>
-  agentStore.acpConfigOptions.filter((o) => o.type === "select" && o.options?.length),
-);
+const acpSelectOptions = computed(() => agentStore.acpConfigOptions.filter((o) => o.type === "select" && o.options?.length));
 
 const activeThreadProjectName = computed(() => {
   for (const g of projectStore.threadGroups) {
@@ -48,9 +48,7 @@ const modelOptions = computed<SelectOption[]>(() =>
 );
 const selectedModel = computed(() => {
   const preferred = settings.selectedModelProviderId;
-  return (preferred && modelOptions.value.some((o) => o.value === preferred)
-    ? preferred
-    : modelOptions.value[0]?.value) ?? "";
+  return (preferred && modelOptions.value.some((o) => o.value === preferred) ? preferred : modelOptions.value[0]?.value) ?? "";
 });
 function onModelChange(value: string): void {
   settings.selectedModelProviderId = value;
@@ -67,8 +65,15 @@ function tryConnectAcp(): void {
   if (selectedProvider.value?.kind !== "acp" || agentStore.acpConfigOptions.length) return;
   void onAcpConnect();
 }
-watch(acpPopOpen, (open) => { if (open) tryConnectAcp(); });
-watch(() => agentStore.routeToAcp, (on) => { if (on) tryConnectAcp(); });
+watch(acpPopOpen, (open) => {
+  if (open) tryConnectAcp();
+});
+watch(
+  () => agentStore.routeToAcp,
+  (on) => {
+    if (on) tryConnectAcp();
+  },
+);
 
 /* ── 发送 ── */
 function doSend(): void {
@@ -90,7 +95,10 @@ function doSend(): void {
   commit();
 }
 function onStop(): void {
-  if (agentStore.acpBusy) { void agentStore.stopAcp(); return; }
+  if (agentStore.acpBusy) {
+    void agentStore.stopAcp();
+    return;
+  }
   chat.abortGeneration();
 }
 function commit(): void {
@@ -100,8 +108,14 @@ function commit(): void {
   }
   closeMenus();
 }
-function confirmRun(): void { confirmOpen.value = false; commit(); }
-function closeMenus(): void { mentionOpen.value = false; plusMenuOpen.value = false; }
+function confirmRun(): void {
+  confirmOpen.value = false;
+  commit();
+}
+function closeMenus(): void {
+  mentionOpen.value = false;
+  plusMenuOpen.value = false;
+}
 
 function onDraftInput(): void {
   mentionOpen.value = /@$/.test(draft.value);
@@ -112,12 +126,30 @@ function insertMention(name: string): void {
   mentionOpen.value = false;
 }
 const mentionOptions = computed(() => pluginMarket.marketplace.map((m) => m.name).slice(0, 8));
-function onChatAttach(file: File): void { attachments.value.push(file.name); }
-function removeAttachment(index: number): void { attachments.value.splice(index, 1); }
-function setEffort(e: ChatEffort): void { chat.chatEffort = e; }
-function setTier(tier: (typeof PERMISSION_TIERS)[number]["value"]): void { settings.permissionTier = tier; }
+function onChatAttach(file: File): void {
+  attachments.value.push(file.name);
+}
+function removeAttachment(index: number): void {
+  attachments.value.splice(index, 1);
+}
+/** 推理等级单源：读写当前选中模型供应商的 reasoningEffort（settings 持久化）。 */
+const currentEffort = computed<ReasoningEffort>(() => {
+  const provider = settings.modelProviders.find((provider) => provider.id === settings.selectedModelProviderId);
+  return provider?.reasoningEffort ?? "auto";
+});
+function setEffort(e: ReasoningEffort): void {
+  const provider = settings.modelProviders.find((provider) => provider.id === settings.selectedModelProviderId);
+  if (provider) provider.reasoningEffort = e;
+}
+function setTier(tier: (typeof PERMISSION_TIERS)[number]["value"]): void {
+  settings.permissionTier = tier;
+}
 function configLabel(option: AcpSessionConfigOption): string {
-  const labels: Record<string, string> = { model: "模型", thought_level: "思考强度", mode: "会话模式" };
+  const labels: Record<string, string> = {
+    model: t("chat.configModel"),
+    thought_level: t("chat.configThoughtLevel"),
+    mode: t("chat.configMode"),
+  };
   return (option.category && labels[option.category]) || option.name;
 }
 const shieldIcons = { cautious: Shield, daily: ShieldCheck, auto: ShieldOff } as const;
@@ -138,15 +170,18 @@ defineExpose({ fill, focus });
       <span v-for="(a, i) in attachments" :key="a" class="chip"
         ><Paperclip class="size-3" /> {{ a }}<i class="chip__x" @click="removeAttachment(i)"><X class="size-3" /></i
       ></span>
-      <span v-if="settings.planMode" class="chip chip--on">计划模式</span>
-      <span v-if="chat.speedBoost" class="chip chip--on">速度 ×1.5</span>
+      <span v-if="settings.planMode" class="chip chip--on">{{ t("chat.planMode") }}</span>
+      <span v-if="chat.speedBoost" class="chip chip--on">{{ t("chat.speedBoost") }}</span>
     </div>
     <div class="composer__box">
       <button
         class="composer__plus"
         :class="{ active: plusMenuOpen }"
-        title="附件 / 计划模式 / 目标"
-        @click.stop="plusMenuOpen = !plusMenuOpen; mentionOpen = false;"
+        :title="t('chat.plusTitle')"
+        @click.stop="
+          plusMenuOpen = !plusMenuOpen;
+          mentionOpen = false;
+        "
       >
         <Plus class="size-4" />
       </button>
@@ -154,19 +189,22 @@ defineExpose({ fill, focus });
         ref="inputEl"
         v-model="draft"
         rows="1"
-        placeholder="给 GreyWork 下达任务，输入 @ 引用插件 / 技能…"
-        aria-label="消息输入"
+        :placeholder="t('chat.placeholder.input')"
+        :aria-label="t('chat.inputAria')"
         @keydown.enter.exact.prevent="doSend"
         @keydown.meta.enter.prevent="doSend"
         @keydown.ctrl.enter.prevent="doSend"
-        @keydown.esc="plusMenuOpen = false; mentionOpen = false;"
+        @keydown.esc="
+          plusMenuOpen = false;
+          mentionOpen = false;
+        "
         @input="onDraftInput"
       ></textarea>
       <button
         v-if="chat.busy || agentStore.acpBusy"
         class="composer__send composer__send--stop"
-        title="停止生成"
-        aria-label="停止生成"
+        :title="t('chat.stop')"
+        :aria-label="t('chat.stop')"
         @click="onStop"
       >
         <Square class="size-3.5" />
@@ -174,61 +212,52 @@ defineExpose({ fill, focus });
       <button
         class="composer__send"
         :disabled="!draft.trim() || chat.busy || agentStore.acpBusy"
-        title="发送"
-        aria-label="发送"
+        :title="t('chat.send')"
+        :aria-label="t('chat.send')"
         @click="doSend"
       >
         <Send class="size-4" />
       </button>
       <div v-if="plusMenuOpen" class="pop pop--plus" @click.stop>
-        <FilePick accept="*" label="上传文件 / 图片" class="w-full" @select="onChatAttach" />
+        <FilePick accept="*" :label="t('chat.uploadFile')" class="w-full" @select="onChatAttach" />
         <div class="pop__row">
           <div>
-            <strong>当前目标</strong><em>{{ activeThreadProjectName ?? "普通对话（未绑定项目）" }}</em>
+            <strong>{{ t("chat.currentGoal") }}</strong
+            ><em>{{ activeThreadProjectName ?? t("chat.plainChat") }}</em>
           </div>
         </div>
       </div>
       <div v-if="mentionOpen" class="pop pop--mention">
-        <p class="pop__cap">引用插件 / 技能</p>
+        <p class="pop__cap">{{ t("chat.referencePlugin") }}</p>
         <button v-for="opt in mentionOptions" :key="opt" class="pop__opt" @click="insertMention(opt)">@ {{ opt }}</button>
       </div>
     </div>
     <div class="composer__bar">
       <Select
+        v-if="!agentStore.routeToAcp"
         :model-value="selectedModel"
         :options="modelOptions"
-        placeholder="未配置模型"
+        :placeholder="t('chat.noModel')"
         trigger-class="composer__model-trigger h-7 text-xs"
         @update:model-value="onModelChange"
       />
-      <div class="shield-seg" role="group" aria-label="权限档位">
-        <button
-          v-for="tier in PERMISSION_TIERS"
-          :key="tier.value"
-          class="shield-seg__btn"
-          :data-tier="tier.value"
-          :class="{ active: settings.permissionTier === tier.value }"
-          :title="tier.desc"
-          @click="setTier(tier.value)"
-        >
-          <component :is="shieldIcons[tier.value]" class="size-3.5 shield-icon" />
-          {{ tier.label }}
-        </button>
-      </div>
       <div class="acp-wrap">
         <button
           class="composer__pill"
           :class="{ active: agentStore.routeToAcp }"
-          title="ACP 派发目标与开关"
-          @click.stop="acpPopOpen = !acpPopOpen; plusMenuOpen = false;"
+          :title="t('chat.acpDispatchTitle')"
+          @click.stop="
+            acpPopOpen = !acpPopOpen;
+            plusMenuOpen = false;
+          "
         >
           <span class="perm__dot"></span>
-          ACP · {{ selectedProvider?.name ?? "未选" }}
-          <template v-if="agentStore.routeToAcp">{{ agentStore.acpBusy ? " · 执行中" : " · 就绪" }}</template>
+          ACP · {{ selectedProvider?.name ?? t("chat.notSelected") }}
+          <template v-if="agentStore.routeToAcp">{{ agentStore.acpBusy ? t("chat.acpBusy") : t("chat.acpReady") }}</template>
           <span class="composer__caret">▾</span>
         </button>
         <div v-if="acpPopOpen" class="pop acp-pop" @click.stop>
-          <p class="pop__cap">派发目标 · ACP 后端</p>
+          <p class="pop__cap">{{ t("chat.dispatchTarget") }}</p>
           <button
             v-for="provider in agentStore.agentProviders"
             :key="provider.id"
@@ -242,22 +271,27 @@ defineExpose({ fill, focus });
           </button>
           <div v-if="selectedProvider?.kind === 'acp'" class="pop__row">
             <div>
-              <strong>{{ agentStore.acpConnecting ? "正在连接后端…" : acpConfigError ? "连接失败" : "未连接" }}</strong>
-              <em>{{ acpConfigError || "连接后即可在 ACP 按钮旁切换模型 / 思考强度 / 会话模式" }}</em>
+              <strong>{{
+                agentStore.acpConnecting ? t("chat.connectingBackend") : acpConfigError ? t("chat.connectFailed") : t("chat.notConnected")
+              }}</strong>
+              <em>{{ acpConfigError || t("chat.connectHint") }}</em>
             </div>
             <Button size="sm" variant="outline" :disabled="agentStore.acpConnecting" @click="onAcpConnect">
-              {{ agentStore.acpConnecting ? "连接中" : "加载配置" }}
+              {{ agentStore.acpConnecting ? t("chat.connecting") : t("chat.loadConfig") }}
             </Button>
           </div>
           <div class="pop__row">
-            <div><strong>派发开关</strong><em>开 = 意图发往 ACP；关 = 内部 mock 管线</em></div>
+            <div>
+              <strong>{{ t("chat.dispatchSwitch") }}</strong
+              ><em>{{ t("chat.dispatchSwitchHint") }}</em>
+            </div>
             <Switch :model-value="agentStore.routeToAcp" @update:model-value="agentStore.toggleRouteToAcp()" />
           </div>
-          <p class="footnote">输出实时进入对话流；{{ agentStore.acpAvailable ? "" : "当前为 Web 环境：本地 ACP 需桌面端。" }}</p>
+          <p class="footnote">{{ t("chat.outputLive") }}{{ agentStore.acpAvailable ? "" : t("chat.acpWebEnv") }}</p>
         </div>
       </div>
       <div
-        v-if="selectedProvider?.kind === 'acp' && acpSelectOptions.length"
+        v-if="agentStore.routeToAcp && selectedProvider?.kind === 'acp' && acpSelectOptions.length"
         class="acp-config"
         :title="acpConfigError || undefined"
       >
@@ -272,43 +306,72 @@ defineExpose({ fill, focus });
         </label>
       </div>
       <span class="composer__sep"></span>
-      <div class="seg">
+      <button
+        class="composer__pill composer__pill--adv"
+        :class="{ active: advancedOpen }"
+        :title="t('chat.advanced')"
+        :aria-label="t('chat.advancedAria')"
+        @click.stop="advancedOpen = !advancedOpen"
+      >
+        <SlidersHorizontal class="size-3.5" />
+        <span class="composer__caret">▾</span>
+      </button>
+      <span class="composer__hint">{{ chat.busy ? t("chat.busy") : t("chat.placeholder.hint") }}</span>
+    </div>
+    <div v-if="advancedOpen" class="composer__adv">
+      <div class="shield-seg" role="group" :aria-label="t('chat.shield')">
         <button
-          v-for="e in CHAT_EFFORTS"
+          v-for="tier in PERMISSION_TIERS"
+          :key="tier.value"
+          class="shield-seg__btn"
+          :data-tier="tier.value"
+          :class="{ active: settings.permissionTier === tier.value }"
+          :title="t(tier.desc)"
+          @click="setTier(tier.value)"
+        >
+          <component :is="shieldIcons[tier.value]" class="size-3.5 shield-icon" />
+          {{ t(tier.label) }}
+        </button>
+      </div>
+      <div v-if="!agentStore.routeToAcp" class="seg">
+        <button
+          v-for="e in REASONING_EFFORTS"
           :key="e.value"
           class="seg__btn"
-          :class="{ active: chat.chatEffort === e.value }"
-          :title="e.desc"
+          :class="{ active: currentEffort === e.value }"
+          :title="t(e.description)"
           @click="setEffort(e.value)"
         >
-          {{ e.label }}
+          {{ t(e.label) }}
         </button>
       </div>
       <button
         class="composer__pill composer__pill--speed"
         :class="{ active: chat.speedBoost }"
-        title="不降智前提下提速约 1.5 倍"
+        :title="t('chat.speedTitle')"
         @click="chat.speedBoost = !chat.speedBoost"
       >
-        速度 ×1.5
+        {{ t("chat.speedBoost") }}
       </button>
       <button
         class="plan-switch"
         :class="{ active: settings.planMode }"
-        title="计划模式：先拆解任务给出方案，确认后再执行"
+        :title="t('chat.planModeTitle')"
         @click="settings.planMode = !settings.planMode"
       >
-        计划
+        {{ t("chat.plan") }}
       </button>
-      <span class="composer__hint">{{ chat.busy ? "任务执行中…" : "Enter 发送 · Shift+Enter 换行" }}</span>
     </div>
     <Dialog :open="confirmOpen" @update:open="confirmOpen = $event">
-      <p class="text-sm font-semibold">谨慎模式确认</p>
-      <p class="detail-desc mt-2">当前权限档位为「最谨慎」：执行前需逐条确认。</p>
-      <p class="detail-desc"><strong>意图：</strong>{{ draft }}</p>
+      <p class="text-sm font-semibold">{{ t("chat.cautiousConfirm") }}</p>
+      <p class="detail-desc mt-2">{{ t("chat.cautiousDesc") }}</p>
+      <p class="detail-desc">
+        <strong>{{ t("chat.intent") }}</strong
+        >{{ draft }}
+      </p>
       <div class="mt-4 flex justify-end gap-2">
-        <Button variant="ghost" size="sm" @click="confirmOpen = false">取消</Button>
-        <Button size="sm" @click="confirmRun">确认执行</Button>
+        <Button variant="ghost" size="sm" @click="confirmOpen = false">{{ t("common.cancel") }}</Button>
+        <Button size="sm" @click="confirmRun">{{ t("chat.confirmRun") }}</Button>
       </div>
     </Dialog>
   </div>

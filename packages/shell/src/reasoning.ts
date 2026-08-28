@@ -2,22 +2,23 @@ import type { ReasoningEffort } from "./types";
 
 export interface ReasoningEffortOption {
   value: ReasoningEffort;
+  /** i18n key：渲染处经 t() 转译（shell 为纯 TS 包，不引入 vue-i18n）。 */
   label: string;
   description: string;
 }
 
 export const REASONING_EFFORTS: ReasoningEffortOption[] = [
-  { value: "auto", label: "自动", description: "由模型供应商自动选择" },
-  { value: "low", label: "低 · Low", description: "最快响应，适合简单指令" },
-  { value: "medium", label: "中 · Medium", description: "平衡速度与质量" },
-  { value: "high", label: "高 · High", description: "复杂空间分析 / 代码审查" },
-  { value: "max", label: "最高 · Max", description: "深度推理，适合困难任务" },
+  { value: "auto", label: "reasoning.auto.label", description: "reasoning.auto.description" },
+  { value: "low", label: "reasoning.low.label", description: "reasoning.low.description" },
+  { value: "medium", label: "reasoning.medium.label", description: "reasoning.medium.description" },
+  { value: "high", label: "reasoning.high.label", description: "reasoning.high.description" },
+  { value: "max", label: "reasoning.max.label", description: "reasoning.max.description" },
 ];
 
 export const REASONING_LABELS: Record<ReasoningEffort, string> = {
-  auto: "自动",
-  low: "低",
-  medium: "中",
-  high: "高",
-  max: "最高",
+  auto: "reasoning.auto.label",
+  low: "reasoning.low.label",
+  medium: "reasoning.medium.label",
+  high: "reasoning.high.label",
+  max: "reasoning.max.label",
 };

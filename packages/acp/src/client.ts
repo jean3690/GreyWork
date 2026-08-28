@@ -78,7 +78,7 @@ export class WebSocketTransport implements AcpTransport {
 
   async openSession(_handle: number, cwd: string): Promise<AcpSessionOpened> {
     this.assertConfigured();
-    const result = await this.request("session/new", { cwd, mcpServers: [] }) as {
+    const result = (await this.request("session/new", { cwd, mcpServers: [] })) as {
       sessionId?: string;
       configOptions?: AcpSessionConfigOption[];
     };
@@ -89,17 +89,20 @@ export class WebSocketTransport implements AcpTransport {
 
   async setSessionConfig(_handle: number, configId: string, value: string | boolean): Promise<AcpSessionConfigOption[]> {
     this.assertConfigured();
-    const result = await this.request("session/set_config_option", {
-      sessionId: this.requireSession(), configId, value,
-    }) as { configOptions?: AcpSessionConfigOption[] };
+    const result = (await this.request("session/set_config_option", {
+      sessionId: this.requireSession(),
+      configId,
+      value,
+    })) as { configOptions?: AcpSessionConfigOption[] };
     return result.configOptions ?? [];
   }
 
   async prompt(_handle: number, text: string): Promise<AcpPromptResult> {
     this.assertConfigured();
-    return await this.request("session/prompt", {
-      sessionId: this.requireSession(), prompt: [{ type: "text", text }],
-    }) as AcpPromptResult;
+    return (await this.request("session/prompt", {
+      sessionId: this.requireSession(),
+      prompt: [{ type: "text", text }],
+    })) as AcpPromptResult;
   }
 
   async stop(_handle: number): Promise<void> {
@@ -113,7 +116,11 @@ export class WebSocketTransport implements AcpTransport {
   async respondPermission(requestId: number, optionId: string | null): Promise<void> {
     this.assertConfigured();
     if (!this.permissionRequests.delete(requestId)) throw new Error(`unknown permission request ${requestId}`);
-    this.send({ jsonrpc: "2.0", id: requestId, result: optionId ? { outcome: { outcome: "selected", optionId } } : { outcome: { outcome: "cancelled" } } });
+    this.send({
+      jsonrpc: "2.0",
+      id: requestId,
+      result: optionId ? { outcome: { outcome: "selected", optionId } } : { outcome: { outcome: "cancelled" } },
+    });
   }
 
   async list(): Promise<AcpSessionInfo[]> {
@@ -136,13 +143,16 @@ export class WebSocketTransport implements AcpTransport {
       socket.onopen = () => resolve();
       socket.onerror = () => reject(new Error("ACP WebSocket connection failed"));
       socket.onclose = () => this.close(new Error("ACP WebSocket connection closed"));
-      socket.onmessage = (event) => { void this.receive(event.data); };
+      socket.onmessage = (event) => {
+        void this.receive(event.data);
+      };
     });
   }
 
   private async receive(data: unknown): Promise<void> {
     try {
-      const raw = typeof data === "string" ? data : data instanceof Blob ? await data.text() : new TextDecoder().decode(data as ArrayBuffer);
+      const raw =
+        typeof data === "string" ? data : data instanceof Blob ? await data.text() : new TextDecoder().decode(data as ArrayBuffer);
       const message = JSON.parse(raw) as JsonRpcMessage;
       if (message.method) {
         if (message.id === undefined) {
@@ -152,7 +162,10 @@ export class WebSocketTransport implements AcpTransport {
         }
         if (message.method === "session/request_permission") {
           this.permissionRequests.add(message.id);
-          this.emit({ kind: "permission-request", payload: { requestId: message.id, auto: false, chosen: null, ...(message.params ?? {}) } });
+          this.emit({
+            kind: "permission-request",
+            payload: { requestId: message.id, auto: false, chosen: null, ...(message.params ?? {}) },
+          });
           return;
         }
         this.send({ jsonrpc: "2.0", id: message.id, error: { code: -32601, message: `Unsupported client method: ${message.method}` } });
@@ -161,16 +174,22 @@ export class WebSocketTransport implements AcpTransport {
       if (message.id === undefined) return;
       const pending = this.pending.get(message.id);
       if (!pending) return;
-      this.pending.delete(message.id); clearTimeout(pending.timer);
+      this.pending.delete(message.id);
+      clearTimeout(pending.timer);
       if (message.error) pending.reject(new Error(message.error.message ?? "ACP request failed"));
       else pending.resolve(message.result);
-    } catch (error) { this.emit({ kind: "transport-error", payload: String(error) }); }
+    } catch (error) {
+      this.emit({ kind: "transport-error", payload: String(error) });
+    }
   }
 
   private request(method: string, params: Record<string, unknown>): Promise<unknown> {
     const id = this.nextRequestId++;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error(`ACP request timed out: ${method}`)); }, this.options?.requestTimeoutMs ?? 30_000);
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`ACP request timed out: ${method}`));
+      }, this.options?.requestTimeoutMs ?? 30_000);
       this.pending.set(id, { resolve, reject, timer });
       this.send({ jsonrpc: "2.0", id, method, params });
     });
@@ -185,13 +204,27 @@ export class WebSocketTransport implements AcpTransport {
     this.socket.send(JSON.stringify(message));
   }
 
-  private requireSession(): string { if (!this.sessionId) throw new Error("ACP session not created"); return this.sessionId; }
-  private assertConfigured(): void { if (!this.options?.url) throw new RemoteAcpUnsupportedError(); }
-  private emit(event: AcpEventEnvelope): void { for (const listener of this.listeners) listener(event); }
+  private requireSession(): string {
+    if (!this.sessionId) throw new Error("ACP session not created");
+    return this.sessionId;
+  }
+  private assertConfigured(): void {
+    if (!this.options?.url) throw new RemoteAcpUnsupportedError();
+  }
+  private emit(event: AcpEventEnvelope): void {
+    for (const listener of this.listeners) listener(event);
+  }
   private close(error: Error): void {
-    const socket = this.socket; this.socket = null; this.sessionId = null; this.permissionRequests.clear();
+    const socket = this.socket;
+    this.socket = null;
+    this.sessionId = null;
+    this.permissionRequests.clear();
     if (socket && socket.readyState !== WebSocket.CLOSED) socket.close();
-    for (const [id, pending] of this.pending) { clearTimeout(pending.timer); pending.reject(error); this.pending.delete(id); }
+    for (const [id, pending] of this.pending) {
+      clearTimeout(pending.timer);
+      pending.reject(error);
+      this.pending.delete(id);
+    }
   }
 }
 

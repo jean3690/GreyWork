@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { isTauriRuntime } from "@greywork/core";
 
 /** MCP 探活报告（与 Rust mcp_client.rs 的 McpProbeReport 对应）。 */
 export interface McpToolInfo {
@@ -19,10 +20,6 @@ export interface McpRuntimeClient {
   available(): boolean;
   probeStdio(command: string, args: string[], env?: Record<string, string>, timeoutSecs?: number): Promise<McpProbeReport>;
   probeRemote(url: string, timeoutSecs?: number): Promise<McpProbeReport>;
-}
-
-function isTauriRuntime(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
 export function createMcpRuntimeClient(): McpRuntimeClient {

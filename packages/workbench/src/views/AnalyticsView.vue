@@ -3,6 +3,14 @@ import { computed, onMounted, ref } from "vue";
 import { SPATIAL_SQL_TEMPLATES, createMockDuckDbClient, type DuckDbClient } from "@greywork/analytics";
 import { createSpatialDescriptor, describeSpatialData } from "@greywork/spatial";
 import { DataTable, FilePick, Select, type TableColumn } from "../components/ui";
+import { exportToXlsx } from "../lib/xlsx";
+import { useArtifactStore } from "../stores/artifact";
+import { useVfsStore } from "../stores/vfs";
+import { useI18n } from "vue-i18n";
+
+const { t } = useI18n();
+const artifactStore = useArtifactStore();
+const vfs = useVfsStore();
 
 const spatialTile = createSpatialDescriptor("mbtiles", "terrain", "/data/terrain.mbtiles", { tileCount: 128 });
 const spatialText = describeSpatialData(spatialTile);
@@ -100,6 +108,29 @@ function onDataFile(file: File): void {
   }
 }
 
+/** 导出当前结果集为 .xlsx 交付物：生成引擎 → VFS 落盘 → Artifacts 卡片。 */
+const exporting = ref(false);
+async function exportExcel(): Promise<void> {
+  if (exporting.value) return;
+  exporting.value = true;
+  try {
+    const rows = duckDbRows.value.length ? duckDbRows.value : tableRows;
+    const headers = resultColumns.map((column) => column.title);
+    const data = await exportToXlsx([{ name: "query-result", headers, rows }]);
+    const path = `reports/query-result-${Date.now()}.xlsx`;
+    await vfs.writeBinary(path, data);
+    artifactStore.pushArtifact({
+      name: path.split("/").pop() ?? "query-result.xlsx",
+      meta: `Excel · ${Math.max(Math.round(data.byteLength / 1024), 1)} KB`,
+      type: "dataset",
+      source: "duckdb-export",
+      format: "xlsx",
+    });
+  } finally {
+    exporting.value = false;
+  }
+}
+
 onMounted(async () => {
   try {
     duckDbStatus.value = "INITIALIZING";
@@ -128,17 +159,23 @@ onMounted(async () => {
     <div class="view__head">
       <div>
         <p class="view__eyebrow">DUCKDB LAB</p>
-        <h1 class="view__title">数据洞察</h1>
-        <p class="view__sub">DuckDB-WASM 客户端空间 SQL 分析。</p>
+        <h1 class="view__title">{{ t("analytics.title") }}</h1>
+        <p class="view__sub">{{ t("analytics.sub") }}</p>
       </div>
-      <div class="view__actions"><button class="btn btn--ghost">数据集</button><button class="btn btn--primary">运行查询</button></div>
+      <div class="view__actions">
+        <button class="btn btn--ghost">{{ t("analytics.datasets") }}</button
+        ><button class="btn btn--primary">{{ t("analytics.runQuery") }}</button>
+      </div>
     </div>
     <div class="analytics-grid">
       <div class="panel">
-        <div class="panel__head"><span class="panel__title">数据集</span><span class="panel__meta">REGISTER</span></div>
-        <Select v-model="activeDataset" :options="datasetOptions" placeholder="选择数据集" trigger-class="h-8" />
+        <div class="panel__head">
+          <span class="panel__title">{{ t("analytics.datasets") }}</span
+          ><span class="panel__meta">REGISTER</span>
+        </div>
+        <Select v-model="activeDataset" :options="datasetOptions" :placeholder="t('analytics.selectDataset')" trigger-class="h-8" />
         <div class="import-actions">
-          <FilePick accept=".csv,.parquet" label="导入 CSV / Parquet" variant="default" @select="onDataFile" />
+          <FilePick accept=".csv,.parquet" :label="t('analytics.importCsvParquet')" variant="default" @select="onDataFile" />
         </div>
         <ul v-if="uploadedData.length" class="source-list source-list--imported">
           <li v-for="d in uploadedData" :key="d.id" class="source">
@@ -152,12 +189,24 @@ onMounted(async () => {
       <div class="panel panel--query">
         <div class="panel__head">
           <span class="panel__title">SQL</span><span class="panel__meta">{{ duckDbStatus }}</span>
+          <button
+            class="btn btn--ghost"
+            style="margin-left: auto; padding: 4px 10px; font-size: 12px"
+            :disabled="exporting"
+            :title="t('analytics.exportExcelHint')"
+            @click="exportExcel"
+          >
+            {{ exporting ? t("analytics.exportExcel") + "…" : t("analytics.exportExcel") }}
+          </button>
         </div>
         <pre class="sql"><code>{{ sqlSample }}</code></pre>
         <DataTable :columns="resultColumns" :data="resultRows" class="mt-3 text-xs" />
       </div>
       <div class="panel">
-        <div class="panel__head"><span class="panel__title">聚合结果</span><span class="panel__meta">BAR</span></div>
+        <div class="panel__head">
+          <span class="panel__title">{{ t("analytics.aggregation") }}</span
+          ><span class="panel__meta">BAR</span>
+        </div>
         <div class="chart">
           <div v-for="(bar, i) in chartBars" :key="i" class="chart__col">
             <i class="chart__bar" :style="{ height: bar + '%' }"></i>

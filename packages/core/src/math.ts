@@ -1,5 +1,9 @@
 import type { Vector3 } from "./types";
 
+export const DEG2RAD = Math.PI / 180;
+
+export const toRad = (deg: number): number => deg * DEG2RAD;
+
 export const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 
 export const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;

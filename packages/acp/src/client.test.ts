@@ -2,7 +2,14 @@
 // （AcpAgentAdapter 组合测试已迁至 @greywork/integrations，见 acp-adapter.test.ts。）
 import { describe, expect, it } from "vitest";
 import type { PermissionTier } from "./permissions";
-import { createAcpClient, RemoteAcpUnsupportedError, WebSocketTransport, type AcpEventEnvelope, type AcpTransport, type WebSocketTransportOptions } from "./client";
+import {
+  createAcpClient,
+  RemoteAcpUnsupportedError,
+  WebSocketTransport,
+  type AcpEventEnvelope,
+  type AcpTransport,
+  type WebSocketTransportOptions,
+} from "./client";
 
 function fakeTransport(): AcpTransport & { events: AcpEventEnvelope[] } {
   const events: AcpEventEnvelope[] = [];
@@ -105,28 +112,53 @@ class FakeWebSocket {
 
   constructor() {
     FakeWebSocket.instances.push(this);
-    queueMicrotask(() => { this.readyState = 1; this.onopen?.(); });
+    queueMicrotask(() => {
+      this.readyState = 1;
+      this.onopen?.();
+    });
   }
 
   send(raw: string): void {
     this.sent.push(raw);
     const request = JSON.parse(raw) as { id?: number; method?: string; params?: Record<string, unknown> };
     if (request.id === undefined) return;
-    const result = request.method === "initialize" ? { protocolVersion: 1 } :
-      request.method === "session/new" ? { sessionId: "remote-session", configOptions: [] } :
-      request.method === "session/set_config_option" ? { configOptions: [{ id: "model", name: "Model", type: "select", currentValue: "fast" }] } :
-      request.method === "session/prompt" ? { stopReason: "end_turn" } : {};
+    const result =
+      request.method === "initialize"
+        ? { protocolVersion: 1 }
+        : request.method === "session/new"
+          ? { sessionId: "remote-session", configOptions: [] }
+          : request.method === "session/set_config_option"
+            ? { configOptions: [{ id: "model", name: "Model", type: "select", currentValue: "fast" }] }
+            : request.method === "session/prompt"
+              ? { stopReason: "end_turn" }
+              : {};
     queueMicrotask(() => this.onmessage?.({ data: JSON.stringify({ jsonrpc: "2.0", id: request.id, result }) }));
   }
 
-  close(): void { this.readyState = 3; this.onclose?.(); }
+  close(): void {
+    this.readyState = 3;
+    this.onclose?.();
+  }
 
   permissionRequest(id: number): void {
-    this.onmessage?.({ data: JSON.stringify({ jsonrpc: "2.0", id, method: "session/request_permission", params: { toolCallId: "call-1", kind: "read", options: [] } }) });
+    this.onmessage?.({
+      data: JSON.stringify({
+        jsonrpc: "2.0",
+        id,
+        method: "session/request_permission",
+        params: { toolCallId: "call-1", kind: "read", options: [] },
+      }),
+    });
   }
 
   update(text: string): void {
-    this.onmessage?.({ data: JSON.stringify({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text } } } }) });
+    this.onmessage?.({
+      data: JSON.stringify({
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: { update: { sessionUpdate: "agent_message_chunk", content: { text } } },
+      }),
+    });
   }
 }
 

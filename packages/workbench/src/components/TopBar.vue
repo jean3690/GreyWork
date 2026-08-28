@@ -6,6 +6,9 @@ import { RUN_MODES, useSettingsStore, type RunMode } from "../stores/settings";
 import { useChatStore } from "../stores/chat";
 import { useProjectStore } from "../stores/project";
 import { capabilitySeam } from "../plugins/loader";
+import { useI18n } from "vue-i18n";
+
+const { t } = useI18n();
 
 const chat = useChatStore();
 const projectStore = useProjectStore();
@@ -17,11 +20,12 @@ const emit = defineEmits<{ (event: "toggle-side"): void; (event: "toggle-sidebar
 
 const currentTitle = computed(() => {
   const mode = String(route.params.mode ?? "chat");
-  return capabilitySeam.snapshot().modes.find((entry) => entry.id === mode)?.title ?? "Cowork";
+  const title = capabilitySeam.snapshot().modes.find((entry) => entry.id === mode)?.title;
+  return title ? t(title) : "Cowork";
 });
 
 const activeProject = computed(
-  () => projectStore.projects.find((project) => project.id === projectStore.activeProjectId)?.name ?? "未命名项目",
+  () => projectStore.projects.find((project) => project.id === projectStore.activeProjectId)?.name ?? t("topbar.unnamedProject"),
 );
 
 const activeThread = computed(() => {
@@ -31,7 +35,7 @@ const activeThread = computed(() => {
   }
   return null;
 });
-const sessionTitle = computed(() => activeThread.value?.thread.title ?? "新对话");
+const sessionTitle = computed(() => activeThread.value?.thread.title ?? t("topbar.newThread"));
 const sessionProject = computed(() => activeThread.value?.project ?? null);
 </script>
 
@@ -48,13 +52,13 @@ const sessionProject = computed(() => activeThread.value?.project ?? null);
       <span v-if="sessionProject" class="topbar__proj">{{ sessionProject }}</span>
     </div>
 
-    <div class="topbar__mode" role="group" aria-label="运行模式">
+    <div class="topbar__mode" role="group" :aria-label="t('settings.runModeLabel')">
       <button
         v-for="runMode in RUN_MODES"
         :key="runMode.value"
         class="topbar__mode-btn"
         :class="{ active: settings.runMode === runMode.value }"
-        :title="runMode.hint"
+        :title="t(runMode.hint)"
         @click="settings.runMode = runMode.value as RunMode"
       >
         {{ runMode.label }}
@@ -62,12 +66,12 @@ const sessionProject = computed(() => activeThread.value?.project ?? null);
     </div>
 
     <div class="topbar__actions">
-      <button class="iconbtn iconbtn--wide" title="连接 IDE（桌面端宿主能力，未接入）" disabled><PlugZap class="size-3.5" />IDE</button>
+      <button class="iconbtn iconbtn--wide" :title="t('topbar.ideHint')" disabled><PlugZap class="size-3.5" />IDE</button>
       <button
         class="iconbtn"
         :class="{ active: !props.sidebarOpen }"
-        :title="props.sidebarOpen ? '收起侧边栏' : '展开侧边栏'"
-        aria-label="侧边栏"
+        :title="props.sidebarOpen ? t('topbar.collapseSidebar') : t('topbar.expandSidebar')"
+        :aria-label="t('topbar.sidebarAria')"
         @click="emit('toggle-sidebar')"
       >
         <PanelLeft class="size-4" />
@@ -75,8 +79,8 @@ const sessionProject = computed(() => activeThread.value?.project ?? null);
       <button
         class="iconbtn"
         :class="{ active: props.sideOpen }"
-        :title="props.sideOpen ? '收起成果展示区' : '展开成果展示区：Diff / 预览 / 终端'"
-        aria-label="成果展示区"
+        :title="props.sideOpen ? t('topbar.collapseResults') : t('topbar.expandResults')"
+        :aria-label="t('topbar.resultsAria')"
         @click="emit('toggle-side')"
       >
         <PanelRight class="size-4" />

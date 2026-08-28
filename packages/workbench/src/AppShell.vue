@@ -6,10 +6,14 @@ import "./theme/tokens.css";
 import "./theme/base.css";
 import { capabilitySeam } from "./plugins/loader";
 import { coreBuiltinManifest } from "./plugins/registry";
+import { syncMarketToCapabilities } from "./plugins/bridge";
+import { getPluginMarket } from "./state/pluginMarket";
 import { useSettingsStore } from "./stores/settings";
 import { useProjectStore } from "./stores/project";
 import { useChatStore } from "./stores/chat";
 import { bindWorkbenchRouter, ensureMode } from "./router/util";
+import { setLocale } from "./i18n";
+import { preloadCesiumEngine } from "@greywork/spatial";
 import ShellSidebar from "./components/ShellSidebar.vue";
 import TopBar from "./components/TopBar.vue";
 import ActivityPanel from "./components/ActivityPanel.vue";
@@ -17,9 +21,10 @@ import StatusBar from "./components/StatusBar.vue";
 import MobileTabBar from "./components/MobileTabBar.vue";
 import { getGreyWorkCore } from "./components/greyWorkCoreSingleton";
 
-/* ===== Bootstrap：注册默认清单 + 拓扑激活 + token 快照 ===== */
+/* ===== Bootstrap：注册默认清单 + 拓扑激活 + 已安装插件恢复 + token 快照 ===== */
 capabilitySeam.register(coreBuiltinManifest);
 void capabilitySeam.activateAll();
+void syncMarketToCapabilities(getPluginMarket());
 
 const settings = useSettingsStore();
 watch(
@@ -27,6 +32,12 @@ watch(
   (theme) => {
     if (typeof document !== "undefined") document.documentElement.dataset.theme = theme;
   },
+  { immediate: true },
+);
+// 语言切换即时生效（locale 落盘走 settings.persist()，与 theme 同模式）。
+watch(
+  () => settings.locale,
+  (locale) => setLocale(locale),
   { immediate: true },
 );
 settings.syncEnabledPlugins(capabilitySeam.activeIds());
@@ -72,6 +83,9 @@ function onViewportChange(event: MediaQueryListEvent): void {
 onMounted(() => {
   window.addEventListener("keydown", onKeydown);
   mobileQuery?.addEventListener("change", onViewportChange);
+  // 空闲预加载 Cesium 引擎（模块级缓存），降低首次进入 SpatialView 的等待。
+  const idle = typeof requestIdleCallback === "function" ? requestIdleCallback : (cb: () => void) => setTimeout(cb, 500);
+  idle(() => void preloadCesiumEngine());
 });
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeydown);
