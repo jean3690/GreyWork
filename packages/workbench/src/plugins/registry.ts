@@ -4,6 +4,7 @@ import SidebarEntriesSection from "../components/sidebar/SidebarEntriesSection.v
 import SidebarProjectsSection from "../components/sidebar/SidebarProjectsSection.vue";
 import SidebarUserSection from "../components/sidebar/SidebarUserSection.vue";
 import ArtifactsPane from "../components/panels/ArtifactsPane.vue";
+import ArtifactViewer from "../components/panels/ArtifactViewer.vue";
 import DiffsPane from "../components/panels/DiffsPane.vue";
 import EditorPane from "../components/panels/EditorPane.vue";
 import ReviewPane from "../components/panels/ReviewPane.vue";
@@ -47,6 +48,7 @@ export const coreBuiltinManifest: PluginManifest = {
       { region: "shellSidebar", id: "sidebar.user", title: "sidebar.user", component: SidebarUserSection, order: 30 },
       // ActivityPanel 内置标签页（「文件」置顶：OS 式列表 → 点击进入内容）
       { region: "activityPanel", id: "activity.editor", title: "panels.file", component: EditorPane, order: 5 },
+      { region: "activityPanel", id: "activity.viewer", title: "panels.viewer.title", component: ArtifactViewer, order: 8 },
       { region: "activityPanel", id: "activity.diffs", title: "panels.diffs.title", component: DiffsPane, order: 10 },
       { region: "activityPanel", id: "activity.web", title: "panels.preview.title", component: WebPreviewPane, order: 20 },
       { region: "activityPanel", id: "activity.terminal", title: "panels.terminal.title", component: TerminalPane, order: 30 },

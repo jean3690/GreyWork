@@ -274,6 +274,14 @@ export const enUS: MessageSchema = {
       emptyHtml: 'No HTML artifacts yet — run GenUI to generate one, or click "Load sample" to try.',
       scriptWarning: "Scripts run only inside the sandboxed iframe (same-origin disabled); load only trusted content.",
     },
+    viewer: {
+      title: "Artifacts",
+      closeTab: "Close",
+      loading: "Loading…",
+      error: "Preview failed: {detail}",
+      binaryPlaceholder: '"{name}" is a binary document; download it from the deliverables panel.',
+      empty: "AI artifacts (md / xlsx / html / csv) open here as tabs; multiple artifacts can be switched between.",
+    },
     terminal: {
       title: "Terminal",
       inputAria: "Terminal input",

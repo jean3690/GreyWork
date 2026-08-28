@@ -266,6 +266,14 @@ export const zhCN = {
       emptyHtml: "暂无 HTML 产物 —— 运行 GenUI 生成，或点「载入示例」体验。",
       scriptWarning: "脚本仅在沙箱 iframe 中运行（禁同源），请只载入可信内容。",
     },
+    viewer: {
+      title: "产物",
+      closeTab: "关闭",
+      loading: "加载中…",
+      error: "预览失败：{detail}",
+      binaryPlaceholder: "「{name}」为二进制文档，请到交付物面板下载查看。",
+      empty: "AI 产物（md / xlsx / html / csv）会在这里以标签页打开；多个产物可切换。",
+    },
     terminal: {
       title: "终端",
       inputAria: "终端输入",
