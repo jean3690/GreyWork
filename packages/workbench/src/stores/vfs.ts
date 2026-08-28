@@ -159,6 +159,11 @@ export const useVfsStore = defineStore("vfs", () => {
     return workspaceFs.readBinary(path);
   }
 
+  /** 读取任意文本文件（不改动编辑态）。 */
+  async function readFile(path: string): Promise<string> {
+    return workspaceFs.readFile(path);
+  }
+
   async function remove(path: string): Promise<void> {
     await workspaceFs.delete(path);
     paths.value = paths.value.filter((candidate) => candidate !== path);
@@ -179,6 +184,7 @@ export const useVfsStore = defineStore("vfs", () => {
     write,
     writeBinary,
     readBinary,
+    readFile,
     remove,
     refreshStatus,
   };

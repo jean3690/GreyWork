@@ -17,6 +17,7 @@ import { ref } from "vue";
 import { useChatStore } from "./chat";
 import { useSettingsStore } from "./settings";
 import { i18n } from "../i18n";
+import { appEvents } from "../events";
 import type { ThreadMessage } from "../types";
 
 const t = i18n.global.t;
@@ -105,6 +106,17 @@ export const useAgentStore = defineStore("agent", () => {
     const failed = run.subtasks.some((s) => s.status === "failed");
     run.status = failed ? "failed" : "done";
     run.finishedAt = Date.now();
+    publishRunStatus(run);
+  }
+
+  /** 发布编排状态变化事件（异步任务完成通知；通知系统/状态栏等可订阅）。 */
+  function publishRunStatus(run: PlannerRun): void {
+    appEvents.emit("run:status", {
+      runId: run.id,
+      status: run.status,
+      done: run.subtasks.filter((s) => s.status === "done").length,
+      total: run.subtasks.length,
+    });
   }
 
   /** 单子任务独立会话派发；完成完全由 prompt-done 事件（按 handle 路由）驱动。 */
@@ -204,6 +216,7 @@ export const useAgentStore = defineStore("agent", () => {
     sub.error = undefined;
     run.status = "running";
     run.finishedAt = undefined;
+    publishRunStatus(run);
     subtaskQueue.push({ run, sub });
     pumpSubtasks();
   }
@@ -217,6 +230,7 @@ export const useAgentStore = defineStore("agent", () => {
     if (run.status === "done" || run.status === "failed") {
       run.status = "running";
       run.finishedAt = undefined;
+      publishRunStatus(run);
     }
     subtaskQueue.push({ run, sub });
     pumpSubtasks();
@@ -229,6 +243,7 @@ export const useAgentStore = defineStore("agent", () => {
       { id: "sub-2", role: "reviewer", prompt: `审查「${run.goal}」的产出`, status: "pending" },
     ];
     run.status = "running";
+    publishRunStatus(run);
     let delay = 150;
     for (const sub of [...run.subtasks]) {
       orchestrationTimers.push(setTimeout(() => (sub.status = "running"), delay));
@@ -247,6 +262,7 @@ export const useAgentStore = defineStore("agent", () => {
   async function dispatchRun(goal: string): Promise<void> {
     const run = createPlannerRun(goal);
     runs.value.unshift(run);
+    publishRunStatus(run);
     const provider = agentProviders.value.find((provider) => provider.id === selectedProviderId.value);
     if (!acpAdapter.isAvailable() || !provider || !provider.enabled) {
       fallbackRunMock(run);
@@ -256,6 +272,7 @@ export const useAgentStore = defineStore("agent", () => {
     if (failure) {
       run.status = "failed";
       run.finishedAt = Date.now();
+      publishRunStatus(run);
       return;
     }
     const text = buildPlanPrompt(run.goal);
@@ -271,6 +288,7 @@ export const useAgentStore = defineStore("agent", () => {
       plannerPending = null;
       run.status = "failed";
       run.finishedAt = Date.now();
+      publishRunStatus(run);
       chat.setMessageContent(message.id, `[Planner 失败] ${String(error)}`, threadId);
       acpStream = null;
       acpThreadId = null;
@@ -366,10 +384,12 @@ export const useAgentStore = defineStore("agent", () => {
           if (plan) {
             run.subtasks = plan;
             run.status = "running";
+            publishRunStatus(run);
             kickSubtasks(run);
           } else {
             run.status = "failed";
             run.finishedAt = Date.now();
+            publishRunStatus(run);
             if (message) chat.appendMessageContent(messageId, `\n\n${t("agents.planFailed")}`, threadId);
             chat.flushPendingContent();
           }
