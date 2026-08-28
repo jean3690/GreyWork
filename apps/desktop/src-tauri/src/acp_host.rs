@@ -248,15 +248,35 @@ fn permission_payload(
 /// 启动外部 ACP agent 子进程并完成 initialize 握手，返回主机句柄 id。
 ///
 /// `tier` 取前端权限档位（"cautious" | "daily" | "auto"），缺省/未知按 cautious。
+/// `sandbox` 取沙盒档位（"off" | "fs" | "full"），非 off 时以 bwrap 包裹进程；
+/// `workspace` 为沙盒可写锚定目录（即会话工作区），仅在沙盒开启时必需。
 #[tauri::command]
 pub async fn acp_start(
     app: AppHandle,
     state: State<'_, AcpHost>,
     agent_cmd: String,
     tier: Option<String>,
+    sandbox: Option<String>,
+    workspace: Option<String>,
 ) -> Result<u64, String> {
     let command = process_guard::validate_spawn_command(&agent_cmd, ALLOWED_AGENT_PROGRAMS)?;
     *state.tier.lock().await = PermissionTier::parse(tier.as_deref());
+
+    let mode = crate::sandbox::SandboxMode::parse(sandbox.as_deref());
+    let command = if mode == crate::sandbox::SandboxMode::Off {
+        command
+    } else {
+        if !crate::sandbox::sandbox_available() {
+            return Err("sandbox: bwrap is not installed on this system".to_string());
+        }
+        let cwd = workspace
+            .as_deref()
+            .map(validate_cwd)
+            .transpose()?
+            .ok_or_else(|| "sandbox: workspace is required when sandbox is enabled".to_string())?;
+        let home = std::env::var("HOME").ok().map(std::path::PathBuf::from);
+        crate::sandbox::wrap_command(mode, &cwd, home.as_deref(), &command)?
+    };
 
     let handle_id = state.next_id.fetch_add(1, Ordering::SeqCst);
     let agent =

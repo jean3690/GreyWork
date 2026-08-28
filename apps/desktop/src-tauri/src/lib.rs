@@ -3,6 +3,7 @@ mod llm;
 pub mod mcp_client;
 mod mcp_registry;
 mod process_guard;
+mod sandbox;
 mod skills_market;
 mod web_search;
 
