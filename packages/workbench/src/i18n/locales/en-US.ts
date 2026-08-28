@@ -30,7 +30,7 @@ export const enUS: MessageSchema = {
   chat: {
     placeholder: {
       hint: "Enter to send · Shift+Enter for newline",
-      input: "Tell GreyWork what to do; type @ to reference a plugin / skill…",
+      input: "Tell GreyWork what to do; type {'@'} to reference a plugin / skill…",
     },
     busy: "Executing task…",
     plan: "Plan",
@@ -279,8 +279,7 @@ export const enUS: MessageSchema = {
       closeTab: "Close",
       loading: "Loading…",
       error: "Preview failed: {detail}",
-      binaryPlaceholder: '"{name}" is a binary document; download it from the deliverables panel.',
-      empty: "AI artifacts (md / xlsx / html / csv) open here as tabs; multiple artifacts can be switched between.",
+      empty: "AI artifacts (md / xlsx / docx / pptx / html / csv) open here as tabs; multiple artifacts can be switched between.",
     },
     terminal: {
       title: "Terminal",

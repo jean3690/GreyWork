@@ -16,6 +16,7 @@ import {
   FolderGit2,
   Gauge,
   MessageSquareDashed,
+  Paperclip,
   Plus,
   Puzzle,
   Sparkles,
@@ -26,6 +27,7 @@ import {
 import MarkdownText from "../components/MarkdownText.vue";
 import StreamText from "../components/chat/StreamText.vue";
 import ChatComposer from "../components/chat/ChatComposer.vue";
+import { Button } from "../components/ui";
 import { stepIcon } from "../lib/icons";
 import type { ThreadMessage } from "../types";
 import { useI18n } from "vue-i18n";

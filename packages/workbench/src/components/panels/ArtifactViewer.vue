@@ -1,21 +1,18 @@
 <script setup lang="ts">
-import { computed, onUnmounted, ref } from "vue";
-import ExcelJS from "exceljs";
+import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 import { FileSpreadsheet, FileText, Presentation, X } from "lucide-vue-next";
 import MarkdownText from "../MarkdownText.vue";
 import { useVfsStore } from "../../stores/vfs";
 import { appEvents } from "../../events";
 import { basename, kindOfPath, type ViewerKind } from "../../lib/viewer";
+import type { IDocumentData, IWorkbookData } from "@univerjs/core";
+import type { ISlideData } from "@univerjs/slides";
 import { useI18n } from "vue-i18n";
+import { buildUniverLocaleConfig } from "../../lib/univer-locale";
+import type { Plugin, PluginCtor } from "@univerjs/core";
 
 const vfs = useVfsStore();
 const { t } = useI18n();
-
-interface XlsxSheetView {
-  name: string;
-  headers: string[];
-  rows: string[][];
-}
 
 /** 一个产物预览场景（tab）。 */
 interface ViewerTab {
@@ -25,10 +22,12 @@ interface ViewerTab {
   kind: ViewerKind;
   /** 文本内容（md/html/csv/raw）。 */
   text?: string;
-  /** docx 经 mammoth 转换的 HTML（沙箱 iframe 渲染）。 */
-  html?: string;
-  /** xlsx 读回的 sheet 表格。 */
-  xlsx?: XlsxSheetView[];
+  /** xlsx 转 Univer workbook 快照（视觉渲染）。 */
+  univerData?: IWorkbookData;
+  /** docx 转 Univer 文档快照（视觉渲染）。 */
+  docData?: IDocumentData;
+  /** pptx 转 Univer 幻灯片快照（视觉渲染）。 */
+  slideData?: ISlideData;
   busy?: boolean;
   error?: string;
 }
@@ -45,20 +44,132 @@ function refreshActive(): void {
   activeTab.value = tabs.value.find((tab) => tab.id === activeTabId.value) ?? null;
 }
 
+/**
+ * xlsx/docx/pptx → Univer 视觉渲染（懒加载独立 chunk；每次切 tab 重建实例并 dispose 旧实例）。
+ * xlsx/docx 使用对应 preset；pptx 使用插件模式（Univer 无 slides preset）。
+ */
+const univerHost = ref<HTMLElement | null>(null);
+let univerInstance: { dispose: () => void } | null = null;
+/** 渲染纪元：每次 renderUniver 递增；异步导入完成后纪元不匹配则丢弃（防快速切 tab 的竞态）。 */
+let renderEpoch = 0;
+
+async function renderUniver(tab: ViewerTab): Promise<void> {
+  const epoch = ++renderEpoch;
+  univerInstance?.dispose();
+  univerInstance = null;
+  await nextTick();
+  if (epoch !== renderEpoch) return;
+  if (!univerHost.value) return;
+
+  if (tab.kind === "xlsx" && tab.univerData) {
+    try {
+      const [{ Univer, UniverInstanceType }, { UniverSheetsCorePreset }] = await Promise.all([
+        import("@univerjs/core"),
+        import("@univerjs/preset-sheets-core"),
+      ]);
+      await import("@univerjs/preset-sheets-core/lib/index.css");
+      if (epoch !== renderEpoch) return;
+      const el = univerHost.value as HTMLElement;
+      const univer = new Univer(await buildUniverLocaleConfig(false, true));
+      univer.registerPlugins(
+        UniverSheetsCorePreset({ container: el }).plugins.map((p: PluginCtor<Plugin> | [PluginCtor<Plugin>, unknown]) =>
+          Array.isArray(p) ? p : [p, void 0],
+        ),
+      );
+      univer.createUnit(UniverInstanceType.UNIVER_SHEET, tab.univerData);
+      if (epoch !== renderEpoch) {
+        univer.dispose();
+        return;
+      }
+      univerInstance = univer;
+    } catch (e) {
+      console.error("[renderUniver] xlsx render ERROR", e);
+    }
+    return;
+  }
+  if (tab.kind === "docx" && tab.docData) {
+    try {
+      const [{ Univer, UniverInstanceType }, { UniverDocsCorePreset }] = await Promise.all([
+        import("@univerjs/core"),
+        import("@univerjs/preset-docs-core"),
+      ]);
+      await import("@univerjs/preset-docs-core/lib/index.css");
+      if (epoch !== renderEpoch) return;
+      const el = univerHost.value as HTMLElement;
+      const univer = new Univer(await buildUniverLocaleConfig(true));
+      univer.registerPlugins(
+        UniverDocsCorePreset({ container: el }).plugins.map((p: PluginCtor<Plugin> | [PluginCtor<Plugin>, unknown]) =>
+          Array.isArray(p) ? p : [p, void 0],
+        ),
+      );
+      univer.createUnit(UniverInstanceType.UNIVER_DOC, tab.docData);
+      if (epoch !== renderEpoch) {
+        univer.dispose();
+        return;
+      }
+      univerInstance = univer;
+    } catch (e) {
+      console.error("[renderUniver] docx render ERROR", e);
+    }
+    return;
+  }
+
+  if (tab.kind === "pptx" && tab.slideData) {
+    try {
+      const [
+        { Univer, UniverInstanceType },
+        { UniverRenderEnginePlugin },
+        { UniverUIPlugin },
+        { UniverDocsPlugin },
+        { UniverSlidesPlugin },
+        { UniverSlidesUIPlugin },
+        { UniverDocsUIPlugin },
+      ] = await Promise.all([
+        import("@univerjs/core"),
+        import("@univerjs/engine-render"),
+        import("@univerjs/ui"),
+        import("@univerjs/docs"),
+        import("@univerjs/slides"),
+        import("@univerjs/slides-ui"),
+        import("@univerjs/docs-ui"),
+      ]);
+      await import("@univerjs/slides-ui/lib/index.css");
+      if (epoch !== renderEpoch) return;
+      const el = univerHost.value as HTMLElement;
+      const univer = new Univer(await buildUniverLocaleConfig(false, false, true));
+      univer.registerPlugin(UniverRenderEnginePlugin);
+      univer.registerPlugin(UniverUIPlugin, { container: el });
+      univer.registerPlugin(UniverDocsPlugin);
+      univer.registerPlugin(UniverDocsUIPlugin);
+      univer.registerPlugin(UniverSlidesPlugin);
+      univer.registerPlugin(UniverSlidesUIPlugin);
+      if (epoch !== renderEpoch) {
+        univer.dispose();
+        return;
+      }
+      univer.createUnit(UniverInstanceType.UNIVER_SLIDE, tab.slideData);
+      univerInstance = univer;
+    } catch (e) {
+      console.error("[renderUniver] pptx render ERROR", e);
+    }
+  }
+}
+
+watch(
+  activeTab,
+  (tab) => {
+    if (tab) void renderUniver(tab);
+  },
+  { immediate: true },
+);
+
 async function loadXlsx(tab: ViewerTab): Promise<void> {
   tab.busy = true;
   try {
     const data = await vfs.readBinary(tab.path);
-    const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(data as unknown as ArrayBuffer);
-    tab.xlsx = workbook.worksheets.map((sheet) => {
-      const rows: string[][] = [];
-      sheet.eachRow({ includeEmpty: true }, (row) => {
-        const values = (row.values as unknown[]).slice(1).map((cell) => (cell == null ? "" : String(cell)));
-        rows.push(values);
-      });
-      return { name: sheet.name, headers: rows[0] ?? [], rows: rows.slice(1) };
-    });
+    const { xlsxToUniverWorkbook } = await import("../../lib/univer-xlsx");
+    tab.univerData = await xlsxToUniverWorkbook(data);
+    if (activeTabId.value === tab.id) await renderUniver(tab);
   } catch (error) {
     tab.error = error instanceof Error ? error.message : String(error);
   } finally {
@@ -66,15 +177,29 @@ async function loadXlsx(tab: ViewerTab): Promise<void> {
   }
 }
 
-/** docx → HTML（mammoth，懒加载 browser bundle；转换结果入沙箱 iframe 渲染）。 */
+/** docx → Univer 文档快照（懒加载；转换结果经 UniverDocsCorePreset 渲染）。 */
 async function loadDocx(tab: ViewerTab): Promise<void> {
   tab.busy = true;
   try {
     const data = await vfs.readBinary(tab.path);
-    const { convertToHtml } = await import("mammoth");
-    const view = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
-    const result = await convertToHtml({ arrayBuffer: view });
-    tab.html = result.value;
+    const { docxToUniverDocument } = await import("../../lib/univer-docx");
+    tab.docData = await docxToUniverDocument(data);
+    if (activeTabId.value === tab.id) await renderUniver(tab);
+  } catch (error) {
+    tab.error = error instanceof Error ? error.message : String(error);
+  } finally {
+    tab.busy = false;
+  }
+}
+
+/** pptx → Univer 幻灯片快照（懒加载；转换结果经 Univer Slides 插件渲染）。 */
+async function loadPptx(tab: ViewerTab): Promise<void> {
+  tab.busy = true;
+  try {
+    const data = await vfs.readBinary(tab.path);
+    const { pptxToUniverSlides } = await import("../../lib/univer-pptx");
+    tab.slideData = await pptxToUniverSlides(data);
+    if (activeTabId.value === tab.id) await renderUniver(tab);
   } catch (error) {
     tab.error = error instanceof Error ? error.message : String(error);
   } finally {
@@ -94,16 +219,17 @@ async function openPath(path: string): Promise<void> {
   const kind = kindOfPath(path);
   const tab: ViewerTab = { id: path, title: basename(path), path, kind };
   tabs.value.push(tab);
+  const proxy = tabs.value[tabs.value.length - 1]; // 取响应式代理：裸对象上的变更不会触发模板更新
   activeTabId.value = path;
   refreshActive();
   if (kind === "xlsx") {
-    await loadXlsx(tab);
+    await loadXlsx(proxy);
   } else if (kind === "docx") {
-    await loadDocx(tab);
+    await loadDocx(proxy);
   } else if (kind === "pptx") {
-    // 二进制演示文稿：占位（下载走交付物面板）
+    await loadPptx(proxy);
   } else {
-    tab.text = await vfs.readFile(path);
+    proxy.text = await vfs.readFile(path);
   }
 }
 
@@ -123,6 +249,8 @@ const unsubscribePreview = appEvents.on("preview:request", ({ path }) => void op
 onUnmounted(() => {
   unsubscribeArtifact();
   unsubscribePreview();
+  univerInstance?.dispose();
+  univerInstance = null;
 });
 
 /* 空态引导：复用 WebPreviewPane 的载入示例产物。 */
@@ -173,15 +301,8 @@ async function loadSample(): Promise<void> {
     </div>
 
     <div v-if="activeTab" :key="activeTab.id" class="viewer__body">
-      <p v-if="activeTab.busy" class="footnote">{{ t("panels.viewer.loading") }}</p>
-      <p v-else-if="activeTab.error" class="footnote">{{ t("panels.viewer.error", { detail: activeTab.error }) }}</p>
-
-      <div v-else-if="activeTab.kind === 'html'" class="viewer__frame-wrap">
+      <div v-if="activeTab.kind === 'html'" class="viewer__frame-wrap">
         <iframe class="viewer__frame" :srcdoc="activeTab.text" :sandbox="sandbox" :title="activeTab.title"></iframe>
-      </div>
-
-      <div v-else-if="activeTab.kind === 'docx'" class="viewer__frame-wrap">
-        <iframe class="viewer__frame" :srcdoc="activeTab.html" :sandbox="sandbox" :title="activeTab.title"></iframe>
       </div>
 
       <div v-else-if="activeTab.kind === 'md'" class="viewer__md">
@@ -210,27 +331,10 @@ async function loadSample(): Promise<void> {
         </table>
       </div>
 
-      <div v-else-if="activeTab.kind === 'xlsx'" class="viewer__table">
-        <section v-for="sheet in activeTab.xlsx" :key="sheet.name" class="viewer__sheet">
-          <p class="viewer__sheet-name">{{ sheet.name }}</p>
-          <table>
-            <thead>
-              <tr>
-                <th v-for="(cell, i) in sheet.headers" :key="i">{{ cell }}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="(row, i) in sheet.rows" :key="i">
-                <td v-for="(cell, j) in row" :key="j">{{ cell }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </section>
-      </div>
-
-      <div v-else-if="activeTab.kind === 'pptx'" class="viewer__placeholder">
-        <Presentation class="size-4" />
-        <span>{{ t("panels.viewer.binaryPlaceholder", { name: activeTab.title }) }}</span>
+      <div v-else-if="activeTab.kind === 'xlsx' || activeTab.kind === 'docx' || activeTab.kind === 'pptx'" class="viewer__univer-wrap">
+        <div v-once ref="univerHost" class="viewer__univer"></div>
+        <p v-if="activeTab.busy" class="footnote viewer__overlay">{{ t("panels.viewer.loading") }}</p>
+        <p v-else-if="activeTab.error" class="footnote viewer__overlay">{{ t("panels.viewer.error", { detail: activeTab.error }) }}</p>
       </div>
 
       <pre v-else class="viewer__raw">{{ activeTab.text }}</pre>
@@ -348,19 +452,24 @@ async function loadSample(): Promise<void> {
   font-weight: 600;
   background: var(--panel-2);
 }
-.viewer__sheet-name {
-  margin: 10px 0 6px;
-  color: var(--dim);
-  font-family: var(--font-mono);
-  font-size: 11px;
+.viewer__univer-wrap {
+  position: relative;
+  height: 100%;
+  min-height: 360px;
+  overflow: hidden;
 }
-.viewer__placeholder {
+.viewer__univer {
+  height: 100%;
+}
+.viewer__overlay {
+  position: absolute;
+  inset: 0;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 18px;
-  color: var(--dim);
-  font-size: 12.5px;
+  justify-content: center;
+  background: var(--panel);
+  z-index: 2;
+  pointer-events: none;
 }
 .viewer__raw {
   margin: 0;

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc --noEmit && vite build",
+    "build": "vue-tsc --noEmit && NODE_OPTIONS=--max-old-space-size=6144 vite build",
     "preview": "vite preview",
     "e2e:cdp": "node e2e/cdp-drive.mjs",
     "tauri": "tauri",

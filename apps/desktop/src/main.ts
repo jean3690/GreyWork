@@ -7,6 +7,16 @@ import "./tailwind.css";
 
 const app = createApp(App).use(i18n).use(createPinia()).use(createWorkbenchRouter());
 app.mount("#app");
+// Dev-only e2e 钩子：暴露内存 FS 与事件总线，便于 Playwright 注入产物并触发预览
+// （生产构建中 import.meta.env.DEV 为 false，整段被 tree-shake 移除）。
+if (import.meta.env.DEV) {
+  void import("@greywork/workbench").then((m) => {
+    (window as unknown as Record<string, unknown>).__gw = {
+      workspaceFs: m.workspaceFs,
+      appEvents: m.appEvents,
+    };
+  });
+}
 
 // 首帧渲染后再显示窗口（tauri.conf.json 配 visible:false 防白屏闪烁）。
 requestAnimationFrame(() => {

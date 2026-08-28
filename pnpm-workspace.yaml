@@ -11,4 +11,5 @@ autoInstallPeers: true
 
 allowBuilds:
   esbuild: false
+  protobufjs: true
   vue-demi: false
