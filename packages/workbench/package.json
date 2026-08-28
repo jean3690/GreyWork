@@ -42,6 +42,7 @@
     "exceljs": "^4.4.0",
     "lucide-vue-next": "^0.544.0",
     "pinia": "^3.0.3",
+    "pptxgenjs": "^4.0.1",
     "reka-ui": "^2.6.0",
     "tailwind-merge": "^3.3.1",
     "vue": "^3.5.13",

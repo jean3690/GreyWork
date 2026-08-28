@@ -14,8 +14,13 @@ const { t } = useI18n();
 const previewPath = ref("");
 const previewContent = ref("");
 
-/** 最新 xlsx 产物（二进制不落文本预览，提供下载入口）。 */
-const latestXlsx = computed(() => artifactStore.artifacts.find((artifact) => artifact.format === "xlsx"));
+/** 最新二进制产物（xlsx/pptx 不落文本预览，提供下载入口）。 */
+const latestBinary = computed(() => artifactStore.artifacts.find((artifact) => artifact.format === "xlsx" || artifact.format === "pptx"));
+
+const BINARY_MIME: Record<string, string> = {
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+};
 
 async function loadPreview(): Promise<void> {
   const live = artifactStore.artifacts.find((artifact) => artifact.name.endsWith(".md"));
@@ -31,15 +36,13 @@ async function loadPreview(): Promise<void> {
   previewContent.value = "";
 }
 
-/** xlsx 产物下载：读 VFS 二进制 → Blob → 触发浏览器下载。 */
+/** 二进制产物下载：读 VFS 二进制 → Blob → 触发浏览器下载。 */
 async function downloadArtifact(artifact: Artifact): Promise<void> {
-  if (artifact.format !== "xlsx") return;
+  if (artifact.format !== "xlsx" && artifact.format !== "pptx") return;
   const path = `reports/${artifact.name}`;
   try {
     const data = await workspaceFs.readBinary(path);
-    const blob = new Blob([data], {
-      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    });
+    const blob = new Blob([data], { type: BINARY_MIME[artifact.format] ?? "application/octet-stream" });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
@@ -64,15 +67,17 @@ watch(
     <div class="artifacts">
       <div v-for="a in artifactStore.artifacts" :key="a.id" class="artifact" :data-artifact-id="a.id">
         <span class="artifact__glyph">
-          <FileSpreadsheet v-if="a.format === 'xlsx'" class="size-4" />
+          <FileSpreadsheet v-if="a.format === 'xlsx' || a.format === 'pptx'" class="size-4" />
           <FileText v-else class="size-4" />
         </span>
         <div>
           <strong>{{ a.name }}</strong
           ><span>{{ a.meta }} · {{ a.source }}</span>
         </div>
-        <span v-if="a.format === 'xlsx'" class="artifact__badge">XLSX</span>
-        <button v-if="a.format === 'xlsx'" class="btn btn--mini" @click="downloadArtifact(a)">{{ t("panels.artifacts.download") }}</button>
+        <span v-if="a.format === 'xlsx' || a.format === 'pptx'" class="artifact__badge">{{ a.format === "xlsx" ? "XLSX" : "PPTX" }}</span>
+        <button v-if="a.format === 'xlsx' || a.format === 'pptx'" class="btn btn--mini" @click="downloadArtifact(a)">
+          {{ t("panels.artifacts.download") }}
+        </button>
         <button v-else class="btn btn--mini">{{ t("panels.artifacts.open") }}</button>
       </div>
     </div>
@@ -82,9 +87,9 @@ watch(
     <div v-if="previewContent" class="artifact-preview">
       <MarkdownText :content="previewContent" />
     </div>
-    <div v-else-if="latestXlsx" class="artifact-preview xlsx-note">
+    <div v-else-if="latestBinary" class="artifact-preview xlsx-note">
       <FileSpreadsheet class="size-4" />
-      <span>{{ t("panels.artifacts.xlsxHint") }} · {{ latestXlsx.meta }}</span>
+      <span>{{ t("panels.artifacts.xlsxHint") }} · {{ latestBinary.meta }}</span>
     </div>
     <p v-else class="footnote">{{ t("panels.artifacts.empty") }}</p>
   </div>

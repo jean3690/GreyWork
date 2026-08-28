@@ -313,7 +313,7 @@ export const enUS: MessageSchema = {
       pathPlaceholder: "Path, e.g. src/app.ts",
       newPathAria: "New file path",
       emptyHint: 'Workspace is empty. Click "New file" to create your first file.',
-      xlsxNote: "Excel binary artifact — download from the deliverables panel",
+      xlsxNote: "Office binary artifact — download from the deliverables panel",
     },
   },
   sidebar: {
@@ -462,6 +462,8 @@ export const enUS: MessageSchema = {
     aggregation: "Aggregated results",
     exportExcel: "Export Excel",
     exportExcelHint: "Write current result set to a .xlsx artifact",
+    exportPptx: "Export brief",
+    exportPptxHint: "Generate a .pptx brief from the current result set (cover + data table)",
   },
   gis: {
     title: "GIS Map",

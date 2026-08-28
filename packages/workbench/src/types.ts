@@ -58,7 +58,7 @@ export interface Artifact {
   source: string;
   createdAt: number;
   /** 产物文件格式（预览/下载据此路由）；缺省按 name 后缀推断。 */
-  format?: "md" | "csv" | "xlsx";
+  format?: "md" | "csv" | "xlsx" | "pptx";
 }
 
 export interface ReviewItem {

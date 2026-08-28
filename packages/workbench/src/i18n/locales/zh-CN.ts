@@ -305,7 +305,7 @@ export const zhCN = {
       pathPlaceholder: "路径，如 src/app.ts",
       newPathAria: "新文件路径",
       emptyHint: "工作区为空。点击「文件」新建第一个文件。",
-      xlsxNote: "Excel 二进制产物，请在交付物面板下载",
+      xlsxNote: "Office 二进制产物，请在交付物面板下载",
     },
   },
   sidebar: {
@@ -453,6 +453,8 @@ export const zhCN = {
     aggregation: "聚合结果",
     exportExcel: "导出 Excel",
     exportExcelHint: "当前结果集落盘为 .xlsx 交付物",
+    exportPptx: "导出简报",
+    exportPptxHint: "当前结果集生成 .pptx 简报（封面 + 数据表页）",
   },
   gis: {
     title: "GIS 地图",
