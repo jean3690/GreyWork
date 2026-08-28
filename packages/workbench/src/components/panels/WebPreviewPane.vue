@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { computed, onUnmounted, ref } from "vue";
+import { computed, ref } from "vue";
 import { useChatStore } from "../../stores/chat";
 import { useVfsStore } from "../../stores/vfs";
-import { appEvents } from "../../events";
 import { useI18n } from "vue-i18n";
 
 const chat = useChatStore();
@@ -91,10 +90,6 @@ function feedScreenshot(): void {
   chat.submitText(t("panels.preview.feedText", { count: webMarkers.value.length }));
   webMarkers.value = [];
 }
-
-/* 跨面板联动：GenUI 产物「预览」按钮 → 加载指定 HTML 并切到 HTML 模式。 */
-const unsubscribePreview = appEvents.on("preview:request", ({ path }) => void openHtmlFile(path));
-onUnmounted(unsubscribePreview);
 </script>
 
 <template>

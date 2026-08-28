@@ -15,9 +15,10 @@ export interface GreyWorkEventMap {
     done: number;
     total: number;
   };
-  /** 交付物创建完成（VFS 已落盘）。 */
+  /** 交付物创建完成（VFS 已落盘）；path 供产物查看器直接打开。 */
   "artifact:created": {
     name: string;
+    path: string;
     format?: "md" | "csv" | "xlsx" | "pptx" | "html";
     source: string;
   };

@@ -20,7 +20,7 @@ describe("capability loader", () => {
     expect(modes).not.toContain("editor");
     expect(modes).not.toContain("spatial");
     expect(modes).not.toContain("gis");
-    expect(loader.snapshot().uiRegions.filter((region) => region.region === "activityPanel")).toHaveLength(7);
+    expect(loader.snapshot().uiRegions.filter((region) => region.region === "activityPanel")).toHaveLength(8);
     expect(loader.snapshot().uiRegions.filter((region) => region.region === "shellSidebar")).toHaveLength(3);
     // UiRegionId 已移除 projectRail；类型系统保证不再出现该 region。
   });

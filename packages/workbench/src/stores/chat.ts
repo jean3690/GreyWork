@@ -229,6 +229,7 @@ export const useChatStore = defineStore("chat", () => {
         message.artifacts = [...(message.artifacts ?? []), artifactId];
         appEvents.emit("artifact:created", {
           name: isReport ? "weekly-report.md" : "task-result.md",
+          path: name,
           format: "md",
           source: "assistant-pipeline",
         });
@@ -254,7 +255,12 @@ export const useChatStore = defineStore("chat", () => {
                 source: "assistant-pipeline",
                 format: "xlsx",
               });
-              appEvents.emit("artifact:created", { name: "task-result.xlsx", format: "xlsx", source: "assistant-pipeline" });
+              appEvents.emit("artifact:created", {
+                name: "task-result.xlsx",
+                path: "reports/task-result.xlsx",
+                format: "xlsx",
+                source: "assistant-pipeline",
+              });
             })
             .catch(() => undefined);
         }
@@ -279,7 +285,12 @@ export const useChatStore = defineStore("chat", () => {
                 source: "assistant-pipeline",
                 format: "pptx",
               });
-              appEvents.emit("artifact:created", { name: "task-brief.pptx", format: "pptx", source: "assistant-pipeline" });
+              appEvents.emit("artifact:created", {
+                name: "task-brief.pptx",
+                path: "reports/task-brief.pptx",
+                format: "pptx",
+                source: "assistant-pipeline",
+              });
             })
             .catch(() => undefined);
         }
@@ -314,7 +325,12 @@ export const useChatStore = defineStore("chat", () => {
                 source: "assistant-pipeline",
                 format: "html",
               });
-              appEvents.emit("artifact:created", { name, format: "html", source: "assistant-pipeline" });
+              appEvents.emit("artifact:created", {
+                name,
+                path,
+                format: "html",
+                source: "assistant-pipeline",
+              });
             })
             .catch(() => undefined);
         }

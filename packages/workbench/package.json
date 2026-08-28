@@ -41,6 +41,7 @@
     "codemirror": "^6.0.2",
     "exceljs": "^4.4.0",
     "lucide-vue-next": "^0.544.0",
+    "mammoth": "^1.12.1",
     "pinia": "^3.0.3",
     "pptxgenjs": "^4.0.1",
     "reka-ui": "^2.6.0",
