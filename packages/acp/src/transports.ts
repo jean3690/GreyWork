@@ -16,6 +16,9 @@ export interface AcpSessionInfo {
   hasSession: boolean;
 }
 
+/** 沙盒档位：off 直启；fs = 文件系统隔离 + 网络关闭；full = 隔离 + 网络放行。 */
+export type AcpSandboxMode = "off" | "fs" | "full";
+
 export interface AcpPromptResult {
   stopReason?: string;
   [key: string]: unknown;
@@ -70,7 +73,8 @@ export interface AcpTransport {
   readonly id: "tauri-ipc" | "websocket";
   /** Web transports are available only after an endpoint is configured. */
   readonly available?: boolean;
-  startAgent(agentCmd: string, tier: PermissionTier): Promise<number>;
+  /** sandbox 非 off 时宿主以 OS 沙盒包裹 agent；workspace 为沙盒可写锚定目录（桌面端必需）。 */
+  startAgent(agentCmd: string, tier: PermissionTier, sandbox?: AcpSandboxMode, workspace?: string | null): Promise<number>;
   openSession(handle: number, cwd: string): Promise<AcpSessionOpened>;
   /** 设置会话配置选项（select 传字符串值，boolean 传布尔值）；返回全量最新配置选项。 */
   setSessionConfig(handle: number, configId: string, value: string | boolean): Promise<AcpSessionConfigOption[]>;

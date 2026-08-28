@@ -215,6 +215,18 @@ export const enUS: MessageSchema = {
     planMode: "Plan mode",
     on: "On",
     off: "Off",
+    sandboxLabel: "ACP sandbox",
+    sandbox: {
+      off: {
+        label: "Off",
+        desc: "Spawn the agent directly without OS-level isolation (process boundary + host permission guard still apply).",
+      },
+      fs: {
+        label: "Filesystem isolation",
+        desc: "bwrap wrapper: read-only system paths, writable workspace, isolated /tmp, network disabled. Requires bwrap on the system.",
+      },
+      full: { label: "Isolation + network", desc: "Same filesystem isolation but network allowed (agent can search / reach MCP)." },
+    },
     workspaceDir: "ACP workspace directory",
     workspaceDirPlaceholder: "Empty = desktop home (host validates absolute path and non-root)",
     registryTitle: "Capability registry",

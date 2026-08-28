@@ -5,7 +5,7 @@ import { REASONING_EFFORTS, createCliSessionManager, type ReasoningEffort } from
 import { Brain, Cpu, Plug, Settings2, Terminal } from "lucide-vue-next";
 import { capabilitySeam } from "../plugins/loader";
 import { Button, Badge, DataTable, Input, Select, Switch, type TableColumn } from "../components/ui";
-import { useSettingsStore, type ThemeMode } from "../stores/settings";
+import { useSettingsStore, SANDBOX_MODES, type ThemeMode } from "../stores/settings";
 import { getPluginMarket, persistRegisteredMcp, removeRegisteredMcp } from "../state/pluginMarket";
 import { PROVIDER_TONES } from "../lib/tones";
 import type { AppLocale } from "../i18n";
@@ -285,6 +285,35 @@ function saveSettings(): void {
                 <Badge round type="info">{{ activeProviderEffort }}</Badge>
                 <Badge round type="warning">{{ settingsTheme }}</Badge>
               </div>
+            </div>
+            <div class="setting-card">
+              <div class="setting-card__head">
+                <strong>{{ t("settings.sandboxLabel") }}</strong>
+                <Badge round :type="settings.sandboxMode === 'off' ? 'default' : 'warning'">{{ settings.sandboxMode }}</Badge>
+              </div>
+              <div class="seg" role="group" :aria-label="t('settings.sandboxLabel')">
+                <button
+                  v-for="option in SANDBOX_MODES"
+                  :key="option.value"
+                  class="seg__btn"
+                  :class="{ active: settings.sandboxMode === option.value }"
+                  :title="t(option.desc)"
+                  @click="settings.sandboxMode = option.value"
+                >
+                  {{ t(option.label) }}
+                </button>
+              </div>
+              <p class="footnote">
+                {{
+                  t(
+                    settings.sandboxMode === "off"
+                      ? "settings.sandbox.off.desc"
+                      : settings.sandboxMode === "fs"
+                        ? "settings.sandbox.fs.desc"
+                        : "settings.sandbox.full.desc",
+                  )
+                }}
+              </p>
             </div>
             <div class="setting-card">
               <div class="setting-card__head">
