@@ -1,4 +1,14 @@
-import { AGENT_ROLES, MOCK_AGENTS, buildPlanPrompt, createPlannerRun, parsePlan, type PlannerRun, type Subtask } from "@greywork/agents";
+import {
+  AGENT_ROLES,
+  MOCK_AGENTS,
+  buildPlanPrompt,
+  createPlannerRun,
+  createSubtask,
+  parsePlan,
+  type AgentRole,
+  type PlannerRun,
+  type Subtask,
+} from "@greywork/agents";
 import { createAcpClient, desktopHomeDir, type AcpPermissionRequestPayload, type AcpSessionConfigOption } from "@greywork/acp";
 import { createAgentProviderRegistry, type AgentProviderConfig } from "@greywork/shell";
 import { createAcpAgentAdapter } from "@greywork/integrations";
@@ -97,7 +107,7 @@ export const useAgentStore = defineStore("agent", () => {
     run.finishedAt = Date.now();
   }
 
-  /** 单子任务独立会话派发；prompt-done 事件按 handle 路由完成（resolve 回执）。 */
+  /** 单子任务独立会话派发；完成完全由 prompt-done 事件（按 handle 路由）驱动。 */
   async function runSubtask(run: PlannerRun, sub: Subtask): Promise<void> {
     sub.status = "running";
     let handle: number;
@@ -115,19 +125,21 @@ export const useAgentStore = defineStore("agent", () => {
       checkRunDone(run);
       return;
     }
+    // 回执：prompt-done / 取消 / prompt 层错误任一先到即解除，驱动并发泵。
     const pending = new Promise<void>((resolve) => {
       subtaskPending.set(sub.id, { resolve });
     });
-    try {
-      await acpAdapter.prompt(handle, sub.prompt);
-    } catch (error) {
-      sub.status = "failed";
-      sub.error = String(error);
-      subtaskSessions.delete(sub.id);
+    // 发起 prompt，不 await 其返回值（agent 回合结束经事件路由完成，避免进程级时序竞态）。
+    acpAdapter.prompt(handle, sub.prompt).catch((error) => {
+      if (subtaskSessions.has(sub.id)) {
+        sub.status = "failed";
+        sub.error = String(error);
+        subtaskSessions.delete(sub.id);
+        checkRunDone(run);
+      }
+      subtaskPending.get(sub.id)?.resolve();
       subtaskPending.delete(sub.id);
-      checkRunDone(run);
-      return;
-    }
+    });
     await pending;
   }
 
@@ -137,7 +149,7 @@ export const useAgentStore = defineStore("agent", () => {
     if (message && !message.content.trim()) chat.setMessageContent(message.id, t("chat.noOutput"), session.threadId);
     sub.status = "done";
     subtaskSessions.delete(sub.id);
-    void acpAdapter.stop(session.handle).catch(() => undefined);
+    void Promise.resolve(acpAdapter.stop(session.handle)).catch(() => undefined);
     checkRunDone(run);
   }
 
@@ -156,6 +168,57 @@ export const useAgentStore = defineStore("agent", () => {
 
   function kickSubtasks(run: PlannerRun): void {
     for (const sub of run.subtasks) subtaskQueue.push({ run, sub });
+    pumpSubtasks();
+  }
+
+  /* ===== Replan：执行中调整计划（取消 / 重试 / 追加子任务） ===== */
+
+  function findRun(runId: string): PlannerRun | undefined {
+    return runs.value.find((candidate) => candidate.id === runId);
+  }
+
+  /** 取消子任务：pending 直接出队；running 先停进程并解除回执（避免 runSubtask 挂起）。 */
+  async function cancelSubtask(runId: string, subId: string): Promise<void> {
+    const run = findRun(runId);
+    const index = run?.subtasks.findIndex((candidate) => candidate.id === subId);
+    if (!run || index === undefined || index < 0) return;
+    run.subtasks.splice(index, 1);
+    const queueIndex = subtaskQueue.findIndex((entry) => entry.sub.id === subId);
+    if (queueIndex >= 0) subtaskQueue.splice(queueIndex, 1);
+    const session = subtaskSessions.get(subId);
+    if (session) {
+      subtaskSessions.delete(subId);
+      subtaskPending.get(subId)?.resolve();
+      subtaskPending.delete(subId);
+      void Promise.resolve(acpAdapter.stop(session.handle)).catch(() => undefined);
+    }
+    checkRunDone(run);
+  }
+
+  /** 重试失败子任务：重置为 pending 重新入队，run 恢复 running。 */
+  function retrySubtask(runId: string, subId: string): void {
+    const run = findRun(runId);
+    const sub = run?.subtasks.find((candidate) => candidate.id === subId);
+    if (!run || !sub || sub.status !== "failed") return;
+    sub.status = "pending";
+    sub.error = undefined;
+    run.status = "running";
+    run.finishedAt = undefined;
+    subtaskQueue.push({ run, sub });
+    pumpSubtasks();
+  }
+
+  /** 追加子任务（replan）：并入队；run 已结束（done/failed）时恢复 running。 */
+  function addSubtask(runId: string, role: AgentRole, prompt: string): void {
+    const run = findRun(runId);
+    if (!run) return;
+    const sub = createSubtask(role, prompt);
+    run.subtasks.push(sub);
+    if (run.status === "done" || run.status === "failed") {
+      run.status = "running";
+      run.finishedAt = undefined;
+    }
+    subtaskQueue.push({ run, sub });
     pumpSubtasks();
   }
 
@@ -222,7 +285,7 @@ export const useAgentStore = defineStore("agent", () => {
     subtaskQueue.length = 0;
     for (const [, pending] of subtaskPending) pending.resolve();
     subtaskPending.clear();
-    for (const session of subtaskSessions.values()) void acpAdapter.stop(session.handle).catch(() => undefined);
+    for (const session of subtaskSessions.values()) void Promise.resolve(acpAdapter.stop(session.handle)).catch(() => undefined);
     subtaskSessions.clear();
     plannerPending = null;
   }
@@ -519,6 +582,9 @@ export const useAgentStore = defineStore("agent", () => {
     connectAcp,
     activateAcpProvider,
     dispatchRun,
+    cancelSubtask,
+    retrySubtask,
+    addSubtask,
     clearOrchestration,
     acpAvailable: acpAdapter.isAvailable(),
     selectProvider,

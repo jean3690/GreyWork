@@ -24,10 +24,22 @@ export interface PlannerRun {
 }
 
 let runSeq = 0;
+let subSeq = 0;
+
+/** 全局唯一子任务 id：parsePlan 与 createSubtask 共享，避免追加子任务 id 撞车。 */
+function nextSubId(): string {
+  subSeq += 1;
+  return `sub-${subSeq}`;
+}
 
 export function createPlannerRun(goal: string): PlannerRun {
   runSeq += 1;
   return { id: `run-${runSeq}`, goal, status: "planning", subtasks: [], createdAt: Date.now() };
+}
+
+/** 追加一个子任务（replan 用）；id 全局递增保证唯一。 */
+export function createSubtask(role: AgentRole, prompt: string): Subtask {
+  return { id: nextSubId(), role, prompt, status: "pending" };
 }
 
 /** planner 的 prompt：要求只输出结构化 JSON 计划，不夹带解释文字。 */
@@ -65,7 +77,7 @@ export function parsePlan(text: string): Subtask[] | null {
     const prompt = String(record.prompt ?? "").trim();
     if (!prompt) continue;
     const role = typeof record.role === "string" && VALID_ROLES.has(record.role) ? record.role : "builder";
-    subtasks.push({ id: `sub-${subtasks.length + 1}`, role: role as AgentRole, prompt, status: "pending" });
+    subtasks.push({ id: nextSubId(), role: role as AgentRole, prompt, status: "pending" });
   }
   return subtasks.length > 0 ? subtasks : null;
 }

@@ -154,6 +154,10 @@ export const enUS: MessageSchema = {
       done: "Done",
       failed: "Failed",
     },
+    retry: "Retry this subtask",
+    cancel: "Cancel this subtask",
+    addSubtask: "Add",
+    addSubtaskPlaceholder: "Add subtask instruction (builder)…",
   },
   settings: {
     title: "Settings",

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { useAgentStore } from "../stores/agent";
 import { PERM_LABELS, useSettingsStore } from "../stores/settings";
 import { AGENT_ROLE_TONES, DEFAULT_TONE, TONE_SOFT } from "../lib/tones";
@@ -14,6 +14,8 @@ interface BoardTask {
   id: string;
   label: string;
   priority: "high" | "medium" | "low";
+  /** 编排子任务状态（drives 重试/取消操作）。 */
+  status?: string;
 }
 
 const BOARD_TASKS: Record<string, BoardTask[]> = {
@@ -52,7 +54,7 @@ function tasksOf(agentId: string, role: string): BoardTask[] {
   if (!activeRun.value) return BOARD_TASKS[agentId] ?? [];
   return activeRun.value.subtasks
     .filter((sub) => sub.role === role)
-    .map((sub) => ({ id: sub.id, label: sub.prompt, priority: subtaskPriority(sub.status) }));
+    .map((sub) => ({ id: sub.id, label: sub.prompt, priority: subtaskPriority(sub.status), status: sub.status }));
 }
 
 /** 列状态：编排运行中该 role 有 running 子任务 → working。 */
@@ -62,6 +64,16 @@ function statusOf(agent: { id: string; role: string; status: string }): string {
   if (subs.some((s) => s.status === "running")) return "working";
   if (subs.some((s) => s.status === "pending")) return "idle";
   return agent.status;
+}
+
+/* ===== Replan：执行中追加子任务 ===== */
+const addPrompt = ref("");
+function onAddSubtask(): void {
+  const run = agentStore.runs[0];
+  const prompt = addPrompt.value.trim();
+  if (!run || !prompt) return;
+  agentStore.addSubtask(run.id, "builder", prompt);
+  addPrompt.value = "";
 }
 
 const board = computed(() =>
@@ -148,6 +160,14 @@ function softOf(role: string): string {
           agentStore.runs[0]?.subtasks.length ?? 0
         }}</span
       >
+      <input
+        v-model="addPrompt"
+        class="run-bar__input"
+        :placeholder="t('agents.addSubtaskPlaceholder')"
+        :aria-label="t('agents.addSubtaskPlaceholder')"
+        @keydown.enter="onAddSubtask"
+      />
+      <button class="btn btn--mini" :disabled="!addPrompt.trim()" @click="onAddSubtask">{{ t("agents.addSubtask") }}</button>
     </div>
 
     <!-- 协作看板：列 = Agent，卡 = 子任务 -->
@@ -162,9 +182,29 @@ function softOf(role: string): string {
           <span class="status-dot" :data-status="col.status" :title="statusLabel[col.status] ?? col.status"></span>
         </div>
         <div class="board__cards">
-          <div v-for="task in col.tasks" :key="task.id" class="board__card" :data-priority="task.priority">
+          <div v-for="task in col.tasks" :key="task.id" class="board__card" :data-priority="task.priority" :data-status="task.status">
             <span class="board__card-edge" :style="{ background: col.tone }"></span>
-            <span>{{ task.label }}</span>
+            <span class="board__card-label">{{ task.label }}</span>
+            <template v-if="activeRun">
+              <button
+                v-if="task.status === 'failed'"
+                class="board__card-btn board__card-btn--retry"
+                :title="t('agents.retry')"
+                :aria-label="t('agents.retry')"
+                @click.stop="agentStore.retrySubtask(activeRun.id, task.id)"
+              >
+                ⟳
+              </button>
+              <button
+                v-else-if="task.status === 'pending' || task.status === 'running'"
+                class="board__card-btn board__card-btn--cancel"
+                :title="t('agents.cancel')"
+                :aria-label="t('agents.cancel')"
+                @click.stop="agentStore.cancelSubtask(activeRun.id, task.id)"
+              >
+                ×
+              </button>
+            </template>
           </div>
         </div>
         <p class="board__status" :style="{ color: col.tone }">{{ statusLabel[col.status] ?? col.status }}</p>
@@ -254,3 +294,63 @@ function softOf(role: string): string {
     </div>
   </section>
 </template>
+
+<style scoped>
+.board__card {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.board__card-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.board__card-btn {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--line-2);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--dim);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.board__card:hover .board__card-btn,
+.board__card-btn[data-always] {
+  opacity: 1;
+}
+.board__card-btn--retry {
+  opacity: 1;
+  border-color: var(--amber, #f59e0b);
+  color: var(--amber, #f59e0b);
+}
+.board__card-btn--retry:hover {
+  background: var(--amber, #f59e0b);
+  color: #fff;
+}
+.board__card-btn--cancel:hover {
+  border-color: var(--aion-red, #ef4444);
+  color: var(--aion-red, #ef4444);
+}
+.run-bar__input {
+  flex: 0 1 220px;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: 7px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 12px;
+}
+</style>
