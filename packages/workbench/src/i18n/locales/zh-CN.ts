@@ -30,7 +30,7 @@ export const zhCN = {
   chat: {
     placeholder: {
       hint: "Enter 发送 · Shift+Enter 换行",
-      input: "给 GreyWork 下达任务，输入 @ 引用插件 / 技能…",
+      input: "给 GreyWork 下达任务，输入 {'@'} 引用插件 / 技能…",
     },
     busy: "任务执行中…",
     plan: "计划",
@@ -271,8 +271,7 @@ export const zhCN = {
       closeTab: "关闭",
       loading: "加载中…",
       error: "预览失败：{detail}",
-      binaryPlaceholder: "「{name}」为二进制文档，请到交付物面板下载查看。",
-      empty: "AI 产物（md / xlsx / html / csv）会在这里以标签页打开；多个产物可切换。",
+      empty: "AI 产物（md / xlsx / docx / pptx / html / csv）会在这里以标签页打开；多个产物可切换。",
     },
     terminal: {
       title: "终端",

@@ -4,7 +4,7 @@
 // UI 侧（router/TopBar/ShellSidebar/ActivityPanel/WorkflowCanvas）在 computed 内调用 snapshot()，
 // 读取 modes/uiRegions 两个 ref 建立响应式依赖。
 import { Service, type Context } from "@cordisjs/core";
-import { ref, type Ref } from "vue";
+import { markRaw, ref, type Ref } from "vue";
 import type { ModeContribution, UiRegionContribution } from "./types";
 
 declare module "@cordisjs/core" {
@@ -23,14 +23,15 @@ export class SeamService extends Service {
   }
 
   registerMode(contribution: ModeContribution): () => void {
-    this.modes.value.push(contribution);
+    // 组件对象标记 raw：避免被 ref 深度代理（Vue 性能告警）。
+    this.modes.value.push(contribution.component ? { ...contribution, component: markRaw(contribution.component) } : contribution);
     return () => {
       this.modes.value = this.modes.value.filter((mode) => mode.id !== contribution.id);
     };
   }
 
   registerUiRegion(contribution: UiRegionContribution): () => void {
-    this.uiRegions.value.push(contribution);
+    this.uiRegions.value.push(contribution.component ? { ...contribution, component: markRaw(contribution.component) } : contribution);
     return () => {
       this.uiRegions.value = this.uiRegions.value.filter((region) => region.id !== contribution.id);
     };
