@@ -11,7 +11,7 @@
 
 use crate::process_guard;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -20,7 +20,7 @@ use agent_client_protocol::schema::v1::{
     ContentBlock, InitializeRequest, NewSessionRequest, PermissionOption, PermissionOptionId,
     PermissionOptionKind, PromptRequest, RequestPermissionOutcome, RequestPermissionRequest,
     RequestPermissionResponse, SelectedPermissionOutcome, SessionConfigOptionValue, SessionId,
-    SessionNotification, SetSessionConfigOptionRequest, TextContent, ToolKind,
+    SessionNotification, SetSessionConfigOptionRequest, TextContent, ToolCallLocation, ToolKind,
 };
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::{
@@ -85,6 +85,48 @@ fn is_readonly_kind(kind: Option<ToolKind>) -> bool {
             | Some(ToolKind::Fetch)
             | Some(ToolKind::Think)
     )
+}
+
+/// 写类工具：文件系统锚定只拦截会改动/删除文件的工具。
+/// execute 不在此列：命令目标无法可靠静态提取，daily 档已转发前端确认。
+fn is_write_kind(kind: Option<ToolKind>) -> bool {
+    matches!(
+        kind,
+        Some(ToolKind::Edit) | Some(ToolKind::Delete) | Some(ToolKind::Move)
+    )
+}
+
+/// 词法规范化路径（解析 `.` / `..`），不触碰文件系统。
+/// 仅用于锚定比较，文件可能尚不存在（新建场景）。
+fn normalize_lexical(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::ParentDir => {
+                out.pop();
+            }
+            Component::CurDir => {}
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
+/// candidate 是否位于 base 目录树内（组件级前缀匹配，杜绝 `proj` vs `proj2` 误判）。
+fn is_within(base: &Path, candidate: &Path) -> bool {
+    let base = normalize_lexical(base);
+    let candidate = normalize_lexical(candidate);
+    candidate.starts_with(&base)
+}
+
+/// 写类工具中越出 workspace 锚定的路径清单（空 = 全部合法）。
+fn blocked_paths(root: &Path, locations: &[ToolCallLocation]) -> Vec<PathBuf> {
+    locations
+        .iter()
+        .map(|location| &location.path)
+        .filter(|path| !is_within(root, path))
+        .cloned()
+        .collect()
 }
 
 fn allow_option(options: &[PermissionOption]) -> Option<&PermissionOption> {
@@ -173,6 +215,8 @@ pub struct AcpHost {
     tier: Mutex<PermissionTier>,
     sessions: Mutex<HashMap<u64, AcpSession>>,
     pending_permissions: Mutex<HashMap<u64, oneshot::Sender<PermissionDecision>>>,
+    /// 最近一次会话的工作区根（文件系统锚定基准）；None = 尚未建立会话，不做路径拦截。
+    workspace_root: Mutex<Option<PathBuf>>,
 }
 
 fn emit(app: &AppHandle, kind: &'static str, payload: serde_json::Value) {
@@ -292,6 +336,35 @@ async fn resolve_permission(
         let guard = host.tier.lock().await;
         *guard
     };
+    let workspace_root = {
+        let host = app.state::<AcpHost>();
+        let guard = host.workspace_root.lock().await;
+        let root = guard.clone();
+        root
+    };
+
+    // 文件系统锚定：写类工具（edit/delete/move）的路径必须在会话工作区内。
+    // 越界直接拒绝（不询问前端），并发出 permission-blocked 通知流供用户知悉。
+    // 该拦截在任何档位（含 auto）下都生效：这是宿主不可绕过的安全边界。
+    if is_write_kind(request.tool_call.fields.kind) {
+        if let Some(root) = workspace_root.as_deref() {
+            let locations = request.tool_call.fields.locations.as_deref().unwrap_or_default();
+            let outside = blocked_paths(root, locations);
+            if !outside.is_empty() {
+                let payload = serde_json::json!({
+                    "auto": true,
+                    "chosen": null,
+                    "toolCallId": request.tool_call.tool_call_id.to_string(),
+                    "title": request.tool_call.fields.title,
+                    "kind": kind_label(request.tool_call.fields.kind),
+                    "reason": "outside-workspace",
+                    "paths": outside.iter().map(|p| p.to_string_lossy()).collect::<Vec<_>>(),
+                });
+                emit(app, "permission-blocked", payload);
+                return RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled);
+            }
+        }
+    }
 
     // auto 直通；daily 仅只读类工具直通。两者都要求存在 Allow 选项。
     let auto_allow = match tier {
@@ -372,6 +445,8 @@ pub async fn acp_new_session(
     cwd: String,
 ) -> Result<serde_json::Value, String> {
     let cwd = validate_cwd(&cwd)?;
+    // 更新文件系统锚定基准：本会话的工作区根。
+    *state.workspace_root.lock().await = Some(cwd.clone());
     let mut sessions = state.sessions.lock().await;
     let session = sessions
         .get_mut(&handle)
@@ -470,7 +545,7 @@ pub async fn acp_send(
         .map_err(|error| format!("session/prompt failed: {error}"))?;
 
     let payload = serde_json::to_value(&response).unwrap_or(serde_json::Value::Null);
-    emit(&app, "prompt-done", payload.clone());
+    emit(&app, "prompt-done", serde_json::json!({ "handle": handle, "response": payload }));
     Ok(payload)
 }
 
@@ -514,7 +589,7 @@ mod tests {
     use super::*;
 
     use agent_client_protocol::schema::v1::{
-        PermissionOption, ToolCallUpdate, ToolCallUpdateFields,
+        PermissionOption, ToolCallLocation, ToolCallUpdate, ToolCallUpdateFields,
     };
 
     #[test]
@@ -614,5 +689,61 @@ mod tests {
 
         let reject_only = permission_request(Some(ToolKind::Read), false);
         assert!(allow_option(&reject_only.options).is_none());
+    }
+
+    #[test]
+    fn normalize_lexical_resolves_dot_and_parent() {
+        let base = PathBuf::from("/home/user/proj");
+        assert_eq!(normalize_lexical(&base), base);
+        assert_eq!(
+            normalize_lexical(Path::new("/home/user/proj/./a/../b")),
+            PathBuf::from("/home/user/proj/b")
+        );
+        // 相对路径
+        assert_eq!(
+            normalize_lexical(Path::new("a/./b/../c")),
+            PathBuf::from("a/c")
+        );
+    }
+
+    #[test]
+    fn is_within_componentwise_matching() {
+        let base = Path::new("/home/user/proj");
+        assert!(is_within(base, Path::new("/home/user/proj/file.ts")));
+        assert!(is_within(base, Path::new("/home/user/proj/sub/dir/../file.ts")));
+        // 组件级前缀：proj 不是 proj2 / project-evil 的前缀
+        assert!(!is_within(base, Path::new("/home/user/proj2/file.ts")));
+        assert!(!is_within(base, Path::new("/home/user/project-evil/file.ts")));
+        // 父目录越界
+        assert!(!is_within(base, Path::new("/home/user/other/file.ts")));
+        assert!(!is_within(base, Path::new("/etc/passwd")));
+        assert!(!is_within(base, Path::new("/home/user/proj/../secret.ts")));
+    }
+
+    #[test]
+    fn is_write_kind_covers_edit_delete_move_only() {
+        assert!(is_write_kind(Some(ToolKind::Edit)));
+        assert!(is_write_kind(Some(ToolKind::Delete)));
+        assert!(is_write_kind(Some(ToolKind::Move)));
+        assert!(!is_write_kind(Some(ToolKind::Read)));
+        assert!(!is_write_kind(Some(ToolKind::Execute)));
+        assert!(!is_write_kind(None));
+    }
+
+    #[test]
+    fn blocked_paths_collects_only_outside_locations() {
+        let root = Path::new("/home/user/proj");
+        let locations = vec![
+            ToolCallLocation::new("/home/user/proj/src/main.ts"),
+            ToolCallLocation::new("/home/user/proj2/leak.ts"),
+            ToolCallLocation::new("/etc/passwd"),
+        ];
+        let blocked = blocked_paths(root, &locations);
+        assert_eq!(blocked.len(), 2);
+        assert_eq!(blocked[0], PathBuf::from("/home/user/proj2/leak.ts"));
+        assert_eq!(blocked[1], PathBuf::from("/etc/passwd"));
+
+        assert!(blocked_paths(root, &[ToolCallLocation::new("/home/user/proj/a.ts")]).is_empty());
+        assert!(blocked_paths(root, &[]).is_empty());
     }
 }

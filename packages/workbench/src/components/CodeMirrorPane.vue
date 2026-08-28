@@ -98,13 +98,7 @@ function languageExtension(lang: string): Extension | null {
 
 function extensionsFor(lang: string): Extension[] {
   const ext = languageExtension(lang);
-  return [
-    basicSetup,
-    keymap.of([indentWithTab]),
-    greyworkTheme,
-    syntaxHighlighting(greyworkHighlight),
-    ...(ext ? [ext] : []),
-  ];
+  return [basicSetup, keymap.of([indentWithTab]), greyworkTheme, syntaxHighlighting(greyworkHighlight), ...(ext ? [ext] : [])];
 }
 
 onMounted(() => {

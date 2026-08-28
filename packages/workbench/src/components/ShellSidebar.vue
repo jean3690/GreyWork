@@ -8,8 +8,11 @@ import { useProjectStore } from "../stores/project";
 import { useSettingsStore } from "../stores/settings";
 import { getPluginMarket } from "../state/pluginMarket";
 import { createWebSearchClient, selectWebSearchProvider, type WebSearchHit } from "@greywork/shell";
+import { useI18n } from "vue-i18n";
 
 defineProps<{ collapsed: boolean }>();
+
+const { t } = useI18n();
 
 const chat = useChatStore();
 const projectStore = useProjectStore();
@@ -139,21 +142,25 @@ async function openSearchResult(result: SearchResult): Promise<void> {
   <aside class="sidebar" :class="{ collapsed }" data-testid="shell-sidebar">
     <div class="sidebar__top">
       <span class="sidebar__brand"><span class="sidebar__mark">G</span>GreyWork</span>
-      <button class="sidebar__navbtn" title="后退" aria-label="后退" @click="goBack"><ArrowLeft class="size-4" /></button>
-      <button class="sidebar__navbtn" title="前进" aria-label="前进" @click="goForward"><ArrowRight class="size-4" /></button>
+      <button class="sidebar__navbtn" :title="t('sidebar.back')" :aria-label="t('sidebar.back')" @click="goBack">
+        <ArrowLeft class="size-4" />
+      </button>
+      <button class="sidebar__navbtn" :title="t('sidebar.forward')" :aria-label="t('sidebar.forward')" @click="goForward">
+        <ArrowRight class="size-4" />
+      </button>
     </div>
 
     <div class="sidebar__quick">
-      <button class="sidebar__quick-item sidebar__new" title="新对话（Ctrl/Cmd+K）" @click="newThread">
-        <Plus class="size-3.5" />新对话
+      <button class="sidebar__quick-item sidebar__new" :title="t('sidebar.newThreadHint', { shortcut: 'Ctrl/Cmd+K' })" @click="newThread">
+        <Plus class="size-3.5" />{{ t("sidebar.newThread") }}
       </button>
       <div class="sidebar__search">
         <div class="sidebar__search-box">
           <Search class="size-3.5" />
           <input
             v-model="searchInput"
-            placeholder="搜索历史对话、插件…"
-            aria-label="搜索历史对话、插件"
+            :placeholder="t('sidebar.searchPlaceholder')"
+            :aria-label="t('sidebar.searchAria')"
             @focus="searchFocus = true"
             @blur="searchFocus = false"
             @keydown.esc="searchInput = ''"
@@ -169,15 +176,21 @@ async function openSearchResult(result: SearchResult): Promise<void> {
             <button v-for="hit in webHits" :key="hit.url" class="sb-search-hit" @mousedown.prevent="copyWebResult(hit.url)">
               {{ hit.title }}<em>{{ hit.snippet }}</em>
             </button>
-            <p class="footnote">复制链接 · 来源：{{ selectWebSearchProvider(settings.webSearchProviders)?.name ?? "网页搜索" }}</p>
+            <p class="footnote">
+              {{
+                t("sidebar.copyLinkSource", {
+                  provider: selectWebSearchProvider(settings.webSearchProviders)?.name ?? t("sidebar.webSearchDefault"),
+                })
+              }}
+            </p>
           </template>
-          <p v-if="webSearching" class="footnote">网页搜索中…</p>
-          <p v-if="webError" class="footnote">网页搜索失败：{{ webError }}</p>
-          <p v-if="!searchResults.length && !webHits.length && !webSearching && !webError" class="footnote">没有匹配结果。</p>
+          <p v-if="webSearching" class="footnote">{{ t("sidebar.webSearching") }}</p>
+          <p v-if="webError" class="footnote">{{ t("sidebar.webSearchFailed", { detail: webError }) }}</p>
+          <p v-if="!searchResults.length && !webHits.length && !webSearching && !webError" class="footnote">{{ t("sidebar.noResults") }}</p>
         </div>
       </div>
       <button class="sidebar__quick-item" :class="{ active: activeMode === 'automation' }" @click="goAutomation">
-        <CalendarClock class="size-3.5" />定时任务
+        <CalendarClock class="size-3.5" />{{ t("sidebar.automation") }}
       </button>
     </div>
 
@@ -186,9 +199,9 @@ async function openSearchResult(result: SearchResult): Promise<void> {
     </div>
 
     <div class="sidebar__foot">
-      <button class="sidebar__foot-btn" title="设置" aria-label="设置" @click="goSettings">
+      <button class="sidebar__foot-btn" :title="t('sidebar.settings')" :aria-label="t('sidebar.settings')" @click="goSettings">
         <Settings class="size-4" />
-        <span>设置</span>
+        <span>{{ t("sidebar.settings") }}</span>
       </button>
       <span class="sidebar__avatar" title="JF · jean">JF</span>
     </div>

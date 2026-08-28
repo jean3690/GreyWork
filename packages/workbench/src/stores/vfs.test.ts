@@ -32,6 +32,21 @@ describe("memory file system", () => {
     await expect(fs.delete("new.ts")).rejects.toThrow("File not found");
     expect(Object.keys(fs.snapshot())).toEqual([]);
   });
+
+  it("writes binary files isolated from snapshot, listable with byte size", async () => {
+    const fs = createMemoryFileSystem({ "readme.md": "hi" });
+    await fs.writeBinary("reports/a.xlsx", new Uint8Array([0, 1, 2, 3, 4]));
+    expect(await fs.exists("reports/a.xlsx")).toBe(true);
+    expect(await fs.readBinary("reports/a.xlsx")).toEqual(new Uint8Array([0, 1, 2, 3, 4]));
+    await expect(fs.readFile("reports/a.xlsx")).rejects.toThrow("File not found");
+    // 二进制不进入文本快照（git/diff 基线）
+    expect(Object.keys(fs.snapshot())).toEqual(["readme.md"]);
+    const report = await fs.list("reports");
+    expect(report[0]?.size).toBe(5);
+    // 二进制文件不干扰 git status（不进基线也不产生变更）
+    const git = createMemoryGitService(fs);
+    expect(await git.status()).toEqual([]);
+  });
 });
 
 describe("memory git on vfs", () => {

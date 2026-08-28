@@ -13,6 +13,7 @@
     "test": "vitest run --coverage"
   },
   "dependencies": {
+    "@greywork/core": "workspace:*",
     "@tauri-apps/api": "^2"
   },
   "devDependencies": {

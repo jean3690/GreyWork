@@ -1,20 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from "vue";
-import type * as CesiumNamespace from "cesium";
-
-/** 模块类型经命名空间派生，规避 import() 注解 lint 规则 */
-type CesiumModule = typeof CesiumNamespace;
-let cesiumModule: CesiumModule | null = null;
-
-/** 按需加载 Cesium：主包与首屏不携带，首次进入 3D 视图才拉取 chunk 与样式。 */
-async function loadCesium(): Promise<CesiumModule> {
-  if (!cesiumModule) {
-    (window as unknown as { CESIUM_BASE_URL?: string }).CESIUM_BASE_URL = new URL("cesium/", document.baseURI).href;
-    cesiumModule = await import("cesium");
-    await import("cesium/Build/Cesium/Widgets/widgets.css");
-  }
-  return cesiumModule;
-}
+import { createCesiumGlobe, type CesiumGlobeHandle } from "@greywork/spatial";
 
 const props = withDefaults(
   defineProps<{
@@ -29,178 +15,30 @@ const readoutRef = ref("LON 116.391° · LAT 39.908°");
 const signalRef = ref("CESIUM GL · SPATIAL CORE");
 const webglBroken = ref(false);
 
-let viewer: CesiumNamespace.Viewer | null = null;
-let observer: ResizeObserver | null = null;
-let removeReadout: (() => void) | null = null;
+let globe: CesiumGlobeHandle | null = null;
 
-const CITY_POINTS: { name: string; lon: number; lat: number; color: string }[] = [
-  { name: "北京", lon: 116.3913, lat: 39.9075, color: "#3fd5e0" },
-  { name: "上海", lon: 121.4737, lat: 31.2304, color: "#a08bff" },
-  { name: "深圳", lon: 114.0579, lat: 22.5431, color: "#ffb85c" },
-  { name: "纽约", lon: -74.006, lat: 40.7128, color: "#61e3a5" },
-  { name: "柏林", lon: 13.405, lat: 52.52, color: "#3fd5e0" },
-  { name: "新加坡", lon: 103.8198, lat: 1.3521, color: "#a08bff" },
-  { name: "悉尼", lon: 151.2093, lat: -33.8688, color: "#ff9d7a" },
-];
-
-function makeCityGeoJson() {
-  return {
-    type: "FeatureCollection" as const,
-    features: CITY_POINTS.map((p) => ({
-      type: "Feature" as const,
-      properties: { id: p.name, name: p.name },
-      geometry: { type: "Point" as const, coordinates: [p.lon, p.lat] },
-    })),
-  };
-}
-
-function hasWebGL(): boolean {
-  try {
-    const canvas = document.createElement("canvas");
-    const gl = canvas.getContext("webgl2") || canvas.getContext("webgl");
-    return !!gl;
-  } catch {
-    return false;
-  }
-}
-
-async function initViewer() {
-  if (!rootRef.value || viewer) return;
-  const Cesium = await loadCesium();
-  const container = document.createElement("div");
-  container.className = "gw-core__cesium";
-  rootRef.value.appendChild(container);
-
-  const creditContainer = document.createElement("div");
-  creditContainer.style.display = "none";
-
-  viewer = new Cesium.Viewer(container, {
-    animation: false,
-    timeline: false,
-    baseLayerPicker: false,
-    geocoder: false,
-    homeButton: false,
-    sceneModePicker: false,
-    navigationHelpButton: false,
-    infoBox: false,
-    selectionIndicator: false,
-    fullscreenButton: false,
-    creditContainer,
-    baseLayer: new Cesium.ImageryLayer(new Cesium.OpenStreetMapImageryProvider({ url: "https://tile.openstreetmap.org/" })),
-  });
-
-  viewer.scene.globe.depthTestAgainstTerrain = false;
-  if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = true;
-  if (viewer.scene.moon) viewer.scene.moon.show = false;
-  if (viewer.scene.sun) viewer.scene.sun.show = false;
-
-  const dataSource = await Cesium.GeoJsonDataSource.load(makeCityGeoJson(), {
-    stroke: Cesium.Color.fromCssColorString("#3fd5e0"),
-    fill: Cesium.Color.fromCssColorString("#3fd5e0").withAlpha(0.28),
-    strokeWidth: 2,
-    markerSize: 14,
-  });
-  viewer.dataSources.add(dataSource);
-
-  const ringColors = ["#ffb85c", "#3fd5e0", "#a08bff"];
-  for (let i = 0; i < 18; i++) {
-    const lon = Math.random() * 360 - 180;
-    const lat = Math.random() * 160 - 80;
-    const color = ringColors[i % 3];
-    viewer.entities.add({
-      position: Cesium.Cartesian3.fromDegrees(lon, lat, 2200000 + i * 180000),
-      point: {
-        pixelSize: 7,
-        color: Cesium.Color.fromCssColorString(color),
-        outlineColor: Cesium.Color.fromCssColorString("#0b1017"),
-        outlineWidth: 1,
-      },
-      label: {
-        text: "AGENT " + String(i + 1).padStart(2, "0"),
-        font: "10px JetBrains Mono, monospace",
-        fillColor: Cesium.Color.fromCssColorString("#8fa6be"),
-        pixelOffset: new Cesium.Cartesian2(0, -13),
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
-      },
-    });
-  }
-
-  const updateReadout = (): void => {
-    if (!viewer) return;
-    const pos = viewer.camera.positionCartographic;
-    readoutRef.value =
-      "LON " +
-      Cesium.Math.toDegrees(pos.longitude).toFixed(1) +
-      "° · LAT " +
-      Cesium.Math.toDegrees(pos.latitude).toFixed(1) +
-      "° · H " +
-      Math.round(pos.height / 1000) +
-      "km";
-  };
-  viewer.camera.moveEnd.addEventListener(updateReadout);
-  removeReadout = () => viewer?.camera.moveEnd.removeEventListener(updateReadout);
-
-  if (props.mode === "spatial") {
-    viewer.camera.flyTo({
-      destination: Cesium.Cartesian3.fromDegrees(116.39, 39.9, 3800000),
-      orientation: { heading: 0, pitch: Cesium.Math.toRadians(-35), roll: 0 },
-      duration: 1.6,
-    });
-  } else {
-    viewer.camera.setView({
-      destination: Cesium.Cartesian3.fromDegrees(104, 32, 26000000),
-    });
-  }
-  signalRef.value = props.mode === "spatial" ? "CESIUM GL · 3D CITY MODE" : "CESIUM GL · GLOBAL MODE";
-}
-
-function addGeoJson(data: unknown, name = "导入数据") {
-  if (!viewer) return;
-  void loadCesium().then((Cesium) =>
-    Cesium.GeoJsonDataSource.load(data as Parameters<CesiumModule["GeoJsonDataSource"]["load"]>[0], {
-      stroke: Cesium.Color.fromCssColorString("#ffb85c"),
-      fill: Cesium.Color.fromCssColorString("#ffb85c").withAlpha(0.24),
-      strokeWidth: 2,
-      markerSize: 14,
-    }).then((ds) => {
-      viewer?.dataSources.add(ds);
-      signalRef.value = "GEOJSON ADDED · " + name;
-    }),
-  );
-}
-
-async function load3dTiles(url: string) {
-  if (!viewer) return;
-  const Cesium = await loadCesium();
-  try {
-    const tileset = await Cesium.Cesium3DTileset.fromUrl(url);
-    viewer.zoomTo(tileset);
-    signalRef.value = "3D TILES · LOADED";
-  } catch (error) {
-    signalRef.value = "3D TILES · FAILED";
-    console.error(error);
-  }
-}
-
-defineExpose({ addGeoJson, load3dTiles });
-
-onMounted(async () => {
-  if (!hasWebGL()) {
-    webglBroken.value = true;
-    signalRef.value = "WEBGL UNAVAILABLE · FALLBACK";
-    return;
-  }
-  await initViewer();
-  observer = new ResizeObserver(() => viewer?.resize());
-  if (rootRef.value) observer.observe(rootRef.value);
+onMounted(() => {
+  if (!rootRef.value) return;
+  globe = createCesiumGlobe({ container: rootRef.value, mode: props.mode });
+  webglBroken.value = !globe.available;
+  globe.onSignal((signal) => (signalRef.value = signal));
+  globe.onReadout((readout) => (readoutRef.value = readout));
 });
 
 onBeforeUnmount(() => {
-  observer?.disconnect();
-  removeReadout?.();
-  viewer?.destroy();
-  viewer = null;
+  globe?.dispose();
+  globe = null;
 });
+
+function addGeoJson(data: unknown, name?: string): void {
+  globe?.addGeoJson(data, name);
+}
+
+async function load3dTiles(url: string): Promise<void> {
+  await globe?.load3dTiles(url);
+}
+
+defineExpose({ addGeoJson, load3dTiles });
 </script>
 
 <template>

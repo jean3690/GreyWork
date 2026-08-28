@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { Switch } from "../components/ui";
 import { ref } from "vue";
+import { useI18n } from "vue-i18n";
+
+const { t } = useI18n();
 
 interface AutomationTask {
   id: string;
@@ -23,11 +26,11 @@ function addAutomation(): void {
   seq += 1;
   automations.value.unshift({
     id: `at-new-${seq}`,
-    name: "新建自动化任务",
-    trigger: "手动触发",
-    target: "未绑定项目",
+    name: t("automation.newTask"),
+    trigger: t("automation.manualTrigger"),
+    target: t("automation.unboundProject"),
     enabled: false,
-    last: "从未运行",
+    last: t("automation.neverRun"),
   });
 }
 </script>
@@ -37,10 +40,12 @@ function addAutomation(): void {
     <div class="view__head">
       <div>
         <p class="view__eyebrow">AUTOMATION</p>
-        <h1 class="view__title">自动化</h1>
-        <p class="view__sub">按时间或规则定时执行的任务，自动整理项目状态、生成日报周报。</p>
+        <h1 class="view__title">{{ t("automation.title") }}</h1>
+        <p class="view__sub">{{ t("automation.sub") }}</p>
       </div>
-      <div class="view__actions"><button class="btn btn--primary" @click="addAutomation">新建自动化</button></div>
+      <div class="view__actions">
+        <button class="btn btn--primary" @click="addAutomation">{{ t("automation.create") }}</button>
+      </div>
     </div>
     <div class="auto-list">
       <div v-for="a in automations" :key="a.id" class="auto-card" :data-on="a.enabled">
@@ -49,10 +54,10 @@ function addAutomation(): void {
           <strong>{{ a.name }}</strong>
           <span>{{ a.trigger }} · {{ a.target }}</span>
         </div>
-        <em>上次运行：{{ a.last }}</em>
-        <span class="auto-card__state">{{ a.enabled ? "已启用" : "已暂停" }}</span>
+        <em>{{ t("automation.lastRun", { last: a.last }) }}</em>
+        <span class="auto-card__state">{{ a.enabled ? t("automation.enabled") : t("automation.paused") }}</span>
       </div>
     </div>
-    <p class="footnote">自动化任务在本地沙箱中运行，输出会写入对应项目的历史线程。</p>
+    <p class="footnote">{{ t("automation.footnote") }}</p>
   </section>
 </template>

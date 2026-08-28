@@ -2,8 +2,8 @@
 name: Acp
 description: Use when implementing agents or clients that communicate via the Agent Client Protocol, building integrations between code editors and AI coding agents, or extending ACP with custom capabilities and transports. Reach for this skill when working with protocol initialization, session management, tool calls, authentication, or implementing bidirectional JSON-RPC communication.
 metadata:
-    mintlify-proj: acp
-    version: "1.0"
+  mintlify-proj: acp
+  version: "1.0"
 ---
 
 # Agent Client Protocol (ACP) Skill
@@ -15,6 +15,7 @@ The Agent Client Protocol (ACP) is a standardized JSON-RPC 2.0 specification for
 ## When to Use
 
 Reach for this skill when:
+
 - **Building an agent** that needs to work with multiple editors or clients
 - **Building a client** (editor, IDE, or UI) that needs to support multiple agents
 - **Implementing protocol features** like session management, tool calls, authentication, or file system access
@@ -28,17 +29,18 @@ Reach for this skill when:
 
 ### Core Protocol Flow
 
-| Phase | Client Action | Agent Response |
-|-------|---------------|-----------------|
-| **Initialize** | Send `initialize` with protocol version and capabilities | Respond with negotiated version and supported capabilities |
-| **Authenticate** | Call `authenticate` (if required) or run terminal login | Return empty result on success |
-| **Session Setup** | Call `session/new`, `session/load`, or `session/resume` | Return `sessionId` or restore context |
-| **Prompt Turn** | Send `session/prompt` with user message | Stream `session/update` notifications, handle tool calls, respond with `stopReason` |
-| **Cleanup** | Call `session/close` or `session/delete` | Free resources and respond |
+| Phase             | Client Action                                            | Agent Response                                                                      |
+| ----------------- | -------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| **Initialize**    | Send `initialize` with protocol version and capabilities | Respond with negotiated version and supported capabilities                          |
+| **Authenticate**  | Call `authenticate` (if required) or run terminal login  | Return empty result on success                                                      |
+| **Session Setup** | Call `session/new`, `session/load`, or `session/resume`  | Return `sessionId` or restore context                                               |
+| **Prompt Turn**   | Send `session/prompt` with user message                  | Stream `session/update` notifications, handle tool calls, respond with `stopReason` |
+| **Cleanup**       | Call `session/close` or `session/delete`                 | Free resources and respond                                                          |
 
 ### Essential Methods
 
 **Agent Methods (Client calls these):**
+
 - `initialize` - Negotiate protocol version and capabilities
 - `authenticate` - Protocol-driven authentication (if `authMethods` advertised)
 - `session/new` - Create new session
@@ -52,6 +54,7 @@ Reach for this skill when:
 - `logout` - End authenticated state (if `auth.logout` capability)
 
 **Client Methods (Agent calls these):**
+
 - `session/request_permission` - Ask user to approve tool execution
 - `fs/read_text_file` - Read file (if `fs.readTextFile` capability)
 - `fs/write_text_file` - Write file (if `fs.writeTextFile` capability)
@@ -81,12 +84,12 @@ Check capabilities in `initialize` response before calling optional methods:
 
 ### Session Lifecycle
 
-| Method | When to Use | Replays History? | Requires Capability |
-|--------|------------|------------------|---------------------|
-| `session/new` | Create new conversation | N/A | None (baseline) |
-| `session/load` | Resume with full history | Yes | `loadSession` |
-| `session/resume` | Reconnect without replay | No | `sessionCapabilities.resume` |
-| `session/close` | Stop active session | N/A | `sessionCapabilities.close` |
+| Method           | When to Use              | Replays History? | Requires Capability          |
+| ---------------- | ------------------------ | ---------------- | ---------------------------- |
+| `session/new`    | Create new conversation  | N/A              | None (baseline)              |
+| `session/load`   | Resume with full history | Yes              | `loadSession`                |
+| `session/resume` | Reconnect without replay | No               | `sessionCapabilities.resume` |
+| `session/close`  | Stop active session      | N/A              | `sessionCapabilities.close`  |
 
 ### Tool Call Lifecycle
 
@@ -100,51 +103,51 @@ Tool call content types: `content` (text/image/etc), `diff` (file changes), `ter
 
 ### Transport Support
 
-| Transport | Default? | When to Use | Notes |
-|-----------|----------|------------|-------|
-| **stdio** | Yes | Local agents as subprocesses | Messages delimited by newlines, no embedded newlines |
-| **HTTP** | Draft | Remote agents, serverless | Streamable HTTP with SSE or WebSocket upgrade |
-| **Custom** | No | Special requirements | Must preserve JSON-RPC format |
+| Transport  | Default? | When to Use                  | Notes                                                |
+| ---------- | -------- | ---------------------------- | ---------------------------------------------------- |
+| **stdio**  | Yes      | Local agents as subprocesses | Messages delimited by newlines, no embedded newlines |
+| **HTTP**   | Draft    | Remote agents, serverless    | Streamable HTTP with SSE or WebSocket upgrade        |
+| **Custom** | No       | Special requirements         | Must preserve JSON-RPC format                        |
 
 ## Decision Guidance
 
 ### When to Use v1 vs v2
 
-| Aspect | v1 (Stable) | v2 (Draft) |
-|--------|-----------|-----------|
-| **Status** | Production-ready | In development, may change |
-| **Use when** | Building stable integrations | Experimenting with new features |
+| Aspect           | v1 (Stable)                       | v2 (Draft)                                                         |
+| ---------------- | --------------------------------- | ------------------------------------------------------------------ |
+| **Status**       | Production-ready                  | In development, may change                                         |
+| **Use when**     | Building stable integrations      | Experimenting with new features                                    |
 | **Prompt model** | `session/prompt` returns response | `session/prompt` returns immediately, updates via `session/update` |
-| **Tool calls** | Full replacement on update | Patch semantics with content chunks |
-| **Auth** | `authenticate` method | `auth/login` and `auth/logout` methods |
-| **Session list** | Not available | `session/list` method |
+| **Tool calls**   | Full replacement on update        | Patch semantics with content chunks                                |
+| **Auth**         | `authenticate` method             | `auth/login` and `auth/logout` methods                             |
+| **Session list** | Not available                     | `session/list` method                                              |
 
 ### When to Use session/load vs session/resume
 
-| Scenario | Use `session/load` | Use `session/resume` |
-|----------|-------------------|---------------------|
-| User wants full conversation history | ✓ | ✗ |
-| User just reconnected, wants to continue | ✓ | ✓ (faster) |
-| Agent doesn't support resume | ✓ | ✗ |
-| Performance critical | ✗ | ✓ |
+| Scenario                                 | Use `session/load` | Use `session/resume` |
+| ---------------------------------------- | ------------------ | -------------------- |
+| User wants full conversation history     | ✓                  | ✗                    |
+| User just reconnected, wants to continue | ✓                  | ✓ (faster)           |
+| Agent doesn't support resume             | ✓                  | ✗                    |
+| Performance critical                     | ✗                  | ✓                    |
 
 ### When to Request Permission vs Auto-Execute
 
-| Situation | Request Permission | Auto-Execute |
-|-----------|-------------------|--------------|
-| Destructive operation (delete, modify) | ✓ | ✗ |
-| Requires external API call | ✓ | ✗ |
-| Read-only operation | ✗ | ✓ |
-| User has auto-approve setting | ✗ | ✓ |
+| Situation                              | Request Permission | Auto-Execute |
+| -------------------------------------- | ------------------ | ------------ |
+| Destructive operation (delete, modify) | ✓                  | ✗            |
+| Requires external API call             | ✓                  | ✗            |
+| Read-only operation                    | ✗                  | ✓            |
+| User has auto-approve setting          | ✗                  | ✓            |
 
 ### When to Use Custom Capabilities vs Extension Methods
 
-| Need | Custom Capabilities | Extension Methods |
-|------|-------------------|-------------------|
-| Advertise feature support | ✓ | ✗ |
-| Add new RPC method | ✗ | ✓ (prefix with `_`) |
-| Attach metadata | ✓ (use `_meta`) | ✗ |
-| Negotiate during init | ✓ | ✗ |
+| Need                      | Custom Capabilities | Extension Methods   |
+| ------------------------- | ------------------- | ------------------- |
+| Advertise feature support | ✓                   | ✗                   |
+| Add new RPC method        | ✗                   | ✓ (prefix with `_`) |
+| Attach metadata           | ✓ (use `_meta`)     | ✗                   |
+| Negotiate during init     | ✓                   | ✗                   |
 
 ## Workflow
 
@@ -222,6 +225,7 @@ Before submitting an ACP implementation:
 **Comprehensive navigation:** https://agentclientprotocol.com/llms.txt
 
 **Critical documentation pages:**
+
 - [Protocol v1 Overview](https://agentclientprotocol.com/protocol/v1/overview) - Core concepts and message flow
 - [Initialization](https://agentclientprotocol.com/protocol/v1/initialization) - Capability negotiation and version selection
 - [Session Setup](https://agentclientprotocol.com/protocol/v1/session-setup) - Creating, loading, and resuming sessions
@@ -232,6 +236,7 @@ Before submitting an ACP implementation:
 - [Schema](https://agentclientprotocol.com/protocol/v1/schema) - Complete JSON-RPC type definitions
 
 **SDK libraries:**
+
 - [TypeScript SDK](https://agentclientprotocol.com/libraries/typescript) - npm package with examples
 - [Python SDK](https://agentclientprotocol.com/libraries/python)
 - [Rust SDK](https://agentclientprotocol.com/libraries/rust)

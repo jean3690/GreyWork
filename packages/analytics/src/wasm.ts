@@ -1,4 +1,5 @@
 import * as duckdb from "@duckdb/duckdb-wasm";
+import { assertSqlAllowed, type SqlRisk } from "./sql-risk";
 import type { DuckDbClient, DuckDbSpatialQuery, GeoJsonFeatureCollection, QueryResult, SpatialDataset } from "./types";
 
 /**
@@ -15,6 +16,8 @@ export async function createDuckDbWasmClient(): Promise<DuckDbClient> {
   const conn = await db.connect();
 
   const run = async (query: DuckDbSpatialQuery): Promise<QueryResult> => {
+    // 执行前风险守卫：只读默认策略，写/DDL 需显式 allowWrite（借鉴 DBX sql_risk）。
+    const risk: SqlRisk = assertSqlAllowed(query.sql, { allowWrite: query.allowWrite });
     const started = performance.now();
     const arrow = await conn.query(query.sql);
     const columns = arrow.schema.fields.map((field) => field.name);
@@ -25,6 +28,8 @@ export async function createDuckDbWasmClient(): Promise<DuckDbClient> {
       rowCount: rows.length,
       durationMs: Math.round(performance.now() - started),
       format: query.format ?? "rows",
+      // 守卫已保证 transaction/unknown 抛错，这里仅保留可执行风险等级供 UI 展示。
+      risk: risk === "read-only" || risk === "write" || risk === "ddl" ? risk : undefined,
     };
   };
 

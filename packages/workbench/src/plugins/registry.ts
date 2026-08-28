@@ -31,28 +31,28 @@ export const coreBuiltinManifest: PluginManifest = {
   version: "0.1.0",
   contributes: {
     modes: [
-      { id: "chat", title: "Chat·Cowork", component: ChatView },
-      { id: "agents", title: "Agents", component: AgentsView },
-      { id: "analytics", title: "数据洞察", component: AnalyticsView },
-      { id: "market", title: "插件市场", component: MarketView },
-      { id: "automation", title: "自动化", component: AutomationView },
-      { id: "settings", title: "设置", component: SettingsView },
+      { id: "chat", title: "nav.modes.chat", component: ChatView },
+      { id: "agents", title: "nav.modes.agents", component: AgentsView },
+      { id: "analytics", title: "nav.modes.analytics", component: AnalyticsView },
+      { id: "market", title: "nav.modes.market", component: MarketView },
+      { id: "automation", title: "nav.modes.automation", component: AutomationView },
+      { id: "settings", title: "nav.modes.settings", component: SettingsView },
       /* 3D 空间 / GIS 地图暂时下线（聚焦 Cowork）：SpatialView / GisView 文件保留，
          重新上线时在 modes 中追加，并同步 router 守卫（自动）与 MobileTabBar。 */
     ],
     uiRegions: [
-      // ShellSidebar 槽位
-      { region: "shellSidebar", id: "sidebar.entries", title: "功能入口", component: SidebarEntriesSection, order: 10 },
-      { region: "shellSidebar", id: "sidebar.projects", title: "项目与线程", component: SidebarProjectsSection, order: 20 },
-      { region: "shellSidebar", id: "sidebar.user", title: "用户", component: SidebarUserSection, order: 30 },
+      // ShellSidebar 槽位（title 为 i18n key，渲染处 t() 转译）
+      { region: "shellSidebar", id: "sidebar.entries", title: "sidebar.entries", component: SidebarEntriesSection, order: 10 },
+      { region: "shellSidebar", id: "sidebar.projects", title: "sidebar.projects", component: SidebarProjectsSection, order: 20 },
+      { region: "shellSidebar", id: "sidebar.user", title: "sidebar.user", component: SidebarUserSection, order: 30 },
       // ActivityPanel 内置标签页（「文件」置顶：OS 式列表 → 点击进入内容）
-      { region: "activityPanel", id: "activity.editor", title: "文件", component: EditorPane, order: 5 },
-      { region: "activityPanel", id: "activity.diffs", title: "Diff", component: DiffsPane, order: 10 },
-      { region: "activityPanel", id: "activity.web", title: "预览", component: WebPreviewPane, order: 20 },
-      { region: "activityPanel", id: "activity.terminal", title: "终端", component: TerminalPane, order: 30 },
-      { region: "activityPanel", id: "activity.artifacts", title: "交付物", component: ArtifactsPane, order: 40 },
-      { region: "activityPanel", id: "activity.review", title: "Review", component: ReviewPane, order: 50 },
-      { region: "activityPanel", id: "activity.sources", title: "Sources", component: SourcesPane, order: 60 },
+      { region: "activityPanel", id: "activity.editor", title: "panels.file", component: EditorPane, order: 5 },
+      { region: "activityPanel", id: "activity.diffs", title: "panels.diffs.title", component: DiffsPane, order: 10 },
+      { region: "activityPanel", id: "activity.web", title: "panels.preview.title", component: WebPreviewPane, order: 20 },
+      { region: "activityPanel", id: "activity.terminal", title: "panels.terminal.title", component: TerminalPane, order: 30 },
+      { region: "activityPanel", id: "activity.artifacts", title: "panels.artifacts.title", component: ArtifactsPane, order: 40 },
+      { region: "activityPanel", id: "activity.review", title: "panels.review.title", component: ReviewPane, order: 50 },
+      { region: "activityPanel", id: "activity.sources", title: "panels.sources.title", component: SourcesPane, order: 60 },
     ],
   },
 };

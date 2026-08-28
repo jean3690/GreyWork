@@ -27,8 +27,7 @@ vi.mock("@greywork/integrations", () => ({
     isAvailable: () => h.isAvailable(),
     startAgent: (cmd: string, tier: string) => h.startAgent(cmd, tier),
     openSession: (handle: number, cwd: string) => h.openSession(handle, cwd),
-    setSessionConfig: (handle: number, configId: string, value: string | boolean) =>
-      h.setSessionConfig(handle, configId, value),
+    setSessionConfig: (handle: number, configId: string, value: string | boolean) => h.setSessionConfig(handle, configId, value),
     prompt: (handle: number, text: string) => h.prompt(handle, text),
     stop: () => h.stop(),
     respondPermission: (requestId: number, optionId: string | null) => h.respondPermission(requestId, optionId),
@@ -67,7 +66,19 @@ beforeEach(() => {
 describe("dispatchToAcp 写入对话流", () => {
   it("user 消息与 assistant 支架进入当前线程，chunk 流式续写 content", async () => {
     h.startAgent.mockResolvedValue(7);
-    h.openSession.mockResolvedValue({ sessionId: "session-1", configOptions: [{ id: "model", name: "Model", category: "model", type: "select", currentValue: "mock/fast", options: [{ value: "mock/fast" }, { value: "mock/slow" }] }] });
+    h.openSession.mockResolvedValue({
+      sessionId: "session-1",
+      configOptions: [
+        {
+          id: "model",
+          name: "Model",
+          category: "model",
+          type: "select",
+          currentValue: "mock/fast",
+          options: [{ value: "mock/fast" }, { value: "mock/slow" }],
+        },
+      ],
+    });
     const turn = deferred<unknown>();
     h.prompt.mockImplementation(() => turn.promise);
     const agentStore = useAgentStore();
@@ -95,6 +106,7 @@ describe("dispatchToAcp 写入对话流", () => {
       kind: "session-update",
       payload: { update: { sessionUpdate: "agent_message_chunk", content: { text: " 5 项改动" } } },
     });
+    chat.flushPendingContent();
     expect(list[1]?.content).toBe("本周共 5 项改动");
 
     emit({
@@ -108,6 +120,7 @@ describe("dispatchToAcp 写入对话流", () => {
         options: [],
       },
     });
+    chat.flushPendingContent();
     expect(list[1]?.content).toContain("宿主自动批准");
 
     turn.resolve({ stopReason: "end_turn" });
@@ -127,6 +140,36 @@ describe("dispatchToAcp 写入对话流", () => {
 
     expect(h.startAgent).toHaveBeenCalledTimes(1);
     expect(h.prompt).toHaveBeenCalledTimes(2);
+  });
+
+  it("流式续写定位到原线程：切换 activeThreadId 后 chunk 仍写入支架", async () => {
+    h.startAgent.mockResolvedValue(7);
+    h.openSession.mockResolvedValue({ sessionId: "session-1", configOptions: [] });
+    const turn = deferred<unknown>();
+    h.prompt.mockImplementation(() => turn.promise);
+    const agentStore = useAgentStore();
+    const chat = useChatStore();
+
+    const pending = agentStore.dispatchToAcp("第一线程的回合");
+    await vi.waitFor(() => expect(agentStore.acpBusy).toBe(true));
+    const originThreadId = chat.activeThreadId;
+    const originMessages = chat.threads[originThreadId];
+    expect(originMessages.at(-1)?.content).toBe("");
+
+    // 流式生成中切到另一线程
+    chat.activeThreadId = "other-thread";
+
+    emit({
+      kind: "session-update",
+      payload: { update: { sessionUpdate: "agent_message_chunk", content: { text: "跨线程 chunk" } } },
+    });
+    chat.flushPendingContent();
+    expect(chat.threads[originThreadId]?.at(-1)?.content).toBe("跨线程 chunk");
+    expect(chat.threads["other-thread"] ?? []).toHaveLength(0);
+
+    turn.resolve({});
+    await pending;
+    expect(agentStore.acpBusy).toBe(false);
   });
 
   it("无可用 ACP 后端时支架消息落错误文案", async () => {
@@ -176,6 +219,7 @@ describe("dispatchToAcp 写入对话流", () => {
     await vi.waitFor(() => expect(agentStore.acpBusy).toBe(true));
     h.stop.mockRejectedValue(new Error("no handle"));
     await agentStore.stopAcp();
+    chat.flushPendingContent();
     expect(chat.threads[chat.activeThreadId]?.at(-1)?.content).toContain("[停止失败] Error: no handle");
 
     turn.resolve({});
@@ -233,10 +277,43 @@ describe("权限请求与裁决", () => {
     });
     h.respondPermission.mockRejectedValue(new Error("closed"));
     await agentStore.respondPermission("allow");
+    chat.flushPendingContent();
     expect(chat.threads[chat.activeThreadId]?.at(-1)?.content).toContain("[权限回传失败] Error: closed");
 
     turn.resolve({});
     await pending;
+  });
+
+  it("permission-blocked（宿主锚定拦截）向流内追加通知，不打断流", async () => {
+    h.startAgent.mockResolvedValue(7);
+    h.openSession.mockResolvedValue({ sessionId: "session-1", configOptions: [] });
+    const turn = deferred<unknown>();
+    h.prompt.mockImplementation(() => turn.promise);
+    const agentStore = useAgentStore();
+    const chat = useChatStore();
+    const pending = agentStore.dispatchToAcp("写文件");
+    await vi.waitFor(() => expect(agentStore.acpBusy).toBe(true));
+
+    emit({
+      kind: "permission-blocked",
+      payload: {
+        auto: true,
+        chosen: null,
+        toolCallId: "tc-4",
+        title: "编辑 /etc/passwd",
+        kind: "edit",
+        reason: "outside-workspace",
+        paths: ["/etc/passwd"],
+      },
+    });
+    chat.flushPendingContent();
+    expect(chat.threads[chat.activeThreadId]?.at(-1)?.content).toContain("宿主拦截");
+    expect(chat.threads[chat.activeThreadId]?.at(-1)?.content).toContain("/etc/passwd");
+    expect(agentStore.acpBusy).toBe(true);
+
+    turn.resolve({});
+    await pending;
+    expect(agentStore.acpBusy).toBe(false);
   });
 });
 describe("会话配置选择器（session/set_config_option）", () => {
@@ -245,11 +322,31 @@ describe("会话配置选择器（session/set_config_option）", () => {
     h.openSession.mockResolvedValue({
       sessionId: "session-1",
       configOptions: [
-        { id: "model", name: "Model", category: "model", type: "select", currentValue: "mock/fast", options: [{ value: "mock/fast", name: "Fast" }, { value: "mock/slow", name: "Slow" }] },
+        {
+          id: "model",
+          name: "Model",
+          category: "model",
+          type: "select",
+          currentValue: "mock/fast",
+          options: [
+            { value: "mock/fast", name: "Fast" },
+            { value: "mock/slow", name: "Slow" },
+          ],
+        },
       ],
     });
     const latest = [
-      { id: "model", name: "Model", category: "model", type: "select", currentValue: "mock/slow", options: [{ value: "mock/fast", name: "Fast" }, { value: "mock/slow", name: "Slow" }] },
+      {
+        id: "model",
+        name: "Model",
+        category: "model",
+        type: "select",
+        currentValue: "mock/slow",
+        options: [
+          { value: "mock/fast", name: "Fast" },
+          { value: "mock/slow", name: "Slow" },
+        ],
+      },
     ];
     h.setSessionConfig.mockResolvedValue(latest);
     const agentStore = useAgentStore();
@@ -272,7 +369,10 @@ describe("会话配置选择器（session/set_config_option）", () => {
 
   it("connectAcp 幂等：未连接时启动会话，已连接直接复用", async () => {
     h.startAgent.mockResolvedValue(7);
-    h.openSession.mockResolvedValue({ sessionId: "session-1", configOptions: [{ id: "effort", name: "Effort", type: "select", currentValue: "high", options: [{ value: "high" }] }] });
+    h.openSession.mockResolvedValue({
+      sessionId: "session-1",
+      configOptions: [{ id: "effort", name: "Effort", type: "select", currentValue: "high", options: [{ value: "high" }] }],
+    });
     const agentStore = useAgentStore();
 
     expect(await agentStore.connectAcp()).toBeNull();
@@ -296,11 +396,9 @@ describe("会话配置选择器（session/set_config_option）", () => {
     expect(h.stop).toHaveBeenCalledTimes(1);
     expect(agentStore.selectedProviderId).toBe("mock-agent");
   });
-
 });
 
 describe("ACP 停止清理", () => {
-
   it("stop 事件清理 ACP 状态与待决权限", async () => {
     h.startAgent.mockResolvedValue(7);
     h.openSession.mockResolvedValue({
@@ -329,5 +427,98 @@ describe("ACP 停止清理", () => {
     expect(agentStore.acpConfigOptions).toEqual([]);
     agentStore.toggleRouteToAcp();
     expect(agentStore.routeToAcp).toBe(true);
+  });
+});
+
+describe("并行编排（dispatchRun）", () => {
+  it("无 ACP 后端时走演示降级：两个 mock 子任务顺序推进至 done", async () => {
+    h.isAvailable.mockImplementation(() => false);
+    const agentStore = useAgentStore();
+
+    void agentStore.dispatchRun("梳理本周改动");
+
+    await vi.waitFor(() => expect(agentStore.runs[0]?.status).toBe("done"), { timeout: 3000 });
+    expect(agentStore.runs[0]?.subtasks).toHaveLength(2);
+    expect(agentStore.runs[0]?.subtasks.every((sub) => sub.status === "done")).toBe(true);
+    expect(agentStore.runs[0]?.finishedAt).toBeTypeOf("number");
+  });
+
+  it("planner 回合解析 JSON 计划后，子任务按 maxParallel 并行派发并逐个完成", async () => {
+    let handleSeq = 0;
+    let sessionSeq = 0;
+    h.startAgent.mockImplementation(() => Promise.resolve(++handleSeq));
+    h.openSession.mockImplementation(() => Promise.resolve({ sessionId: `session-${++sessionSeq}`, configOptions: [] }));
+    h.prompt.mockImplementation(() => new Promise<unknown>(() => undefined));
+    const agentStore = useAgentStore();
+    const chat = useChatStore();
+
+    void agentStore.dispatchRun("分析客流数据");
+
+    // planner 回合：全局 session（session-1 / handle 1）流式输出 JSON 计划
+    await vi.waitFor(() => {
+      expect(h.prompt).toHaveBeenCalledWith(1, expect.stringContaining("你是任务编排器"));
+    });
+    emit({
+      kind: "session-update",
+      payload: {
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { text: '[{"role":"researcher","prompt":"抓取数据"},{"role":"geo-analyst","prompt":"空间聚类"}]' },
+        },
+      },
+    });
+    chat.flushPendingContent();
+    emit({ kind: "prompt-done", payload: { handle: 1, response: {} } });
+
+    // 计划解析成功 → 两个子任务并行派发（handle 2/3，session 2/3）
+    await vi.waitFor(() => {
+      expect(h.startAgent).toHaveBeenCalledTimes(3); // 1 planner + 2 subtask
+      expect(agentStore.runs[0]?.status).toBe("running");
+      expect(agentStore.runs[0]?.subtasks).toHaveLength(2);
+    });
+    expect(h.prompt).toHaveBeenCalledTimes(3);
+
+    // 子任务 1 流式输出并完成
+    emit({
+      kind: "session-update",
+      payload: { session_id: "session-2", update: { sessionUpdate: "agent_message_chunk", content: { text: "已抓取 3 条" } } },
+    });
+    chat.flushPendingContent();
+    emit({ kind: "prompt-done", payload: { handle: 2, response: {} } });
+    expect(agentStore.runs[0]?.subtasks[0]?.status).toBe("done");
+    expect(agentStore.runs[0]?.status).toBe("running"); // 子任务 2 仍在跑
+
+    // 子任务 2 完成 → run done
+    emit({
+      kind: "session-update",
+      payload: { session_id: "session-3", update: { sessionUpdate: "agent_message_chunk", content: { text: "聚类完成" } } },
+    });
+    chat.flushPendingContent();
+    emit({ kind: "prompt-done", payload: { handle: 3, response: {} } });
+    expect(agentStore.runs[0]?.subtasks.every((sub) => sub.status === "done")).toBe(true);
+    expect(agentStore.runs[0]?.status).toBe("done");
+  });
+
+  it("planner 未返回有效 JSON 时 run 置 failed，不派发任何子任务", async () => {
+    let handleSeq = 0;
+    h.startAgent.mockImplementation(() => Promise.resolve(++handleSeq));
+    h.openSession.mockImplementation(() => Promise.resolve({ sessionId: "session-1", configOptions: [] }));
+    h.prompt.mockImplementation(() => new Promise<unknown>(() => undefined));
+    const agentStore = useAgentStore();
+    const chat = useChatStore();
+
+    void agentStore.dispatchRun("生成日报");
+    await vi.waitFor(() => expect(h.prompt).toHaveBeenCalledTimes(1));
+
+    emit({
+      kind: "session-update",
+      payload: { update: { sessionUpdate: "agent_message_chunk", content: { text: "抱歉，我无法完成" } } },
+    });
+    chat.flushPendingContent();
+    emit({ kind: "prompt-done", payload: { handle: 1, response: {} } });
+
+    await vi.waitFor(() => expect(agentStore.runs[0]?.status).toBe("failed"));
+    expect(agentStore.runs[0]?.subtasks).toHaveLength(0);
+    expect(h.startAgent).toHaveBeenCalledTimes(1); // 仅 planner
   });
 });

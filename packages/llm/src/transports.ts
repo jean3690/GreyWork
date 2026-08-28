@@ -1,5 +1,9 @@
 /** LLM 直连传输抽象：desktop 走 Tauri IPC（Rust 宿主 reqwest），web 无直连通道。 */
 
+import { isTauriRuntime } from "@greywork/core";
+
+export { isTauriRuntime };
+
 export interface LlmEventEnvelope {
   kind: "llm-delta" | "llm-done" | "llm-error";
   payload: { delta?: string; message?: string };
@@ -17,6 +21,8 @@ export interface LlmChatParams {
   /** 密钥所在环境变量名；宿主侧解析，密钥不经过渲染端 */
   apiKeyEnv?: string;
   messages: LlmChatMessage[];
+  /** 推理等级（auto/low/medium/high/max）；宿主侧映射为供应商参数，auto/缺省不传 */
+  reasoningEffort?: string;
 }
 
 export interface LlmClient {
@@ -24,8 +30,4 @@ export interface LlmClient {
   chat(params: LlmChatParams): Promise<number>;
   stop(requestId: number): Promise<void>;
   onEvent(listener: (event: LlmEventEnvelope) => void): Promise<() => void>;
-}
-
-export function isTauriRuntime(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }

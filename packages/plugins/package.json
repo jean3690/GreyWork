@@ -17,6 +17,7 @@
     "vitest": "^3.2.4"
   },
   "dependencies": {
+    "@greywork/core": "workspace:*",
     "@tauri-apps/api": "^2.11.1"
   }
 }

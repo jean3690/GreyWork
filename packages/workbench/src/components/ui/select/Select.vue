@@ -37,7 +37,7 @@ const selected = computed({
     <SelectTrigger
       :class="
         cn(
-                    'flex h-9 w-full items-center justify-between gap-2 rounded-lg border border-input bg-card px-3 text-sm text-foreground whitespace-nowrap transition-colors focus:outline-none focus:ring-2 focus:ring-ring/40 disabled:opacity-50 data-[placeholder]:text-muted-foreground',
+          'flex h-9 w-full items-center justify-between gap-2 rounded-lg border border-input bg-card px-3 text-sm text-foreground whitespace-nowrap transition-colors focus:outline-none focus:ring-2 focus:ring-ring/40 disabled:opacity-50 data-[placeholder]:text-muted-foreground',
           props.triggerClass,
         )
       "

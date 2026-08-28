@@ -12,7 +12,7 @@ export const useArtifactStore = defineStore("artifact", () => {
   const sources = ref<SourceRef[]>([...MOCK_SOURCE_ITEMS]);
 
   /** 交付物流线终点：追加一条交付物卡片并返回其 id。 */
-  function pushArtifact(input: Pick<Artifact, "name" | "meta" | "type" | "source">): string {
+  function pushArtifact(input: Pick<Artifact, "name" | "meta" | "type" | "source"> & { format?: Artifact["format"] }): string {
     artifactSeq += 1;
     const id = `af-live-${artifactSeq}`;
     artifacts.value.unshift({ ...input, id, createdAt: Date.now() });

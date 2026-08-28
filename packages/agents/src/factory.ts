@@ -1,36 +1,4 @@
-import { clamp } from "@greywork/core";
-import type { Agent, AgentEvent, AgentRole, AgentStatus } from "./types";
-
-export function createAgent(id: string, role: AgentRole = "planner", name: string = role): Agent {
-  return {
-    id,
-    name,
-    role,
-    status: "idle",
-    progress: 0,
-    tags: [],
-  };
-}
-
-export function setAgentStatus(agent: Agent, status: AgentStatus): Agent {
-  return { ...agent, status };
-}
-
-export function advanceAgent(agent: Agent, delta = 1): Agent {
-  if (agent.status !== "working") return agent;
-  return {
-    ...agent,
-    progress: clamp(agent.progress + delta, 0, 100),
-  };
-}
-
-export function emitAgentEvent(agentId: string, message: string): AgentEvent {
-  return {
-    agentId,
-    at: new Date().toISOString(),
-    message,
-  };
-}
+import type { Agent } from "./types";
 
 export const MOCK_AGENTS: Agent[] = [
   { id: "agent-alpha", name: "Alpha · 总规划", role: "planner", status: "working", progress: 64, tags: ["mission", "orchestrate"] },

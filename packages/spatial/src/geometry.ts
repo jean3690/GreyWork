@@ -1,7 +1,7 @@
-import { scale, type Vector3 } from "@greywork/core";
+import { DEG2RAD, scale, type Vector3 } from "@greywork/core";
 import type { OrientedPoint } from "./types";
 
-export const DEG2RAD = Math.PI / 180;
+export { DEG2RAD };
 
 export function sphericalToCartesian(lat: number, lon: number, radius = 1): Vector3 {
   const latRad = lat * DEG2RAD;

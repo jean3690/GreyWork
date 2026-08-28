@@ -4,17 +4,13 @@ import { useSettingsStore } from "./settings";
 import { useVfsStore } from "./vfs";
 import { createLlmClient } from "@greywork/llm";
 import { buildLlmHistory, selectLlmProvider } from "./chat-llm";
+import { exportToXlsx } from "../lib/xlsx";
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
+import { i18n } from "../i18n";
 import type { ChatStep, CommandEntry, ThreadMessage } from "../types";
 
-export const CHAT_EFFORTS = [
-  { value: "low", label: "low", desc: "最快响应，适合简单指令" },
-  { value: "medium", label: "medium", desc: "平衡速度与深度" },
-  { value: "high", label: "high", desc: "更深思考，适合复杂任务" },
-  { value: "xhigh", label: "xhigh", desc: "最深推理，更慢且更耗 token" },
-] as const;
-export type ChatEffort = (typeof CHAT_EFFORTS)[number]["value"];
+const t = i18n.global.t;
 
 export const CHAT_SUGGESTIONS = [
   "梳理项目本周改动并生成日报",
@@ -37,17 +33,19 @@ function clearSim(): void {
 
 /** mock 规划器：按意图文本生成步骤时间线。 */
 export function buildSteps(text: string): ChatStep[] {
-  const steps: ChatStep[] = [{ kind: "read", label: "读取上下文", detail: "workspace · greywork/", status: "wait" }];
+  const steps: ChatStep[] = [
+    { kind: "read", label: t("chat.steps.readContext"), detail: t("chat.steps.readContextDetail"), status: "wait" },
+  ];
   if (/测试|test/i.test(text)) {
-    steps.push({ kind: "exec", label: "运行测试", detail: "pnpm vitest run", status: "wait" });
-    steps.push({ kind: "test", label: "汇总测试结果", detail: "38 passed · 0 failed", status: "wait" });
+    steps.push({ kind: "exec", label: t("chat.steps.runTests"), detail: t("chat.steps.runTestsDetail"), status: "wait" });
+    steps.push({ kind: "test", label: t("chat.steps.summarize"), detail: t("chat.steps.summarizeDetail"), status: "wait" });
   } else if (/日报|周报|报告/.test(text)) {
-    steps.push({ kind: "search", label: "检索任务记录", detail: "近 7 天 · 24 条动态", status: "wait" });
-    steps.push({ kind: "write", label: "生成报告", detail: "reports/weekly.md", status: "wait" });
+    steps.push({ kind: "search", label: t("chat.steps.search"), detail: t("chat.steps.searchDetail"), status: "wait" });
+    steps.push({ kind: "write", label: t("chat.steps.writeReport"), detail: t("chat.steps.writeReportDetail"), status: "wait" });
   } else {
-    steps.push({ kind: "read", label: "读取相关源码", detail: "packages/workbench/src/*.vue", status: "wait" });
-    steps.push({ kind: "write", label: "执行修改", detail: "patch · 3 files changed", status: "wait" });
-    steps.push({ kind: "exec", label: "验证构建", detail: "pnpm typecheck && pnpm build", status: "wait" });
+    steps.push({ kind: "read", label: t("chat.steps.readSource"), detail: t("chat.steps.readSourceDetail"), status: "wait" });
+    steps.push({ kind: "write", label: t("chat.steps.apply"), detail: t("chat.steps.applyDetail"), status: "wait" });
+    steps.push({ kind: "exec", label: t("chat.steps.verify"), detail: t("chat.steps.verifyDetail"), status: "wait" });
   }
   return steps;
 }
@@ -63,7 +61,6 @@ export const useChatStore = defineStore("chat", () => {
   const threads = ref<Record<string, ThreadMessage[]>>({});
   const busy = ref(false);
   const speedBoost = ref(false);
-  const chatEffort = ref<ChatEffort>("medium");
   const commandHistory = ref<CommandEntry[]>([]);
 
   /* ===== 真实 LLM 管线（openai-compatible 流式；密钥宿主侧解析） ===== */
@@ -71,15 +68,54 @@ export const useChatStore = defineStore("chat", () => {
   /** 最近一次派发是否走了真实管线（false = mock 演示管线） */
   const llmActive = ref(false);
   /** 响应式可用性：设置中启用/配置供应商后即时翻转（与 llmActive 无关，不固化于初始化）。 */
-  const llmReady = computed(() => llm.isAvailable() && !!selectLlmProvider(settingsStore.modelProviders, settingsStore.selectedModelProviderId));
+  const llmReady = computed(
+    () => llm.isAvailable() && !!selectLlmProvider(settingsStore.modelProviders, settingsStore.selectedModelProviderId),
+  );
   let llmRequestId: number | null = null;
   let streamingInto: ThreadMessage | null = null;
   let llmListening = false;
+  /** 当前流式续写的消息 id（ChatView 据此切换 StreamText 纯文本渲染，流式结束回 Markdown）。 */
+  const streamingMessageId = ref<string | null>(null);
+
+  /* 流式批处理：chunk 先入缓冲，~40ms 合并写入一次，
+     避免每个 chunk 都触发深层响应式 + Markdown 全量重解析。 */
+  const appendBuf = new Map<string, { threadId: string; text: string }>();
+  let streamBuf = "";
+  let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function scheduleFlush(): void {
+    if (flushTimer) return;
+    flushTimer = setTimeout(() => {
+      flushTimer = null;
+      flushPendingContent();
+    }, 40);
+  }
+
+  /** 立即写入缓冲内容（ACP 回合结束 / 测试断言前调用）。 */
+  function flushPendingContent(): void {
+    if (flushTimer) {
+      clearTimeout(flushTimer);
+      flushTimer = null;
+    }
+    if (appendBuf.size) {
+      for (const [messageId, entry] of appendBuf) {
+        const message = ensure(entry.threadId).find((candidate) => candidate.id === messageId);
+        if (message) message.content += entry.text;
+      }
+      appendBuf.clear();
+    }
+    if (streamBuf) {
+      if (streamingInto) streamingInto.content += streamBuf;
+      streamBuf = "";
+    }
+  }
 
   function finishStream(): void {
+    flushPendingContent();
     busy.value = false;
     streamingInto = null;
     llmRequestId = null;
+    streamingMessageId.value = null;
   }
 
   async function ensureLlmListener(): Promise<void> {
@@ -87,11 +123,14 @@ export const useChatStore = defineStore("chat", () => {
     llmListening = true;
     await llm.onEvent((event) => {
       if (event.kind === "llm-delta") {
-        if (streamingInto) streamingInto.content += event.payload.delta ?? "";
+        if (streamingInto) {
+          streamBuf += event.payload.delta ?? "";
+          scheduleFlush();
+        }
       } else if (event.kind === "llm-done") {
         finishStream();
       } else if (event.kind === "llm-error") {
-        if (streamingInto) streamingInto.content += `\n\n[LLM 错误] ${event.payload.message ?? "unknown"}`;
+        if (streamingInto) streamBuf += `\n\n${t("chat.llmError", { detail: event.payload.message ?? "unknown" })}`;
         finishStream();
       }
     });
@@ -111,6 +150,7 @@ export const useChatStore = defineStore("chat", () => {
     message.steps = [];
     busy.value = true;
     streamingInto = message;
+    streamingMessageId.value = message.id;
     await ensureLlmListener();
     try {
       const history = buildLlmHistory(ensure(activeThreadId.value).filter((item) => item.id !== message.id));
@@ -119,6 +159,7 @@ export const useChatStore = defineStore("chat", () => {
         model: provider.model,
         apiKeyEnv: provider.apiKeyEnv,
         messages: history,
+        reasoningEffort: provider.reasoningEffort ?? "auto",
       });
     } catch (error) {
       message.content = `[LLM 调用失败] ${error instanceof Error ? error.message : String(error)}`;
@@ -157,9 +198,7 @@ export const useChatStore = defineStore("chat", () => {
     }
     simTimers.push(
       setTimeout(() => {
-        message.content = speedBoost.value
-          ? "任务已完成（速度模式 · 提速约 1.5 倍）。所有步骤执行成功，可在右侧面板查看产物、Diff 与来源。"
-          : "任务已完成。所有步骤均执行成功，右侧面板可查看生成的文件、Git Diff 与引用来源。";
+        message.content = speedBoost.value ? t("chat.completedSpeed") : t("chat.completed");
         busy.value = false;
         // 交付物契约：产物落盘虚拟文件系统 → Artifacts 卡片 + Diffs 实时出现
         const firstLabel = String(message.steps?.[1]?.label ?? "");
@@ -185,6 +224,31 @@ export const useChatStore = defineStore("chat", () => {
           source: "assistant-pipeline",
         });
         message.artifacts = [...(message.artifacts ?? []), artifactId];
+        // 表格意图：额外产出一个 xlsx 交付物（引擎生成 → VFS 二进制落盘 → Artifacts 卡片）
+        if (/表|Excel|xlsx|客流|站点/i.test(message.content) || /表/.test(firstLabel)) {
+          void exportToXlsx([
+            {
+              name: "task-result",
+              headers: ["站点", "客流"],
+              rows: [
+                ["北京站", "1284"],
+                ["上海站", "2231"],
+                ["深圳站", "876"],
+              ],
+            },
+          ])
+            .then((data) => vfsStore.writeBinary("reports/task-result.xlsx", data))
+            .then(() => {
+              artifactStore.pushArtifact({
+                name: "task-result.xlsx",
+                meta: "Excel · 表格产物",
+                type: "dataset",
+                source: "assistant-pipeline",
+                format: "xlsx",
+              });
+            })
+            .catch(() => undefined);
+        }
       }, delay),
     );
   }
@@ -240,26 +304,31 @@ export const useChatStore = defineStore("chat", () => {
 
   /**
    * ACP 回合（agent store 派发）：user 消息入流 + assistant 支架，
-   * 返回支架消息供 ACP 事件流式续写。与 submitText 的差异：
-   * 无 planMode / mock 步骤时间线，内容完全由 ACP 宿主事件驱动。
+   * 返回 { threadId, message } 供 ACP 事件按线程流式续写（不依赖 activeThreadId）。
+   * 与 submitText 的差异：无 planMode / mock 步骤时间线，内容完全由 ACP 宿主事件驱动。
    */
-  function startAcpTurn(text: string, providerName: string): ThreadMessage {
+  function startAcpTurn(text: string, providerName: string): { threadId: string; message: ThreadMessage } {
     if (!activeThreadId.value) activeThreadId.value = projectStore.startNewThread(null);
     const threadId = activeThreadId.value;
     push(threadId, { id: uid(), role: "user", content: text, ts: Date.now(), attachments: [] });
     const message: ThreadMessage = { id: uid(), role: "assistant", content: "", ts: Date.now(), acp: providerName };
     push(threadId, message);
-    return message;
+    return { threadId, message };
   }
 
-  /** 通过响应式线程列表更新 ACP 支架，不能直接修改 startAcpTurn 返回的原始对象。 */
-  function appendMessageContent(messageId: string, content: string): void {
-    const message = ensure(activeThreadId.value).find((candidate) => candidate.id === messageId);
-    if (message) message.content += content;
+  /** 通过响应式线程列表更新 ACP 支架；threadId 缺省 = 当前激活线程（向后兼容）。
+   * 增量先入缓冲（~40ms 合并），由 flushPendingContent 统一写入。 */
+  function appendMessageContent(messageId: string, content: string, threadId = activeThreadId.value): void {
+    const entry = appendBuf.get(messageId);
+    if (entry) entry.text += content;
+    else appendBuf.set(messageId, { threadId, text: content });
+    scheduleFlush();
   }
 
-  function setMessageContent(messageId: string, content: string): void {
-    const message = ensure(activeThreadId.value).find((candidate) => candidate.id === messageId);
+  function setMessageContent(messageId: string, content: string, threadId = activeThreadId.value): void {
+    // 丢弃待 flush 的增量，避免覆盖回退后再被缓冲追加。
+    appendBuf.delete(messageId);
+    const message = ensure(threadId).find((candidate) => candidate.id === messageId);
     if (message) message.content = content;
   }
 
@@ -268,7 +337,6 @@ export const useChatStore = defineStore("chat", () => {
     threads,
     busy,
     speedBoost,
-    chatEffort,
     commandHistory,
     clearSim,
     ensure,
@@ -278,6 +346,8 @@ export const useChatStore = defineStore("chat", () => {
     startAcpTurn,
     appendMessageContent,
     setMessageContent,
+    flushPendingContent,
+    streamingMessageId,
     llmReady,
     llmActive,
     abortGeneration,

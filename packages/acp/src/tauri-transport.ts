@@ -24,11 +24,7 @@ export class TauriIpcTransport implements AcpTransport {
     return invoke<AcpSessionOpened>("acp_new_session", { handle, cwd });
   }
 
-  async setSessionConfig(
-    handle: number,
-    configId: string,
-    value: string | boolean,
-  ): Promise<AcpSessionConfigOption[]> {
+  async setSessionConfig(handle: number, configId: string, value: string | boolean): Promise<AcpSessionConfigOption[]> {
     const response = await invoke<{ configOptions?: AcpSessionConfigOption[] }>("acp_set_config", {
       handle,
       configId,

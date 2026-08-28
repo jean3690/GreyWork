@@ -1,13 +1,10 @@
+import { DEG2RAD, toRad } from "@greywork/core";
 import type { Coordinate, MercatorPixel, TileAddress } from "./types";
+
+export { DEG2RAD, toRad };
 
 export const EARTH_RADIUS = 6378137;
 export const TILE_SIZE = 256;
-
-export const DEG2RAD = Math.PI / 180;
-
-export function toRad(deg: number): number {
-  return deg * DEG2RAD;
-}
 
 /**
  * WGS84 经纬度 -> Web 墨卡托像素坐标。

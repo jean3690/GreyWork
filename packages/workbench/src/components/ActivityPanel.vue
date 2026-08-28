@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import { capabilitySeam } from "../plugins/loader";
+
+const { t } = useI18n();
 
 const props = defineProps<{ open: boolean }>();
 
@@ -25,7 +28,7 @@ watch([tabs, activeTab], ([list, active]) => {
   <aside v-if="props.open" class="side" data-testid="activity-panel">
     <div class="side__tabs">
       <button v-for="tab in tabs" :key="tab.id" class="side__tab" :class="{ active: activeTab === tab.id }" @click="activeTab = tab.id">
-        {{ tab.title }}
+        {{ t(tab.title) }}
       </button>
     </div>
     <component :is="activeComponent" v-if="activeComponent" />

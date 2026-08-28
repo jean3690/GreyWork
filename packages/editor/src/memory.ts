@@ -1,8 +1,10 @@
 import type { CommitResult, FileEntry, GitChange, GitService, GitStatusEntry, WorkspaceFileSystem } from "./types";
 
-/** 内存虚拟文件系统：path → content 平铺表；目录是路径推导出的虚拟节点。 */
+/** 内存虚拟文件系统：path → content 平铺表；目录是路径推导出的虚拟节点。
+ * 二进制文件（xlsx 等产物）存独立表，不参与 snapshot（git/diff 基于文本快照）。 */
 export function createMemoryFileSystem(initialFiles: Record<string, string> = {}): WorkspaceFileSystem {
   const files = new Map<string, string>(Object.entries(initialFiles));
+  const binaryFiles = new Map<string, Uint8Array>();
   return {
     async readFile(path) {
       const content = files.get(path);
@@ -12,11 +14,27 @@ export function createMemoryFileSystem(initialFiles: Record<string, string> = {}
     async writeFile(path, content) {
       files.set(path, content);
     },
-    async delete(path) {
-      if (!files.has(path)) throw new Error(`File not found: ${path}`);
+    async writeBinary(path, data) {
+      binaryFiles.set(path, data);
       files.delete(path);
     },
+    async readBinary(path) {
+      const data = binaryFiles.get(path);
+      if (data === undefined) throw new Error(`Binary file not found: ${path}`);
+      return data;
+    },
+    async delete(path) {
+      if (!files.has(path) && !binaryFiles.has(path)) throw new Error(`File not found: ${path}`);
+      files.delete(path);
+      binaryFiles.delete(path);
+    },
     async rename(from, to) {
+      if (binaryFiles.has(from)) {
+        const data = binaryFiles.get(from)!;
+        binaryFiles.delete(from);
+        binaryFiles.set(to, data);
+        return;
+      }
       const content = files.get(from);
       if (content === undefined) throw new Error(`File not found: ${from}`);
       files.delete(from);
@@ -39,10 +57,25 @@ export function createMemoryFileSystem(initialFiles: Record<string, string> = {}
           });
         }
       }
+      for (const [path, data] of binaryFiles) {
+        if (dir && !path.startsWith(dir + "/")) continue;
+        const rel = path.slice(dir ? dir.length + 1 : 0);
+        const first = rel.split("/")[0];
+        const isDir = rel.includes("/");
+        const key = dir ? `${dir}/${first}` : first;
+        if (!entries.has(key)) {
+          entries.set(key, {
+            path: key,
+            kind: isDir ? "directory" : "file",
+            size: isDir ? undefined : data.byteLength,
+            language: first.split(".")[1],
+          });
+        }
+      }
       return Array.from(entries.values()).sort((a, b) => a.path.localeCompare(b.path));
     },
     async exists(path) {
-      return files.has(path);
+      return files.has(path) || binaryFiles.has(path);
     },
     snapshot() {
       return Object.fromEntries(files);

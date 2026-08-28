@@ -1,6 +1,9 @@
 /** ACP 传输抽象：desktop 走 Tauri IPC（Rust 主机），web 走远程 WebSocket。 */
 
+import { isTauriRuntime } from "@greywork/core";
 import type { PermissionTier } from "./permissions";
+
+export { isTauriRuntime };
 
 export interface AcpEventEnvelope {
   kind: string;
@@ -76,8 +79,4 @@ export interface AcpTransport {
   respondPermission(requestId: number, optionId: string | null): Promise<void>;
   list(): Promise<AcpSessionInfo[]>;
   onEvent(listener: (event: AcpEventEnvelope) => void): Promise<() => void>;
-}
-
-export function isTauriRuntime(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }

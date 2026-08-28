@@ -3,10 +3,12 @@ import { computed, defineAsyncComponent, onMounted, ref } from "vue";
 /* 异步分包：CodeMirror 及语言包独立 chunk，不进主包 */
 const CodeMirrorPane = defineAsyncComponent(() => import("../CodeMirrorPane.vue"));
 import MarkdownText from "../MarkdownText.vue";
-import { ArrowLeft, ChevronDown, ChevronRight, FileText, Folder, Plus, Save, X } from "lucide-vue-next";
+import { ArrowLeft, ChevronDown, ChevronRight, FileSpreadsheet, FileText, Folder, Plus, Save, X } from "lucide-vue-next";
 import { buildFileTree, statusLetter, useVfsStore, type VfsTreeNode } from "../../stores/vfs";
+import { useI18n } from "vue-i18n";
 
 const vfs = useVfsStore();
+const { t } = useI18n();
 /** 列表态 ↔ 文件态（OS 式进入：点文件才展示内容，返回键回列表）。 */
 const view = ref<"list" | "file">("list");
 const mode = ref<"edit" | "preview">("edit");
@@ -93,10 +95,21 @@ const activeLetter = computed(() => {
 });
 
 async function openFile(path: string): Promise<void> {
+  // 二进制产物（xlsx 等）：不读文本，进入只读占位预览
+  if (path.endsWith(".xlsx")) {
+    const data = await vfs.readBinary(path);
+    binaryInfo.value = { path, bytes: data.byteLength };
+    view.value = "file";
+    mode.value = "preview";
+    return;
+  }
+  binaryInfo.value = null;
   await vfs.open(path);
   mode.value = "edit";
   view.value = "file";
 }
+/** 二进制文件占位信息（打开 .xlsx 等产物时展示，不做文本编辑）。 */
+const binaryInfo = ref<{ path: string; bytes: number } | null>(null);
 async function save(): Promise<void> {
   await vfs.saveActive();
 }
@@ -114,27 +127,35 @@ function revealDir(dir: string): void {
     <!-- 文件态：返回 + 路径 + 模式 + 保存 -->
     <template v-if="view === 'file'">
       <div class="editor-pane__bar">
-        <button class="editor-pane__back" title="返回文件列表" aria-label="返回文件列表" @click="view = 'list'">
+        <button class="editor-pane__back" :title="t('panels.editor.back')" :aria-label="t('panels.editor.back')" @click="view = 'list'">
           <ArrowLeft class="size-4" />
         </button>
-        <div class="editor-pane__seg" role="group" aria-label="查看模式">
-          <button class="editor-pane__segbtn" :class="{ active: mode === 'edit' }" @click="mode = 'edit'">编辑</button>
-          <button class="editor-pane__segbtn" :class="{ active: mode === 'preview' }" @click="mode = 'preview'">预览</button>
+        <div class="editor-pane__seg" role="group" :aria-label="t('panels.editor.viewMode')">
+          <button class="editor-pane__segbtn" :class="{ active: mode === 'edit' }" @click="mode = 'edit'">
+            {{ t("panels.editor.edit") }}
+          </button>
+          <button class="editor-pane__segbtn" :class="{ active: mode === 'preview' }" @click="mode = 'preview'">
+            {{ t("panels.preview.title") }}
+          </button>
         </div>
-        <button class="btn btn--primary btn--mini" :disabled="!vfs.dirty" title="写入虚拟文件系统" @click="save">
-          <Save class="size-3.5" />保存
+        <button class="btn btn--primary btn--mini" :disabled="!vfs.dirty" :title="t('panels.editor.writeVfs')" @click="save">
+          <Save class="size-3.5" />{{ t("panels.editor.save") }}
         </button>
       </div>
-      <nav class="editor-pane__crumbs" aria-label="文件路径" :title="vfs.activePath">
+      <nav class="editor-pane__crumbs" :aria-label="t('panels.editor.filePath')" :title="vfs.activePath">
         <template v-for="(segment, index) in vfs.activePath.split('/')" :key="index">
           <span v-if="index > 0" class="editor-pane__crumbsep">›</span>
           <button
             v-if="index < vfs.activePath.split('/').length - 1"
             class="editor-pane__crumb"
-            :title="`在列表中查看 ${vfs.activePath
-              .split('/')
-              .slice(0, index + 1)
-              .join('/')}`"
+            :title="
+              t('panels.editor.viewInList', {
+                path: vfs.activePath
+                  .split('/')
+                  .slice(0, index + 1)
+                  .join('/'),
+              })
+            "
             @click="
               revealDir(
                 vfs.activePath
@@ -151,16 +172,11 @@ function revealDir(dir: string): void {
       </nav>
       <p class="editor-pane__meta">
         {{ language }} · UTF-8 · LF
-        <span v-if="vfs.dirty" class="editor-pane__dirty">未保存</span>
+        <span v-if="vfs.dirty" class="editor-pane__dirty">{{ t("panels.editor.unsaved") }}</span>
         <span v-if="activeLetter" class="tree-row__status" :data-status="activeLetter">{{ activeLetter }}</span>
       </p>
 
-      <CodeMirrorPane
-        v-if="mode === 'edit'"
-        v-model:value="vfs.activeContent"
-        :language="language"
-        class="editor-pane__editor"
-      />
+      <CodeMirrorPane v-if="mode === 'edit'" v-model:value="vfs.activeContent" :language="language" class="editor-pane__editor" />
       <div v-else-if="ext === 'md'" class="editor-pane__preview">
         <MarkdownText :content="vfs.activeContent" />
       </div>
@@ -185,15 +201,19 @@ function revealDir(dir: string): void {
           </tbody>
         </table>
       </div>
-      <pre v-else class="editor-pane__preview editor-pane__raw">{{ vfs.activeContent }}</pre>
+      <pre v-else-if="!binaryInfo" class="editor-pane__preview editor-pane__raw">{{ vfs.activeContent }}</pre>
+      <div v-else class="editor-pane__preview xlsx-note">
+        <FileSpreadsheet class="size-4" />
+        <span>{{ binaryInfo.path }} · {{ binaryInfo.bytes.toLocaleString() }} bytes · {{ t("panels.editor.xlsxNote") }}</span>
+      </div>
     </template>
 
     <!-- 列表态：OS 式文件列表占满 -->
     <template v-else>
       <div class="editor-pane__bar">
-        <span class="editor-pane__cap">文件 · {{ vfs.paths.length }}</span>
-        <button class="editor-pane__new" title="新建文件（输入路径，Enter 确认）" @click="startCreate">
-          <Plus class="size-3.5" />文件
+        <span class="editor-pane__cap">{{ t("panels.file") }} · {{ vfs.paths.length }}</span>
+        <button class="editor-pane__new" :title="t('panels.editor.newFileHint')" @click="startCreate">
+          <Plus class="size-3.5" />{{ t("panels.editor.newFile") }}
         </button>
       </div>
 
@@ -215,7 +235,7 @@ function revealDir(dir: string): void {
             v-else
             class="tree-row tree-row--file"
             :class="{ active: vfs.activePath === node.path }"
-                        :style="{ paddingLeft: `${25 + depth * 13}px` }"
+            :style="{ paddingLeft: `${25 + depth * 13}px` }"
           >
             <button class="tree-row__open" :title="node.path" @click="openFile(node.path)">
               <FileText class="size-3.5" />
@@ -227,8 +247,8 @@ function revealDir(dir: string): void {
             <button
               class="tree-row__del"
               :class="{ confirm: deletingPath === node.path }"
-              :title="deletingPath === node.path ? '再点一次确认删除' : '删除文件'"
-              :aria-label="`删除 ${node.path}`"
+              :title="deletingPath === node.path ? t('panels.editor.confirmDelete') : t('panels.editor.deleteFile')"
+              :aria-label="t('panels.editor.deletePath', { path: node.path })"
               @click.stop="requestDelete(node.path)"
             >
               <X v-if="deletingPath !== node.path" class="size-3" />
@@ -242,14 +262,14 @@ function revealDir(dir: string): void {
             ref="newFileInput"
             v-model="newPath"
             class="tree-row__newinput"
-            placeholder="路径，如 src/app.ts"
-            aria-label="新文件路径"
+            :placeholder="t('panels.editor.pathPlaceholder')"
+            :aria-label="t('panels.editor.newPathAria')"
             @keydown.enter="confirmCreate"
             @keydown.esc="creating = false"
             @blur="confirmCreate"
           />
         </div>
-        <p v-if="!vfs.paths.length && !creating" class="footnote">工作区为空。点击「文件」新建第一个文件。</p>
+        <p v-if="!vfs.paths.length && !creating" class="footnote">{{ t("panels.editor.emptyHint") }}</p>
       </div>
     </template>
   </div>
@@ -551,5 +571,12 @@ function revealDir(dir: string): void {
   font-family: var(--font-mono);
   font-size: 11px;
   white-space: pre-wrap;
+}
+.xlsx-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--dim);
+  font-size: 12px;
 }
 </style>

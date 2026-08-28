@@ -48,4 +48,16 @@ export const SAMPLE_MARKET_MANIFESTS: PluginManifest[] = [
     tags: ["skill", "report"],
     tools: ["render_report"],
   },
+  {
+    id: "ext-gis",
+    kind: "extension",
+    type: "ui",
+    name: "GIS 视图",
+    version: "0.1.0",
+    entry: "views/gis.ts",
+    description: "安装后向工作台贡献 GIS 地图视图与终端面板入口",
+    author: { name: "GreyWork" },
+    tags: ["extension", "ui", "gis"],
+    contributes: { views: ["gis"], panels: ["activity.terminal"] },
+  },
 ];

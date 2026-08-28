@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { isTauriRuntime } from "@greywork/core";
 import type { WebSearchProviderConfig } from "./types";
 
 /** 归一化搜索结果（与 Rust web_search.rs 的 WebSearchHit 对应）。 */
@@ -17,10 +18,6 @@ export interface WebSearchTarget {
 /** 选择用于真实网页搜索的供应商：启用且 endpoint 已配置。 */
 export function selectWebSearchProvider(providers: WebSearchProviderConfig[]): WebSearchProviderConfig | null {
   return providers.find((provider) => provider.enabled && !!provider.endpoint?.trim()) ?? null;
-}
-
-function isTauriRuntime(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
 export interface WebSearchClient {

@@ -15,17 +15,17 @@ Claude Code ──(强执行 / 弱可视化)──►  GreyWork  ◄──(弱�
 
 ## 折中到底「折」在哪
 
-| 维度 | Claude Code（对标一端） | **GreyWork（折中）** | Pi（对标另一端） |
-| --- | --- | --- | --- |
-| 形态 | 纯终端 / CLI | Tauri 桌面 GUI + 终端视图 | 网页 / App 聊天 |
-| 工程能力 | 直接读写文件、跑命令、Git | 直接读写文件、跑命令、Git（经命令守卫） | 基本无 |
-| Agent 可见性 | 滚动日志，过程隐于终端 | 多 Agent 看板、状态灯、进度条、轨道环 | 单条气泡，看不到编排 |
-| 多 Agent | 单 agent 自主循环 | 规划→研究→执行→审查 并行编排（`@greywork/agents`） | 单 agent |
-| 上手门槛 | 需懂终端 | 图形派工台，无需记命令 | 极低 |
-| 可扩展 | 钩子 / 子代理 | 一切皆插件：Skill / Extension / MCP / 市场 | 封闭 |
-| 宿主 vs 底层 | 自己就是 agent | 宿主：派发并监控 Claude Code / OpenCode / Gemini 等外部 agent（ACP） | 自己就是模型前端 |
-| 领域增强 | 无 | 3D 空间 / GIS / DuckDB 空间分析（独有） | 无 |
-| 安全护栏 | 权限确认 | 三档权限护栏（只读 / 允许编辑 / 完全执行）+ 命令守卫 | 对话级 |
+| 维度         | Claude Code（对标一端）   | **GreyWork（折中）**                                                 | Pi（对标另一端）     |
+| ------------ | ------------------------- | -------------------------------------------------------------------- | -------------------- |
+| 形态         | 纯终端 / CLI              | Tauri 桌面 GUI + 终端视图                                            | 网页 / App 聊天      |
+| 工程能力     | 直接读写文件、跑命令、Git | 直接读写文件、跑命令、Git（经命令守卫）                              | 基本无               |
+| Agent 可见性 | 滚动日志，过程隐于终端    | 多 Agent 看板、状态灯、进度条、轨道环                                | 单条气泡，看不到编排 |
+| 多 Agent     | 单 agent 自主循环         | 规划→研究→执行→审查 并行编排（`@greywork/agents`）                   | 单 agent             |
+| 上手门槛     | 需懂终端                  | 图形派工台，无需记命令                                               | 极低                 |
+| 可扩展       | 钩子 / 子代理             | 一切皆插件：Skill / Extension / MCP / 市场                           | 封闭                 |
+| 宿主 vs 底层 | 自己就是 agent            | 宿主：派发并监控 Claude Code / OpenCode / Gemini 等外部 agent（ACP） | 自己就是模型前端     |
+| 领域增强     | 无                        | 3D 空间 / GIS / DuckDB 空间分析（独有）                              | 无                   |
+| 安全护栏     | 权限确认                  | 三档权限护栏（只读 / 允许编辑 / 完全执行）+ 命令守卫                 | 对话级               |
 
 **关键洞察**：GreyWork 不与 Claude Code / Pi 正面竞争「谁的模型更强」，而是竞争「谁让这些 agent 更好用、更可见、更可治理」。它是 agent 的操作系统（宿主），而不是又一个 agent 本身。
 
@@ -38,16 +38,16 @@ Claude Code ──(强执行 / 弱可视化)──►  GreyWork  ◄──(弱�
 
 ## 能力地图（落到实际包）
 
-| 定位卖点 | 承载包 | 说明 |
-| --- | --- | --- |
-| 看得见 Agent 在工作 | `packages/workbench` + `packages/agents` | 协作看板、状态灯、轨道环、步骤卡 |
-| 强执行力 + 文件 / Git / 命令 | `packages/editor` + `packages/plugins`（命令守卫） | CodeMirror、Git commit、命令白名单 |
-| 派发外部强 agent | `packages/acp` + `apps/desktop/src-tauri/acp_host.rs` | 经 ACP 拉起 Claude Code / OpenCode / Gemini |
-| 多 Agent 并行编排 | `packages/agents`（orchestrator / workflow） | 采集→分析→报告流水线 |
-| 一切皆插件 | `packages/plugins` + `packages/shell`（市场） | Skill / Extension / MCP 标准 + 远程源 |
-| 安全护栏（折中关键） | `packages/plugins`（guard）+ UI 权限三档 | 只读 / 允许编辑 / 完全执行 |
-| 差异化空间能力 | `packages/spatial` / `gis` / `analytics` | Cesium、MapLibre、DuckDB-WASM |
-| 模型供应商 / 会话 / 搜索 | `packages/llm` / `shell` / `acp` | openai-compatible 流式 |
+| 定位卖点                     | 承载包                                                | 说明                                        |
+| ---------------------------- | ----------------------------------------------------- | ------------------------------------------- |
+| 看得见 Agent 在工作          | `packages/workbench` + `packages/agents`              | 协作看板、状态灯、轨道环、步骤卡            |
+| 强执行力 + 文件 / Git / 命令 | `packages/editor` + `packages/plugins`（命令守卫）    | CodeMirror、Git commit、命令白名单          |
+| 派发外部强 agent             | `packages/acp` + `apps/desktop/src-tauri/acp_host.rs` | 经 ACP 拉起 Claude Code / OpenCode / Gemini |
+| 多 Agent 并行编排            | `packages/agents`（orchestrator / workflow）          | 采集→分析→报告流水线                        |
+| 一切皆插件                   | `packages/plugins` + `packages/shell`（市场）         | Skill / Extension / MCP 标准 + 远程源       |
+| 安全护栏（折中关键）         | `packages/plugins`（guard）+ UI 权限三档              | 只读 / 允许编辑 / 完全执行                  |
+| 差异化空间能力               | `packages/spatial` / `gis` / `analytics`              | Cesium、MapLibre、DuckDB-WASM               |
+| 模型供应商 / 会话 / 搜索     | `packages/llm` / `shell` / `acp`                      | openai-compatible 流式                      |
 
 ## 设计语言如何服务定位
 

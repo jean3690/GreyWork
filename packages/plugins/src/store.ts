@@ -1,3 +1,4 @@
+import { createJsonStorage } from "@greywork/core";
 import { createPluginRegistry, type PluginRegistry } from "./registry";
 import type { PluginManifest } from "./types";
 
@@ -29,15 +30,15 @@ export function createPluginStore(options: PluginStoreOptions = {}): PluginStore
   const marketplace = [...remoteMarketplace];
   const installed = new Set<string>();
 
+  const storage = createJsonStorage<string[]>(
+    storageKey,
+    (value): value is string[] => Array.isArray(value) && value.every((item) => typeof item === "string"),
+  );
+
   const readStored = (): Set<string> => {
     if (!persist || typeof localStorage === "undefined") return new Set(initialInstalled);
-    try {
-      const raw = localStorage.getItem(storageKey);
-      if (!raw) return new Set(initialInstalled);
-      return new Set(JSON.parse(raw) as string[]);
-    } catch {
-      return new Set(initialInstalled);
-    }
+    const stored = storage.read();
+    return stored ? new Set(stored) : new Set(initialInstalled);
   };
 
   for (const id of readStored()) {
@@ -50,7 +51,7 @@ export function createPluginStore(options: PluginStoreOptions = {}): PluginStore
 
   function persistInstalled(): void {
     if (!persist || typeof localStorage === "undefined") return;
-    localStorage.setItem(storageKey, JSON.stringify(Array.from(installed)));
+    storage.write(Array.from(installed));
   }
 
   return {

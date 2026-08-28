@@ -14,7 +14,13 @@ export function permissionTierToAcpMode(tier: PermissionTier): AcpPermissionMode
   return "auto-approve";
 }
 
-/** daily 档的破坏性意图粗筛（mock 期前端拦截；真实实现移入 Rust 宿主守卫）。 */
+/**
+ * daily 档的破坏性意图粗筛（派发前语义拦截，防误发）。
+ * 注意：真正的工具级守卫已由 Rust 宿主执行——daily 档非只读工具
+ * 一律转发前端确认；写类工具（edit/delete/move）路径越出工作区由宿主直接拒绝
+ * （见 apps/desktop/src-tauri/src/acp_host.rs 的文件系统锚定）。此处仅做用户
+ * 体验层的第一道提示，不承担安全边界职责。
+ */
 const DESTRUCTIVE_PATTERN = /(删除|rm\s|格式化|format\s|drop\s+table|push\s+--force)/i;
 
 export function isDestructiveIntent(text: string): boolean {

@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { ref } from "vue";
+import { useI18n } from "vue-i18n";
 import { FilePick } from "../components/ui";
 import { getGreyWorkCore, useSharedGreyWorkCore } from "../components/greyWorkCoreSingleton";
 import { SAMPLE_LOCAL_SOURCES } from "@greywork/gis";
 import { SUPPORTED_FORMATS, createSpatialDescriptor, describeSpatialData } from "@greywork/spatial";
+
+const { t } = useI18n();
 
 const coreHostRef = ref<HTMLElement | null>(null);
 useSharedGreyWorkCore(coreHostRef);
@@ -12,10 +15,10 @@ const spatialTile = createSpatialDescriptor("mbtiles", "terrain", "/data/terrain
 const spatialText = describeSpatialData(spatialTile);
 
 const toggles = ref([
-  { id: "grid", label: "经纬网格", on: true },
-  { id: "points", label: "点云", on: true },
-  { id: "orbits", label: "Agent 环", on: true },
-  { id: "labels", label: "标注", on: true },
+  { id: "grid", label: "spatial.toggle.grid", on: true },
+  { id: "points", label: "spatial.toggle.points", on: true },
+  { id: "orbits", label: "spatial.toggle.orbits", on: true },
+  { id: "labels", label: "spatial.toggle.labels", on: true },
 ]);
 
 const tilesUrl = ref("");
@@ -54,18 +57,23 @@ function loadTileset(): void {
     <div class="view__head">
       <div>
         <p class="view__eyebrow">SPATIAL LAB</p>
-        <h1 class="view__title">3D 空间</h1>
-        <p class="view__sub">CesiumJS 数字地球与本地 3D Tiles 数据编排。</p>
+        <h1 class="view__title">{{ t("spatial.title") }}</h1>
+        <p class="view__sub">{{ t("spatial.sub") }}</p>
       </div>
-      <div class="view__actions"><button class="btn btn--ghost">切换瓦片集</button><button class="btn btn--primary">FlyTo</button></div>
+      <div class="view__actions">
+        <button class="btn btn--ghost">{{ t("spatial.switchTileset") }}</button><button class="btn btn--primary">FlyTo</button>
+      </div>
     </div>
     <div class="spatial-grid">
       <div class="panel panel--narrow">
-        <div class="panel__head"><span class="panel__title">图层控制</span><span class="panel__meta">LOCAL</span></div>
+        <div class="panel__head">
+          <span class="panel__title">{{ t("spatial.layerControl") }}</span
+          ><span class="panel__meta">LOCAL</span>
+        </div>
         <div class="toggles">
-          <label v-for="t in toggles" :key="t.id" class="toggle">
-            <input v-model="t.on" type="checkbox" />
-            <span class="toggle__box"></span>{{ t.label }}
+          <label v-for="toggle in toggles" :key="toggle.id" class="toggle">
+            <input v-model="toggle.on" type="checkbox" />
+            <span class="toggle__box"></span>{{ t(toggle.label) }}
           </label>
         </div>
         <div class="chips">
@@ -77,7 +85,10 @@ function loadTileset(): void {
         <div ref="coreHostRef" class="gw-core-host gw-core-host--spatial"></div>
       </div>
       <div class="panel panel--narrow">
-        <div class="panel__head"><span class="panel__title">数据源</span><span class="panel__meta">3 FILES</span></div>
+        <div class="panel__head">
+          <span class="panel__title">{{ t("spatial.dataSources") }}</span
+          ><span class="panel__meta">3 FILES</span>
+        </div>
         <ul class="source-list">
           <li v-for="s in SAMPLE_LOCAL_SOURCES" :key="s.id" class="source">
             <span class="source__type">{{ s.type }}</span>
@@ -86,17 +97,17 @@ function loadTileset(): void {
           </li>
         </ul>
         <div class="import-actions">
-          <FilePick accept=".geojson,.json" label="导入 GeoJSON" variant="default" @select="onGeoFile" />
+          <FilePick accept=".geojson,.json" :label="t('spatial.importGeoJson')" variant="default" @select="onGeoFile" />
         </div>
         <div class="tiles-url">
           <input v-model="tilesUrl" placeholder="3D Tiles URL (tileset.json)" @keydown.enter="loadTileset" />
-          <button class="btn btn--mini" @click="loadTileset">加载</button>
+          <button class="btn btn--mini" @click="loadTileset">{{ t("spatial.load") }}</button>
         </div>
         <ul v-if="importedDatasets.length" class="source-list source-list--imported">
           <li v-for="ds in importedDatasets" :key="ds.id" class="source">
             <span class="source__type">{{ ds.format }}</span>
             <strong>{{ ds.name }}</strong>
-            <code>{{ ds.url || "已同步至 Cesium / MapLibre" }}</code>
+            <code>{{ ds.url || t("spatial.synced") }}</code>
           </li>
         </ul>
       </div>

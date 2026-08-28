@@ -38,7 +38,6 @@ greywork/
 │   ├── llm/            # @greywork/llm          模型供应商客户端（openai-compatible 流式）
 │   ├── shell/          # @greywork/shell        会话 / 模型供应商 / 插件市场
 │   ├── workbench/      # @greywork/workbench    桌面 共享工作台 UI
-│   └── ui/             # @greywork/ui           共享 UI 组件与视觉令牌
 ├── docs/               # 架构与协作文档
 ├── pnpm-workspace.yaml # workspace 声明 + pnpm 11 配置
 └── tsconfig.base.json  # 共享 TypeScript 配置

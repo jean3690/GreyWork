@@ -55,13 +55,11 @@ try {
     // 本地验证：自起 Chromium 开调试口并打开 dist 预览页，再走同一条 connectOverCDP 路径。
     const executablePath = chromium.executablePath();
     console.log(`[e2e:cdp] launch chromium ${executablePath} -> ${PREVIEW_URL}`);
-    const child = spawn(executablePath, [
-      "--headless=new",
-      "--no-sandbox",
-      "--remote-debugging-port=9222",
-      "--user-data-dir=/tmp/greywork-e2e-profile",
-      PREVIEW_URL,
-    ], { stdio: "ignore" });
+    const child = spawn(
+      executablePath,
+      ["--headless=new", "--no-sandbox", "--remote-debugging-port=9222", "--user-data-dir=/tmp/greywork-e2e-profile", PREVIEW_URL],
+      { stdio: "ignore" },
+    );
     child.on("exit", () => console.log("[e2e:cdp] chromium exited"));
   }
 

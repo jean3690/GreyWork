@@ -17,24 +17,24 @@
 
 ## 色彩体系（暗色优先 · 客户端默认）
 
-| Token           | 值      | 用途                                  |
-| --------------- | ------- | ------------------------------------- |
-| `--ink`         | #141519 | 画布底色（暖石墨黑）                  |
-| `--panel`       | #1B1D22 | 面板 / 卡片底色                       |
-| `--panel-2`     | #23262C | 卡片 / 输入 / hover 底色              |
-| `--line`        | #2D3138 | 1px 分割线（低对比）                  |
-| `--line-2`      | #3B4049 | 强调边框                              |
-| `--text`        | #ECEAE3 | 主文字（暖纸白）                      |
-| `--dim`         | #9DA1A4 | 正文 / 次级文字                       |
-| `--dim2`        | #6C7076 | 禁用 / 提示文字                       |
+| Token           | 值      | 用途                                   |
+| --------------- | ------- | -------------------------------------- |
+| `--ink`         | #141519 | 画布底色（暖石墨黑）                   |
+| `--panel`       | #1B1D22 | 面板 / 卡片底色                        |
+| `--panel-2`     | #23262C | 卡片 / 输入 / hover 底色               |
+| `--line`        | #2D3138 | 1px 分割线（低对比）                   |
+| `--line-2`      | #3B4049 | 强调边框                               |
+| `--text`        | #ECEAE3 | 主文字（暖纸白）                       |
+| `--dim`         | #9DA1A4 | 正文 / 次级文字                        |
+| `--dim2`        | #6C7076 | 禁用 / 提示文字                        |
 | `--accent`      | #FFB224 | 主强调（仪表琥珀：信号/武装/关键操作） |
-| `--accent-ink`  | #201403 | 强调色上的文字                        |
-| `--accent-hi`   | #FFCB5C | 琥珀悬停亮阶                          |
-| `--aion-blue`   | #3B82F6 | Agent 主题蓝                          |
-| `--aion-green`  | #10B981 | Agent 主题绿 / 在线                   |
-| `--aion-orange` | #F59E0B | Agent 主题橙 / 信号                   |
-| `--aion-violet` | #8B5CF6 | Agent 主题紫（会话主色）              |
-| `--aion-red`    | #EF4444 | Agent 主题红 / 阻塞                   |
+| `--accent-ink`  | #201403 | 强调色上的文字                         |
+| `--accent-hi`   | #FFCB5C | 琥珀悬停亮阶                           |
+| `--aion-blue`   | #3B82F6 | Agent 主题蓝                           |
+| `--aion-green`  | #10B981 | Agent 主题绿 / 在线                    |
+| `--aion-orange` | #F59E0B | Agent 主题橙 / 信号                    |
+| `--aion-violet` | #8B5CF6 | Agent 主题紫（会话主色）               |
+| `--aion-red`    | #EF4444 | Agent 主题红 / 阻塞                    |
 
 信号语义：琥珀 = 待命/武装/关键操作；mint = 在线/成功；钢蓝（`--cyan`）= 信息/执行中；
 橙（`--orange`）= 停止/危险能力（完全执行档警示条纹）。
@@ -42,6 +42,7 @@
 角色色调映射（单一来源：`packages/workbench/src/lib/tones.ts`）：planner=蓝、geo-analyst=绿、spatial-artist=紫、reviewer=橙。
 
 ## 字体
+
 - 栈：`--font-ui` = Archivo Variable（DIN 系工业怪诞，wdth 轴；铭牌/品牌用 125% 扩展字宽 + 大写宽字距）+ "Noto Sans SC"/"Microsoft YaHei" 中文回退
 - 遥测：`--font-mono` = JetBrains Mono Variable（标签/读数/代码，大写小间距 0.1-0.22em）
 - 标题：700-800 字重，24-32px（页面标题 30px，可加 110% 字宽）

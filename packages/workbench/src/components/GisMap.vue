@@ -1,13 +1,11 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
-import * as maplibregl from "maplibre-gl";
-import type { GeoJSONSourceSpecification } from "maplibre-gl";
-import "maplibre-gl/dist/maplibre-gl.css";
-import { SAMPLE_FEATURES } from "@greywork/gis";
+import { Map } from "lucide-vue-next";
+import { createMapLibreMap, type MapLibreLayerState, type MapLibreMapHandle } from "@greywork/gis";
 
 const props = withDefaults(
   defineProps<{
-    layers?: { terrain: boolean; imagery: boolean; vector: boolean; live: boolean };
+    layers?: MapLibreLayerState;
     active?: string | null;
   }>(),
   {
@@ -22,204 +20,42 @@ const mapRef = ref<HTMLElement | null>(null);
 const coordRef = ref("LON 000.000° · LAT 00.000°");
 const mapBroken = ref(false);
 
-let map: maplibregl.Map | null = null;
-let observer: ResizeObserver | null = null;
-let geojsonLoaded = false;
-const pendingGeojson: { data: unknown; name: string }[] = [];
+let handle: MapLibreMapHandle | null = null;
 
-const citiesGeojson = {
-  type: "FeatureCollection" as const,
-  features: SAMPLE_FEATURES.map((f) => ({
-    type: "Feature" as const,
-    properties: { id: f.id, name: f.label },
-    geometry: { type: "Point" as const, coordinates: [f.coordinate.lon, f.coordinate.lat] },
-  })),
-};
-
-function backgroundFor(layers: typeof props.layers): string {
-  if (layers.imagery) return "#0c1a2b";
-  if (layers.terrain) return "#0a1520";
-  return "#08101b";
-}
-
-function applyLayers() {
-  if (!map) return;
-  const bg = backgroundFor(props.layers);
-  map.setPaintProperty("bg", "background-color", bg);
-  const visible = props.layers.vector ? "visible" : "none";
-  map.setLayoutProperty("cities-circles", "visibility", visible);
-  map.setLayoutProperty("cities-labels", "visibility", visible);
-  const color = props.layers.live ? "#61e3a5" : props.layers.vector ? "#3fd5e0" : "#31445f";
-  map.setPaintProperty("cities-circles", "circle-color", color);
-}
-
-function applyActive() {
-  if (!map || !geojsonLoaded) return;
-  const activeId = props.active ?? "__none__";
-  map.setPaintProperty("cities-circles", "circle-color", [
-    "match",
-    ["get", "id"],
-    activeId,
-    "#ffb85c",
-    props.layers.live ? "#61e3a5" : "#3fd5e0",
-  ]);
-  map.setPaintProperty("cities-circles", "circle-stroke-width", ["match", ["get", "id"], activeId, 3, 1]);
-}
-
-function hasWebGL(): boolean {
-  try {
-    const canvas = document.createElement("canvas");
-    const gl = canvas.getContext("webgl2") || canvas.getContext("webgl");
-    return !!gl;
-  } catch {
-    return false;
-  }
-}
-
-function addGeoJson(data: unknown, name = "导入数据") {
-  if (!map || !geojsonLoaded) {
-    pendingGeojson.push({ data, name });
-    return;
-  }
-  const id = "import-" + Date.now();
-  map.addSource(id, { type: "geojson", data } as GeoJSONSourceSpecification);
-  map.addLayer({
-    id: id + "-circles",
-    type: "circle",
-    source: id,
-    paint: {
-      "circle-radius": 8,
-      "circle-color": "#ff9d7a",
-      "circle-stroke-color": "#e8f0fa",
-      "circle-stroke-width": 1,
-    },
+onMounted(() => {
+  if (!mapRef.value) return;
+  handle = createMapLibreMap({
+    container: mapRef.value,
+    layers: props.layers,
+    active: props.active,
   });
-  map.addLayer({
-    id: id + "-labels",
-    type: "symbol",
-    source: id,
-    layout: {
-      "text-field": ["get", "name"],
-      "text-font": ["Open Sans Semibold"],
-      "text-size": 12,
-      "text-offset": [0, 1.4],
-    },
-    paint: { "text-color": "#ffd9b3", "text-halo-color": "#08101b", "text-halo-width": 2 },
-  });
-}
+  mapBroken.value = !handle.available;
+  handle.onSelect((id) => emit("select", id));
+  handle.onHover((id) => emit("hover", id));
+  handle.onCoord((text) => (coordRef.value = text));
+  handle.onBroken(() => (mapBroken.value = true));
+});
 
-function flushPending() {
-  for (const item of pendingGeojson.splice(0)) {
-    addGeoJson(item.data, item.name);
-  }
-}
+onBeforeUnmount(() => {
+  handle?.dispose();
+  handle = null;
+});
 
-defineExpose({ addGeoJson });
-
-function createMap() {
-  if (!mapRef.value || map) return;
-  if (!hasWebGL()) {
-    mapBroken.value = true;
-    return;
-  }
-  const style: maplibregl.StyleSpecification = {
-    version: 8,
-    glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
-    sources: {},
-    layers: [{ id: "bg", type: "background", paint: { "background-color": backgroundFor(props.layers) } }],
-  };
-
-  try {
-    map = new maplibregl.Map({
-      container: mapRef.value,
-      style,
-      center: [104, 36],
-      zoom: 1.6,
-      attributionControl: false,
-    });
-  } catch {
-    mapBroken.value = true;
-    return;
-  }
-
-  map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-left");
-
-  map.on("load", () => {
-    if (!map) return;
-    map.addSource("cities", {
-      type: "geojson",
-      data: citiesGeojson,
-    });
-    map.addLayer({
-      id: "cities-circles",
-      type: "circle",
-      source: "cities",
-      paint: {
-        "circle-radius": ["interpolate", ["linear"], ["zoom"], 0, 4, 6, 11],
-        "circle-color": props.layers.live ? "#61e3a5" : "#3fd5e0",
-        "circle-stroke-color": "#e8f0fa",
-        "circle-stroke-width": 1,
-      },
-    });
-    map.addLayer({
-      id: "cities-labels",
-      type: "symbol",
-      source: "cities",
-      layout: {
-        "text-field": ["get", "name"],
-        "text-font": ["Open Sans Semibold"],
-        "text-size": 12,
-        "text-offset": [0, 1.4],
-      },
-      paint: {
-        "text-color": "#e8f0fa",
-        "text-halo-color": "#08101b",
-        "text-halo-width": 2,
-      },
-    });
-
-    map.on("click", "cities-circles", (e) => {
-      const id = e.features?.[0]?.properties?.id;
-      if (typeof id === "string") emit("select", id);
-    });
-    map.on("mousemove", "cities-circles", (e) => {
-      const id = e.features?.[0]?.properties?.id;
-      if (typeof id === "string") emit("hover", id);
-    });
-    map.on("mouseleave", "cities-circles", () => emit("hover", null));
-    map.on("mousemove", (e) => {
-      const lngLat = e.lngLat;
-      coordRef.value = "LON " + lngLat.lng.toFixed(3) + "° · LAT " + lngLat.lat.toFixed(3) + "°";
-    });
-
-    geojsonLoaded = true;
-    applyLayers();
-    applyActive();
-    flushPending();
-  });
+function addGeoJson(data: unknown, name?: string): void {
+  handle?.addGeoJson(data, name);
 }
 
 watch(
   () => props.layers,
-  () => applyLayers(),
+  (layers) => handle?.setLayers(layers),
   { deep: true },
 );
 watch(
   () => props.active,
-  () => applyActive(),
+  (active) => handle?.setActive(active),
 );
 
-onMounted(() => {
-  createMap();
-  observer = new ResizeObserver(() => map?.resize());
-  if (mapRef.value) observer.observe(mapRef.value);
-});
-
-onBeforeUnmount(() => {
-  observer?.disconnect();
-  map?.remove();
-  map = null;
-});
+defineExpose({ addGeoJson });
 </script>
 
 <template>

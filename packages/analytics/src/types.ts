@@ -21,6 +21,8 @@ export interface DuckDbSpatialQuery {
   params?: Record<string, unknown>;
   format?: QueryResultFormat;
   limit?: number;
+  /** 显式允许写/DDL 语句（默认只读守卫会拦截 CREATE/INSERT/UPDATE/DELETE 等） */
+  allowWrite?: boolean;
 }
 
 export interface QueryResult {
@@ -30,6 +32,8 @@ export interface QueryResult {
   durationMs: number;
   format: QueryResultFormat;
   truncated?: boolean;
+  /** 语句风险分级（read-only / write / ddl），供 UI 展示 */
+  risk?: "read-only" | "write" | "ddl";
 }
 
 export interface GeoJsonFeatureCollection {

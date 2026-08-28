@@ -6,7 +6,7 @@
 
 ## 变更范围
 
-- [ ] packages/*（monorepo 包）
+- [ ] packages/\*（monorepo 包）
 - [ ] apps/desktop（Tauri / src-tauri）
 - [ ] 文档 / CI
 

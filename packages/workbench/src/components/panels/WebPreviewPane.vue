@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { useChatStore } from "../../stores/chat";
+import { useI18n } from "vue-i18n";
 
 const chat = useChatStore();
+const { t } = useI18n();
 
 const webUrl = ref("http://localhost:5173/workspace");
 const annotateMode = ref(false);
@@ -20,7 +22,7 @@ function clearMarkers(): void {
 }
 
 function feedScreenshot(): void {
-  chat.submitText("[截图投喂] 网页预览截图已附上，共标注 " + webMarkers.value.length + " 处问题，请检查并给出修复方案。");
+  chat.submitText(t("panels.preview.feedText", { count: webMarkers.value.length }));
   webMarkers.value = [];
 }
 </script>
@@ -30,10 +32,10 @@ function feedScreenshot(): void {
     <div class="webprev__bar">
       <code>{{ webUrl }}</code>
       <button class="btn btn--mini" :class="{ 'btn--on': annotateMode }" @click="annotateMode = !annotateMode">
-        {{ annotateMode ? "标注中" : "标注模式" }}
+        {{ annotateMode ? t("panels.preview.annotating") : t("panels.preview.annotateMode") }}
       </button>
-      <button class="btn btn--mini" @click="clearMarkers">清除</button>
-      <button class="btn btn--mini btn--primary" @click="feedScreenshot">截图投喂</button>
+      <button class="btn btn--mini" @click="clearMarkers">{{ t("panels.preview.clear") }}</button>
+      <button class="btn btn--mini btn--primary" @click="feedScreenshot">{{ t("panels.preview.feed") }}</button>
     </div>
     <div class="webprev" :data-annotate="annotateMode" @click="markSpot">
       <div class="webprev__nav"><i></i><i></i><i></i><span class="webprev__pill"></span></div>
@@ -47,6 +49,6 @@ function feedScreenshot(): void {
         i + 1
       }}</span>
     </div>
-    <p class="footnote">点击元素标记界面问题，「截图投喂」会把标注截图发进当前对话。</p>
+    <p class="footnote">{{ t("panels.preview.hint", { feed: t("panels.preview.feed") }) }}</p>
   </div>
 </template>

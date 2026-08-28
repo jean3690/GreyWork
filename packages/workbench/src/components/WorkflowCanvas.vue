@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useRoute } from "vue-router";
+import { useI18n } from "vue-i18n";
 import { capabilitySeam } from "../plugins/loader";
 import { useSettingsStore } from "../stores/settings";
+
+const { t } = useI18n();
 
 const route = useRoute();
 
@@ -22,8 +25,10 @@ async function reactivateBuiltin(): Promise<void> {
   <main class="stage" :class="{ 'stage--chat': currentMode === 'chat' }" data-testid="workflow-canvas">
     <Transition name="view" mode="out-in" appear>
       <div v-if="modes.length === 0" class="canvas-empty" data-testid="canvas-empty">
-        <p class="footnote">当前没有已启用的能力清单。</p>
-        <button class="btn btn--primary" data-testid="reactivate-builtin" @click="reactivateBuiltin">启用内置能力</button>
+        <p class="footnote">{{ t("canvas.emptyHint") }}</p>
+        <button class="btn btn--primary" data-testid="reactivate-builtin" @click="reactivateBuiltin">
+          {{ t("canvas.enableBuiltin") }}
+        </button>
       </div>
       <component :is="activeComponent" v-else />
     </Transition>

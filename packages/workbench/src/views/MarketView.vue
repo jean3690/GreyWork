@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import { useRoute } from "vue-router";
 import { getPluginMarket } from "../state/pluginMarket";
 import { loadRemoteSkills, saveRemoteSkills, type RemoteSkillRecord } from "../state/remoteSkills";
@@ -21,6 +22,7 @@ import { persistRegisteredMcp, removeRegisteredMcp } from "../state/pluginMarket
 const pluginMarket = getPluginMarket();
 const route = useRoute();
 const settings = useSettingsStore();
+const { t } = useI18n();
 
 /* ===== 远程技能市场（宿主代理；安装落盘工作区 .agents/skills/） ===== */
 const transport = new TauriSkillsTransport();
@@ -48,7 +50,7 @@ async function resolveWorkspace(): Promise<string> {
   const configured = settings.workspaceDir.trim();
   if (configured) return configured;
   const home = await desktopHomeDir();
-  if (!home) throw new Error("无法解析工作区目录：请在设置中配置 workspaceDir");
+  if (!home) throw new Error(t("errors.workspaceUnresolvable"));
   return home;
 }
 
@@ -86,7 +88,9 @@ async function openInstallConfirm(entry: MarketSkillEntry): Promise<void> {
     const snapshot = await (activeSource.value as NonNullable<typeof activeSource.value>).download(entry);
     pendingInstall.value = { entry, snapshot };
   } catch (error) {
-    installFeedback.value = `下载失败：${error instanceof Error ? error.message : String(error)}`;
+    installFeedback.value = t("market.downloadFailed", {
+      detail: error instanceof Error ? error.message : String(error),
+    });
   }
 }
 
@@ -109,10 +113,14 @@ async function confirmInstall(): Promise<void> {
     };
     remoteInstalled.value = [...remoteInstalled.value.filter((item) => item.ref !== record.ref), record];
     saveRemoteSkills(remoteInstalled.value);
-    installFeedback.value = `已安装到 ${workspace}/.agents/skills/${record.skillId}`;
+    installFeedback.value = t("market.installedTo", {
+      path: `${workspace}/.agents/skills/${record.skillId}`,
+    });
     pendingInstall.value = null;
   } catch (error) {
-    installFeedback.value = `安装失败：${error instanceof Error ? error.message : String(error)}`;
+    installFeedback.value = t("market.installFailed", {
+      detail: error instanceof Error ? error.message : String(error),
+    });
   } finally {
     installBusy.value = false;
   }
@@ -125,7 +133,9 @@ async function uninstallRemote(record: RemoteSkillRecord): Promise<void> {
     remoteInstalled.value = remoteInstalled.value.filter((item) => item.ref !== record.ref);
     saveRemoteSkills(remoteInstalled.value);
   } catch (error) {
-    installFeedback.value = `卸载失败：${error instanceof Error ? error.message : String(error)}`;
+    installFeedback.value = t("market.uninstallFailed", {
+      detail: error instanceof Error ? error.message : String(error),
+    });
   }
 }
 
@@ -135,6 +145,10 @@ const marketQuery = ref("");
 const pluginDetailOpen = ref(false);
 
 const marketCategories = ["全部", "Skill", "Extension", "MCP"];
+
+function categoryLabel(category: string): string {
+  return category === "全部" ? t("market.category.all") : category;
+}
 
 function categoryOf(id: string): string {
   return id.startsWith("skill-") ? "Skill" : id.startsWith("ext-") ? "Extension" : "MCP";
@@ -227,7 +241,7 @@ function isMcpRegistered(entry: McpRegistryEntry): boolean {
 function registerMcp(entry: McpRegistryEntry): void {
   const manifest = toMcpServerManifest(entry);
   if (!manifest) {
-    mcpFeedback.value = `暂不支持该条目的传输类型：${entry.name}`;
+    mcpFeedback.value = t("market.unsupportedTransport", { name: entry.name });
     return;
   }
   if (!pluginMarket.marketplace.some((item) => item.id === manifest.id)) {
@@ -237,7 +251,8 @@ function registerMcp(entry: McpRegistryEntry): void {
   persistRegisteredMcp(manifest);
   const envTags = (manifest.tags ?? []).filter((tag) => tag.startsWith("env:"));
   mcpFeedback.value =
-    `已登记 ${manifest.id}` + (envTags.length ? ` · 使用前需补环境变量：${envTags.map((tag) => tag.slice(4)).join(", ")}` : "");
+    t("market.registered", { id: manifest.id }) +
+    (envTags.length ? t("market.needEnvVars", { vars: envTags.map((tag) => tag.slice(4)).join(", ") }) : "");
 }
 
 function unregisterMcp(entry: McpRegistryEntry): void {
@@ -265,20 +280,20 @@ function togglePlugin(id: string): void {
     <div class="view__head">
       <div>
         <p class="view__eyebrow">PLUGIN MARKET</p>
-        <h1 class="view__title">插件市场</h1>
-        <p class="view__sub">Skill · Extension · MCP，一切皆插件。</p>
+        <h1 class="view__title">{{ t("market.title") }}</h1>
+        <p class="view__sub">{{ t("market.sub") }}</p>
       </div>
     </div>
     <div class="market-toolbar">
       <div class="hero__pillbar">
         <button v-for="c in marketCategories" :key="c" class="hero__pill" :class="{ active: marketFilter === c }" @click="marketFilter = c">
-          {{ c }}
+          {{ categoryLabel(c) }}
         </button>
       </div>
       <div class="market-search">
         <Search class="size-3.5" /><input
           v-model="marketQuery"
-          placeholder="搜索插件…"
+          :placeholder="t('market.searchPlugins')"
           class="w-full bg-transparent text-xs outline-none placeholder:text-muted-foreground"
         />
       </div>
@@ -295,21 +310,21 @@ function togglePlugin(id: string): void {
         >
           {{ source.label }}
         </button>
-        <span v-if="!transport.available()" class="chip">桌面端可用 · Web 无宿主通道</span>
+        <span v-if="!transport.available()" class="chip">{{ t("market.desktopOnly") }}</span>
       </div>
       <div class="market-search">
         <Search class="size-3.5" /><input
           v-model="remoteQuery"
-          placeholder="搜索远程技能（如 tdd / frontend-design / lark）…"
+          :placeholder="t('market.searchRemoteSkills')"
           class="w-full bg-transparent text-xs outline-none placeholder:text-muted-foreground"
         />
       </div>
     </div>
     <div v-if="remoteQuery.trim().length >= 2" class="market-grid">
       <div class="market-list">
-        <p v-if="remoteLoading" class="footnote">搜索中…</p>
+        <p v-if="remoteLoading" class="footnote">{{ t("market.searching") }}</p>
         <p v-else-if="remoteError" class="footnote">{{ remoteError }}</p>
-        <p v-else-if="!remoteResults.length && remoteSearched" class="footnote">没有匹配的远程技能。</p>
+        <p v-else-if="!remoteResults.length && remoteSearched" class="footnote">{{ t("market.remoteEmpty") }}</p>
         <div v-for="entry in remoteResults" :key="entry.ref" class="plugin-card">
           <div class="plugin-card__head">
             <span class="plugin-card__icon" data-kind="skill"><Sparkles class="size-4" /></span>
@@ -317,34 +332,34 @@ function togglePlugin(id: string): void {
               <strong>{{ entry.name }}</strong
               ><span>{{ entry.source }}</span>
             </div>
-            <Badge variant="info">{{ entry.downloadable ? "可安装" : "索引" }}</Badge>
+            <Badge variant="info">{{ entry.downloadable ? t("market.installable") : t("market.indexed") }}</Badge>
           </div>
           <p class="plugin-card__desc">{{ entry.ref }}</p>
           <div class="plugin-card__foot">
             <span>⬇ {{ entry.installs.toLocaleString() }}</span>
-            <Button v-if="entry.downloadable && !isRemoteInstalled(entry)" size="sm" @click.stop="openInstallConfirm(entry)"
-              >获取并安装</Button
-            >
-            <Badge v-else-if="entry.downloadable" variant="success">已安装</Badge>
+            <Button v-if="entry.downloadable && !isRemoteInstalled(entry)" size="sm" @click.stop="openInstallConfirm(entry)">{{
+              t("market.fetchAndInstall")
+            }}</Button>
+            <Badge v-else-if="entry.downloadable" variant="success">{{ t("market.installed") }}</Badge>
           </div>
         </div>
       </div>
       <div class="panel panel--detail">
         <div class="panel__head">
-          <span class="panel__title">已安装的远程技能</span>
+          <span class="panel__title">{{ t("market.installedRemoteSkills") }}</span>
           <span class="panel__meta">{{ remoteInstalled.length }}</span>
         </div>
-        <p class="footnote">安装位置：工作区 .agents/skills/ —— 外部 ACP agent（opencode / claude-code 等）自动识别。</p>
+        <p class="footnote">{{ t("market.installLocation") }}</p>
         <div v-for="record in remoteInstalled" :key="record.ref" class="plugin-card">
           <div class="plugin-card__head">
             <span class="plugin-card__icon" data-kind="skill"><Sparkles class="size-4" /></span>
             <div>
               <strong>{{ record.name }}</strong
-              ><span>{{ record.files.length }} 个文件</span>
+              ><span>{{ t("market.fileCount", { count: record.files.length }) }}</span>
             </div>
           </div>
           <div class="plugin-card__foot">
-            <Button variant="ghost" size="sm" @click.stop="uninstallRemote(record)">卸载</Button>
+            <Button variant="ghost" size="sm" @click.stop="uninstallRemote(record)">{{ t("market.uninstall") }}</Button>
           </div>
         </div>
       </div>
@@ -352,22 +367,22 @@ function togglePlugin(id: string): void {
 
     <div class="market-remote">
       <div class="chips">
-        <span class="chip chip--on">MCP Registry · 官方</span>
-        <span v-if="!mcpRegistry.available()" class="chip">桌面端可用</span>
+        <span class="chip chip--on">{{ t("market.mcpRegistryOfficial") }}</span>
+        <span v-if="!mcpRegistry.available()" class="chip">{{ t("market.desktopAvailable") }}</span>
       </div>
       <div class="market-search">
         <Plug class="size-3.5" /><input
           v-model="mcpQuery"
-          placeholder="搜索官方 MCP 服务器（如 github / filesystem / sqlite）…"
+          :placeholder="t('market.searchMcpServers')"
           class="w-full bg-transparent text-xs outline-none placeholder:text-muted-foreground"
         />
       </div>
     </div>
     <div v-if="mcpQuery.trim().length >= 2" class="market-grid">
       <div class="market-list">
-        <p v-if="mcpLoading" class="footnote">搜索中…</p>
+        <p v-if="mcpLoading" class="footnote">{{ t("market.searching") }}</p>
         <p v-else-if="mcpError" class="footnote">{{ mcpError }}</p>
-        <p v-else-if="!mcpResults.length" class="footnote">没有匹配的 MCP 服务器。</p>
+        <p v-else-if="!mcpResults.length" class="footnote">{{ t("market.mcpEmpty") }}</p>
         <div v-for="entry in mcpResults" :key="entry.name" class="plugin-card">
           <div class="plugin-card__head">
             <span class="plugin-card__icon" data-kind="mcp"><Plug class="size-4" /></span>
@@ -377,14 +392,14 @@ function togglePlugin(id: string): void {
             </div>
             <Badge variant="info">MCP</Badge>
           </div>
-          <p class="plugin-card__desc">{{ entry.description || "（无描述）" }}</p>
+          <p class="plugin-card__desc">{{ entry.description || t("market.noDescription") }}</p>
           <div class="plugin-card__foot">
             <span
-              >{{ entry.remotes.length ? `远程 × ${entry.remotes.length}` : "" }}
-              {{ entry.packages.length ? `包 × ${entry.packages.length}` : "" }}</span
+              >{{ entry.remotes.length ? t("market.remoteCount", { count: entry.remotes.length }) : "" }}
+              {{ entry.packages.length ? t("market.packageCount", { count: entry.packages.length }) : "" }}</span
             >
-            <Button v-if="!isMcpRegistered(entry)" size="sm" @click.stop="registerMcp(entry)">登记为插件</Button>
-            <Button v-else variant="ghost" size="sm" @click.stop="unregisterMcp(entry)">取消登记</Button>
+            <Button v-if="!isMcpRegistered(entry)" size="sm" @click.stop="registerMcp(entry)">{{ t("market.registerAsPlugin") }}</Button>
+            <Button v-else variant="ghost" size="sm" @click.stop="unregisterMcp(entry)">{{ t("market.unregister") }}</Button>
           </div>
         </div>
       </div>
@@ -396,18 +411,25 @@ function togglePlugin(id: string): void {
       @update:open="if (!$event) pendingInstall = null;"
     >
       <template v-if="pendingInstall">
-        <p class="mb-2 text-sm font-semibold">确认安装 · {{ pendingInstall.entry.name }}</p>
+        <p class="mb-2 text-sm font-semibold">{{ t("market.confirmInstallTitle", { name: pendingInstall.entry.name }) }}</p>
         <p class="footnote mb-1">
-          来源 {{ pendingInstall.entry.source }} · {{ pendingInstall.snapshot.files.length }} 个文件 · hash
-          {{ pendingInstall.snapshot.hash.slice(0, 12) || "-" }}
+          {{
+            t("market.confirmInstallMeta", {
+              source: pendingInstall.entry.source,
+              count: pendingInstall.snapshot.files.length,
+              hash: pendingInstall.snapshot.hash.slice(0, 12) || "-",
+            })
+          }}
         </p>
-        <p class="footnote mb-2">将写入工作区 .agents/skills/{{ pendingInstall.entry.skillId }}/ ，外部 agent 会自动加载其中的指令。</p>
+        <p class="footnote mb-2">{{ t("market.confirmInstallDest", { skillId: pendingInstall.entry.skillId }) }}</p>
         <ul class="mb-3 max-h-48 overflow-y-auto rounded border border-line bg-black/20 p-2 font-mono text-[11px] leading-5">
           <li v-for="file in pendingInstall.snapshot.files" :key="file.path">{{ file.path }}（{{ file.contents.length }} B）</li>
         </ul>
         <div class="flex gap-2">
-          <Button size="sm" :disabled="installBusy" @click="confirmInstall">{{ installBusy ? "安装中…" : "确认安装" }}</Button>
-          <Button variant="ghost" size="sm" @click="pendingInstall = null">取消</Button>
+          <Button size="sm" :disabled="installBusy" @click="confirmInstall">{{
+            installBusy ? t("market.installing") : t("market.confirmInstall")
+          }}</Button>
+          <Button variant="ghost" size="sm" @click="pendingInstall = null">{{ t("common.cancel") }}</Button>
         </div>
       </template>
     </Dialog>
@@ -444,10 +466,12 @@ function togglePlugin(id: string): void {
                 pluginDetailOpen = true;
                 selectedPluginId = p.id;
               "
-              >详情</Button
+              >{{ t("market.details") }}</Button
             >
-            <Button v-if="!pluginMarket.installedIds().includes(p.id)" size="sm" @click.stop="togglePlugin(p.id)">安装</Button>
-            <Button v-else variant="ghost" size="sm" @click.stop="togglePlugin(p.id)">卸载</Button>
+            <Button v-if="!pluginMarket.installedIds().includes(p.id)" size="sm" @click.stop="togglePlugin(p.id)">{{
+              t("market.install")
+            }}</Button>
+            <Button v-else variant="ghost" size="sm" @click.stop="togglePlugin(p.id)">{{ t("market.uninstall") }}</Button>
           </div>
         </div>
       </div>
@@ -462,10 +486,12 @@ function togglePlugin(id: string): void {
         </div>
         <div class="detail-stats">
           <div>
-            <span>下载</span><strong>{{ selectedPlugin?.downloads.toLocaleString() }}</strong>
+            <span>{{ t("market.downloads") }}</span
+            ><strong>{{ selectedPlugin?.downloads.toLocaleString() }}</strong>
           </div>
           <div>
-            <span>评分</span><strong>{{ selectedPlugin?.rating.toFixed(1) }}</strong>
+            <span>{{ t("market.rating") }}</span
+            ><strong>{{ selectedPlugin?.rating.toFixed(1) }}</strong>
           </div>
         </div>
         <Button
@@ -473,9 +499,9 @@ function togglePlugin(id: string): void {
           class="mt-4 w-full"
           @click="togglePlugin(selectedPlugin.id)"
         >
-          安装到当前会话
+          {{ t("market.installToSession") }}
         </Button>
-        <Button v-else variant="secondary" class="mt-4 w-full" disabled>已在当前会话中</Button>
+        <Button v-else variant="secondary" class="mt-4 w-full" disabled>{{ t("market.alreadyInSession") }}</Button>
       </div>
     </div>
 
@@ -487,10 +513,12 @@ function togglePlugin(id: string): void {
       </div>
       <div class="detail-stats">
         <div>
-          <span>下载</span><strong>{{ selectedPlugin?.downloads.toLocaleString() }}</strong>
+          <span>{{ t("market.downloads") }}</span
+          ><strong>{{ selectedPlugin?.downloads.toLocaleString() }}</strong>
         </div>
         <div>
-          <span>评分</span><strong>{{ selectedPlugin?.rating.toFixed(1) }}</strong>
+          <span>{{ t("market.rating") }}</span
+          ><strong>{{ selectedPlugin?.rating.toFixed(1) }}</strong>
         </div>
       </div>
       <Button
@@ -498,9 +526,11 @@ function togglePlugin(id: string): void {
         class="mt-4 w-full"
         @click="togglePlugin(selectedPlugin.id)"
       >
-        安装到当前会话
+        {{ t("market.installToSession") }}
       </Button>
-      <Button v-else variant="destructive" class="mt-4 w-full" @click="selectedPlugin && togglePlugin(selectedPlugin.id)">卸载</Button>
+      <Button v-else variant="destructive" class="mt-4 w-full" @click="selectedPlugin && togglePlugin(selectedPlugin.id)">{{
+        t("market.uninstall")
+      }}</Button>
     </Dialog>
   </section>
 </template>

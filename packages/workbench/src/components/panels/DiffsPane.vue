@@ -2,8 +2,10 @@
 import { computed, ref } from "vue";
 import { Check, GitCommitHorizontal, GitPullRequestArrow, Rocket } from "lucide-vue-next";
 import { statusLetter, useVfsStore, workspaceGit } from "../../stores/vfs";
+import { useI18n } from "vue-i18n";
 
 const vfs = useVfsStore();
+const { t } = useI18n();
 const message = ref("");
 const committed = ref(false);
 const commitError = ref("");
@@ -49,7 +51,7 @@ async function commit(): Promise<void> {
 <template>
   <div class="side__pane">
     <p class="side__cap">
-      本次变更 · {{ totals.files }} 个文件
+      {{ t("panels.diffs.summary", { files: totals.files }) }}
       <b class="diff-add">+{{ totals.add }}</b>
       <b class="diff-del">−{{ totals.del }}</b>
     </p>
@@ -65,7 +67,7 @@ async function commit(): Promise<void> {
           >
         </div>
       </div>
-      <p v-if="!groups.length" class="footnote">暂无 Diff。运行一次任务后，变更会写入虚拟文件系统并在这里展示。</p>
+      <p v-if="!groups.length" class="footnote">{{ t("panels.diffs.empty") }}</p>
     </div>
     <div class="diff-actions">
       <div class="diff-actions__row">
@@ -77,14 +79,21 @@ async function commit(): Promise<void> {
           :disabled="committed"
           @keydown.enter="commit"
         />
-        <button class="btn btn--primary btn--mini" :disabled="!message.trim() || committed" title="提交到当前分支" @click="commit">
+        <button
+          class="btn btn--primary btn--mini"
+          :disabled="!message.trim() || committed"
+          :title="t('panels.diffs.commitTitle')"
+          @click="commit"
+        >
           <GitCommitHorizontal class="size-3.5" />Commit
         </button>
       </div>
       <div class="diff-actions__row">
-        <button class="btn btn--mini" disabled title="需远程后端（未接入）"><Rocket class="size-3.5" />Push</button>
-        <button class="btn btn--mini" disabled title="需远程后端（未接入）"><GitPullRequestArrow class="size-3.5" />Create PR</button>
-        <span v-if="committed" class="diff-actions__ok"><Check class="size-3" />已提交</span>
+        <button class="btn btn--mini" disabled :title="t('panels.diffs.remoteBackendNeeded')"><Rocket class="size-3.5" />Push</button>
+        <button class="btn btn--mini" disabled :title="t('panels.diffs.remoteBackendNeeded')">
+          <GitPullRequestArrow class="size-3.5" />Create PR
+        </button>
+        <span v-if="committed" class="diff-actions__ok"><Check class="size-3" />{{ t("panels.diffs.committed") }}</span>
         <span v-if="commitError" class="diff-actions__err">{{ commitError }}</span>
       </div>
     </div>

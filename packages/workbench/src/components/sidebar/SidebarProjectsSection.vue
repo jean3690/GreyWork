@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { computed, reactive } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import { useI18n } from "vue-i18n";
 import { useChatStore } from "../../stores/chat";
 import { useProjectStore } from "../../stores/project";
+
+const { t } = useI18n();
 
 const chat = useChatStore();
 const projectStore = useProjectStore();
@@ -62,7 +65,12 @@ async function openThread(threadId: string): Promise<void> {
           <span>{{ group.project }}</span>
           <span class="sb-group__caret" :class="{ open: group.expanded }">▸</span>
         </button>
-        <div v-if="group.expanded" :id="`project-group-${group.project}`" role="region" :aria-label="`${group.project} 的线程`">
+        <div
+          v-if="group.expanded"
+          :id="`project-group-${group.project}`"
+          role="region"
+          :aria-label="t('sidebar.threadsOfProject', { project: group.project })"
+        >
           <button
             v-for="thread in group.threads"
             :key="thread.id"
@@ -81,7 +89,7 @@ async function openThread(threadId: string): Promise<void> {
             <span v-if="threadState(thread.id).kind === 'done'" class="sb-state">✓</span>
             <span v-else class="sb-thread__time">{{ thread.time }}</span>
           </button>
-          <p v-if="!group.threads.length" class="footnote" style="margin: 4px 10px">暂无线程</p>
+          <p v-if="!group.threads.length" class="footnote" style="margin: 4px 10px">{{ t("sidebar.noThreads") }}</p>
         </div>
       </div>
     </div>
