@@ -4,6 +4,7 @@ import { SPATIAL_SQL_TEMPLATES, createMockDuckDbClient, type DuckDbClient } from
 import { createSpatialDescriptor, describeSpatialData } from "@greywork/spatial";
 import { DataTable, FilePick, Select, type TableColumn } from "../components/ui";
 import { exportToXlsx } from "../lib/xlsx";
+import { exportToPptx, resultSetToDeck } from "../lib/pptx";
 import { useArtifactStore } from "../stores/artifact";
 import { useVfsStore } from "../stores/vfs";
 import { useI18n } from "vue-i18n";
@@ -131,6 +132,29 @@ async function exportExcel(): Promise<void> {
   }
 }
 
+/** 导出当前结果集为 .pptx 简报：封面 + 数据表页。 */
+const exportingPptx = ref(false);
+async function exportPptx(): Promise<void> {
+  if (exportingPptx.value) return;
+  exportingPptx.value = true;
+  try {
+    const rows = duckDbRows.value.length ? duckDbRows.value : tableRows;
+    const headers = resultColumns.map((column) => column.title);
+    const data = await exportToPptx(resultSetToDeck("客流数据简报", `查询结果 · ${rows.length} 行 · DuckDB`, headers, rows));
+    const path = `reports/query-brief-${Date.now()}.pptx`;
+    await vfs.writeBinary(path, data);
+    artifactStore.pushArtifact({
+      name: path.split("/").pop() ?? "query-brief.pptx",
+      meta: `PPT · ${Math.max(Math.round(data.byteLength / 1024), 1)} KB`,
+      type: "report",
+      source: "duckdb-export",
+      format: "pptx",
+    });
+  } finally {
+    exportingPptx.value = false;
+  }
+}
+
 onMounted(async () => {
   try {
     duckDbStatus.value = "INITIALIZING";
@@ -197,6 +221,15 @@ onMounted(async () => {
             @click="exportExcel"
           >
             {{ exporting ? t("analytics.exportExcel") + "…" : t("analytics.exportExcel") }}
+          </button>
+          <button
+            class="btn btn--ghost"
+            style="padding: 4px 10px; font-size: 12px"
+            :disabled="exportingPptx"
+            :title="t('analytics.exportPptxHint')"
+            @click="exportPptx"
+          >
+            {{ exportingPptx ? t("analytics.exportPptx") + "…" : t("analytics.exportPptx") }}
           </button>
         </div>
         <pre class="sql"><code>{{ sqlSample }}</code></pre>

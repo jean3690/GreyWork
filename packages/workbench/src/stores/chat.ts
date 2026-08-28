@@ -5,6 +5,7 @@ import { useVfsStore } from "./vfs";
 import { createLlmClient } from "@greywork/llm";
 import { buildLlmHistory, selectLlmProvider } from "./chat-llm";
 import { exportToXlsx } from "../lib/xlsx";
+import { exportToPptx } from "../lib/pptx";
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { i18n } from "../i18n";
@@ -245,6 +246,30 @@ export const useChatStore = defineStore("chat", () => {
                 type: "dataset",
                 source: "assistant-pipeline",
                 format: "xlsx",
+              });
+            })
+            .catch(() => undefined);
+        }
+        // 报告意图：额外产出一个 pptx 简报（标题 + 执行步骤）
+        if (isReport) {
+          void exportToPptx({
+            title: "任务简报",
+            subtitle: `来源会话：${message.content.slice(0, 24)}…`,
+            slides: [
+              {
+                title: "执行步骤",
+                bullets: (message.steps ?? []).map((step) => `${step.label}：${step.detail}`),
+              },
+            ],
+          })
+            .then((data) => vfsStore.writeBinary("reports/task-brief.pptx", data))
+            .then(() => {
+              artifactStore.pushArtifact({
+                name: "task-brief.pptx",
+                meta: "PPT · 简报产物",
+                type: "report",
+                source: "assistant-pipeline",
+                format: "pptx",
               });
             })
             .catch(() => undefined);

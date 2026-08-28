@@ -95,8 +95,8 @@ const activeLetter = computed(() => {
 });
 
 async function openFile(path: string): Promise<void> {
-  // 二进制产物（xlsx 等）：不读文本，进入只读占位预览
-  if (path.endsWith(".xlsx")) {
+  // 二进制产物（xlsx/pptx 等）：不读文本，进入只读占位预览
+  if (path.endsWith(".xlsx") || path.endsWith(".pptx")) {
     const data = await vfs.readBinary(path);
     binaryInfo.value = { path, bytes: data.byteLength };
     view.value = "file";
