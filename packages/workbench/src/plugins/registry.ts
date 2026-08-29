@@ -55,8 +55,9 @@ export const coreBuiltinManifest: PluginManifest = {
       { region: "activityPanel", id: "activity.web", title: "panels.preview.title", component: WebPreviewPane, order: 20 },
       { region: "activityPanel", id: "activity.terminal", title: "panels.terminal.title", component: TerminalPane, order: 30 },
       { region: "activityPanel", id: "activity.artifacts", title: "panels.artifacts.title", component: ArtifactsPane, order: 40 },
-      { region: "activityPanel", id: "activity.review", title: "panels.review.title", component: ReviewPane, order: 50 },
-      { region: "activityPanel", id: "activity.sources", title: "panels.sources.title", component: SourcesPane, order: 60 },
+      /* Review / Sources 使用频率远低于前六个，收进「更多」下拉，避免标签栏挤成 8 个。 */
+      { region: "activityPanel", id: "activity.review", title: "panels.review.title", component: ReviewPane, order: 50, overflow: true },
+      { region: "activityPanel", id: "activity.sources", title: "panels.sources.title", component: SourcesPane, order: 60, overflow: true },
     ],
   },
 };
