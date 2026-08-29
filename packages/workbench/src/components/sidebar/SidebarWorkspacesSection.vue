@@ -73,7 +73,7 @@ function relativeTime(ts: number): string {
 async function openThread(threadId: string): Promise<void> {
   chat.activeThreadId = threadId;
   chat.ensure(threadId);
-  await router.push(`/p/${String(route.params.projectId ?? "p-gw-main")}/chat`);
+  await router.push(`/p/${String(route.params.workspaceId ?? "p-gw-main")}/chat`);
 }
 
 /* 重命名：✎ 进入行内编辑，Enter/blur 提交，Esc 取消。 */

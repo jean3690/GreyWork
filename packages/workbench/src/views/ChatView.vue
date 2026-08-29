@@ -42,7 +42,7 @@ const route = useRoute();
 const router = useRouter();
 
 async function goMode(mode: string): Promise<void> {
-  await router.push(`/p/${String(route.params.projectId ?? "p-gw-main")}/${mode}`);
+  await router.push(`/p/${String(route.params.workspaceId ?? "p-gw-main")}/${mode}`);
 }
 const acpProviders = computed(() => agentStore.agentProviders);
 function acpProviderIcon(id: string): Component {

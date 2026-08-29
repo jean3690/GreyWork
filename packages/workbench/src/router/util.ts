@@ -8,10 +8,10 @@ export function bindWorkbenchRouter(router: Router): void {
   routerRef = router;
 }
 
-/** 跳转到指定 mode（保持当前项目；未注册 mode 由路由守卫回退 chat）。 */
+/** 跳转到指定 mode（保持当前工作区；未注册 mode 由路由守卫回退 chat）。 */
 export async function ensureMode(mode: string): Promise<void> {
   if (!routerRef) return;
   const current = routerRef.currentRoute.value;
-  const projectId = String(current.params.projectId ?? DEFAULT_WORKSPACE_ID);
-  await routerRef.push(`/p/${projectId}/${mode}`);
+  const workspaceId = String(current.params.workspaceId ?? DEFAULT_WORKSPACE_ID);
+  await routerRef.push(`/p/${workspaceId}/${mode}`);
 }

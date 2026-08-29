@@ -20,7 +20,7 @@ const tabs = computed(() => [
 const active = computed(() => String(route.params.mode ?? ""));
 
 async function go(id: string): Promise<void> {
-  await router.push(`/p/${String(route.params.projectId ?? "p-gw-main")}/${id}`);
+  await router.push(`/p/${String(route.params.workspaceId ?? "p-gw-main")}/${id}`);
 }
 </script>
 
