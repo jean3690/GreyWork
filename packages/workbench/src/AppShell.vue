@@ -47,11 +47,11 @@ const workspaceStore = useWorkspaceStore();
 const route = useRoute();
 bindWorkbenchRouter(useRouter());
 
-// 路由 projectId → workspaceStore 同步
+// 路由 workspaceId → workspaceStore 同步
 watch(
-  () => route.params.projectId,
-  (projectId) => {
-    if (typeof projectId === "string" && projectId) workspaceStore.setActiveWorkspace(projectId);
+  () => route.params.workspaceId,
+  (workspaceId) => {
+    if (typeof workspaceId === "string" && workspaceId) workspaceStore.setActiveWorkspace(workspaceId);
   },
   { immediate: true },
 );

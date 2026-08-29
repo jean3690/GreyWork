@@ -25,7 +25,7 @@ const activeMode = computed(() => String(route.params.mode ?? "chat"));
 
 async function go(entry: (typeof entries.value)[number]): Promise<void> {
   await router.push({
-    path: `/p/${String(route.params.projectId ?? "p-gw-main")}/${entry.path}`,
+    path: `/p/${String(route.params.workspaceId ?? "p-gw-main")}/${entry.path}`,
     query: entry.query,
   });
 }

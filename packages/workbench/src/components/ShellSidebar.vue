@@ -42,12 +42,12 @@ async function newThread(): Promise<void> {
 
 /* 设置：固定在侧栏左下角 */
 async function goSettings(): Promise<void> {
-  await router.push(`/p/${String(route.params.projectId ?? "p-gw-main")}/settings`);
+  await router.push(`/p/${String(route.params.workspaceId ?? "p-gw-main")}/settings`);
 }
 
 /* 定时任务：进入自动化 mode */
 async function goAutomation(): Promise<void> {
-  await router.push(`/p/${String(route.params.projectId ?? "p-gw-main")}/automation`);
+  await router.push(`/p/${String(route.params.workspaceId ?? "p-gw-main")}/automation`);
 }
 
 const activeMode = computed(() => String(route.params.mode ?? "chat"));
@@ -134,10 +134,10 @@ async function openSearchResult(result: SearchResult): Promise<void> {
   if (result.kind === "thread") {
     chat.activeThreadId = result.id;
     chat.ensure(result.id);
-    await router.push(`/p/${String(route.params.projectId ?? workspaceStore.workspaces[0]?.id)}/chat`);
+    await router.push(`/p/${String(route.params.workspaceId ?? workspaceStore.workspaces[0]?.id)}/chat`);
   } else {
     await router.push({
-      path: `/p/${String(route.params.projectId ?? workspaceStore.workspaces[0]?.id)}/market`,
+      path: `/p/${String(route.params.workspaceId ?? workspaceStore.workspaces[0]?.id)}/market`,
       query: { plugin: result.id },
     });
   }
