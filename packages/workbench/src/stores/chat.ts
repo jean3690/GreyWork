@@ -1,5 +1,5 @@
 import { useArtifactStore } from "./artifact";
-import { useProjectStore } from "./project";
+import { useSessionStore } from "./session";
 import { useSettingsStore } from "./settings";
 import { useVfsStore } from "./vfs";
 import { createLlmClient } from "@greywork/llm";
@@ -55,13 +55,22 @@ export function buildSteps(text: string): ChatStep[] {
 
 /** 会话状态：每 thread 消息流 + 命令历史 + 真实/mock 执行管线（send→respond）。 */
 export const useChatStore = defineStore("chat", () => {
-  const projectStore = useProjectStore();
+  const sessionStore = useSessionStore();
   const settingsStore = useSettingsStore();
   const artifactStore = useArtifactStore();
   const vfsStore = useVfsStore();
 
-  const activeThreadId = ref("");
-  const threads = ref<Record<string, ThreadMessage[]>>({});
+  /** 当前会话 id：由持久化会话存储托管（computed+setter 保持原赋值语义）。 */
+  const activeThreadId = computed<string>({
+    get: () => sessionStore.activeSessionId ?? "",
+    set: (value) => sessionStore.setActive(value || null),
+  });
+  /** 线程 id → 消息列表（派生自会话存储；消息对象响应式共享）。 */
+  const threads = computed<Record<string, ThreadMessage[]>>(() => {
+    const map: Record<string, ThreadMessage[]> = {};
+    for (const session of sessionStore.sessions) map[session.id] = session.messages;
+    return map;
+  });
   const busy = ref(false);
   const speedBoost = ref(false);
   const commandHistory = ref<CommandEntry[]>([]);
@@ -180,12 +189,11 @@ export const useChatStore = defineStore("chat", () => {
     busy.value = false;
   }
   function ensure(threadId: string): ThreadMessage[] {
-    if (!threads.value[threadId]) threads.value[threadId] = [];
-    return threads.value[threadId];
+    return sessionStore.ensure(threadId);
   }
 
   function push(threadId: string, message: ThreadMessage): void {
-    ensure(threadId).push(message);
+    sessionStore.appendMessage(threadId, message);
   }
 
   /** mock 执行：步进时间线 → 完成文案 → 追加交付物。 */
@@ -346,7 +354,7 @@ export const useChatStore = defineStore("chat", () => {
     const trimmed = text.trim();
     if (!trimmed || busy.value) return null;
     if (!activeThreadId.value) {
-      activeThreadId.value = projectStore.startNewThread(null);
+      activeThreadId.value = sessionStore.createSession(null).id;
     }
     commandHistory.value.unshift({ input: trimmed, ts: Date.now(), threadId: activeThreadId.value });
     if (commandHistory.value.length > 100) commandHistory.value.pop();
@@ -393,7 +401,7 @@ export const useChatStore = defineStore("chat", () => {
    * 与 submitText 的差异：无 planMode / mock 步骤时间线，内容完全由 ACP 宿主事件驱动。
    */
   function startAcpTurn(text: string, providerName: string): { threadId: string; message: ThreadMessage } {
-    if (!activeThreadId.value) activeThreadId.value = projectStore.startNewThread(null);
+    if (!activeThreadId.value) activeThreadId.value = sessionStore.createSession(null).id;
     const threadId = activeThreadId.value;
     push(threadId, { id: uid(), role: "user", content: text, ts: Date.now(), attachments: [] });
     const message: ThreadMessage = { id: uid(), role: "assistant", content: "", ts: Date.now(), acp: providerName };

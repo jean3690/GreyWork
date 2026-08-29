@@ -3,19 +3,21 @@ import { useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import { MessageSquarePlus } from "lucide-vue-next";
 import { useChatStore } from "../../stores/chat";
-import { useProjectStore } from "../../stores/project";
+import { useWorkspaceStore } from "../../stores/workspace";
+import { useSessionStore } from "../../stores/session";
 import { ensureMode } from "../../router/util";
 
 const { t } = useI18n();
 
 const chat = useChatStore();
-const projectStore = useProjectStore();
+const workspaceStore = useWorkspaceStore();
+const sessionStore = useSessionStore();
 const router = useRouter();
 
 async function newTempChat(): Promise<void> {
-  chat.activeThreadId = projectStore.startNewThread(null);
+  chat.activeThreadId = sessionStore.createSession(null).id;
   await ensureMode("chat");
-  await router.push(`/p/${projectStore.activeProjectId ?? "p-gw-main"}/chat`);
+  await router.push(`/p/${workspaceStore.activeWorkspaceId ?? "p-gw-main"}/chat`);
 }
 </script>
 

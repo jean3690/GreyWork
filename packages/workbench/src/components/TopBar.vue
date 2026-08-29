@@ -4,14 +4,16 @@ import { useRoute } from "vue-router";
 import { PanelLeft, PanelRight, PlugZap } from "lucide-vue-next";
 import { RUN_MODES, useSettingsStore, type RunMode } from "../stores/settings";
 import { useChatStore } from "../stores/chat";
-import { useProjectStore } from "../stores/project";
+import { useWorkspaceStore } from "../stores/workspace";
+import { useSessionStore } from "../stores/session";
 import { capabilitySeam } from "../plugins/loader";
 import { useI18n } from "vue-i18n";
 
 const { t } = useI18n();
 
 const chat = useChatStore();
-const projectStore = useProjectStore();
+const workspaceStore = useWorkspaceStore();
+const sessionStore = useSessionStore();
 const settings = useSettingsStore();
 const route = useRoute();
 
@@ -24,32 +26,30 @@ const currentTitle = computed(() => {
   return title ? t(title) : "Cowork";
 });
 
-const activeProject = computed(
-  () => projectStore.projects.find((project) => project.id === projectStore.activeProjectId)?.name ?? t("topbar.unnamedProject"),
+const activeWorkspace = computed(
+  () =>
+    workspaceStore.workspaces.find((workspace) => workspace.id === workspaceStore.activeWorkspaceId)?.name ?? t("topbar.unnamedWorkspace"),
 );
 
-const activeThread = computed(() => {
-  for (const group of projectStore.threadGroups) {
-    const hit = group.threads.find((thread) => thread.id === chat.activeThreadId);
-    if (hit) return { thread: hit, project: group.project };
-  }
-  return null;
+const activeSession = computed(() => sessionStore.getSession(chat.activeThreadId));
+const sessionTitle = computed(() => activeSession.value?.title ?? t("topbar.newThread"));
+const sessionWorkspace = computed(() => {
+  const workspaceId = activeSession.value?.workspaceId;
+  return workspaceId ? (workspaceStore.workspaceById(workspaceId)?.name ?? null) : null;
 });
-const sessionTitle = computed(() => activeThread.value?.thread.title ?? t("topbar.newThread"));
-const sessionProject = computed(() => activeThread.value?.project ?? null);
 </script>
 
 <template>
   <header class="topbar" data-testid="topbar">
     <div class="topbar__crumb">
-      <strong>{{ activeProject }}</strong>
+      <strong>{{ activeWorkspace }}</strong>
       <span class="topbar__slash">/</span>
       <span class="topbar__crumb-mode">{{ currentTitle }}</span>
     </div>
 
-    <div v-if="activeThread" class="topbar__session">
+    <div v-if="activeSession" class="topbar__session">
       <strong>{{ sessionTitle }}</strong>
-      <span v-if="sessionProject" class="topbar__proj">{{ sessionProject }}</span>
+      <span v-if="sessionWorkspace" class="topbar__proj">{{ sessionWorkspace }}</span>
     </div>
 
     <div class="topbar__mode" role="group" :aria-label="t('settings.runModeLabel')">

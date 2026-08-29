@@ -9,8 +9,9 @@ import { coreBuiltinManifest } from "./plugins/registry";
 import { syncMarketToCapabilities } from "./plugins/bridge";
 import { getPluginMarket } from "./state/pluginMarket";
 import { useSettingsStore } from "./stores/settings";
-import { useProjectStore } from "./stores/project";
+import { useWorkspaceStore } from "./stores/workspace";
 import { useChatStore } from "./stores/chat";
+import { useSessionStore } from "./stores/session";
 import { bindWorkbenchRouter, ensureMode } from "./router/util";
 import { setLocale } from "./i18n";
 import { preloadCesiumEngine } from "@greywork/spatial";
@@ -42,15 +43,15 @@ watch(
 );
 settings.syncEnabledPlugins(capabilitySeam.activeIds());
 
-const projectStore = useProjectStore();
+const workspaceStore = useWorkspaceStore();
 const route = useRoute();
 bindWorkbenchRouter(useRouter());
 
-// 路由 projectId → projectStore 同步
+// 路由 projectId → workspaceStore 同步
 watch(
   () => route.params.projectId,
   (projectId) => {
-    if (typeof projectId === "string" && projectId) projectStore.setActiveProject(projectId);
+    if (typeof projectId === "string" && projectId) workspaceStore.setActiveWorkspace(projectId);
   },
   { immediate: true },
 );
@@ -59,9 +60,9 @@ watch(
 async function onKeydown(event: KeyboardEvent): Promise<void> {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
     event.preventDefault();
-    const project = projectStore.projects.find((candidate) => candidate.id === projectStore.activeProjectId);
+    const workspace = workspaceStore.workspaces.find((candidate) => candidate.id === workspaceStore.activeWorkspaceId);
     const chat = useChatStore();
-    chat.activeThreadId = projectStore.startNewThread(project?.name ?? null);
+    chat.activeThreadId = useSessionStore().createSession(workspace?.id ?? null).id;
     await ensureMode("chat");
   }
 }

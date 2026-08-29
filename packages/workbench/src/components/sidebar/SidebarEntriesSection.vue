@@ -2,7 +2,7 @@
 import { computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
-import { BarChart3, Bot, MessagesSquare, Puzzle } from "lucide-vue-next";
+import { BarChart3, Bot, FolderGit2, MessagesSquare, Puzzle } from "lucide-vue-next";
 
 const { t } = useI18n();
 
@@ -17,6 +17,7 @@ const entries = computed(
       { id: "agents", label: "Agents", icon: Bot, path: "agents", query: {} },
       { id: "analytics", label: t("sidebar.analytics"), icon: BarChart3, path: "analytics", query: {} },
       { id: "market", label: t("sidebar.market"), icon: Puzzle, path: "market", query: {} },
+      { id: "workspaces", label: t("sidebar.workspacesNav"), icon: FolderGit2, path: "workspaces", query: {} },
     ] as const,
 );
 

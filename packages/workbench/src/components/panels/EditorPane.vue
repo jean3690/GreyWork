@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onMounted, ref } from "vue";
+import { computed, defineAsyncComponent, onMounted, onUnmounted, ref } from "vue";
 /* 异步分包：CodeMirror 及语言包独立 chunk，不进主包 */
 const CodeMirrorPane = defineAsyncComponent(() => import("../CodeMirrorPane.vue"));
 import MarkdownText from "../MarkdownText.vue";
 import { ArrowLeft, ChevronDown, ChevronRight, FileSpreadsheet, FileText, Folder, Plus, Save, X } from "lucide-vue-next";
 import { buildFileTree, statusLetter, useVfsStore, type VfsTreeNode } from "../../stores/vfs";
+import { appEvents } from "../../events";
 import { useI18n } from "vue-i18n";
 
 const vfs = useVfsStore();
@@ -110,6 +111,9 @@ async function openFile(path: string): Promise<void> {
 }
 /** 二进制文件占位信息（打开 .xlsx 等产物时展示，不做文本编辑）。 */
 const binaryInfo = ref<{ path: string; bytes: number } | null>(null);
+/* 项目管理导入后联动：editor:open → 切文件态并打开（面板卸载时退订）。 */
+const unsubscribeOpen = appEvents.on("editor:open", ({ path }) => void openFile(path));
+onUnmounted(unsubscribeOpen);
 async function save(): Promise<void> {
   await vfs.saveActive();
 }

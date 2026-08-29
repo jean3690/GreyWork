@@ -1,4 +1,4 @@
-import { DEFAULT_PROJECT_ID } from "../mocks/projects";
+import { DEFAULT_WORKSPACE_ID } from "../mocks/workspaces";
 import type { Router } from "vue-router";
 
 let routerRef: Router | null = null;
@@ -12,6 +12,6 @@ export function bindWorkbenchRouter(router: Router): void {
 export async function ensureMode(mode: string): Promise<void> {
   if (!routerRef) return;
   const current = routerRef.currentRoute.value;
-  const projectId = String(current.params.projectId ?? DEFAULT_PROJECT_ID);
+  const projectId = String(current.params.projectId ?? DEFAULT_WORKSPACE_ID);
   await routerRef.push(`/p/${projectId}/${mode}`);
 }

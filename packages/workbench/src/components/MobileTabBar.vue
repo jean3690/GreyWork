@@ -2,7 +2,7 @@
 import { computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
-import { Bot, MessageSquare, Settings, Store } from "lucide-vue-next";
+import { Bot, FolderGit2, MessageSquare, Settings, Store } from "lucide-vue-next";
 
 const { t } = useI18n();
 
@@ -13,6 +13,7 @@ const tabs = computed(() => [
   { id: "chat", label: t("mobile.chat"), icon: MessageSquare },
   { id: "agents", label: "Agent", icon: Bot },
   { id: "market", label: t("mobile.market"), icon: Store },
+  { id: "workspaces", label: t("sidebar.workspacesNav"), icon: FolderGit2 },
   { id: "settings", label: t("mobile.settings"), icon: Settings },
 ]);
 

@@ -3,6 +3,7 @@ mod llm;
 pub mod mcp_client;
 mod mcp_registry;
 mod process_guard;
+mod workspace_fs;
 mod sandbox;
 mod skills_market;
 mod web_search;
@@ -16,6 +17,7 @@ fn greet(name: &str) -> String {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(acp_host::AcpHost::default())
         .manage(llm::LlmHost::default())
         .invoke_handler(tauri::generate_handler![
@@ -35,6 +37,9 @@ pub fn run() {
             skills_market::skills_install,
             skills_market::skills_uninstall,
             mcp_registry::mcp_search,
+            workspace_fs::fs_read_text_file,
+            workspace_fs::fs_write_text_file,
+            workspace_fs::fs_list_dir,
             mcp_client::mcp_probe_stdio,
             mcp_client::mcp_probe_remote,
         ])

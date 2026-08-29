@@ -3,8 +3,9 @@ import { computed, nextTick, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import type { Component } from "vue";
 import { useChatStore } from "../stores/chat";
-import { useProjectStore } from "../stores/project";
+import { useWorkspaceStore } from "../stores/workspace";
 import { useAgentStore } from "../stores/agent";
+import { useSessionStore } from "../stores/session";
 import {
   Bot,
   BarChart3,
@@ -34,7 +35,8 @@ import { useI18n } from "vue-i18n";
 
 const { t } = useI18n();
 const chat = useChatStore();
-const projectStore = useProjectStore();
+const workspaceStore = useWorkspaceStore();
+const sessionStore = useSessionStore();
 const agentStore = useAgentStore();
 const route = useRoute();
 const router = useRouter();
@@ -132,7 +134,7 @@ const scrollEl = ref<HTMLElement | null>(null);
 const composerRef = ref<InstanceType<typeof ChatComposer> | null>(null);
 const draft = ref("");
 const attachments = ref<string[]>([]);
-const projectPopOpen = ref(false);
+const workspacePopOpen = ref(false);
 
 const showTyping = computed(() => {
   const last = messages.value[messages.value.length - 1];
@@ -144,11 +146,9 @@ function isStreaming(m: ThreadMessage): boolean {
   return chat.streamingMessageId === m.id || agentStore.acpStreamId === m.id;
 }
 
-const activeThreadProjectName = computed(() => {
-  for (const g of projectStore.threadGroups) {
-    if (g.threads.some((t) => t.id === chat.activeThreadId)) return g.project ?? null;
-  }
-  return null;
+const activeThreadWorkspaceName = computed(() => {
+  const session = sessionStore.getSession(chat.activeThreadId);
+  return session?.workspaceId ? (workspaceStore.workspaceById(session.workspaceId)?.name ?? null) : null;
 });
 
 watch(messages, async () => {
@@ -163,11 +163,11 @@ async function pickAssistant(a: AssistantEntry): Promise<void> {
   }
   if (a.prompt) composerRef.value?.fill(a.prompt);
 }
-async function pickProject(name: string | null): Promise<void> {
-  chat.activeThreadId = projectStore.startNewThread(name);
-  const match = name ? projectStore.projectByName(name) : null;
-  if (match) projectStore.setActiveProject(match.id);
-  projectPopOpen.value = false;
+async function pickWorkspace(name: string | null): Promise<void> {
+  const match = name ? workspaceStore.workspaceByName(name) : null;
+  chat.activeThreadId = sessionStore.createSession(match?.id ?? null).id;
+  if (match) workspaceStore.setActiveWorkspace(match.id);
+  workspacePopOpen.value = false;
 }
 </script>
 
@@ -212,24 +212,26 @@ async function pickProject(name: string | null): Promise<void> {
           </div>
           <ChatComposer ref="composerRef" v-model:draft="draft" v-model:attachments="attachments" class="composer--hero" />
           <div class="home__project">
-            <button class="home__project-btn" :class="{ active: projectPopOpen }" @click.stop="projectPopOpen = !projectPopOpen">
+            <button class="home__project-btn" :class="{ active: workspacePopOpen }" @click.stop="workspacePopOpen = !workspacePopOpen">
               <FolderGit2 class="size-3.5" />
-              {{ activeThreadProjectName ? t("chatView.workingOnProject", { name: activeThreadProjectName }) : t("chatView.plainChat") }}
+              {{
+                activeThreadWorkspaceName ? t("chatView.workingOnWorkspace", { name: activeThreadWorkspaceName }) : t("chatView.plainChat")
+              }}
               <span class="composer__caret">▾</span>
             </button>
-            <div v-if="projectPopOpen" class="pop pop--project" @click.stop>
-              <p class="pop__cap">{{ t("chatView.threadOwner") }}</p>
-              <button class="pop__opt pop__opt--row" :class="{ active: !activeThreadProjectName }" @click="pickProject(null)">
+            <div v-if="workspacePopOpen" class="pop pop--project" @click.stop>
+              <p class="pop__cap">{{ t("chatView.workspaceOwner") }}</p>
+              <button class="pop__opt pop__opt--row" :class="{ active: !activeThreadWorkspaceName }" @click="pickWorkspace(null)">
                 <MessageSquareDashed class="size-3.5" /> {{ t("chatView.plainChatOption") }}
               </button>
               <button
-                v-for="p in projectStore.projects"
-                :key="p.id"
+                v-for="w in workspaceStore.workspaces"
+                :key="w.id"
                 class="pop__opt pop__opt--row"
-                :class="{ active: activeThreadProjectName === p.name }"
-                @click="pickProject(p.name)"
+                :class="{ active: activeThreadWorkspaceName === w.name }"
+                @click="pickWorkspace(w.name)"
               >
-                <FolderGit2 class="size-3.5" /> {{ p.name }}
+                <FolderGit2 class="size-3.5" /> {{ w.name }}
               </button>
             </div>
           </div>

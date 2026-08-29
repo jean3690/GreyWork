@@ -4,7 +4,8 @@ import { useRoute, useRouter } from "vue-router";
 import { ArrowLeft, ArrowRight, CalendarClock, Plus, Search, Settings } from "lucide-vue-next";
 import { capabilitySeam } from "../plugins/loader";
 import { useChatStore } from "../stores/chat";
-import { useProjectStore } from "../stores/project";
+import { useWorkspaceStore } from "../stores/workspace";
+import { useSessionStore } from "../stores/session";
 import { useSettingsStore } from "../stores/settings";
 import { getPluginMarket } from "../state/pluginMarket";
 import { createWebSearchClient, selectWebSearchProvider, type WebSearchHit } from "@greywork/shell";
@@ -15,7 +16,8 @@ defineProps<{ collapsed: boolean }>();
 const { t } = useI18n();
 
 const chat = useChatStore();
-const projectStore = useProjectStore();
+const workspaceStore = useWorkspaceStore();
+const sessionStore = useSessionStore();
 const settings = useSettingsStore();
 const pluginMarket = getPluginMarket();
 const route = useRoute();
@@ -33,9 +35,9 @@ function goForward(): void {
 
 /* 新对话（归属当前项目） */
 async function newThread(): Promise<void> {
-  const project = projectStore.projects.find((candidate) => candidate.id === projectStore.activeProjectId);
-  chat.activeThreadId = projectStore.startNewThread(project?.name ?? null);
-  await router.push(`/p/${String(projectStore.activeProjectId ?? "p-gw-main")}/chat`);
+  const workspace = workspaceStore.workspaces.find((candidate) => candidate.id === workspaceStore.activeWorkspaceId);
+  chat.activeThreadId = sessionStore.createSession(workspace?.id ?? null).id;
+  await router.push(`/p/${String(workspaceStore.activeWorkspaceId ?? "p-gw-main")}/chat`);
 }
 
 /* 设置：固定在侧栏左下角 */
@@ -105,16 +107,22 @@ interface SearchResult {
 }
 
 const allThreads = computed(() =>
-  projectStore.threadGroups.flatMap((group) => group.threads.map((t) => ({ ...t, project: group.project }))),
+  sessionStore.sessions.map((session) => ({
+    id: session.id,
+    title: session.title,
+    workspace: session.workspaceId
+      ? (workspaceStore.workspaceById(session.workspaceId)?.name ?? t("sidebar.plainChat"))
+      : t("sidebar.plainChat"),
+  })),
 );
 
 const searchResults = computed<SearchResult[]>(() => {
   const query = searchInput.value.trim().toLowerCase();
   if (!query) return [];
   const threadHits = allThreads.value
-    .filter((t) => t.title.toLowerCase().includes(query) || t.project.toLowerCase().includes(query))
+    .filter((t) => t.title.toLowerCase().includes(query) || t.workspace.toLowerCase().includes(query))
     .slice(0, 6)
-    .map((t) => ({ kind: "thread" as const, id: t.id, title: t.title, sub: t.project }));
+    .map((t) => ({ kind: "thread" as const, id: t.id, title: t.title, sub: t.workspace }));
   const pluginHits = pluginMarket.marketplace
     .filter((m) => (m.name + " " + (m.description ?? "")).toLowerCase().includes(query))
     .slice(0, 5)
@@ -126,10 +134,10 @@ async function openSearchResult(result: SearchResult): Promise<void> {
   if (result.kind === "thread") {
     chat.activeThreadId = result.id;
     chat.ensure(result.id);
-    await router.push(`/p/${String(route.params.projectId ?? projectStore.projects[0]?.id)}/chat`);
+    await router.push(`/p/${String(route.params.projectId ?? workspaceStore.workspaces[0]?.id)}/chat`);
   } else {
     await router.push({
-      path: `/p/${String(route.params.projectId ?? projectStore.projects[0]?.id)}/market`,
+      path: `/p/${String(route.params.projectId ?? workspaceStore.workspaces[0]?.id)}/market`,
       query: { plugin: result.id },
     });
   }

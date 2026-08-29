@@ -1,4 +1,4 @@
-import { DEFAULT_PROJECT_ID } from "../mocks/projects";
+import { DEFAULT_WORKSPACE_ID } from "../mocks/workspaces";
 import { capabilitySeam } from "../plugins/loader";
 import WorkflowCanvas from "../components/WorkflowCanvas.vue";
 import { createRouter, createWebHashHistory, type Router } from "vue-router";
@@ -13,7 +13,7 @@ export function createWorkbenchRouter(): Router {
   const router = createRouter({
     history: createWebHashHistory(),
     routes: [
-      { path: "/", redirect: `/p/${DEFAULT_PROJECT_ID}/chat` },
+      { path: "/", redirect: `/p/${DEFAULT_WORKSPACE_ID}/chat` },
       { path: "/p/:projectId/:mode", component: WorkflowCanvas },
       { path: "/:pathMatch(.*)*", redirect: "/" },
     ],
@@ -27,7 +27,7 @@ export function createWorkbenchRouter(): Router {
     const fallback = modes[0]?.id;
     if (!fallback) return true;
     if (String(fallback) === String(mode)) return true;
-    const projectId = String(to.params.projectId ?? DEFAULT_PROJECT_ID);
+    const projectId = String(to.params.projectId ?? DEFAULT_WORKSPACE_ID);
     return { path: `/p/${projectId}/${fallback}` };
   });
 
