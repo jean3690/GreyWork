@@ -26,7 +26,9 @@
   --line-2: #cfd3da;
   --text: #17181d;
   --dim: #5f636b;
-  --dim2: #9aa0a8;
+  /* --dim2 用于 10–12px 次要文字（分组标签、卡片描述）。#9aa0a8 在 --side/#f0f1f4 上
+   * 仅 2.4:1，远低于 WCAG AA 4.5:1；此处压暗到 ≥4.8:1（三种浅底最差情况）。 */
+  --dim2: #636a74;
   /* 用户消息气泡（浅灰纸团） */
   --bubble: #e9ebef;
   /* 终端 / SQL 控制台固定深底（artifact 不随主题翻转） */
@@ -60,6 +62,14 @@
   --gw-statusbar-h: 24px;
 }
 
+/* 宽屏（≥1600px）：右栏 420px 定宽在 1920 下会挤压不出内容、主区两侧反而空出大片死白，
+ * 此处放宽右栏；主内容阅读宽度在 base.css 的同断点规则里同步放开。 */
+@media (min-width: 1600px) {
+  :root {
+    --gw-side-w: 520px;
+  }
+}
+
 /* 深色模式 = 原机加工暖石墨（v6），整体语义不变。 */
 :root[data-theme="dark"] {
   color-scheme: dark;
@@ -71,7 +81,7 @@
   --line-2: #3b4049;
   --text: #eceae3;
   --dim: #9da1a4;
-  --dim2: #6c7076;
+  --dim2: #8a9099;
   --bubble: #2a2d33;
   --amber: #ffb224;
   --cyan: #4e7cff;
@@ -94,7 +104,7 @@
     --line-2: #3b4049;
     --text: #eceae3;
     --dim: #9da1a4;
-    --dim2: #6c7076;
+    --dim2: #8a9099;
     --bubble: #2a2d33;
     --amber: #ffb224;
     --cyan: #4e7cff;

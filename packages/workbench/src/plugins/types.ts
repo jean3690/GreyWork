@@ -18,6 +18,8 @@ export interface UiRegionContribution {
   component: Component;
   /** 同 region 内排序，缺省排后 */
   order?: number;
+  /** 低频面板：不占标签栏位，收进「更多」下拉。插件可自选，缺省为常驻标签。 */
+  overflow?: boolean;
 }
 
 export interface PluginManifest {

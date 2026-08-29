@@ -667,13 +667,24 @@ textarea:focus-visible,
   border-left: 1px solid var(--line);
   background: var(--panel);
 }
-.side__tabs {
+/* 标签栏拆成「可横向滚动的主标签」+「不参与滚动的更多按钮」两层：
+ * .side__tabs 带 overflow-x:auto（按规范 overflow-y 会被算成 auto），
+ * 绝对定位的下拉若放在它内部会被裁掉，因此菜单必须挂在滚动容器之外。 */
+.side__tabbar {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 10px 12px;
+  padding-right: 12px;
   border-bottom: 1px solid var(--line);
+}
+.side__tabs {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 0 10px 12px;
   overflow-x: auto;
   scrollbar-width: thin;
   scrollbar-color: var(--line-2) transparent;
@@ -702,6 +713,51 @@ textarea:focus-visible,
   background: var(--panel-2);
   border-color: transparent;
   color: var(--text);
+}
+.side__more {
+  position: relative;
+  flex: 0 0 auto;
+}
+.side__more-btn {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+.side__more-caret {
+  font-size: 9px;
+}
+.side__more-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  min-width: 140px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 12px 32px rgba(17, 17, 20, 0.14);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.side__more-opt {
+  padding: 7px 10px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  white-space: nowrap;
+  transition: 0.14s;
+}
+.side__more-opt:hover {
+  background: var(--panel-2);
+}
+.side__more-opt.active {
+  background: var(--panel-2);
+  font-weight: 600;
 }
 .side__close {
   margin-left: auto;
@@ -3161,6 +3217,28 @@ textarea:focus-visible,
     justify-content: center;
     padding: 3px;
     font-size: 0;
+  }
+}
+
+/* ===== 宽屏断点（≥1600px）：放开主内容阅读宽度（右栏见 tokens.css 同断点） =====
+ * 1920 下原本 .chat 860 / .home 720 会让主区两侧各空出 190px 以上的死白。
+ * home → groups → cards 是逐层收窄的，必须一起放宽才生效。 */
+@media (min-width: 1600px) {
+  .chat {
+    max-width: 1080px;
+  }
+  .home {
+    max-width: 980px;
+  }
+  .hero__groups {
+    max-width: 980px;
+  }
+  .home .hero__cards {
+    /* 用 auto-fill 而非固定 4 列：1600 下 .home 实际只有 ~758px（右栏已放宽到 520），
+     * 固定 4 列会把卡片压到 183px，而头像 30 + gap 9 + 左右内边距 22 已占去 61px，
+     * 描述文字几乎全截断。auto-fill 按可用宽在 3/4 列间自适应，列宽稳定在 ~240px。 */
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    max-width: 980px;
   }
 }
 

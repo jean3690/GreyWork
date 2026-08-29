@@ -243,6 +243,7 @@ export const zhCN = {
   },
   panels: {
     file: "文件",
+    more: "更多",
     diffs: {
       title: "Diff",
       summary: "本次变更 · {files} 个文件",
@@ -380,7 +381,7 @@ export const zhCN = {
   statusbar: {
     gitUnavailable: "Git 服务不可用",
     currentBranch: "当前分支",
-    tokenUsageHint: "Token 用量：会话计数器尚未接入",
+    tokenUsageHint: "Token 用量",
     acpHostReady: "桌面端 ACP 宿主就绪",
     webPreviewEnv: "Web 预览环境",
     acpReady: "ACP 就绪",

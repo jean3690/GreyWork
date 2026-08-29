@@ -251,6 +251,7 @@ export const enUS: MessageSchema = {
   },
   panels: {
     file: "Files",
+    more: "More",
     diffs: {
       title: "Diff",
       summary: "Changes · {files} files",
@@ -388,7 +389,7 @@ export const enUS: MessageSchema = {
   statusbar: {
     gitUnavailable: "Git service unavailable",
     currentBranch: "Current branch",
-    tokenUsageHint: "Token usage: session counter not wired up yet",
+    tokenUsageHint: "Token usage",
     acpHostReady: "Desktop ACP host ready",
     webPreviewEnv: "Web preview environment",
     acpReady: "ACP ready",
