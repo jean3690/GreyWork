@@ -1,6 +1,7 @@
 /** workbench 共享领域类型（mock 阶段形状，后续接真实包时在此演进）。 */
 
-export interface Project {
+/** 工作区：会话归属的顶层组织单位（可绑定用户选择的存放文件夹）。 */
+export interface Workspace {
   id: string;
   name: string;
   description: string;
@@ -13,8 +14,8 @@ export interface ThreadItem {
 }
 
 export interface ThreadGroup {
-  project: string;
-  projectId?: string;
+  workspace: string;
+  workspaceId?: string;
   threads: ThreadItem[];
 }
 

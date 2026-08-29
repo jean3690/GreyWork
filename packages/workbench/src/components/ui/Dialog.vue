@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { DialogClose, DialogContent, DialogOverlay, DialogPortal, DialogRoot, type DialogRootProps } from "reka-ui";
-import type { HTMLAttributes } from "vue";
+import { computed, type HTMLAttributes } from "vue";
 import { X } from "lucide-vue-next";
 import { cn } from "../../lib/utils";
 
@@ -16,7 +16,8 @@ const emit = defineEmits<{
   (event: "update:open", value: boolean): void;
 }>();
 
-const rootProps = { open: props.open, defaultOpen: props.defaultOpen };
+/** 受控 open 需随父级 :open 更新：静态对象在 setup 捕获旧值，对话框永不打开。 */
+const rootProps = computed(() => ({ open: props.open, defaultOpen: props.defaultOpen }));
 
 function onOpenChange(value: boolean): void {
   emit("update:open", value);

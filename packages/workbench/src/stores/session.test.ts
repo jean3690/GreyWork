@@ -1,0 +1,157 @@
+// 会话存储契约：CRUD / 归属项目 / 持久化往返 / 项目删除迁移。
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createPinia, setActivePinia } from "pinia";
+import { useSessionStore } from "./session";
+
+const storageHolder = globalThis as { localStorage?: Storage };
+
+/** node 环境注入内存 localStorage（createJsonStorage 优先 window，再 globalThis）。 */
+function injectStorage(): void {
+  const backing: Record<string, string> = {};
+  storageHolder.localStorage = {
+    getItem: (key: string) => backing[key] ?? null,
+    setItem: (key: string, value: string) => {
+      backing[key] = value;
+    },
+    removeItem: (key: string) => {
+      delete backing[key];
+    },
+    clear: () => {
+      for (const key of Object.keys(backing)) delete backing[key];
+    },
+    key: (index: number) => Object.keys(backing)[index] ?? null,
+    get length() {
+      return Object.keys(backing).length;
+    },
+  } as Storage;
+}
+
+beforeEach(() => {
+  setActivePinia(createPinia());
+});
+
+describe("基础 CRUD", () => {
+  it("无持久化数据时按 mock 线程种子初始化（按项目分组）", () => {
+    const store = useSessionStore();
+    expect(store.sessions.length).toBeGreaterThan(0);
+    const main = store.sessionsOf("p-gw-main");
+    expect(main.length).toBe(3);
+    expect(main[0]?.title).toBeTruthy();
+    expect(store.sessions.some((s) => s.workspaceId === null)).toBe(false);
+  });
+
+  it("createSession 建会话并置为当前", () => {
+    const store = useSessionStore();
+    const session = store.createSession("p-city", "台风复盘");
+    expect(session.id).toBeTruthy();
+    expect(store.activeSessionId).toBe(session.id);
+    expect(store.getSession(session.id)?.workspaceId).toBe("p-city");
+  });
+
+  it("ensure 复用已有会话，缺 id 时按给定 id 创建", () => {
+    const store = useSessionStore();
+    const created = store.createSession(null);
+    const messages = store.ensure(created.id);
+    expect(messages).toBe(store.getSession(created.id)?.messages);
+
+    const list = store.ensure("ses-unknown");
+    expect(store.getSession("ses-unknown")?.messages).toBe(list);
+    expect(store.activeSessionId).toBe("ses-unknown");
+  });
+
+  it("appendMessage 追加并推进 updatedAt", () => {
+    const store = useSessionStore();
+    const session = store.createSession(null);
+    const before = store.getSession(session.id)?.updatedAt ?? 0;
+    store.appendMessage(session.id, { id: "m-1", role: "user", content: "hi", ts: Date.now() });
+    const record = store.getSession(session.id);
+    expect(record?.messages).toHaveLength(1);
+    expect(record?.messages[0]?.content).toBe("hi");
+    expect(record?.updatedAt).toBeGreaterThanOrEqual(before);
+  });
+
+  it("renameSession 校验空标题；deleteSession 清空激活态", () => {
+    const store = useSessionStore();
+    const session = store.createSession(null);
+    store.renameSession(session.id, "  重命名后  ");
+    expect(store.getSession(session.id)?.title).toBe("重命名后");
+    store.renameSession(session.id, "   ");
+    expect(store.getSession(session.id)?.title).toBe("重命名后");
+
+    store.deleteSession(session.id);
+    expect(store.getSession(session.id)).toBeUndefined();
+    expect(store.activeSessionId).toBeNull();
+  });
+
+  it("sessionsOf 按更新倒序且过滤归属", () => {
+    vi.useFakeTimers();
+    try {
+      const store = useSessionStore();
+      const first = store.createSession("p-city", "a");
+      vi.advanceTimersByTime(1000);
+      store.createSession("p-city", "b");
+      const citySessions = store.sessionsOf("p-city");
+      expect(citySessions).toHaveLength(4); // 种子 2 + 新建 2
+      expect(citySessions.slice(0, 2).map((s) => s.title)).toEqual(["b", "a"]);
+      expect(first.workspaceId).toBe("p-city");
+      expect(store.sessionsOf(null).some((s) => s.title === "a" || s.title === "b")).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("归属迁移与持久化", () => {
+  it("旧版 v1（projectId）会话数据迁移为 workspaceId", () => {
+    injectStorage();
+    try {
+      storageHolder.localStorage?.setItem(
+        "greywork.sessions",
+        JSON.stringify({
+          version: 1,
+          sessions: [{ id: "old-1", title: "旧会话", projectId: "p-city", createdAt: 1, updatedAt: 2, messages: [] }],
+          activeSessionId: "old-1",
+        }),
+      );
+      const store = useSessionStore();
+      const migrated = store.getSession("old-1");
+      expect(migrated?.title).toBe("旧会话");
+      expect(migrated?.workspaceId).toBe("p-city");
+      expect(store.activeSessionId).toBe("old-1");
+    } finally {
+      delete storageHolder.localStorage;
+    }
+  });
+
+  it("reassignWorkspace 把工作区会话迁移到普通对话", () => {
+    const store = useSessionStore();
+    store.createSession("p-city");
+    store.createSession("p-city", "second");
+    const orphan = store.createSession(null);
+
+    store.reassignWorkspace("p-city", null);
+    expect(store.sessionsOf("p-city")).toHaveLength(0);
+    expect(store.sessionsOf(null)).toHaveLength(5); // 孤儿 1 + 迁移（种子 2 + 新建 2）
+    expect(store.sessionsOf(null).some((s) => s.id === orphan.id)).toBe(true);
+  });
+
+  it("写操作落盘，重新加载后状态还原", () => {
+    injectStorage();
+    try {
+      const store = useSessionStore();
+      const session = store.createSession("p-general", "持久化会话");
+      store.appendMessage(session.id, { id: "m-x", role: "user", content: "内容", ts: Date.now() });
+
+      // 同一 localStorage 上重建（新 pinia），读取应还原
+      setActivePinia(createPinia());
+      const reloaded = useSessionStore();
+      const restored = reloaded.getSession(session.id);
+      expect(restored?.title).toBe("持久化会话");
+      expect(restored?.workspaceId).toBe("p-general");
+      expect(restored?.messages[0]?.content).toBe("内容");
+      expect(reloaded.activeSessionId).toBe(session.id);
+    } finally {
+      delete storageHolder.localStorage;
+    }
+  });
+});

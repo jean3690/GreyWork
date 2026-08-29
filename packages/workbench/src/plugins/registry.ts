@@ -1,7 +1,7 @@
 import type { PluginManifest } from "./types";
 import { defineAsyncComponent } from "vue";
 import SidebarEntriesSection from "../components/sidebar/SidebarEntriesSection.vue";
-import SidebarProjectsSection from "../components/sidebar/SidebarProjectsSection.vue";
+import SidebarWorkspacesSection from "../components/sidebar/SidebarWorkspacesSection.vue";
 import SidebarUserSection from "../components/sidebar/SidebarUserSection.vue";
 import ArtifactsPane from "../components/panels/ArtifactsPane.vue";
 import ArtifactViewer from "../components/panels/ArtifactViewer.vue";
@@ -20,6 +20,7 @@ const AnalyticsView = defineAsyncComponent(() => import("../views/AnalyticsView.
 const MarketView = defineAsyncComponent(() => import("../views/MarketView.vue"));
 const AutomationView = defineAsyncComponent(() => import("../views/AutomationView.vue"));
 const SettingsView = defineAsyncComponent(() => import("../views/SettingsView.vue"));
+const WorkspacesView = defineAsyncComponent(() => import("../views/WorkspacesView.vue"));
 
 /**
  * 默认清单（id "core.builtin"）：一次性贡献全部 6 个内置 mode（主舞台以 Cowork 为家，
@@ -38,13 +39,14 @@ export const coreBuiltinManifest: PluginManifest = {
       { id: "market", title: "nav.modes.market", component: MarketView },
       { id: "automation", title: "nav.modes.automation", component: AutomationView },
       { id: "settings", title: "nav.modes.settings", component: SettingsView },
+      { id: "workspaces", title: "nav.modes.workspaces", component: WorkspacesView },
       /* 3D 空间 / GIS 地图暂时下线（聚焦 Cowork）：SpatialView / GisView 文件保留，
          重新上线时在 modes 中追加，并同步 router 守卫（自动）与 MobileTabBar。 */
     ],
     uiRegions: [
       // ShellSidebar 槽位（title 为 i18n key，渲染处 t() 转译）
       { region: "shellSidebar", id: "sidebar.entries", title: "sidebar.entries", component: SidebarEntriesSection, order: 10 },
-      { region: "shellSidebar", id: "sidebar.projects", title: "sidebar.projects", component: SidebarProjectsSection, order: 20 },
+      { region: "shellSidebar", id: "sidebar.workspaces", title: "sidebar.workspaces", component: SidebarWorkspacesSection, order: 20 },
       { region: "shellSidebar", id: "sidebar.user", title: "sidebar.user", component: SidebarUserSection, order: 30 },
       // ActivityPanel 内置标签页（「文件」置顶：OS 式列表 → 点击进入内容）
       { region: "activityPanel", id: "activity.editor", title: "panels.file", component: EditorPane, order: 5 },

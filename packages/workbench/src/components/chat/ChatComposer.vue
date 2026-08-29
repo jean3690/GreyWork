@@ -3,7 +3,8 @@ import { computed, ref, watch } from "vue";
 import { REASONING_EFFORTS, type ReasoningEffort } from "@greywork/shell";
 import { useChatStore } from "../../stores/chat";
 import { PERMISSION_TIERS, useSettingsStore } from "../../stores/settings";
-import { useProjectStore } from "../../stores/project";
+import { useWorkspaceStore } from "../../stores/workspace";
+import { useSessionStore } from "../../stores/session";
 import { getPluginMarket } from "../../state/pluginMarket";
 import { Paperclip, Plus, Send, Shield, ShieldCheck, ShieldOff, SlidersHorizontal, Square, X } from "lucide-vue-next";
 import { Button, Dialog, FilePick, Select, type SelectOption, Switch } from "../ui";
@@ -15,7 +16,8 @@ const { t } = useI18n();
 const chat = useChatStore();
 const settings = useSettingsStore();
 const agentStore = useAgentStore();
-const projectStore = useProjectStore();
+const workspaceStore = useWorkspaceStore();
+const sessionStore = useSessionStore();
 const pluginMarket = getPluginMarket();
 
 const draft = defineModel<string>("draft", { default: "" });
@@ -34,10 +36,8 @@ const selectedProvider = computed(() => agentStore.agentProviders.find((p) => p.
 const acpSelectOptions = computed(() => agentStore.acpConfigOptions.filter((o) => o.type === "select" && o.options?.length));
 
 const activeThreadProjectName = computed(() => {
-  for (const g of projectStore.threadGroups) {
-    if (g.threads.some((t) => t.id === chat.activeThreadId)) return g.project ?? null;
-  }
-  return null;
+  const session = sessionStore.getSession(chat.activeThreadId);
+  return session?.workspaceId ? (workspaceStore.workspaceById(session.workspaceId)?.name ?? null) : null;
 });
 
 /* ── 模型选择（自 TopBar 迁入） ── */

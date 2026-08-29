@@ -3504,6 +3504,59 @@ textarea:focus-visible,
   font-family: var(--font-mono);
   font-size: 10px;
 }
+/* 会话行：hover 显示重命名 / 删除；行内重命名输入覆盖行。 */
+.sb-thread-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.sb-thread-row .sb-thread {
+  flex: 1;
+  min-width: 0;
+}
+.sb-thread__actions {
+  display: none;
+  align-items: center;
+  gap: 2px;
+  padding-right: 4px;
+}
+.sb-thread-row:hover .sb-thread__actions,
+.sb-thread-row:focus-within .sb-thread__actions {
+  display: inline-flex;
+}
+.sb-thread__action {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--dim2);
+  cursor: pointer;
+}
+.sb-thread__action:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+.sb-thread__action--confirm {
+  background: var(--danger-bg, rgba(227, 65, 79, 0.16));
+  color: var(--danger, #e3414f);
+}
+.sb-thread__rename {
+  flex: 1;
+  min-width: 0;
+  margin: 2px 4px;
+  padding: 5px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--panel-1);
+  color: var(--text);
+  font-size: 12px;
+  outline: none;
+}
+
 .sidebar__foot {
   justify-content: space-between;
   margin-top: 12px;

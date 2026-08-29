@@ -58,6 +58,12 @@ export const WORKSPACE_SEED: Record<string, string> = {
 /** 模块级共享单例：编辑器 / Diff / 状态栏 / chat 管线全部读写同一份虚拟文件系统。 */
 export const workspaceFs: WorkspaceFileSystem = createMemoryFileSystem(WORKSPACE_SEED);
 export const workspaceGit: GitService = createMemoryGitService(workspaceFs);
+/** 磁盘写回钩子：工作区绑定存放文件夹后，编辑器保存同步写回真实磁盘（未命中注册路径时为空操作）。 */
+type DiskWriter = (path: string, content: string) => Promise<void>;
+let diskWriter: DiskWriter | null = null;
+export function setDiskWriter(writer: DiskWriter | null): void {
+  diskWriter = writer;
+}
 
 const STATUS_LETTER: Record<GitStatusEntry["status"], string> = {
   modified: "M",
@@ -131,11 +137,12 @@ export const useVfsStore = defineStore("vfs", () => {
     savedContent.value = activeContent.value;
   }
 
-  /** 保存当前打开文件并刷新变更。 */
+  /** 保存当前打开文件并刷新变更；绑定工作区存放文件夹时同步写回磁盘。 */
   async function saveActive(): Promise<void> {
     await workspaceFs.writeFile(activePath.value, activeContent.value);
     savedContent.value = activeContent.value;
     await refreshStatus();
+    await diskWriter?.(activePath.value, activeContent.value);
   }
 
   /** 管线 / 面板写入任意文件（新文件自动入清单）。 */

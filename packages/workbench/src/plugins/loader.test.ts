@@ -9,13 +9,14 @@ import { coreBuiltinManifest } from "./registry";
 const Dummy = defineComponent({ render: () => null });
 
 describe("capability loader", () => {
-  it("registers default manifest and exposes 6 builtin modes（工作区已并入右栏编辑；3D 空间 / GIS 暂时下线）", async () => {
+  it("registers default manifest and exposes 7 builtin modes（工作区已并入右栏编辑；3D 空间 / GIS 暂时下线）", async () => {
     const loader = createCapabilityLoader();
     loader.register(coreBuiltinManifest);
     await loader.activateAll();
     const modes = loader.snapshot().modes.map((mode) => mode.id);
-    expect(modes).toHaveLength(6);
+    expect(modes).toHaveLength(7);
     expect(modes).toContain("chat");
+    expect(modes).toContain("workspaces");
     expect(modes).not.toContain("overview");
     expect(modes).not.toContain("editor");
     expect(modes).not.toContain("spatial");
