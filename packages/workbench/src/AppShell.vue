@@ -14,13 +14,12 @@ import { useChatStore } from "./stores/chat";
 import { useSessionStore } from "./stores/session";
 import { bindWorkbenchRouter, ensureMode } from "./router/util";
 import { setLocale } from "./i18n";
-import { preloadCesiumEngine } from "@greywork/spatial";
 import ShellSidebar from "./components/ShellSidebar.vue";
 import TopBar from "./components/TopBar.vue";
 import ActivityPanel from "./components/ActivityPanel.vue";
 import StatusBar from "./components/StatusBar.vue";
 import MobileTabBar from "./components/MobileTabBar.vue";
-import { getGreyWorkCore } from "./components/greyWorkCoreSingleton";
+import { disposeGreyWorkCore } from "./components/greyWorkCoreSingleton";
 
 /* ===== Bootstrap：注册默认清单 + 拓扑激活 + 已安装插件恢复 + token 快照 ===== */
 capabilitySeam.register(coreBuiltinManifest);
@@ -84,14 +83,14 @@ function onViewportChange(event: MediaQueryListEvent): void {
 onMounted(() => {
   window.addEventListener("keydown", onKeydown);
   mobileQuery?.addEventListener("change", onViewportChange);
-  // 空闲预加载 Cesium 引擎（模块级缓存），降低首次进入 SpatialView 的等待。
-  const idle = typeof requestIdleCallback === "function" ? requestIdleCallback : (cb: () => void) => setTimeout(cb, 500);
-  idle(() => void preloadCesiumEngine());
+  // 原空闲预加载 Cesium 引擎已移除：Spatial/GIS 两个 mode 当前未注册（registry 注释
+  // 「暂时下线」），预加载会在每次启动白拉 ~4.7MB 懒加载 chunk，且首屏 idle 抢带宽。
+  // 重新上线 SpatialView 时把这段加回来即可。
 });
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeydown);
   mobileQuery?.removeEventListener("change", onViewportChange);
-  getGreyWorkCore().dispose();
+  disposeGreyWorkCore();
 });
 
 /* 右栏开合 + 侧栏开合（<1180 默认收起） */

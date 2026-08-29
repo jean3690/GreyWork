@@ -39,6 +39,16 @@ export function getGreyWorkCore(): GreyWorkCoreInstance {
   return instance;
 }
 
+/**
+ * 仅在已实例化时 dispose。
+ * 注意：不要写成 getGreyWorkCore().dispose() —— getGreyWorkCore 是懒初始化工厂，
+ * 首次调用会真正 mount GreyWorkCore.vue，而它的 onMounted 会 createCesiumGlobe()
+ * 拉起整个 Cesium 引擎（约 4.7MB）。用 AppShell 卸载路径调它会为「销毁」而先创建。
+ */
+export function disposeGreyWorkCore(): void {
+  instance?.dispose();
+}
+
 /** 视图侧共享宿主：挂载时把 singleton 宿主 appendChild 进本地面板，卸载时移除（不销毁）。 */
 export function useSharedGreyWorkCore(hostRef: Ref<HTMLElement | null>): void {
   onMounted(() => {
