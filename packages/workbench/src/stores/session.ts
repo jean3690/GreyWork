@@ -1,6 +1,7 @@
 import { createJsonStorage } from "@greywork/core";
 import { defineStore } from "pinia";
 import { ref, watch } from "vue";
+import { sessionBackend } from "../lib/session-backend";
 import { MOCK_THREAD_GROUPS } from "../mocks/threads";
 import { MOCK_WORKSPACES } from "../mocks/workspaces";
 import type { ThreadMessage } from "../types";
@@ -134,7 +135,7 @@ function loadSessions(): PersistedSessions {
   return { version: 2, sessions: seedSessions(), activeSessionId: null };
 }
 
-/** 会话管理：持久化于 localStorage（greywork.sessions），跨重启保留会话与消息。 */
+/** 会话管理：桌面态真源为 SQLite（db_sessions_*），localStorage 作首帧缓存；浏览器态维持 localStorage 全量持久化。 */
 export const useSessionStore = defineStore("session", () => {
   const loaded = loadSessions();
   const sessions = ref<SessionRecord[]>(loaded.sessions);
@@ -157,7 +158,31 @@ export const useSessionStore = defineStore("session", () => {
       persistTimer = null;
     }
     storage.write({ version: 2, sessions: sessions.value, activeSessionId: activeSessionId.value });
+    if (sessionBackend.active()) {
+      // 后端真源同步：失败不回滚内存（下次 persist 自愈），仅上报。
+      void sessionBackend.save({ sessions: sessions.value, activeSessionId: activeSessionId.value }).catch((error: unknown) => {
+        console.error("[session] SQLite 同步失败，将下次重试", error);
+      });
+    }
   }
+
+  /** 桌面态启动接管：库已接管 → 以库内容覆盖（localStorage 仅首帧缓存）；未接管 → 当前内容首落库。 */
+  const backendHydratePromise = (() => {
+    if (!sessionBackend.active()) return null;
+    return sessionBackend
+      .load()
+      .then((snapshot) => {
+        if (snapshot) {
+          sessions.value = snapshot.sessions as SessionRecord[];
+          activeSessionId.value = snapshot.activeSessionId;
+        } else {
+          persist(); // 首启：种子/缓存成为库的真源快照
+        }
+      })
+      .catch((error: unknown) => {
+        console.error("[session] SQLite 加载失败，沿用本地缓存", error);
+      });
+  })();
 
   function getSession(id: string): SessionRecord | undefined {
     return sessions.value.find((candidate) => candidate.id === id);
@@ -201,6 +226,18 @@ export const useSessionStore = defineStore("session", () => {
     persist();
   }
 
+  /**
+   * 首条用户消息自动命名：只在标题仍是默认值时写入，用户手动改过名就不再动
+   *（否则第二句会把用户起的名字冲掉）。
+   */
+  function autoTitle(id: string, text: string): void {
+    const session = getSession(id);
+    if (!session || session.title !== DEFAULT_TITLE) return;
+    const flat = text.trim().replace(/\s+/g, " ");
+    if (!flat) return;
+    session.title = flat.length > 24 ? `${flat.slice(0, 24)}…` : flat;
+  }
+
   function deleteSession(id: string): void {
     const index = sessions.value.findIndex((candidate) => candidate.id === id);
     if (index < 0) return;
@@ -222,6 +259,8 @@ export const useSessionStore = defineStore("session", () => {
   function appendMessage(id: string, message: ThreadMessage): void {
     ensure(id).push(message);
     touch(id);
+    // 会话标题跟着第一条用户消息走；助手消息不参与命名。
+    if (message.role === "user") autoTitle(id, message.content);
     persist();
   }
 
@@ -245,10 +284,13 @@ export const useSessionStore = defineStore("session", () => {
   return {
     sessions,
     activeSessionId,
+    /** 桌面态启动接管完成信号（null = 浏览器态无后端）；await 后库内容已就位。 */
+    hydrated: backendHydratePromise,
     getSession,
     createSession,
     ensure,
     renameSession,
+    autoTitle,
     deleteSession,
     touch,
     setActive,
