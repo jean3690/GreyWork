@@ -13,6 +13,7 @@ import {
   createAcpClient,
   type AcpPermissionRequestPayload,
   type AcpSessionConfigOption,
+  type AcpSessionOpened,
   type McpProbeReport,
   type McpServerConfig,
   type McpSkippedServer,
@@ -96,6 +97,13 @@ export const useAgentStore = defineStore("agent", () => {
   const acpBusy = ref(false);
   const acpHandle = ref<number | null>(null);
   const acpSessionId = ref<string | null>(null);
+  /**
+   * 当前 ACP 会话服务的对话 id（null = 尚未绑定到具体对话，如设置页主动连接时建的会话）。
+   *
+   * 不是渲染状态，所以用普通变量而不是 ref。它存在的唯一理由：ACP 的上下文属于 session，
+   * 派发时必须能判断「这条 session 是不是当前这条对话的」，否则会拿着上一条对话的上下文继续答。
+   */
+  let acpSessionThreadId: string | null = null;
   /** 待前端裁决的权限请求；null = 无待决项（auto 决策只进通知流） */
   const pendingPermission = ref<AcpPermissionRequestPayload | null>(null);
   /** 当前 ACP 回合写入中的 assistant 支架（chat.threads 内），流式续写目标。 */
@@ -578,6 +586,7 @@ export const useAgentStore = defineStore("agent", () => {
         acpConnected.value = false;
         acpHandle.value = null;
         acpSessionId.value = null;
+        acpSessionThreadId = null;
         acpConfigOptions.value = [];
         acpBusy.value = false;
         pendingPermission.value = null;
@@ -588,8 +597,28 @@ export const useAgentStore = defineStore("agent", () => {
     });
   }
 
-  /** 启动 ACP 后端会话；返回错误文案（null = 成功）。 */
-  async function startAcpSession(): Promise<string | null> {
+  /** 采纳 session/new 的结果（两条建会话路径共用，避免字段回填漂移）。 */
+  function adoptOpenedSession(opened: AcpSessionOpened, threadId: string | null): void {
+    acpSessionId.value = opened.sessionId;
+    acpSessionThreadId = threadId;
+    acpConfigOptions.value = opened.configOptions;
+    acpMcpServers.value = opened.mcpServers ?? [];
+    acpMcpSkipped.value = opened.skippedMcpServers ?? [];
+    acpStatus.value = opened.configOptions.length > 0 ? "session_active" : "connected";
+    acpConnected.value = true;
+  }
+
+  /**
+   * 建一条 ACP 会话并绑定到 `threadId`（null = 尚未落到具体对话，如设置页主动连接）。
+   * 返回错误文案（null = 成功）。
+   *
+   * **agent 进程可复用，会话必须一对话一条**：ACP 的上下文属于 session，不属于进程。
+   * 整个 app 共用一条 session 时，新建对话后 agent 仍带着上一条对话的上下文，
+   * 回答会接着上一轮往下讲 —— 对话之间根本不隔离。
+   * 反过来也不能靠重启进程来换会话：重启要重新 spawn CLI 并重新探测 config options
+   * （模型 / 思考强度），那些是用户按工作区记住的选择，不该因为新建一次对话就丢掉。
+   */
+  async function startAcpSession(threadId: string | null = chat.activeThreadId): Promise<string | null> {
     const provider = agentProviders.value.find((provider) => provider.id === selectedProviderId.value);
     if (!provider) return t("errors.acpNotSelected");
     if (!acp.isAvailable()) return t("errors.acpTransportUnavailable");
@@ -602,25 +631,26 @@ export const useAgentStore = defineStore("agent", () => {
       return error instanceof Error ? error.message : String(error);
     }
     await ensureListener();
-    acpStatus.value = "connecting";
+    const reusedProcess = acpHandle.value !== null;
+    if (!reusedProcess) acpStatus.value = "connecting";
     try {
-      acpHandle.value = await acp.startAgent(provider.command, settings.effectivePermissionTier, settings.sandboxMode, workspace);
+      // 已有进程就只在它上面另开会话，不再 spawn 第二个 CLI。
+      acpHandle.value ??= await acp.startAgent(provider.command, settings.effectivePermissionTier, settings.sandboxMode, workspace);
       // 建会话时把启用的 MCP 服务器声明给 agent；宿主按后端能力过滤，
       // 被跳过的原因回灌到 acpMcpSkipped 供设置页明示（不静默丢配置）。
-      const opened = await acp.openSession(acpHandle.value, workspace, settings.enabledMcpServers);
-      acpSessionId.value = opened.sessionId;
-      acpConfigOptions.value = opened.configOptions;
-      acpMcpServers.value = opened.mcpServers ?? [];
-      acpMcpSkipped.value = opened.skippedMcpServers ?? [];
-      acpStatus.value = opened.configOptions.length > 0 ? "session_active" : "connected";
-      acpConnected.value = true;
+      adoptOpenedSession(await acp.openSession(acpHandle.value, workspace, settings.enabledMcpServers), threadId);
       return null;
     } catch (error) {
       acpStatus.value = "error";
-      acpConnected.value = false;
-      acpHandle.value = null;
       acpSessionId.value = null;
-      acpConfigOptions.value = [];
+      acpSessionThreadId = null;
+      // 复用的进程还活着：只清会话、保留 handle，下一次派发能直接重试 session/new。
+      // 若进程是本次刚 spawn 的，则连 handle 一起丢弃（与既有恢复语义一致：整条 runtime 重来）。
+      if (!reusedProcess) {
+        acpConnected.value = false;
+        acpHandle.value = null;
+        acpConfigOptions.value = [];
+      }
       return t("errors.startFailed", { detail: String(error) });
     }
   }
@@ -638,8 +668,10 @@ export const useAgentStore = defineStore("agent", () => {
     acpStream = message;
     acpThreadId = threadId;
     acpStreamId.value = message.id;
-    if (acpHandle.value === null || acpSessionId.value === null) {
-      const failure = await startAcpSession();
+    // 会话隔离：没有进程/会话，或现有会话属于**另一条对话** → 都要建新会话（进程照旧复用）。
+    // 少了最后一个条件，新建对话后 agent 还带着上一条对话的上下文，回答会接着上一轮讲。
+    if (acpHandle.value === null || acpSessionId.value === null || acpSessionThreadId !== threadId) {
+      const failure = await startAcpSession(threadId);
       if (failure) {
         chat.setMessageContent(message.id, t("errors.acpStartFailed", { detail: failure }), acpThreadId);
         acpStream = null;
@@ -796,6 +828,7 @@ export const useAgentStore = defineStore("agent", () => {
     acpConnected.value = false;
     acpHandle.value = null;
     acpSessionId.value = null;
+    acpSessionThreadId = null;
     acpConfigOptions.value = [];
     pendingPermission.value = null;
     acpStreamId.value = null;
@@ -866,6 +899,7 @@ export const useAgentStore = defineStore("agent", () => {
       acpConnected.value = false;
       acpHandle.value = null;
       acpSessionId.value = null;
+      acpSessionThreadId = null;
       acpConfigOptions.value = [];
       pendingPermission.value = null;
       acpStreamId.value = null;
@@ -938,6 +972,7 @@ export const useAgentStore = defineStore("agent", () => {
       acpConnected.value = false;
       acpHandle.value = null;
       acpSessionId.value = null;
+      acpSessionThreadId = null;
       acpConfigOptions.value = [];
       pendingPermission.value = null;
       acpStreamId.value = null;
