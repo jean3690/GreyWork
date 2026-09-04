@@ -5,6 +5,8 @@ apps/desktop/src-tauri/target/
 *.log
 # 日志轮转目录：*.log 盖不住同目录的 .<hash>-audit.json（winston-daily-rotate-file 的轮转元数据）
 logs/
+# WSL 从 Windows 拷文件时留下的 NTFS 备用数据流（<文件名>:Zone.Identifier），与源码无关
+*:Zone.Identifier
 *.png
 .env
 .env.*
