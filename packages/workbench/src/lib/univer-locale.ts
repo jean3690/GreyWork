@@ -28,30 +28,26 @@ function deepMerge(target: UniverLocaleMap, ...sources: Partial<UniverLocaleMap>
 type LocaleModule = { default: UniverLocaleMap };
 
 /**
- * 加载并合并 Univer 常用 zh-CN 语言包。
- * design / ui 为所有产品共用；docs-ui 供文档；sheets-ui / sheets 供表格。
- * 幻灯片不在此列：pptx 预览已改为自解析 + DOM 渲染（`lib/pptx-parse.ts`），不再经 Univer。
+ * 加载并合并 Univer 表格用的 zh-CN 语言包（design / ui 为共用底座，sheets 系为表格）。
+ *
+ * 只剩表格：docx 与 pptx 预览都已改为自解析 + DOM 渲染
+ * （`lib/docx-parse.ts` / `lib/pptx-parse.ts`），不再经 Univer。
+ * 表格留着它是因为 Univer 的虚拟化网格（滚动 / 冻结 / 列宽）自己重写不划算。
  */
-export async function loadUniverZhLocales(docs = false, sheets = false): Promise<UniverLocaleMap> {
-  const imports: Promise<LocaleModule>[] = [
+export async function loadUniverZhLocales(): Promise<UniverLocaleMap> {
+  const modules = await Promise.all([
     import("@univerjs/design/locale/zh-CN") as Promise<LocaleModule>,
     import("@univerjs/ui/locale/zh-CN") as Promise<LocaleModule>,
-  ];
-  if (docs) imports.push(import("@univerjs/docs-ui/locale/zh-CN") as Promise<LocaleModule>);
-  if (sheets) {
-    imports.push(import("@univerjs/sheets/locale/zh-CN") as Promise<LocaleModule>);
-    imports.push(import("@univerjs/sheets-ui/locale/zh-CN") as Promise<LocaleModule>);
-  }
-
-  const modules = await Promise.all(imports);
+    import("@univerjs/sheets/locale/zh-CN") as Promise<LocaleModule>,
+    import("@univerjs/sheets-ui/locale/zh-CN") as Promise<LocaleModule>,
+  ]);
   return deepMerge({}, ...modules.map((m) => m.default));
 }
 
 /** 供 `new Univer({ locale, locales })` 使用的最小 locales 配置（含合并后的 zh-CN 数据）。 */
-export async function buildUniverLocaleConfig(docs = false, sheets = false): Promise<{ locale: LocaleType; locales: ILocales }> {
-  const localeData = await loadUniverZhLocales(docs, sheets);
+export async function buildUniverLocaleConfig(): Promise<{ locale: LocaleType; locales: ILocales }> {
   return {
     locale: LocaleType.ZH_CN,
-    locales: { [LocaleType.ZH_CN]: localeData },
+    locales: { [LocaleType.ZH_CN]: await loadUniverZhLocales() },
   };
 }

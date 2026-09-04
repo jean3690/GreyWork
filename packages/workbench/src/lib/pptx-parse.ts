@@ -15,9 +15,7 @@
  * - 文本自动缩放（normAutofit）与 layout/master 的 lstStyle 默认字号继承：无显式 sz 时用 18pt 兜底。
  */
 import JSZip from "jszip";
-
-/** 1 CSS px = 9525 EMU（914400 EMU/inch ÷ 96 px/inch）。 */
-const EMU_PER_PX = 9525;
+import { EMU_PER_PX, attr, boolAttr, decodeImages, emuToPx, kid, kids, local, pick, readRels, readXml, relAttr, type Rels } from "./ooxml";
 
 /** 未声明字号时的兜底（pt）。PowerPoint 的正文默认是 18pt。 */
 const DEFAULT_FONT_PT = 18;
@@ -125,87 +123,6 @@ export interface ParsedDeck {
   width: number;
   height: number;
   slides: ParsedSlide[];
-}
-
-/* ===== DOM 辅助 ===== */
-
-/**
- * 取去掉命名空间前缀的标签名。
- *
- * 不用 localName / getElementsByTagNameNS：不同 XML 解析器（浏览器 DOMParser 与测试用的
- * happy-dom）对未声明命名空间感知时的 localName 行为不一致，而 nodeName 一定是「前缀:本名」，
- * 剥前缀是唯一在两边都成立的做法。也顺带兼容用其他前缀的生产者。
- */
-function local(node: Element): string {
-  const name = node.nodeName;
-  const colon = name.indexOf(":");
-  return colon === -1 ? name : name.slice(colon + 1);
-}
-
-/** 直接子元素中所有同名者。逐层取而非全树搜：避免把嵌套子形状的 a:off 当成自己的。 */
-function kids(parent: Element | null, name: string): Element[] {
-  if (!parent) return [];
-  const out: Element[] = [];
-  for (const child of Array.from(parent.children)) {
-    if (local(child) === name) out.push(child);
-  }
-  return out;
-}
-
-function kid(parent: Element | null, name: string): Element | null {
-  if (!parent) return null;
-  for (const child of Array.from(parent.children)) {
-    if (local(child) === name) return child;
-  }
-  return null;
-}
-
-/** 沿路径逐层下钻，任一层缺失即 null。 */
-function pick(parent: Element | null, ...path: string[]): Element | null {
-  let node = parent;
-  for (const name of path) {
-    node = kid(node, name);
-    if (!node) return null;
-  }
-  return node;
-}
-
-function attr(el: Element | null, name: string): string | null {
-  return el?.getAttribute(name) ?? null;
-}
-
-/**
- * 取关系引用属性（`r:embed` / `r:id`），按本名匹配、**带前缀的优先**。
- *
- * 两个坑叠在一起：`getAttribute("embed")` 取不到带前缀的属性；而写死 `"r:embed"` 又赌了
- * 生产者一定用 `r` 作前缀。更要命的是 `<p:sldId id="256" r:id="rId3"/>` 两个都有 ——
- * 无前缀的 `id` 是页号，拿它去查关系表必然落空，所以顺序不能反。
- */
-function relAttr(el: Element | null, name: string): string | null {
-  if (!el) return null;
-  for (const item of Array.from(el.attributes)) {
-    const colon = item.name.indexOf(":");
-    if (colon !== -1 && item.name.slice(colon + 1) === name) return item.value;
-  }
-  return el.getAttribute(name);
-}
-
-/** OOXML 布尔属性可写 "1" 或 "true"。 */
-function flag(el: Element | null, name: string): boolean {
-  const value = attr(el, name);
-  return value === "1" || value === "true";
-}
-
-function emu(value: string | null): number {
-  const n = Number(value);
-  return Number.isFinite(n) ? n / EMU_PER_PX : 0;
-}
-
-function parseXml(text: string): Element | null {
-  if (typeof DOMParser === "undefined") throw new Error("当前环境没有 DOMParser，无法解析 pptx");
-  const doc = new DOMParser().parseFromString(text, "application/xml");
-  if (doc.getElementsByTagName("parsererror").length > 0) return null;
-  return doc.documentElement ?? null;
 }
 
 /* ===== 颜色 ===== */
@@ -334,10 +251,10 @@ function rectOf(xfrm: Element | null): PptxRect | null {
   // rot 单位是 1/60000 度
   const rotation = Number(attr(xfrm, "rot") ?? 0) / 60000;
   return {
-    x: emu(attr(off, "x")),
-    y: emu(attr(off, "y")),
-    w: emu(attr(ext, "cx")),
-    h: emu(attr(ext, "cy")),
+    x: emuToPx(attr(off, "x")),
+    y: emuToPx(attr(off, "y")),
+    w: emuToPx(attr(ext, "cx")),
+    h: emuToPx(attr(ext, "cy")),
     rotation: Number.isFinite(rotation) ? rotation : 0,
   };
 }
@@ -353,12 +270,12 @@ function groupTransform(xfrm: Element | null, outer: Transform): Transform {
   const chOff = kid(xfrm, "chOff");
   const chExt = kid(xfrm, "chExt");
   if (!rect || !chExt) return outer;
-  const childW = emu(attr(chExt, "cx"));
-  const childH = emu(attr(chExt, "cy"));
+  const childW = emuToPx(attr(chExt, "cx"));
+  const childH = emuToPx(attr(chExt, "cy"));
   const sx = childW > 0 ? rect.w / childW : 1;
   const sy = childH > 0 ? rect.h / childH : 1;
-  const childX = emu(attr(chOff, "x"));
-  const childY = emu(attr(chOff, "y"));
+  const childX = emuToPx(attr(chOff, "x"));
+  const childY = emuToPx(attr(chOff, "y"));
   return {
     dx: outer.dx + (rect.x - childX * sx) * outer.sx,
     dy: outer.dy + (rect.y - childY * sy) * outer.sy,
@@ -388,8 +305,8 @@ function runOf(node: Element, theme: ThemeColors, text: string): PptxRun {
   const typeface = attr(kid(rPr, "latin"), "typeface");
   return {
     text,
-    bold: flag(rPr, "b"),
-    italic: flag(rPr, "i"),
+    bold: boolAttr(rPr, "b"),
+    italic: boolAttr(rPr, "i"),
     underline: (attr(rPr, "u") ?? "none") !== "none",
     sizePt: Number.isFinite(size) && size > 0 ? size / 100 : null,
     color: solidFill(rPr, theme),
@@ -462,62 +379,6 @@ function inheritedRect(sp: Element, placeholders: PlaceholderRects): PptxRect | 
   return null;
 }
 
-/* ===== 关系与包内路径 ===== */
-
-/** 解析 `../media/image1.png` 这类相对目标为包内绝对路径。 */
-function resolvePath(base: string, target: string): string {
-  if (target.startsWith("/")) return target.slice(1);
-  const segments = base.split("/").slice(0, -1);
-  for (const part of target.split("/")) {
-    if (part === "." || part === "") continue;
-    if (part === "..") segments.pop();
-    else segments.push(part);
-  }
-  return segments.join("/");
-}
-
-interface Rels {
-  /** rId → 包内绝对路径。 */
-  byId: Map<string, string>;
-  /** 关系类型末段（slideLayout / notesSlide / …）→ 包内绝对路径。 */
-  byType: Map<string, string>;
-}
-
-function parseRels(xml: string | null, ownerPath: string): Rels {
-  const byId = new Map<string, string>();
-  const byType = new Map<string, string>();
-  const root = xml ? parseXml(xml) : null;
-  for (const rel of kids(root, "Relationship")) {
-    const id = attr(rel, "Id");
-    const target = attr(rel, "Target");
-    if (!id || !target) continue;
-    // 外部关系（超链接等）不是包内文件，取了会指向不存在的 zip 条目
-    if (attr(rel, "TargetMode") === "External") continue;
-    const path = resolvePath(ownerPath, target);
-    byId.set(id, path);
-    const type = (attr(rel, "Type") ?? "").split("/").pop() ?? "";
-    if (type && !byType.has(type)) byType.set(type, path);
-  }
-  return { byId, byType };
-}
-
-function relsPathOf(partPath: string): string {
-  const at = partPath.lastIndexOf("/");
-  return `${partPath.slice(0, at)}/_rels/${partPath.slice(at + 1)}.rels`;
-}
-
-/* ===== 图片 ===== */
-
-const IMAGE_MIME: Record<string, string> = {
-  png: "image/png",
-  jpg: "image/jpeg",
-  jpeg: "image/jpeg",
-  gif: "image/gif",
-  bmp: "image/bmp",
-  webp: "image/webp",
-  svg: "image/svg+xml",
-};
-
 /* ===== 主流程 ===== */
 
 interface SlideContext {
@@ -532,9 +393,9 @@ function parseTable(frame: Element, theme: ThemeColors, transform: Transform): P
   if (!tbl) return null;
   const rect = rectOf(kid(frame, "xfrm"));
   if (!rect) return null;
-  const colWidths = kids(kid(tbl, "tblGrid"), "gridCol").map((col) => emu(attr(col, "w")));
+  const colWidths = kids(kid(tbl, "tblGrid"), "gridCol").map((col) => emuToPx(attr(col, "w")));
   const rows: PptxTableRow[] = kids(tbl, "tr").map((tr) => ({
-    height: emu(attr(tr, "h")),
+    height: emuToPx(attr(tr, "h")),
     cells: kids(tr, "tc").map((tc) => {
       const tcPr = kid(tc, "tcPr");
       return {
@@ -543,7 +404,7 @@ function parseTable(frame: Element, theme: ThemeColors, transform: Transform): P
         colSpan: Number(attr(tc, "gridSpan") ?? 1) || 1,
         rowSpan: Number(attr(tc, "rowSpan") ?? 1) || 1,
         // hMerge/vMerge 标记的是「被前一格吃掉」的续格，渲染时必须跳过
-        covered: flag(tc, "hMerge") || flag(tc, "vMerge"),
+        covered: boolAttr(tc, "hMerge") || boolAttr(tc, "vMerge"),
       };
     }),
   }));
@@ -669,29 +530,18 @@ function slidePaths(presentation: Element | null, rels: Rels, zip: JSZip): strin
   return ordered;
 }
 
-async function readText(zip: JSZip, path: string): Promise<string | null> {
-  const file = zip.files[path];
-  return file ? file.async("text") : null;
-}
-
-async function readXml(zip: JSZip, path: string | undefined): Promise<Element | null> {
-  if (!path) return null;
-  const text = await readText(zip, path);
-  return text ? parseXml(text) : null;
-}
-
 /** 解析 pptx 二进制为幻灯片模型。 */
 export async function parsePptx(data: Uint8Array): Promise<ParsedDeck> {
   const zip = await JSZip.loadAsync(data);
 
   const presentationPath = "ppt/presentation.xml";
   const presentation = await readXml(zip, presentationPath);
-  const presentationRels = parseRels(await readText(zip, relsPathOf(presentationPath)), presentationPath);
+  const presentationRels = await readRels(zip, presentationPath);
 
   const sldSz = kid(presentation, "sldSz");
   // 缺 sldSz 时按 16:9 的 10in × 5.625in 兜底（pptxgenjs 的 LAYOUT_16x9 就是这个尺寸）
-  const width = emu(attr(sldSz, "cx")) || 960;
-  const height = emu(attr(sldSz, "cy")) || 540;
+  const width = emuToPx(attr(sldSz, "cx")) || 960;
+  const height = emuToPx(attr(sldSz, "cy")) || 540;
 
   const themeRoot = await readXml(zip, presentationRels.byType.get("theme"));
   const theme = parseThemeColors(themeRoot);
@@ -703,11 +553,11 @@ export async function parsePptx(data: Uint8Array): Promise<ParsedDeck> {
     const slidePath = paths[i];
     const slide = await readXml(zip, slidePath);
     if (!slide) continue;
-    const rels = parseRels(await readText(zip, relsPathOf(slidePath)), slidePath);
+    const rels = await readRels(zip, slidePath);
 
     const layoutPath = rels.byType.get("slideLayout");
     const layout = await readXml(zip, layoutPath);
-    const layoutRels = layoutPath ? parseRels(await readText(zip, relsPathOf(layoutPath)), layoutPath) : null;
+    const layoutRels = layoutPath ? await readRels(zip, layoutPath) : null;
     const masterPath = layoutRels?.byType.get("slideMaster");
     const master = await readXml(zip, masterPath);
 
@@ -716,14 +566,7 @@ export async function parsePptx(data: Uint8Array): Promise<ParsedDeck> {
     collectPlaceholders(pick(master, "cSld", "spTree"), placeholders);
 
     // 图片按需解码：只取本页真正引用到的 rId，避免整包 media 都转成 base64
-    const images = new Map<string, string>();
-    for (const [id, path] of rels.byId) {
-      const ext = path.split(".").pop()?.toLowerCase() ?? "";
-      const mime = IMAGE_MIME[ext];
-      const file = zip.files[path];
-      if (!mime || !file) continue;
-      images.set(id, `data:${mime};base64,${await file.async("base64")}`);
-    }
+    const images = await decodeImages(zip, rels);
 
     const ctx: SlideContext = { theme, placeholders, images };
     const elements: PptxElement[] = [];

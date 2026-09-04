@@ -23,7 +23,7 @@ const { host, loading, error, bootError } = useUniverHost(toRef(props, "tab"), a
     ]);
 
   const preset = UniverSheetsCorePreset({ container });
-  const { locale, locales } = await buildUniverLocaleConfig(false, true);
+  const { locale, locales } = await buildUniverLocaleConfig();
   // preset 自带一份 locale，与我们加载的 zh-CN 合并；缺任一侧都会让部分 UI 回落成 key。
   const merged = {
     [LocaleType.ZH_CN]: { ...(locales[LocaleType.ZH_CN] ?? {}), ...(preset.locales?.[LocaleType.ZH_CN] ?? {}) },
