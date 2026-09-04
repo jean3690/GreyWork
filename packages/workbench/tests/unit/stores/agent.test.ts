@@ -150,6 +150,71 @@ describe("dispatchToAcp 写入对话流", () => {
     expect(h.prompt).toHaveBeenCalledTimes(2);
   });
 
+  it("同一对话内连发两轮：复用同一 ACP 会话（上下文本就该延续）", async () => {
+    h.startAgent.mockResolvedValue(7);
+    h.openSession.mockResolvedValue({ sessionId: "session-1", configOptions: [] });
+    h.prompt.mockResolvedValue({ turnId: 99 });
+    const agentStore = useAgentStore();
+
+    await agentStore.dispatchToAcp("第一回合");
+    emit({ kind: "prompt-done", payload: { turnId: 99, response: {} } });
+    await agentStore.dispatchToAcp("第二回合");
+
+    expect(h.openSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("换到另一条对话再发：同进程上另开会话，agent 不再带着上一条对话的上下文", async () => {
+    h.startAgent.mockResolvedValue(7);
+    h.openSession.mockResolvedValue({ sessionId: "session-A", configOptions: [] });
+    h.prompt.mockResolvedValue({ turnId: 1 });
+    const agentStore = useAgentStore();
+    const chat = useChatStore();
+
+    await agentStore.dispatchToAcp("A 对话第一轮");
+    emit({ kind: "prompt-done", payload: { turnId: 1, response: {} } });
+    const threadA = chat.activeThreadId;
+
+    // 新建对话（侧栏「新对话」等效动作）
+    chat.activeThreadId = "thread-B";
+    await agentStore.dispatchToAcp("B 对话第一轮");
+
+    expect(threadA).not.toBe("thread-B");
+    // agent 进程复用（重启会丢已探测的 config options），但会话必须换
+    expect(h.startAgent).toHaveBeenCalledTimes(1);
+    expect(h.openSession).toHaveBeenCalledTimes(2);
+
+    // 回到 A 对话再发 → 又是一条新会话（ACP 侧无法恢复已结束的 session）
+    emit({ kind: "prompt-done", payload: { turnId: 1, response: {} } });
+    chat.activeThreadId = threadA;
+    await agentStore.dispatchToAcp("A 对话第二轮");
+
+    expect(h.startAgent).toHaveBeenCalledTimes(1);
+    expect(h.openSession).toHaveBeenCalledTimes(3);
+  });
+
+  it("换会话失败时保留 agent 进程：下一次派发只重试 session/new，不再 spawn 第二个 CLI", async () => {
+    h.startAgent.mockResolvedValue(7);
+    h.openSession.mockResolvedValueOnce({ sessionId: "session-A", configOptions: [] });
+    h.prompt.mockResolvedValue({ turnId: 1 });
+    const agentStore = useAgentStore();
+    const chat = useChatStore();
+
+    await agentStore.dispatchToAcp("A 对话");
+    emit({ kind: "prompt-done", payload: { turnId: 1, response: {} } });
+
+    h.openSession.mockRejectedValueOnce(new Error("session/new refused"));
+    chat.activeThreadId = "thread-B";
+    await agentStore.dispatchToAcp("B 对话");
+    expect(chat.threads["thread-B"]?.at(-1)?.content).toContain("session/new refused");
+
+    h.openSession.mockResolvedValueOnce({ sessionId: "session-B", configOptions: [] });
+    await agentStore.dispatchToAcp("B 对话重试");
+
+    expect(h.startAgent).toHaveBeenCalledTimes(1);
+    expect(h.openSession).toHaveBeenCalledTimes(3);
+    expect(h.prompt).toHaveBeenCalledTimes(2);
+  });
+
   it("流式续写定位到原线程：切换 activeThreadId 后 chunk 仍写入支架", async () => {
     h.startAgent.mockResolvedValue(7);
     h.openSession.mockResolvedValue({ sessionId: "session-1", configOptions: [] });
