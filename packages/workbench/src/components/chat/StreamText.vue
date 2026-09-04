@@ -36,5 +36,5 @@ watch(
 </script>
 
 <template>
-  <div ref="host" class="msg__stream msg__text"></div>
+  <div ref="host" class="msg__stream msg__text m-0 text-foreground text-[13.5px] leading-[1.75]"></div>
 </template>

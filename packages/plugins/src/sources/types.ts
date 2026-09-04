@@ -21,9 +21,11 @@ export interface SkillSnapshot {
   hash: string;
 }
 
-/** 对宿主命令的传输抽象（skills_market.rs 的四个命令）。 */
+/** 技能市场传输抽象（Web 通道经 vite 代理；宿主命令已移除）。 */
 export interface SkillsMarketTransport {
   available(): boolean;
+  /** 安装/卸载是否可用（Web 预览无宿主文件写入通道）。 */
+  installable(): boolean;
   search(query: string): Promise<unknown>;
   download(entryRef: string): Promise<unknown>;
   install(workspaceRoot: string, skillId: string, files: SkillSnapshotFile[]): Promise<{ dir: string; filesWritten: number }>;

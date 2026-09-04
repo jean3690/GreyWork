@@ -2,9 +2,11 @@ import { createJsonStorage } from "@greywork/core";
 import { defineStore } from "pinia";
 import { ref, watch } from "vue";
 import { sessionBackend } from "../lib/session-backend";
+import { toWorkspaceDirRefs } from "../lib/session-backend";
+import { useWorkspaceStore } from "./workspace";
 import { MOCK_THREAD_GROUPS } from "../mocks/threads";
 import { MOCK_WORKSPACES } from "../mocks/workspaces";
-import type { ThreadMessage } from "../types";
+import type { MessageSegment, ThreadMessage } from "../types";
 
 /** 会话记录：一条会话 = 一组对话消息 + 归属工作区 + 时间戳。 */
 export interface SessionRecord {
@@ -92,6 +94,41 @@ function migrateLegacySessions(value: LegacyPersistedSessions): PersistedSession
   };
 }
 
+/**
+ * 采纳外部消息档：历史消息把思考存在 `thinking` 平铺字段上，没有段落表。
+ * 旧档的真实到达顺序已无从还原，按当年的渲染顺序（思考 → 工具 → 正文）重建为段落，
+ * 这样渲染层只有一条路径，不必为老数据保留第二套分支。
+ */
+function adoptMessages(messages: ThreadMessage[]): ThreadMessage[] {
+  return messages.map((message) => {
+    if (message.role !== "assistant" || (message.segments && message.segments.length > 0)) return message;
+    // 旧字段已从 ThreadMessage 移除，这里只为迁移读一次
+    const legacy = message as ThreadMessage & { thinking?: string; thinkingAt?: number; thinkingFor?: number };
+    const segments: MessageSegment[] = [];
+    if (typeof legacy.thinking === "string" && legacy.thinking) {
+      const startedAt = legacy.thinkingAt ?? message.ts;
+      segments.push({
+        kind: "thinking",
+        id: `${message.id}-s-think`,
+        text: legacy.thinking,
+        startedAt,
+        endedAt: startedAt + (legacy.thinkingFor ?? 0),
+      });
+    }
+    if (message.tools && message.tools.length > 0) {
+      segments.push({ kind: "tools", id: `${message.id}-s-tools`, toolCallIds: message.tools.map((activity) => activity.toolCallId) });
+    }
+    if (message.content) segments.push({ kind: "text", id: `${message.id}-s-text`, from: 0, to: null });
+    return segments.length > 0 ? { ...message, segments } : message;
+  });
+}
+
+/** 采纳外部会话档：逐条消息做段落归一。 */
+function adoptSessions(records: SessionRecord[]): SessionRecord[] {
+  for (const record of records) record.messages = adoptMessages(record.messages);
+  return records;
+}
+
 const storage = createJsonStorage<PersistedSessions>(STORAGE_KEY, isPersistedSessions);
 const legacyStorage = createJsonStorage<LegacyPersistedSessions>(STORAGE_KEY, isLegacyPersistedSessions);
 
@@ -129,17 +166,24 @@ function makeId(): string {
 
 function loadSessions(): PersistedSessions {
   const current = storage.read();
-  if (current) return current;
+  if (current) return { ...current, sessions: adoptSessions(current.sessions) };
   const legacy = legacyStorage.read();
-  if (legacy) return migrateLegacySessions(legacy);
+  if (legacy) {
+    const migrated = migrateLegacySessions(legacy);
+    return { ...migrated, sessions: adoptSessions(migrated.sessions) };
+  }
   return { version: 2, sessions: seedSessions(), activeSessionId: null };
 }
 
-/** 会话管理：桌面态真源为 SQLite（db_sessions_*），localStorage 作首帧缓存；浏览器态维持 localStorage 全量持久化。 */
+/** 会话管理：桌面态真源为会话文件（store_fs），浏览器态可配远端（WebDAV）；localStorage 作首帧缓存。 */
 export const useSessionStore = defineStore("session", () => {
   const loaded = loadSessions();
   const sessions = ref<SessionRecord[]>(loaded.sessions);
   const activeSessionId = ref<string | null>(loaded.activeSessionId);
+
+  /* 工作区目录清单：会话文件按归属落到 ~/.greyWork/sessions 或 <工作区>/.greyWork/sessions。 */
+  const workspaceStore = useWorkspaceStore();
+  const workspaceDirs = () => toWorkspaceDirRefs(workspaceStore.workspaces);
 
   /* 消息内容 / 步骤状态等深层变更也落盘：debounce 500ms 合并写。 */
   let persistTimer: ReturnType<typeof setTimeout> | null = null;
@@ -152,35 +196,67 @@ export const useSessionStore = defineStore("session", () => {
   }
   watch(sessions, persistSoon, { deep: true });
 
+  /**
+   * 待落实的删除清单。
+   *
+   * 落盘侧不再扫目录清扫「不在快照里的文件」（多实例会互删），删除必须显式送达。
+   * 同步成功才清空：失败就留到下次 persist 重试，避免删除动作被吞掉。
+   */
+  const pendingDeletions = new Set<string>();
+
+  /**
+   * 落盘侧版本更新导致的冲突：按 id 回读并取较新者。
+   *
+   * 只动冲突的那几条，不整表替换 —— 整表替换会把本实例尚未落盘的其它会话编辑冲掉。
+   */
+  async function reconcileConflicts(conflicts: { id: string }[]): Promise<void> {
+    const ids = conflicts.map((conflict) => conflict.id);
+    console.warn("[session] 落盘侧有更新版本，按条合并", ids);
+    const snapshot = await sessionBackend.load(workspaceDirs());
+    if (!snapshot) return;
+    for (const record of adoptSessions(snapshot.sessions as SessionRecord[])) {
+      if (!ids.includes(record.id)) continue;
+      const index = sessions.value.findIndex((candidate) => candidate.id === record.id);
+      if (index < 0) sessions.value.push(record);
+      else if (record.updatedAt > sessions.value[index]!.updatedAt) sessions.value[index] = record;
+    }
+  }
+
   function persist(): void {
     if (persistTimer) {
       clearTimeout(persistTimer);
       persistTimer = null;
     }
     storage.write({ version: 2, sessions: sessions.value, activeSessionId: activeSessionId.value });
-    if (sessionBackend.active()) {
-      // 后端真源同步：失败不回滚内存（下次 persist 自愈），仅上报。
-      void sessionBackend.save({ sessions: sessions.value, activeSessionId: activeSessionId.value }).catch((error: unknown) => {
-        console.error("[session] SQLite 同步失败，将下次重试", error);
+    if (!sessionBackend.active()) return;
+    const deleted = [...pendingDeletions];
+    // 后端真源同步：失败不回滚内存（下次 persist 自愈），仅上报。
+    void sessionBackend
+      .save({ sessions: sessions.value, activeSessionId: activeSessionId.value }, workspaceDirs(), deleted)
+      .then(async (report) => {
+        for (const id of deleted) pendingDeletions.delete(id);
+        if (report.conflicts.length) await reconcileConflicts(report.conflicts);
+      })
+      .catch((error: unknown) => {
+        console.error("[session] 落盘同步失败，将下次重试", error);
       });
-    }
   }
 
-  /** 桌面态启动接管：库已接管 → 以库内容覆盖（localStorage 仅首帧缓存）；未接管 → 当前内容首落库。 */
+  /** 启动接管：落盘侧已接管 → 以其内容覆盖（localStorage 仅首帧缓存）；未接管 → 当前内容首落盘。 */
   const backendHydratePromise = (() => {
     if (!sessionBackend.active()) return null;
     return sessionBackend
-      .load()
+      .load(workspaceDirs())
       .then((snapshot) => {
         if (snapshot) {
-          sessions.value = snapshot.sessions as SessionRecord[];
+          sessions.value = adoptSessions(snapshot.sessions as SessionRecord[]);
           activeSessionId.value = snapshot.activeSessionId;
         } else {
           persist(); // 首启：种子/缓存成为库的真源快照
         }
       })
       .catch((error: unknown) => {
-        console.error("[session] SQLite 加载失败，沿用本地缓存", error);
+        console.error("[session] 落盘加载失败，沿用本地缓存", error);
       });
   })();
 
@@ -242,6 +318,8 @@ export const useSessionStore = defineStore("session", () => {
     const index = sessions.value.findIndex((candidate) => candidate.id === id);
     if (index < 0) return;
     sessions.value.splice(index, 1);
+    // 落盘侧只删显式清单里的文件，这里不登记就会留下孤儿会话文件
+    pendingDeletions.add(id);
     if (activeSessionId.value === id) activeSessionId.value = null;
     persist();
   }

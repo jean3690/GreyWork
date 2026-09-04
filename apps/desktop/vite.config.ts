@@ -40,6 +40,7 @@ export default defineConfig(async () => ({
     port: 1420,
     strictPort: true,
     host: host || false,
+    // Web 预览环境的市场通道：浏览器直连 skills.sh / MCP 注册表被 CORS 拦截，
     hmr: host
       ? {
           protocol: "ws",
@@ -47,6 +48,20 @@ export default defineConfig(async () => ({
           port: 1421,
         }
       : undefined,
+    proxy: {
+      // /market-api/skills/* → https://www.skills.sh/*；/market-api/mcp/* → https://registry.modelcontextprotocol.io/*
+      // 仅 Web 预览（非 Tauri IPC）使用；桌面端仍走 Rust 宿主代理。
+      "/market-api/skills": {
+        target: "https://www.skills.sh",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/market-api\/skills/, ""),
+      },
+      "/market-api/mcp": {
+        target: "https://registry.modelcontextprotocol.io",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/market-api\/mcp/, ""),
+      },
+    },
     watch: {
       // 3. tell Vite to ignore watching `src-tauri`
       ignored: ["**/src-tauri/**"],

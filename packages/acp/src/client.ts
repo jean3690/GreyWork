@@ -10,15 +10,43 @@ import type {
   AcpSessionInfo,
   AcpSessionOpened,
   AcpTransport,
+  McpProbeReport,
+  McpServerConfig,
+  McpSkippedServer,
+  McpToolInfo,
 } from "./transports";
 import type { PermissionTier } from "./permissions";
 import { isTauriRuntime } from "./transports";
 import { TauriIpcTransport } from "./tauri-transport";
 export class RemoteAcpUnsupportedError extends Error {
-  constructor() {
-    super("remote ACP WebSocket endpoint is not configured");
+  constructor(message = "remote ACP WebSocket endpoint is not configured") {
+    super(message);
     this.name = "RemoteAcpUnsupportedError";
   }
+}
+
+/**
+ * 把 MCP 声明转成 ACP 线上形状：http / sse 带 `type` 标签，stdio 是 untagged
+ * 变体（无 type 字段），env 走 `{name,value}` 数组。桌面端由 Rust 宿主做同样的
+ * 转换，这里是远程传输那一路。
+ */
+function toWireMcpServers(servers?: readonly McpServerConfig[]): Record<string, unknown>[] {
+  return (servers ?? []).map((server) => {
+    if (server.transport === "stdio") {
+      return {
+        name: server.name,
+        command: server.command ?? "",
+        args: server.args ?? [],
+        env: Object.entries(server.env ?? {}).map(([name, value]) => ({ name, value })),
+      };
+    }
+    return {
+      type: server.transport,
+      name: server.name,
+      url: server.url ?? "",
+      headers: server.headers ?? [],
+    };
+  });
 }
 
 export interface WebSocketTransportOptions {
@@ -76,15 +104,31 @@ export class WebSocketTransport implements AcpTransport {
     this.emit({ kind: "started", payload: { handle: 1 } });
     return 1;
   }
-  async openSession(_handle: number, cwd: string): Promise<AcpSessionOpened> {
+
+  /** 远程传输没有宿主强制面：档位由桌面宿主执行，这里明确报错而非假装降级成功。 */
+  async setPermissionTier(_handle: number, _tier: PermissionTier): Promise<void> {
+    throw new Error("ACP 远程传输不执行权限档位（档位由桌面宿主强制）");
+  }
+  async openSession(_handle: number, cwd: string, mcpServers?: readonly McpServerConfig[]): Promise<AcpSessionOpened> {
     this.assertConfigured();
-    const result = (await this.request("session/new", { cwd, mcpServers: [] })) as {
+    // 远程 agent 自己去连这些 MCP 服务器；这里只负责把声明送过去。
+    // 能力过滤在桌面宿主里做，远程侧由对端自行拒绝并报错。
+    const result = (await this.request("session/new", { cwd, mcpServers: toWireMcpServers(mcpServers) })) as {
       sessionId?: string;
       configOptions?: AcpSessionConfigOption[];
     };
     if (!result.sessionId) throw new Error("ACP session/new returned no sessionId");
     this.sessionId = result.sessionId;
-    return { sessionId: result.sessionId, configOptions: result.configOptions ?? [] };
+    return {
+      sessionId: result.sessionId,
+      configOptions: result.configOptions ?? [],
+      mcpServers: (mcpServers ?? []).map((server) => server.name),
+    };
+  }
+
+  /** 远程传输没有宿主进程面：探活需要本机发起 HTTP / spawn，明确报错而非假装成功。 */
+  async probeMcp(_config: McpServerConfig, _timeoutSecs?: number): Promise<never> {
+    throw new RemoteAcpUnsupportedError("MCP 探活需要桌面宿主（远程传输不代发探活请求）");
   }
 
   async setSessionConfig(_handle: number, configId: string, value: string | boolean): Promise<AcpSessionConfigOption[]> {
@@ -97,15 +141,33 @@ export class WebSocketTransport implements AcpTransport {
     return result.configOptions ?? [];
   }
 
-  async prompt(_handle: number, text: string): Promise<AcpPromptResult> {
+  async prompt(handle: number, text: string): Promise<{ turnId: number }> {
     this.assertConfigured();
-    return (await this.request("session/prompt", {
-      sessionId: this.requireSession(),
-      prompt: [{ type: "text", text }],
-    })) as AcpPromptResult;
+    // 与桌面传输一致：立即返回 turnId，回合结果经 prompt-done 事件送达。
+    const id = this.nextRequestId++;
+    const timer = setTimeout(() => {
+      this.pending.delete(id);
+      this.emit({ kind: "prompt-done", payload: { handle, turnId: id, error: "ACP prompt timed out" } });
+    }, this.options?.requestTimeoutMs ?? 30_000);
+    this.pending.set(id, {
+      resolve: (result) => {
+        this.emit({ kind: "prompt-done", payload: { handle, turnId: id, response: result } });
+      },
+      reject: (error: unknown) => {
+        this.emit({ kind: "prompt-done", payload: { handle, turnId: id, error: String(error) } });
+      },
+      timer,
+    });
+    this.send({
+      jsonrpc: "2.0",
+      id,
+      method: "session/prompt",
+      params: { sessionId: this.requireSession(), prompt: [{ type: "text", text }] },
+    });
+    return { turnId: id };
   }
 
-  async stop(_handle: number): Promise<void> {
+  async stop(_handle: number, _turnId?: number): Promise<void> {
     this.assertConfigured();
     if (this.socket?.readyState === WebSocket.OPEN && this.sessionId) {
       await this.notify("session/cancel", { sessionId: this.sessionId });
@@ -234,13 +296,18 @@ export interface AcpClient {
   isAvailable(): boolean;
   /** sandbox 非 off 时宿主以 OS 沙盒包裹 agent；workspace 为沙盒可写锚定目录。 */
   startAgent(agentCmd: string, tier: PermissionTier, sandbox?: AcpSandboxMode, workspace?: string | null): Promise<number>;
-  openSession(handle: number, cwd: string): Promise<AcpSessionOpened>;
+  /** 建会话；`mcpServers` 随 session/new 声明给 agent，由 agent 连接并合并工具面。 */
+  openSession(handle: number, cwd: string, mcpServers?: readonly McpServerConfig[]): Promise<AcpSessionOpened>;
+  /** 改写在途会话的权限档位（临时降级/回升）；桌面宿主立即生效。 */
+  setPermissionTier(handle: number, tier: PermissionTier): Promise<void>;
   setSessionConfig(handle: number, configId: string, value: string | boolean): Promise<AcpSessionConfigOption[]>;
-  prompt(handle: number, text: string): Promise<AcpPromptResult>;
-  stop(handle: number): Promise<void>;
+  prompt(handle: number, text: string): Promise<{ turnId: number }>;
+  stop(handle: number, turnId?: number): Promise<void>;
   respondPermission(requestId: number, optionId: string | null): Promise<void>;
   list(): Promise<AcpSessionInfo[]>;
   onEvent(listener: (event: AcpEventEnvelope) => void): Promise<() => void>;
+  /** 探活一台 MCP 服务器（设置页「测试连接」）；远程传输不支持，会抛 RemoteAcpUnsupportedError。 */
+  probeMcp(config: McpServerConfig, timeoutSecs?: number): Promise<McpProbeReport>;
 }
 
 /** 按运行环境自动选择传输；测试/桌面可显式注入。 */
@@ -249,13 +316,15 @@ export function createAcpClient(transport: AcpTransport = defaultTransport()): A
     transportId: transport.id,
     isAvailable: () => transport.available ?? transport.id === "tauri-ipc",
     startAgent: (cmd, tier, sandbox, workspace) => transport.startAgent(cmd, tier, sandbox, workspace),
-    openSession: (handle, cwd) => transport.openSession(handle, cwd),
+    openSession: (handle, cwd, mcpServers) => transport.openSession(handle, cwd, mcpServers),
     setSessionConfig: (handle, configId, value) => transport.setSessionConfig(handle, configId, value),
+    setPermissionTier: (handle, tier) => transport.setPermissionTier(handle, tier),
     prompt: (handle, text) => transport.prompt(handle, text),
-    stop: (handle) => transport.stop(handle),
+    stop: (handle, turnId) => transport.stop(handle, turnId),
     respondPermission: (requestId, optionId) => transport.respondPermission(requestId, optionId),
     list: () => transport.list(),
     onEvent: (listener) => transport.onEvent(listener),
+    probeMcp: (config, timeoutSecs) => transport.probeMcp(config, timeoutSecs),
   };
 }
 
@@ -282,4 +351,8 @@ export type {
   AcpSessionInfo,
   AcpSessionOpened,
   AcpTransport,
+  McpProbeReport,
+  McpServerConfig,
+  McpSkippedServer,
+  McpToolInfo,
 };

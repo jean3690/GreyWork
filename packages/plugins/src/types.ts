@@ -47,6 +47,8 @@ export interface McpServerManifest extends PluginBase {
   args?: string[];
   url?: string;
   env?: Record<string, string>;
+  /** 远程传输的鉴权头。值由用户在登记弹窗填，落盘后是明文。 */
+  headers?: Record<string, string>;
 }
 
 export type PluginManifest = SkillManifest | ExtensionManifest | McpServerManifest;

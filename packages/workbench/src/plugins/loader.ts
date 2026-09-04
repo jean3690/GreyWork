@@ -157,5 +157,5 @@ export function createCapabilityLoader(): CapabilityLoader {
   };
 }
 
-/** 应用级单例 seam：AppShell bootstrap 时 register 默认清单 + activateAll()。 */
+/** 应用级单例 seam：外壳 bootstrap 时 register 默认清单 + activateAll()。 */
 export const capabilitySeam: CapabilityLoader = createCapabilityLoader();

@@ -85,9 +85,6 @@ export const useChatStore = defineStore("chat", () => {
   });
   const busy = ref(false);
   const speedBoost = ref(false);
-  /** 当前正处于「思考产出中」的消息 id（ChatView 据此钉出 ThoughtDisplay；回合结束清空）。 */
-  const thinkingMessageId = ref<string | null>(null);
-
   /* ===== 发送队列（M5）：回复期间下发的消息先入队，回合结束再补发 ===== */
   const commandQueue = ref<QueuedCommand[]>([]);
   const commandQueueMode = ref<"auto" | "manual">("auto");
@@ -154,7 +151,19 @@ export const useChatStore = defineStore("chat", () => {
     }, 40);
   }
 
-  /** 立即写入缓冲内容（ACP 回合结束 / 测试断言前调用）。 */
+  /**
+   * 打开（或续用）当前活跃的正文段：思考段在前就先封口，工具段在前则另起一段。
+   * text 段只记 `content` 的起始偏移，正文本身不存第二份。
+   */
+  function openTextSegment(message: ThreadMessage): void {
+    const segments = (message.segments ??= []);
+    const tail = segments.at(-1);
+    if (tail?.kind === "text") return;
+    if (tail?.kind === "thinking") tail.endedAt = Date.now();
+    segments.push({ kind: "text", id: uid(), from: message.content.length, to: null });
+  }
+
+  /** 立即写入缓冲内容（ACP 回合结束 / 思考与工具插入前 / 测试断言前调用）。 */
   function flushPendingContent(): void {
     if (flushTimer) {
       clearTimeout(flushTimer);
@@ -163,12 +172,17 @@ export const useChatStore = defineStore("chat", () => {
     if (appendBuf.size) {
       for (const [messageId, entry] of appendBuf) {
         const message = ensure(entry.threadId).find((candidate) => candidate.id === messageId);
-        if (message) message.content += entry.text;
+        if (!message) continue;
+        openTextSegment(message);
+        message.content += entry.text;
       }
       appendBuf.clear();
     }
     if (streamBuf) {
-      if (streamingInto) streamingInto.content += streamBuf;
+      if (streamingInto) {
+        openTextSegment(streamingInto);
+        streamingInto.content += streamBuf;
+      }
       streamBuf = "";
     }
   }
@@ -238,6 +252,7 @@ export const useChatStore = defineStore("chat", () => {
     }
     clearSim();
     busy.value = false;
+    streamingMessageId.value = null;
   }
   function ensure(threadId: string): ThreadMessage[] {
     return sessionStore.ensure(threadId);
@@ -536,20 +551,17 @@ export const useChatStore = defineStore("chat", () => {
     const live = ensure(activeThreadId.value).find((m) => m.id === message.id) ?? message;
     live.planPending = false;
     busy.value = true;
-    // 思考链：回合开头分句揭示推理过程，执行期间持续钉出（thinkingMessageId 直到回合结束才清空）。
+    // 本条消息正在被写入：思考段据此判定「仍在流」并保持展开（与真实 ACP 回合同一判据）。
+    streamingMessageId.value = live.id;
+    // 思考链：分句揭示推理。头几句在动手之前，末句留到工具跑完之后 —— 复现真实回合的
+    // 「思考 → 动手 → 再思考」节奏，演示态也就能看到多段各自折叠的思考条。
     const thinking = buildThinking(intentText);
-    live.thinkingAt = Date.now();
-    thinkingMessageId.value = live.id;
-    let thinkingAcc = "";
+    const opening = thinking.length > 1 ? thinking.slice(0, -1) : thinking;
+    const closing = thinking.length > 1 ? thinking.at(-1) : undefined;
     let thinkingDelay = 140;
-    for (const segment of thinking) {
+    for (const segment of opening) {
       const capture = segment;
-      simTimers.push(
-        setTimeout(() => {
-          thinkingAcc += (thinkingAcc ? " " : "") + capture;
-          live.thinking = thinkingAcc;
-        }, thinkingDelay),
-      );
+      simTimers.push(setTimeout(() => appendMessageThinking(live.id, `${capture}\n`), thinkingDelay));
       thinkingDelay += 360 + Math.random() * 160;
     }
     let delay = 420;
@@ -564,173 +576,174 @@ export const useChatStore = defineStore("chat", () => {
     let toolDelay = 480;
     for (const tool of mockTools) {
       simTimers.push(
-        setTimeout(() => {
-          live.tools = mergeToolActivities(live.tools, [{ ...tool, status: "in_progress", startedAt: Date.now() }]);
-        }, toolDelay),
+        setTimeout(() => appendTools([{ ...tool, status: "in_progress", startedAt: Date.now(), finishedAt: null }], live.id), toolDelay),
       );
       toolDelay += 700 + Math.random() * 400;
       simTimers.push(
-        setTimeout(() => {
-          live.tools = mergeToolActivities(live.tools, [
-            { ...tool, status: tool.status === "failed" ? "failed" : "completed", finishedAt: Date.now() },
-          ]);
-        }, toolDelay),
+        setTimeout(
+          () => appendTools([{ ...tool, status: tool.status === "failed" ? "failed" : "completed", finishedAt: Date.now() }], live.id),
+          toolDelay,
+        ),
       );
     }
+    if (closing) simTimers.push(setTimeout(() => appendMessageThinking(live.id, closing), toolDelay + 260));
     simTimers.push(
-      setTimeout(() => {
-        live.content = speedBoost.value ? t("chat.completedSpeed") : t("chat.completed");
-        busy.value = false;
-        thinkingMessageId.value = null;
-        live.thinkingFor = Date.now() - (live.thinkingAt ?? Date.now());
-        // 消息级记账：每条产物 id 都要回挂到本条消息，对话内「文件变更」块才列得全。
-        // 此前只有主 md 记了账，xlsx/pptx/html 都漏在 artifacts 之外。
-        const record = (id: string): void => {
-          live.artifacts = [...(live.artifacts ?? []), id];
-        };
-        // 交付物契约：产物落盘虚拟文件系统 → Artifacts 卡片 + Diffs 实时出现
-        // 意图识别基于用户原始输入（intentText），而非占位完成文案 message.content。
-        const firstLabel = String(live.steps?.[1]?.label ?? "");
-        const isReport = /日报|周报|报告/.test(intentText) || /报告/.test(live.content);
-        // 太阳系演示意图：生成 5 页深色主题 PPT + 对应 Brief
-        const isSolar = /(太阳系|solar system|太阳系之旅)/i.test(intentText);
-        // 追加行意图：给已存在的 Excel 追加一行（走就地修改，不重新生成整表）
-        const isAddRow =
-          /添加|新增|插入|追加|补|增加|加.{0,4}(一行|行|row)/i.test(intentText) && /(excel|xlsx|表格|数据表|表)/i.test(intentText);
-        const name = isReport ? "reports/weekly-report.md" : "reports/task-result.md";
-        const stepLines = (live.steps ?? []).map((step) => `- ✅ ${step.label}（${step.detail}）`);
-        void artifactStore
-          .deliverArtifact({
-            meta: isReport ? "Markdown · 刚刚生成" : "Markdown · 任务产物",
-            type: "report",
-            source: "assistant-pipeline",
-            format: "md",
-            path: name,
-            data: [
-              `# ${isReport ? "周报" : "任务结果"}`,
-              "",
-              `来源会话：${intentText.slice(0, 24)}…`,
-              "",
-              "## 执行步骤",
-              ...stepLines,
-              "",
-            ].join("\n"),
-          })
-          .then(record)
-          .catch(() => undefined);
-        // 追加行意图：就地修改现有 Excel（通知查看器重载），跳过整表重新生成
-        if (isAddRow) {
-          void appendRowToXlsx(intentText)
-            .then(record)
-            .catch(() => undefined);
-        }
-        // 表格意图：额外产出一个 xlsx 交付物（引擎生成 → VFS 二进制落盘 → Artifacts 卡片）
-        if (!isAddRow && (/表|Excel|xlsx|客流|站点/i.test(intentText) || /表/.test(firstLabel))) {
-          void exportToXlsx([
-            {
-              name: "task-result",
-              headers: ["站点", "客流"],
-              rows: [
-                ["北京站", "1284"],
-                ["上海站", "2231"],
-                ["深圳站", "876"],
-              ],
-            },
-          ])
-            .then((data) =>
-              artifactStore.deliverArtifact({
-                meta: "Excel · 表格产物",
-                type: "dataset",
-                source: "assistant-pipeline",
-                format: "xlsx",
-                path: "reports/task-result.xlsx",
-                data,
-              }),
-            )
-            .then(record)
-            .catch(() => undefined);
-        }
-        // 报告意图：额外产出一个 pptx 简报（标题 + 执行步骤）
-        if (isReport) {
-          void exportToPptx({
-            title: "任务简报",
-            subtitle: `来源会话：${intentText.slice(0, 24)}…`,
-            slides: [
-              {
-                title: "执行步骤",
-                bullets: (live.steps ?? []).map((step) => `${step.label}：${step.detail}`),
-              },
-            ],
-          })
-            .then((data) =>
-              artifactStore.deliverArtifact({
-                meta: "PPT · 简报产物",
-                type: "report",
-                source: "assistant-pipeline",
-                format: "pptx",
-                path: "reports/task-brief.pptx",
-                data,
-              }),
-            )
-            .then(record)
-            .catch(() => undefined);
-        }
-        // 演示方案 Brief（Summary / Outline / Page Brief 三段）
-        if (isSolar) {
-          const { deck, brief } = solarDeck();
-          void exportToPptx(deck)
-            .then((data) =>
-              artifactStore.deliverArtifact({
-                meta: "PPT · 太阳系演示",
-                type: "report",
-                source: "assistant-pipeline",
-                format: "pptx",
-                path: "reports/solar-system.pptx",
-                data,
-              }),
-            )
-            .then(record)
-            .then(() => writeBrief("reports/brief.md", brief))
-            .then(record)
-            .catch(() => undefined);
-        } else if (isReport) {
-          // 报告意图同时产出演示方案 Brief（从执行步骤推导）
-          void writeBrief("reports/brief.md", briefFromReport(intentText, live.steps ?? []))
-            .then(record)
-            .catch(() => undefined);
-        }
-        // 界面意图：GenUI 产出静态 HTML 可视化 → VFS → 预览面板（preview:request 联动）
-        if (/界面|仪表盘|看板|dashboard|genui/i.test(intentText) || /界面|仪表盘|看板/.test(firstLabel)) {
-          const html = specToHtml({
-            title: `${extractDashboardTitle(intentText)} · GenUI`,
-            subtitle: `来源会话：${intentText.slice(0, 24)}…`,
-            kpis: [
-              { label: "总客流", value: "12,384" },
-              { label: "峰值日", value: "周六" },
-              { label: "环比", value: "+8.2%" },
-            ],
-            table: {
-              headers: ["站点", "客流", "占比"],
-              rows: [
-                ["北京站", "4,281", "80%"],
-                ["上海站", "3,650", "62%"],
-                ["深圳站", "2,134", "40%"],
-              ],
-            },
-          });
+      setTimeout(
+        () => {
+          setMessageContent(live.id, speedBoost.value ? t("chat.completedSpeed") : t("chat.completed"));
+          busy.value = false;
+          streamingMessageId.value = null;
+          // 消息级记账：每条产物 id 都要回挂到本条消息，对话内「文件变更」块才列得全。
+          // 此前只有主 md 记了账，xlsx/pptx/html 都漏在 artifacts 之外。
+          const record = (id: string): void => {
+            live.artifacts = [...(live.artifacts ?? []), id];
+          };
+          // 交付物契约：产物落盘虚拟文件系统 → Artifacts 卡片 + Diffs 实时出现
+          // 意图识别基于用户原始输入（intentText），而非占位完成文案 message.content。
+          const firstLabel = String(live.steps?.[1]?.label ?? "");
+          const isReport = /日报|周报|报告/.test(intentText) || /报告/.test(live.content);
+          // 太阳系演示意图：生成 5 页深色主题 PPT + 对应 Brief
+          const isSolar = /(太阳系|solar system|太阳系之旅)/i.test(intentText);
+          // 追加行意图：给已存在的 Excel 追加一行（走就地修改，不重新生成整表）
+          const isAddRow =
+            /添加|新增|插入|追加|补|增加|加.{0,4}(一行|行|row)/i.test(intentText) && /(excel|xlsx|表格|数据表|表)/i.test(intentText);
+          const name = isReport ? "reports/weekly-report.md" : "reports/task-result.md";
+          const stepLines = (live.steps ?? []).map((step) => `- ✅ ${step.label}（${step.detail}）`);
           void artifactStore
             .deliverArtifact({
-              meta: "HTML · 可视化产物",
+              meta: isReport ? "Markdown · 刚刚生成" : "Markdown · 任务产物",
               type: "report",
               source: "assistant-pipeline",
-              format: "html",
-              path: `reports/genui/dashboard-${Date.now()}.html`,
-              data: html,
+              format: "md",
+              path: name,
+              data: [
+                `# ${isReport ? "周报" : "任务结果"}`,
+                "",
+                `来源会话：${intentText.slice(0, 24)}…`,
+                "",
+                "## 执行步骤",
+                ...stepLines,
+                "",
+              ].join("\n"),
             })
             .then(record)
             .catch(() => undefined);
-        }
-      }, delay),
+          // 追加行意图：就地修改现有 Excel（通知查看器重载），跳过整表重新生成
+          if (isAddRow) {
+            void appendRowToXlsx(intentText)
+              .then(record)
+              .catch(() => undefined);
+          }
+          // 表格意图：额外产出一个 xlsx 交付物（引擎生成 → VFS 二进制落盘 → Artifacts 卡片）
+          if (!isAddRow && (/表|Excel|xlsx|客流|站点/i.test(intentText) || /表/.test(firstLabel))) {
+            void exportToXlsx([
+              {
+                name: "task-result",
+                headers: ["站点", "客流"],
+                rows: [
+                  ["北京站", "1284"],
+                  ["上海站", "2231"],
+                  ["深圳站", "876"],
+                ],
+              },
+            ])
+              .then((data) =>
+                artifactStore.deliverArtifact({
+                  meta: "Excel · 表格产物",
+                  type: "dataset",
+                  source: "assistant-pipeline",
+                  format: "xlsx",
+                  path: "reports/task-result.xlsx",
+                  data,
+                }),
+              )
+              .then(record)
+              .catch(() => undefined);
+          }
+          // 报告意图：额外产出一个 pptx 简报（标题 + 执行步骤）
+          if (isReport) {
+            void exportToPptx({
+              title: "任务简报",
+              subtitle: `来源会话：${intentText.slice(0, 24)}…`,
+              slides: [
+                {
+                  title: "执行步骤",
+                  bullets: (live.steps ?? []).map((step) => `${step.label}：${step.detail}`),
+                },
+              ],
+            })
+              .then((data) =>
+                artifactStore.deliverArtifact({
+                  meta: "PPT · 简报产物",
+                  type: "report",
+                  source: "assistant-pipeline",
+                  format: "pptx",
+                  path: "reports/task-brief.pptx",
+                  data,
+                }),
+              )
+              .then(record)
+              .catch(() => undefined);
+          }
+          // 演示方案 Brief（Summary / Outline / Page Brief 三段）
+          if (isSolar) {
+            const { deck, brief } = solarDeck();
+            void exportToPptx(deck)
+              .then((data) =>
+                artifactStore.deliverArtifact({
+                  meta: "PPT · 太阳系演示",
+                  type: "report",
+                  source: "assistant-pipeline",
+                  format: "pptx",
+                  path: "reports/solar-system.pptx",
+                  data,
+                }),
+              )
+              .then(record)
+              .then(() => writeBrief("reports/brief.md", brief))
+              .then(record)
+              .catch(() => undefined);
+          } else if (isReport) {
+            // 报告意图同时产出演示方案 Brief（从执行步骤推导）
+            void writeBrief("reports/brief.md", briefFromReport(intentText, live.steps ?? []))
+              .then(record)
+              .catch(() => undefined);
+          }
+          // 界面意图：GenUI 产出静态 HTML 可视化 → VFS → 预览面板（preview:request 联动）
+          if (/界面|仪表盘|看板|dashboard|genui/i.test(intentText) || /界面|仪表盘|看板/.test(firstLabel)) {
+            const html = specToHtml({
+              title: `${extractDashboardTitle(intentText)} · GenUI`,
+              subtitle: `来源会话：${intentText.slice(0, 24)}…`,
+              kpis: [
+                { label: "总客流", value: "12,384" },
+                { label: "峰值日", value: "周六" },
+                { label: "环比", value: "+8.2%" },
+              ],
+              table: {
+                headers: ["站点", "客流", "占比"],
+                rows: [
+                  ["北京站", "4,281", "80%"],
+                  ["上海站", "3,650", "62%"],
+                  ["深圳站", "2,134", "40%"],
+                ],
+              },
+            });
+            void artifactStore
+              .deliverArtifact({
+                meta: "HTML · 可视化产物",
+                type: "report",
+                source: "assistant-pipeline",
+                format: "html",
+                path: `reports/genui/dashboard-${Date.now()}.html`,
+                data: html,
+              })
+              .then(record)
+              .catch(() => undefined);
+          }
+          // 完成文案排在工具与收尾思考之后：演示态也遵守「思考 → 动手 → 再思考 → 作答」的真实顺序
+        },
+        Math.max(delay, toolDelay + 520),
+      ),
     );
   }
 
@@ -794,12 +807,20 @@ export const useChatStore = defineStore("chat", () => {
     return { threadId, message };
   }
 
-  /** 通过响应式线程列表更新 ACP 支架；threadId 缺省 = 当前激活线程（向后兼容）。
-   * 增量先入缓冲（~40ms 合并），由 flushPendingContent 统一写入。 */
+  /**
+   * 通过响应式线程列表更新 ACP 支架；threadId 缺省 = 当前激活线程（向后兼容）。
+   * 增量先入缓冲（~40ms 合并），由 flushPendingContent 统一写入；
+   * 段边界在增量到达时就定下来，否则中途插进来的思考 / 工具会串位。
+   */
   function appendMessageContent(messageId: string, content: string, threadId = activeThreadId.value): void {
     const entry = appendBuf.get(messageId);
-    if (entry) entry.text += content;
-    else appendBuf.set(messageId, { threadId, text: content });
+    if (entry) {
+      entry.text += content;
+    } else {
+      appendBuf.set(messageId, { threadId, text: content });
+      const message = ensure(threadId).find((candidate) => candidate.id === messageId);
+      if (message) openTextSegment(message);
+    }
     scheduleFlush();
   }
 
@@ -807,33 +828,56 @@ export const useChatStore = defineStore("chat", () => {
     // 丢弃待 flush 的增量，避免覆盖回退后再被缓冲追加。
     appendBuf.delete(messageId);
     const message = ensure(threadId).find((candidate) => candidate.id === messageId);
-    if (message) message.content = content;
-  }
-
-  /** 把工具活动增量并入指定消息的 tools 时间线（ACP 事件路由用）。 */
-  function appendTools(activities: ToolActivity[], messageId: string, threadId = activeThreadId.value): void {
-    const message = ensure(threadId).find((candidate) => candidate.id === messageId);
     if (!message) return;
-    message.tools = mergeToolActivities(message.tools, activities);
-  }
-
-  /** 写入思考链增量（整段替换；mock 揭示与未来 ACP 推理流共用的入口）。 */
-  function setMessageThinking(messageId: string, thinking: string, threadId = activeThreadId.value): void {
-    const message = ensure(threadId).find((candidate) => candidate.id === messageId);
-    if (message) message.thinking = thinking;
+    message.content = content;
+    // 正文整体替换（错误文案 / 无输出兜底）：偏移全失效，思考与工具段保留，正文归一段挂到末尾。
+    const kept = (message.segments ?? []).filter((segment) => segment.kind !== "text");
+    message.segments = content ? [...kept, { kind: "text", id: uid(), from: 0, to: null }] : kept;
   }
 
   /**
-   * 追加思考链增量（ACP AgentThoughtChunk 回流入口；与 setMessageThinking 的差异是
-   * 增量累加而非整段替换）。首段记录 thinkingAt 并持续刷新 thinkingFor，
-   * 供 ThinkingBlock 显示「已思考 Ns」。
+   * 把工具活动增量并入指定消息的 tools 时间线，并登记到当前工具段。
+   * 已在某段里的 toolCallId（后续 tool_call_update）不重复登记，也不另起新段。
    */
-  function appendMessageThinking(messageId: string, delta: string, threadId = activeThreadId.value): void {
+  function appendTools(activities: ToolActivity[], messageId: string, threadId = activeThreadId.value): void {
+    // 缓冲里的正文先落地，否则这批工具会插到还没写出的正文之前，段序错位。
+    flushPendingContent();
     const message = ensure(threadId).find((candidate) => candidate.id === messageId);
     if (!message) return;
-    message.thinkingAt ??= Date.now();
-    message.thinking = (message.thinking ?? "") + delta;
-    message.thinkingFor = Date.now() - message.thinkingAt;
+    message.tools = mergeToolActivities(message.tools, activities);
+    const segments = (message.segments ??= []);
+    for (const activity of activities) {
+      if (segments.some((segment) => segment.kind === "tools" && segment.toolCallIds.includes(activity.toolCallId))) continue;
+      let tail = segments.at(-1);
+      if (tail?.kind !== "tools") {
+        if (tail?.kind === "thinking") tail.endedAt = Date.now();
+        else if (tail?.kind === "text") tail.to = message.content.length;
+        tail = { kind: "tools", id: uid(), toolCallIds: [] };
+        segments.push(tail);
+      }
+      tail.toolCallIds.push(activity.toolCallId);
+    }
+  }
+
+  /**
+   * 追加思考链增量（ACP AgentThoughtChunk / mock 揭示共用入口）。
+   * 连续的思考并进同一段；一旦被正文或工具打断，下一波思考另起一段 ——
+   * 这样一条消息里的多轮推理各自折叠，而不是全部堆进消息头上那一坨。
+   */
+  function appendMessageThinking(messageId: string, delta: string, threadId = activeThreadId.value): void {
+    flushPendingContent();
+    const message = ensure(threadId).find((candidate) => candidate.id === messageId);
+    if (!message) return;
+    const segments = (message.segments ??= []);
+    const tail = segments.at(-1);
+    const now = Date.now();
+    if (tail?.kind === "thinking") {
+      tail.text += delta;
+      tail.endedAt = now;
+      return;
+    }
+    if (tail?.kind === "text") tail.to = message.content.length;
+    segments.push({ kind: "thinking", id: uid(), text: delta, startedAt: now, endedAt: now });
   }
 
   return {
@@ -841,7 +885,6 @@ export const useChatStore = defineStore("chat", () => {
     threads,
     busy,
     speedBoost,
-    thinkingMessageId,
     commandQueue,
     commandQueueMode,
     enqueueCommand,
@@ -858,7 +901,6 @@ export const useChatStore = defineStore("chat", () => {
     appendMessageContent,
     setMessageContent,
     appendTools,
-    setMessageThinking,
     appendMessageThinking,
     flushPendingContent,
     streamingMessageId,

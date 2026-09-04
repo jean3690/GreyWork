@@ -12,6 +12,7 @@
     "dev": "pnpm --filter @greywork/desktop dev",
     "dev:desktop": "pnpm --filter @greywork/desktop dev",
     "tauri": "pnpm --filter @greywork/desktop tauri",
+    "tauri:wayland": "pnpm --filter @greywork/desktop tauri:wayland",
     "build": "pnpm --filter @greywork/desktop build",
     "build:desktop": "pnpm --filter @greywork/desktop build",
     "typecheck": "pnpm -r --if-present run typecheck",

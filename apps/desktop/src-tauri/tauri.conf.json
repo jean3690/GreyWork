@@ -17,8 +17,12 @@
         "height": 820,
         "minWidth": 960,
         "minHeight": 640,
-        "visible": false,
-        "backgroundColor": "#f6f7f9"
+        "visible": true,
+        "backgroundColor": "#f6f7f9",
+        "resizable": true,
+        "center": true,
+        "decorations": false,
+        "dragDropEnabled": true
       }
     ],
     "security": {

@@ -19,6 +19,20 @@ export interface WorkspaceFile {
   binary?: boolean;
 }
 
+/**
+ * 每工作区记忆的 ACP / agent 配置。
+ *
+ * 只记「用户选过什么」，不记运行期状态（handle / sessionId）：切回该工作区时
+ * 按此重建，跨重启也成立。configValues 的键是 agent 在 session/new 暴露的
+ * 配置项 id（model / effort / mode …），不同 agent 各异，故不写死字段。
+ */
+export interface WorkspaceAgentConfig {
+  /** ACP provider id；null = 本地 LLM 管线；undefined = 未记录过。 */
+  providerId?: string | null;
+  /** 会话配置项 id → 选中值（模型、思考强度、会话模式等）。 */
+  configValues?: Record<string, string>;
+}
+
 /** 工作区记录：绑定用户选择的存放文件夹 + 已打开（存放）文件清单。 */
 export interface WorkspaceRecord extends Workspace {
   /** 用户选择的存放文件夹（桌面端为磁盘路径，浏览器端为所选文件夹名）。 */
@@ -26,14 +40,28 @@ export interface WorkspaceRecord extends Workspace {
   files: WorkspaceFile[];
   createdAt: number;
   updatedAt: number;
+  /** 最近一次被激活的时刻（最近使用排序依据；v1 迁移时取 updatedAt）。 */
+  lastUsedAt: number;
+  /** 该工作区记住的 ACP / agent 配置。 */
+  agentConfig?: WorkspaceAgentConfig;
 }
 
 const STORAGE_KEY = "greywork.workspaces";
 const LEGACY_PROJECTS_KEY = "greywork.projects";
 
+/** v2：新增 lastUsedAt（最近使用）与 defaultWorkspaceId（默认工作区）。 */
 interface PersistedWorkspaces {
-  version: 1;
+  version: 2;
   workspaces: WorkspaceRecord[];
+  activeWorkspaceId: string | null;
+  /** 启动时的兜底工作区（用户显式设定）；null = 不指定，按最近使用。 */
+  defaultWorkspaceId: string | null;
+}
+
+/** v1：无 lastUsedAt / defaultWorkspaceId，读取时补齐。 */
+interface PersistedWorkspacesV1 {
+  version: 1;
+  workspaces: Omit<WorkspaceRecord, "lastUsedAt">[];
   activeWorkspaceId: string | null;
 }
 
@@ -43,7 +71,8 @@ function isWorkspaceFile(value: unknown): value is WorkspaceFile {
   return typeof record.name === "string" && typeof record.vfsPath === "string" && (record.kind === "file" || record.kind === "directory");
 }
 
-function isWorkspaceRecord(value: unknown): value is WorkspaceRecord {
+/** v1/v2 共有字段的校验（lastUsedAt 单独判，v1 记录没有它）。 */
+function hasWorkspaceCore(value: unknown): value is Omit<WorkspaceRecord, "lastUsedAt"> {
   if (typeof value !== "object" || value === null) return false;
   const record = value as Record<string, unknown>;
   return (
@@ -58,15 +87,27 @@ function isWorkspaceRecord(value: unknown): value is WorkspaceRecord {
   );
 }
 
+function isWorkspaceRecord(value: unknown): value is WorkspaceRecord {
+  if (!hasWorkspaceCore(value)) return false;
+  return "lastUsedAt" in value && typeof value.lastUsedAt === "number";
+}
+
 function isPersistedWorkspaces(value: unknown): value is PersistedWorkspaces {
   if (typeof value !== "object" || value === null) return false;
   const record = value as Record<string, unknown>;
   return (
-    record.version === 1 &&
+    record.version === 2 &&
     Array.isArray(record.workspaces) &&
     record.workspaces.every(isWorkspaceRecord) &&
-    (record.activeWorkspaceId === null || typeof record.activeWorkspaceId === "string")
+    (record.activeWorkspaceId === null || typeof record.activeWorkspaceId === "string") &&
+    (record.defaultWorkspaceId === null || typeof record.defaultWorkspaceId === "string")
   );
+}
+
+function isPersistedWorkspacesV1(value: unknown): value is PersistedWorkspacesV1 {
+  if (typeof value !== "object" || value === null) return false;
+  const record = value as Record<string, unknown>;
+  return record.version === 1 && Array.isArray(record.workspaces) && record.workspaces.every(hasWorkspaceCore);
 }
 
 /** 旧版「项目」存储（greywork.projects）→ 工作区：root 即存放文件夹，其余字段同构。 */
@@ -87,12 +128,11 @@ interface LegacyProjects {
 function readLegacyProjects(): PersistedWorkspaces | null {
   const legacy = createJsonStorage<LegacyProjects>(
     LEGACY_PROJECTS_KEY,
-    (value): value is LegacyProjects =>
-      typeof value === "object" && value !== null && Array.isArray((value as { projects?: unknown }).projects),
+    (value): value is LegacyProjects => typeof value === "object" && value !== null && "projects" in value && Array.isArray(value.projects),
   ).read();
   if (!legacy) return null;
   return {
-    version: 1,
+    version: 2,
     workspaces: legacy.projects.map((project) => ({
       id: project.id,
       name: project.name,
@@ -109,12 +149,15 @@ function readLegacyProjects(): PersistedWorkspaces | null {
         : [],
       createdAt: project.createdAt,
       updatedAt: project.updatedAt,
+      lastUsedAt: project.updatedAt,
     })),
     activeWorkspaceId: legacy.activeProjectId,
+    defaultWorkspaceId: null,
   };
 }
 
 const storage = createJsonStorage<PersistedWorkspaces>(STORAGE_KEY, isPersistedWorkspaces);
+const storageV1 = createJsonStorage<PersistedWorkspacesV1>(STORAGE_KEY, isPersistedWorkspacesV1);
 
 /** 移除给定 key（迁移完成后清理旧版数据）。 */
 function removeStorageValue(key: string): void {
@@ -128,12 +171,34 @@ function removeStorageValue(key: string): void {
 
 function seedWorkspaces(): WorkspaceRecord[] {
   const now = Date.now();
-  return MOCK_WORKSPACES.map((workspace, index) => ({
-    ...workspace,
-    files: [],
-    createdAt: now - (MOCK_WORKSPACES.length - index) * 86_400_000,
-    updatedAt: now - (MOCK_WORKSPACES.length - index) * 86_400_000,
-  }));
+  return MOCK_WORKSPACES.map((workspace, index) => {
+    const at = now - (MOCK_WORKSPACES.length - index) * 86_400_000;
+    return { ...workspace, files: [], createdAt: at, updatedAt: at, lastUsedAt: at };
+  });
+}
+
+/** v2 → 直接用；v1 → 补 lastUsedAt/defaultWorkspaceId；再旧 → 项目时代存储；都没有 → 种子。 */
+function loadWorkspaces(): PersistedWorkspaces {
+  const current = storage.read();
+  if (current) return current;
+  const v1 = storageV1.read();
+  if (v1) {
+    return {
+      version: 2,
+      // 没有使用记录可依据，退回 updatedAt：至少保住相对顺序
+      workspaces: v1.workspaces.map((workspace) => ({ ...workspace, lastUsedAt: workspace.updatedAt })),
+      activeWorkspaceId: v1.activeWorkspaceId,
+      defaultWorkspaceId: null,
+    };
+  }
+  return (
+    readLegacyProjects() ?? {
+      version: 2,
+      workspaces: seedWorkspaces(),
+      activeWorkspaceId: null,
+      defaultWorkspaceId: null,
+    }
+  );
 }
 
 let workspaceSeq = 0;
@@ -144,15 +209,32 @@ function makeId(): string {
 
 /** 工作区（绑定存放文件夹）与已存放文件的顶层组织。持久化于 localStorage（greywork.workspaces）。 */
 export const useWorkspaceStore = defineStore("workspace", () => {
-  const stored = storage.read();
-  const legacy = stored ?? readLegacyProjects();
+  const loaded = loadWorkspaces();
   // 旧版 key 读取后即清理（无论是否走迁移路径），避免遗留数据二次迁移
   removeStorageValue(LEGACY_PROJECTS_KEY);
-  const workspaces = ref<WorkspaceRecord[]>(legacy?.workspaces ?? seedWorkspaces());
-  const activeWorkspaceId = ref<string | null>(legacy?.activeWorkspaceId ?? workspaces.value[0]?.id ?? null);
+  const workspaces = ref<WorkspaceRecord[]>(loaded.workspaces);
+  const defaultWorkspaceId = ref<string | null>(
+    loaded.defaultWorkspaceId && loaded.workspaces.some((workspace) => workspace.id === loaded.defaultWorkspaceId)
+      ? loaded.defaultWorkspaceId
+      : null,
+  );
+  /** 最近使用优先（lastUsedAt 倒序）；同刻按原顺序稳定。 */
+  const recentWorkspaces = computed(() => [...workspaces.value].sort((a, b) => b.lastUsedAt - a.lastUsedAt));
+  /**
+   * 启动落点：上次激活 → 默认工作区 → 清单首位。
+   *
+   * 最后一档刻意用声明顺序而不是最近使用：首启（种子数据）时「最近使用」是造出来的
+   * 时间戳，落点会漂到列表末尾那个；上次激活本身已经承担了「回到我离开的地方」。
+   */
+  const activeWorkspaceId = ref<string | null>(loaded.activeWorkspaceId ?? defaultWorkspaceId.value ?? workspaces.value[0]?.id ?? null);
 
   function persist(): void {
-    storage.write({ version: 1, workspaces: workspaces.value, activeWorkspaceId: activeWorkspaceId.value });
+    storage.write({
+      version: 2,
+      workspaces: workspaces.value,
+      activeWorkspaceId: activeWorkspaceId.value,
+      defaultWorkspaceId: defaultWorkspaceId.value,
+    });
   }
 
   /* 编辑器保存 → 同步写回存放文件夹（仅桌面端命中 origin 的文件）。 */
@@ -182,8 +264,24 @@ export const useWorkspaceStore = defineStore("workspace", () => {
     return workspaces.value.find((workspace) => workspace.name === name || workspace.id === name);
   }
 
-  function setActiveWorkspace(id: string): void {
+  /** 记一次使用（最近使用排序依据）；不动 updatedAt（那代表内容变更）。 */
+  function touchWorkspace(id: string): void {
+    const workspace = workspaceById(id);
+    if (!workspace) return;
+    workspace.lastUsedAt = Date.now();
+    persist();
+  }
+
+  function setActiveWorkspace(id: string | null): void {
     activeWorkspaceId.value = id;
+    const workspace = workspaceById(id);
+    if (workspace) workspace.lastUsedAt = Date.now();
+    persist();
+  }
+
+  /** 设为/取消默认工作区（下次启动无上次激活记录时的落点）。 */
+  function setDefaultWorkspace(id: string | null): void {
+    defaultWorkspaceId.value = id && workspaceById(id) ? id : null;
     persist();
   }
 
@@ -196,6 +294,7 @@ export const useWorkspaceStore = defineStore("workspace", () => {
       files: [],
       createdAt: now,
       updatedAt: now,
+      lastUsedAt: now,
     };
     workspaces.value.push(workspace);
     activeWorkspaceId.value = workspace.id;
@@ -225,16 +324,34 @@ export const useWorkspaceStore = defineStore("workspace", () => {
     const index = workspaces.value.findIndex((workspace) => workspace.id === id);
     if (index < 0) return;
     workspaces.value.splice(index, 1);
+    if (defaultWorkspaceId.value === id) defaultWorkspaceId.value = null;
     if (activeWorkspaceId.value === id) activeWorkspaceId.value = workspaces.value[0]?.id ?? null;
     persist();
   }
 
-  /** 绑定用户选择的存放文件夹。 */
+  /** 绑定用户选择的存放文件夹。会话文件搬迁由 lib/workspace-bind.ts 编排。 */
   function setFolder(id: string, folder: string): void {
     const workspace = workspaceById(id);
     if (!workspace) return;
     workspace.folder = folder;
     workspace.updatedAt = Date.now();
+    persist();
+  }
+
+  /** 该工作区记住的 ACP / agent 配置（无记录返回 undefined，调用方据此决定「不动当前状态」）。 */
+  function agentConfigOf(id: string | null): WorkspaceAgentConfig | undefined {
+    return workspaceById(id)?.agentConfig;
+  }
+
+  /** 记忆 ACP / agent 配置：providerId 整体覆盖，configValues 逐键浅合并。 */
+  function setAgentConfig(id: string, patch: WorkspaceAgentConfig): void {
+    const workspace = workspaceById(id);
+    if (!workspace) return;
+    const previous = workspace.agentConfig ?? {};
+    workspace.agentConfig = {
+      providerId: "providerId" in patch ? patch.providerId : previous.providerId,
+      configValues: patch.configValues ? { ...previous.configValues, ...patch.configValues } : previous.configValues,
+    };
     persist();
   }
 
@@ -260,14 +377,20 @@ export const useWorkspaceStore = defineStore("workspace", () => {
   return {
     workspaces,
     activeWorkspaceId,
+    defaultWorkspaceId,
+    recentWorkspaces,
     workspaceById,
     workspaceByName,
+    touchWorkspace,
     setActiveWorkspace,
+    setDefaultWorkspace,
     createWorkspace,
     renameWorkspace,
     updateDescription,
     deleteWorkspace,
     setFolder,
+    agentConfigOf,
+    setAgentConfig,
     addFile,
     removeFile,
     persist,

@@ -1,29 +1,53 @@
 import { defineConfig } from "vitest/config";
+import path from "path";
 import vue from "@vitejs/plugin-vue";
+
+// 对齐 GreyWork 的 tests/ 集中布局：
+//   tests/unit/**/*.test.ts       纯逻辑单测（node 环境）
+//   tests/unit/**/*.dom.test.ts   组件/hook 测试（happy-dom 环境，.dom 后缀分流）
+//   tests/vitest.setup.ts / tests/vitest.dom.setup.ts  各环境共享 setup
+// 环境不再用 `// @vitest-environment` 文件头注释，而是按文件后缀 + projects 配置分流。
+const srcRoot = path.resolve(__dirname, "src");
 
 export default defineConfig({
   plugins: [vue()],
+  resolve: {
+    alias: {
+      "@": srcRoot,
+    },
+  },
   test: {
-    include: ["src/**/*.test.ts"],
-    // 环境策略：全局保持 node（多数用例是纯逻辑，node 更快也更贴近 store 的单测语义）。
-    // 需要 DOM 的用例在文件头写 `// @vitest-environment happy-dom` 单独开启 ——
-    // 组件挂载、以及 createWebHashHistory 这类依赖 window 的都走这条路。
-    // 改全局 environment 会一次性扰动全部既有用例，故不做。
+    projects: [
+      // node 环境：纯逻辑单测
+      {
+        extends: true,
+        test: {
+          name: "node",
+          environment: "node",
+          include: ["tests/unit/**/*.test.ts"],
+          exclude: ["tests/unit/**/*.dom.test.ts", "tests/unit/**/*.dom.test.tsx"],
+          setupFiles: ["./tests/vitest.setup.ts"],
+        },
+      },
+      // happy-dom 环境：组件 / 依赖 window 的用例
+      {
+        extends: true,
+        test: {
+          name: "dom",
+          environment: "happy-dom",
+          include: ["tests/unit/**/*.dom.test.ts", "tests/unit/**/*.dom.test.tsx"],
+          setupFiles: ["./tests/vitest.dom.setup.ts"],
+        },
+      },
+    ],
     coverage: {
       provider: "v8",
+      // 只统计业务源码；测试已移出 src，天然不参与
       include: ["src/**"],
-      // barrel 出口与纯类型不计入门禁；.vue 组件随基线棘轮逐步收紧
-      exclude: ["src/index.ts", "src/types.ts", "src/**/*.d.ts", "src/i18n/**"],
-      // 2026-08-26 二次重设基线：Codex 风格壳层改造新增 ShellSidebar/MarkdownText/StatusBar
-      // 等视图组件（未挂测试），实测 statements/lines 26.75、branches 78.1、functions 67.1。
-      // 2026-08-27 三次调整：H4 桥接新增 bridge.ts（含 22 个异步组件 lazy loader，仅真实渲染
-      // 时执行，node 测试环境无法覆盖），pluginMarket.ts 补测后实测 statements/lines 26+、
-      // branches 76+、functions 64.22。functions 阈值降至 64 保持棘轮。
-      // 2026-08-29 四次上调：补齐 @vue/test-utils + happy-dom（此前组件层根本无法测试），
-      // 新增 router/index.test.ts 与 ActivityPanel.test.ts。router 8.1% → 78.37%，
-      // 全量 statements/lines 26 → 48.82、branches 79.55、functions 73.14。
-      // 阈值提到实测下方约 1.5pt 留出余量，锁住增量防止回退。
-      thresholds: { statements: 47, lines: 47, branches: 78, functions: 71 },
+      exclude: ["src/index.ts", "src/types.ts", "src/**/*.d.ts", "src/i18n/**", "src/**/*.test.ts"],
+      // 2026-08-26 起基线注释见旧 vitest.config；测试迁移到 tests/ 后 coverage 只覆盖业务代码，
+      // 数值重新测量后在此登记（见 2026-09-02 迁移说明）。
+      thresholds: { statements: 49, lines: 49, branches: 79, functions: 72 },
     },
   },
 });

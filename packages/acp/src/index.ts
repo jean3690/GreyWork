@@ -1,7 +1,7 @@
-export { createAcpClient, WebSocketTransport, RemoteAcpUnsupportedError, isTauriRuntime, desktopHomeDir } from "./client";
+export { createAcpClient, isTauriRuntime, desktopHomeDir } from "./client";
+export { WebSocketTransport, RemoteAcpUnsupportedError } from "./client";
 export type { WebSocketTransportOptions } from "./client";
-export { permissionTierToAcpMode, shouldConfirmBeforeDispatch, isDestructiveIntent } from "./permissions";
-export type { PermissionTier, AcpPermissionMode } from "./permissions";
+export type { PermissionTier } from "./permissions";
 export { TauriIpcTransport } from "./tauri-transport";
 export type {
   AcpClient,
@@ -15,4 +15,8 @@ export type {
   AcpSessionInfo,
   AcpSessionOpened,
   AcpTransport,
+  McpProbeReport,
+  McpServerConfig,
+  McpSkippedServer,
+  McpToolInfo,
 } from "./client";

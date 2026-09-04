@@ -29,9 +29,10 @@ type LocaleModule = { default: UniverLocaleMap };
 
 /**
  * 加载并合并 Univer 常用 zh-CN 语言包。
- * design / ui 为所有产品共用；docs-ui 供文档；sheets-ui / sheets 供表格；slides-ui 供幻灯片。
+ * design / ui 为所有产品共用；docs-ui 供文档；sheets-ui / sheets 供表格。
+ * 幻灯片不在此列：pptx 预览已改为自解析 + DOM 渲染（`lib/pptx-parse.ts`），不再经 Univer。
  */
-export async function loadUniverZhLocales(docs = false, sheets = false, slides = false): Promise<UniverLocaleMap> {
+export async function loadUniverZhLocales(docs = false, sheets = false): Promise<UniverLocaleMap> {
   const imports: Promise<LocaleModule>[] = [
     import("@univerjs/design/locale/zh-CN") as Promise<LocaleModule>,
     import("@univerjs/ui/locale/zh-CN") as Promise<LocaleModule>,
@@ -41,19 +42,14 @@ export async function loadUniverZhLocales(docs = false, sheets = false, slides =
     imports.push(import("@univerjs/sheets/locale/zh-CN") as Promise<LocaleModule>);
     imports.push(import("@univerjs/sheets-ui/locale/zh-CN") as Promise<LocaleModule>);
   }
-  if (slides) imports.push(import("@univerjs/slides-ui/locale/zh-CN") as Promise<LocaleModule>);
 
   const modules = await Promise.all(imports);
   return deepMerge({}, ...modules.map((m) => m.default));
 }
 
 /** 供 `new Univer({ locale, locales })` 使用的最小 locales 配置（含合并后的 zh-CN 数据）。 */
-export async function buildUniverLocaleConfig(
-  docs = false,
-  sheets = false,
-  slides = false,
-): Promise<{ locale: LocaleType; locales: ILocales }> {
-  const localeData = await loadUniverZhLocales(docs, sheets, slides);
+export async function buildUniverLocaleConfig(docs = false, sheets = false): Promise<{ locale: LocaleType; locales: ILocales }> {
+  const localeData = await loadUniverZhLocales(docs, sheets);
   return {
     locale: LocaleType.ZH_CN,
     locales: { [LocaleType.ZH_CN]: localeData },
