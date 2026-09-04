@@ -356,15 +356,6 @@ importers:
       '@univerjs/design':
         specifier: ^0.25.1
         version: 0.25.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
-      '@univerjs/docs':
-        specifier: ^0.25.1
-        version: 0.25.1(react@19.2.8)(rxjs@7.8.2)
-      '@univerjs/docs-ui':
-        specifier: ^0.25.1
-        version: 0.25.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2)
-      '@univerjs/preset-docs-core':
-        specifier: ^0.25.1
-        version: 0.25.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2)
       '@univerjs/preset-sheets-core':
         specifier: ^0.25.1
         version: 0.25.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2)
@@ -1825,13 +1816,6 @@ packages:
   '@univerjs/network@0.25.1':
     resolution: {integrity: sha512-5sqyI9qKyn/fb+IMIoW6nQPJHlpJr1/WscCyDG4PmMtpMm/ipN/CZu31FIyMyM1jLOeJX1uMeldflviEq4iorA==}
     peerDependencies:
-      rxjs: '>=7.0.0'
-
-  '@univerjs/preset-docs-core@0.25.1':
-    resolution: {integrity: sha512-V98oGWbMa2NjvHZEMFyHvVu0DXp8h4i/soJilAdK+mV+Ja0i2Eofj/Wsmoj9LT++nC1pXfGfNzpezy04uR/EVw==}
-    peerDependencies:
-      react: ^16.9.0 || ^17.0.0 || ^18.0.0 || ^19.0.0 || ^19.0.0-rc
-      react-dom: ^16.9.0 || ^17.0.0 || ^18.0.0 || ^19.0.0 || ^19.0.0-rc
       rxjs: '>=7.0.0'
 
   '@univerjs/preset-sheets-core@0.25.1':
@@ -5262,22 +5246,6 @@ snapshots:
       rxjs: 7.8.2
     transitivePeerDependencies:
       - react
-
-  '@univerjs/preset-docs-core@0.25.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2)':
-    dependencies:
-      '@univerjs/design': 0.25.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
-      '@univerjs/docs': 0.25.1(react@19.2.8)(rxjs@7.8.2)
-      '@univerjs/docs-ui': 0.25.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2)
-      '@univerjs/engine-formula': 0.25.1(react@19.2.8)(rxjs@7.8.2)
-      '@univerjs/engine-render': 0.25.1(react@19.2.8)(rxjs@7.8.2)
-      '@univerjs/network': 0.25.1(react@19.2.8)(rxjs@7.8.2)
-      '@univerjs/ui': 0.25.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2)
-      react: 19.2.8
-      react-dom: 19.2.8(react@19.2.8)
-      rxjs: 7.8.2
-    transitivePeerDependencies:
-      - '@types/react'
-      - '@types/react-dom'
 
   '@univerjs/preset-sheets-core@0.25.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2)':
     dependencies:
