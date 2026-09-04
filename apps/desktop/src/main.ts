@@ -2,10 +2,10 @@ import { createApp } from "vue";
 import { createPinia } from "pinia";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import App from "./App.vue";
-import { createWorkbenchRouter, i18n } from "@greywork/workbench";
+import { createAppRouter, i18n } from "@greywork/workbench";
 import "./tailwind.css";
 
-const app = createApp(App).use(i18n).use(createPinia()).use(createWorkbenchRouter());
+const app = createApp(App).use(i18n).use(createPinia()).use(createAppRouter());
 app.mount("#app");
 // Dev-only e2e 钩子：暴露内存 FS 与事件总线，便于 Playwright 注入产物并触发预览
 // （生产构建中 import.meta.env.DEV 为 false，整段被 tree-shake 移除）。

@@ -1,36 +1,75 @@
-/** 权限档位 → ACP 确认模式映射（Phase 5）。
- *
- * cautious → confirm-each：每次工具/权限请求逐条弹层确认（CommandBar 已实现确认门）。
- * daily    → confirm-destructive：常规操作放行，破坏性操作确认（mock 期与 Rust YOLO 组合时
- *            由前端在派发前拦截危险意图关键词）。
- * auto     → auto-approve：Rust 主机 YOLO 策略直通。
- */
-export type PermissionTier = "cautious" | "daily" | "auto";
-export type AcpPermissionMode = "confirm-each" | "confirm-destructive" | "auto-approve";
+/** Agent 权限档位（前端展示层级；真正的判定边界由 Rust 宿主执行）。 */
+export type PermissionTier = "read-only" | "workspace" | "full";
 
-export function permissionTierToAcpMode(tier: PermissionTier): AcpPermissionMode {
-  if (tier === "cautious") return "confirm-each";
-  if (tier === "daily") return "confirm-destructive";
-  return "auto-approve";
+/** 权限选项意图分类（对齐 GreyWork permissionOptions.ts 的模型）。 */
+export type PermissionIntent = "allow-once" | "allow-always" | "reject-once" | "reject-always" | "neutral";
+
+/** 工具操作分类：决定 daily 档位是否自动放行、UI 图标/文案选择。 */
+export type PermissionOperationKind = "execute" | "edit" | "read" | "fetch" | "tool";
+
+/** ACP 权限选项的原始 kind（宿主转发，透传 agent 侧命名）。 */
+export type AcpOptionKind = "allow_once" | "allow_always" | "reject_once" | "reject_always" | (string & {});
+
+/** 将 ACP 选项 kind 归一化为意图枚举；未知值按 neutral（保守）。 */
+export function classifyAcpPermission(kind: string | null | undefined): PermissionIntent {
+  switch (kind) {
+    case "allow_once":
+      return "allow-once";
+    case "allow_always":
+      return "allow-always";
+    case "reject_once":
+      return "reject-once";
+    case "reject_always":
+      return "reject-always";
+    default:
+      return "neutral";
+  }
 }
 
-/**
- * daily 档的破坏性意图粗筛（派发前语义拦截，防误发）。
- * 注意：真正的工具级守卫已由 Rust 宿主执行——daily 档非只读工具
- * 一律转发前端确认；写类工具（edit/delete/move）路径越出工作区由宿主直接拒绝
- * （见 apps/desktop/src-tauri/src/acp_host.rs 的文件系统锚定）。此处仅做用户
- * 体验层的第一道提示，不承担安全边界职责。
- */
-const DESTRUCTIVE_PATTERN = /(删除|rm\s|格式化|format\s|drop\s+table|push\s+--force)/i;
-
-export function isDestructiveIntent(text: string): boolean {
-  return DESTRUCTIVE_PATTERN.test(text);
+/** 将工具调用 kind（宿主 label）归一化为操作分类；未知按 tool。 */
+export function normalizePermissionOperationKind(kind?: string | null): PermissionOperationKind {
+  switch (kind) {
+    case "exec":
+    case "execute":
+    case "bash":
+      return "execute";
+    case "edit":
+    case "write":
+    case "create":
+    case "delete":
+    case "move":
+      return "edit";
+    case "info":
+    case "read":
+    case "list":
+      return "read";
+    case "fetch":
+    case "search":
+    case "web_search":
+      return "fetch";
+    default:
+      return "tool";
+  }
 }
 
-/** 派发前置守卫：返回是否允许直接派发（false = 需前端确认弹层）。 */
-export function shouldConfirmBeforeDispatch(tier: PermissionTier, text: string): boolean {
-  const mode = permissionTierToAcpMode(tier);
-  if (mode === "confirm-each") return true;
-  if (mode === "confirm-destructive") return isDestructiveIntent(text);
-  return false;
+/** auto 档安全兜底：选第一个 allow-once 选项；无则 null（宿主将取消而非询问）。 */
+export function safeAllowOnceId(options: { optionId: string; kind?: AcpOptionKind }[]): string | null {
+  return options.find((option) => classifyAcpPermission(option.kind) === "allow-once")?.optionId ?? null;
+}
+
+/** 权限面板选项展示模型（去重 + 意图分类后的稳定身份，供渲染 key/测试断言）。 */
+export interface PermissionPanelOption {
+  id: string;
+  value: string;
+  label: string;
+  intent: PermissionIntent;
+}
+
+export function toPermissionPanelOptions(options: { optionId: string; name: string; kind?: AcpOptionKind }[]): PermissionPanelOption[] {
+  return options.map((option, index) => ({
+    id: `${option.optionId}:${index}`,
+    value: option.optionId,
+    label: option.name || option.optionId,
+    intent: classifyAcpPermission(option.kind),
+  }));
 }

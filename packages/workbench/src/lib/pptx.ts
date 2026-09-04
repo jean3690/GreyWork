@@ -1,5 +1,8 @@
 import pptxgen from "pptxgenjs";
 
+/** 简报主题色：封面底色。预览组件必须复用同一常量，否则预览与导出不一致。 */
+export const DECK_ACCENT = "F59E0B";
+
 /** 一页简报的声明式描述。 */
 export interface PptxSlide {
   title: string;
@@ -7,6 +10,8 @@ export interface PptxSlide {
   bullets?: string[];
   /** 可选数据表：首行为表头（加粗）。 */
   table?: { headers: string[]; rows: string[][] };
+  /** 演讲者备注。 */
+  notes?: string;
 }
 
 /** 简报整体：封面 + 若干页。 */
@@ -28,7 +33,7 @@ export async function exportToPptx(deck: PptxDeck): Promise<Uint8Array> {
 
   // 封面
   const cover = pptx.addSlide();
-  cover.background = { color: "F59E0B" };
+  cover.background = { color: DECK_ACCENT };
   cover.addText(deck.title, {
     x: 0.6,
     y: 2.0,
@@ -76,10 +81,12 @@ export async function exportToPptx(deck: PptxDeck): Promise<Uint8Array> {
       );
       page.addTable(body, { x: 0.6, y: yCursor, w: "88%", fontSize: 12, border: { pt: 0.5, color: "E7E5E4" } });
     }
+    if (slide.notes) page.addNotes(slide.notes);
   }
 
-  const buffer = await pptx.write({ outputType: "nodebuffer" });
-  return new Uint8Array(buffer as ArrayBuffer);
+  // 同时兼容浏览器与 Node：arraybuffer 两端均可用（nodebuffer 仅在 Node 下有效）。
+  const buffer = (await pptx.write({ outputType: "arraybuffer" })) as ArrayBuffer;
+  return new Uint8Array(buffer);
 }
 
 /** 结果集 → 单页数据表简报。 */

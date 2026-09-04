@@ -30,4 +30,69 @@
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);
+
+  /* 字族对齐 tokens.css（Archivo Variable + JetBrains Mono） */
+  --font-sans: var(--font-ui);
+  --font-display: var(--font-display);
+  --font-mono: var(--font-mono);
+
+  /* GreyWork chrome token（无 shadcn 等价项者）→ 工具类。
+     panel/panel-2/dim/line 等已由 shadcn 语义色覆盖（card/secondary/muted-foreground/border）。 */
+  --color-side: var(--side);
+  --color-line: var(--line);
+  --color-line-2: var(--line-2);
+  --color-panel-2: var(--panel-2);
+  --color-dim: var(--dim);
+  --color-dim2: var(--dim2);
+  --color-mint: var(--mint);
+  --color-cyan: var(--cyan);
+  --color-amber: var(--amber);
+  --color-violet: var(--violet);
+  --color-panel: var(--panel);
+  --color-accent-ink: var(--accent-ink);
+  --color-bubble: var(--bubble);
+  --color-console: var(--console);
+  --color-orange: var(--orange);
+  --color-brand-2: var(--brand-2);
+
+  /* GreyWork 风格入场/退场动画（供 kit 组件 data-[state=open/closed] 使用） */
+  --animate-in: enter 150ms ease-out;
+  --animate-out: exit 150ms ease-out;
+}
+
+@keyframes enter {
+  from {
+    opacity: var(--tw-enter-opacity, 1);
+    transform: translate3d(var(--tw-enter-translate-x, 0), var(--tw-enter-translate-y, 0), 0)
+      scale3d(var(--tw-enter-scale, 1), var(--tw-enter-scale, 1), 1) rotate(var(--tw-enter-rotate, 0));
+  }
+}
+@keyframes exit {
+  to {
+    opacity: var(--tw-exit-opacity, 1);
+    transform: translate3d(var(--tw-exit-translate-x, 0), var(--tw-exit-translate-y, 0), 0)
+      scale3d(var(--tw-exit-scale, 1), var(--tw-exit-scale, 1), 1) rotate(var(--tw-exit-rotate, 0));
+  }
+}
+
+/* GreyWork tool-activity shimmer：时间线「当前正在做什么」扫光文本 */
+@keyframes tat-shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/* ===== 视口高度链 =====
+ * Shell 依赖 size-full（height:100%）撑满窗口；WebKitGTK 对「百分比高度祖先
+ * 未定义高度」按 auto 塌缩（Chromium 宽容），导致桌面端内容只占窗口上部、底部大片空白。
+ * 显式钉住 html/body/#app 高度并禁止 body 滚动（滚动都在内部 overflow 容器）。
+ */
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  overflow: hidden;
 }

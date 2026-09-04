@@ -8,15 +8,24 @@ import { createEventBus } from "@greywork/core";
  * - `artifact:created`：交付物创建（chat mock 管线）
  */
 export interface GreyWorkEventMap {
-  /** 编排运行状态变化：status + 子任务完成进度。 */
+  /** 编排/协作运行状态变化：status + 子任务完成进度。
+   *  planning|running|done|failed 来自 planner 编排；paused|cancelled 来自 cowork 协作运行
+   *  （预算触顶暂停、用户取消）。 */
   "run:status": {
     runId: string;
-    status: "planning" | "running" | "done" | "failed";
+    status: "planning" | "running" | "paused" | "done" | "failed" | "cancelled";
     done: number;
     total: number;
   };
   /** 交付物创建完成（VFS 已落盘）；path 供产物查看器直接打开。 */
   "artifact:created": {
+    name: string;
+    path: string;
+    format?: "md" | "csv" | "xlsx" | "pptx" | "html";
+    source: string;
+  };
+  /** 已有交付物被就地修改（如给 Excel 追加一行）；查看器需重新加载该 tab。 */
+  "artifact:updated": {
     name: string;
     path: string;
     format?: "md" | "csv" | "xlsx" | "pptx" | "html";

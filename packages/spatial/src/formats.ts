@@ -1,3 +1,5 @@
+import { formatNumber } from "@greywork/core";
+
 export type SpatialFormat = "geojson" | "mbtiles" | "3dtiles" | "kml" | "shp";
 
 export interface SpatialBBox {
@@ -35,10 +37,6 @@ export function createSpatialDescriptor(
   extras: Partial<Omit<ParsedSpatialData, "format" | "name" | "sourcePath">> = {},
 ): ParsedSpatialData {
   return { format, name, sourcePath, ...extras };
-}
-
-function formatNumber(value: number): string {
-  return value.toFixed(2);
 }
 
 export function describeSpatialData(data: ParsedSpatialData): string {

@@ -3,12 +3,14 @@ dist/
 apps/desktop/src-tauri/target/
 .playwright*
 *.log
+# 日志轮转目录：*.log 盖不住同目录的 .<hash>-audit.json（winston-daily-rotate-file 的轮转元数据）
+logs/
 *.png
 .env
 .env.*
 !.env.example
 .pnpm-store/
-aionUi*.png
+greyWork*.png
 .omo/
 coverage/
 

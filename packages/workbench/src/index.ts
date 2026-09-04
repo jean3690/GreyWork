@@ -1,5 +1,9 @@
-export { default as WorkbenchShell } from "./AppShell.vue";
-export { createWorkbenchRouter } from "./router/index";
+// 外壳为唯一前端。旧工作台（WorkbenchShell / createWorkbenchRouter 及其视图、
+// 组件、registry、pluginMarket）已删除；此处只导出外壳、能力缝、i18n 与 e2e 调试钩子。
+export { default as Shell } from "./Shell.vue";
+export { createAppRouter } from "./router";
+export { ICONS, getIconShapes, iconNames } from "./lib/icons";
+export type { IconShape } from "./lib/icons";
 export { capabilitySeam } from "./plugins/loader";
 export type { CapabilityLoader } from "./plugins/loader";
 export type { PluginManifest, ModeContribution, UiRegionContribution, UiRegionId } from "./plugins/types";

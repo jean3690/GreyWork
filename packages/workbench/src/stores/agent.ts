@@ -9,20 +9,29 @@ import {
   type PlannerRun,
   type Subtask,
 } from "@greywork/agents";
-import { createAcpClient, type AcpPermissionRequestPayload, type AcpSessionConfigOption } from "@greywork/acp";
+import {
+  createAcpClient,
+  type AcpPermissionRequestPayload,
+  type AcpSessionConfigOption,
+  type McpProbeReport,
+  type McpServerConfig,
+  type McpSkippedServer,
+} from "@greywork/acp";
 import { createJsonStorage } from "@greywork/core";
 import { createAgentProviderRegistry, type AgentProviderConfig } from "@greywork/shell";
-import { resolveWorkspaceDir } from "../lib/workspace-dir";
 import { agentsBackend, type AgentProviderRow } from "../lib/agents-backend";
 import { teamRunsBackend, type TeamRunRow } from "../lib/team-runs-backend";
 import { defineStore } from "pinia";
-import { ref } from "vue";
+import { ref, watch } from "vue";
 import { useChatStore } from "./chat";
 import { useSettingsStore } from "./settings";
+import { useWorkspaceStore } from "./workspace";
 import { i18n } from "../i18n";
 import { appEvents } from "../events";
 import { parseToolActivityPayload } from "../lib/tool-activity";
 import type { ThreadMessage } from "../types";
+import { resolveWorkspaceDir } from "../lib/workspace-dir";
+import { activeConversationFolder } from "../lib/conversation-folder";
 
 const t = i18n.global.t;
 
@@ -64,6 +73,7 @@ const providerPrefStorage = createJsonStorage<ProviderPreference>(
 export const useAgentStore = defineStore("agent", () => {
   const settings = useSettingsStore();
   const chat = useChatStore();
+  const workspaceStore = useWorkspaceStore();
   const agents = ref(MOCK_AGENTS.map((agent) => ({ ...agent })));
   const roles = ref(AGENT_ROLES);
   const workflowSteps = ref<WorkflowStep[]>([
@@ -100,14 +110,18 @@ export const useAgentStore = defineStore("agent", () => {
   const acpConnecting = ref(false);
   /** 当前会话的配置选择器（模型 / 推理力度 / 会话模式等）；空 = agent 未暴露。 */
   const acpConfigOptions = ref<AcpSessionConfigOption[]>([]);
+  /** 上次建会话时实际声明给 agent 的 MCP 服务器名。 */
+  const acpMcpServers = ref<string[]>([]);
+  /** 上次建会话时被跳过的 MCP 服务器（能力不匹配 / 配置不全），设置页据此明示原因。 */
+  const acpMcpSkipped = ref<McpSkippedServer[]>([]);
   /** ACP runtime 已连接（有 agent 进程 + 会话）；供 UI 显示重启/选择器。 */
   const acpConnected = ref(false);
 
-  /** ACP 连接状态机（对齐 AionUi acpStatus）：null=未启动 → connecting → connected → session_active → disconnected | error。 */
+  /** ACP 连接状态机（对齐 GreyWork acpStatus）：null=未启动 → connecting → connected → session_active → disconnected | error。 */
   const acpStatus = ref<"connecting" | "connected" | "session_active" | "disconnected" | "error" | null>(null);
   /** 在途回合 id：acp.prompt 立即返回，stop 时按 turnId 精确取消单回合（进程保留）。 */
   const activeTurnId = ref<number | null>(null);
-  /** 在途回合起点（epoch ms）；跨会话切换存活（模块级时钟，对齐 AionUi conversationTurnClock）。 */
+  /** 在途回合起点（epoch ms）；跨会话切换存活（模块级时钟，对齐 GreyWork conversationTurnClock）。 */
   const turnStartedAtMs = ref<number | null>(null);
   /** 最近一次 usage 快照（usage 事件）；null = agent 未上报。 */
   const acpUsage = ref<{ used: number; size: number; cost?: { amount: number; currency: string } } | null>(null);
@@ -227,8 +241,8 @@ export const useAgentStore = defineStore("agent", () => {
       const provider = agentProviders.value.find((provider) => provider.id === selectedProviderId.value);
       if (!provider) throw new Error(t("errors.acpNotSelected"));
       const workspace = await resolveWorkspaceDir();
-      handle = await acp.startAgent(provider.command, settings.permissionTier, settings.sandboxMode, workspace);
-      const { sessionId } = await acp.openSession(handle, workspace);
+      handle = await acp.startAgent(provider.command, settings.effectivePermissionTier, settings.sandboxMode, workspace);
+      const { sessionId } = await acp.openSession(handle, workspace, settings.enabledMcpServers);
       const { threadId, message } = chat.startAcpTurn(sub.prompt, sub.role);
       subtaskSessions.set(sub.id, { handle, sessionId, threadId, messageId: message.id });
     } catch (error) {
@@ -431,38 +445,27 @@ export const useAgentStore = defineStore("agent", () => {
     await acp.onEvent((event) => {
       if (event.kind === "session-update") {
         const payload = event.payload as {
-          session_id?: string;
+          sessionId?: string;
           update?: { sessionUpdate?: string; content?: { text?: string } };
         };
+        // 宿主发出的是 camelCase sessionId（ACP schema 的 serde 约定）。此前这里读
+        // snake_case，按 sessionId 的子任务路由从不命中，并行子任务的增量全涌进全局支架。
+        const routed = payload.sessionId
+          ? [...subtaskSessions.values()].find((session) => session.sessionId === payload.sessionId)
+          : undefined;
         // 解析 agent_message 中携带的工具调用部分（read/edit/bash/search …），
         // 并入对应消息的 tools 时间线 —— 前端「工具聚合时间线」数据源。
         const toolActivities = parseToolActivityPayload(event.payload);
         if (toolActivities.length > 0) {
-          if (payload.session_id) {
-            for (const session of subtaskSessions.values()) {
-              if (session.sessionId === payload.session_id) {
-                chat.appendTools(toolActivities, session.messageId, session.threadId);
-                break;
-              }
-            }
-          } else if (acpStream && acpThreadId) {
-            chat.appendTools(toolActivities, acpStream.id, acpThreadId);
-          }
+          if (routed) chat.appendTools(toolActivities, routed.messageId, routed.threadId);
+          else if (acpStream && acpThreadId) chat.appendTools(toolActivities, acpStream.id, acpThreadId);
         }
         if (payload.update?.sessionUpdate === "agent_message_chunk") {
           const text = payload.update.content?.text ?? "";
           if (!text) return;
-          // 编排子任务优先：按 sessionId 路由到独立支架
-          if (payload.session_id) {
-            for (const session of subtaskSessions.values()) {
-              if (session.sessionId === payload.session_id) {
-                chat.appendMessageContent(session.messageId, text, session.threadId);
-                return;
-              }
-            }
-          }
-          // 全局回合（普通派发 / planner）
-          if (acpStream && acpThreadId) chat.appendMessageContent(acpStream.id, text, acpThreadId);
+          // 子任务优先：按 sessionId 路由到独立支架；未命中即为全局回合（普通派发 / planner）。
+          if (routed) chat.appendMessageContent(routed.messageId, text, routed.threadId);
+          else if (acpStream && acpThreadId) chat.appendMessageContent(acpStream.id, text, acpThreadId);
         }
       } else if (event.kind === "thought") {
         // 思考流（AgentThoughtChunk）：聚合到 store 快照，并续写支架消息的 thinking
@@ -491,20 +494,21 @@ export const useAgentStore = defineStore("agent", () => {
             acpThreadId,
           );
       } else if (event.kind === "permission-blocked") {
-        // 宿主文件系统锚定拦截（写类工具路径越出工作区）：通知流记录，不打断流
-        const payload = event.payload as { title?: string | null; kind?: string; paths?: string[] };
-        if (acpStream && acpThreadId)
-          chat.appendMessageContent(
-            acpStream.id,
-            t("errors.blockedOutsideWorkspace", {
-              title: payload.title ?? payload.kind ?? "write",
-              paths: (payload.paths ?? []).join("、"),
-            }),
-            acpThreadId,
-          );
+        // 宿主权限拦截（只读档 / 工作区越界）：通知流记录，不打断流
+        const payload = event.payload as { title?: string | null; kind?: string; reason?: string; paths?: string[] };
+        if (acpStream && acpThreadId) {
+          const detail =
+            payload.reason === "read-only"
+              ? t("errors.readOnlyBlocked", { title: payload.title ?? payload.kind ?? "write" })
+              : t("errors.blockedOutsideWorkspace", {
+                  title: payload.title ?? payload.kind ?? "write",
+                  paths: (payload.paths ?? []).join("、"),
+                });
+          chat.appendMessageContent(acpStream.id, detail, acpThreadId);
+        }
       } else if (event.kind === "config-options") {
         // 后端确认后的全量配置快照（set_config_option 响应 / ConfigOptionUpdate 通知）：
-        // 回填选择器控件——对齐 AionUi useAcpConfigOptions 的 snapshot 观测。
+        // 回填选择器控件——对齐 GreyWork useAcpConfigOptions 的 snapshot 观测。
         const payload = event.payload as { configOptions?: AcpSessionConfigOption[] };
         if (Array.isArray(payload.configOptions) && payload.configOptions.length > 0) {
           acpConfigOptions.value = payload.configOptions;
@@ -591,17 +595,23 @@ export const useAgentStore = defineStore("agent", () => {
     if (!acp.isAvailable()) return t("errors.acpTransportUnavailable");
     let workspace: string;
     try {
-      workspace = await resolveWorkspaceDir();
+      // 当前会话绑定带磁盘文件夹的工作区 → 以该文件夹为 ACP 工作区（权限锚定基准）；
+      // 否则回落既有解析（设置项 workspaceDir → 桌面主目录）。
+      workspace = activeConversationFolder() ?? (await resolveWorkspaceDir());
     } catch (error) {
       return error instanceof Error ? error.message : String(error);
     }
     await ensureListener();
     acpStatus.value = "connecting";
     try {
-      acpHandle.value = await acp.startAgent(provider.command, settings.permissionTier, settings.sandboxMode, workspace);
-      const opened = await acp.openSession(acpHandle.value, workspace);
+      acpHandle.value = await acp.startAgent(provider.command, settings.effectivePermissionTier, settings.sandboxMode, workspace);
+      // 建会话时把启用的 MCP 服务器声明给 agent；宿主按后端能力过滤，
+      // 被跳过的原因回灌到 acpMcpSkipped 供设置页明示（不静默丢配置）。
+      const opened = await acp.openSession(acpHandle.value, workspace, settings.enabledMcpServers);
       acpSessionId.value = opened.sessionId;
       acpConfigOptions.value = opened.configOptions;
+      acpMcpServers.value = opened.mcpServers ?? [];
+      acpMcpSkipped.value = opened.skippedMcpServers ?? [];
       acpStatus.value = opened.configOptions.length > 0 ? "session_active" : "connected";
       acpConnected.value = true;
       return null;
@@ -671,11 +681,76 @@ export const useAgentStore = defineStore("agent", () => {
       // 控件状态，保证「选择 → 后端确认 → 回填」闭环（对齐 useAcpConfigOptions）。
       const updated = await acp.setSessionConfig(acpHandle.value, configId, value);
       if (updated.length > 0) acpConfigOptions.value = updated;
+      // 记忆到当前工作区：模型 / 思考强度这类选择是「这个项目怎么干活」的一部分，
+      // 切回来应当还是它。回放期间不记（见 replayingConfig），否则回放会把自己再写一遍。
+      if (!replayingConfig && typeof value === "string" && workspaceStore.activeWorkspaceId) {
+        workspaceStore.setAgentConfig(workspaceStore.activeWorkspaceId, { configValues: { [configId]: value } });
+      }
       return null;
     } catch (error) {
       return t("errors.configFailed", { detail: String(error) });
     }
   }
+
+  /**
+   * 把当前生效档位推给所有在途 agent。
+   *
+   * 宿主按 handle 存档位并在每条权限请求上重读，因此这里改完即刻生效，不必重启进程 ——
+   * 「降到只读跑完再升」才能保住会话上下文。编排子任务各自一个 handle，一并推。
+   */
+  async function applyPermissionTier(): Promise<string | null> {
+    const handles = acpHandle.value === null ? [] : [acpHandle.value];
+    for (const session of subtaskSessions.values()) handles.push(session.handle);
+    for (const handle of handles) {
+      try {
+        await acp.setPermissionTier(handle, settings.effectivePermissionTier);
+      } catch (error) {
+        return t("errors.configFailed", { detail: String(error) });
+      }
+    }
+    return null;
+  }
+
+  /** 一键临时降级/回升；返回错误文案（null = 成功）。 */
+  async function setTempReadOnly(on: boolean): Promise<string | null> {
+    settings.tempReadOnly = on;
+    return applyPermissionTier();
+  }
+
+  /** 回放工作区记忆配置期间置真，抑制 setAcpConfig 的自反写入。 */
+  let replayingConfig = false;
+
+  /**
+   * 应用某工作区记住的 ACP 后端与会话配置。
+   *
+   * 无记录时**不动当前状态**（用户可能刚在别处选好后端，切个工作区不该被重置）。
+   */
+  async function applyWorkspaceAgentConfig(workspaceId: string | null): Promise<void> {
+    const remembered = workspaceStore.agentConfigOf(workspaceId);
+    if (!remembered) return;
+    if (remembered.providerId === null) {
+      if (routeToAcp.value) await switchToLocalLlm();
+      return;
+    }
+    if (remembered.providerId && (remembered.providerId !== selectedProviderId.value || !routeToAcp.value)) {
+      const failure = await activateAcpProvider(remembered.providerId);
+      if (failure) return; // 连不上就停在错误态，别再拿旧 handle 回放配置
+    }
+    const values = remembered.configValues;
+    if (!values || acpHandle.value === null) return;
+    replayingConfig = true;
+    try {
+      for (const [configId, value] of Object.entries(values)) {
+        const option = acpConfigOptions.value.find((candidate) => candidate.id === configId && candidate.type === "select");
+        if (option) await setAcpConfig(configId, value);
+      }
+    } finally {
+      replayingConfig = false;
+    }
+  }
+
+  // 切工作区即换「这个项目的干活方式」；immediate 关掉，避免启动就抢着建连接。
+  watch(() => workspaceStore.activeWorkspaceId, applyWorkspaceAgentConfig);
 
   /** 主动连接当前 ACP 后端并加载会话配置（幂等：已连接直接返回）。 */
   async function connectAcp(): Promise<string | null> {
@@ -710,7 +785,7 @@ export const useAgentStore = defineStore("agent", () => {
   }
 
   /** 重启当前 ACP runtime：停 agent 进程 → 重新 spawn + session/new（重新探测模型/config options）。
-   *  对齐 AionUi AcpRuntimeRestartButton——runtime 卡死/模型探测失败后的恢复路径。 */
+   *  对齐 GreyWork AcpRuntimeRestartButton——runtime 卡死/模型探测失败后的恢复路径。 */
   async function restartAcpRuntime(): Promise<string | null> {
     if (acpHandle.value === null) return null;
     try {
@@ -798,10 +873,12 @@ export const useAgentStore = defineStore("agent", () => {
     selectedProviderId.value = id;
     routeToAcp.value = true;
     providerPrefStorage.write({ providerId: id });
+    // 后端选择也按工作区记忆（回放时 replayingConfig 无关：providerId 幂等）
+    if (workspaceStore.activeWorkspaceId) workspaceStore.setAgentConfig(workspaceStore.activeWorkspaceId, { providerId: id });
     // 选中即建会话：configOptions（模型 / 思考强度）只有 session/new 之后才有值，
-    // 否则选择器要等到首次发送才出现。连接失败不阻塞选择（发送时会重试并落文案）。
-    void connectAcp();
-    return null;
+    // 否则选择器要等到首次发送才出现。连接失败不阻塞选择（发送时会重试并落文案）；
+    // 失败文案原样返回，调用方（AgentProviderBar）就地展示而非静默吞掉。
+    return await connectAcp();
   }
 
   /** 权限裁决回传宿主；optionId=null 表示拒绝该次操作。 */
@@ -826,6 +903,19 @@ export const useAgentStore = defineStore("agent", () => {
     }
   }
 
+  /**
+   * 探活一台 MCP 服务器（设置页「测试连接」）：宿主自己走一遍 initialize + tools/list。
+   * 这只用于验证配置——真正连接由 agent 在会话里建立。
+   */
+  async function probeMcpServer(config: McpServerConfig): Promise<{ report?: McpProbeReport; error?: string }> {
+    if (!acp.isAvailable()) return { error: t("errors.acpTransportUnavailable") };
+    try {
+      return { report: await acp.probeMcp(config) };
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
   function selectProvider(id: string): void {
     selectedProviderId.value = id;
   }
@@ -838,6 +928,7 @@ export const useAgentStore = defineStore("agent", () => {
   async function switchToLocalLlm(): Promise<void> {
     routeToAcp.value = false;
     providerPrefStorage.write({ providerId: null });
+    if (workspaceStore.activeWorkspaceId) workspaceStore.setAgentConfig(workspaceStore.activeWorkspaceId, { providerId: null });
     if (acpHandle.value !== null) {
       try {
         await acp.stop(acpHandle.value);
@@ -867,6 +958,8 @@ export const useAgentStore = defineStore("agent", () => {
     acpConnecting,
     pendingPermission,
     acpConfigOptions,
+    acpMcpServers,
+    acpMcpSkipped,
     acpStreamId,
     acpStatus,
     acpConnected,
@@ -891,6 +984,9 @@ export const useAgentStore = defineStore("agent", () => {
     retrySubtask,
     addSubtask,
     clearOrchestration,
+    setTempReadOnly,
+    applyPermissionTier,
+    applyWorkspaceAgentConfig,
     acpAvailable: acp.isAvailable(),
     selectProvider,
     toggleRouteToAcp,
@@ -899,5 +995,6 @@ export const useAgentStore = defineStore("agent", () => {
     dispatchToAcp,
     stopAcp,
     respondPermission,
+    probeMcpServer,
   };
 });

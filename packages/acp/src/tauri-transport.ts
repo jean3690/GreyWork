@@ -2,12 +2,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AcpEventEnvelope,
-  AcpPromptResult,
   AcpSandboxMode,
   AcpSessionConfigOption,
   AcpSessionInfo,
   AcpSessionOpened,
   AcpTransport,
+  McpProbeReport,
+  McpServerConfig,
 } from "./transports";
 import type { PermissionTier } from "./permissions";
 
@@ -21,8 +22,23 @@ export class TauriIpcTransport implements AcpTransport {
     return invoke<number>("acp_start", { agentCmd, tier, sandbox, workspace });
   }
 
-  async openSession(handle: number, cwd: string): Promise<AcpSessionOpened> {
-    return invoke<AcpSessionOpened>("acp_new_session", { handle, cwd });
+  async setPermissionTier(handle: number, tier: PermissionTier): Promise<void> {
+    await invoke("acp_set_permission_tier", { handle, tier });
+  }
+
+  async openSession(handle: number, cwd: string, mcpServers?: readonly McpServerConfig[]): Promise<AcpSessionOpened> {
+    return invoke<AcpSessionOpened>("acp_new_session", { handle, cwd, mcpServers });
+  }
+
+  async probeMcp(config: McpServerConfig, timeoutSecs?: number): Promise<McpProbeReport> {
+    return invoke<McpProbeReport>("mcp_probe", {
+      transport: config.transport,
+      url: config.url,
+      command: config.command,
+      args: config.args,
+      env: config.env,
+      timeoutSecs,
+    });
   }
 
   async setSessionConfig(handle: number, configId: string, value: string | boolean): Promise<AcpSessionConfigOption[]> {
@@ -34,12 +50,12 @@ export class TauriIpcTransport implements AcpTransport {
     return response.configOptions ?? [];
   }
 
-  async prompt(handle: number, text: string): Promise<AcpPromptResult> {
-    return invoke<AcpPromptResult>("acp_send", { handle, text });
+  async prompt(handle: number, text: string): Promise<{ turnId: number }> {
+    return invoke<{ turnId: number }>("acp_send", { handle, text });
   }
 
-  async stop(handle: number): Promise<void> {
-    await invoke("acp_stop", { handle });
+  async stop(handle: number, turnId?: number): Promise<void> {
+    await invoke("acp_stop", { handle, turnId });
   }
 
   async respondPermission(requestId: number, optionId: string | null): Promise<void> {

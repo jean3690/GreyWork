@@ -168,6 +168,46 @@ export function writeTextFile(path: string, content: string): Promise<void> {
   return invoke("fs_write_text_file", { path, content });
 }
 
+/** 确保目录存在（产物默认目录等落盘前置）。 */
+export function ensureDir(path: string): Promise<void> {
+  return invoke("fs_ensure_dir", { path });
+}
+
+/** 把二进制内容写入磁盘（Rust fs_write_binary，base64 载荷 ≤20MB）。 */
+export function writeBinaryFile(path: string, data: Uint8Array): Promise<void> {
+  const bytes = new Uint8Array(data);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return invoke("fs_write_binary", { path, dataBase64: btoa(binary) });
+}
+
+/**
+ * 读取磁盘二进制文件（Rust fs_read_binary，base64 回传，≤20MB）。
+ * 与 `readTextFile` 分成两个函数而不是一个「读文件」：走错通道会让 xlsx/pdf
+ * 经 utf-8 解码后不可逆损坏，所以通道由调用侧按 kind 明确选定。
+ */
+export async function readBinaryFile(path: string): Promise<Uint8Array> {
+  const base64 = await invoke<string>("fs_read_binary", { path });
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+/** 浅层列目录（Rust fs_list_dir）。目录树按需逐层展开，不做递归扫描 —— 大仓库一次递归会卡死。 */
+export async function listDir(path: string): Promise<WorkspaceDirEntry[]> {
+  const raw = (await invoke<{ name: string; kind: string; size?: number; path: string }[]>("fs_list_dir", { path })) ?? [];
+  return raw.map((entry) => ({
+    name: entry.name,
+    kind: entry.kind === "directory" ? "directory" : "file",
+    size: entry.size,
+    origin: entry.path,
+    readText: () => invokeReadText(entry.path),
+  }));
+}
+
 function invokeReadText(path: string): Promise<string> {
   return invoke<string>("fs_read_text_file", { path });
 }

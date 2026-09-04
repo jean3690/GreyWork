@@ -1,35 +1,39 @@
-import { DEFAULT_WORKSPACE_ID } from "../mocks/workspaces";
-import { capabilitySeam } from "../plugins/loader";
-import WorkflowCanvas from "../components/WorkflowCanvas.vue";
-import { createRouter, createWebHashHistory, type Router } from "vue-router";
+import { createRouter, createWebHashHistory, type Router, type RouteRecordRaw } from "vue-router";
+import GuidView from "../views/GuidView.vue";
+import ConversationView from "../views/ConversationView.vue";
+import AssistantsView from "../views/AssistantsView.vue";
+import ScheduledView from "../views/ScheduledView.vue";
+import TeamView from "../views/TeamView.vue";
+import SettingsView from "../views/SettingsView.vue";
 
 /**
- * 可寻址外壳路由（hash 模式，Tauri 桌面端安全）。
- * mode 集合不写死：beforeEach 以 loader 激活快照校验；
- * 未注册 mode 一律回退到首个已注册 mode（缺省 chat，Cowork 即主舞台）；
- * 零注册能力时允许停留，由画布空态引导恢复（避免重定向循环）。
+ * GreyWork 外壳路由（hash 模式，兼容 Tauri 桌面端）。
+ * 「一比一复刻」路径树：
+ *   /guid           全新对话引导页
+ *   /conversation/  单 Agent 对话（历史会话）
+ *   /assistants     助手库（Agent 设置页的读入口）
+ *   /scheduled      定时任务
+ *   /team           团队
+ *   /settings/*     设置（Agent / 助手 / 外观 / 系统 等子页）
  */
-export function createWorkbenchRouter(): Router {
-  const router = createRouter({
-    history: createWebHashHistory(),
-    routes: [
-      { path: "/", redirect: `/p/${DEFAULT_WORKSPACE_ID}/chat` },
-      { path: "/p/:workspaceId/:mode", component: WorkflowCanvas },
-      { path: "/:pathMatch(.*)*", redirect: "/" },
-    ],
-  });
+export function createAppRouter(): Router {
+  const routes: RouteRecordRaw[] = [
+    { path: "/", redirect: "/guid" },
+    { path: "/guid", component: GuidView },
+    { path: "/conversation/:conversationId?", component: ConversationView },
+    { path: "/assistants", component: AssistantsView },
+    { path: "/scheduled", component: ScheduledView },
+    { path: "/team", component: TeamView },
+    { path: "/settings", redirect: "/settings/agent" },
+    {
+      path: "/settings/:section",
+      component: SettingsView,
+      props: (route) => ({ section: route.params.section }),
+    },
+    { path: "/:pathMatch(.*)*", redirect: "/guid" },
+  ];
 
-  router.beforeEach((to) => {
-    const mode = to.params.mode as string | undefined;
-    if (!mode) return true;
-    const modes = capabilitySeam.snapshot().modes;
-    if (modes.some((entry) => entry.id === mode)) return true;
-    const fallback = modes[0]?.id;
-    if (!fallback) return true;
-    if (String(fallback) === String(mode)) return true;
-    const workspaceId = String(to.params.workspaceId ?? DEFAULT_WORKSPACE_ID);
-    return { path: `/p/${workspaceId}/${fallback}` };
-  });
+  const router = createRouter({ history: createWebHashHistory(), routes });
 
   return router;
 }

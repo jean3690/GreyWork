@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { WorkbenchShell } from "@greywork/workbench";
+import { Shell } from "@greywork/workbench";
 </script>
 
 <template>
-  <WorkbenchShell />
+  <Shell />
 </template>

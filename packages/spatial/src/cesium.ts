@@ -3,7 +3,7 @@
 // workbench 等 UI 层只负责容器 DOM 与降级占位，渲染逻辑在此封装。
 import type * as CesiumNamespace from "cesium";
 import { hasWebGL } from "@greywork/core";
-import { SAMPLE_FEATURES } from "@greywork/gis";
+import { buildCitiesGeoJson, SAMPLE_FEATURES } from "@greywork/gis";
 
 /** 模块类型经命名空间派生，规避 import() 注解 lint 规则 */
 type CesiumModule = typeof CesiumNamespace;
@@ -22,14 +22,7 @@ async function loadCesium(): Promise<CesiumModule> {
 
 /** 数字地球示例城市点：与 @greywork/gis 的 SAMPLE_FEATURES 同源派生，避免双份示例数据。 */
 export function buildCityGeoJson() {
-  return {
-    type: "FeatureCollection" as const,
-    features: SAMPLE_FEATURES.map((feature) => ({
-      type: "Feature" as const,
-      properties: { id: feature.id, name: feature.label },
-      geometry: { type: "Point" as const, coordinates: [feature.coordinate.lon, feature.coordinate.lat] },
-    })),
-  };
+  return buildCitiesGeoJson(SAMPLE_FEATURES);
 }
 
 export interface CesiumGlobeOptions {
@@ -231,7 +224,7 @@ export function createCesiumGlobe(options: CesiumGlobeOptions): CesiumGlobeHandl
 }
 
 /**
- * 空闲预加载 Cesium 引擎（AppShell 首屏空闲时调用）。
+ * 空闲预加载 Cesium 引擎（外壳首屏空闲时调用）。
  * 命中模块级缓存，不重复下载；仅预热，不创建 viewer。
  */
 export function preloadCesiumEngine(): Promise<void> {

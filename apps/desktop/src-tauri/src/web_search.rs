@@ -5,8 +5,6 @@
 //! - `tavily`（默认兜底）：POST endpoint，Bearer 认证，body {query,max_results}
 //! - `brave`：GET endpoint?q=&count=，X-Subscription-Token 认证
 
-use std::time::Duration;
-
 use serde::Serialize;
 
 /// 单条归一化结果。
@@ -87,10 +85,7 @@ pub async fn web_search(
         return Err(format!("missing API key env for provider {provider_id}"));
     }
 
-    let client = reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(10))
-        .build()
-        .map_err(|error| format!("http client build failed: {error}"))?;
+    let client = crate::http::shared_client(10)?;
 
     let limit = max_results.unwrap_or(5).clamp(1, 20);
     let limit_str = limit.to_string();
@@ -118,10 +113,8 @@ pub async fn web_search(
     if !status.is_success() {
         return Err(format!("search endpoint returned {status}"));
     }
-    let body: serde_json::Value = response
-        .json()
-        .await
-        .map_err(|error| format!("invalid search response: {error}"))?;
+    let body: serde_json::Value =
+        crate::http::read_json(response, crate::http::RESPONSE_READ_TIMEOUT).await?;
 
     Ok(match provider_id.as_str() {
         "brave" => normalize_brave(&body),
