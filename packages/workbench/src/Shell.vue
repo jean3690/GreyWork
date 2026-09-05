@@ -8,6 +8,7 @@ import { useSessionStore } from "./stores/session";
 import { useSettingsStore } from "./stores/settings";
 import { useWorkspaceStore } from "./stores/workspace";
 import { usePreviewStore } from "./stores/preview";
+import { bootPlugins } from "./plugins/runtime";
 import Sider from "./components/Sider.vue";
 import PreviewSider from "./components/preview/PreviewSider.vue";
 import Titlebar from "./components/Titlebar.vue";
@@ -69,6 +70,8 @@ onMounted(() => {
   syncViewport();
   window.addEventListener("resize", syncViewport);
   observeMainRow();
+  // 微内核接线：注册内置插件清单并激活（幂等，见 plugins/runtime）。
+  void bootPlugins();
 });
 onBeforeUnmount(() => {
   if (typeof window !== "undefined") window.removeEventListener("resize", syncViewport);

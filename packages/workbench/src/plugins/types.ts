@@ -1,10 +1,12 @@
 import type { Component } from "vue";
 
 export interface ModeContribution {
-  /** mode 标识，即路由 :mode 段，如 "chat" */
+  /** mode 标识，即 /plugin/:modeId 的 :modeId 段 */
   id: string;
-  /** tab 显示名 */
+  /** 侧栏入口显示名 */
   title: string;
+  /** 侧栏入口图标键（lib/icons 的 ICONS 键名），缺省 "magic" */
+  icon?: string;
   component: Component;
 }
 
@@ -28,6 +30,8 @@ export interface PluginManifest {
   name: string;
   /** semver */
   version: string;
+  /** 一句话说明（插件中心展示用） */
+  description?: string;
   contributes?: {
     modes?: ModeContribution[];
     uiRegions?: UiRegionContribution[];

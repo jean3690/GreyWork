@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import { useRoute } from "vue-router";
 import { useSessionStore } from "../stores/session";
+import { useCapabilityLoader } from "../plugins/current";
 import Icon from "./Icon.vue";
 import GroupedHistory from "./GroupedHistory.vue";
 import SettingsSider from "./SettingsSider.vue";
@@ -40,6 +41,17 @@ const shortcuts = [
   { path: "/scheduled", label: "定时任务", icon: "alarm-clock" },
   { path: "/team", label: "团队", icon: "peoples" },
 ] as const;
+
+/**
+ * 快捷入口 = 内置 + 插件贡献的 modes（seam 快照，响应式）。
+ * 插件激活即出现入口，停用即消失；点击走 /plugin/:id 由 PluginView 宿主渲染。
+ */
+const navItems = computed(() => [
+  ...shortcuts,
+  ...useCapabilityLoader()
+    .snapshot()
+    .modes.map((mode) => ({ path: `/plugin/${mode.id}`, label: mode.title, icon: mode.icon ?? "magic" })),
+]);
 </script>
 
 <template>
@@ -64,7 +76,7 @@ const shortcuts = [
     <template v-else>
       <div class="flex flex-col gap-0.5 px-2">
         <button
-          v-for="item in shortcuts"
+          v-for="item in navItems"
           :key="item.path"
           class="flex h-[34px] cursor-pointer items-center gap-2 rounded-[8px] px-2 text-[13px] transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
           :class="route.path === item.path ? 'bg-panel text-foreground' : 'text-dim hover:bg-panel hover:text-foreground'"
