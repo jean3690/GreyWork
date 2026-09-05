@@ -18,7 +18,7 @@
  * 两条路都走不通,只有 `model.drawing` 为空才会整块跳过。
  * 没有命中时原样返回原 buffer,自己的写入器产物(无图纸)零开销。
  */
-import JSZip from "jszip";
+import type JSZip from "jszip";
 
 /** 这些目录里的部件是 exceljs 图纸解析的输入,预览用不到。 */
 const GRAPHICS_PART = /^xl\/(drawings|charts|media)\//;
@@ -59,6 +59,9 @@ function viewOf(data: Uint8Array): ArrayBuffer {
  * 无命中(或不是合法 zip)时原样返回,不让这里的失败替换 exceljs 的报错语义。
  */
 export async function sanitizeXlsxGraphics(data: Uint8Array): Promise<ArrayBuffer> {
+  // jszip 只在真正要剥图纸时才有用：静态 import 会把它带进任何静态引用本模块的
+  // chunk（会话 store 链直达入口），而多数 xlsx（自己的写入器产物）根本不用剥。
+  const { default: JSZip } = await import("jszip");
   let zip: JSZip;
   try {
     zip = await JSZip.loadAsync(data);
