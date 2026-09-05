@@ -160,6 +160,7 @@ export const useChatStore = defineStore("chat", () => {
     if (tail?.kind === "text") return;
     if (tail?.kind === "thinking") tail.endedAt = Date.now();
     segments.push({ kind: "text", id: uid(), from: message.content.length, to: null });
+    sessionStore.markDirty();
   }
 
   /** 立即写入缓冲内容（ACP 回合结束 / 思考与工具插入前 / 测试断言前调用）。 */
@@ -176,6 +177,7 @@ export const useChatStore = defineStore("chat", () => {
         message.content += entry.text;
       }
       appendBuf.clear();
+      sessionStore.markDirty();
     }
     if (streamBuf) {
       if (streamingInto) {
@@ -183,6 +185,7 @@ export const useChatStore = defineStore("chat", () => {
         streamingInto.content += streamBuf;
       }
       streamBuf = "";
+      sessionStore.markDirty();
     }
   }
 
@@ -224,6 +227,7 @@ export const useChatStore = defineStore("chat", () => {
     message.planPending = false;
     // 真实管线不演造步骤时间线；增量直接写入 content
     message.steps = [];
+    sessionStore.markDirty();
     busy.value = true;
     streamingInto = message;
     streamingMessageId.value = message.id;
@@ -239,6 +243,7 @@ export const useChatStore = defineStore("chat", () => {
       });
     } catch (error) {
       message.content = `[LLM 调用失败] ${error instanceof Error ? error.message : String(error)}`;
+      sessionStore.markDirty();
       finishStream();
     }
   }
@@ -540,6 +545,7 @@ export const useChatStore = defineStore("chat", () => {
     // 走响应式引用更新：直接改原始 message 不会触发 Pinia 重渲染，步骤时间线会卡在 wait。
     const live = ensure(activeThreadId.value).find((m) => m.id === message.id) ?? message;
     live.planPending = false;
+    sessionStore.markDirty();
     busy.value = true;
     // 本条消息正在被写入：思考段据此判定「仍在流」并保持展开（与真实 ACP 回合同一判据）。
     streamingMessageId.value = live.id;
@@ -556,9 +562,19 @@ export const useChatStore = defineStore("chat", () => {
     }
     let delay = 420;
     for (const step of live.steps ?? []) {
-      simTimers.push(setTimeout(() => (step.status = "running"), delay));
+      simTimers.push(
+        setTimeout(() => {
+          step.status = "running";
+          sessionStore.markDirty();
+        }, delay),
+      );
       delay += 380 + Math.random() * 220;
-      simTimers.push(setTimeout(() => (step.status = "done"), delay));
+      simTimers.push(
+        setTimeout(() => {
+          step.status = "done";
+          sessionStore.markDirty();
+        }, delay),
+      );
       delay += 120;
     }
     // 生成并推进「工具聚合时间线」（无 ACP 后端时演示执行可视化，与步骤并行）
@@ -587,6 +603,7 @@ export const useChatStore = defineStore("chat", () => {
           // 此前只有主 md 记了账，xlsx/pptx/html 都漏在 artifacts 之外。
           const record = (id: string): void => {
             live.artifacts = [...(live.artifacts ?? []), id];
+            sessionStore.markDirty();
           };
           // 交付物契约：产物落盘虚拟文件系统 → Artifacts 卡片 + Diffs 实时出现
           // 意图识别基于用户原始输入（intentText），而非占位完成文案 message.content。
@@ -823,6 +840,7 @@ export const useChatStore = defineStore("chat", () => {
     // 正文整体替换（错误文案 / 无输出兜底）：偏移全失效，思考与工具段保留，正文归一段挂到末尾。
     const kept = (message.segments ?? []).filter((segment) => segment.kind !== "text");
     message.segments = content ? [...kept, { kind: "text", id: uid(), from: 0, to: null }] : kept;
+    sessionStore.markDirty();
   }
 
   /**
@@ -846,6 +864,7 @@ export const useChatStore = defineStore("chat", () => {
         segments.push(tail);
       }
       tail.toolCallIds.push(activity.toolCallId);
+      sessionStore.markDirty();
     }
   }
 
@@ -864,10 +883,12 @@ export const useChatStore = defineStore("chat", () => {
     if (tail?.kind === "thinking") {
       tail.text += delta;
       tail.endedAt = now;
+      sessionStore.markDirty();
       return;
     }
     if (tail?.kind === "text") tail.to = message.content.length;
     segments.push({ kind: "thinking", id: uid(), text: delta, startedAt: now, endedAt: now });
+    sessionStore.markDirty();
   }
 
   return {

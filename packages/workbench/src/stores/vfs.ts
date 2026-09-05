@@ -77,7 +77,7 @@ export function statusLetter(status: GitStatusEntry["status"]): string {
   return STATUS_LETTER[status];
 }
 
-export interface VfsTreeNode {
+interface VfsTreeNode {
   name: string;
   /** 从根起的完整路径（目录无尾斜杠）。 */
   path: string;
@@ -85,26 +85,39 @@ export interface VfsTreeNode {
   children?: VfsTreeNode[];
 }
 
-/** 平铺路径清单 → 目录树（目录在前、同层按名排序），供右栏 OS 风格文件列表。 */
+/** 目录节点：children 必在（区别于尚未展开的树节点），Map 登记用。 */
+interface VfsDirNode extends VfsTreeNode {
+  kind: "directory";
+  children: VfsTreeNode[];
+}
+
+/**
+ * 平铺路径清单 → 目录树（目录在前、同层按名排序），供右栏 OS 风格文件列表。
+ * 目录按前缀登记进 Map，每段 O(1) 下钻 —— 原先每段都在兄弟列表里 find() 线性扫，
+ * 单个目录上千子项时是 O(n²)。排序只在末尾做一次整树递归。
+ */
 export function buildFileTree(paths: string[]): VfsTreeNode[] {
   const root: VfsTreeNode[] = [];
-  for (const path of [...paths].sort()) {
+  const dirByPath = new Map<string, VfsDirNode>();
+  for (const path of paths) {
     const parts = path.split("/");
-    let level = root;
+    let level: VfsTreeNode[] = root;
     let prefix = "";
     for (let depth = 0; depth < parts.length; depth += 1) {
       const name = parts[depth];
       prefix = prefix ? `${prefix}/${name}` : name;
       const isFile = depth === parts.length - 1;
-      let node = level.find((candidate) => candidate.name === name && candidate.kind === (isFile ? "file" : "directory"));
+      if (isFile) {
+        level.push({ name, path: prefix, kind: "file" });
+        break;
+      }
+      let node = dirByPath.get(prefix);
       if (!node) {
-        node = isFile ? { name, path: prefix, kind: "file" } : { name, path: prefix, kind: "directory", children: [] };
+        node = { name, path: prefix, kind: "directory", children: [] };
+        dirByPath.set(prefix, node);
         level.push(node);
       }
-      if (!isFile) {
-        if (!node.children) node.children = [];
-        level = node.children;
-      }
+      level = node.children;
     }
   }
   const sortLevel = (nodes: VfsTreeNode[]): VfsTreeNode[] => {
