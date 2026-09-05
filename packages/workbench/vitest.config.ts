@@ -42,12 +42,15 @@ export default defineConfig({
     ],
     coverage: {
       provider: "v8",
-      // 只统计业务源码；测试已移出 src，天然不参与
+      // 只统计业务源码；测试已移出 src，天然不参与。src/mocks 是测试夹具不是产品代码，
+      // 100% 覆盖只会虚高总量（之前 fixtures 的 67 条语句被算进分母）。
       include: ["src/**"],
-      exclude: ["src/index.ts", "src/types.ts", "src/**/*.d.ts", "src/i18n/**", "src/**/*.test.ts"],
+      exclude: ["src/index.ts", "src/types.ts", "src/**/*.d.ts", "src/i18n/**", "src/**/*.test.ts", "src/mocks/**"],
       // 2026-08-26 起基线注释见旧 vitest.config；测试迁移到 tests/ 后 coverage 只覆盖业务代码，
       // 数值重新测量后在此登记（见 2026-09-02 迁移说明）。
-      thresholds: { statements: 49, lines: 49, branches: 79, functions: 72 },
+      // 2026-09-05 实测 statements 77.8 / branches 82.2 / functions 80.3 —— 原先 statements
+      // 49 留了 ~29pt 死空间等于没设闸，收紧到 70 仍是余量充足的闸门。
+      thresholds: { statements: 70, lines: 70, branches: 79, functions: 72 },
     },
   },
 });
