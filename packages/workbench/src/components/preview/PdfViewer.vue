@@ -13,7 +13,9 @@
  */
 import { onUnmounted, ref, toRef, watch } from "vue";
 // 只取 URL 字符串，Vite 会把 worker 作为资源单独产出（v6 是 ESM worker）。
-import workerUrl from "pdfjs-dist/build/pdf.worker.mjs?url";
+// 用预压缩的 *.min.mjs：worker 是 ?url 原样拷贝的资产，不走 Vite minify，
+// 非 min 版 2.2MB 会原封不动躺进安装包。
+import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { usePreviewBinary } from "../../lib/preview-content";
 import type { PreviewTab } from "../../stores/preview";
 
