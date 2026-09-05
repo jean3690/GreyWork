@@ -1,5 +1,6 @@
 import ExcelJS from "exceljs";
 import { cellDisplayValue } from "./xlsx-values";
+import { sanitizeXlsxGraphics } from "./xlsx-sanitize";
 
 /** 一张工作表的声明式描述：headers + rows（单元格字符串原样写入，公式如 "=SUM(A1:A3)" 生效）。 */
 export interface XlsxSheet {
@@ -65,7 +66,7 @@ export function rowsToSheet(name: string, headers: string[], rows: string[][]): 
  */
 export async function readXlsxPreview(data: Uint8Array, maxRows = 12): Promise<XlsxPreview> {
   const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(data as unknown as ArrayBuffer);
+  await workbook.xlsx.load(await sanitizeXlsxGraphics(data));
   const first = workbook.worksheets[0];
   if (!first) return { rows: [], sheetCount: 0 };
   const rows: string[][] = [];

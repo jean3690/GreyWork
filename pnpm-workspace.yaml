@@ -13,3 +13,6 @@ allowBuilds:
   esbuild: false
   protobufjs: true
   vue-demi: false
+
+patchedDependencies:
+  exceljs@4.4.0: patches/exceljs@4.4.0.patch

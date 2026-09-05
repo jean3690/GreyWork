@@ -7,6 +7,7 @@ import { buildLlmHistory, selectLlmProvider } from "./chat-llm";
 import { exportToXlsx } from "../lib/xlsx";
 import ExcelJS from "exceljs";
 import { exportToPptx, type PptxDeck } from "../lib/pptx";
+import { sanitizeXlsxGraphics } from "../lib/xlsx-sanitize";
 import { extractDashboardTitle, specToHtml } from "../lib/genui";
 import { createIdFactory } from "@greywork/core";
 import { defineStore } from "pinia";
@@ -285,7 +286,7 @@ export const useChatStore = defineStore("chat", () => {
       await vfsStore.writeBinary(path, data);
     } else {
       const wb = new ExcelJS.Workbook();
-      await wb.xlsx.load(existing);
+      await wb.xlsx.load(await sanitizeXlsxGraphics(existing));
       const ws = wb.getWorksheet(1) ?? wb.addWorksheet("task-result");
       ws.addRow(row);
       const buf = await wb.xlsx.writeBuffer();

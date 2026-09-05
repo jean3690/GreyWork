@@ -10,8 +10,9 @@
  */
 import type { Cell, Worksheet } from "exceljs";
 import type { IWorkbookData, IWorksheetData, ICellData, IStyleData, IColorStyle, IBorderData } from "@univerjs/core";
-
-type CellValue = string | number | boolean;
+import { sanitizeXlsxGraphics } from "./xlsx-sanitize";
+import { isRecord } from "./guards";
+import { normalizeCellValue } from "./xlsx-values";
 
 /** Excel 列宽 1 单位 ≈ 7px 字形宽 + 5px 内边距（Excel 的默认字体度量）。 */
 const PX_PER_CHAR = 7;
@@ -35,36 +36,6 @@ const MS_PER_DAY = 86_400_000;
 
 function toExcelSerial(date: Date): number {
   return (date.getTime() - EXCEL_EPOCH_MS) / MS_PER_DAY;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-/**
- * exceljs 的 cell.value 有七种形态，逐一拆解。
- *
- * 旧实现只认 `{ text }` 与「结果是字符串的公式」，其余一律落到 `String(value)` ——
- * 于是数值公式、富文本、错误值在预览里全变成 `[object Object]`。
- */
-function toCellValue(value: unknown): CellValue | undefined {
-  if (value == null) return undefined;
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
-  if (value instanceof Date) return toExcelSerial(value);
-  if (!isRecord(value)) return String(value);
-
-  // 公式 / 共享公式：取缓存结果（预览不重算），结果本身可能又是错误值或日期
-  if ("result" in value) return toCellValue(value.result);
-  // 富文本：拼接各片段的文字（片段级样式在单元格级别表达不了，取并集意义不大）
-  const richText = value.richText;
-  if (Array.isArray(richText)) {
-    return richText.map((part) => (isRecord(part) && typeof part.text === "string" ? part.text : "")).join("");
-  }
-  // 超链接：{ text, hyperlink }
-  if (typeof value.text === "string") return value.text;
-  // 错误值：{ error: "#DIV/0!" }
-  if (typeof value.error === "string") return value.error;
-  return undefined;
 }
 
 /* ===== 样式 ===== */
@@ -285,8 +256,9 @@ export async function xlsxToUniverWorkbook(data: Uint8Array): Promise<IWorkbookD
   };
 
   const exceljs = new ExcelJS.Workbook();
-  const view = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
-  await exceljs.xlsx.load(view);
+  // openpyxl 等写入器的 drawing 部件会让 exceljs(浏览器 dist)在 reconcile 崩溃,
+  // 图纸图表预览本来就不渲染,读前先剥掉
+  await exceljs.xlsx.load(await sanitizeXlsxGraphics(data));
 
   const sheets: IWorkbookData["sheets"] = {};
   const sheetOrder: string[] = [];
@@ -303,7 +275,7 @@ export async function xlsxToUniverWorkbook(data: Uint8Array): Promise<IWorkbookD
       const rowIndex = rowNumber - 1;
       row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
         const colIndex = colNumber - 1;
-        const value = toCellValue(cell.value);
+        const value = normalizeCellValue(cell.value, toExcelSerial);
         const styleId = pool.idOf(toStyle(cell, enums));
         // 空值但有样式（表头底色、边框框出来的区域）也要留格，否则版式塌掉
         if (value === undefined && styleId === undefined) return;

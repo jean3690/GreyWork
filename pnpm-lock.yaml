@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  exceljs@4.4.0: 1d3a419c1cadeda89269d69b7994bfffd10f10633c0918360587b604f73ed7ef
+
 importers:
 
   .:
@@ -379,7 +382,7 @@ importers:
         version: 6.0.2
       exceljs:
         specifier: ^4.4.0
-        version: 4.4.0
+        version: 4.4.0(patch_hash=1d3a419c1cadeda89269d69b7994bfffd10f10633c0918360587b604f73ed7ef)
       jszip:
         specifier: ^3.10.1
         version: 3.10.1
@@ -6156,7 +6159,7 @@ snapshots:
 
   eventemitter3@5.0.4: {}
 
-  exceljs@4.4.0:
+  exceljs@4.4.0(patch_hash=1d3a419c1cadeda89269d69b7994bfffd10f10633c0918360587b604f73ed7ef):
     dependencies:
       archiver: 5.0.0
       dayjs: 1.11.23
