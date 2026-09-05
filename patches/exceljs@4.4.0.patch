@@ -1,0 +1,57 @@
+diff --git a/lib/xlsx/xform/sheet/worksheet-xform.js b/lib/xlsx/xform/sheet/worksheet-xform.js
+index b38930042cbb05dccd01c46a9adacb7a9fc59dba..108de9727e6a7aaa098a2a60602bb68ade0331cc 100644
+--- a/lib/xlsx/xform/sheet/worksheet-xform.js
++++ b/lib/xlsx/xform/sheet/worksheet-xform.js
+@@ -487,21 +487,25 @@ class WorkSheetXform extends BaseXform {
+     model.media = [];
+     if (model.drawing) {
+       const drawingRel = rels[model.drawing.rId];
+-      const match = drawingRel.Target.match(/\/drawings\/([a-zA-Z0-9]+)[.][a-zA-Z]{3,4}$/);
++      const match = drawingRel && drawingRel.Target.match(/\/drawings\/([a-zA-Z0-9]+)[.][a-zA-Z]{3,4}$/);
+       if (match) {
+         const drawingName = match[1];
+         const drawing = options.drawings[drawingName];
+-        drawing.anchors.forEach(anchor => {
+-          if (anchor.medium) {
+-            const image = {
+-              type: 'image',
+-              imageId: anchor.medium.index,
+-              range: anchor.range,
+-              hyperlinks: anchor.picture.hyperlinks,
+-            };
+-            model.media.push(image);
+-          }
+-        });
++        // drawing 解析不出来（默认命名空间等）时媒体留空即可，
++        // 不能用 return 提前退出 —— 后面的表格 reconcile 会被跳过
++        if (drawing) {
++          drawing.anchors.forEach(anchor => {
++            if (anchor.medium) {
++              const image = {
++                type: 'image',
++                imageId: anchor.medium.index,
++                range: anchor.range,
++                hyperlinks: anchor.picture.hyperlinks,
++              };
++              model.media.push(image);
++            }
++          });
++        }
+       }
+     }
+ 
+diff --git a/lib/xlsx/xlsx.js b/lib/xlsx/xlsx.js
+index ff2d9a117d78cacf727564f74770e1e8f19d0fa1..c64579582d7bdbe20624d45a3f25deb44f2fc888 100644
+--- a/lib/xlsx/xlsx.js
++++ b/lib/xlsx/xlsx.js
+@@ -92,7 +92,9 @@ class XLSX {
+     Object.keys(model.drawings).forEach(name => {
+       const drawing = model.drawings[name];
+       const drawingRel = model.drawingRels[name];
+-      if (drawingRel) {
++      // 某些写入器（openpyxl 等）的 drawing 部件用默认命名空间，解析不出来
++      // （exceljs 按 xdr: 前缀匹配节点名），drawing 会是 undefined，跳过即可
++      if (drawingRel && drawing) {
+         drawingOptions.rels = drawingRel.reduce((o, rel) => {
+           o[rel.Id] = rel;
+           return o;
