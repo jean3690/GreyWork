@@ -1,6 +1,6 @@
 import { createJsonStorage } from "@greywork/core";
 import { defineStore } from "pinia";
-import { ref, watch } from "vue";
+import { ref } from "vue";
 import { sessionBackend } from "../lib/session-backend";
 import { toWorkspaceDirRefs } from "../lib/session-backend";
 import { useWorkspaceStore } from "./workspace";
@@ -185,7 +185,11 @@ export const useSessionStore = defineStore("session", () => {
   const workspaceStore = useWorkspaceStore();
   const workspaceDirs = () => toWorkspaceDirRefs(workspaceStore.workspaces);
 
-  /* 消息内容 / 步骤状态等深层变更也落盘：debounce 500ms 合并写。 */
+  /* 深层就地修改（消息内容 / 段落 / 步骤 / 工具时间线）也落盘：写入方改完显式
+     markDirty()，debounce 500ms 合并写。不再 deep watch 整棵 sessions 树 ——
+     流式管线每 ~40ms flush 一次就触发一次全树深度遍历（所有会话 × 消息 × 段落），
+     token 密集时纯属浪费；store action 本来就各自 persist()，只有绕过 action 的
+     就地写入才需要打脏，写入方是有限的几个（都在 chat.ts 的段落助手函数里）。 */
   let persistTimer: ReturnType<typeof setTimeout> | null = null;
   function persistSoon(): void {
     if (persistTimer) return;
@@ -194,7 +198,10 @@ export const useSessionStore = defineStore("session", () => {
       persist();
     }, 500);
   }
-  watch(sessions, persistSoon, { deep: true });
+  /** 深层就地修改后的统一打脏入口：直接改会话树内容（而非调用 store action）的代码必须调用它。 */
+  function markDirty(): void {
+    persistSoon();
+  }
 
   /**
    * 待落实的删除清单。
@@ -375,6 +382,8 @@ export const useSessionStore = defineStore("session", () => {
     appendMessage,
     reassignWorkspace,
     sessionsOf,
+    /** 深层就地修改后打脏，500ms 防抖合并落盘（替代曾经的 deep watch）。 */
+    markDirty,
     persist,
   };
 });

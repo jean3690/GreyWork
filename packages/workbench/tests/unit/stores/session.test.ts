@@ -177,4 +177,33 @@ describe("归属迁移与持久化", () => {
       delete storageHolder.localStorage;
     }
   });
+
+  it("markDirty 契约：绕过 action 的深层就地修改，500ms 防抖后落盘", () => {
+    injectStorage();
+    vi.useFakeTimers();
+    try {
+      const store = useSessionStore();
+      const session = store.createSession(null, "深层修改");
+      store.appendMessage(session.id, { id: "deep-1", role: "assistant", content: "", ts: Date.now() });
+      // 流式管线就是这样在 action 之外直接改 message.content / segments
+      const message = store.getSession(session.id)!.messages[0]!;
+      message.content += "流式增量";
+      (message.segments ??= []).push({ kind: "text", id: "s-1", from: 0, to: null });
+
+      // 未打脏前不落盘（这是与 deep watch 的行为差：必须显式 markDirty）
+      setActivePinia(createPinia());
+      expect(useSessionStore().getSession(session.id)?.messages[0]?.content).toBe("");
+
+      // 打脏后推进 500ms → 落盘；重建读取应还原
+      store.markDirty();
+      vi.advanceTimersByTime(500);
+      setActivePinia(createPinia());
+      const reloaded = useSessionStore();
+      expect(reloaded.getSession(session.id)?.messages[0]?.content).toBe("流式增量");
+      expect(reloaded.getSession(session.id)?.messages[0]?.segments).toEqual([{ kind: "text", id: "s-1", from: 0, to: null }]);
+    } finally {
+      vi.useRealTimers();
+      delete storageHolder.localStorage;
+    }
+  });
 });
