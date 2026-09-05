@@ -8,7 +8,8 @@ export interface SessionMeta {
   title: string;
   createdAt: string;
   updatedAt: string;
-  activeView: "overview" | "agents" | "spatial" | "gis" | "editor" | "analytics" | "market" | "settings";
+  // spatial / gis / analytics 包已下线（2026-09-05），视图枚举随之收敛
+  activeView: "overview" | "agents" | "editor" | "market" | "settings";
   pluginIds: string[];
   agentLoop?: AgentLoopConfig;
 }

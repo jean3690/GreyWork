@@ -16,7 +16,6 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     "paths": {
-      "cesium/Build/Cesium/Widgets/widgets.css": ["./packages/spatial/src/cesium-css.d.ts"],
       "maplibre-gl/dist/maplibre-gl.css": ["./packages/gis/src/maplibre-css.d.ts"]
     }
   }
