@@ -7,6 +7,9 @@ export type { IconShape } from "./lib/icons";
 export { capabilitySeam } from "./plugins/loader";
 export type { CapabilityLoader } from "./plugins/loader";
 export type { PluginManifest, ModeContribution, UiRegionContribution, UiRegionId } from "./plugins/types";
+// 插件宿主 API：外部 host 可在 Shell 挂载前 registerPlugin / 换 loader。
+export { bootPlugins, registerPlugin, setPluginEnabled, isPluginEnabled } from "./plugins/runtime";
+export { setCapabilityLoaderForTest, useCapabilityLoader } from "./plugins/current";
 export { i18n, setLocale } from "./i18n";
 export type { AppLocale } from "./i18n";
 // 测试/调试钩子（dev-only 由调用方按 import.meta.env.DEV 守卫）：暴露内存文件
