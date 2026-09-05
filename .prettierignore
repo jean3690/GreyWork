@@ -5,3 +5,7 @@ target
 pnpm-lock.yaml
 apps/desktop/src-tauri/gen
 .omo
+# vendored 的 agent skills（markdown + 自带配置），不是本仓代码
+.agents
+# Rust 集成测试的 mock agent，eslint.config.js 同样跳过它们
+apps/desktop/src-tauri/tests/*.mjs
