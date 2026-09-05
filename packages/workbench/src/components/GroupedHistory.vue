@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from "vue";
+import { computed, nextTick, onMounted, ref } from "vue";
 import { useSessionStore } from "../stores/session";
 import { useWorkspaceStore } from "../stores/workspace";
 import { groupSessions, type HistoryGroup } from "../lib/grouped";
 import { pickWorkspaceFolder } from "../lib/workspace-picker";
 import { bindWorkspaceFolder } from "../lib/workspace-bind";
 import Icon from "./Icon.vue";
+import GroupedHistorySessions from "./GroupedHistorySessions.vue";
 
 /**
  * GreyWork 风格会话历史：工作区列表（一行一个，可展开/收起）+ 展开后的会话。
@@ -16,6 +17,7 @@ import Icon from "./Icon.vue";
  * 未绑定工作区的会话落在末行「普通对话」（合并规则见 grouped.ts）。
  * 搜索时只留有命中的组并强制展开——此刻列表是结果面。
  * 行高 34px、圆角 8px；分组逻辑在 grouped.ts（纯函数，单测覆盖）。
+ * 展开体里的会话列表在 GroupedHistorySessions：会话多到阈值就切虚拟窗口，详见该文件。
  */
 const props = defineProps<{
   activeSessionId: string | null;
@@ -173,11 +175,7 @@ function commitWorkspaceRename(): void {
   if (id && draftWorkspaceName.value.trim()) workspaceStore.renameWorkspace(id, draftWorkspaceName.value);
 }
 
-/* ===== 行内管理：重命名 / 删除 ===== */
-const renamingId = ref<string | null>(null);
-const draftTitle = ref("");
-const renameInput = ref<HTMLInputElement | null>(null);
-const pendingDeleteId = ref<string | null>(null);
+/* ===== 行内管理：删除工作区（会话重命名/删除在 GroupedHistoryRow 内自洽） ===== */
 const pendingDeleteWorkspaceId = ref<string | null>(null);
 
 /** 展开管理面板的工作区（一次只开一个）；关掉时把重命名 / 删除确认的半途状态一并撤回。 */
@@ -191,34 +189,6 @@ function toggleMenu(id: string): void {
   }
 }
 
-/** v-for 内的模板 ref 会被 Vue 收成数组，用函数 ref 精确绑定当前那一个 input。 */
-function bindRenameInput(el: unknown): void {
-  renameInput.value = (el as HTMLInputElement | null) ?? null;
-}
-
-async function startRename(session: { id: string; title: string }): Promise<void> {
-  renamingId.value = session.id;
-  draftTitle.value = session.title;
-  await nextTick();
-  renameInput.value?.select();
-}
-
-function commitRename(): void {
-  const id = renamingId.value;
-  renamingId.value = null;
-  if (id && draftTitle.value.trim()) sessionStore.renameSession(id, draftTitle.value);
-}
-
-function cancelRename(): void {
-  renamingId.value = null;
-}
-
-function confirmDelete(id: string): void {
-  pendingDeleteId.value = null;
-  sessionStore.deleteSession(id);
-  if (props.activeSessionId === id) emit("navigate", "/guid");
-}
-
 /** 删除工作区：其会话先迁回「普通对话」，再移除工作区本身。 */
 function confirmDeleteWorkspace(id: string): void {
   pendingDeleteWorkspaceId.value = null;
@@ -230,13 +200,16 @@ function confirmDeleteWorkspace(id: string): void {
   if (active && sessionStore.getSession(active)?.workspaceId === id) emit("navigate", "/guid");
 }
 
-function fmtTime(ts: number): string {
-  const date = new Date(ts);
-  const today = new Date();
-  const sameDay = date.toDateString() === today.toDateString();
-  if (sameDay) return date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
-  return date.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" });
-}
+/** 会话列表的外层滚动容器：GroupedHistorySessions 的大列表窗口跟随它。 */
+const scrollEl = ref<HTMLElement | null>(null);
+/**
+ * 模板 ref 在子树挂载后才赋值，而子组件拿到的是渲染期的 prop（恒 null）。
+ * 挂载后踢一脚让父组件重渲一次，子组件的 scrollElement / tick 才拿到真元素。
+ */
+const scrollTick = ref(0);
+onMounted(() => {
+  scrollTick.value += 1;
+});
 </script>
 
 <template>
@@ -272,7 +245,7 @@ function fmtTime(ts: number): string {
       </button>
     </label>
 
-    <div class="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
+    <div ref="scrollEl" class="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
       <template v-for="group in groups" :key="rowKey(group)">
         <!-- 工作区行：caret 只管展开，行体管切换（两个独立按钮，避免按钮套按钮） -->
         <div
@@ -431,87 +404,21 @@ function fmtTime(ts: number): string {
           </span>
         </div>
 
-        <!-- 展开体：该工作区的会话 -->
+        <!-- 展开体：该工作区的会话（数量大时内部自动切虚拟窗口） -->
         <div
           v-if="isExpanded(group)"
           :id="`workspace-group-${rowKey(group)}`"
           role="group"
           :aria-label="`${group.name} 的会话`"
-          class="flex flex-col gap-0.5 pl-5"
+          class="flex flex-col pl-5"
         >
-          <div v-for="session in group.sessions" :key="session.id" class="group relative shrink-0">
-            <!-- 重命名：行内 input，Enter 提交 / Esc 取消 / 失焦提交 -->
-            <input
-              v-if="renamingId === session.id"
-              :ref="bindRenameInput"
-              v-model="draftTitle"
-              class="h-[34px] w-full rounded-[8px] border border-cyan/60 bg-panel px-2 text-[13px] text-foreground outline-none"
-              :aria-label="'重命名会话'"
-              @keydown.enter.prevent="commitRename"
-              @keydown.esc.prevent="cancelRename"
-              @blur="commitRename"
-            />
-            <template v-else>
-              <button
-                class="flex h-[34px] w-full cursor-pointer items-center gap-2 rounded-[8px] px-2 pr-12 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
-                :class="props.activeSessionId === session.id ? 'bg-panel text-foreground' : 'text-dim hover:bg-panel hover:text-foreground'"
-                :aria-current="props.activeSessionId === session.id ? 'true' : undefined"
-                @click="emit('navigate', `/conversation/${session.id}`)"
-              >
-                <span class="grid size-5 shrink-0 place-items-center rounded-[5px] bg-panel text-dim">
-                  <Icon name="message" :size="10" />
-                </span>
-                <span class="min-w-0 flex-1 truncate text-[13px]">{{ session.title }}</span>
-                <span class="shrink-0 text-[10px] text-dim2 tabular-nums">{{ fmtTime(session.updatedAt) }}</span>
-              </button>
-
-              <!-- hover / 键盘聚焦时浮出的行内操作（pr-12 已为它留位） -->
-              <div
-                class="absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100"
-              >
-                <button
-                  type="button"
-                  class="grid size-5 cursor-pointer place-items-center rounded-[5px] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
-                  :aria-label="'重命名会话'"
-                  @click="startRename(session)"
-                >
-                  <Icon name="edit" :size="12" />
-                </button>
-                <button
-                  type="button"
-                  class="grid size-5 cursor-pointer place-items-center rounded-[5px] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
-                  :aria-label="'删除会话'"
-                  @click="pendingDeleteId = session.id"
-                >
-                  <Icon name="delete" :size="12" />
-                </button>
-              </div>
-
-              <!-- 删除二次确认：覆盖整行，历史不可恢复 -->
-              <div
-                v-if="pendingDeleteId === session.id"
-                class="absolute inset-0 flex items-center gap-1 rounded-[8px] border border-line-2 bg-panel px-2"
-              >
-                <span class="min-w-0 flex-1 truncate text-[12px] text-dim">删除该会话？</span>
-                <button
-                  type="button"
-                  class="h-5 shrink-0 cursor-pointer rounded-[5px] border border-line bg-panel-2 px-1.5 text-[11px] text-foreground transition-colors hover:border-line-2"
-                  @click="confirmDelete(session.id)"
-                >
-                  删除
-                </button>
-                <button
-                  type="button"
-                  class="h-5 shrink-0 cursor-pointer rounded-[5px] px-1.5 text-[11px] text-dim transition-colors hover:text-foreground"
-                  @click="pendingDeleteId = null"
-                >
-                  取消
-                </button>
-              </div>
-            </template>
-          </div>
-
-          <p v-if="!group.sessions.length" class="px-2 pb-1 text-[11px] text-dim2">暂无会话</p>
+          <GroupedHistorySessions
+            :sessions="group.sessions"
+            :active-session-id="props.activeSessionId"
+            :scroll-element="scrollEl"
+            :scroll-tick="scrollTick"
+            @navigate="emit('navigate', $event)"
+          />
         </div>
       </template>
 
