@@ -6,7 +6,7 @@
  * 这里给用到的具体 specifier 各补一条精确声明：精确匹配优先于通配，
  * 与 `vite/client` 共存也不会冲突。
  */
-declare module "pdfjs-dist/build/pdf.worker.mjs?url" {
+declare module "pdfjs-dist/build/pdf.worker.min.mjs?url" {
   const src: string;
   export default src;
 }
