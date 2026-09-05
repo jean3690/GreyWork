@@ -72,7 +72,7 @@ export default defineConfigWithVueTs(
     },
   },
   {
-    files: ["packages/{agents,gis,analytics}/src/**"],
+    files: ["packages/{agents,gis}/src/**"],
     rules: {
       "no-restricted-imports": [
         "error",
@@ -92,28 +92,8 @@ export default defineConfigWithVueTs(
     },
   },
   {
-    files: ["packages/spatial/src/**"],
-    rules: {
-      "no-restricted-imports": [
-        "error",
-        {
-          patterns: [
-            {
-              group: ["@greywork/*", "!@greywork/core", "!@greywork/gis"],
-              message: "spatial 只允许依赖 @greywork/core 与 @greywork/gis（示例城市点同源派生），见 docs/architecture.md「依赖方向」。",
-            },
-            {
-              group: ["**/apps/**"],
-              message: "packages 禁止反向依赖 apps/*，见 docs/architecture.md「依赖方向」。",
-            },
-          ],
-        },
-      ],
-    },
-  },
-  {
     files: ["packages/*/src/**"],
-    ignores: ["packages/{agents,spatial,gis,analytics}/src/**"],
+    ignores: ["packages/{agents,gis}/src/**"],
     rules: {
       "no-restricted-imports": [
         "error",

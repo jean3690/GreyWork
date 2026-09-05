@@ -15,7 +15,6 @@
     "@greywork/workbench": "workspace:*",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",
-    "cesium": "^1.144.0",
     "pinia": "^3.0.3",
     "vue": "^3.5.13"
   },
