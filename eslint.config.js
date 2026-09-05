@@ -16,6 +16,9 @@ export default defineConfigWithVueTs(
       "apps/desktop/e2e/**",
       "**/vitest.config.ts",
       "eslint.config.js",
+      // vendored 的 agent skills（markdown 文档 + 自带配置），不是本仓代码，
+      // 也不在 tsconfig 的 project service 里 —— 交给 eslint 解析只会报 parsing error
+      ".agents/**",
     ],
   },
   js.configs.recommended,
