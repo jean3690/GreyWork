@@ -41,6 +41,39 @@ jobs:
       - name: Build (web + desktop renderer)
         run: pnpm build
 
+  desktop:
+    name: Tauri Bundle (deb)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # tauri build 会先跑 beforeBuildCommand（pnpm build 编 renderer），
+      # 再编译 Rust 并打整包 —— 这是 web/rust 两个 job 都覆盖不到的「整包能否出来」。
+      # 只打 deb：AppImage 需要 linuxdeploy 现场下载，CI 里不稳定且没必要。
+      - name: Build (tauri bundle)
+        run: pnpm --filter @greywork/desktop tauri build --bundles deb
+
   rust:
     name: Cargo Test (src-tauri)
     runs-on: ubuntu-latest
