@@ -1,5 +1,3 @@
-import pptxgen from "pptxgenjs";
-
 /** 简报主题色：封面底色。预览组件必须复用同一常量，否则预览与导出不一致。 */
 export const DECK_ACCENT = "F59E0B";
 
@@ -24,8 +22,12 @@ export interface PptxDeck {
 /**
  * 将声明式结构渲染为 .pptx 二进制（pptxgenjs）。
  * 封面：大标题 + 副标题；内容页：标题 + 要点 + 可选数据表。
+ *
+ * pptxgenjs 约几百 KB，只在真正产 pptx 时才需要 —— 静态 import 会把它带进会话
+ * store 链直达的入口 chunk，让从不产幻灯的用户开屏就解析。这里改成调用时再加载。
  */
 export async function exportToPptx(deck: PptxDeck): Promise<Uint8Array> {
+  const { default: pptxgen } = await import("pptxgenjs");
   const pptx = new pptxgen();
   pptx.layout = "LAYOUT_16x9";
   pptx.author = "GreyWork";

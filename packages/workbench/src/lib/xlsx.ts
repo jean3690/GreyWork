@@ -1,6 +1,12 @@
-import ExcelJS from "exceljs";
 import { cellDisplayValue } from "./xlsx-values";
 import { sanitizeXlsxGraphics } from "./xlsx-sanitize";
+
+/**
+ * xlsx 导出 / 追加 / 轻量预览。exceljs 是这里唯一的重量级依赖 —— 静态 import 会把
+ * 它焊进任何静态引用本模块的 chunk（会话 store 链从 Shell 直达，等于焊进出入口，
+ * 从不产表格的用户开屏就要解析）。所以每个入口函数内部再 `import("exceljs")`，
+ * 让这份 ~1MB 的写入器自然落到独立 chunk，只在真正产出/读取 xlsx 时才加载。
+ */
 
 /** 一张工作表的声明式描述：headers + rows（单元格字符串原样写入，公式如 "=SUM(A1:A3)" 生效）。 */
 export interface XlsxSheet {
@@ -22,6 +28,7 @@ const EXCEL_SHEET_MAX = 31;
  * 首行加粗 + 自动筛选 + 数据区域列宽自适应；公式字符串按原样写入由 Excel 求值。
  */
 export async function exportToXlsx(sheets: XlsxSheet[]): Promise<Uint8Array> {
+  const { default: ExcelJS } = await import("exceljs");
   const workbook = new ExcelJS.Workbook();
   for (const input of sheets) {
     const worksheet = workbook.addWorksheet(sanitizeSheetName(input.name));
@@ -50,6 +57,22 @@ export async function exportToXlsx(sheets: XlsxSheet[]): Promise<Uint8Array> {
   return new Uint8Array(buffer as ArrayBuffer);
 }
 
+/**
+ * 给现有 xlsx 追加一行（无则按 headers 新建），返回新字节。
+ * 读取路径同样要过 sanitize：磁盘上的文件可能带 openpyxl 风格图纸，
+ * exceljs 的 dist 在 reconcile 阶段会崩。
+ */
+export async function appendXlsxRow(data: Uint8Array | null, sheetName: string, headers: string[], row: string[]): Promise<Uint8Array> {
+  if (!data) return exportToXlsx([{ name: sheetName, headers, rows: [row] }]);
+  const { default: ExcelJS } = await import("exceljs");
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(await sanitizeXlsxGraphics(data));
+  const sheet = workbook.getWorksheet(1) ?? workbook.addWorksheet(sheetName);
+  sheet.addRow(row);
+  const buffer = await workbook.xlsx.writeBuffer();
+  return new Uint8Array(buffer as ArrayBuffer);
+}
+
 function sanitizeSheetName(name: string): string {
   const cleaned = name.replace(/[\\/?*[\]:]/g, "").slice(0, EXCEL_SHEET_MAX);
   return cleaned.length > 0 ? cleaned : "Sheet";
@@ -65,6 +88,7 @@ export function rowsToSheet(name: string, headers: string[], rows: string[][]): 
  * 工作表总数，供消息流内联产物卡片渲染，避免为内联视图拉起完整 Univer。
  */
 export async function readXlsxPreview(data: Uint8Array, maxRows = 12): Promise<XlsxPreview> {
+  const { default: ExcelJS } = await import("exceljs");
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(await sanitizeXlsxGraphics(data));
   const first = workbook.worksheets[0];

@@ -4,10 +4,8 @@ import { useSettingsStore } from "./settings";
 import { useVfsStore } from "./vfs";
 import { createLlmClient } from "@greywork/llm";
 import { buildLlmHistory, selectLlmProvider } from "./chat-llm";
-import { exportToXlsx } from "../lib/xlsx";
-import ExcelJS from "exceljs";
+import { appendXlsxRow, exportToXlsx } from "../lib/xlsx";
 import { exportToPptx, type PptxDeck } from "../lib/pptx";
-import { sanitizeXlsxGraphics } from "../lib/xlsx-sanitize";
 import { extractDashboardTitle, specToHtml } from "../lib/genui";
 import { createIdFactory } from "@greywork/core";
 import { defineStore } from "pinia";
@@ -281,17 +279,8 @@ export const useChatStore = defineStore("chat", () => {
     const path = "reports/task-result.xlsx";
     const row = parseRowValues(intentText);
     const existing = await vfsStore.readBinary(path).catch(() => null);
-    if (!existing) {
-      const data = await exportToXlsx([{ name: "task-result", headers: ["站点", "客流"], rows: [row] }]);
-      await vfsStore.writeBinary(path, data);
-    } else {
-      const wb = new ExcelJS.Workbook();
-      await wb.xlsx.load(await sanitizeXlsxGraphics(existing));
-      const ws = wb.getWorksheet(1) ?? wb.addWorksheet("task-result");
-      ws.addRow(row);
-      const buf = await wb.xlsx.writeBuffer();
-      await vfsStore.writeBinary(path, new Uint8Array(buf as ArrayBuffer));
-    }
+    const data = await appendXlsxRow(existing, "task-result", ["站点", "客流"], row);
+    await vfsStore.writeBinary(path, data);
     const id = await artifactStore.deliverArtifact({
       name: "task-result.xlsx",
       meta: "Excel · 已追加一行",
