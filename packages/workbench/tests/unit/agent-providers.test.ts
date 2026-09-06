@@ -110,7 +110,8 @@ describe("agent 后端目录（桌面态：SQLite 真源）", () => {
     const agentStore = useAgentStore();
     await agentStore.providersHydrated;
 
-    expect(agentStore.agentProviders.length).toBeGreaterThanOrEqual(4); // 内置缺省
+    expect(agentStore.agentProviders.length).toBeGreaterThanOrEqual(3); // 内置缺省（mock-agent 已下线）
+    expect(agentStore.agentProviders.some((p) => p.id === "mock-agent")).toBe(false);
     expect(invokeMock).toHaveBeenCalledWith("db_agents_sync", expect.objectContaining({ providers: expect.any(Array) }));
   });
 

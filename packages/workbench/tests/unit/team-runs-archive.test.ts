@@ -45,7 +45,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 const invokeMock = vi.mocked((await import("@tauri-apps/api/core")).invoke);
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn().mockResolvedValue(() => {}) }));
 
-import { useAgentStore } from "@/stores/agent";
+import { useRunsStore } from "@/stores/runs";
 
 const storageHolder = globalThis as { localStorage?: Storage };
 
@@ -109,14 +109,14 @@ describe("agent 编排存档（浏览器态：localStorage 缓存）", () => {
   });
 
   it("运行结束自动入档并写 localStorage 缓存", async () => {
-    const agentStore = useAgentStore();
-    expect(agentStore.runsHydrated).toBeNull(); // 浏览器态无后端
+    const runsStore = useRunsStore();
+    expect(runsStore.runsHydrated).toBeNull(); // 浏览器态无后端
 
-    await agentStore.dispatchRun("生成一份演示方案");
-    expect(agentStore.runs[0]?.status).toBe("running");
+    await runsStore.dispatchRun("生成一份演示方案");
+    expect(runsStore.runs[0]?.status).toBe("running");
     await vi.advanceTimersByTimeAsync(2_000); // fallback mock 全程走完
 
-    const archived = agentStore.runs.find((run) => run.id === agentStore.runs[0]?.id);
+    const archived = runsStore.runs.find((run) => run.id === runsStore.runs[0]?.id);
     expect(archived?.status).toBe("done");
     const cached = JSON.parse(localStorage.getItem("greywork.agent-runs") ?? "{}");
     expect(Array.isArray(cached.runs)).toBe(true);
@@ -140,25 +140,25 @@ describe("maybeOrchestrate 意图识别", () => {
   });
 
   it("「自动执行」前缀触发编排并返回 true", async () => {
-    const agentStore = useAgentStore();
-    const started = agentStore.maybeOrchestrate("自动执行：生成一份日报");
+    const runsStore = useRunsStore();
+    const started = runsStore.maybeOrchestrate("自动执行：生成一份日报");
     expect(started).toBe(true);
     await vi.advanceTimersByTimeAsync(2_000);
-    const run = agentStore.runs[0];
+    const run = runsStore.runs[0];
     expect(run?.status).toBe("done");
     expect(run?.subtasks.length).toBeGreaterThanOrEqual(2);
   });
 
   it("「编排」前缀同样触发（无冒号）", () => {
-    const agentStore = useAgentStore();
-    expect(agentStore.maybeOrchestrate("编排整理项目状态")).toBe(true);
-    expect(agentStore.runs[0]?.goal).toBe("整理项目状态");
+    const runsStore = useRunsStore();
+    expect(runsStore.maybeOrchestrate("编排整理项目状态")).toBe(true);
+    expect(runsStore.runs[0]?.goal).toBe("整理项目状态");
   });
 
   it("普通输入不触发，返回 false", () => {
-    const agentStore = useAgentStore();
-    expect(agentStore.maybeOrchestrate("生成一份日报")).toBe(false);
-    expect(agentStore.runs).toHaveLength(0);
+    const runsStore = useRunsStore();
+    expect(runsStore.maybeOrchestrate("生成一份日报")).toBe(false);
+    expect(runsStore.runs).toHaveLength(0);
   });
 });
 
@@ -180,29 +180,29 @@ describe("agent 编排存档（桌面态：SQLite 真源）", () => {
 
   it("库已接管：hydrate 后历史并入 runs（活跃之后）", async () => {
     installInvoke([{ id: "run-hist-1", payload: archivedRun }]);
-    const agentStore = useAgentStore();
-    await agentStore.runsHydrated;
+    const runsStore = useRunsStore();
+    await runsStore.runsHydrated;
 
-    expect(agentStore.runs.some((run) => run.id === "run-hist-1")).toBe(true);
-    const history = agentStore.runs.find((run) => run.id === "run-hist-1");
+    expect(runsStore.runs.some((run) => run.id === "run-hist-1")).toBe(true);
+    const history = runsStore.runs.find((run) => run.id === "run-hist-1");
     expect(history?.status).toBe("done");
     expect(history?.subtasks[0]?.role).toBe("builder");
   });
 
   it("库未接管：空存档首落库（写接管标记）", async () => {
     installInvoke(null);
-    const agentStore = useAgentStore();
-    await agentStore.runsHydrated;
+    const runsStore = useRunsStore();
+    await runsStore.runsHydrated;
 
     expect(invokeMock).toHaveBeenCalledWith("db_team_runs_sync", expect.objectContaining({ runs: [] }));
   });
 
   it("运行结束后入档并同步回库（形状含 payload 全文）", async () => {
     installInvoke(null);
-    const agentStore = useAgentStore();
-    await agentStore.runsHydrated;
+    const runsStore = useRunsStore();
+    await runsStore.runsHydrated;
 
-    await agentStore.dispatchRun("生成一份演示方案");
+    await runsStore.dispatchRun("生成一份演示方案");
     await vi.advanceTimersByTimeAsync(2_000);
 
     const syncCalls = invokeMock.mock.calls.filter(([cmd]) => cmd === "db_team_runs_sync");
