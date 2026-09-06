@@ -11,10 +11,21 @@ import { createIdFactory } from "@greywork/core";
 import { defineStore } from "pinia";
 import { computed, ref, watch } from "vue";
 import { i18n } from "../i18n";
+import { notify } from "./notice";
 import { mergeToolActivities } from "../lib/tool-activity";
 import type { ChatStep, QueuedCommand, ThreadMessage, ToolActivity } from "../types";
 
 const t = i18n.global.t;
+
+/** 产物落盘失败的统一上报：key 去重（一次失败只一条通知，别被演示管线的多次写入刷屏）。 */
+function notifyArtifactFailure(error: unknown): void {
+  notify({
+    kind: "error",
+    key: "artifact-write",
+    title: t("errors.artifactWriteFailed"),
+    detail: error instanceof Error ? error.message : String(error),
+  });
+}
 
 const uid = createIdFactory("m");
 const quid = createIdFactory("q");
@@ -634,12 +645,10 @@ export const useChatStore = defineStore("chat", () => {
               ].join("\n"),
             })
             .then(record)
-            .catch(() => undefined);
+            .catch(notifyArtifactFailure);
           // 追加行意图：就地修改现有 Excel（通知查看器重载），跳过整表重新生成
           if (isAddRow) {
-            void appendRowToXlsx(intentText)
-              .then(record)
-              .catch(() => undefined);
+            void appendRowToXlsx(intentText).then(record).catch(notifyArtifactFailure);
           }
           // 表格意图：额外产出一个 xlsx 交付物（引擎生成 → VFS 二进制落盘 → Artifacts 卡片）
           if (!isAddRow && (/表|Excel|xlsx|客流|站点/i.test(intentText) || /表/.test(firstLabel))) {
@@ -665,7 +674,7 @@ export const useChatStore = defineStore("chat", () => {
                 }),
               )
               .then(record)
-              .catch(() => undefined);
+              .catch(notifyArtifactFailure);
           }
           // 报告意图：额外产出一个 pptx 简报（标题 + 执行步骤）
           if (isReport) {
@@ -690,7 +699,7 @@ export const useChatStore = defineStore("chat", () => {
                 }),
               )
               .then(record)
-              .catch(() => undefined);
+              .catch(notifyArtifactFailure);
           }
           // 演示方案 Brief（Summary / Outline / Page Brief 三段）
           if (isSolar) {
@@ -709,12 +718,12 @@ export const useChatStore = defineStore("chat", () => {
               .then(record)
               .then(() => writeBrief("reports/brief.md", brief))
               .then(record)
-              .catch(() => undefined);
+              .catch(notifyArtifactFailure);
           } else if (isReport) {
             // 报告意图同时产出演示方案 Brief（从执行步骤推导）
             void writeBrief("reports/brief.md", briefFromReport(intentText, live.steps ?? []))
               .then(record)
-              .catch(() => undefined);
+              .catch(notifyArtifactFailure);
           }
           // 界面意图：GenUI 产出静态 HTML 可视化 → VFS → 预览面板（preview:request 联动）
           if (/界面|仪表盘|看板|dashboard|genui/i.test(intentText) || /界面|仪表盘|看板/.test(firstLabel)) {
@@ -745,7 +754,7 @@ export const useChatStore = defineStore("chat", () => {
                 data: html,
               })
               .then(record)
-              .catch(() => undefined);
+              .catch(notifyArtifactFailure);
           }
           // 完成文案排在工具与收尾思考之后：演示态也遵守「思考 → 动手 → 再思考 → 作答」的真实顺序
         },

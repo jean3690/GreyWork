@@ -12,6 +12,7 @@ import { bootPlugins } from "./plugins/runtime";
 import Sider from "./components/Sider.vue";
 import PreviewSider from "./components/preview/PreviewSider.vue";
 import Titlebar from "./components/Titlebar.vue";
+import NoticeHost from "./components/NoticeHost.vue";
 
 /**
  * GreyWork 风格外壳：标题栏 + 左侧栏 + 内容区（router-view）+ 右侧预览面板。
@@ -49,6 +50,40 @@ function syncViewport(): void {
 }
 
 /**
+ * 全局快捷键与抽屉的键盘退路。
+ *
+ * - Ctrl/Cmd+N 新对话 · Ctrl/Cmd+B 折叠/展开侧栏 · Ctrl/Cmd+\ 预览面板。
+ *   集中注册在这一个函数里：以后要上命令面板时，把这些 key 挪进面板注册表即可。
+ * - Escape 关抽屉：遮罩是 aria-hidden 的装饰层，点它收起对鼠标够用，对键盘不够；
+ *   挂在 window 上是因为抽屉打开时焦点可能在侧栏内的任意按钮上，
+ *   挂在遮罩元素上的处理器永远收不到那个 keydown。
+ */
+function onWindowKeydown(event: KeyboardEvent): void {
+  const mod = event.ctrlKey || event.metaKey;
+  if (mod && !event.altKey && !event.shiftKey) {
+    const key = event.key.toLowerCase();
+    if (key === "n") {
+      event.preventDefault();
+      handleNewChat();
+      return;
+    }
+    if (key === "b") {
+      event.preventDefault();
+      collapsed.value = !collapsed.value;
+      return;
+    }
+    if (key === "\\") {
+      event.preventDefault();
+      if (preview.available) preview.toggle();
+      return;
+    }
+  }
+  if (event.key !== "Escape") return;
+  if (!isMobile.value || collapsed.value) return;
+  collapsed.value = true;
+}
+
+/**
  * [内容区 + 右栏] 这一行的实测宽度回灌给 preview store，用于把右栏宽度收进
  * 「不挤破会话区」的范围。用这一行而不是整个窗口：左栏宽度会变（折叠/拖拽），
  * 拿窗口宽度算会在左栏展开时高估可用空间。
@@ -69,12 +104,16 @@ function observeMainRow(): void {
 onMounted(() => {
   syncViewport();
   window.addEventListener("resize", syncViewport);
+  window.addEventListener("keydown", onWindowKeydown);
   observeMainRow();
   // 微内核接线：注册内置插件清单并激活（幂等，见 plugins/runtime）。
   void bootPlugins();
 });
 onBeforeUnmount(() => {
-  if (typeof window !== "undefined") window.removeEventListener("resize", syncViewport);
+  if (typeof window !== "undefined") {
+    window.removeEventListener("resize", syncViewport);
+    window.removeEventListener("keydown", onWindowKeydown);
+  }
   rowObserver?.disconnect();
   rowObserver = null;
 });
@@ -129,5 +168,6 @@ function toggleTheme(): void {
         <PreviewSider v-if="preview.available" />
       </div>
     </div>
+    <NoticeHost />
   </div>
 </template>

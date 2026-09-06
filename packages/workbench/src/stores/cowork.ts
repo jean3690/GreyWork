@@ -20,6 +20,7 @@ import { parseToolActivityPayload } from "../lib/tool-activity";
 import { resolveWorkspaceDir } from "../lib/workspace-dir";
 import type { ThreadMessage } from "../types";
 import { useAgentStore } from "./agent";
+import { useRunsStore } from "./runs";
 import { useChatStore } from "./chat";
 import { useSessionStore } from "./session";
 import { useSettingsStore } from "./settings";
@@ -96,6 +97,7 @@ const summarize = (output: string): string | undefined => {
 /** Cowork 协作运行：把 @greywork/cowork 引擎接到真实 ACP 会话与会话存储上。 */
 export const useCoworkStore = defineStore("cowork", () => {
   const agentStore = useAgentStore();
+  const runsStore = useRunsStore();
   const chat = useChatStore();
   const sessionStore = useSessionStore();
   const settings = useSettingsStore();
@@ -398,7 +400,7 @@ export const useCoworkStore = defineStore("cowork", () => {
     const instance = createCoworkEngine({
       goal: trimmed,
       slots: created.map((item) => item.init),
-      maxParallel: () => agentStore.maxParallel,
+      maxParallel: () => runsStore.maxParallel,
       ports: { dispatch: dispatchTurn, emit: onEngineEvent },
     });
     engine.value = instance;

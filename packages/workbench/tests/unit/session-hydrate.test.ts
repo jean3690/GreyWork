@@ -76,9 +76,10 @@ describe("session store 桌面接管（~/.greyWork 文件真源）", () => {
   it("未接管：load=null → 本地内容作为真源首落文件", async () => {
     invokeMock.mockResolvedValue(null);
     const store = useSessionStore();
+    store.createSession(null, "本地会话"); // 首启空清单 → 本地真实内容
     await store.hydrated;
 
-    expect(store.sessions.length).toBeGreaterThan(0);
+    expect(store.sessions).toHaveLength(1);
     expect(invokeMock).toHaveBeenCalledWith(
       "store_sessions_sync",
       expect.objectContaining({ snapshot: expect.any(Object), workspaces: [] }),
@@ -89,9 +90,10 @@ describe("session store 桌面接管（~/.greyWork 文件真源）", () => {
     invokeMock.mockRejectedValue(new Error("文件损坏"));
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     const store = useSessionStore();
+    store.createSession(null, "本地会话");
     await store.hydrated;
 
-    expect(store.sessions.length).toBeGreaterThan(0);
+    expect(store.sessions).toHaveLength(1);
     expect(consoleError).toHaveBeenCalled();
     consoleError.mockRestore();
   });

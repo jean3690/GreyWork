@@ -172,8 +172,9 @@ describe("工作区文件夹绑定", () => {
     h.resolveRoot.mockResolvedValue({ dir: "/data/project", bound: true });
 
     const workspaceStore = useWorkspaceStore();
-    const activeId = workspaceStore.activeWorkspaceId;
-    expect(activeId).toBeTruthy();
+    // 首启不再有种子工作区：先建一个，绑定的落点就是它
+    const activeId = workspaceStore.createWorkspace("绑定工作区").id;
+    expect(workspaceStore.activeWorkspaceId).toBe(activeId);
 
     const tree = useFileTreeStore();
     await expect(tree.bindFolder()).resolves.toBe("/data/project");

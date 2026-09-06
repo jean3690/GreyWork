@@ -31,13 +31,10 @@ beforeEach(() => {
 });
 
 describe("基础 CRUD", () => {
-  it("无持久化数据时按 mock 线程种子初始化（按项目分组）", () => {
+  it("无持久化数据时从空会话列表开始（首启不伪造历史）", () => {
     const store = useSessionStore();
-    expect(store.sessions.length).toBeGreaterThan(0);
-    const main = store.sessionsOf("p-gw-main");
-    expect(main.length).toBe(3);
-    expect(main[0]?.title).toBeTruthy();
-    expect(store.sessions.some((s) => s.workspaceId === null)).toBe(false);
+    expect(store.sessions).toHaveLength(0);
+    expect(store.activeSessionId).toBeNull();
   });
 
   it("createSession 建会话并置为当前", () => {
@@ -114,7 +111,7 @@ describe("基础 CRUD", () => {
       vi.advanceTimersByTime(1000);
       store.createSession("p-city", "b");
       const citySessions = store.sessionsOf("p-city");
-      expect(citySessions).toHaveLength(4); // 种子 2 + 新建 2
+      expect(citySessions).toHaveLength(2); // 空首启 + 新建 2
       expect(citySessions.slice(0, 2).map((s) => s.title)).toEqual(["b", "a"]);
       expect(first.workspaceId).toBe("p-city");
       expect(store.sessionsOf(null).some((s) => s.title === "a" || s.title === "b")).toBe(false);
@@ -154,7 +151,7 @@ describe("归属迁移与持久化", () => {
 
     store.reassignWorkspace("p-city", null);
     expect(store.sessionsOf("p-city")).toHaveLength(0);
-    expect(store.sessionsOf(null)).toHaveLength(5); // 孤儿 1 + 迁移（种子 2 + 新建 2）
+    expect(store.sessionsOf(null)).toHaveLength(3); // 孤儿 1 + 迁移 2
     expect(store.sessionsOf(null).some((s) => s.id === orphan.id)).toBe(true);
   });
 

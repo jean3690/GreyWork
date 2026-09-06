@@ -2,10 +2,12 @@ import { createJsonStorage } from "@greywork/core";
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import { sessionBackend } from "../lib/session-backend";
+import { notify } from "./notice";
+import { i18n } from "../i18n";
+
+const t = i18n.global.t;
 import { toWorkspaceDirRefs } from "../lib/session-backend";
 import { useWorkspaceStore } from "./workspace";
-import { MOCK_THREAD_GROUPS } from "../mocks/threads";
-import { MOCK_WORKSPACES } from "../mocks/workspaces";
 import type { MessageSegment, ThreadMessage } from "../types";
 
 /** 会话记录：一条会话 = 一组对话消息 + 归属工作区 + 时间戳。 */
@@ -132,32 +134,13 @@ function adoptSessions(records: SessionRecord[]): SessionRecord[] {
 const storage = createJsonStorage<PersistedSessions>(STORAGE_KEY, isPersistedSessions);
 const legacyStorage = createJsonStorage<LegacyPersistedSessions>(STORAGE_KEY, isLegacyPersistedSessions);
 
-/** mock 线程种子 → SessionRecord（messages 由 chat 管线按需回填）。 */
-const SEED_OFFSET_MS: Record<string, number> = {
-  刚刚: 0,
-  "2 小时前": 2 * 3600_000,
-  昨天: 24 * 3600_000,
-  周一: 3 * 24 * 3600_000,
-  "3 天前": 3 * 24 * 3600_000,
-  上周: 7 * 24 * 3600_000,
-};
-
-function seedSessions(): SessionRecord[] {
-  const now = Date.now();
-  const workspaceIdOf = (workspaceName: string): string | null =>
-    MOCK_WORKSPACES.find((workspace) => workspace.name === workspaceName)?.id ?? null;
-  return MOCK_THREAD_GROUPS.flatMap((group) =>
-    group.threads.map((thread) => ({
-      id: thread.id,
-      title: thread.title,
-      workspaceId: workspaceIdOf(group.workspace),
-      createdAt: now - (SEED_OFFSET_MS[thread.time] ?? 0) - 3600_000,
-      updatedAt: now - (SEED_OFFSET_MS[thread.time] ?? 0),
-      messages: [] as ThreadMessage[],
-    })),
-  );
-}
-
+/**
+ * 首启无任何缓存时从空会话列表开始。
+ *
+ * 早期版本在这里灌入 mock 线程种子，让侧栏看起来有「历史」——但那是对用户的欺骗：
+ * 全新安装第一帧就在真库里出现 6 条从未发生过的会话（随后还会被当作真源落盘）。
+ * 演示数据请走 dev-only 注入（import.meta.env.DEV 守卫），不进首启默认路径。
+ */
 let sessionSeq = 0;
 function makeId(): string {
   sessionSeq += 1;
@@ -172,7 +155,7 @@ function loadSessions(): PersistedSessions {
     const migrated = migrateLegacySessions(legacy);
     return { ...migrated, sessions: adoptSessions(migrated.sessions) };
   }
-  return { version: 2, sessions: seedSessions(), activeSessionId: null };
+  return { version: 2, sessions: [], activeSessionId: null };
 }
 
 /** 会话管理：桌面态真源为会话文件（store_fs），浏览器态可配远端（WebDAV）；localStorage 作首帧缓存。 */
@@ -246,6 +229,7 @@ export const useSessionStore = defineStore("session", () => {
       })
       .catch((error: unknown) => {
         console.error("[session] 落盘同步失败，将下次重试", error);
+        notify({ kind: "error", key: "session-sync", title: t("errors.sessionSyncFailed"), detail: String(error) });
       });
   }
 
@@ -264,6 +248,7 @@ export const useSessionStore = defineStore("session", () => {
       })
       .catch((error: unknown) => {
         console.error("[session] 落盘加载失败，沿用本地缓存", error);
+        notify({ kind: "warning", key: "session-load", title: t("errors.sessionLoadFailed"), detail: String(error) });
       });
   })();
 

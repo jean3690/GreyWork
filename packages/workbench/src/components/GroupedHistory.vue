@@ -177,6 +177,18 @@ function commitWorkspaceRename(): void {
 
 /* ===== 行内管理：删除工作区（会话重命名/删除在 GroupedHistoryRow 内自洽） ===== */
 const pendingDeleteWorkspaceId = ref<string | null>(null);
+const workspaceDeleteCancelEl = ref<HTMLButtonElement | null>(null);
+
+/** 打开删除确认并把焦点移进面板（Esc 在面板上收）；关闭时焦点还给触发区。 */
+async function openWorkspaceDelete(id: string): Promise<void> {
+  pendingDeleteWorkspaceId.value = id;
+  await nextTick();
+  workspaceDeleteCancelEl.value?.focus();
+}
+
+function cancelWorkspaceDelete(): void {
+  pendingDeleteWorkspaceId.value = null;
+}
 
 /** 展开管理面板的工作区（一次只开一个）；关掉时把重命名 / 删除确认的半途状态一并撤回。 */
 const openMenuId = ref<string | null>(null);
@@ -372,14 +384,18 @@ onMounted(() => {
               :data-testid="`workspace-delete-${group.id}`"
               class="flex h-6 w-full cursor-pointer items-center gap-1.5 rounded-[5px] px-1.5 text-left text-[11.5px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
               :aria-label="`删除工作区 ${group.name}`"
-              @click="pendingDeleteWorkspaceId = group.id"
+              @click="openWorkspaceDelete(String(group.id))"
             >
               <Icon name="delete" :size="11" class="text-dim2" />
               删除
             </button>
           </div>
 
-          <div v-if="pendingDeleteWorkspaceId === group.id" class="flex flex-col gap-1 border-t border-line-2 pt-1">
+          <div
+            v-if="pendingDeleteWorkspaceId === group.id"
+            class="flex flex-col gap-1 border-t border-line-2 pt-1"
+            @keydown.esc.prevent="cancelWorkspaceDelete"
+          >
             <span class="text-[11px] text-dim">删除该工作区？其会话将移入「普通对话」</span>
             <div class="flex items-center gap-1">
               <button
@@ -390,9 +406,10 @@ onMounted(() => {
                 删除
               </button>
               <button
+                ref="workspaceDeleteCancelEl"
                 type="button"
                 class="h-5 shrink-0 cursor-pointer rounded-[5px] px-1.5 text-[11px] text-dim transition-colors hover:text-foreground"
-                @click="pendingDeleteWorkspaceId = null"
+                @click="cancelWorkspaceDelete"
               >
                 取消
               </button>

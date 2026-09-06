@@ -8,7 +8,9 @@ export { capabilitySeam } from "./plugins/loader";
 export type { CapabilityLoader } from "./plugins/loader";
 export type { PluginManifest, ModeContribution, UiRegionContribution, UiRegionId } from "./plugins/types";
 // 插件宿主 API：外部 host 可在 Shell 挂载前 registerPlugin / 换 loader。
-export { bootPlugins, registerPlugin, setPluginEnabled, isPluginEnabled } from "./plugins/runtime";
+export { bootPlugins, registerPlugin, setPluginEnabled, isPluginEnabled, restoreBuiltinPlugins } from "./plugins/runtime";
+// 桌面宿主（拖放打开等）需要的状态入口。
+export { usePreviewStore } from "./stores/preview";
 export { setCapabilityLoaderForTest, useCapabilityLoader } from "./plugins/current";
 export { i18n, setLocale } from "./i18n";
 export type { AppLocale } from "./i18n";

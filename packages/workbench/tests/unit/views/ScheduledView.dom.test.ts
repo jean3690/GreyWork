@@ -33,7 +33,7 @@ describe("ScheduledView", () => {
     const before = automation.list.length;
 
     const wrapper = mount(ScheduledView, { global: { plugins: [router, i18n] } });
-    const newButton = wrapper.findAll("button").find((button) => button.text().includes("新建任务"));
+    const newButton = wrapper.findAll("button").find((button) => button.text().includes("新建自动化"));
     expect(newButton).toBeDefined();
     await newButton!.trigger("click");
 

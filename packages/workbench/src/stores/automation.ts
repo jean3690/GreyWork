@@ -1,9 +1,14 @@
 import { createJsonStorage } from "@greywork/core";
 import { defineStore } from "pinia";
-import { ref } from "vue";
+import { ref, watch } from "vue";
 import { listen } from "@tauri-apps/api/event";
 import { automationsBackend, type AutomationDuePayload, type AutomationDueRow, type AutomationTaskRow } from "../lib/automations-backend";
 import { useChatStore } from "./chat";
+import { useSessionStore } from "./session";
+import { notify } from "./notice";
+import { i18n } from "../i18n";
+
+const t = i18n.global.t;
 
 /** 自动化任务：按时/规则触发的预设指令，Run Now 经 chat 派管线复跑并落产物。 */
 export interface AutomationTask {
@@ -45,9 +50,9 @@ const DEFAULT_AUTOMATIONS: AutomationTask[] = [
     name: "整理项目状态",
     schedule: "每天 09:00",
     cron: "0 9 * * *",
-    target: "GreyWork 主仓",
+    target: "普通对话",
     intent: "梳理项目本周改动并生成日报",
-    enabled: true,
+    enabled: false,
     lastRun: 0,
     running: false,
   },
@@ -56,7 +61,7 @@ const DEFAULT_AUTOMATIONS: AutomationTask[] = [
     name: "自动生成周报",
     schedule: "每周五 18:00",
     cron: "0 18 * * 4",
-    target: "城市数据洞察",
+    target: "普通对话",
     intent: "生成一份周报，包含数据表，并导出 Excel 和 PPT 简报",
     enabled: false,
     lastRun: 0,
@@ -69,7 +74,7 @@ const DEFAULT_AUTOMATIONS: AutomationTask[] = [
     cron: "0 3 * * *",
     target: "全部项目",
     intent: "跑一遍测试，修复失败的用例",
-    enabled: true,
+    enabled: false,
     lastRun: 0,
     running: false,
   },
@@ -114,6 +119,7 @@ export const useAutomationStore = defineStore("automation", () => {
       })
       .catch((error: unknown) => {
         console.error("[automation] SQLite 加载失败，沿用本地缓存", error);
+        notify({ kind: "warning", key: "automation-load", title: t("errors.automationSyncFailed"), detail: String(error) });
       });
   })();
 
@@ -123,6 +129,7 @@ export const useAutomationStore = defineStore("automation", () => {
       // 后端真源同步：失败不回滚内存（下次 persist 自愈）。
       void automationsBackend.save(list.value.map(toRow)).catch((error: unknown) => {
         console.error("[automation] SQLite 同步失败，将下次重试", error);
+        notify({ kind: "error", key: "automation-sync", title: t("errors.automationSyncFailed"), detail: String(error) });
       });
     }
   }
@@ -166,17 +173,67 @@ export const useAutomationStore = defineStore("automation", () => {
     }
   }
 
-  /** Run Now：把任务指令下发到 chat 管线（mock/真实），并记录运行时间。
-   * 运行状态由 ScheduledView 观察 chat.busy 反映（单人说·同一时刻只跑一个）。 */
-  function runNow(id: string): void {
+  /* ===== Run Now 在途跟踪 =====
+   * 管线没有「本任务完成」回执，只有全局 chat.busy —— 所以用翻转检测近似：
+   * 下发后 busy 从 true → false 的一次翻转视为本次运行结束；另有 10 分钟保险丝
+   * 兜底（防 busy 观察错位把任务永远钉在「运行中」）。一次只跑一个。 */
+  const RUN_FUSE_MS = 10 * 60_000;
+  let inflight: { id: string; sawBusy: boolean } | null = null;
+  let fuseTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 最近一次 Run Now 下发的会话 id（视图「查看会话」入口）。 */
+  const lastRunSessionId = ref<string | null>(null);
+
+  function clearInflight(): void {
+    if (fuseTimer !== null) {
+      clearTimeout(fuseTimer);
+      fuseTimer = null;
+    }
+    if (inflight) {
+      const task = list.value.find((a) => a.id === inflight!.id);
+      if (task) task.running = false;
+      inflight = null;
+    }
+  }
+
+  watch(
+    () => {
+      const chat = useChatStore();
+      return chat.busy;
+    },
+    (busy, wasBusy) => {
+      if (!inflight) return;
+      if (busy) {
+        inflight.sawBusy = true;
+      } else if (wasBusy && inflight.sawBusy) {
+        clearInflight();
+      }
+    },
+  );
+
+  /**
+   * Run Now：把任务指令下发到 chat 管线，返回结果码供视图给即时反馈
+   * （started / busy / missing）。running 置真直到管线忙完一轮或保险丝到期。 */
+  function runNow(id: string): "started" | "busy" | "missing" {
     const task = list.value.find((a) => a.id === id);
-    if (!task) return;
+    if (!task) return "missing";
     const chat = useChatStore();
-    if (chat.busy) return;
+    if (chat.busy || inflight !== null) return "busy";
+    if (!chat.activeThreadId) {
+      const session = useSessionStore().createSession(null);
+      chat.activeThreadId = session.id;
+    }
     task.enabled = true;
-    chat.submitText(task.intent);
+    task.running = true;
     task.lastRun = Date.now();
+    lastRunSessionId.value = chat.activeThreadId;
+    inflight = { id, sawBusy: false };
+    fuseTimer = setTimeout(() => {
+      fuseTimer = null;
+      clearInflight();
+    }, RUN_FUSE_MS);
+    chat.submitText(task.intent);
     persist();
+    return "started";
   }
 
   /* ===== 宿主到期队列（automation_due 表）消费 =====
@@ -229,6 +286,7 @@ export const useAutomationStore = defineStore("automation", () => {
       }
     } catch (error: unknown) {
       console.error("[automation] 到期队列消费失败", error);
+      notify({ kind: "error", key: "automation-due", title: t("errors.automationRunFailed"), detail: String(error) });
     } finally {
       consuming = false;
     }
@@ -241,6 +299,7 @@ export const useAutomationStore = defineStore("automation", () => {
       void consumeDue();
     }).catch((error: unknown) => {
       console.error("[automation] due 事件监听失败", error);
+      notify({ kind: "warning", key: "automation-due-listen", title: t("errors.automationSyncFailed"), detail: String(error) });
     });
     setInterval(() => {
       void consumeDue();
@@ -254,6 +313,7 @@ export const useAutomationStore = defineStore("automation", () => {
 
   return {
     list,
+    lastRunSessionId,
     add,
     remove,
     setEnabled,

@@ -30,11 +30,10 @@ beforeEach(() => {
 });
 
 describe("工作区 CRUD", () => {
-  it("无持久化数据时按 mock 工作区清单初始化", () => {
+  it("无持久化数据时从空工作区清单开始（首启不伪造工作区）", () => {
     const store = useWorkspaceStore();
-    expect(store.workspaces.length).toBe(3);
-    expect(store.workspaceById("p-gw-main")?.name).toBe("GreyWork 主仓");
-    expect(store.activeWorkspaceId).toBe("p-gw-main");
+    expect(store.workspaces).toHaveLength(0);
+    expect(store.activeWorkspaceId).toBeNull();
   });
 
   it("createWorkspace 追加并置为当前", () => {
@@ -42,7 +41,7 @@ describe("工作区 CRUD", () => {
     const workspace = store.createWorkspace("  新工作区  ", "描述");
     expect(workspace.name).toBe("新工作区");
     expect(store.activeWorkspaceId).toBe(workspace.id);
-    expect(store.workspaces).toHaveLength(4);
+    expect(store.workspaces).toHaveLength(1);
   });
 
   it("renameWorkspace 校验空名；deleteWorkspace 移除并回退激活项", () => {
@@ -55,7 +54,7 @@ describe("工作区 CRUD", () => {
 
     store.deleteWorkspace(workspace.id);
     expect(store.workspaceById(workspace.id)).toBeUndefined();
-    expect(store.activeWorkspaceId).toBe("p-gw-main");
+    expect(store.activeWorkspaceId).toBeNull();
   });
 
   it("addFile 同 vfsPath 去重；removeFile 移除", () => {

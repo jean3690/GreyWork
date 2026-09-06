@@ -1,4 +1,4 @@
-// 助手库契约：列出 agent store 的编队成员卡片（数量与内容都跟 store 对齐）。
+// 助手库契约：真实成员注册表接入前初始为空 —— 空态引导可见；有成员时按 store 对齐渲染卡片。
 import { beforeEach, describe, expect, it } from "vitest";
 import { mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
@@ -13,20 +13,16 @@ beforeEach(() => {
 });
 
 describe("AssistantsView", () => {
-  it("渲染助手库标题与全部编队成员卡片", async () => {
+  it("首启空态：无假成员、显示引导而非冻结进度", async () => {
     const router = createAppRouter();
     await router.push("/assistants");
     await router.isReady();
     const agentStore = useAgentStore();
-    expect(agentStore.agents.length).toBeGreaterThan(0);
+    expect(agentStore.agents).toHaveLength(0);
 
     const wrapper = mount(AssistantsView, { global: { plugins: [router, i18n] } });
     expect(wrapper.text()).toContain("助手库");
-    expect(wrapper.findAll("article")).toHaveLength(agentStore.agents.length);
-    const first = agentStore.agents[0];
-    expect(wrapper.text()).toContain(first?.name ?? "");
-    expect(wrapper.text()).toContain(first?.role ?? "");
-    // 状态徽标来自 store（idle 初始态）
-    expect(wrapper.text()).toContain("idle");
+    expect(wrapper.get('[data-testid="assistants-empty"]').text()).toContain("还没有可调用的 Agent");
+    expect(wrapper.findAll("article")).toHaveLength(0);
   });
 });

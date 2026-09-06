@@ -82,6 +82,18 @@
   }
 }
 
+/* 减少动效偏好：入场/退场与扫光全部关掉（动画只在无偏好时启用）。 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 /* ===== 视口高度链 =====
  * Shell 依赖 size-full（height:100%）撑满窗口；WebKitGTK 对「百分比高度祖先
  * 未定义高度」按 auto 塌缩（Chromium 宽容），导致桌面端内容只占窗口上部、底部大片空白。
