@@ -164,7 +164,15 @@ async fn send_chat_request(
     messages: &[LlmChatMessage],
     reasoning_effort: &str,
 ) -> Result<reqwest::Response, String> {
-    let api_key = std::env::var(api_key_env.trim()).unwrap_or_default();
+    let env_name = api_key_env.trim();
+    let api_key = std::env::var(env_name).unwrap_or_default();
+    // 声明了 env 却没设值：别拿匿名请求去撞 401 —— 直接告诉用户去哪补。
+    // （env 名为空的本地服务如 Ollama 才允许匿名。）
+    if !env_name.is_empty() && api_key.is_empty() {
+        return Err(format!(
+            "未设置 API Key：先在本机终端执行 export {env_name}=你的密钥，再从同一终端启动 GreyWork（设置页 → Agent → 模型供应商可查看/修改变量名）"
+        ));
+    }
     let client = crate::http::shared_client(10)?;
     let mut request = client
         .post(completions_url(base_url))
@@ -182,8 +190,8 @@ async fn send_chat_request(
             .await
             .unwrap_or_default();
         return Err(format!(
-            "llm endpoint returned {status}: {}",
-            truncate(&body, 300)
+            "llm endpoint returned {status}: {}（检查 API Key 是否有效，或到设置页 → Agent → 模型供应商核对 Base URL / 模型名）",
+            truncate(&body, 200)
         ));
     }
     Ok(response)

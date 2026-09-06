@@ -115,7 +115,19 @@ pub fn spawn_ticker(app: tauri::AppHandle, db_path: PathBuf) {
             }
             // 宿主兜底消费：渲染端超 2min 未消费的到期任务（webview 缺席/长忙），
             // 宿主直接以默认 LLM 单轮回合并落库——不依赖渲染端在线。
-            host_exec::claim_and_run(&db).await;
+            // 逐条结果转系统通知：这是窗口不可见时用户唯一的感知面。
+            for outcome in host_exec::claim_and_run(&db).await {
+                let title = if outcome.ok {
+                    "自动化已完成"
+                } else {
+                    "自动化执行失败"
+                };
+                crate::notify::send(
+                    &app,
+                    title,
+                    &format!("{}：{}", outcome.name, outcome.detail),
+                );
+            }
         }
     });
 }
