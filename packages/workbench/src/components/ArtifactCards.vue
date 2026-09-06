@@ -75,7 +75,7 @@ async function open(id: string, diskPath: string): Promise<void> {
         </button>
       </div>
       <span v-if="artifact.diskPath" class="break-all font-mono text-[10.5px] text-dim2">{{ artifact.diskPath }}</span>
-      <span v-if="failedId === artifact.id" role="alert" class="text-[11px] text-red-400">打开失败，路径可能已被移动或删除</span>
+      <span v-if="failedId === artifact.id" role="alert" class="text-[11px] text-orange">打开失败，路径可能已被移动或删除</span>
     </div>
   </div>
 </template>

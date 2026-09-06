@@ -77,6 +77,28 @@ export function isPluginEnabled(id: string): boolean {
   return pluginActive.value.includes(id);
 }
 
+/**
+ * 恢复全部内置插件（含停用后把插件中心页一起锁死的场景）。
+ *
+ * 语义：内置清单全量重新激活，第三方插件的活跃状态并入不丢；
+ * 持久化写回新活跃集（storage 语义 = 完整活跃 id 集）。幂等：
+ * 已激活的内置插件会被 loader 忽略/报重复 —— 逐个 try 容错。
+ */
+export async function restoreBuiltinPlugins(): Promise<void> {
+  const loader = useCapabilityLoader();
+  const builtinIds = BUILTIN_PLUGINS.map((manifest) => manifest.id);
+  const keepThirdParty = pluginActive.value.filter((id) => !builtinIds.includes(id));
+  for (const id of [...builtinIds, ...keepThirdParty]) {
+    try {
+      await loader.activate(id);
+    } catch {
+      // 已激活或依赖缺失：交给 sync() 后的真实状态反映，不阻断恢复。
+    }
+  }
+  sync();
+  storage.write([...pluginActive.value]);
+}
+
 /** 测试钩子：清掉 booted 与清单状态（不动 loader 本身），换 loader 后配合 boot 重放。 */
 export function resetPluginRuntime(): void {
   booted = false;

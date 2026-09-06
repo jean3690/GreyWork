@@ -2,7 +2,6 @@ import { createJsonStorage } from "@greywork/core";
 import { isTauriRuntime } from "@greywork/core";
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
-import { MOCK_WORKSPACES } from "../mocks/workspaces";
 import { writeTextFile } from "../state/workspaceFiles";
 import type { Workspace } from "../types";
 import { setDiskWriter } from "./vfs";
@@ -169,15 +168,10 @@ function removeStorageValue(key: string): void {
   storageHolder.localStorage?.removeItem(key);
 }
 
-function seedWorkspaces(): WorkspaceRecord[] {
-  const now = Date.now();
-  return MOCK_WORKSPACES.map((workspace, index) => {
-    const at = now - (MOCK_WORKSPACES.length - index) * 86_400_000;
-    return { ...workspace, files: [], createdAt: at, updatedAt: at, lastUsedAt: at };
-  });
-}
-
-/** v2 → 直接用；v1 → 补 lastUsedAt/defaultWorkspaceId；再旧 → 项目时代存储；都没有 → 种子。 */
+/**
+ * v2 → 直接用；v1 → 补 lastUsedAt/defaultWorkspaceId；再旧 → 项目时代存储；
+ * 都没有 → 空清单（首启不该出现用户从未创建的工作区；演示数据走 dev-only 注入）。
+ */
 function loadWorkspaces(): PersistedWorkspaces {
   const current = storage.read();
   if (current) return current;
@@ -194,7 +188,7 @@ function loadWorkspaces(): PersistedWorkspaces {
   return (
     readLegacyProjects() ?? {
       version: 2,
-      workspaces: seedWorkspaces(),
+      workspaces: [],
       activeWorkspaceId: null,
       defaultWorkspaceId: null,
     }

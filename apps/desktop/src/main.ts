@@ -1,4 +1,4 @@
-import { createApp } from "vue";
+import { createApp, nextTick } from "vue";
 import { createPinia } from "pinia";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import App from "./App.vue";
@@ -18,13 +18,19 @@ if (import.meta.env.DEV) {
   });
 }
 
-// 首帧渲染后再显示窗口（tauri.conf.json 配 visible:false 防白屏闪烁）。
-requestAnimationFrame(() => {
-  try {
-    void getCurrentWindow()
-      .show()
-      .catch(() => {});
-  } catch {
-    // 非 Tauri 运行（浏览器预览 devUrl）：无窗口概念，忽略。
-  }
-});
+// 防白屏闪烁：tauri.conf.json 配 visible:false，窗口等首帧画完再显示。
+// 两个 rAF 之间留一个 nextTick，确保 Vue 首帧布局与主题 data-theme 都已落 DOM。
+void (async () => {
+  await nextTick();
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      try {
+        void getCurrentWindow()
+          .show()
+          .catch(() => {});
+      } catch {
+        // 非 Tauri 运行（浏览器预览 devUrl）：无窗口概念，忽略。
+      }
+    });
+  });
+})();

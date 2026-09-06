@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import { setLocale } from "../i18n";
 import { systemBackend, type SysInfo } from "../lib/system-backend";
@@ -101,6 +101,70 @@ function applySandboxMode(mode: (typeof SANDBOX_MODES)[number]["value"]): void {
   settings.persist();
 }
 
+// ---------- 模型供应商编辑 ----------
+
+/** 当前编辑中的供应商 id（跟随选中项）与字段草稿。 */
+const providerDraftId = ref<string | null>(null);
+const providerDraft = ref({ name: "", baseUrl: "", model: "", apiKeyEnv: "" });
+/** 草稿相对 store 有未保存改动时置真（简单脏检查，切走即丢——字段少，不做自动保存）。 */
+const providerDraftDirty = ref(false);
+
+function syncProviderDraft(): void {
+  const provider = settings.modelProviders.find((candidate) => candidate.id === providerDraftId.value);
+  if (!provider) return;
+  providerDraft.value = {
+    name: provider.name,
+    baseUrl: provider.baseUrl ?? "",
+    model: provider.model ?? "",
+    apiKeyEnv: provider.apiKeyEnv ?? "",
+  };
+  providerDraftDirty.value = false;
+}
+
+watch(
+  activeProvider,
+  (provider) => {
+    if (!provider) return;
+    providerDraftId.value = provider.id;
+    syncProviderDraft();
+  },
+  { immediate: true },
+);
+
+function saveProviderDraft(): void {
+  const current = settings.modelProviders.find((provider) => provider.id === providerDraftId.value);
+  if (!current) return;
+  settings.upsertModelProvider({
+    ...current,
+    name: providerDraft.value.name.trim() || current.name,
+    baseUrl: providerDraft.value.baseUrl.trim(),
+    model: providerDraft.value.model.trim(),
+    apiKeyEnv: providerDraft.value.apiKeyEnv.trim(),
+  });
+  providerDraftDirty.value = false;
+}
+
+function addCustomProvider(): void {
+  const id = `custom-${Date.now().toString(36)}`;
+  settings.upsertModelProvider({
+    id,
+    name: "自定义供应商",
+    kind: "custom",
+    baseUrl: "",
+    model: "",
+    apiKeyEnv: "CUSTOM_LLM_API_KEY",
+    enabled: true,
+  });
+  settings.selectModelProvider(id);
+}
+
+function removeActiveProvider(): void {
+  if (providerDraftId.value === null) return;
+  settings.removeModelProvider(providerDraftId.value);
+  providerDraftId.value = null;
+  providerDraftDirty.value = false;
+}
+
 // ---------- MCP ----------
 
 /** 新增表单草稿。transport 决定填 url 还是 command。 */
@@ -165,19 +229,113 @@ async function testMcpServer(entry: McpServerEntry): Promise<void> {
     <div class="flex flex-col gap-4">
       <template v-if="section === 'agent'">
         <div class="rounded-[14px] border border-line bg-panel p-4">
-          <div class="mb-3 text-[13px] font-medium text-foreground">默认模型供应商</div>
+          <div class="mb-3 flex items-center justify-between gap-2">
+            <span class="text-[13px] font-medium text-foreground">默认模型供应商</span>
+            <span class="flex gap-1.5">
+              <button
+                type="button"
+                class="h-6 cursor-pointer rounded-[6px] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
+                @click="addCustomProvider"
+              >
+                ＋ 新增供应商
+              </button>
+              <button
+                type="button"
+                class="h-6 cursor-pointer rounded-[6px] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
+                @click="settings.resetModelProviders()"
+              >
+                恢复默认
+              </button>
+            </span>
+          </div>
           <div class="flex flex-col gap-1.5">
             <button
               v-for="provider in settings.modelProviders"
               :key="provider.id"
               class="flex cursor-pointer items-center gap-2.5 rounded-[10px] border px-3 py-2 text-left transition-colors"
               :class="provider.id === settings.selectedModelProviderId ? 'border-line-2 bg-panel-2' : 'border-transparent hover:bg-panel-2'"
-              @click="settings.selectedModelProviderId = provider.id"
+              @click="settings.selectModelProvider(provider.id)"
             >
               <Icon :name="provider.enabled ? 'check-one' : 'close-one'" :size="14" class="text-dim" />
               <span class="min-w-0 flex-1 truncate text-[13px] text-foreground">{{ provider.name }}</span>
               <span class="font-mono text-[11px] text-dim2">{{ provider.model }}</span>
             </button>
+          </div>
+        </div>
+        <!-- 供应商编辑表单：API key 来自宿主进程环境变量，改完需重启应用生效 -->
+        <div v-if="activeProvider" class="rounded-[14px] border border-line bg-panel p-4">
+          <div class="mb-3 flex items-center justify-between gap-2">
+            <span class="text-[13px] font-medium text-foreground">编辑供应商</span>
+            <span class="text-[10.5px] text-dim2">当前：{{ activeProvider.id }}</span>
+          </div>
+          <div class="flex flex-col gap-2.5">
+            <label class="flex items-center gap-2">
+              <span class="w-20 shrink-0 text-[11.5px] text-dim2">名称</span>
+              <input
+                v-model="providerDraft.name"
+                class="min-w-0 flex-1 rounded-[8px] border border-line bg-panel-2 px-2 py-1.5 text-[12.5px] text-foreground outline-none focus:border-line-2"
+                placeholder="供应商名称"
+                @input="providerDraftDirty = true"
+              />
+            </label>
+            <label class="flex items-center gap-2">
+              <span class="w-20 shrink-0 text-[11.5px] text-dim2">Base URL</span>
+              <input
+                v-model="providerDraft.baseUrl"
+                class="min-w-0 flex-1 rounded-[8px] border border-line bg-panel-2 px-2 py-1.5 font-mono text-[12px] text-foreground outline-none focus:border-line-2"
+                placeholder="https://api.openai.com/v1"
+                @input="providerDraftDirty = true"
+              />
+            </label>
+            <label class="flex items-center gap-2">
+              <span class="w-20 shrink-0 text-[11.5px] text-dim2">模型</span>
+              <input
+                v-model="providerDraft.model"
+                class="min-w-0 flex-1 rounded-[8px] border border-line bg-panel-2 px-2 py-1.5 font-mono text-[12px] text-foreground outline-none focus:border-line-2"
+                placeholder="gpt-4o / claude-sonnet-4-5"
+                @input="providerDraftDirty = true"
+              />
+            </label>
+            <label class="flex items-center gap-2">
+              <span class="w-20 shrink-0 text-[11.5px] text-dim2">API Key 环境变量</span>
+              <input
+                v-model="providerDraft.apiKeyEnv"
+                class="min-w-0 flex-1 rounded-[8px] border border-line bg-panel-2 px-2 py-1.5 font-mono text-[12px] text-foreground outline-none focus:border-line-2"
+                placeholder="OPENAI_API_KEY"
+                @input="providerDraftDirty = true"
+              />
+            </label>
+            <p class="text-[10.5px] leading-relaxed text-dim2">
+              Key 在桌面端从启动应用的 shell 环境变量读取：先
+              <code class="font-mono">export {{ providerDraft.apiKeyEnv || "OPENAI_API_KEY" }}=…</code> 再从同一终端启动
+              GreyWork。浏览器/演示模式不读环境变量。
+            </p>
+            <div class="flex items-center justify-between gap-2">
+              <button
+                type="button"
+                class="h-7 cursor-pointer rounded-[7px] border border-line bg-panel-2 px-2.5 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
+                @click="removeActiveProvider"
+              >
+                删除该供应商
+              </button>
+              <div class="flex gap-1.5">
+                <button
+                  type="button"
+                  class="h-7 cursor-pointer rounded-[7px] border border-line bg-panel px-2.5 text-[11px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground"
+                  @click="syncProviderDraft"
+                >
+                  撤销
+                </button>
+                <button
+                  type="button"
+                  class="h-7 cursor-pointer rounded-[7px] bg-accent px-3 text-[11.5px] font-medium text-accent-ink transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+                  :disabled="!providerDraftDirty"
+                  @click="saveProviderDraft"
+                >
+                  保存
+                </button>
+              </div>
+            </div>
           </div>
         </div>
         <div class="rounded-[14px] border border-line bg-panel p-4">

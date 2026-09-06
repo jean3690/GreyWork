@@ -2,7 +2,7 @@
 import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
-import { useAgentStore } from "../stores/agent";
+import { useRunsStore } from "../stores/runs";
 import { useChatStore } from "../stores/chat";
 import { useCoworkStore, type CoworkMemberInit } from "../stores/cowork";
 import { useSessionStore } from "../stores/session";
@@ -15,7 +15,7 @@ import type { PlannerRun, Subtask } from "@greywork/agents";
  * 下半保留 planner 编排运行的看板（自动执行拆解出的并行子任务）。
  */
 const { t } = useI18n();
-const agentStore = useAgentStore();
+const runsStore = useRunsStore();
 const cowork = useCoworkStore();
 const sessionStore = useSessionStore();
 const chat = useChatStore();
@@ -116,7 +116,7 @@ const subStatusMeta: Record<Subtask["status"], { dot: string; label: string }> =
   failed: { dot: "bg-destructive", label: "失败" },
 };
 
-const displayRuns = computed(() => agentStore.runs);
+const displayRuns = computed(() => runsStore.runs);
 const doneCount = (run: PlannerRun): number => run.subtasks.filter((sub) => sub.status === "done").length;
 
 function timeOf(ts: number): string {
@@ -177,6 +177,7 @@ function roleLabel(role: string): string {
             type="button"
             class="grid size-7 place-items-center rounded-[8px] border border-line text-dim transition-colors hover:text-foreground"
             :disabled="memberDrafts.length <= 1"
+            :aria-label="t('cowork.removeMember')"
             @click="removeMember(index)"
           >
             <Icon name="close" :size="12" />
@@ -322,7 +323,7 @@ function roleLabel(role: string): string {
     <div class="mt-6 mb-2 flex items-center gap-2">
       <h2 class="font-display text-[14px] font-semibold text-foreground">编排运行</h2>
       <span class="rounded-full border border-line bg-panel-2 px-2 py-0.5 text-[10px] text-dim">
-        并行上限 {{ agentStore.maxParallel }}
+        并行上限 {{ runsStore.maxParallel }}
       </span>
     </div>
 

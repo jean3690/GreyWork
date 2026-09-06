@@ -58,11 +58,20 @@ describe("PluginsView（插件中心自身）", () => {
     expect(wrapper.get('[data-testid="mode-chip-plugins"]').text()).toBe("插件");
   });
 
-  it("停用后自身贡献的模式页从 seam 快照消失，按钮翻转为「启用」", async () => {
+  it("停用自身需两步确认：确认后模式页从 seam 快照消失，按钮翻转为「启用」", async () => {
     await bootWithFreshLoader();
     const wrapper = mount(PluginsView);
 
+    // 第一次点：出现警告 + 确认/取消，尚未停用
     await wrapper.get('[data-testid="plugin-toggle-core.plugins"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.text()).toContain("停用插件中心后本页会消失");
+    expect(wrapper.find('[data-testid="mode-chip-plugins"]').exists()).toBe(true);
+
+    // 点确认（第二步）：真正停用
+    const confirmButtons = wrapper.findAll("button").filter((button) => button.text().includes("删除"));
+    expect(confirmButtons.length).toBeGreaterThan(0);
+    await confirmButtons[confirmButtons.length - 1]!.trigger("click");
     await flushPromises();
 
     expect(wrapper.get('[data-testid="plugin-toggle-core.plugins"]').text()).toBe("启用");

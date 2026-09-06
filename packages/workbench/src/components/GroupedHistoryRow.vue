@@ -41,6 +41,18 @@ function cancelRename(): void {
 
 /* ===== 删除（就地二次确认，历史不可恢复） ===== */
 const pendingDelete = ref(false);
+const deleteCancelEl = ref<HTMLButtonElement | null>(null);
+
+/** 打开确认即把焦点移进面板（Esc 的接收者）；关闭时焦点回到触发按钮所在行。 */
+async function openDeleteConfirm(): Promise<void> {
+  pendingDelete.value = true;
+  await nextTick();
+  deleteCancelEl.value?.focus();
+}
+
+function cancelDelete(): void {
+  pendingDelete.value = false;
+}
 
 function confirmDelete(): void {
   pendingDelete.value = false;
@@ -99,14 +111,18 @@ function fmtTime(ts: number): string {
           type="button"
           class="grid size-5 cursor-pointer place-items-center rounded-[5px] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
           :aria-label="'删除会话'"
-          @click="pendingDelete = true"
+          @click="openDeleteConfirm"
         >
           <Icon name="delete" :size="12" />
         </button>
       </div>
 
       <!-- 删除二次确认：覆盖整行，历史不可恢复 -->
-      <div v-if="pendingDelete" class="absolute inset-0 flex items-center gap-1 rounded-[8px] border border-line-2 bg-panel px-2">
+      <div
+        v-if="pendingDelete"
+        class="absolute inset-0 flex items-center gap-1 rounded-[8px] border border-line-2 bg-panel px-2"
+        @keydown.esc.prevent="cancelDelete"
+      >
         <span class="min-w-0 flex-1 truncate text-[12px] text-dim">删除该会话？</span>
         <button
           type="button"
@@ -116,9 +132,10 @@ function fmtTime(ts: number): string {
           删除
         </button>
         <button
+          ref="deleteCancelEl"
           type="button"
           class="h-5 shrink-0 cursor-pointer rounded-[5px] px-1.5 text-[11px] text-dim transition-colors hover:text-foreground"
-          @click="pendingDelete = false"
+          @click="cancelDelete"
         >
           取消
         </button>

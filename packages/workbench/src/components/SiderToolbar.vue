@@ -17,7 +17,7 @@ const emit = defineEmits<{ newChat: [] }>();
     </div>
 
     <button
-      class="flex h-7 shrink-0 cursor-pointer items-center gap-1 rounded-[8px] bg-console px-2 text-[12px] font-medium text-white transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+      class="flex h-7 shrink-0 cursor-pointer items-center gap-1 rounded-[8px] bg-accent px-2 text-[12px] font-medium text-accent-ink transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
       aria-label="新建对话"
       @click="emit('newChat')"
     >

@@ -12,6 +12,10 @@ import {
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { settingsBackend } from "../lib/settings-backend";
+import { notify } from "./notice";
+import { i18n } from "../i18n";
+
+const t = i18n.global.t;
 import type { AppLocale } from "../i18n";
 
 export type PermTier = "read-only" | "workspace" | "full";
@@ -221,6 +225,7 @@ export const useSettingsStore = defineStore("settings", () => {
       // 后端真源同步：失败不回滚内存（下次 persist 自愈）。
       void settingsBackend.save(snapshot as Record<string, unknown>).catch((error: unknown) => {
         console.error("[settings] SQLite 同步失败，将下次重试", error);
+        notify({ kind: "error", key: "settings-sync", title: t("errors.settingsSyncFailed"), detail: String(error) });
       });
     }
   }
@@ -242,6 +247,7 @@ export const useSettingsStore = defineStore("settings", () => {
       })
       .catch((error: unknown) => {
         console.error("[settings] SQLite 加载失败，沿用本地缓存", error);
+        notify({ kind: "warning", key: "settings-load", title: t("errors.settingsSyncFailed"), detail: String(error) });
       });
   })();
 
@@ -259,6 +265,36 @@ export const useSettingsStore = defineStore("settings", () => {
 
   function removeMcpServer(id: string): void {
     mcpServers.value = mcpServers.value.filter((server) => server.id !== id);
+    persist();
+  }
+
+  /* ===== 模型供应商管理（设置页编辑面） ===== */
+  /** 选中即持久化（此前点选直接写 ref，重启即丢）。 */
+  function selectModelProvider(id: string | null): void {
+    selectedModelProviderId.value = id;
+    persist();
+  }
+
+  /** 新增或整体覆盖一台模型供应商；写入前归一化 reasoningEffort。 */
+  function upsertModelProvider(provider: ModelProviderConfig): void {
+    const normalized = { ...provider, reasoningEffort: normalizeReasoningEffort(provider.reasoningEffort) };
+    const index = modelProviders.value.findIndex((candidate) => candidate.id === provider.id);
+    if (index >= 0) modelProviders.value[index] = normalized;
+    else modelProviders.value.push(normalized);
+    persist();
+  }
+
+  /** 恢复出厂默认供应商清单（误删/改坏后的逃生门）。 */
+  function resetModelProviders(): void {
+    modelProviders.value = DEFAULT_MODEL_PROVIDERS.map((provider) => ({ ...provider, reasoningEffort: "auto" as const }));
+    selectedModelProviderId.value = null;
+    persist();
+  }
+
+  /** 删除自定义供应商；删的是当前选中项则回落空选（Local 默认路径）。 */
+  function removeModelProvider(id: string): void {
+    modelProviders.value = modelProviders.value.filter((candidate) => candidate.id !== id);
+    if (selectedModelProviderId.value === id) selectedModelProviderId.value = null;
     persist();
   }
 
@@ -290,6 +326,10 @@ export const useSettingsStore = defineStore("settings", () => {
     upsertMcpServer,
     removeMcpServer,
     setMcpServerEnabled,
+    selectModelProvider,
+    upsertModelProvider,
+    removeModelProvider,
+    resetModelProviders,
     syncEnabledPlugins,
     persist,
     /** 桌面态启动接管完成信号（null = 浏览器态无后端）；await 后库内容已就位。 */
