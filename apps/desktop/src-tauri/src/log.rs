@@ -47,6 +47,10 @@ pub fn error(tag: &str, message: impl AsRef<str>) {
     write_line("ERROR", tag, message);
 }
 
+pub fn warn(tag: &str, message: impl AsRef<str>) {
+    write_line("WARN", tag, message);
+}
+
 fn write_line(level: &str, tag: &str, message: impl AsRef<str>) {
     let Some(target) = LOG_FILE.get() else {
         return; // 未 init：静默 no-op（测试/无宿主环境）

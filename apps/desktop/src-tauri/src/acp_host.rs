@@ -505,7 +505,10 @@ pub async fn acp_start(
         .send_request(InitializeRequest::new(ProtocolVersion::V1))
         .block_task()
         .await
-        .map_err(|error| format!("initialize failed: {error}"))?;
+        .map_err(|error| {
+            task.abort();
+            format!("initialize failed: {error}")
+        })?;
     let mcp_capabilities = initialize.agent_capabilities.mcp_capabilities.clone();
 
     state.sessions.lock().await.insert(
@@ -688,6 +691,22 @@ async fn resolve_permission(
             app,
             "permission-request",
             permission_payload(request_id, false, None, &request),
+        );
+        // 系统通知：待裁决请求 120s 后自动取消，窗口不可见时用户会彻底错过。
+        crate::notify::send(
+            app,
+            "ACP 权限待裁决",
+            &format!(
+                "{} · {}（{} 秒内未响应将自动拒绝）",
+                kind_label(request.tool_call.fields.kind),
+                request
+                    .tool_call
+                    .fields
+                    .title
+                    .as_deref()
+                    .unwrap_or("未命名工具调用"),
+                PERMISSION_CONFIRM_TIMEOUT.as_secs()
+            ),
         );
         rx
     };

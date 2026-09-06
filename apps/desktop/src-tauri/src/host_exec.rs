@@ -21,36 +21,81 @@ const STALE_AFTER_MS: i64 = 120_000;
 /// 每轮最多执行的积压数（防一次 tick 打爆限流）。
 const MAX_CLAIM_PER_TICK: u32 = 3;
 
+/// 单条兜底执行的结果（宿主据此发系统通知）。
+pub struct Outcome {
+    /// 任务名（通知正文前缀）。
+    pub name: String,
+    /// 执行是否成功。
+    pub ok: bool,
+    /// 成功时为回复预览；失败时为错误文案。
+    pub detail: String,
+}
+
 /// 每轮 tick 调用：捡过期 pending 逐条执行（失败 finish failed，不重试）。
-pub async fn claim_and_run(db: &Db) {
+///
+/// 返回本轮逐条结果——渲染端缺席时它是用户唯一的感知面，由 `scheduler` 转成
+/// 系统通知（本模块不碰 AppHandle，db 单测可以只喂 `&Db` 直接调）。
+pub async fn claim_and_run(db: &Db) -> Vec<Outcome> {
     let stale = match db.automation_due_list_stale(STALE_AFTER_MS, MAX_CLAIM_PER_TICK) {
         Ok(items) => items,
         Err(error) => {
             crate::log::error("host-exec", format!("拉取过期队列失败: {error}"));
-            return;
+            return Vec::new();
         }
     };
+    let mut outcomes = Vec::with_capacity(stale.len());
     for item in stale {
-        let outcome = run_one(db, &item).await;
-        let status = if outcome.is_ok() { "success" } else { "failed" };
+        let result = run_one(db, &item).await;
+        let status = if result.is_ok() { "success" } else { "failed" };
         if let Err(error) = db.automation_due_finish(item.id, status) {
             crate::log::error("host-exec", format!("回执失败 id={}: {error}", item.id));
         }
-        match outcome {
-            Ok(_) => crate::log::info(
-                "host-exec",
-                format!("宿主执行完成: {} ({})", item.name, item.task_id),
-            ),
-            Err(error) => crate::log::error(
-                "host-exec",
-                format!("宿主执行失败: {} ({}) — {error}", item.name, item.task_id),
-            ),
-        }
+        let outcome = match result {
+            Ok(reply) => {
+                crate::log::info(
+                    "host-exec",
+                    format!("宿主执行完成: {} ({})", item.name, item.task_id),
+                );
+                Outcome {
+                    name: item.name.clone(),
+                    ok: true,
+                    detail: preview(&reply),
+                }
+            }
+            Err(error) => {
+                crate::log::error(
+                    "host-exec",
+                    format!("宿主执行失败: {} ({}) — {error}", item.name, item.task_id),
+                );
+                Outcome {
+                    name: item.name.clone(),
+                    ok: false,
+                    detail: error,
+                }
+            }
+        };
+        outcomes.push(outcome);
     }
+    outcomes
+}
+
+/// 通知正文用的回复预览：取首行、按字符截断（中文按字符切，不会切坏 UTF-8）。
+fn preview(reply: &str) -> String {
+    const MAX_CHARS: usize = 80;
+    let first_line = reply.lines().next().unwrap_or_default().trim();
+    if first_line.is_empty() {
+        return "（空回复）".into();
+    }
+    let mut out: String = first_line.chars().take(MAX_CHARS).collect();
+    if first_line.chars().count() > MAX_CHARS {
+        out.push('…');
+    }
+    out
 }
 
 /// 执行单条：默认 LLM 配置 → 单轮 chat_complete → 新会话落库 → last_run 回写。
-async fn run_one(db: &Db, item: &AutomationDueDto) -> Result<(), String> {
+/// 成功返回模型回复全文（供通知预览）。
+async fn run_one(db: &Db, item: &AutomationDueDto) -> Result<String, String> {
     let settings = db
         .load_settings()?
         .ok_or_else(|| "设置未初始化（无模型配置可执行）".to_string())?;
@@ -93,7 +138,7 @@ async fn run_one(db: &Db, item: &AutomationDueDto) -> Result<(), String> {
         &assistant_message,
     )?;
     db.automation_mark_last_run(&item.task_id, now)?;
-    Ok(())
+    Ok(reply)
 }
 
 /// 从 settings 快照解析默认 LLM 端点：selectedModelProviderId 优先，
@@ -145,6 +190,20 @@ mod tests {
                 { "id": "cloud", "name": "Cloud", "kind": "openai-compatible", "baseUrl": "https://api.example.com/v1", "model": "gpt-x", "apiKeyEnv": "EXAMPLE_KEY", "enabled": true }
             ]
         })
+    }
+
+    #[test]
+    fn preview_takes_first_line_and_truncates_by_chars() {
+        assert_eq!(preview("第一行\n第二行"), "第一行", "只取首行");
+        let out = preview(&"あ".repeat(100));
+        assert_eq!(out.chars().count(), 81, "80 字 + 省略号");
+        assert!(out.ends_with('…'));
+    }
+
+    #[test]
+    fn preview_empty_reply_is_labelled() {
+        assert_eq!(preview(""), "（空回复）");
+        assert_eq!(preview("   \n  "), "（空回复）");
     }
 
     #[test]
