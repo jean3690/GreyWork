@@ -51,6 +51,11 @@ const ALLOWED_AGENT_PROGRAMS: &[&str] = &[
     "qwen",
     "droid",
     "amp",
+    "amp-acp",
+    "kimi",
+    "glm-acp-agent",
+    "goose",
+    "copilot",
     "cursor-agent",
     "aider",
     "node",
@@ -970,6 +975,86 @@ pub async fn acp_list(state: State<'_, AcpHost>) -> Result<Vec<serde_json::Value
         .collect())
 }
 
+/// PATH 探测结果（设置页据此显示「已安装 / 未安装」）。
+#[derive(Serialize)]
+pub struct AgentProgramProbe {
+    program: String,
+    installed: bool,
+    path: Option<String>,
+}
+
+/// 在给定 PATH 值里找可执行文件；纯文件系统命中，不起进程。
+fn probe_program(
+    program: &str,
+    path_value: Option<&std::ffi::OsStr>,
+) -> Option<std::path::PathBuf> {
+    let value = path_value
+        .map(|v| v.to_os_string())
+        .or_else(|| std::env::var_os("PATH"))?;
+    let candidates = program_candidates(program);
+    for dir in std::env::split_paths(&value) {
+        for candidate in &candidates {
+            let full = dir.join(candidate);
+            if full.is_file() && is_executable(&full) {
+                return Some(full);
+            }
+        }
+    }
+    None
+}
+
+/// Windows 上程序名不带扩展名时按 PATHEXT 展开；其他平台只有原名。
+fn program_candidates(program: &str) -> Vec<String> {
+    if !cfg!(windows) || std::path::Path::new(program).extension().is_some() {
+        return vec![program.to_string()];
+    }
+    let pathext = std::env::var("PATHEXT").unwrap_or_else(|_| ".EXE;.CMD;.BAT".to_string());
+    let expanded: Vec<String> = pathext
+        .split(';')
+        .filter(|ext| !ext.is_empty())
+        .map(|ext| format!("{program}{ext}"))
+        .collect();
+    if expanded.is_empty() {
+        vec![program.to_string()]
+    } else {
+        expanded
+    }
+}
+
+#[cfg(unix)]
+fn is_executable(path: &std::path::Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(path)
+        .map(|meta| meta.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn is_executable(_path: &std::path::Path) -> bool {
+    true
+}
+
+/// 批量探测 ACP agent 入口程序是否在本机 PATH 上（只读，不启动任何进程）。
+///
+/// 探测失败（命令缺失等）不该让用户以为「没装」，故返回空数组由前端按未知处理。
+#[tauri::command]
+pub fn acp_detect_programs(programs: Vec<String>) -> Vec<AgentProgramProbe> {
+    const MAX_PROGRAMS: usize = 64;
+    programs
+        .into_iter()
+        .filter(|program| !program.trim().is_empty())
+        .take(MAX_PROGRAMS)
+        .map(|program| {
+            let found = probe_program(&program, None);
+            AgentProgramProbe {
+                installed: found.is_some(),
+                path: found.map(|p| p.to_string_lossy().into_owned()),
+                program,
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -977,6 +1062,27 @@ mod tests {
     use agent_client_protocol::schema::v1::{
         PermissionOption, ToolCallLocation, ToolCallUpdate, ToolCallUpdateFields,
     };
+
+    #[test]
+    fn path_probe_hits_executable_and_misses_absent() {
+        let dir = std::env::temp_dir().join(format!("gw-probe-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let exe = dir.join("gw-fake-agent");
+        std::fs::write(&exe, b"#!/bin/sh\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let path_string = dir.to_string_lossy().into_owned();
+        let path_value = std::ffi::OsStr::new(&path_string);
+
+        assert!(probe_program("gw-fake-agent", Some(path_value)).is_some());
+        assert!(probe_program("gw-no-such-agent", Some(path_value)).is_none());
+
+        let _ = std::fs::remove_file(&exe);
+        let _ = std::fs::remove_dir(&dir);
+    }
 
     #[test]
     fn agent_command_allows_known_programs_and_rejects_injection() {

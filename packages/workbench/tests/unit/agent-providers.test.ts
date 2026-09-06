@@ -128,6 +128,54 @@ describe("agent 后端目录（桌面态：SQLite 真源）", () => {
     expect(cached.providers.find((p: { id: string }) => p.id === "codex")?.enabled).toBe(false);
   });
 
+  it("CLI 安装探测：桌面态 PATH 命中→已安装，未命中→未安装", async () => {
+    installInvoke(dbProviders);
+    invokeMock.mockImplementation((cmd: string) => {
+      switch (cmd) {
+        case "db_agents_load":
+          return Promise.resolve(dbProviders);
+        case "acp_detect_programs":
+          return Promise.resolve([
+            { program: "opencode", installed: true, path: "/usr/bin/opencode" },
+            { program: "codex", installed: false, path: null },
+          ]);
+        default:
+          return Promise.resolve(undefined);
+      }
+    });
+    const agentStore = useAgentStore();
+    await agentStore.providersHydrated;
+
+    // 探测前：状态未知
+    expect(agentStore.providerInstalled(agentStore.agentProviders[0]!)).toBeNull();
+
+    await agentStore.refreshAgentDetection();
+    const opencode = agentStore.agentProviders.find((p) => p.id === "opencode")!;
+    const codex = agentStore.agentProviders.find((p) => p.id === "codex")!;
+    // detect 元数据不落库，从库读回后按 id 补回
+    expect(opencode.detect).toEqual(["opencode"]);
+    expect(agentStore.providerInstalled(opencode)).toBe(true);
+    expect(agentStore.providerInstallLabel(opencode)).toBe("已安装");
+    expect(agentStore.providerInstallLabel(codex)).toBe("未安装");
+  });
+
+  it("npx 型后端未预装 → 提示首次启动下载（不是未安装）", async () => {
+    installInvoke(null);
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "acp_detect_programs") {
+        return Promise.resolve([{ program: "gemini", installed: false, path: null }]);
+      }
+      if (cmd === "db_agents_load") return Promise.resolve(null);
+      return Promise.resolve(undefined);
+    });
+    const agentStore = useAgentStore();
+    await agentStore.providersHydrated;
+    await agentStore.refreshAgentDetection();
+
+    const gemini = agentStore.agentProviders.find((p) => p.id === "gemini")!;
+    expect(agentStore.providerInstallLabel(gemini)).toBe("首次启动下载");
+  });
+
   it("禁用当前选中后端（routeToAcp 中）→ 自动切回 Local", async () => {
     installInvoke(dbProviders);
     const agentStore = useAgentStore();

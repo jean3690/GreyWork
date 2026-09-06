@@ -18,6 +18,13 @@ export interface AgentProviderRow {
   enabled: boolean;
 }
 
+/** 单个入口程序的 PATH 探测结果。 */
+export interface AgentProgramProbe {
+  program: string;
+  installed: boolean;
+  path: string | null;
+}
+
 export const agentsBackend = {
   /** 当前运行时是否有后端真源（Tauri 桌面）。 */
   active(): boolean {
@@ -34,5 +41,15 @@ export const agentsBackend = {
   async save(providers: AgentProviderRow[]): Promise<void> {
     if (!isTauriRuntime()) return;
     await invoke("db_agents_sync", { providers });
+  },
+
+  /**
+   * PATH 探测各后端 CLI 是否已安装（纯 stat，不起进程）。
+   * 浏览器态无宿主 → null，UI 按「未知」处理不显示状态。
+   */
+  async detect(programs: string[]): Promise<AgentProgramProbe[] | null> {
+    if (!isTauriRuntime() || programs.length === 0) return null;
+    const probes = await invoke<AgentProgramProbe[]>("acp_detect_programs", { programs });
+    return Array.isArray(probes) ? probes : null;
   },
 };

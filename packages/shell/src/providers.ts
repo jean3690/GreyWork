@@ -8,19 +8,128 @@ export interface AgentProviderConfig {
   /** ACP 启动命令（AcpAgent::from_str 兼容：可执行文件 + 参数） */
   command: string;
   enabled: boolean;
+  /** PATH 上探测的可执行文件名（任一命中即视为本机已装）；空/缺省 = 不探测。 */
+  detect?: string[];
+  /** 未安装时的安装提示（设置页展示）。 */
+  installHint?: string;
 }
 
+/**
+ * 主流 ACP agent 预设。
+ *
+ * 启动命令以官方 ACP registry（https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json）
+ * 的分发信息为准：registry 给 npx 包的走 `npx -y <pkg> <args>`（免预装，首次启动按需下载），
+ * 给原生二进制的走裸命令（依赖 PATH）。
+ */
 export const DEFAULT_AGENT_PROVIDERS: AgentProviderConfig[] = [
-  { id: "opencode", name: "OpenCode", kind: "acp", command: "opencode acp", enabled: true },
   {
-    id: "mock-agent",
-    name: "Mock Agent（本地桩）",
+    id: "opencode",
+    name: "OpenCode",
     kind: "acp",
-    command: "node apps/desktop/src-tauri/tests/mock-acp-agent.mjs",
+    command: "opencode acp",
     enabled: true,
+    detect: ["opencode"],
+    installHint: "opencode.ai 安装后加入 PATH",
   },
-  { id: "codex", name: "Codex", kind: "acp", command: "codex acp", enabled: false },
-  { id: "claude-code", name: "Claude Code（zed 桥接）", kind: "acp", command: "npx -y @zed-industries/claude-code-acp", enabled: false },
+  {
+    id: "codex",
+    name: "Codex",
+    kind: "acp",
+    command: "codex acp",
+    enabled: false,
+    detect: ["codex"],
+    installHint: "npm i -g @openai/codex",
+  },
+  {
+    id: "claude-code",
+    name: "Claude Code（zed 桥接）",
+    kind: "acp",
+    command: "npx -y @zed-industries/claude-code-acp",
+    enabled: false,
+    detect: ["claude"],
+    installHint: "npx 自动下载；本机需已登录 Claude Code",
+  },
+  {
+    id: "gemini",
+    name: "Gemini CLI",
+    kind: "acp",
+    command: "npx -y @google/gemini-cli --acp",
+    enabled: false,
+    detect: ["gemini"],
+    installHint: "npm i -g @google/gemini-cli",
+  },
+  {
+    id: "qwen-code",
+    name: "Qwen Code",
+    kind: "acp",
+    command: "npx -y @qwen-code/qwen-code --acp",
+    enabled: false,
+    detect: ["qwen"],
+    installHint: "npm i -g @qwen-code/qwen-code",
+  },
+  {
+    id: "kimi",
+    name: "Kimi CLI",
+    kind: "acp",
+    command: "kimi acp",
+    enabled: false,
+    detect: ["kimi"],
+    installHint: "github.com/MoonshotAI/kimi-cli releases",
+  },
+  {
+    id: "glm",
+    name: "GLM Agent（智谱）",
+    kind: "acp",
+    command: "npx -y glm-acp-agent",
+    enabled: false,
+    detect: ["glm-acp-agent"],
+    installHint: "npm i -g glm-acp-agent",
+  },
+  {
+    id: "cursor",
+    name: "Cursor Agent",
+    kind: "acp",
+    command: "cursor-agent acp",
+    enabled: false,
+    detect: ["cursor-agent"],
+    installHint: "cursor.com 安装后 agent CLI 需在 PATH",
+  },
+  {
+    id: "copilot",
+    name: "GitHub Copilot CLI",
+    kind: "acp",
+    command: "npx -y @github/copilot --acp",
+    enabled: false,
+    detect: ["copilot"],
+    installHint: "npm i -g @github/copilot",
+  },
+  {
+    id: "goose",
+    name: "goose（Block）",
+    kind: "acp",
+    command: "goose acp",
+    enabled: false,
+    detect: ["goose"],
+    installHint: "block.github.io/goose 安装后加入 PATH",
+  },
+  {
+    id: "droid",
+    name: "Factory Droid",
+    kind: "acp",
+    command: "npx -y droid exec --output-format acp-daemon",
+    enabled: false,
+    detect: ["droid"],
+    installHint: "npm i -g droid",
+  },
+  {
+    id: "amp",
+    name: "Amp（社区 ACP 桥接）",
+    kind: "acp",
+    command: "npx -y amp-acp",
+    enabled: false,
+    detect: ["amp-acp", "amp"],
+    installHint: "npm i -g amp-acp",
+  },
 ];
 
 export const DEFAULT_MODEL_PROVIDERS: ModelProviderConfig[] = [
