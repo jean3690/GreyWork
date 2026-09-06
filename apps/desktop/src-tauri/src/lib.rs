@@ -48,6 +48,7 @@ pub fn run() {
             acp_host::acp_stop,
             acp_host::acp_set_permission_tier,
             acp_host::acp_list,
+            acp_host::acp_detect_programs,
             llm::llm_chat_start,
             llm::llm_chat_stop,
             mcp::mcp_probe,

@@ -20,7 +20,7 @@ import {
 } from "@greywork/acp";
 import { createJsonStorage } from "@greywork/core";
 import { createAgentProviderRegistry, type AgentProviderConfig } from "@greywork/shell";
-import { agentsBackend, type AgentProviderRow } from "../lib/agents-backend";
+import { agentsBackend, type AgentProgramProbe, type AgentProviderRow } from "../lib/agents-backend";
 import { teamRunsBackend, type TeamRunRow } from "../lib/team-runs-backend";
 import { defineStore } from "pinia";
 import { ref, watch } from "vue";
@@ -843,11 +843,53 @@ export const useAgentStore = defineStore("agent", () => {
   function persistProviders(): void {
     providersStorage.write({ providers: agentProviders.value });
     if (agentsBackend.active()) {
-      const rows: AgentProviderRow[] = agentProviders.value.map((provider) => ({ ...provider }));
+      // 显式取字段：detect/installHint 只属于前端预设，不落库
+      const rows: AgentProviderRow[] = agentProviders.value.map(({ id, name, kind, command, enabled }) => ({
+        id,
+        name,
+        kind,
+        command,
+        enabled,
+      }));
       void agentsBackend.save(rows).catch((error: unknown) => {
         console.error("[agent] 后端目录同步失败，将下次重试", error);
       });
     }
+  }
+
+  /** detect/installHint 属于前端预设、不落库；从 SQLite 读回时按 id 补回。 */
+  function withPresetMeta(provider: AgentProviderConfig): AgentProviderConfig {
+    const preset = agentProviderRegistry.get(provider.id);
+    return preset ? { ...provider, detect: preset.detect, installHint: preset.installHint } : provider;
+  }
+
+  /** 本机 PATH 探测结果（program → 探测结果）；浏览器态恒为空 → UI 不显示安装状态。 */
+  const agentDetection = ref<Record<string, AgentProgramProbe>>({});
+
+  /** 探测各后端 CLI 是否安装（桌面态；失败静默 → 状态保持未知）。 */
+  async function refreshAgentDetection(): Promise<void> {
+    const programs = [...new Set(agentProviders.value.flatMap((provider) => provider.detect ?? []))];
+    try {
+      const probes = await agentsBackend.detect(programs);
+      if (probes) agentDetection.value = Object.fromEntries(probes.map((probe) => [probe.program, probe]));
+    } catch (error: unknown) {
+      console.error("[agent] CLI 安装探测失败", error);
+    }
+  }
+
+  /** 后端安装状态：true 已装 / false 未装 / null 未探测（未跑过探测或无探测项）。 */
+  function providerInstalled(provider: AgentProviderConfig): boolean | null {
+    const programs = provider.detect ?? [];
+    if (programs.length === 0 || Object.keys(agentDetection.value).length === 0) return null;
+    return programs.some((program) => agentDetection.value[program]?.installed === true);
+  }
+
+  /** 设置页状态文案：未装且命令走 npx → 首次启动按需下载，否则直说未安装。 */
+  function providerInstallLabel(provider: AgentProviderConfig): string {
+    const installed = providerInstalled(provider);
+    if (installed === null) return "";
+    if (installed) return "已安装";
+    return provider.command.startsWith("npx") ? "首次启动下载" : "未安装";
   }
 
   /** 桌面态启动接管：库目录 → 覆盖（真源）；未接管 → 内置缺省/缓存首落库。 */
@@ -857,7 +899,7 @@ export const useAgentStore = defineStore("agent", () => {
       .load()
       .then((providers) => {
         if (providers) {
-          agentProviders.value = providers;
+          agentProviders.value = providers.map(withPresetMeta);
           // selected 在新目录中消失时回落首个 id（routeToAcp 状态保持，activate 再校验 enabled）
           if (!agentProviders.value.some((provider) => provider.id === selectedProviderId.value)) {
             selectedProviderId.value = agentProviders.value[0]?.id ?? "";
@@ -1008,6 +1050,10 @@ export const useAgentStore = defineStore("agent", () => {
     runsHydrated,
     /** 后端目录启动接管完成信号（null = 浏览器态无后端）。 */
     providersHydrated,
+    agentDetection,
+    refreshAgentDetection,
+    providerInstalled,
+    providerInstallLabel,
     setAgentProviderEnabled,
     maxParallel,
     setAcpConfig,

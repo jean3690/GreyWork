@@ -54,6 +54,7 @@ const sysInfo = ref<SysInfo | null>(null);
 const sysInfoFailed = ref(false);
 
 onMounted(() => {
+  void agent.refreshAgentDetection();
   if (!systemBackend.active()) return;
   void systemBackend
     .info()
@@ -198,10 +199,19 @@ async function testMcpServer(entry: McpServerEntry): Promise<void> {
                 @change="void agent.setAgentProviderEnabled(provider.id, ($event.target as HTMLInputElement).checked)"
               />
               <span class="min-w-0 flex-1 truncate text-[13px] text-foreground">{{ provider.name }}</span>
-              <span class="max-w-[40%] truncate font-mono text-[11px] text-dim2">{{ provider.command }}</span>
+              <span class="max-w-[36%] truncate font-mono text-[11px] text-dim2">{{ provider.command }}</span>
+              <span
+                class="shrink-0 text-[11px]"
+                :class="agent.providerInstalled(provider) === true ? 'text-accent' : 'text-dim2'"
+                :title="provider.installHint ?? ''"
+              >
+                {{ agent.providerInstallLabel(provider) }}
+              </span>
             </label>
           </div>
-          <p class="mt-2 text-[11px] text-dim2">启用后出现在发送条上方的后端选择胶囊；停用当前后端会自动切回 Local。</p>
+          <p class="mt-2 text-[11px] text-dim2">
+            启用后出现在发送条上方的后端选择胶囊；停用当前后端会自动切回 Local。标「首次启动下载」的后端由 npx 按需拉取，无需预装。
+          </p>
         </div>
       </template>
 
