@@ -112,7 +112,7 @@ async function probe(): Promise<void> {
             />
           </label>
         </div>
-        <p class="flex items-start gap-1.5 text-[11px] text-amber-400">
+        <p class="flex items-start gap-1.5 text-[11px] text-amber">
           <Icon name="shield" :size="12" class="mt-0.5 shrink-0" />
           凭据以明文存在浏览器 localStorage：只用于自建/局域网端点，并且请用只对该目录有权限的专用账号。
         </p>
