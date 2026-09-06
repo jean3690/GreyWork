@@ -395,6 +395,17 @@ fn permission_payload(
     })
 }
 
+/// 握手就绪窗口：npx/npm 型命令首次运行需按需下载（gemini/qwen 等包可达数十 MB），
+/// 放宽到 60s；原生二进制启动快，保持 10s 以便「命令不存在」快速失败。
+fn handshake_timeout_secs(command: &str) -> u64 {
+    let program = command.split_whitespace().next().unwrap_or_default();
+    if matches!(program, "npx" | "npm" | "yarn" | "pnpm" | "deno" | "bunx") {
+        60
+    } else {
+        10
+    }
+}
+
 /// 启动外部 ACP agent 子进程并完成 initialize 握手，返回主机句柄 id。
 ///
 /// `tier` 取前端权限档位（"cautious" | "daily" | "auto"），缺省/未知按 cautious。
@@ -470,10 +481,22 @@ pub async fn acp_start(
             .await;
     });
 
-    let conn = tokio::time::timeout(Duration::from_secs(10), ready_rx.recv())
+    let handshake_secs = handshake_timeout_secs(&command);
+    let ready = tokio::time::timeout(Duration::from_secs(handshake_secs), ready_rx.recv())
         .await
-        .map_err(|_| "agent handshake timeout (10s)".to_string())?
-        .ok_or_else(|| "agent connection closed before ready".to_string())?;
+        .map_err(|_| {
+            // 超时回收：npx 冷启动可能仍在下游拉包，不 abort 会留孤儿进程。
+            task.abort();
+            format!(
+                "agent handshake timeout after {handshake_secs}s: '{command}' did not become \
+                 ready (npx/npm 首次运行需下载，可再试一次)"
+            )
+        })?
+        .ok_or_else(|| {
+            task.abort();
+            "agent connection closed before ready".to_string()
+        })?;
+    let conn = ready;
 
     // initialize 回包里带 agent 的 MCP 传输能力：留着给 acp_new_session 做声明过滤，
     // 免得把 http 服务器塞给只支持 stdio 的 agent 而让整个 session/new 失败。
@@ -1062,6 +1085,14 @@ mod tests {
     use agent_client_protocol::schema::v1::{
         PermissionOption, ToolCallLocation, ToolCallUpdate, ToolCallUpdateFields,
     };
+
+    #[test]
+    fn handshake_timeout_widens_for_registry_launchers() {
+        assert_eq!(handshake_timeout_secs("opencode acp"), 10);
+        assert_eq!(handshake_timeout_secs("npx -y @google/gemini-cli --acp"), 60);
+        assert_eq!(handshake_timeout_secs("bunx @qwen-code/qwen-code --acp"), 60);
+        assert_eq!(handshake_timeout_secs("/usr/bin/goose acp"), 10);
+    }
 
     #[test]
     fn path_probe_hits_executable_and_misses_absent() {
