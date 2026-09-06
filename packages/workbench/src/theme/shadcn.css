@@ -13,8 +13,9 @@
   --secondary-foreground: var(--text);
   --muted: var(--panel-2);
   --muted-foreground: var(--dim);
-  --accent: var(--panel-2);
-  --accent-foreground: var(--text);
+  /* --accent/--accent-ink 的唯一真源在 tokens.css（GreyWork 蓝）。
+     这里不再重复声明 —— 曾经 shadcn 用 --accent 表达 hover 面（panel-2），
+     与 tokens.css 的主行动色撞名，胜负取决于 import 顺序。hover 面请用 --secondary。 */
   --destructive: var(--orange);
   --border: var(--line);
   --input: var(--line-2);
