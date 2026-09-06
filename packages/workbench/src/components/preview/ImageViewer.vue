@@ -52,7 +52,7 @@ onUnmounted(release);
 <template>
   <div class="flex size-full items-center justify-center overflow-auto bg-background p-3">
     <p v-if="loading" class="text-[12px] text-dim2">读取中…</p>
-    <p v-else-if="error" role="alert" class="text-[12px] text-red-400">读取失败：{{ error }}</p>
+    <p v-else-if="error" role="alert" class="text-[12px] text-orange">读取失败：{{ error }}</p>
     <img
       v-else-if="objectUrl"
       data-testid="image-viewer"

@@ -102,7 +102,7 @@ onMounted(() => {
     </p>
 
     <p v-if="tree.loadingRoot" class="px-3 py-2 text-[12px] text-dim2">读取目录中…</p>
-    <p v-else-if="tree.error" role="alert" class="px-3 py-2 text-[12px] text-red-400">{{ tree.error }}</p>
+    <p v-else-if="tree.error" role="alert" class="px-3 py-2 text-[12px] text-orange">{{ tree.error }}</p>
     <p v-else-if="rows.length === 0" class="px-3 py-2 text-[12px] text-dim2">这个目录是空的</p>
 
     <div v-else class="min-h-0 flex-1 overflow-auto py-1">

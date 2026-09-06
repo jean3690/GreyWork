@@ -155,8 +155,8 @@ onUnmounted(() => {
       <span>{{ totalPages > 0 ? `已渲染 ${renderedPages} / 共 ${totalPages} 页` : "PDF" }}</span>
     </div>
     <p v-if="loading" class="px-4 py-3 text-[12px] text-dim2">读取中…</p>
-    <p v-else-if="error" role="alert" class="px-4 py-3 text-[12px] text-red-400">读取失败：{{ error }}</p>
-    <p v-else-if="renderError" role="alert" class="px-4 py-3 text-[12px] text-red-400">
+    <p v-else-if="error" role="alert" class="px-4 py-3 text-[12px] text-orange">读取失败：{{ error }}</p>
+    <p v-else-if="renderError" role="alert" class="px-4 py-3 text-[12px] text-orange">
       无法渲染该 PDF：{{ renderError }}。可在文件夹中打开原文件。
     </p>
     <div

@@ -21,8 +21,8 @@ const LINE_CLASS: Record<DiffLineKind, string> = {
   header: "bg-panel text-dim2",
   hunk: "bg-panel text-dim2",
   meta: "text-dim2",
-  add: "bg-emerald-500/10 text-emerald-400",
-  del: "bg-red-500/10 text-red-400",
+  add: "bg-mint/10 text-mint",
+  del: "bg-orange/10 text-orange",
   context: "text-dim",
 };
 
@@ -40,14 +40,14 @@ const MARKER: Record<DiffLineKind, string> = {
 <template>
   <div class="size-full overflow-auto font-mono text-[12px]">
     <p v-if="loading" class="px-4 py-3 text-dim2">读取中…</p>
-    <p v-else-if="error" role="alert" class="px-4 py-3 text-red-400">读取失败：{{ error }}</p>
+    <p v-else-if="error" role="alert" class="px-4 py-3 text-orange">读取失败：{{ error }}</p>
     <p v-else-if="files.length === 0" class="px-4 py-3 text-dim2">没有可显示的变更</p>
     <template v-else>
       <section v-for="file in files" :key="file.path" data-testid="diff-file" class="mb-2">
         <header class="sticky top-0 z-10 flex items-center gap-2 border-y border-line bg-panel-2 px-3 py-1.5 text-[11.5px]">
           <span class="min-w-0 flex-1 truncate text-foreground">{{ file.path }}</span>
-          <span class="shrink-0 text-emerald-400">+{{ file.added }}</span>
-          <span class="shrink-0 text-red-400">-{{ file.removed }}</span>
+          <span class="shrink-0 text-mint">+{{ file.added }}</span>
+          <span class="shrink-0 text-orange">-{{ file.removed }}</span>
         </header>
         <div v-for="(line, index) in file.lines.slice(0, LINE_LIMIT)" :key="index" class="flex items-start" :class="LINE_CLASS[line.kind]">
           <span class="w-10 shrink-0 select-none px-1 text-right tabular-nums text-dim2">{{ line.oldNo ?? "" }}</span>
