@@ -2,6 +2,7 @@
 import { ref } from "vue";
 import { useRouter } from "vue-router";
 import { useAgentStore } from "../stores/agent";
+import { useRunsStore } from "../stores/runs";
 import { useChatStore } from "../stores/chat";
 import { useSessionStore } from "../stores/session";
 import { useSettingsStore } from "../stores/settings";
@@ -16,6 +17,7 @@ import Icon from "../components/Icon.vue";
  */
 const router = useRouter();
 const agent = useAgentStore();
+const runs = useRunsStore();
 const chat = useChatStore();
 const sessionStore = useSessionStore();
 const workspaceStore = useWorkspaceStore();
@@ -41,7 +43,7 @@ function run(prompt: string): void {
     if (agent.routeToAcp) {
       // ACP agent 选中：回合由宿主事件驱动（chunk/权限/停止），不进 LLM 管线。
       void agent.dispatchToAcp(prompt);
-    } else if (agent.maybeOrchestrate(prompt)) {
+    } else if (runs.maybeOrchestrate(prompt)) {
       // 编排意图（「自动执行/编排 …」）：planner 拆解 → 并行子任务，TeamView 看板跟踪。
     } else {
       chat.submitText(prompt);

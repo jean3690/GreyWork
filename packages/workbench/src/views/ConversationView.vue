@@ -4,6 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 import { useVirtualizer } from "@tanstack/vue-virtual";
 import { MCP_SKIP_REASONS } from "../lib/mcp-labels";
 import { useAgentStore } from "../stores/agent";
+import { useRunsStore } from "../stores/runs";
 import { useChatStore } from "../stores/chat";
 import { useSessionStore } from "../stores/session";
 import { useSettingsStore } from "../stores/settings";
@@ -13,6 +14,7 @@ import AcpSessionConfig from "../components/AcpSessionConfig.vue";
 import AgentProviderBar from "../components/AgentProviderBar.vue";
 import Icon from "../components/Icon.vue";
 import ConversationMessage from "../components/ConversationMessage.vue";
+import PermissionCard from "../components/chat/PermissionCard.vue";
 
 /**
  * GreyWork 风格对话页：消息流 + 底部输入卡。
@@ -21,6 +23,7 @@ import ConversationMessage from "../components/ConversationMessage.vue";
 const route = useRoute();
 const router = useRouter();
 const agent = useAgentStore();
+const runs = useRunsStore();
 const chat = useChatStore();
 const sessionStore = useSessionStore();
 const settings = useSettingsStore();
@@ -46,11 +49,11 @@ const backendLabel = computed(() => {
   const provider = agent.agentProviders.find((candidate) => candidate.id === agent.selectedProviderId);
   return provider?.name ?? "ACP";
 });
-/** 运行中：chat LLM 流或 ACP 回合任一活跃。 */
-const busy = computed(() => chat.busy || agent.acpBusy);
+/** 运行中：chat LLM 流或 ACP 回合任一活跃（含 spawn/建会话在途 —— 那窗口也要能停）。 */
+const busy = computed(() => chat.busy || agent.acpBusy || agent.acpConnecting || agent.acpStatus === "connecting");
 
 function stop(): void {
-  if (agent.acpBusy) void agent.stopAcp();
+  if (agent.acpBusy || agent.acpConnecting || agent.acpStatus === "connecting") void agent.stopAcp();
   else chat.abortGeneration();
 }
 
@@ -144,10 +147,10 @@ const turnActive = computed(() => chat.busy || agent.acpBusy || agent.acpConnect
 
 function send(): void {
   const text = draft.value.trim();
-  if (!text || chat.busy || agent.acpBusy) return;
+  if (!text || chat.busy || agent.acpBusy || agent.acpConnecting || agent.acpStatus === "connecting") return;
   if (agent.routeToAcp) {
     void agent.dispatchToAcp(text);
-  } else if (agent.maybeOrchestrate(text)) {
+  } else if (runs.maybeOrchestrate(text)) {
     // 编排意图：并行子任务在 TeamView 看板跟踪（goal 不入本会话消息流）。
   } else {
     chat.submitText(text);
@@ -250,6 +253,7 @@ function goBack(): void {
 
     <div class="shrink-0 border-t border-line-2 bg-panel px-4 py-3 sm:px-6">
       <div class="mx-auto flex w-full max-w-[860px] flex-col gap-2">
+        <PermissionCard />
         <AgentProviderBar />
         <div class="flex w-full flex-col gap-2 rounded-[16px] border border-line bg-panel-2 p-2.5">
           <textarea
@@ -269,8 +273,8 @@ function goBack(): void {
               <AcpSessionConfig />
             </div>
             <button
-              class="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-[10px] bg-console px-3 text-[12px] font-medium text-white transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40"
-              :disabled="!draft.trim() || chat.busy || agent.acpBusy"
+              class="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-[10px] bg-accent px-3 text-[12px] font-medium text-accent-ink transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40"
+              :disabled="!draft.trim() || chat.busy || agent.acpBusy || agent.acpConnecting || agent.acpStatus === 'connecting'"
               @click="send"
             >
               发送

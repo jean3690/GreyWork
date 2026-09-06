@@ -118,11 +118,7 @@ async function toggleTempReadOnly(on: boolean): Promise<void> {
         恢复
       </button>
     </p>
-    <p
-      v-if="connectError || (selected !== null && agent.acpStatus === 'error')"
-      role="alert"
-      class="truncate pl-1 text-[11px] text-red-400"
-    >
+    <p v-if="connectError || (selected !== null && agent.acpStatus === 'error')" role="alert" class="truncate pl-1 text-[11px] text-orange">
       <Icon name="close-one" :size="11" class="inline" />
       {{ connectError ?? "连接失败 —— 点击后端胶囊重试" }}
     </p>
