@@ -40,8 +40,8 @@ const { host, loading, error, bootError } = useUniverHost(toRef(props, "tab"), a
 <template>
   <div class="flex size-full min-h-0 flex-col overflow-hidden">
     <p v-if="loading" class="px-4 py-3 text-[12px] text-dim2">读取中…</p>
-    <p v-else-if="error" role="alert" class="px-4 py-3 text-[12px] text-red-400">读取失败：{{ error }}</p>
-    <p v-else-if="bootError" role="alert" class="px-4 py-3 text-[12px] text-red-400">
+    <p v-else-if="error" role="alert" class="px-4 py-3 text-[12px] text-orange">读取失败：{{ error }}</p>
+    <p v-else-if="bootError" role="alert" class="px-4 py-3 text-[12px] text-orange">
       无法渲染该表格：{{ bootError }}。可在文件夹中打开原文件。
     </p>
     <div v-show="!loading && !error && !bootError" ref="host" data-testid="sheet-viewer" class="min-h-0 flex-1" />

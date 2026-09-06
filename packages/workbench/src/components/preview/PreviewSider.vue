@@ -17,7 +17,7 @@ import { computed, ref, watch } from "vue";
 import Icon from "../Icon.vue";
 import FileTree from "./FileTree.vue";
 import PreviewSurface from "./PreviewSurface.vue";
-import { DEFAULT_PREVIEW_PANEL_PX, PREVIEW_TAB_BAR_HEIGHT } from "../../lib/layout";
+import { DEFAULT_PREVIEW_PANEL_PX, MAX_PREVIEW_PANEL_PX, MIN_PREVIEW_PANEL_PX, PREVIEW_TAB_BAR_HEIGHT } from "../../lib/layout";
 import { usePreviewBridge } from "../../lib/preview-bridge";
 import { useResizableSplit } from "../../lib/resizable-split";
 import { usePreviewStore } from "../../stores/preview";
@@ -51,6 +51,19 @@ function resetWidth(): void {
   preview.setWidth(DEFAULT_PREVIEW_PANEL_PX, true);
 }
 
+/** 键盘调宽：方向键 ±8px（Shift 步进 40），Home/End 到上下限。 */
+function onResizeKeydown(event: KeyboardEvent): void {
+  const step = event.shiftKey ? 40 : 8;
+  let next: number | null = null;
+  if (event.key === "ArrowLeft") next = preview.widthPx - step;
+  else if (event.key === "ArrowRight") next = preview.widthPx + step;
+  else if (event.key === "Home") next = MIN_PREVIEW_PANEL_PX;
+  else if (event.key === "End") next = MAX_PREVIEW_PANEL_PX;
+  if (next === null) return;
+  event.preventDefault();
+  preview.setWidth(next, true);
+}
+
 const sectionClass = (active: boolean): string =>
   [
     "h-6 shrink-0 cursor-pointer rounded-[6px] px-2 text-[11.5px] transition-colors",
@@ -75,6 +88,11 @@ const sectionClass = (active: boolean): string =>
       role="separator"
       aria-orientation="vertical"
       aria-label="调整预览面板宽度"
+      :aria-valuemin="MIN_PREVIEW_PANEL_PX"
+      :aria-valuemax="MAX_PREVIEW_PANEL_PX"
+      :aria-valuenow="preview.widthPx"
+      tabindex="0"
+      @keydown="onResizeKeydown"
       @pointerdown="onPointerDown"
       @dblclick="resetWidth"
     >

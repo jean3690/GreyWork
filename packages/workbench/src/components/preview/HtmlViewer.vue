@@ -34,7 +34,7 @@ const tabClass = (active: boolean): string =>
     </div>
 
     <p v-if="loading" class="px-4 py-3 text-[12px] text-dim2">读取中…</p>
-    <p v-else-if="error" role="alert" class="px-4 py-3 text-[12px] text-red-400">读取失败：{{ error }}</p>
+    <p v-else-if="error" role="alert" class="px-4 py-3 text-[12px] text-orange">读取失败：{{ error }}</p>
     <iframe
       v-else-if="mode === 'render'"
       data-testid="html-viewer-frame"

@@ -201,8 +201,8 @@ const slideCount = computed(() => deck.value?.slides.length ?? 0);
     </div>
 
     <p v-if="loading" class="px-4 py-3 text-[12px] text-dim2">读取中…</p>
-    <p v-else-if="error" role="alert" class="px-4 py-3 text-[12px] text-red-400">读取失败：{{ error }}</p>
-    <p v-else-if="parseError" role="alert" class="px-4 py-3 text-[12px] text-red-400">
+    <p v-else-if="error" role="alert" class="px-4 py-3 text-[12px] text-orange">读取失败：{{ error }}</p>
+    <p v-else-if="parseError" role="alert" class="px-4 py-3 text-[12px] text-orange">
       无法解析该演示文稿：{{ parseError }}。可在文件夹中打开原文件。
     </p>
     <p v-else-if="deck && slideCount === 0" class="px-4 py-3 text-[12px] text-dim2">这份演示文稿没有幻灯片。</p>
