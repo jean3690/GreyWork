@@ -158,4 +158,103 @@ describe("MCP 服务器声明", () => {
     const settings = useSettingsStore();
     expect(settings.mcpServers.map((server) => server.id)).toEqual(["ok"]);
   });
+
+  it("编辑 = 按 id 覆盖且保留原 id，headers/env 随往返持久化", () => {
+    const settings = useSettingsStore();
+    settings.upsertMcpServer({
+      id: "auth-srv",
+      name: "auth-srv",
+      transport: "http",
+      url: "https://api.example.com/mcp",
+      headers: [{ name: "Authorization", value: "Bearer tok" }],
+      enabled: true,
+    });
+    // 编辑同一条（保留 id，改 url + 增补 header）
+    settings.upsertMcpServer({
+      id: "auth-srv",
+      name: "auth-srv",
+      transport: "http",
+      url: "https://api.example.com/v2/mcp",
+      headers: [
+        { name: "Authorization", value: "Bearer tok2" },
+        { name: "X-Trace", value: "1" },
+      ],
+      enabled: false,
+    });
+    expect(settings.mcpServers.filter((server) => server.id === "auth-srv")).toHaveLength(1);
+    expect(settings.mcpServers.find((server) => server.id === "auth-srv")).toMatchObject({
+      id: "auth-srv",
+      url: "https://api.example.com/v2/mcp",
+      enabled: false,
+      headers: [
+        { name: "Authorization", value: "Bearer tok2" },
+        { name: "X-Trace", value: "1" },
+      ],
+    });
+
+    setActivePinia(createPinia());
+    const reloaded = useSettingsStore();
+    expect(reloaded.mcpServers.find((server) => server.id === "auth-srv")).toMatchObject({
+      id: "auth-srv",
+      transport: "http",
+      url: "https://api.example.com/v2/mcp",
+      headers: [
+        { name: "Authorization", value: "Bearer tok2" },
+        { name: "X-Trace", value: "1" },
+      ],
+      enabled: false,
+    });
+    // 停用后不再进入下发清单
+    expect(reloaded.enabledMcpServers).toEqual([]);
+  });
+
+  it("stdio 条目的 env 随往返持久化并原样下发", () => {
+    const settings = useSettingsStore();
+    settings.upsertMcpServer({
+      id: "notes",
+      name: "notes",
+      transport: "stdio",
+      command: "/usr/bin/npx",
+      args: ["-y", "notes-mcp"],
+      env: { NOTES_TOKEN: "secret" },
+      enabled: true,
+    });
+    setActivePinia(createPinia());
+    const reloaded = useSettingsStore();
+    expect(reloaded.enabledMcpServers).toEqual([
+      {
+        name: "notes",
+        transport: "stdio",
+        command: "/usr/bin/npx",
+        args: ["-y", "notes-mcp"],
+        env: { NOTES_TOKEN: "secret" },
+      },
+    ]);
+  });
+});
+
+describe("编排并发度 maxParallel", () => {
+  it("写值后 persist 往返一致", () => {
+    const settings = useSettingsStore();
+    settings.maxParallel = 4;
+    settings.persist();
+
+    setActivePinia(createPinia());
+    expect(useSettingsStore().maxParallel).toBe(4);
+  });
+
+  it("越界 / 非整数 / 非法类型静默回落默认 2", () => {
+    const cases: unknown[] = [0, 99, -3, 1.5, "x", null, true];
+    for (const value of cases) {
+      storage.set("greywork.settings", JSON.stringify({ maxParallel: value }));
+      setActivePinia(createPinia());
+      expect(useSettingsStore().maxParallel).toBe(2);
+    }
+  });
+
+  it("缺失字段回落默认 2", () => {
+    storage.set("greywork.settings", JSON.stringify({}));
+    setActivePinia(createPinia());
+    expect(useSettingsStore().maxParallel).toBe(2);
+  });
 });

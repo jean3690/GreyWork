@@ -1,11 +1,12 @@
-import { fetchJson } from "@greywork/core";
+import { fetchJson, isTauriRuntime } from "@greywork/core";
 import type { SkillSnapshotFile, SkillsMarketTransport } from "./types";
+import { HostSkillsTransport } from "./host-transport";
 
 /**
  * 市场通道：浏览器直连外部市场被 CORS 拦截（两端均无
  * Access-Control-Allow-Origin），统一走 Vite dev 代理（apps/desktop/vite.config.ts）。
- * 搜索/下载可用；安装/卸载需要宿主写文件系统，Web 下明确报错。
- * 注：Rust 技能市场命令（skills_*）已移除，桌面态无宿主代理，市场面统一为 Web 通道。
+ * Web 态仅搜索/下载可用；安装/卸载需要宿主写文件系统，Web 下明确报错。
+ * 桌面态（Tauri）由 HostSkillsTransport 接管：搜索/下载/安装/卸载全部经宿主。
  */
 export const MARKET_API_BASE = "/market-api";
 
@@ -41,7 +42,7 @@ export class WebSkillsTransport implements SkillsMarketTransport {
   }
 }
 
-/** 运行时自适应工厂：宿主命令已移除，统一 Web 通道（桌面态市场能力随之搁置）。 */
+/** 运行时自适应工厂：桌面态走宿主 IPC（搜索/下载/安装/卸载全可用），浏览器态退回 Web 直连通道。 */
 export function createSkillsTransport(): SkillsMarketTransport {
-  return new WebSkillsTransport();
+  return isTauriRuntime() ? new HostSkillsTransport() : new WebSkillsTransport();
 }
