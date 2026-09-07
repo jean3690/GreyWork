@@ -16,6 +16,7 @@ const sections = [
   { key: "mode", label: "运行模式", icon: "hammer", path: "/settings/mode" },
   { key: "system", label: "系统", icon: "setting", path: "/settings/system" },
   { key: "mcp", label: "MCP", icon: "terminal", path: "/settings/mcp" },
+  { key: "skills", label: "技能", icon: "lightning", path: "/settings/skills" },
   { key: "storage", label: "存储", icon: "folder", path: "/settings/storage" },
   { key: "team", label: "团队", icon: "peoples", path: "/settings/team" },
 ] as const;

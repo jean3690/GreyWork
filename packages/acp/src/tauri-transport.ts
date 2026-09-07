@@ -30,6 +30,10 @@ export class TauriIpcTransport implements AcpTransport {
     return invoke<AcpSessionOpened>("acp_new_session", { handle, cwd, mcpServers });
   }
 
+  async loadSession(handle: number, cwd: string, sessionId: string, mcpServers?: readonly McpServerConfig[]): Promise<AcpSessionOpened> {
+    return invoke<AcpSessionOpened>("acp_load_session", { handle, cwd, sessionId, mcpServers });
+  }
+
   async probeMcp(config: McpServerConfig, timeoutSecs?: number): Promise<McpProbeReport> {
     return invoke<McpProbeReport>("mcp_probe", {
       transport: config.transport,
@@ -37,6 +41,7 @@ export class TauriIpcTransport implements AcpTransport {
       command: config.command,
       args: config.args,
       env: config.env,
+      headers: config.headers,
       timeoutSecs,
     });
   }

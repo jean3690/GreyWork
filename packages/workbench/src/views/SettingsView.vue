@@ -3,19 +3,13 @@ import { computed, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import { setLocale } from "../i18n";
 import { systemBackend, type SysInfo } from "../lib/system-backend";
-import { MCP_SKIP_REASONS, MCP_TRANSPORT_LABELS } from "../lib/mcp-labels";
 import { useAgentStore } from "../stores/agent";
 import { useChatStore } from "../stores/chat";
-import {
-  RUN_MODES,
-  SANDBOX_MODES,
-  PERMISSION_TIERS,
-  recommendedSandboxMode,
-  useSettingsStore,
-  type McpServerEntry,
-} from "../stores/settings";
+import { RUN_MODES, SANDBOX_MODES, PERMISSION_TIERS, recommendedSandboxMode, useSettingsStore } from "../stores/settings";
 import Icon from "../components/Icon.vue";
 import StorageSettings from "../components/StorageSettings.vue";
+import McpPane from "../components/settings/McpPane.vue";
+import SettingsSkills from "../components/settings/SettingsSkills.vue";
 
 /**
  * 设置内容区：按 /settings/:section 分派子面板。导航在 SettingsSider（左侧栏）。
@@ -35,6 +29,7 @@ const sectionMeta = [
   { key: "mode", title: "运行模式", desc: "执行档位与权限策略" },
   { key: "system", title: "系统", desc: "环境信息与沙盒" },
   { key: "mcp", title: "MCP", desc: "外部工具服务器：声明给 agent，由 agent 连接" },
+  { key: "skills", title: "技能", desc: "工作区技能：安装 / 更新 / 卸载与官方市场" },
   { key: "storage", title: "存储", desc: "会话落盘与远端同步" },
   { key: "team", title: "团队", desc: "成员与协作空间" },
 ] as const;
@@ -98,6 +93,12 @@ function applyPermissionTier(tier: (typeof PERMISSION_TIERS)[number]["value"]): 
 
 function applySandboxMode(mode: (typeof SANDBOX_MODES)[number]["value"]): void {
   settings.sandboxMode = mode;
+  settings.persist();
+}
+
+function onMaxParallelInput(event: Event): void {
+  const raw = Number((event.target as HTMLInputElement).value);
+  if (Number.isInteger(raw)) settings.maxParallel = raw;
   settings.persist();
 }
 
@@ -165,62 +166,67 @@ function removeActiveProvider(): void {
   providerDraftDirty.value = false;
 }
 
-// ---------- MCP ----------
+// ---------- ACP 后端编辑（用户自配） ----------
 
-/** 新增表单草稿。transport 决定填 url 还是 command。 */
-const mcpDraft = ref({ name: "", transport: "http" as McpServerEntry["transport"], url: "", command: "", args: "" });
-const mcpDraftError = ref<string | null>(null);
-/** 每台服务器最近一次「测试连接」的结果（成功列工具，失败给原因）。 */
-const mcpProbes = ref<Record<string, { server?: string; tools?: string[]; error?: string }>>({});
-const mcpProbing = ref<string | null>(null);
+/** 自配后端草稿：agentDraftOpen 打开编辑器；agentDraftId = null 表示新增，否则编辑该项。 */
+const agentDraftOpen = ref(false);
+const agentDraftId = ref<string | null>(null);
+const agentDraft = ref({ name: "", command: "" });
+const agentDraftError = ref<string | null>(null);
 
-function addMcpServer(): void {
-  const name = mcpDraft.value.name.trim();
-  if (!name) {
-    mcpDraftError.value = "请先填服务器名";
-    return;
-  }
-  const transport = mcpDraft.value.transport;
-  const url = mcpDraft.value.url.trim();
-  const command = mcpDraft.value.command.trim();
-  if (transport === "stdio" ? !command : !url) {
-    mcpDraftError.value = transport === "stdio" ? "stdio 需要可执行文件绝对路径" : "远程传输需要 URL";
-    return;
-  }
-  mcpDraftError.value = null;
-  const args = mcpDraft.value.args
-    .split(/\s+/)
-    .map((arg) => arg.trim())
-    .filter((arg) => arg.length > 0);
-  settings.upsertMcpServer({
-    id: `mcp-${Date.now().toString(36)}`,
-    name,
-    transport,
-    enabled: true,
-    ...(transport === "stdio" ? { command, args } : { url }),
-  });
-  mcpDraft.value = { name: "", transport, url: "", command: "", args: "" };
+function startAgentAdd(): void {
+  agentDraftId.value = null;
+  agentDraftOpen.value = true;
+  agentDraft.value = { name: "", command: "" };
+  agentDraftError.value = null;
 }
 
-async function testMcpServer(entry: McpServerEntry): Promise<void> {
-  mcpProbing.value = entry.id;
-  const { id: _id, enabled: _enabled, ...config } = entry;
-  const { report, error } = await agent.probeMcpServer(config);
-  mcpProbing.value = null;
-  mcpProbes.value = {
-    ...mcpProbes.value,
-    [entry.id]: error
-      ? { error }
-      : {
-          server: report?.serverName ? `${report.serverName} ${report.serverVersion ?? ""}`.trim() : undefined,
-          tools: report?.tools.map((tool) => tool.name) ?? [],
-        },
-  };
+function startAgentEdit(id: string): void {
+  const provider = agent.agentProviders.find((candidate) => candidate.id === id);
+  if (!provider) return;
+  agentDraftId.value = provider.id;
+  agentDraftOpen.value = true;
+  agentDraft.value = { name: provider.name, command: provider.command };
+  agentDraftError.value = null;
 }
+
+function cancelAgentDraft(): void {
+  agentDraftId.value = null;
+  agentDraftOpen.value = false;
+  agentDraftError.value = null;
+}
+
+function saveAgentDraft(): void {
+  const failure =
+    agentDraftId.value === null
+      ? agent.addAgentProvider(agentDraft.value.name, agentDraft.value.command)
+      : agent.updateAgentProvider(agentDraftId.value, agentDraft.value.name, agentDraft.value.command);
+  if (failure) {
+    agentDraftError.value = failure;
+    return;
+  }
+  agentDraftId.value = null;
+  agentDraftOpen.value = false;
+  agentDraftError.value = null;
+}
+
+async function removeAgentDraft(): Promise<void> {
+  if (agentDraftId.value === null) return;
+  const failure = await agent.removeAgentProvider(agentDraftId.value);
+  if (failure) {
+    agentDraftError.value = failure;
+    return;
+  }
+  agentDraftId.value = null;
+  agentDraftOpen.value = false;
+  agentDraftError.value = null;
+}
+
+// ---------- MCP 面板已抽离为 components/settings/McpPane.vue ----------
 </script>
 
 <template>
-  <section class="mx-auto min-h-0 w-full max-w-[720px] overflow-y-auto px-4 py-6 sm:px-6">
+  <section class="mx-auto min-h-0 h-full w-full max-w-[720px] overflow-y-auto px-4 py-6 sm:px-6">
     <header class="mb-6">
       <h1 class="font-display text-[20px] font-bold tracking-tight text-foreground">{{ meta.title }}</h1>
       <p class="mt-1 text-[12px] text-dim2">{{ meta.desc }}</p>
@@ -343,7 +349,16 @@ async function testMcpServer(entry: McpServerEntry): Promise<void> {
           <div class="text-[11px] text-dim2">当前 {{ activeProvider?.reasoningEffort ?? "auto" }}</div>
         </div>
         <div class="rounded-[14px] border border-line bg-panel p-4">
-          <div class="mb-3 text-[13px] font-medium text-foreground">ACP 后端（聊天 / 自动执行）</div>
+          <div class="mb-3 flex items-center justify-between gap-2">
+            <span class="text-[13px] font-medium text-foreground">ACP 后端（聊天 / 自动执行）</span>
+            <button
+              type="button"
+              class="h-6 cursor-pointer rounded-[6px] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
+              @click="startAgentAdd"
+            >
+              新增后端
+            </button>
+          </div>
           <div class="flex flex-col gap-1.5">
             <label
               v-for="provider in agent.agentProviders"
@@ -365,11 +380,72 @@ async function testMcpServer(entry: McpServerEntry): Promise<void> {
               >
                 {{ agent.providerInstallLabel(provider) }}
               </span>
+              <button
+                v-if="agent.isCustomAgentProvider(provider.id)"
+                type="button"
+                class="shrink-0 cursor-pointer rounded-[6px] border border-line bg-panel-2 px-2 py-0.5 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
+                @click.stop="startAgentEdit(provider.id)"
+              >
+                编辑
+              </button>
             </label>
           </div>
           <p class="mt-2 text-[11px] text-dim2">
-            启用后出现在发送条上方的后端选择胶囊；停用当前后端会自动切回 Local。标「首次启动下载」的后端由 npx 按需拉取，无需预装。
+            启用后出现在发送条上方的后端选择胶囊；停用当前后端会自动切回 Local。标「首次启动下载」的后端由 npx 按需拉取，无需预装。＋
+            新增后端可填任意 ACP 启动命令（如
+            <code class="font-mono">my-agent acp</code>）；自配后端仅限本机已安装的程序，含 shell 元字符的命令会被宿主拒绝。
           </p>
+        </div>
+        <!-- 自配后端编辑表单（新增 / 编辑共用；仅 custom-* 项可编辑删除） -->
+        <div v-if="agentDraftOpen" class="rounded-[14px] border border-line bg-panel p-4">
+          <div class="mb-3 text-[13px] font-medium text-foreground">
+            {{ agentDraftId === null ? "新增 ACP 后端" : "编辑 ACP 后端" }}
+          </div>
+          <div class="flex flex-col gap-2.5">
+            <label class="flex items-center gap-2">
+              <span class="w-20 shrink-0 text-[11.5px] text-dim2">名称</span>
+              <input
+                v-model="agentDraft.name"
+                class="min-w-0 flex-1 rounded-[8px] border border-line bg-panel-2 px-2 py-1.5 text-[12.5px] text-foreground outline-none focus:border-line-2"
+                placeholder="如 My Agent"
+              />
+            </label>
+            <label class="flex items-center gap-2">
+              <span class="w-20 shrink-0 text-[11.5px] text-dim2">启动命令</span>
+              <input
+                v-model="agentDraft.command"
+                class="min-w-0 flex-1 rounded-[8px] border border-line bg-panel-2 px-2 py-1.5 font-mono text-[12px] text-foreground outline-none focus:border-line-2"
+                placeholder="如 my-agent acp / npx -y @scope/pkg-acp"
+              />
+            </label>
+            <p v-if="agentDraftError" class="text-[11px] text-destructive">{{ agentDraftError }}</p>
+            <div class="flex items-center justify-between gap-2">
+              <button
+                v-if="agentDraftId !== null"
+                type="button"
+                class="h-7 cursor-pointer rounded-[7px] border border-line bg-panel-2 px-2.5 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
+                @click="void removeAgentDraft()"
+              >
+                删除
+              </button>
+              <div class="ml-auto flex gap-1.5">
+                <button
+                  type="button"
+                  class="h-7 cursor-pointer rounded-[7px] border border-line bg-panel px-2.5 text-[11px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground"
+                  @click="cancelAgentDraft"
+                >
+                  撤销
+                </button>
+                <button
+                  type="button"
+                  class="h-7 cursor-pointer rounded-[7px] bg-accent px-3 text-[11.5px] font-medium text-accent-ink transition-opacity hover:opacity-90"
+                  @click="saveAgentDraft"
+                >
+                  保存
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       </template>
 
@@ -562,113 +638,11 @@ async function testMcpServer(entry: McpServerEntry): Promise<void> {
       </template>
 
       <template v-else-if="section === 'mcp'">
-        <div class="rounded-[14px] border border-line bg-panel p-4">
-          <div class="mb-1 text-[13px] font-medium text-foreground">MCP 服务器</div>
-          <p class="mb-3 text-[11px] leading-relaxed text-dim2">
-            启用的服务器会在建会话时声明给 agent，由 <b>agent 自己连接</b>并把工具并入它的工具面；宿主不代理工具调用。 HTTP / SSE 需要后端在
-            initialize 时声明对应能力，不支持会被跳过并在下方说明原因；stdio 所有后端都必须支持。
-          </p>
+        <McpPane />
+      </template>
 
-          <div v-if="settings.mcpServers.length === 0" class="text-[12px] text-dim2">还没有声明任何 MCP 服务器。</div>
-          <div v-else class="flex flex-col gap-2">
-            <div v-for="entry in settings.mcpServers" :key="entry.id" class="rounded-[10px] bg-panel-2 p-2.5">
-              <div class="flex items-center gap-2">
-                <span class="min-w-0 flex-1 truncate text-[12px] text-foreground">{{ entry.name }}</span>
-                <span class="shrink-0 rounded-full border border-line px-1.5 text-[10px] text-dim2">
-                  {{ MCP_TRANSPORT_LABELS[entry.transport] ?? entry.transport }}
-                </span>
-                <label class="flex shrink-0 cursor-pointer items-center gap-1 text-[11px] text-dim">
-                  <input
-                    type="checkbox"
-                    :checked="entry.enabled"
-                    @change="settings.setMcpServerEnabled(entry.id, ($event.target as HTMLInputElement).checked)"
-                  />
-                  启用
-                </label>
-              </div>
-              <div class="mt-1 truncate font-mono text-[11px] text-dim2">
-                {{ entry.transport === "stdio" ? [entry.command, ...(entry.args ?? [])].join(" ") : entry.url }}
-              </div>
-              <div class="mt-2 flex items-center gap-1.5">
-                <button
-                  type="button"
-                  class="rounded-[8px] border border-line px-2 py-1 text-[11px] text-dim transition-colors hover:text-foreground disabled:opacity-50"
-                  :disabled="mcpProbing === entry.id"
-                  @click="testMcpServer(entry)"
-                >
-                  {{ mcpProbing === entry.id ? "连接中…" : "测试连接" }}
-                </button>
-                <button
-                  type="button"
-                  class="rounded-[8px] border border-line px-2 py-1 text-[11px] text-dim transition-colors hover:text-destructive"
-                  @click="settings.removeMcpServer(entry.id)"
-                >
-                  删除
-                </button>
-              </div>
-              <p v-if="mcpProbes[entry.id]?.error" class="mt-1.5 text-[11px] text-destructive">
-                {{ mcpProbes[entry.id]?.error }}
-              </p>
-              <p v-else-if="mcpProbes[entry.id]" class="mt-1.5 text-[11px] text-dim">
-                {{ mcpProbes[entry.id]?.server ?? "已连接" }} · 工具 {{ mcpProbes[entry.id]?.tools?.length ?? 0 }}：
-                {{ (mcpProbes[entry.id]?.tools ?? []).join("、") }}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div class="rounded-[14px] border border-line bg-panel p-4">
-          <div class="mb-3 text-[13px] font-medium text-foreground">添加服务器</div>
-          <div class="flex flex-col gap-1.5">
-            <input
-              v-model="mcpDraft.name"
-              class="rounded-[8px] border border-line bg-panel-2 px-2.5 py-1.5 text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
-              placeholder="名称（agent 会看到这个名字）"
-            />
-            <select
-              v-model="mcpDraft.transport"
-              class="rounded-[8px] border border-line bg-panel-2 px-2 py-1.5 text-[12px] text-foreground outline-none focus:border-accent"
-            >
-              <option value="http">HTTP（streamable）</option>
-              <option value="sse">SSE</option>
-              <option value="stdio">stdio（本地进程）</option>
-            </select>
-            <input
-              v-if="mcpDraft.transport !== 'stdio'"
-              v-model="mcpDraft.url"
-              class="rounded-[8px] border border-line bg-panel-2 px-2.5 py-1.5 font-mono text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
-              placeholder="https://mcp.deepwiki.com/mcp"
-            />
-            <template v-else>
-              <input
-                v-model="mcpDraft.command"
-                class="rounded-[8px] border border-line bg-panel-2 px-2.5 py-1.5 font-mono text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
-                placeholder="/usr/bin/npx（可执行文件绝对路径）"
-              />
-              <input
-                v-model="mcpDraft.args"
-                class="rounded-[8px] border border-line bg-panel-2 px-2.5 py-1.5 font-mono text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
-                placeholder="参数，空格分隔"
-              />
-            </template>
-            <button
-              type="button"
-              class="self-start rounded-[8px] bg-accent px-3 py-1.5 text-[12px] font-medium text-accent-ink"
-              @click="addMcpServer"
-            >
-              添加
-            </button>
-            <p v-if="mcpDraftError" class="text-[11px] text-destructive">{{ mcpDraftError }}</p>
-          </div>
-        </div>
-
-        <div v-if="agent.acpMcpServers.length > 0 || agent.acpMcpSkipped.length > 0" class="rounded-[14px] border border-line bg-panel p-4">
-          <div class="mb-2 text-[13px] font-medium text-foreground">上次建会话的声明结果</div>
-          <p v-if="agent.acpMcpServers.length > 0" class="text-[11px] text-dim">已声明：{{ agent.acpMcpServers.join("、") }}</p>
-          <p v-for="skip in agent.acpMcpSkipped" :key="skip.name" class="text-[11px] text-destructive">
-            已跳过 {{ skip.name }}：{{ MCP_SKIP_REASONS[skip.reason] ?? skip.reason }}
-          </p>
-        </div>
+      <template v-else-if="section === 'skills'">
+        <SettingsSkills />
       </template>
 
       <template v-else-if="section === 'storage'">
@@ -676,7 +650,24 @@ async function testMcpServer(entry: McpServerEntry): Promise<void> {
       </template>
 
       <template v-else-if="section === 'team'">
-        <div class="rounded-[14px] border border-line bg-panel p-4 text-[12px] text-dim2">团队协作能力接入中。</div>
+        <div class="rounded-[14px] border border-line bg-panel p-4">
+          <div class="text-[13px] font-medium text-fg">编排并发度</div>
+          <p class="mt-1 text-[12px] text-dim2">多智能体协作时同时运行的回合上限；调高可加速但需要更多进程资源。</p>
+          <div class="mt-3 flex items-center gap-3">
+            <input
+              type="range"
+              min="1"
+              max="8"
+              step="1"
+              :value="settings.maxParallel"
+              data-testid="max-parallel"
+              class="h-1 w-48 cursor-pointer accent-accent"
+              @input="onMaxParallelInput"
+            />
+            <span class="w-6 text-center text-[13px] font-medium text-fg" data-testid="max-parallel-value">{{ settings.maxParallel }}</span>
+          </div>
+          <p class="mt-2 text-[11px] text-dim2">范围 1–8，默认 2。更改即时生效。</p>
+        </div>
       </template>
     </div>
   </section>
