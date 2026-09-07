@@ -84,7 +84,7 @@ export function resolveToolKind(raw: string | undefined, name?: string): ToolAct
 /**
  * 拆解 MCP 工具名。ACP 的 tool_call 没有独立工具名字段：agent 把 MCP 工具名
  * 原样塞进 title，形如 `mcp__<server>__<tool>`，kind 一律落 `other`
- * （见 claude-code-acp `src/tools.ts` 默认分支 `title: name, kind: "other"`）。
+ * （各 ACP 适配器工具映射的默认分支 `title: name, kind: "other"`）。
  * server 为 undefined 表示不是外部 MCP 调用：`mcp__acp__Read` 这类是客户端自带的
  * 文件桥，不该在 UI 上标成 MCP。
  */
@@ -566,6 +566,32 @@ export function durationOf(activity: ToolActivity, now = Date.now()): number | n
   if (activity.finishedAt != null) return Math.max(0, activity.finishedAt - activity.startedAt);
   if (isInFlight(activity)) return Math.max(0, now - activity.startedAt);
   return null;
+}
+
+/**
+ * 时间线整体跨度：最早 startedAt → 最晚 finishedAt（ms）。
+ * 挂在飞行中的活动按 now 计；无任何活动时返回 null（空时间线不显示耗时）。
+ * span 用于「任务级总耗时」展示：多条工具调用从开始到全部结算的墙钟时长，
+ * 与单条调用各自的 durationOf（并行调用会重叠）不同，更能回答「这次跑了多久」。
+ */
+export function timelineSpan(activities: ToolActivity[], now = Date.now()): number | null {
+  if (activities.length === 0) return null;
+  let start = Number.POSITIVE_INFINITY;
+  let end = 0;
+  for (const activity of activities) {
+    if (activity.startedAt < start) start = activity.startedAt;
+    const doneAt = activity.finishedAt ?? (isInFlight(activity) ? now : activity.startedAt);
+    if (doneAt > end) end = doneAt;
+  }
+  if (end < start) return null;
+  return end - start;
+}
+
+/** 已结算（completed / failed / interrupted，不再回滚）的活动数 —— 进度条分子。 */
+export function settledCount(activities: ToolActivity[]): number {
+  let count = 0;
+  for (const activity of activities) if (!isInFlight(activity)) count += 1;
+  return count;
 }
 
 /**

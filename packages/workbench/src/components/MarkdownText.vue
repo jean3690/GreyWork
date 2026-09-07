@@ -4,12 +4,14 @@ import { Check, Copy } from "lucide-vue-next";
 import { parseBlocks } from "../lib/markdown";
 import MarkdownInline from "./MarkdownInline.vue";
 import MarkdownList from "./MarkdownList.vue";
+import MermaidBlock from "./MermaidBlock.vue";
 
 /**
  * Markdown 渲染：解析在 lib/markdown.ts，此处只做块级分派与样式。
  * 支持标题、段落、有序/无序嵌套列表、表格、引用、分割线、围栏代码块
  * （路径标签 + 行号 + 复制）与行内 code/粗体/斜体/删除线/链接。
- * 不引入解析依赖、不使用 v-html —— 内容来自模型输出，从根上规避注入。
+ * 解析由 marked 词法器驱动（见 lib/markdown.ts），本组件只做块级分派与样式；
+ * 不使用 v-html —— 内容来自模型输出，从根上规避注入。
  */
 const props = defineProps<{ content: string }>();
 
@@ -102,6 +104,7 @@ function alignOf(align: (string | null)[], column: number): Record<string, strin
         </table>
       </div>
 
+      <MermaidBlock v-else-if="block.type === 'code' && block.lang.toLowerCase() === 'mermaid'" :code="block.codeLines.join('\n')" />
       <div v-else-if="block.type === 'code'" class="md-code my-[0.7em] overflow-hidden rounded-[8px] border border-line bg-panel-2">
         <div class="md-code__head flex items-center gap-2 border-b border-line bg-panel py-1 pl-2.5 pr-2">
           <span v-if="block.path" class="md-code__path font-mono text-[11px] text-dim">{{ block.path }}</span>

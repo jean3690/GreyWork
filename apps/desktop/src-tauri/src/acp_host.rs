@@ -8,7 +8,8 @@
 //!   Allow 选项。未知档位按 `cautious` 处理（fail-closed）。
 //! - 写类工具（edit / delete / move）的路径必须落在本 handle 的会话工作区内，
 //!   越界一律拒绝，任何档位（含 auto）都不可绕过。
-//! - agent 启动命令经白名单校验：拒绝 shell 元字符；程序名必须在已知列表内。
+//! - agent 启动命令经白名单校验：拒绝 shell 元字符；程序名必须在内置列表内，
+//!   或在用户显式启用的自配后端目录里（`db.enabled_agent_programs`）。
 //! - 会话 cwd 必须是已存在的绝对路径目录，且不得为文件系统根。
 
 use crate::process_guard;
@@ -19,8 +20,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use agent_client_protocol::schema::v1::{
-    CancelNotification, ContentBlock, InitializeRequest, McpCapabilities, NewSessionRequest,
-    PermissionOption, PermissionOptionId, PermissionOptionKind, PromptRequest,
+    CancelNotification, ContentBlock, InitializeRequest, LoadSessionRequest, McpCapabilities,
+    NewSessionRequest, PermissionOption, PermissionOptionId, PermissionOptionKind, PromptRequest,
     RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
     SelectedPermissionOutcome, SessionConfigOptionValue, SessionId, SessionNotification,
     SetSessionConfigOptionRequest, TextContent, ToolCallLocation, ToolKind,
@@ -238,6 +239,9 @@ struct AcpSession {
     /// 本 handle 的 agent 所声明的 MCP 传输能力（initialize 回包）。
     /// 按协议只能在声明过的传输上给它 MCP 服务器，否则 session/new 会整体失败。
     mcp_capabilities: McpCapabilities,
+    /// 本 handle 的 agent 是否支持 `session/load`（initialize 回包）。
+    /// 不支持时前端回落 session/new，宿主也不发无谓请求。
+    load_session: bool,
 }
 
 /// 一条权限请求的宿主决策上下文快照：锁内取出、锁外使用，避免跨 await 持锁。
@@ -395,15 +399,113 @@ fn permission_payload(
     })
 }
 
-/// 握手就绪窗口：npx/npm 型命令首次运行需按需下载（gemini/qwen 等包可达数十 MB），
-/// 放宽到 60s；原生二进制启动快，保持 10s 以便「命令不存在」快速失败。
+/// 握手就绪窗口：npx/npm 型命令首次运行需按需下载 + 适配器冷启动（codex-acp 要拉起
+/// Codex App Server，实测首次可达 ~60s），放宽到 120s；原生二进制启动快，保持 10s
+/// 以便「命令不存在」快速失败。
 fn handshake_timeout_secs(command: &str) -> u64 {
     let program = command.split_whitespace().next().unwrap_or_default();
     if matches!(program, "npx" | "npm" | "yarn" | "pnpm" | "deno" | "bunx") {
-        60
+        120
     } else {
         10
     }
+}
+
+/* ===== 回合产物扫描（prompt-done 自动开预览的数据源） ===== */
+
+/// 回合产物预览白名单扩展名（小写、无点）。与前端查看器能力对齐：文本产物
+/// （md/html/csv）+ Office 二进制（xlsx/docx/pptx）+ pdf。
+/// 故意不放 json/txt：agent 回合里改配置文件、README、锁文件太常见，
+/// 弹出来是噪音而不是「交付物」。
+const TURN_ARTIFACT_EXTS: &[&str] = &["md", "html", "csv", "xlsx", "docx", "pptx", "pdf"];
+
+/// 遍历时跳过的目录：依赖 / 构建产物 / 缓存。隐藏目录（.git、.cache…）整体跳过。
+const TURN_ARTIFACT_SKIP_DIRS: &[&str] = &[
+    "node_modules",
+    "target",
+    "dist",
+    "build",
+    "coverage",
+    "__pycache__",
+    ".venv",
+    "venv",
+];
+
+/// 递归深度上限：产物目录嵌套通常很浅（≤3 层），上限防极端嵌套拖慢回合收尾。
+const TURN_ARTIFACT_MAX_DEPTH: usize = 8;
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn system_time_ms(time: std::time::SystemTime) -> u64 {
+    time.duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// 是否值得作为回合产物上报：白名单扩展名 + 排除 Office 锁文件（`~$` 前缀）
+/// 与隐藏文件（`.name`）。扩展名大小写不敏感。
+fn is_turn_artifact_file(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    if name.starts_with("~$") || name.starts_with('.') || name.ends_with('~') {
+        return false;
+    }
+    let Some(extension) = path.extension().and_then(|e| e.to_str()) else {
+        return false;
+    };
+    let extension = extension.to_ascii_lowercase();
+    TURN_ARTIFACT_EXTS
+        .iter()
+        .any(|candidate| *candidate == extension)
+}
+
+/// 收集 `root` 下自 `since_ms` 以来 mtime 变化过的白名单文件（绝对路径，字典序）。
+/// 目录过滤：隐藏目录与已知噪音目录不进入；符号链接不跟随（防循环与逃逸）。
+/// 同步 IO，调用方须放 spawn_blocking。
+pub(crate) fn scan_turn_artifacts(root: &Path, since_ms: u64) -> Vec<PathBuf> {
+    fn walk(dir: &Path, since_ms: u64, depth: usize, out: &mut Vec<PathBuf>) {
+        if depth > TURN_ARTIFACT_MAX_DEPTH {
+            return;
+        }
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_symlink() {
+                continue;
+            }
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if file_type.is_dir() {
+                if name.starts_with('.') || TURN_ARTIFACT_SKIP_DIRS.contains(&name.as_ref()) {
+                    continue;
+                }
+                walk(&path, since_ms, depth + 1, out);
+            } else if file_type.is_file() && is_turn_artifact_file(&path) {
+                if let Ok(metadata) = entry.metadata() {
+                    if let Ok(modified) = metadata.modified() {
+                        if system_time_ms(modified) >= since_ms {
+                            out.push(path);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let mut found = Vec::new();
+    walk(root, since_ms, 0, &mut found);
+    found.sort();
+    found
 }
 
 /// 启动外部 ACP agent 子进程并完成 initialize 握手，返回主机句柄 id。
@@ -415,12 +517,19 @@ fn handshake_timeout_secs(command: &str) -> u64 {
 pub async fn acp_start(
     app: AppHandle,
     state: State<'_, AcpHost>,
+    db: State<'_, crate::db::Db>,
     agent_cmd: String,
     tier: Option<String>,
     sandbox: Option<String>,
     workspace: Option<String>,
 ) -> Result<u64, String> {
-    let command = process_guard::validate_spawn_command(&agent_cmd, ALLOWED_AGENT_PROGRAMS)?;
+    // 内置白名单 + 用户显式启用的自配后端：自定义 agent 与内置项同等信任，
+    // 但仅限「用户已在目录里启用」的程序（目录真源归 Rust，渲染端不可自封）。
+    // shell 元字符拒绝不受影响，仍是配置注入的最后防线。
+    let mut allowed: Vec<&str> = ALLOWED_AGENT_PROGRAMS.to_vec();
+    let custom_programs = db.enabled_agent_programs();
+    allowed.extend(custom_programs.iter().map(String::as_str));
+    let command = process_guard::validate_spawn_command(&agent_cmd, &allowed)?;
     let tier = PermissionTier::parse(tier.as_deref());
 
     let mode = crate::sandbox::SandboxMode::parse(sandbox.as_deref());
@@ -510,6 +619,9 @@ pub async fn acp_start(
             format!("initialize failed: {error}")
         })?;
     let mcp_capabilities = initialize.agent_capabilities.mcp_capabilities.clone();
+    // 顺手记下是否支持 session/load：恢复会话时据此决定是否走 load 而非 new，
+    // 避免对不支持的 agent 发无谓请求（协议只在声明过的会话上才返回 load_session）。
+    let load_session = initialize.agent_capabilities.load_session;
 
     state.sessions.lock().await.insert(
         handle_id,
@@ -522,6 +634,7 @@ pub async fn acp_start(
             tier,
             workspace_root: None,
             mcp_capabilities,
+            load_session,
         },
     );
     emit(&app, "started", serde_json::json!({ "handle": handle_id }));
@@ -800,6 +913,72 @@ pub async fn acp_new_session(
     }))
 }
 
+/// 恢复一条已存在的 ACP 会话（session/load），把既有上下文接回来——实现「重启不丢会话」。
+///
+/// 与 `acp_new_session` 共享门禁与 MCP 过滤逻辑；不同点：
+/// - 能力预检：agent 未声明 `load_session` 直接 `Err`，不发请求、不改 `session.session_id`，
+///   让前端静默回落 `acp_new_session`（无副作用）。
+/// - **仅请求成功时**才回写 `session.session_id` 并 emit `session-load`；失败不改任何状态，
+///   前端可原样回落 new。
+/// - `LoadSessionResponse` 不含 sessionId（用传入的那个），返回外形与 `acp_new_session` 对齐。
+#[tauri::command]
+pub async fn acp_load_session(
+    app: AppHandle,
+    state: State<'_, AcpHost>,
+    handle: u64,
+    cwd: String,
+    session_id: String,
+    mcp_servers: Option<Vec<crate::mcp::McpServerConfig>>,
+) -> Result<serde_json::Value, String> {
+    let cwd = validate_cwd(&cwd)?;
+    let mut sessions = state.sessions.lock().await;
+    let session = sessions
+        .get_mut(&handle)
+        .ok_or_else(|| format!("unknown handle {handle}"))?;
+    if !session.load_session {
+        return Err("agent does not support session/load".to_string());
+    }
+
+    let (servers, skipped) =
+        crate::mcp::plan_servers(&mcp_servers.unwrap_or_default(), &session.mcp_capabilities);
+    let declared: Vec<String> = servers.iter().map(crate::mcp::server_name).collect();
+
+    let response = session
+        .conn
+        .clone()
+        .send_request(
+            LoadSessionRequest::new(SessionId::from(session_id.clone()), &cwd).mcp_servers(servers),
+        )
+        .block_task()
+        .await
+        .map_err(|error| format!("session/load failed: {error}"))?;
+    let id_str = session_id;
+    let config_options = serde_json::to_value(response.config_options.clone().unwrap_or_default())
+        .unwrap_or_else(|_| serde_json::Value::Array(Vec::new()));
+    // 仅请求成功后才有状态改写：session_id 回写 + 工作区锚定基准更新。
+    // 失败路径必须保持原样——锚定若提前换成新 cwd，回落 new 前旧会话的
+    // 越界拦截会按错误基准判定。
+    session.session_id = Some(SessionId::from(id_str.clone()));
+    session.workspace_root = Some(cwd);
+    emit(
+        &app,
+        "session-load",
+        serde_json::json!({
+            "handle": handle,
+            "sessionId": id_str,
+            "mcpServers": declared,
+            "skippedMcpServers": skipped,
+        }),
+    );
+    Ok(serde_json::json!({
+        "sessionId": id_str,
+        "restored": true,
+        "configOptions": config_options,
+        "mcpServers": declared,
+        "skippedMcpServers": skipped,
+    }))
+}
+
 /// 设置会话配置选项（session/set_config_option）：模型 / 推理力度 / 会话模式等。
 /// select 选项传字符串值，boolean 选项传布尔值；返回全量最新配置选项。
 #[tauri::command]
@@ -849,7 +1028,9 @@ pub async fn acp_set_permission_tier(
     handle: u64,
     tier: String,
 ) -> Result<(), String> {
-    state.set_tier(handle, PermissionTier::parse(Some(&tier))).await
+    state
+        .set_tier(handle, PermissionTier::parse(Some(&tier)))
+        .await
 }
 
 /// 发送一轮 prompt；立即返回 `{ turnId }`，回合结果经 `prompt-done` 事件
@@ -869,7 +1050,8 @@ pub async fn acp_send(
 ) -> Result<serde_json::Value, String> {
     // 短临界区：登记回合后立即释放锁。sent 必须随块返回——SentRequest 的
     // Drop 会向对端发取消请求，块内丢弃等于立即取消本回合。
-    let (sent, turn_id) = {
+    // 同时取出产物扫描所需快照：工作区锚定基准 + 回合开始时刻（mtime 过滤下界）。
+    let (sent, turn_id, workspace_root, turn_started_ms) = {
         let mut sessions = state.sessions.lock().await;
         let session = sessions
             .get_mut(&handle)
@@ -884,7 +1066,7 @@ pub async fn acp_send(
         ));
         let turn_id = state.next_turn_id.fetch_add(1, Ordering::SeqCst);
         session.turns.insert(turn_id, sent.id().clone());
-        (sent, turn_id)
+        (sent, turn_id, session.workspace_root.clone(), now_ms())
     };
 
     // 锁外等待回合结果（独立 task）：取消或完成都会唤醒 block_task，
@@ -899,13 +1081,43 @@ pub async fn acp_send(
             .await
             .get_mut(&handle)
             .map(|session| session.turns.remove(&turn_id));
+        // 只对成功回合扫产物：失败/被取消的回合不弹（与前端「失败不假装完成」同语义）。
+        // 同步目录遍历放 spawn_blocking，避免阻塞异步 runtime 线程。
+        let succeeded = response.is_ok();
+        // spawn_blocking 的句柄要在 async 上下文里 await：先解 Option 再进 async 块，
+        // 避免把 await 塞进同步 map 闭包。
+        let files: Vec<String> = if succeeded {
+            match workspace_root {
+                Some(root) => {
+                    tauri::async_runtime::spawn_blocking(move || {
+                        // mtime 是秒级粒度：回合首秒内写的文件，其秒值可能早于
+                        // turn_started_ms 的毫秒值。下界放宽 2s 兜住粒度差——
+                        // 发送瞬间用户几乎不可能同时在改工作区文件，误报面可忽略。
+                        scan_turn_artifacts(&root, turn_started_ms.saturating_sub(2000))
+                            .into_iter()
+                            .map(|path| path.to_string_lossy().into_owned())
+                            .collect::<Vec<_>>()
+                    })
+                    .await
+                    .unwrap_or_default()
+                }
+                None => Vec::new(),
+            }
+        } else {
+            Vec::new()
+        };
         match response {
             Ok(result) => {
                 let payload = serde_json::to_value(&result).unwrap_or(serde_json::Value::Null);
                 emit(
                     &app_task,
                     "prompt-done",
-                    serde_json::json!({ "handle": handle, "turnId": turn_id, "response": payload }),
+                    serde_json::json!({
+                        "handle": handle,
+                        "turnId": turn_id,
+                        "response": payload,
+                        "files": files,
+                    }),
                 );
             }
             Err(error) => {
@@ -1108,9 +1320,96 @@ mod tests {
     #[test]
     fn handshake_timeout_widens_for_registry_launchers() {
         assert_eq!(handshake_timeout_secs("opencode acp"), 10);
-        assert_eq!(handshake_timeout_secs("npx -y @google/gemini-cli --acp"), 60);
-        assert_eq!(handshake_timeout_secs("bunx @qwen-code/qwen-code --acp"), 60);
+        assert_eq!(handshake_timeout_secs("gemini --acp"), 10);
+        // npx 型：适配器冷启动要下载 + 拉起 App Server，窗口放宽
+        assert_eq!(
+            handshake_timeout_secs("npx -y @agentclientprotocol/codex-acp"),
+            120
+        );
+        assert_eq!(
+            handshake_timeout_secs("npx -y @agentclientprotocol/claude-agent-acp"),
+            120
+        );
+        assert_eq!(
+            handshake_timeout_secs("bunx @qwen-code/qwen-code --acp"),
+            120
+        );
         assert_eq!(handshake_timeout_secs("/usr/bin/goose acp"), 10);
+    }
+
+    /// 把文件 mtime 拨到 now-age_secs（std 无 filetime 依赖，用 File::set_modified）。
+    fn backdate(path: &std::path::Path, age_secs: u64) {
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .expect("open for backdate");
+        file.set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(age_secs))
+            .expect("set mtime");
+    }
+
+    #[test]
+    fn scan_turn_artifacts_picks_only_fresh_document_files() {
+        let root = std::env::temp_dir().join(format!("gw-scan-fresh-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("reports")).unwrap();
+        std::fs::create_dir_all(root.join("node_modules/pkg")).unwrap();
+        std::fs::create_dir_all(root.join(".hidden")).unwrap();
+        // 命中：新写的白名单文档
+        std::fs::write(root.join("data.csv"), b"a,b\n").unwrap();
+        std::fs::write(root.join("reports/brief.md"), b"# brief").unwrap();
+        // 未命中：白名单但 mtime 早于窗口
+        std::fs::write(root.join("reports/old.md"), b"old").unwrap();
+        backdate(&root.join("reports/old.md"), 3600);
+        // 未命中：非白名单扩展名（新写）
+        std::fs::write(root.join("notes.txt"), b"hi").unwrap();
+        std::fs::write(root.join("package.json"), r#"{"x":1}"#).unwrap();
+        // 未命中：Office 锁文件与隐藏文件
+        std::fs::write(root.join("~$lock.xlsx"), b"lock").unwrap();
+        std::fs::write(root.join(".dot.md"), b"hidden").unwrap();
+        // 未命中：噪音目录与隐藏目录里的新文档
+        std::fs::write(root.join("node_modules/pkg/readme.md"), b"dep").unwrap();
+        std::fs::write(root.join(".hidden/secret.md"), b"secret").unwrap();
+
+        let found = scan_turn_artifacts(&root, now_ms() - 10_000);
+        let names: Vec<String> = found
+            .iter()
+            .map(|path| {
+                path.strip_prefix(&root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+        assert_eq!(names, vec!["data.csv", "reports/brief.md"]);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn scan_turn_artifacts_empty_or_missing_root_yields_nothing() {
+        let root = std::env::temp_dir().join(format!("gw-scan-empty-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        assert!(scan_turn_artifacts(&root, now_ms() - 10_000).is_empty());
+        // 目录不存在 / 无权限路径：静默空，不 panic
+        assert!(scan_turn_artifacts(&root.join("nope"), 0).is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn is_turn_artifact_file_matches_case_insensitively() {
+        assert!(is_turn_artifact_file(std::path::Path::new(
+            "a/b/Report.XLSX"
+        )));
+        assert!(is_turn_artifact_file(std::path::Path::new("简报.PPTX")));
+        assert!(!is_turn_artifact_file(std::path::Path::new("a/notes.txt")));
+        assert!(!is_turn_artifact_file(std::path::Path::new(
+            "a/~$report.xlsx"
+        )));
+        assert!(!is_turn_artifact_file(std::path::Path::new("a/.report.md")));
+        assert!(!is_turn_artifact_file(std::path::Path::new(
+            "a/report.docx~"
+        )));
     }
 
     #[test]
@@ -1141,7 +1440,7 @@ mod tests {
             "opencode acp"
         );
         assert!(process_guard::validate_spawn_command(
-            "npx -y @zed-industries/claude-code-acp",
+            "npx -y @agentclientprotocol/codex-acp",
             ALLOWED_AGENT_PROGRAMS
         )
         .is_ok());
@@ -1198,7 +1497,10 @@ mod tests {
         );
         assert_eq!(PermissionTier::parse(Some("full")), PermissionTier::Full);
         // 旧值兼容：daily→Workspace、auto→Full、cautious→ReadOnly（fail-closed）
-        assert_eq!(PermissionTier::parse(Some("daily")), PermissionTier::Workspace);
+        assert_eq!(
+            PermissionTier::parse(Some("daily")),
+            PermissionTier::Workspace
+        );
         assert_eq!(PermissionTier::parse(Some("auto")), PermissionTier::Full);
         assert_eq!(
             PermissionTier::parse(Some("cautious")),
@@ -1320,7 +1622,10 @@ mod tests {
         );
         // Execute（无法静态验证命令目标）→ 逐条确认
         assert_eq!(
-            decide_permission(&workspace, &permission_request(Some(ToolKind::Execute), true)),
+            decide_permission(
+                &workspace,
+                &permission_request(Some(ToolKind::Execute), true)
+            ),
             PermissionVerdict::Ask
         );
         // 未绑定工作区（无锚定基准）→ 写类逐条确认，不盲放
@@ -1485,5 +1790,43 @@ mod tests {
 
         assert!(blocked_paths(root, &[ToolCallLocation::new("/home/user/proj/a.ts")]).is_empty());
         assert!(blocked_paths(root, &[]).is_empty());
+    }
+
+    #[test]
+    fn spawn_gate_accepts_user_enabled_custom_programs() {
+        // 复刻 acp_start 的放行面组装：内置白名单 ∪ 用户启用的自配后端程序名。
+        let db = crate::db::Db::open_in_memory().expect("open");
+        db.sync_agent_providers(&[
+            crate::db::AgentProviderDto {
+                id: "custom-1".to_string(),
+                name: "My Agent".to_string(),
+                kind: "acp".to_string(),
+                command: "my-agent acp".to_string(),
+                enabled: true,
+            },
+            crate::db::AgentProviderDto {
+                id: "custom-off".to_string(),
+                name: "Disabled".to_string(),
+                kind: "acp".to_string(),
+                command: "disabled-agent acp".to_string(),
+                enabled: false,
+            },
+        ])
+        .unwrap();
+        let mut allowed: Vec<&str> = ALLOWED_AGENT_PROGRAMS.to_vec();
+        let custom_programs = db.enabled_agent_programs();
+        allowed.extend(custom_programs.iter().map(String::as_str));
+
+        // 用户启用的自配程序可 spawn；禁用项不进入放行面
+        assert_eq!(
+            process_guard::validate_spawn_command("my-agent acp", &allowed).unwrap(),
+            "my-agent acp"
+        );
+        assert!(process_guard::validate_spawn_command("disabled-agent acp", &allowed).is_err());
+        // 白名单语义不因扩展而失效：未声明的程序仍被拒，元字符拒绝仍生效
+        assert!(process_guard::validate_spawn_command("malicious acp", &allowed).is_err());
+        assert!(
+            process_guard::validate_spawn_command("my-agent acp && rm -rf ~", &allowed).is_err()
+        );
     }
 }

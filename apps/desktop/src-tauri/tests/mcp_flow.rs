@@ -40,8 +40,7 @@ async fn declared_mcp_servers_reach_the_agent() {
             .builder()
             .connect_with(agent, |conn: ConnectionTo<AgentRole>| async move {
                 let _ = ready_tx.send(conn).await;
-                let never: Result<(), agent_client_protocol::Error> =
-                    std::future::pending().await;
+                let never: Result<(), agent_client_protocol::Error> = std::future::pending().await;
                 never
             })
             .await;
@@ -103,7 +102,10 @@ async fn declared_mcp_servers_reach_the_agent() {
 
     let stdio = &received[1];
     // stdio 是 untagged 变体：线上没有 type 字段，靠 command 识别
-    assert!(stdio.get("type").is_none(), "stdio 变体不带 type: {stdio:?}");
+    assert!(
+        stdio.get("type").is_none(),
+        "stdio 变体不带 type: {stdio:?}"
+    );
     assert_eq!(stdio["name"], "local-notes");
     assert_eq!(stdio["command"], "/usr/bin/notes-mcp");
     assert_eq!(stdio["args"][0], "--verbose");

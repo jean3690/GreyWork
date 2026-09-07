@@ -1,4 +1,4 @@
-import type { CoworkBudget, CoworkMail, CoworkSlot, CoworkTask } from "./types";
+import type { CoworkBudget, CoworkMail, CoworkSlot, CoworkSpecialty, CoworkTask } from "./types";
 
 /** 单封信注入正文的长度上限；超出截断并标记，全文仍留在 run 快照与 UI 里。 */
 const MAX_MAIL_BODY = 2000;
@@ -34,8 +34,18 @@ export const COWORK_PROTOCOL = `## 协作指令
 新消息到达时系统会立刻重新唤醒你，这是无损的等待方式。
 若你保持回合不结束地「等待」，底层模型请求会一直挂着，直到 provider 超时把你判为失败。`;
 
+/** 职能标签 → 一句话定位（teammate 有标签时注入 prompt，帮模型理解自己被派来干嘛）。 */
+const SPECIALTY_BRIEF: Record<CoworkSpecialty, string> = {
+  planner: "你侧重把大目标拆成可执行的小步，想清楚先后依赖再动手。",
+  researcher: "你侧重搜集信息与调研：联网检索、读文档、核对事实，结论要给出处。",
+  builder: "你侧重动手产出：写代码、改文档、生成可交付的成果，少空谈多落地。",
+  reviewer: "你侧重审查与挑错：查一致性、查遗漏、查质量，结论要给具体修改建议。",
+};
+
 const slotLine = (slot: CoworkSlot): string =>
-  `- ${slot.name}（id: ${slot.id}，角色: ${slot.role === "leader" ? "leader" : "成员"}，状态: ${slot.status}）`;
+  `- ${slot.name}（id: ${slot.id}，角色: ${slot.role === "leader" ? "leader" : "成员"}，状态: ${slot.status}${
+    slot.specialty ? `，职能: ${slot.specialty}` : ""
+  }）`;
 
 export interface LeaderPromptParams {
   goal: string;
@@ -87,7 +97,7 @@ export function buildTeammatePrompt(params: TeammatePromptParams): string {
 
   return `# 你是团队成员 ${slot.name}
 
-## 你的团队
+${slot.specialty ? `## 你的职能\n${SPECIALTY_BRIEF[slot.specialty]}\n\n` : ""}## 你的团队
 Leader：${leader?.name ?? "（无）"}
 其他成员：${peerLine}
 

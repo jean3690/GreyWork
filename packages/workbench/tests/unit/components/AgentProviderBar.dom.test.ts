@@ -1,7 +1,7 @@
 // 后端选择条渲染契约：点击 ACP 胶囊 → 同处展开会话配置选择器（模型 / 思考强度 / 会话模式，
 // 取决于 agent 在 session/new 暴露的 select 型配置）；模型未暴露思考强度时展示提示桩；
 // 连接失败就地展示错误文案并可点击重试；已连接重复点击不再重复建会话。
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { defineComponent } from "vue";
 import { createPinia, setActivePinia } from "pinia";
@@ -20,6 +20,7 @@ const h = vi.hoisted(() => ({
   stop: vi.fn(),
   isAvailable: vi.fn(() => true),
   homeDir: vi.fn<() => Promise<string | null>>(() => Promise.resolve("/home/test")),
+  invoke: vi.fn<(cmd: string, args?: { programs?: string[] }) => Promise<unknown>>(() => Promise.resolve([])),
   listener: null as ((event: { kind: string; payload: unknown }) => void) | null,
 }));
 
@@ -41,6 +42,8 @@ vi.mock("@greywork/acp", () => ({
     }) as never,
   desktopHomeDir: () => h.homeDir(),
 }));
+
+vi.mock("@tauri-apps/api/core", () => ({ invoke: (...args: unknown[]) => (h.invoke as (...a: unknown[]) => Promise<unknown>)(...args) }));
 
 function options(withEffort: boolean) {
   const configOptions = [
@@ -173,5 +176,68 @@ describe("AgentProviderBar · ACP 会话配置选择器", () => {
     await flushPromises();
     expect(h.startAgent).toHaveBeenCalledTimes(1);
     expect(wrapper.text()).toContain("思考强度 · Low");
+  });
+
+  it("选择条列出全部 ACP 后端（不止已启用），未启用的可一步选到并启用", async () => {
+    h.startAgent.mockResolvedValue(7);
+    h.openSession.mockResolvedValue(options(true));
+    const { wrapper } = mountBar();
+    const agentStore = useAgentStore();
+
+    // 预设里除 opencode 外默认禁用，但都应出现在条上（用户提供「其他 ACP 选择」）。
+    const codex = wrapper.findAll("button").find((button) => button.text().includes("Codex"));
+    expect(codex, "Codex 胶囊应出现在选择条").toBeDefined();
+
+    // 点击未启用的 Codex：先启用再建会话（选择即启用）。
+    await codex!.trigger("click");
+    await vi.waitFor(() => expect(agentStore.acpConnected).toBe(true));
+    expect(agentStore.agentProviders.find((p) => p.id === "codex")?.enabled).toBe(true);
+    // 连接命令应为 codex 的启动命令（证明选中的是 Codex 而非 OpenCode）。
+    expect(h.startAgent).toHaveBeenCalledWith("npx -y @agentclientprotocol/codex-acp", expect.any(String));
+  });
+});
+
+describe("AgentProviderBar · 安装状态探测与胶囊标注", () => {
+  /** 模拟桌面运行时（__TAURI_INTERNALS__ 注入 → isTauriRuntime()=true → agentsBackend.detect 走 invoke）。 */
+  beforeEach(() => {
+    (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
+  });
+  afterEach(() => {
+    delete (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+  });
+
+  it("挂载即触发本机 CLI 安装探测（桌面态），不需要先去设置页", async () => {
+    h.invoke.mockImplementation((cmd: string) => (cmd === "acp_detect_programs" ? Promise.resolve([]) : Promise.resolve()));
+    mountBar();
+    await vi.waitFor(() => expect(h.invoke).toHaveBeenCalledWith("acp_detect_programs", expect.any(Object)));
+  });
+
+  it("探测命中：已装后端显「已安装」，npx 型未装显「首次启动下载」，原生未装显「未安装」", async () => {
+    // opencode 已装；codex（npx 适配器）未装 → 首次启动下载；gemini（原生二进制）未装 → 未安装。
+    h.invoke.mockImplementation((cmd: string) =>
+      cmd === "acp_detect_programs"
+        ? Promise.resolve([
+            { program: "opencode", installed: true, path: "/usr/local/bin/opencode" },
+            { program: "gemini", installed: false, path: null },
+            { program: "codex", installed: false, path: null },
+          ])
+        : Promise.resolve(),
+    );
+    h.startAgent.mockResolvedValue(7);
+    h.openSession.mockResolvedValue(options(true));
+    const { wrapper } = mountBar();
+    await vi.waitFor(() => expect(wrapper.text()).toContain("已安装"));
+
+    const opencode = wrapper.findAll("button").find((button) => button.text().includes("OpenCode"));
+    expect(opencode!.text()).toContain("已安装");
+
+    // codex 走官方 npx 适配器：未装时明示「首次启动下载」而非「未安装」。
+    const codex = wrapper.findAll("button").find((button) => button.text().includes("Codex"));
+    expect(codex!.text()).toContain("首次启动下载");
+    expect(codex!.text()).not.toContain("未安装");
+
+    // gemini 原生二进制（gemini --acp）：未装时显「未安装」。
+    const gemini = wrapper.findAll("button").find((button) => button.text().includes("Gemini"));
+    expect(gemini!.text()).toContain("未安装");
   });
 });

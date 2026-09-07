@@ -149,7 +149,12 @@ function send(): void {
   const text = draft.value.trim();
   if (!text || chat.busy || agent.acpBusy || agent.acpConnecting || agent.acpStatus === "connecting") return;
   if (agent.routeToAcp) {
-    void agent.dispatchToAcp(text);
+    if (settings.planMode) {
+      // 计划模式：先挂起计划卡，确认后才真正派发（ACP）。
+      agent.beginAcpPlan(text);
+    } else {
+      void agent.dispatchToAcp(text);
+    }
   } else if (runs.maybeOrchestrate(text)) {
     // 编排意图：并行子任务在 TeamView 看板跟踪（goal 不入本会话消息流）。
   } else {
@@ -219,7 +224,7 @@ function goBack(): void {
     <div ref="scrollEl" class="min-h-0 flex-1 overflow-y-auto" @scroll.passive="onScroll">
       <!-- 短会话：普通整列渲染 -->
       <div v-if="messages.length && !useVirtual" class="mx-auto flex w-full max-w-[860px] flex-col gap-4 px-4 py-6 sm:px-6">
-        <ConversationMessage v-for="message in messages" :key="message.id" :message="message" />
+        <ConversationMessage v-for="message in messages" :key="message.id" :message="message" :thread-id="sessionId" />
       </div>
       <!-- 长会话：虚拟窗口渲染（动态测量高度，钉底跟流） -->
       <div
@@ -235,7 +240,7 @@ function goBack(): void {
           class="absolute left-0 top-0 w-full pb-4"
           :style="{ transform: `translateY(${row.start + V_PAD_TOP}px)` }"
         >
-          <ConversationMessage :message="messages[row.index]" />
+          <ConversationMessage :message="messages[row.index]" :thread-id="sessionId" />
         </div>
       </div>
       <!-- 空会话引导 -->

@@ -26,8 +26,8 @@ const router = useRouter();
 const goalDraft = ref("");
 const memberDrafts = ref<CoworkMemberInit[]>([
   { name: "Leader", role: "leader" },
-  { name: "Builder", role: "teammate" },
-  { name: "Reviewer", role: "teammate" },
+  { name: "Builder", role: "teammate", specialty: "builder" },
+  { name: "Reviewer", role: "teammate", specialty: "reviewer" },
 ]);
 const startError = ref<string | null>(null);
 const messageDraft = ref("");
@@ -75,7 +75,7 @@ async function startCowork(): Promise<void> {
 }
 
 function addMember(): void {
-  memberDrafts.value.push({ name: "", role: "teammate" });
+  memberDrafts.value.push({ name: "", role: "teammate", specialty: undefined });
 }
 
 function removeMember(index: number): void {
@@ -138,7 +138,7 @@ function roleLabel(role: string): string {
 </script>
 
 <template>
-  <section class="mx-auto min-h-0 w-full max-w-[860px] overflow-y-auto px-4 py-6 sm:px-6">
+  <section class="mx-auto min-h-0 h-full w-full max-w-[860px] overflow-y-auto px-4 py-6 sm:px-6">
     <div class="mb-1 flex items-center gap-2">
       <h1 class="font-display text-[20px] font-bold tracking-tight text-foreground">{{ t("cowork.title") }}</h1>
       <span v-if="cowork.status" class="rounded-full px-2 py-0.5 text-[10px] font-medium" :class="runBadge[cowork.status]">
@@ -169,9 +169,23 @@ function roleLabel(role: string): string {
           <select
             v-model="member.role"
             class="rounded-[8px] border border-line bg-panel-2 px-2 py-1.5 text-[12px] text-foreground outline-none focus:border-accent"
+            data-testid="member-role"
           >
             <option value="leader">{{ t("cowork.role.leader") }}</option>
             <option value="teammate">{{ t("cowork.role.teammate") }}</option>
+          </select>
+          <select
+            v-if="member.role === 'teammate'"
+            v-model="member.specialty"
+            class="rounded-[8px] border border-line bg-panel-2 px-2 py-1.5 text-[12px] text-foreground outline-none focus:border-accent"
+            data-testid="member-specialty"
+            :aria-label="t('cowork.specialty.label')"
+          >
+            <option :value="undefined">{{ t("cowork.specialty.none") }}</option>
+            <option value="planner">{{ t("cowork.specialty.planner") }}</option>
+            <option value="researcher">{{ t("cowork.specialty.researcher") }}</option>
+            <option value="builder">{{ t("cowork.specialty.builder") }}</option>
+            <option value="reviewer">{{ t("cowork.specialty.reviewer") }}</option>
           </select>
           <button
             type="button"
@@ -221,6 +235,9 @@ function roleLabel(role: string): string {
             <span class="size-1.5 rounded-full" :class="wakeDot[slot.wake]" />
             <span class="text-foreground">{{ slot.name }}</span>
             <span class="text-dim2">{{ t(`cowork.role.${slot.role}`) }}</span>
+            <span v-if="slot.specialty" class="rounded-full bg-panel px-1.5 text-[10px] text-cyan">{{
+              t(`cowork.specialty.${slot.specialty}`)
+            }}</span>
             <span v-if="slot.unread > 0" class="rounded-full bg-cyan/15 px-1.5 text-[10px] text-cyan">{{ slot.unread }}</span>
             <span class="tabular-nums text-dim2">{{ slot.turns }}</span>
             <span v-if="slot.status === 'failed'" class="text-destructive">!</span>

@@ -13,7 +13,7 @@ const agentStore = useAgentStore();
 </script>
 
 <template>
-  <section class="mx-auto min-h-0 w-full max-w-[860px] overflow-y-auto px-4 py-6 sm:px-6">
+  <section class="mx-auto min-h-0 h-full w-full max-w-[860px] overflow-y-auto px-4 py-6 sm:px-6">
     <div class="mb-5">
       <h1 class="font-display text-[20px] font-bold tracking-tight text-foreground">助手库</h1>
       <p class="mt-1 text-[12px] text-dim2">可以调用的 Agent 编队与角色。</p>

@@ -1,25 +1,29 @@
 <script setup lang="ts">
 /**
  * 运行后端选择条（对齐 GreyWork Guid 页 AssistantSelectionArea 形态）：
- * 胶囊横条列出可用执行后端——本地 LLM（chat 管线）+ enabled 的 ACP agent。
+ * 胶囊横条列出全部 ACP agent（opencode / codex / claude-code…）+ 本地 LLM。
  * 选中 ACP agent 后发送路由走 agent store 的 dispatchToAcp（真实 CLI agent 回合）；
  * 选中 Local 走 chat store 的 LLM/mock 管线。权限档位（cautious/daily/auto）随
  * settings 全局档位，宿主执行（acp_host PermissionTier）。
+ *
+ * 选择即启用：点未启用的后端胶囊会先启用再建会话（一步到位选到其他 ACP），
+ * 不必先去设置页勾选。未安装的后端显式标「未安装 / 首次启动下载」并给出安装提示。
  *
  * 选中 ACP 后端时的会话配置选择器（模型 / 思考强度 / 会话模式）由
  * AcpSessionConfig 渲染在输入卡底栏（发送按钮旁）；本条只负责后端选择与
  * 连接失败的就地提示（点击后端胶囊重试，不再静默吞错）。
  */
-import { computed, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useAgentStore } from "../stores/agent";
 import { useSettingsStore } from "../stores/settings";
 import Icon from "./Icon.vue";
+import type { AgentProviderConfig } from "@greywork/shell";
 
 const agent = useAgentStore();
 const settings = useSettingsStore();
 
-/** 可选的 ACP 后端（enabled 才展示；缺省 opencode 等由 DEFAULT_AGENT_PROVIDERS 提供）。 */
-const acpOptions = computed(() => agent.agentProviders.filter((provider) => provider.enabled));
+/** 全部 ACP 后端（不止 enabled）——未启用的也能从条上一步选到，不必先去设置页勾选。 */
+const acpOptions = computed<AgentProviderConfig[]>(() => agent.agentProviders);
 
 /** 当前选中：null = 本地 LLM 管线。 */
 const selected = computed(() => (agent.routeToAcp ? agent.selectedProviderId : null));
@@ -37,6 +41,9 @@ function selectLocal(): void {
 
 async function selectAcp(id: string): Promise<void> {
   connectError.value = null;
+  // 未启用的后端：先启用再走激活（选择即启用，一步到位选到其他 ACP）。
+  const provider = agent.agentProviders.find((candidate) => candidate.id === id);
+  if (provider && !provider.enabled) await agent.setAgentProviderEnabled(id, true);
   // 同后端已连接：点击无操作（幂等）。未连接 / 连接失败时点击即重试建会话，
   // 让「点了没反应 → 模型/思考强度选择器出现」的路径有明确入口。
   if (id === agent.selectedProviderId && agent.routeToAcp && agent.acpConnected) return;
@@ -47,6 +54,15 @@ async function selectAcp(id: string): Promise<void> {
 async function toggleTempReadOnly(on: boolean): Promise<void> {
   connectError.value = await agent.setTempReadOnly(on);
 }
+
+/**
+ * 选择条挂载即探测本机 CLI 安装状态（桌面态；浏览器态后端不接管 → 静默无结果）。
+ * 仅在此触发，确保 Guid / Conversation 两条渲染路径都能就地显示「已安装 / 首次启动下载 / 未安装」，
+ * 不必依赖用户先去过设置页（设置页的探测是 duplicate 调用，幂等且被 store 合并）。
+ */
+onMounted(() => {
+  void agent.refreshAgentDetection();
+});
 </script>
 
 <template>
@@ -70,7 +86,7 @@ async function toggleTempReadOnly(on: boolean): Promise<void> {
         >
       </button>
 
-      <!-- ACP agent 胶囊 -->
+      <!-- ACP agent 胶囊（全部后端，未启用的也能一步选到） -->
       <button
         v-for="provider in acpOptions"
         :key="provider.id"
@@ -79,13 +95,26 @@ async function toggleTempReadOnly(on: boolean): Promise<void> {
           'flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-full border px-2.5 text-[11.5px] transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan',
           selected === provider.id
             ? 'border-cyan/60 bg-cyan/10 text-foreground'
-            : 'border-line bg-panel text-dim hover:border-line-2 hover:text-foreground',
+            : provider.enabled
+              ? 'border-line bg-panel text-dim hover:border-line-2 hover:text-foreground'
+              : 'border-dashed border-line bg-panel text-dim2 hover:border-line-2 hover:text-foreground',
         ]"
         :aria-pressed="selected === provider.id"
+        :title="provider.enabled ? provider.command : (provider.installHint ?? provider.command)"
         @click="selectAcp(provider.id)"
       >
-        <Icon name="robot" :size="12" class="text-dim" />
+        <Icon name="robot" :size="12" :class="provider.enabled ? 'text-dim' : 'text-dim2'" />
         <span class="whitespace-nowrap">{{ provider.name }}</span>
+        <!-- 安装状态：探测有结论才显（未知则不喧宾夺主）；
+             已装中性、未装橙色引导；npx 型直说「首次启动下载」 -->
+        <span
+          v-if="agent.providerInstalled(provider) !== null"
+          class="shrink-0 text-[10px]"
+          :class="agent.providerInstalled(provider) === true ? 'text-dim2' : 'text-orange/80'"
+          :title="provider.installHint ?? provider.command"
+        >
+          {{ agent.providerInstallLabel(provider) }}
+        </span>
         <span v-if="agent.acpBusy && selected === provider.id" class="size-1.5 animate-pulse rounded-full bg-cyan" />
       </button>
 

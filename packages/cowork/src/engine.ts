@@ -16,6 +16,7 @@ import {
   type CoworkRole,
   type CoworkRun,
   type CoworkSlot,
+  type CoworkSpecialty,
   type WakeState,
 } from "./types";
 
@@ -25,6 +26,8 @@ export interface CoworkSlotInit {
   role: CoworkRole;
   /** 该成员位绑定的会话 id：它的消息流全部落在这个会话里。 */
   threadId: string;
+  /** teammate 的职能标签（leader 传了会被忽略）。 */
+  specialty?: CoworkSpecialty;
 }
 
 export interface CoworkEngineInit {
@@ -94,6 +97,8 @@ export function createCoworkEngine(init: CoworkEngineInit): CoworkEngine {
       status: "pending",
       threadId: slot.threadId,
       turns: 0,
+      // leader 不带职能标签（协作模型只对执行者注入定位）。
+      specialty: slot.role === "leader" ? undefined : slot.specialty,
     })),
     tasks: [],
     mail: [],

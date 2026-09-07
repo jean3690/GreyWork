@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createCoworkEngine } from "../../src/engine";
+import { createCoworkEngine, type CoworkSlotInit } from "../../src/engine";
 import type { CoworkBudget, CoworkDispatchInput, CoworkEvent } from "../../src/types";
 
 /** 把指令包成 agent 输出里的 ```cowork 围栏。 */
@@ -8,6 +8,7 @@ const fence = (ops: unknown): string => `\`\`\`cowork\n${JSON.stringify(ops)}\n\
 interface HarnessOptions {
   budget?: Partial<CoworkBudget>;
   maxParallel?: number;
+  slots?: readonly CoworkSlotInit[];
 }
 
 /**
@@ -23,7 +24,7 @@ function harness(options: HarnessOptions = {}) {
 
   const engine = createCoworkEngine({
     goal: "上线登录功能",
-    slots: [
+    slots: options.slots ?? [
       { id: "slot-lead", name: "Alpha", role: "leader", threadId: "ses-1" },
       { id: "slot-a", name: "Builder", role: "teammate", threadId: "ses-2" },
       { id: "slot-b", name: "Reviewer", role: "teammate", threadId: "ses-3" },
@@ -327,5 +328,50 @@ describe("cowork 引擎：静止判定与失败恢复", () => {
     engine.sendUser("还在吗");
     expect(dispatches).toHaveLength(before);
     expect(engine.run.status).toBe("cancelled");
+  });
+});
+
+describe("cowork 引擎：teammate 职能标签", () => {
+  it("带 specialty 的成员位：role prompt 注入职能定位，slot 视图透传标签", () => {
+    const { engine, dispatches } = harness({
+      slots: [
+        { id: "slot-lead", name: "Alpha", role: "leader", threadId: "ses-1" },
+        { id: "slot-a", name: "Builder", role: "teammate", threadId: "ses-2", specialty: "builder" },
+        { id: "slot-b", name: "Searcher", role: "teammate", threadId: "ses-3", specialty: "researcher" },
+      ],
+    });
+    engine.start();
+    engine.applyOutput("slot-lead", fence([{ op: "task", subject: "调研竞品", owner: "Searcher" }]));
+
+    expect(engine.slotOf("slot-a")?.specialty).toBe("builder");
+    expect(engine.slotOf("slot-b")?.specialty).toBe("researcher");
+
+    // leader 的花名册用 slotLine 展示每位成员：职能标签可见。
+    expect(dispatches[0]!.prompt).toContain("职能: researcher");
+
+    const searcherTurn = dispatches.find((item) => item.slot.id === "slot-b")!;
+    expect(searcherTurn.kind).toBe("role");
+    expect(searcherTurn.prompt).toContain("你是团队成员 Searcher");
+    expect(searcherTurn.prompt).toContain("你侧重搜集信息与调研");
+  });
+
+  it("无 specialty 的成员不注入职能段；leader 传了 specialty 也被忽略", () => {
+    const { engine, dispatches } = harness({
+      slots: [
+        { id: "slot-lead", name: "Alpha", role: "leader", threadId: "ses-1", specialty: "reviewer" },
+        { id: "slot-a", name: "Plain", role: "teammate", threadId: "ses-2" },
+      ],
+    });
+    engine.start();
+
+    expect(engine.slotOf("slot-lead")?.specialty).toBeUndefined();
+    expect(dispatches[0]!.prompt).toContain("你是团队 leader");
+    expect(dispatches[0]!.prompt).not.toContain("你的职能");
+
+    engine.applyOutput("slot-lead", fence([{ op: "task", subject: "通用活", owner: "Plain" }]));
+    const plainTurn = dispatches.find((item) => item.slot.id === "slot-a")!;
+    expect(plainTurn.prompt).toContain("你是团队成员 Plain");
+    expect(plainTurn.prompt).not.toContain("你的职能");
+    expect(plainTurn.prompt).not.toContain("职能:");
   });
 });

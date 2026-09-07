@@ -50,6 +50,9 @@ export const SANDBOX_MODES: { value: SandboxMode; label: string; desc: string }[
 
 const SANDBOX_MODE_VALUES: Record<SandboxMode, true> = { off: true, fs: true, full: true };
 
+/** 编排并发度合法区间（含端点）。 */
+export const MAX_PARALLEL_RANGE = { min: 1, max: 8 } as const;
+
 /**
  * 权限档位 → 建议沙盒档位。
  *
@@ -112,6 +115,8 @@ export interface SavedSettings {
   sandboxMode?: SandboxMode;
   workspaceDir?: string;
   mcpServers?: McpServerEntry[];
+  /** 多智能体编排并发度（同时跑的回合上限）；1-8，越界静默回落 2。 */
+  maxParallel?: number;
 }
 
 const settingsStorage = createJsonStorage<SavedSettings>(
@@ -124,6 +129,8 @@ export const useSettingsStore = defineStore("settings", () => {
   const permissionTier = ref<PermTier>("workspace");
   /** 沙盒档位：off 直启；fs = bwrap 文件系统隔离 + 网络关闭；full = 隔离 + 网络放行。 */
   const sandboxMode = ref<SandboxMode>("off");
+  /** 多智能体编排并发度（同时跑的回合上限）。默认 2，与既有并行编排一致。 */
+  const maxParallel = ref(2);
   /**
    * 会话内临时降级到只读：**刻意不持久化**。
    *
@@ -170,6 +177,11 @@ export const useSettingsStore = defineStore("settings", () => {
     if (saved.permissionTier && PERM_TIER_VALUES[saved.permissionTier]) permissionTier.value = saved.permissionTier;
     if (saved.sandboxMode && SANDBOX_MODE_VALUES[saved.sandboxMode]) sandboxMode.value = saved.sandboxMode;
     if (typeof saved.workspaceDir === "string") workspaceDir.value = saved.workspaceDir;
+    // 并发度：仅整数且落在区间内才接受；越界 / 非法值静默回落默认 2（不写通知）。
+    if (Number.isInteger(saved.maxParallel)) {
+      const n = saved.maxParallel as number;
+      maxParallel.value = n >= MAX_PARALLEL_RANGE.min && n <= MAX_PARALLEL_RANGE.max ? n : 2;
+    }
     if (saved.theme === "dark" || saved.theme === "light" || saved.theme === "system") theme.value = saved.theme;
     if (saved.locale === "zh-CN" || saved.locale === "en-US") locale.value = saved.locale;
     if (typeof saved.selectedModelProviderId === "string" || saved.selectedModelProviderId === null) {
@@ -219,6 +231,7 @@ export const useSettingsStore = defineStore("settings", () => {
       sandboxMode: sandboxMode.value,
       workspaceDir: workspaceDir.value,
       mcpServers: mcpServers.value,
+      maxParallel: maxParallel.value,
     };
     settingsStorage.write(snapshot);
     if (settingsBackend.active()) {
@@ -309,6 +322,7 @@ export const useSettingsStore = defineStore("settings", () => {
   return {
     permissionTier,
     sandboxMode,
+    maxParallel,
     tempReadOnly,
     effectivePermissionTier,
     runMode,

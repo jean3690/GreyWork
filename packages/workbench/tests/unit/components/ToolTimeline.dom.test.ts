@@ -108,4 +108,22 @@ describe("ToolTimeline", () => {
     await wrapper.get("button").trigger("click");
     expect(wrapper.find('[data-testid="tool-row-toggle"]').exists()).toBe(false);
   });
+
+  it("运行中显示已结算/总量进度（3/7 式）", () => {
+    const wrapper = render([
+      act({ toolCallId: "a", kind: "read", path: "a.ts" }),
+      act({ toolCallId: "b", kind: "read", path: "b.ts" }),
+      act({ toolCallId: "c", kind: "execute", command: "pnpm test", status: "in_progress", finishedAt: null }),
+    ]);
+    expect(wrapper.get('[data-testid="tool-progress"]').text()).toBe("2/3");
+  });
+
+  it("结算后显示任务级总耗时（不显示进度数字）", () => {
+    const wrapper = render([
+      act({ toolCallId: "a", kind: "read", path: "a.ts", startedAt: T, finishedAt: T + 900 }),
+      act({ toolCallId: "b", kind: "read", path: "b.ts", startedAt: T + 500, finishedAt: T + 1500 }),
+    ]);
+    expect(wrapper.find('[data-testid="tool-progress"]').exists()).toBe(false);
+    expect(wrapper.get('[data-testid="tool-span"]').text()).toBe("1.5s");
+  });
 });

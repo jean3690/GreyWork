@@ -231,3 +231,66 @@ describe("parseBlocks · 演示 Brief 端到端", () => {
     expect(lists[1].type === "list" && lists[1].items[0].children?.items).toHaveLength(2);
   });
 });
+
+describe("marked 引擎契约（2026-09 换引擎后钉住）", () => {
+  it("`_x_` 两侧成斜体，snake_case 保持文本（CommonMark 词内规则）", () => {
+    const tokens = parseInline("_em_ 与 use_some_name");
+    expect(tokens.filter((t) => t.t === "italic").map((t) => t.v)).toEqual(["em"]);
+    expect(flat(tokens)).toBe("em 与 use_some_name");
+  });
+
+  it("反斜杠转义生效，硬换行（行尾两空格）拆成两行", () => {
+    // 反斜杠被消费，星号以字面文本呈现（不斜体）
+    const escaped = parseInline("\\*not em\\*");
+    expect(escaped.some((t) => t.t === "italic")).toBe(false);
+    expect(flat(escaped)).toBe("*not em*");
+    const para = firstOf(parseBlocks("a  \nb"), "p");
+    expect(para.lines.map(flat)).toEqual(["a", "b"]);
+  });
+
+  it("行内 HTML 降级为字面文本，不产出任何标签语义", () => {
+    const tokens = parseInline("a <b>x</b> <script>s</script>");
+    expect(tokens.every((t) => t.t === "text")).toBe(true);
+    expect(flat(tokens)).toBe("a <b>x</b> <script>s</script>");
+  });
+
+  it("块级 HTML（script 等）整体按字面段落输出", () => {
+    const blocks = parseBlocks("<script>alert(1)</script>\n\nok");
+    const lines = firstOf(blocks, "p").lines;
+    expect(flat(lines[0])).toBe("<script>alert(1)</script>");
+    expect(blocks[1].type).toBe("p");
+    expect(flat(blocks[1].type === "p" ? blocks[1].lines[0] : [])).toBe("ok");
+  });
+
+  it("图片降级为字面原文（安全模型：不产出 link/image 语义）", () => {
+    const tokens = parseInline("![alt](https://x.com/i.png)");
+    expect(tokens.every((t) => t.t === "text")).toBe(true);
+    expect(flat(tokens)).toBe("![alt](https://x.com/i.png)");
+  });
+
+  it("自动链接：安全协议成可点链接，脚本协议降级", () => {
+    expect(parseInline("<https://a.com>")).toEqual([{ t: "link", v: "https://a.com", href: "https://a.com" }]);
+    const danger = parseInline("<javascript:alert(1)>");
+    expect(danger.some((t) => t.t === "link")).toBe(false);
+    expect(flat(danger)).toBe("<javascript:alert(1)>");
+  });
+
+  it("text 后紧跟 --- 是 setext 标题而非分割线", () => {
+    expect(parseBlocks("Title\n---")[0].type).toBe("heading");
+    expect(parseBlocks("Title\n\n---")[1].type).toBe("hr");
+  });
+
+  it("嵌套行内格式外层胜出，不残留内层标记", () => {
+    expect(parseInline("**a `c` _e_**")).toEqual([{ t: "bold", v: "a c e" }]);
+  });
+
+  it("引用内块级语法保持字面（仅行内解析）", () => {
+    const quote = firstOf(parseBlocks("> - a\n> # b"), "quote");
+    expect(quote.lines.map(flat)).toEqual(["- a", "# b"]);
+  });
+
+  it("任务列表标记降级为字面 [x] / [ ]", () => {
+    const list = firstOf(parseBlocks("- [x] done\n- [ ] todo"), "list");
+    expect(list.items.map((item) => flat(item.inline))).toEqual(["[x] done", "[ ] todo"]);
+  });
+});
