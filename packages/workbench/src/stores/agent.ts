@@ -13,10 +13,12 @@ import { agentsBackend, type AgentProgramProbe, type AgentProviderRow } from "..
 import { defineStore } from "pinia";
 import { ref, watch } from "vue";
 import { useChatStore } from "./chat";
+import { usePreviewStore } from "./preview";
+import { useSessionStore } from "./session";
 import { useSettingsStore } from "./settings";
 import { useWorkspaceStore } from "./workspace";
 import { i18n } from "../i18n";
-import { parseToolActivityPayload } from "../lib/tool-activity";
+import { formatDuration, parseToolActivityPayload } from "../lib/tool-activity";
 import type { ThreadMessage } from "../types";
 import { resolveWorkspaceDir } from "../lib/workspace-dir";
 import { activeConversationFolder } from "../lib/conversation-folder";
@@ -44,8 +46,8 @@ export interface WorkflowStep {
 export interface RunEventBridge {
   /** session-update 载荷；sessionId 命中子任务会话即写子任务支架，返回 true 表示已消费。 */
   routeSessionUpdate?(payload: unknown): boolean;
-  /** prompt-done 按 handle 完成子任务（finishSubtask + 解除回执）；true = 已消费。 */
-  routeSubtaskDone?(handle: number): boolean;
+  /** prompt-done 按 handle 完成子任务（finishSubtask + 解除回执）；error = 回合失败原因；true = 已消费。 */
+  routeSubtaskDone?(handle: number, error?: string): boolean;
   /** 在途子任务句柄（applyPermissionTier 需同步档位到所有 agent 进程）。 */
   collectActiveHandles?(): number[];
 }
@@ -65,6 +67,15 @@ export interface GlobalTurnHooks {
   onPromptDone?(ctx: GlobalTurnEndContext): void;
   /** true = 回合开始不清 acpThoughtText（planner 路径保持与旧 dispatchRun 一致）。 */
   preserveThought?: boolean;
+}
+
+/** sendGlobalTurn 的派发选项。 */
+export interface GlobalTurnOptions {
+  hooks?: GlobalTurnHooks;
+  /** 信任调用方已 connectAcp（planner 路径与旧 dispatchRun 一致：先连接后建回合，不做会话隔离检查）。 */
+  reuseGlobalSession?: boolean;
+  /** 复用已入流的支架（计划门确认路径：user + assistant 已由 beginAcpPlan 推入，不再重复入流）。 */
+  reuseScaffold?: { threadId: string; message: ThreadMessage };
 }
 
 const PROVIDERS_STORAGE_KEY = "greywork.agent-providers";
@@ -104,8 +115,25 @@ export const useAgentStore = defineStore("agent", () => {
 
   /* ===== ACP 后端（工作台接入） ===== */
   const agentProviderRegistry = createAgentProviderRegistry();
+  /** 用户自配 ACP 后端 id 前缀：mergeProviders 据此把自配项保留过加载（预设合并丢弃注册表外残留）。 */
+  const CUSTOM_AGENT_PROVIDER_ID_PREFIX = "custom-";
+  /** 是否为用户自配后端（预设项不可编辑/删除，合并时也不会被丢弃）。 */
+  function isCustomAgentProvider(id: string): boolean {
+    return id.startsWith(CUSTOM_AGENT_PROVIDER_ID_PREFIX);
+  }
+  /** 自配后端 id：时间戳 + 随机后缀，跨重启唯一。 */
+  function newCustomProviderId(): string {
+    return `${CUSTOM_AGENT_PROVIDER_ID_PREFIX}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  }
+  /** 从命令首 token 派生探测程序（自配后端无预设 detect 元数据，仍能显示安装状态）。 */
+  function detectProgramOf(command: string): string[] {
+    const program = command.trim().split(/\s+/)[0] ?? "";
+    const basename = program.split(/[\\/]/).pop() ?? program;
+    return basename ? [basename] : [];
+  }
   const cachedProviders = providersStorage.read()?.providers;
-  const agentProviders = ref<AgentProviderConfig[]>(cachedProviders ?? agentProviderRegistry.list());
+  // 缓存命中也走合并：旧缓存可能只有早期几个预设，升级后要把新增预设带出来。
+  const agentProviders = ref<AgentProviderConfig[]>(mergeProviders(cachedProviders));
   const savedPref = providerPrefStorage.read();
   const savedProvider = savedPref?.providerId ? agentProviders.value.find((provider) => provider.id === savedPref?.providerId) : undefined;
   const selectedProviderId = ref<string>(savedProvider?.id ?? agentProviders.value[0]?.id ?? "");
@@ -164,6 +192,43 @@ export const useAgentStore = defineStore("agent", () => {
   const acpStreamId = ref<string | null>(null);
   /** 事件监听只挂一次 */
   let listening = false;
+
+  /**
+   * 恢复会话的回放抑制窗口。
+   *
+   * `session/load` 之后 agent 可能把历史以 `session/update` 重放一遍，而历史已经在
+   * `messages` 里，再贴一遍会重复。置位期间只丢「内容类」update（正文 / thinking / 工具），
+   * 权限 / 配置 / usage / prompt-done 照常处理。窗口在「连续 300ms 无内容 update」或
+   * 硬上限 1s 时解除；stop / 切会话 / handle 变更也清位。agent 不重放时唯一成本 ≤300ms。
+   */
+  let replayGuard: { sessionId: string; lastContentAt: number } | null = null;
+  /** 清回放抑制窗口（stop / 切会话 / handle 变更 / 超时都走这里）。 */
+  function clearReplayGuard(): void {
+    replayGuard = null;
+  }
+  /**
+   * 进入回放抑制窗口后等待「连续 300ms 无内容 update」或硬上限 1s，然后解除。
+   * agent 不重放时成本仅 ≤300ms；用 rAF 之外的 setTimeout 轮询（测试可 fake timers）。
+   */
+  async function settleReplay(sessionId: string): Promise<void> {
+    replayGuard = { sessionId, lastContentAt: Date.now() };
+    const startedAt = Date.now();
+    const QUIET_MS = 300;
+    const HARD_MS = 1000;
+    // 轮询式静默检测：事件处理里会刷新 lastContentAt，这里只判断窗口何时结束。
+    await new Promise<void>((resolve) => {
+      const tick = (): void => {
+        if (replayGuard === null) return resolve(); // 已被外部清位
+        const quietEnough = Date.now() - replayGuard.lastContentAt >= QUIET_MS;
+        const overtime = Date.now() - startedAt >= HARD_MS;
+        if (quietEnough || overtime) return resolve();
+        setTimeout(tick, 50);
+      };
+      tick();
+    });
+    // 到时有可能是内容仍在刷（overtime 触发），但只要没被外部清，就解除——下游新内容已不属重放。
+    clearReplayGuard();
+  }
   /** 连接中标记：connectAcp 防重入。 */
   const acpConnecting = ref(false);
   /** spawn 在途收到停止：startAcpSession 在检查点自行收尾（spawn 无法精确取消）。 */
@@ -196,6 +261,21 @@ export const useAgentStore = defineStore("agent", () => {
   /** 在途全局回合的收尾钩子（sendGlobalTurn 置入；prompt-done/异常清空，stopped 不清——编排 plannerPending 悬置语义保真）。 */
   let turnHooks: GlobalTurnHooks | null = null;
 
+  /**
+   * 回合失败落文案：空内容整段替换为失败行；已有流式内容则在末尾追加失败行。
+   * prompt-done 带 error、planner 钩子未自写错误文案时共用——失败回合不落「无文本输出」。
+   */
+  function writeTurnError(messageId: string, detail: string, threadId: string): void {
+    const message = chat.threads[threadId]?.find((candidate) => candidate.id === messageId);
+    if (!message) return;
+    const text = t("chat.llmCallFailed", { detail });
+    if (!message.content.trim()) chat.setMessageContent(messageId, text, threadId);
+    else {
+      chat.appendMessageContent(messageId, `\n\n${text}`, threadId);
+      chat.flushPendingContent();
+    }
+  }
+
   async function ensureListener(): Promise<void> {
     if (listening) return;
     listening = true;
@@ -208,20 +288,30 @@ export const useAgentStore = defineStore("agent", () => {
         // 子任务会话事件（sessionId 命中编排域注册的会话）由桥直接写子任务支架并消费；
         // 宿主发出的是 camelCase sessionId（ACP schema 的 serde 约定）。
         if (typeof payload.sessionId === "string" && runBridge?.routeSessionUpdate?.(event.payload) === true) return;
-        // 解析 agent_message 中携带的工具调用部分（read/edit/bash/search …），
-        // 并入支架消息的 tools 时间线 —— 前端「工具聚合时间线」数据源。
-        const toolActivities = parseToolActivityPayload(event.payload);
-        if (toolActivities.length > 0 && acpStream && acpThreadId) {
-          chat.appendTools(toolActivities, acpStream.id, acpThreadId);
-        }
-        if (payload.update?.sessionUpdate === "agent_message_chunk") {
-          const text = payload.update.content?.text ?? "";
-          if (!text) return;
-          if (acpStream && acpThreadId) chat.appendMessageContent(acpStream.id, text, acpThreadId);
+        // 恢复会话的回放抑制：窗口期内只丢「内容类」update（工具 / 正文），避免历史重复渲染。
+        // 匹配规则：事件带 sessionId 时须等于恢复出的 session；缺失则按 handle 级窗口（本会话）。
+        const suppressed = replayGuard !== null && (payload.sessionId === undefined || payload.sessionId === replayGuard.sessionId);
+        if (!suppressed) {
+          // 解析 agent_message 中携带的工具调用部分（read/edit/bash/search …），
+          // 并入支架消息的 tools 时间线 —— 前端「工具聚合时间线」数据源。
+          const toolActivities = parseToolActivityPayload(event.payload);
+          if (toolActivities.length > 0 && acpStream && acpThreadId) {
+            chat.appendTools(toolActivities, acpStream.id, acpThreadId);
+          }
+          if (payload.update?.sessionUpdate === "agent_message_chunk") {
+            const text = payload.update.content?.text ?? "";
+            if (!text) return;
+            if (acpStream && acpThreadId) chat.appendMessageContent(acpStream.id, text, acpThreadId);
+          }
+        } else {
+          // 被抑制的内容类 update 仍在推进「静默」计时：只要有内容到达就把窗口往后挪，
+          // 直到连续 300ms 无内容为止（见 settleReplay）。
+          if (replayGuard) replayGuard.lastContentAt = Date.now();
         }
       } else if (event.kind === "thought") {
         // 思考流（AgentThoughtChunk）：聚合到 store 快照，并续写支架消息的 thinking
         // 字段（ThinkingBlock 数据源），不打断正文流。
+        if (replayGuard) return; // 回放抑制：恢复窗口内的思考流同样不写（历史已在 messages）。
         const payload = event.payload as { text?: string };
         if (!payload.text) return;
         acpThoughtText.value += payload.text;
@@ -271,29 +361,54 @@ export const useAgentStore = defineStore("agent", () => {
         armPermissionTimer();
       } else if (event.kind === "prompt-done") {
         chat.flushPendingContent();
-        const payload = event.payload as { handle?: number; response?: unknown };
+        const payload = event.payload as { handle?: number; response?: unknown; error?: unknown; files?: unknown };
+        // 回合失败原因（prompt 层错误 / 宿主超时 / agent JSON-RPC 错误）。有值 = 失败回合：
+        // 落失败文案而非「无文本输出」，且不发「完成」脚标/通知——否则挂掉的后端会被当成成功。
+        const errorText = typeof payload.error === "string" && payload.error.trim() ? payload.error.trim() : "";
         // 1) 子任务完成：按 handle 经桥路由到编排域（finishSubtask + 解除回执）
-        if (payload.handle !== undefined && runBridge?.routeSubtaskDone?.(payload.handle) === true) return;
+        if (payload.handle !== undefined && runBridge?.routeSubtaskDone?.(payload.handle, errorText) === true) return;
         // 2) hooked 全局回合（编排 planner 阶段）：脚手架收尾后回调编排域解析计划。
         //    镜像旧 planner 分支：只清 stream/busy，不清 activeTurnId/turnStartedAtMs（那是普通回合收尾才做）。
         if (turnHooks && acpStream && acpThreadId) {
+          const hooks = turnHooks;
           const threadId = acpThreadId;
           const messageId = acpStream.id;
           const message = chat.threads[threadId]?.find((candidate) => candidate.id === messageId);
-          if (message && !message.content.trim()) chat.setMessageContent(messageId, t("chat.noOutput"), threadId);
+          if (message && errorText) {
+            // 失败回合：编排钩子可自写错误文案（返回 true）；否则落失败行，
+            // onPromptDone 照常收尾（planner 解析失败会转 run failed，不会假装成功）。
+            if (hooks.onPromptError?.({ threadId, messageId, error: errorText }) !== true) {
+              writeTurnError(messageId, errorText, threadId);
+            }
+          } else if (message && !message.content.trim()) {
+            chat.setMessageContent(messageId, t("chat.noOutput"), threadId);
+          }
           acpStream = null;
           acpThreadId = null;
           acpStreamId.value = null;
           acpBusy.value = false;
-          const hooks = turnHooks;
           turnHooks = null;
           hooks.onPromptDone?.({ threadId, messageId });
           return;
         }
         // 3) 普通全局回合（既有逻辑）
+        const turnStart = turnStartedAtMs.value;
         if (acpStream && acpThreadId) {
           const message = chat.threads[acpThreadId]?.find((candidate) => candidate.id === acpStream?.id);
-          if (message && !message.content.trim()) chat.setMessageContent(message.id, t("chat.noOutput"), acpThreadId);
+          if (message && errorText) {
+            writeTurnError(message.id, errorText, acpThreadId);
+          } else if (message && !message.content.trim()) {
+            chat.setMessageContent(message.id, t("chat.noOutput"), acpThreadId);
+          } else if (message && turnStart != null) {
+            // 回合收尾脚标：真实 ACP 路径原本只有状态翻转（无任何显式「完成」文本），
+            // 加一行完成脚标让用户确认响应已结束——否则以为还在生成而去按停止。
+            chat.appendMessageContent(
+              message.id,
+              t("chat.completedFooter", { duration: formatDuration(Date.now() - turnStart) }),
+              acpThreadId,
+            );
+            chat.flushPendingContent();
+          }
         }
         acpStream = null;
         acpThreadId = null;
@@ -301,6 +416,29 @@ export const useAgentStore = defineStore("agent", () => {
         acpBusy.value = false;
         activeTurnId.value = null;
         turnStartedAtMs.value = null;
+        // 成功回合的磁盘产物自动开右栏预览：宿主只在成功回合把工作区内本回合修改过的
+        // 文档类文件（md/html/csv/xlsx/docx/pptx/pdf）随 prompt-done 带回 files；
+        // 失败回合不带，这里也不弹。open 天然幂等（同路径聚焦），多文件按序开。
+        if (!errorText && Array.isArray(payload.files)) {
+          const preview = usePreviewStore();
+          for (const raw of payload.files) {
+            if (typeof raw !== "string" || !raw.trim()) continue;
+            const path = raw.trim();
+            preview.open(path, path.split(/[\\/]/).pop() || path, "disk");
+          }
+        }
+        // 完成通知（success toast，自动消失）：回合结束是低频事件，值得一个明确的「完成」反馈，
+        // 用户不必盯着输入框从「处理中…」翻成「就绪」才知道干完了。
+        // 失败回合不发：错误已在气泡里，成功 toast 会把挂掉的后端演成「完成」。
+        if (!errorText && turnStart != null) {
+          const duration = formatDuration(Date.now() - turnStart);
+          notify({
+            kind: "success",
+            key: "acp-turn-done",
+            title: t("chat.completedToast"),
+            detail: t("chat.completedDetail", { duration }),
+          });
+        }
       } else if (event.kind === "stopped") {
         chat.flushPendingContent();
         if (acpStream && acpThreadId) {
@@ -387,10 +525,40 @@ export const useAgentStore = defineStore("agent", () => {
       // 已有进程就只在它上面另开会话，不再 spawn 第二个 CLI。
       acpHandle.value ??= await acp.startAgent(provider.command, settings.effectivePermissionTier, settings.sandboxMode, workspace);
       if (abortConnecting) return await abortInFlightStart();
-      // 建会话时把启用的 MCP 服务器声明给 agent；宿主按后端能力过滤，
-      // 被跳过的原因回灌到 acpMcpSkipped 供设置页明示（不静默丢配置）。
-      adoptOpenedSession(await acp.openSession(acpHandle.value, workspace, settings.enabledMcpServers), threadId);
+
+      // 惰性恢复：当前对话若落盘了 ACP 绑定、且 provider/cwd 仍一致，先尝试 session/load
+      // 接回旧上下文；失败（agent 不支持 / 会话失效）静默回落新建。任何路径都不发错误通知，
+      // 保证「发送必达」。
+      const binding = threadId !== null ? (useSessionStore().getSession(threadId)?.acp ?? null) : null;
+      const canRestore = binding !== null && binding.providerId === provider.id && binding.cwd === workspace;
+      let restoredSessionId: string | null = null;
+      if (canRestore) {
+        try {
+          const opened = await acp.loadSession(acpHandle.value, workspace, binding.sessionId, settings.enabledMcpServers);
+          adoptOpenedSession(opened, threadId);
+          restoredSessionId = opened.sessionId;
+          await settleReplay(opened.sessionId);
+        } catch {
+          // 回落：清掉恢复标记，下面还是走 session/new（保持孤立分支可读）。
+          restoredSessionId = null;
+        }
+      }
+      if (restoredSessionId === null) {
+        // 建会话时把启用的 MCP 服务器声明给 agent；宿主按后端能力过滤，
+        // 被跳过的原因回灌到 acpMcpSkipped 供设置页明示（不静默丢配置）。
+        adoptOpenedSession(await acp.openSession(acpHandle.value, workspace, settings.enabledMcpServers), threadId);
+      }
       if (abortConnecting) return await abortInFlightStart();
+
+      // 落盘绑定（新建或恢复都记，便于下次重启接回）。threadId 为 null 时不绑定具体对话。
+      if (threadId !== null) {
+        useSessionStore().setAcpBinding(threadId, {
+          sessionId: acpSessionId.value as string,
+          providerId: provider.id,
+          cwd: workspace,
+          savedAt: Date.now(),
+        });
+      }
       return null;
     } catch (error) {
       acpStatus.value = "error";
@@ -424,13 +592,17 @@ export const useAgentStore = defineStore("agent", () => {
    * `reuseGlobalSession: true` 时信任调用方已 connectAcp（planner 路径与旧 dispatchRun 一致：
    * 先 connect 后建回合，不做「会话是否属于本线程」的隔离检查）；默认做隔离检查。
    */
-  async function sendGlobalTurn(
-    text: string,
-    providerName: string,
-    options: { hooks?: GlobalTurnHooks; reuseGlobalSession?: boolean } = {},
-  ): Promise<void> {
+  async function sendGlobalTurn(text: string, providerName: string, options: GlobalTurnOptions = {}): Promise<void> {
     if (acpBusy.value || acpConnecting.value) return;
-    const { threadId, message } = chat.startAcpTurn(text, providerName);
+    let threadId: string;
+    let message: ThreadMessage;
+    if (options.reuseScaffold) {
+      // 计划门确认：user 消息与支架已在挂卡时入流，直接复用，避免重复入流。
+      threadId = options.reuseScaffold.threadId;
+      message = options.reuseScaffold.message;
+    } else {
+      ({ threadId, message } = chat.startAcpTurn(text, providerName));
+    }
     acpStream = message;
     acpThreadId = threadId;
     acpStreamId.value = message.id;
@@ -486,6 +658,28 @@ export const useAgentStore = defineStore("agent", () => {
   async function dispatchToAcp(text: string): Promise<void> {
     const providerName = agentProviders.value.find((provider) => provider.id === selectedProviderId.value)?.name ?? "ACP";
     await sendGlobalTurn(text, providerName);
+  }
+
+  /**
+   * 计划模式 · ACP 门：先入流 user + 支架并挂起计划卡（planPending），确认前不派发、不建会话。
+   * 确认走 confirmAcpPlan 复用同一支架；取消只需 chat.cancelPlan 摘掉卡片。
+   */
+  function beginAcpPlan(text: string): void {
+    const providerName = agentProviders.value.find((provider) => provider.id === selectedProviderId.value)?.name ?? "ACP";
+    const { message } = chat.startAcpTurn(text, providerName);
+    message.planDraft = text;
+    message.planPending = true;
+  }
+
+  /** 计划模式 · ACP 确认：解除计划卡并按 planDraft 派发同一支架（不重复入流）。
+   * 回合运行中确认被忽略（卡片保持挂起），等当前回合结束后可再次确认。 */
+  function confirmAcpPlan(threadId: string, message: ThreadMessage): void {
+    const text = message.planDraft;
+    const providerName = message.acp;
+    if (!text || !providerName || !message.planPending || acpBusy.value || acpConnecting.value) return;
+    message.planPending = false;
+    message.planDraft = undefined;
+    void sendGlobalTurn(text, providerName, { reuseScaffold: { threadId, message } });
   }
 
   /** 编排域（runs store）注册事件消费桥；null = 解除。 */
@@ -590,6 +784,7 @@ export const useAgentStore = defineStore("agent", () => {
       abortConnecting = true;
       return;
     }
+    clearReplayGuard(); // 停会话即终止回放抑制窗口（如有）。
     if (acpHandle.value === null) return;
     try {
       // 有在途回合：精确取消该回合（agent 进程与会话保留，可继续对话）。
@@ -656,6 +851,30 @@ export const useAgentStore = defineStore("agent", () => {
     return preset ? { ...provider, detect: preset.detect, installHint: preset.installHint } : provider;
   }
 
+  /**
+   * 把持久化状态（只存 id/name/kind/command/enabled）合并回当前预设注册表。
+   *
+   * **为什么需要**：预设列表随版本扩充（3 → 12 个主流 ACP agent），但旧用户本地已落库的
+   * providers 仍是旧快照。若直接以缓存/库覆盖，新加的 gemini/qwen/kimi… 永不可见，
+   * 选择条只会显示首次装库时的那几个。
+   *
+   * 合并规则：以注册表为准源（决定「有哪些」「顺序」「detect/installHint 元数据」），
+   * 仅把持久化的 `enabled` 覆盖回去；注册表新增的项带默认 enabled 出现。这样升级后
+   * 新预设自动可见，又不丢用户已开关的偏好。
+   *
+   * 用户自配的后端（`custom-*` 前缀）不在注册表里，但**必须保留**——预设合并丢弃的
+   * 只是「注册表已移除的残留项」，自配项是用户资产，按持久化顺序接在预设后面。
+   */
+  function mergeProviders(persisted: AgentProviderConfig[] | undefined): AgentProviderConfig[] {
+    const byId = new Map((persisted ?? []).map((provider) => [provider.id, provider]));
+    const presets = agentProviderRegistry.list().map((preset) => {
+      const saved = byId.get(preset.id);
+      return saved ? { ...preset, enabled: saved.enabled } : preset;
+    });
+    const custom = (persisted ?? []).filter((provider) => isCustomAgentProvider(provider.id));
+    return [...presets, ...custom];
+  }
+
   /** 本机 PATH 探测结果（program → 探测结果）；浏览器态恒为空 → UI 不显示安装状态。 */
   const agentDetection = ref<Record<string, AgentProgramProbe>>({});
 
@@ -692,7 +911,9 @@ export const useAgentStore = defineStore("agent", () => {
       .load()
       .then((providers) => {
         if (providers) {
-          agentProviders.value = providers.map(withPresetMeta);
+          // 合并而非整体覆盖：旧库快照缺新预设时，升级后自动补齐（enabled 以库为准）。
+          agentProviders.value = mergeProviders(providers).map(withPresetMeta);
+          persistProviders(); // 回写合并结果，把新增预设固化进库（自修复旧快照）
           // selected 在新目录中消失时回落首个 id（routeToAcp 状态保持，activate 再校验 enabled）
           if (!agentProviders.value.some((provider) => provider.id === selectedProviderId.value)) {
             selectedProviderId.value = agentProviders.value[0]?.id ?? "";
@@ -719,6 +940,60 @@ export const useAgentStore = defineStore("agent", () => {
     if (!enabled && id === selectedProviderId.value && routeToAcp.value) {
       await switchToLocalLlm(); // 停用当前后端：完整清理 ACP 状态回 Local
     }
+  }
+
+  /** 新增用户自配 ACP 后端（名称 + 启动命令）；返回错误文案（null = 成功）。 */
+  function addAgentProvider(name: string, command: string): string | null {
+    const trimmedName = name.trim();
+    const trimmedCommand = command.trim();
+    if (!trimmedName) return t("errors.agentProviderNameRequired");
+    if (!trimmedCommand) return t("errors.agentProviderCommandRequired");
+    agentProviders.value.push({
+      id: newCustomProviderId(),
+      name: trimmedName,
+      kind: "acp",
+      command: trimmedCommand,
+      enabled: true,
+      detect: detectProgramOf(trimmedCommand),
+    });
+    persistProviders();
+    void refreshAgentDetection();
+    return null;
+  }
+
+  /**
+   * 编辑用户自配 ACP 后端（名称 / 命令）。预设项不可改：合并流程会用注册表元数据
+   * 覆盖回去，改了也不持久，故直接拒绝。
+   */
+  function updateAgentProvider(id: string, name: string, command: string): string | null {
+    const provider = agentProviders.value.find((candidate) => candidate.id === id);
+    if (!provider || !isCustomAgentProvider(id)) return t("errors.agentProviderNotEditable");
+    const trimmedName = name.trim();
+    const trimmedCommand = command.trim();
+    if (!trimmedName) return t("errors.agentProviderNameRequired");
+    if (!trimmedCommand) return t("errors.agentProviderCommandRequired");
+    provider.name = trimmedName;
+    provider.command = trimmedCommand;
+    provider.detect = detectProgramOf(trimmedCommand);
+    persistProviders();
+    void refreshAgentDetection();
+    return null;
+  }
+
+  /** 删除用户自配 ACP 后端；删的是当前选中项时回落选择，正在 ACP 路由则先切回 Local。 */
+  async function removeAgentProvider(id: string): Promise<string | null> {
+    const provider = agentProviders.value.find((candidate) => candidate.id === id);
+    if (!provider) return t("errors.acpNotSelected");
+    if (!isCustomAgentProvider(id)) return t("errors.agentProviderNotEditable");
+    if (id === selectedProviderId.value && routeToAcp.value) {
+      await switchToLocalLlm();
+    }
+    agentProviders.value = agentProviders.value.filter((candidate) => candidate.id !== id);
+    if (id === selectedProviderId.value) {
+      selectedProviderId.value = agentProviders.value.find((candidate) => candidate.enabled)?.id ?? "";
+    }
+    persistProviders();
+    return null;
   }
 
   /** 切换首页 ACP CLI 入口。切换已有连接时先释放旧 agent，避免跨 provider 复用 session。 */
@@ -847,6 +1122,10 @@ export const useAgentStore = defineStore("agent", () => {
     providerInstalled,
     providerInstallLabel,
     setAgentProviderEnabled,
+    isCustomAgentProvider,
+    addAgentProvider,
+    updateAgentProvider,
+    removeAgentProvider,
     setAcpConfig,
     connectAcp,
     activateAcpProvider,
@@ -862,6 +1141,8 @@ export const useAgentStore = defineStore("agent", () => {
     switchToLocalLlm,
     restartAcpRuntime,
     dispatchToAcp,
+    beginAcpPlan,
+    confirmAcpPlan,
     stopAcp,
     respondPermission,
     probeMcpServer,

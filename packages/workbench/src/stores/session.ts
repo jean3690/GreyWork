@@ -19,6 +19,17 @@ export interface SessionRecord {
   createdAt: number;
   updatedAt: number;
   messages: ThreadMessage[];
+  /**
+   * ACP 会话绑定（惰性恢复）：先前建会话时落盘的 agent 会话 id，重启后据此走
+   * `session/load` 接回上下文，而不是开新会话。providerId/cwd 用于校验一致性——
+   * 切换 provider 或工作区即视为失效，回落新建。可选字段：旧数据无副作用。
+   */
+  acp?: {
+    sessionId: string;
+    providerId: string;
+    cwd: string;
+    savedAt: number;
+  };
 }
 
 const STORAGE_KEY = "greywork.sessions";
@@ -256,6 +267,19 @@ export const useSessionStore = defineStore("session", () => {
     return sessions.value.find((candidate) => candidate.id === id);
   }
 
+  /**
+   * 写/清某会话的 ACP 绑定（惰性恢复用）。
+   * null = 清绑定（回落新建）；非 null = 落盘 { sessionId, providerId, cwd, savedAt }。
+   * 仅改该条记录，不触碰消息树，因此不触发 markDirty 的 debounce 路径，直接 persist()。
+   */
+  function setAcpBinding(id: string, binding: SessionRecord["acp"] | null): void {
+    const record = getSession(id);
+    if (!record) return;
+    if (binding) record.acp = { ...binding };
+    else delete record.acp;
+    persist();
+  }
+
   /** 新建会话并置为当前；title 缺省「新对话」。 */
   function createSession(workspaceId: string | null, title: string = DEFAULT_TITLE): SessionRecord {
     const now = Date.now();
@@ -357,6 +381,7 @@ export const useSessionStore = defineStore("session", () => {
     /** 桌面态启动接管完成信号（null = 浏览器态无后端）；await 后库内容已就位。 */
     hydrated: backendHydratePromise,
     getSession,
+    setAcpBinding,
     createSession,
     ensure,
     renameSession,

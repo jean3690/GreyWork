@@ -135,6 +135,27 @@ describe("startRun", () => {
     }
   });
 
+  it("teammate 带 specialty 时透传到 slot 视图；leader 传了 specialty 被忽略", async () => {
+    let handleSeq = 0;
+    h.startAgent.mockImplementation(() => Promise.resolve(++handleSeq));
+    h.openSession.mockImplementation((handle: number) => Promise.resolve({ sessionId: `s-${handle}`, configOptions: [] }));
+    h.prompt.mockResolvedValue({ turnId: 1 });
+    const cowork = useCoworkStore();
+    const failure = await cowork.startRun("目标", [
+      { name: "Leader", role: "leader", specialty: "reviewer" },
+      { name: "Builder", role: "teammate", specialty: "builder" },
+      { name: "Searcher", role: "teammate" },
+    ]);
+    expect(failure).toBeNull();
+
+    const leader = cowork.slots.find((slot) => slot.name === "Leader");
+    const builder = cowork.slots.find((slot) => slot.name === "Builder");
+    const searcher = cowork.slots.find((slot) => slot.name === "Searcher");
+    expect(leader?.specialty).toBeUndefined();
+    expect(builder?.specialty).toBe("builder");
+    expect(searcher?.specialty).toBeUndefined();
+  });
+
   it("传输不可用时不起进程，返回错误文案", async () => {
     h.isAvailable.mockImplementation(() => false);
     const cowork = useCoworkStore();
@@ -224,6 +245,20 @@ describe("宿主事件分流", () => {
     expect(prompt).toContain("实现登录");
     expect(cowork.tasks[0]).toMatchObject({ subject: "实现登录", ownerName: "Builder", status: "pending" });
     expect(cowork.slots[1]!.wake).toBe("running");
+  });
+
+  it("成员回合失败（prompt-done 带 error）：支架落失败文案而非「无文本输出」", async () => {
+    const cowork = await startPair();
+    const chat = useChatStore();
+    const leaderThread = cowork.slots[0]!.threadId;
+
+    emit({ kind: "prompt-done", payload: { handle: 1, turnId: 1, error: "backend down" } });
+    await Promise.resolve();
+
+    const leaderMessages = chat.threads[leaderThread] ?? [];
+    const scaffold = leaderMessages.filter((message) => message.role === "assistant").at(-1);
+    expect(scaffold?.content).toBe("[LLM 调用失败] backend down");
+    expect(leaderMessages.some((message) => message.content === "（本次回合无文本输出）")).toBe(false);
   });
 
   it("空闲成员位收到 stopped 是噪声，不标记失败也不惊动 leader", async () => {

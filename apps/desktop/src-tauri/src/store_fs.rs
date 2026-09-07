@@ -60,7 +60,8 @@ impl StoreLock {
         for _ in 0..LOCK_RETRY_LIMIT {
             match std::fs::create_dir(&dir) {
                 Ok(()) => {
-                    let owner = serde_json::json!({ "pid": std::process::id(), "at": now_ms() as u64 });
+                    let owner =
+                        serde_json::json!({ "pid": std::process::id(), "at": now_ms() as u64 });
                     // owner 写失败不致命（只影响陈旧判定精度），锁本身已经拿到
                     let _ = std::fs::write(dir.join(LOCK_OWNER_FILE), owner.to_string());
                     return Ok(Self { dir });
@@ -196,7 +197,11 @@ fn session_dir_for_folder(root: &Path, folder: Option<&str>) -> Result<PathBuf, 
 }
 
 /// 某工作区（或无工作区）的会话目录；目录确保存在。
-fn session_dir_for(root: &Path, workspaces: &[WorkspaceDirDto], workspace_id: Option<&str>) -> Result<PathBuf, String> {
+fn session_dir_for(
+    root: &Path,
+    workspaces: &[WorkspaceDirDto],
+    workspace_id: Option<&str>,
+) -> Result<PathBuf, String> {
     let bound = workspace_id.and_then(|id| workspaces.iter().find(|w| w.id == id));
     session_dir_for_folder(root, bound.and_then(|w| w.folder.as_deref()))
 }
@@ -221,7 +226,13 @@ fn all_session_dirs(root: &Path, workspaces: &[WorkspaceDirDto]) -> Result<Vec<P
 /// 会话 id → 安全文件名（仅保留字母数字与 `-`/`_`，杜绝路径穿越）。
 fn safe_file_name(id: &str) -> String {
     id.chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
@@ -240,12 +251,17 @@ fn read_active(root: &Path) -> Option<String> {
     let raw = std::fs::read_to_string(root.join(ACTIVE_FILE)).ok()?;
     serde_json::from_str::<serde_json::Value>(&raw)
         .ok()
-        .and_then(|v| v.get("activeSessionId").and_then(|s| s.as_str()).map(String::from))
+        .and_then(|v| {
+            v.get("activeSessionId")
+                .and_then(|s| s.as_str())
+                .map(String::from)
+        })
 }
 
 fn write_active(root: &Path, active: Option<&str>) -> Result<(), String> {
     let payload = serde_json::json!({ "activeSessionId": active });
-    std::fs::write(root.join(ACTIVE_FILE), payload.to_string()).map_err(|e| format!("写入活动会话失败: {e}"))
+    std::fs::write(root.join(ACTIVE_FILE), payload.to_string())
+        .map_err(|e| format!("写入活动会话失败: {e}"))
 }
 
 fn list_session_files(dir: &Path) -> Result<Vec<(String, PathBuf)>, String> {
@@ -272,20 +288,24 @@ fn is_ready(root: &Path) -> bool {
 /* ===== 读 / 写 / 搬迁 ===== */
 
 /// 聚合读取全部会话文件（默认目录 + 各工作区目录）；未就绪 → None。
-pub fn read_snapshot(root: &Path, workspaces: &[WorkspaceDirDto]) -> Result<Option<SessionsSnapshotDto>, String> {
+pub fn read_snapshot(
+    root: &Path,
+    workspaces: &[WorkspaceDirDto],
+) -> Result<Option<SessionsSnapshotDto>, String> {
     if !is_ready(root) {
         return Ok(None);
     }
     let mut sessions = Vec::new();
     for dir in all_session_dirs(root, workspaces)? {
         for (id, path) in list_session_files(&dir)? {
-            let raw = std::fs::read_to_string(&path).map_err(|e| format!("读取会话 {id} 失败: {e}"))?;
+            let raw =
+                std::fs::read_to_string(&path).map_err(|e| format!("读取会话 {id} 失败: {e}"))?;
             let session: ConversationDto =
                 serde_json::from_str(&raw).map_err(|e| format!("解析会话 {id} 失败: {e}"))?;
             sessions.push(session);
         }
     }
-    sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    sessions.sort_by_key(|session| std::cmp::Reverse(session.updated_at));
     Ok(Some(SessionsSnapshotDto {
         sessions,
         active_session_id: read_active(root),
@@ -352,7 +372,10 @@ pub fn write_snapshot(
 ///
 /// 目标已有**更新**版本时两边都保留并记入 conflicts —— 宁可留下一份重复，也不能
 /// 静默盖掉另一实例/另一次会话里更晚的内容。
-pub fn relocate_sessions(root: &Path, request: &RelocateRequestDto) -> Result<RelocateReportDto, String> {
+pub fn relocate_sessions(
+    root: &Path,
+    request: &RelocateRequestDto,
+) -> Result<RelocateReportDto, String> {
     let from = session_dir_for_folder(root, request.from_folder.as_deref())?;
     let to = session_dir_for_folder(root, request.to_folder.as_deref())?;
     let mut report = RelocateReportDto::default();
@@ -399,7 +422,10 @@ pub fn migrate_from_db(
     if is_ready(root) {
         return Ok(None);
     }
-    match db.load_snapshot().map_err(|e| format!("读取旧库失败: {e}"))? {
+    match db
+        .load_snapshot()
+        .map_err(|e| format!("读取旧库失败: {e}"))?
+    {
         Some(legacy) => {
             write_snapshot(root, &legacy, workspaces, &[])?;
             Ok(Some(legacy))
@@ -476,8 +502,7 @@ pub async fn pick_workspace_folder(app: tauri::AppHandle) -> Result<Option<Strin
         .pick_folder(move |file_path| {
             let _ = tx.send(file_path.as_ref().and_then(|p| p.to_string().into()));
         });
-    rx.await
-        .map_err(|e| format!("目录选择对话框失败: {e}"))
+    rx.await.map_err(|e| format!("目录选择对话框失败: {e}"))
 }
 
 #[cfg(test)]
@@ -493,7 +518,12 @@ mod tests {
         }
     }
 
-    fn conversation(id: &str, title: &str, workspace_id: Option<&str>, n: usize) -> ConversationDto {
+    fn conversation(
+        id: &str,
+        title: &str,
+        workspace_id: Option<&str>,
+        n: usize,
+    ) -> ConversationDto {
         ConversationDto {
             id: id.into(),
             title: title.into(),
@@ -528,13 +558,21 @@ mod tests {
         };
         let report = write_snapshot(&root, &snapshot, &[], &[]).unwrap();
         assert_eq!(report.written, 1);
-        let loaded = read_snapshot(&root, &[]).unwrap().expect("接管后应返回真源");
+        let loaded = read_snapshot(&root, &[])
+            .unwrap()
+            .expect("接管后应返回真源");
         assert_eq!(loaded.sessions.len(), 1);
         assert_eq!(loaded.sessions[0].messages.len(), 2);
         assert_eq!(loaded.active_session_id.as_deref(), Some("ses-a"));
 
         // 空快照 = 用户清空（不复活）；文件本身要靠显式删除清单才消失
-        write_snapshot(&root, &SessionsSnapshotDto::default(), &[], &["ses-a".into()]).unwrap();
+        write_snapshot(
+            &root,
+            &SessionsSnapshotDto::default(),
+            &[],
+            &["ses-a".into()],
+        )
+        .unwrap();
         let loaded = read_snapshot(&root, &[]).unwrap().expect("接管后空真源");
         assert!(loaded.sessions.is_empty());
         let _ = std::fs::remove_dir_all(&tmp);
@@ -578,7 +616,10 @@ mod tests {
         let tmp = temp_home("incr");
         let root = default_root(&tmp).unwrap();
         let snapshot = SessionsSnapshotDto {
-            sessions: vec![conversation("ses-a", "A", None, 1), conversation("ses-b", "B", None, 2)],
+            sessions: vec![
+                conversation("ses-a", "A", None, 1),
+                conversation("ses-b", "B", None, 2),
+            ],
             active_session_id: None,
         };
         let first = write_snapshot(&root, &snapshot, &[], &[]).unwrap();
@@ -587,8 +628,16 @@ mod tests {
         let path = root.join("sessions/ses-a.json");
         let before = std::fs::metadata(&path).unwrap().modified().unwrap();
         let second = write_snapshot(&root, &snapshot, &[], &[]).unwrap();
-        assert_eq!((second.written, second.skipped), (0, 2), "内容未变应全部跳过");
-        assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), before, "跳过的文件不该被重写");
+        assert_eq!(
+            (second.written, second.skipped),
+            (0, 2),
+            "内容未变应全部跳过"
+        );
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().modified().unwrap(),
+            before,
+            "跳过的文件不该被重写"
+        );
 
         // 内容有变 → 重新写入
         let mut bumped = snapshot.clone();
@@ -607,7 +656,10 @@ mod tests {
         fresh.updated_at = 5_000;
         write_snapshot(
             &root,
-            &SessionsSnapshotDto { sessions: vec![fresh], active_session_id: None },
+            &SessionsSnapshotDto {
+                sessions: vec![fresh],
+                active_session_id: None,
+            },
             &[],
             &[],
         )
@@ -618,7 +670,10 @@ mod tests {
         stale.updated_at = 1_000;
         let report = write_snapshot(
             &root,
-            &SessionsSnapshotDto { sessions: vec![stale], active_session_id: None },
+            &SessionsSnapshotDto {
+                sessions: vec![stale],
+                active_session_id: None,
+            },
             &[],
             &[],
         )
@@ -626,7 +681,10 @@ mod tests {
         assert_eq!(report.written, 0);
         assert_eq!(
             report.conflicts,
-            vec![ConflictDto { id: "ses-a".into(), disk_updated_at: 5_000 }]
+            vec![ConflictDto {
+                id: "ses-a".into(),
+                disk_updated_at: 5_000
+            }]
         );
         let loaded = read_snapshot(&root, &[]).unwrap().unwrap();
         assert_eq!(loaded.sessions[0].title, "磁盘版", "冲突时磁盘版本不被覆盖");
@@ -638,7 +696,10 @@ mod tests {
         let tmp = temp_home("delete");
         let root = default_root(&tmp).unwrap();
         let snapshot = SessionsSnapshotDto {
-            sessions: vec![conversation("ses-old", "旧", None, 1), conversation("ses-keep", "留", None, 1)],
+            sessions: vec![
+                conversation("ses-old", "旧", None, 1),
+                conversation("ses-keep", "留", None, 1),
+            ],
             active_session_id: None,
         };
         write_snapshot(&root, &snapshot, &[], &[]).unwrap();
@@ -670,7 +731,10 @@ mod tests {
         let folder = tmp.join("proj");
         std::fs::create_dir_all(&folder).unwrap();
         let snapshot = SessionsSnapshotDto {
-            sessions: vec![conversation("ses-a", "A", None, 1), conversation("ses-b", "B", None, 1)],
+            sessions: vec![
+                conversation("ses-a", "A", None, 1),
+                conversation("ses-b", "B", None, 1),
+            ],
             active_session_id: None,
         };
         write_snapshot(&root, &snapshot, &[], &[]).unwrap();
@@ -687,13 +751,18 @@ mod tests {
         assert!(!root.join("sessions/ses-a.json").exists(), "源文件应被搬走");
         let moved = folder.join(".greyWork/sessions/ses-a.json");
         assert!(moved.exists());
-        let payload: ConversationDto = serde_json::from_str(&std::fs::read_to_string(&moved).unwrap()).unwrap();
+        let payload: ConversationDto =
+            serde_json::from_str(&std::fs::read_to_string(&moved).unwrap()).unwrap();
         assert_eq!(payload.title, "A");
 
         // 同目录搬迁 = no-op
         let same = relocate_sessions(
             &root,
-            &RelocateRequestDto { session_ids: vec!["ses-a".into()], from_folder: None, to_folder: None },
+            &RelocateRequestDto {
+                session_ids: vec!["ses-a".into()],
+                from_folder: None,
+                to_folder: None,
+            },
         )
         .unwrap();
         assert_eq!(same, RelocateReportDto::default());
@@ -712,14 +781,21 @@ mod tests {
         source.updated_at = 1_000;
         write_snapshot(
             &root,
-            &SessionsSnapshotDto { sessions: vec![source], active_session_id: None },
+            &SessionsSnapshotDto {
+                sessions: vec![source],
+                active_session_id: None,
+            },
             &[],
             &[],
         )
         .unwrap();
         let mut target = conversation("ses-a", "目标新版", None, 1);
         target.updated_at = 9_000;
-        std::fs::write(target_dir.join("ses-a.json"), serde_json::to_string(&target).unwrap()).unwrap();
+        std::fs::write(
+            target_dir.join("ses-a.json"),
+            serde_json::to_string(&target).unwrap(),
+        )
+        .unwrap();
 
         let report = relocate_sessions(
             &root,
@@ -732,9 +808,13 @@ mod tests {
         .unwrap();
         assert_eq!(report.moved, 0);
         assert_eq!(report.conflicts, vec!["ses-a".to_string()]);
-        assert!(root.join("sessions/ses-a.json").exists(), "冲突时源文件保留");
+        assert!(
+            root.join("sessions/ses-a.json").exists(),
+            "冲突时源文件保留"
+        );
         let kept: ConversationDto =
-            serde_json::from_str(&std::fs::read_to_string(target_dir.join("ses-a.json")).unwrap()).unwrap();
+            serde_json::from_str(&std::fs::read_to_string(target_dir.join("ses-a.json")).unwrap())
+                .unwrap();
         assert_eq!(kept.title, "目标新版");
         let _ = std::fs::remove_dir_all(&tmp);
     }
@@ -748,7 +828,10 @@ mod tests {
         {
             let _guard = StoreLock::acquire(&root).unwrap();
             assert!(root.join(LOCK_DIR).exists());
-            assert!(std::fs::create_dir(root.join(LOCK_DIR)).is_err(), "锁目录应互斥");
+            assert!(
+                std::fs::create_dir(root.join(LOCK_DIR)).is_err(),
+                "锁目录应互斥"
+            );
         }
         assert!(!root.join(LOCK_DIR).exists(), "Drop 应释放锁");
 
@@ -781,7 +864,9 @@ mod tests {
         db.sync_snapshot(&legacy).unwrap();
 
         // 文件面未就绪 → 迁移并返回旧快照；再次 load 走文件面（幂等）
-        let loaded = migrate_from_db(&root, &db, &[]).unwrap().expect("迁移应返回数据");
+        let loaded = migrate_from_db(&root, &db, &[])
+            .unwrap()
+            .expect("迁移应返回数据");
         assert_eq!(loaded.sessions[0].id, "legacy-1");
         assert!(root.join("sessions/legacy-1.json").exists());
         assert!(root.join(".ready").exists());

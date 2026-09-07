@@ -1,16 +1,32 @@
 /**
- * 轻量 Markdown 解析器：源文本 → 结构化 Block[]，供 MarkdownText.vue 用模板渲染。
+ * Markdown → Block[] 转换层（渲染由 MarkdownText.vue 等模板完成）。
  *
- * 设计约束（沿用组件原有取向，勿改）：
- * - 不引入 markdown-it / marked 等依赖；
- * - 输出 AST 而非 HTML 字符串，渲染端不使用 v-html —— 内容来自模型输出，从根上规避注入。
+ * 引擎：marked（当前锁 v18）的词法分析器 —— marked.lexer() 产块级 token 树、
+ * Lexer.inlineTokens() 产行内 token 流。本文件只消费 token/AST，从不经过 marked
+ * 的 HTML 渲染器：输出仍是结构化 Block[]，模板端保持文本插值渲染。
  *
- * 与 CommonMark 的已知偏离（有意为之）：
- * - 段落内单换行保留为换行（chat 场景下 LLM 常靠换行分行，按 CommonMark 折成空格会读不通）；
- * - 斜体只认 `*x*`，不认 `_x_`；粗体只认 `**x**`，不认 `__x__`
- *   —— snake_case 标识符会被 `_` 规则误判成斜体，代价大于收益；
- * - 不支持 setext 标题、图片、脚注、HTML 内联。
+ * 安全模型（沿用组件取向，勿改）：
+ * - 渲染端不使用 v-html，内容来自模型输出，从根上规避注入；
+ * - raw HTML（块级与行内）与图片一律降级为字面文本（token.raw），绝无标签透传；
+ * - 链接 href 过 isSafeHref 白名单（http/https/mailto 与相对路径），其余协议
+ *   （javascript: / data: / vbscript: …，含控制字符混淆）整段降级为纯文本。
+ *
+ * 与 CommonMark / GFM 的关系：
+ * - 块级与行内结构语义以 CommonMark + GFM 为准（setext 标题、表格、任务列表、
+ *   自动链接、转义、引用定义解析等均由 marked 保证，不再维护手写偏离清单）；
+ * - 保留的 chat 取向（渲染习惯，非语法偏离）：
+ *   - 段落与引用内软换行按源行拆分，模板以 <br> 呈现可见换行（不折成空格）；
+ *   - 行内格式扁平化：嵌套格式（如粗体内套斜体）外层胜出，v 只取可见文本；
+ *   - 引用块内只做行内解析（引用中的块级语法标记保持字面可见）。
+ *
+ * 已知行为差异（相对旧手写解析器，均为向 CommonMark 靠拢）：
+ * - `_斜体_`、setext 标题、图片/自动链接语法开始生效（图片仍按安全模型降级为字面）；
+ * - `text\n---` 解析为 setext 标题而非分割线（`---` 前需空行才是 <hr>）；
+ * - 链接引用定义行（`[id]: url`）不再渲染，引用处解析成真链接。
  */
+
+import { Lexer, marked } from "marked";
+import type { Token, Tokens } from "marked";
 
 export type InlineToken =
   | { t: "text"; v: string }
@@ -67,232 +83,269 @@ export function isSafeHref(href: string): boolean {
   return SAFE_SCHEME.test(clean);
 }
 
-const FENCE_RE = /^```(\S+)?[ \t]*(.*)$/;
-const HEADING_RE = /^(#{1,6})[ \t]+(.*)$/;
-const HR_RE = /^[ \t]*(?:-{3,}|\*{3,}|_{3,})[ \t]*$/;
-const QUOTE_RE = /^[ \t]*>[ \t]?(.*)$/;
-const LIST_RE = /^([ \t]*)(?:([-*+])|(\d{1,9})[.)])[ \t]+(.*)$/;
-const TABLE_DELIM_RE = /^[ \t]*\|?[ \t]*:?-{1,}:?[ \t]*(\|[ \t]*:?-{1,}:?[ \t]*)*\|?[ \t]*$/;
+const LEX_OPTIONS = { gfm: true } as const;
 
-// 顺序即优先级：`code` 先吃掉反引号内容，`**` 必须早于 `*`，否则粗体会被斜体规则切碎。
-const INLINE_RE = /(`[^`]+`)|(\*\*[^*]+?\*\*)|(~~[^~]+?~~)|(\*[^*\n]+?\*)|(\[[^\]]*\]\([^)\s]*\))/g;
+/** 纯行内解析：块级语法惰性（标题/列表/围栏标记原样当文本），只认行内标记。 */
+function inlineTokensOf(text: string): Token[] {
+  return new Lexer(LEX_OPTIONS).inlineTokens(text);
+}
 
-/** 行内标记解析：code / bold / strike / italic / link，其余原样落为 text。 */
-export function parseInline(text: string): InlineToken[] {
-  const tokens: InlineToken[] = [];
-  let last = 0;
-  for (const match of text.matchAll(INLINE_RE)) {
-    const index = match.index ?? 0;
-    if (index > last) tokens.push({ t: "text", v: text.slice(last, index) });
-    const raw = match[0];
-    if (raw.startsWith("`")) tokens.push({ t: "code", v: raw.slice(1, -1) });
-    else if (raw.startsWith("**")) tokens.push({ t: "bold", v: raw.slice(2, -2) });
-    else if (raw.startsWith("~~")) tokens.push({ t: "strike", v: raw.slice(2, -2) });
-    else if (raw.startsWith("*")) tokens.push({ t: "italic", v: raw.slice(1, -1) });
-    else {
-      const sep = raw.lastIndexOf("](");
-      const href = raw.slice(sep + 2, -1).trim();
-      const label = raw.slice(1, sep);
-      if (isSafeHref(href)) tokens.push({ t: "link", v: label, href });
-      else tokens.push({ t: "text", v: raw });
-    }
-    last = index + raw.length;
+/** 取 token 的可见文本：容器递归子节点，图片取 alt，HTML 标签取字面原文。 */
+function textContent(t: Token): string {
+  switch (t.type) {
+    case "text":
+    case "escape":
+    case "codespan":
+      return t.text;
+    case "strong":
+    case "em":
+    case "del":
+    case "link":
+      return (t.tokens ?? []).map(textContent).join("");
+    case "html":
+      return t.text;
+    case "image":
+      return t.text;
+    case "br":
+      return "\n";
+    default:
+      return "";
   }
-  if (last < text.length) tokens.push({ t: "text", v: text.slice(last) });
-  return tokens;
 }
 
-/** 缩进宽度：tab 记 4 列，用于判定列表嵌套层级。 */
-function indentWidth(prefix: string): number {
-  let width = 0;
-  for (const ch of prefix) width += ch === "\t" ? 4 : 1;
-  return width;
+/** 单个 marked 行内 token → 模型 token。链接/图片/HTML 的安全降级都在这一层。 */
+function toModelToken(t: Token): InlineToken {
+  switch (t.type) {
+    case "text":
+    case "escape":
+      return { t: "text", v: t.text };
+    case "codespan":
+      return { t: "code", v: t.text };
+    case "strong":
+      // 扁平化：嵌套行内格式（em/code/link…）外层胜出，v 取可见文本
+      return { t: "bold", v: textContent(t) };
+    case "em":
+      return { t: "italic", v: textContent(t) };
+    case "del":
+      return { t: "strike", v: textContent(t) };
+    case "link": {
+      const v = textContent(t).replace(/\n/g, " ");
+      if (isSafeHref(t.href)) return { t: "link", v, href: t.href };
+      return { t: "text", v: t.raw };
+    }
+    case "br":
+      return { t: "text", v: "\n" };
+    default:
+      // image / html（行内）按安全模型降级为字面原文；未知 token 同样只作文本
+      return { t: "text", v: t.raw ?? "" };
+  }
 }
 
-function splitRow(line: string): string[] {
-  const trimmed = line.trim().replace(/^\|/, "").replace(/\|$/, "");
-  return trimmed.split("|").map((cell) => cell.trim());
-}
-
-function parseAlign(line: string): Align[] {
-  return splitRow(line).map((cell) => {
-    const left = cell.startsWith(":");
-    const right = cell.endsWith(":");
-    if (left && right) return "center";
-    if (right) return "right";
-    if (left) return "left";
-    return null;
-  });
-}
-
-/** 表头行判定需要前看一行对齐分隔行，单行无法判断。 */
-function isTableStart(lines: string[], i: number): boolean {
-  return lines[i].includes("|") && i + 1 < lines.length && TABLE_DELIM_RE.test(lines[i + 1]);
-}
-
-/** 该行是否开启一个新的块级结构（段落遇之即止）。 */
-function startsBlock(lines: string[], i: number): boolean {
-  const line = lines[i];
-  return (
-    line.trim().length === 0 ||
-    FENCE_RE.test(line) ||
-    HEADING_RE.test(line) ||
-    HR_RE.test(line) ||
-    LIST_RE.test(line) ||
-    QUOTE_RE.test(line) ||
-    isTableStart(lines, i)
-  );
-}
-
-interface ListRow {
-  depth: number;
-  ordered: boolean;
-  num: number;
-  text: string;
+/** 行内 token 流 → 模型 token 流。 */
+function toModelTokens(tokens: Token[]): InlineToken[] {
+  const out: InlineToken[] = [];
+  for (const t of tokens) out.push(toModelToken(t));
+  return out;
 }
 
 /**
- * 递归折树：从 rows[start] 起吃掉同层及更深的行，返回本层列表与下一个待处理下标。
- * 同层遇有序/无序切换即收尾，交回调用方另起一个列表块（ol 里混 ul 项是非法结构）。
+ * 按软换行把扁平 token 流拆成行数组：任何 token 的 v 内含 \n 都在该处断行
+ * （br 已映射成 v="\n"），每行拿到独立 token —— 段落/引用模板用 <br> 连接行。
  */
-function buildListNode(rows: ListRow[], start: number): { node: ListNode; next: number } {
-  const depth = rows[start].depth;
-  const node: ListNode = { ordered: rows[start].ordered, start: rows[start].num, items: [] };
-  let i = start;
-  while (i < rows.length) {
-    const row = rows[i];
-    if (row.depth < depth) break;
-    if (row.depth > depth) {
-      const parent = node.items[node.items.length - 1];
-      const sub = buildListNode(rows, i);
-      if (!parent) break;
-      // 缩进不规整时同一父项可能拿到多段子列表，合并而非覆盖，避免丢内容
-      if (parent.children) parent.children.items.push(...sub.node.items);
-      else parent.children = sub.node;
-      i = sub.next;
-      continue;
+function splitAtBreaks(tokens: InlineToken[]): InlineToken[][] {
+  const lines: InlineToken[][] = [[]];
+  for (const tok of tokens) {
+    const parts = tok.v.split("\n");
+    for (let i = 0; i < parts.length; i += 1) {
+      if (i > 0) lines.push([]);
+      if (parts[i].length > 0) lines[lines.length - 1].push({ ...tok, v: parts[i] });
     }
-    if (row.ordered !== node.ordered) break;
-    node.items.push({ inline: parseInline(row.text), children: null });
-    i += 1;
   }
-  return { node, next: i };
+  return lines;
 }
 
-/** 源文本 → Block[]。逐行状态机，块级优先级：围栏 > 标题 > hr > 表格 > 列表 > 引用 > 段落。 */
+/**
+ * 解析围栏代码块信息串：marked v18 把整条 info 串放进 token.lang
+ * （如 `ts src/main.ts`），这里拆回 lang + caption（caption 形如路径时记为 path）。
+ */
+function fenceMeta(lang: string | undefined): { lang: string; caption: string } {
+  const info = (lang ?? "").trim();
+  if (!info) return { lang: "", caption: "" };
+  const sp = info.search(/\s/);
+  if (sp === -1) return { lang: info, caption: "" };
+  return { lang: info.slice(0, sp), caption: info.slice(sp + 1).trim() };
+}
+
+/** marked 的 code token 内容已去掉 EOF 尾换行；仅缩进式代码残留一行尾空，剥掉。 */
+function codeLinesOf(t: Tokens.Code): string[] {
+  if (t.text === "") return [];
+  const lines = t.text.split("\n");
+  if (t.codeBlockStyle === "indented" && lines[lines.length - 1] === "") lines.pop();
+  return lines;
+}
+
+/** marked list token → 模型 ListNode。 */
+function toListNode(l: Tokens.List): ListNode {
+  const node: ListNode = {
+    ordered: l.ordered,
+    // marked 无序列表的 start 记作 ""，模型层仅有序列表使用
+    start: typeof l.start === "number" ? l.start : 1,
+    items: [],
+  };
+  for (const item of l.items) {
+    const inline: InlineToken[] = [];
+    let children: ListNode | null = null;
+    let pendingTask = "";
+    let contentStarted = false;
+    // 段落性内容段之间插软换行（渲染折成空格，保住词边界）；任务标记附着到首段
+    const beginChunk = (): void => {
+      if (contentStarted) inline.push({ t: "text", v: "\n" });
+      contentStarted = true;
+      if (pendingTask !== "") {
+        inline.push({ t: "text", v: pendingTask });
+        pendingTask = "";
+      }
+    };
+    for (const sub of item.tokens) {
+      switch (sub.type) {
+        case "space":
+          break;
+        case "checkbox":
+          // 任务列表标记不渲染原生 checkbox，降级为字面 [x] / [ ]
+          pendingTask = sub.checked ? "[x] " : "[ ] ";
+          break;
+        case "paragraph":
+          beginChunk();
+          inline.push(...toModelTokens(sub.tokens ?? []));
+          break;
+        case "heading":
+          beginChunk();
+          inline.push(...toModelTokens(sub.tokens ?? []));
+          break;
+        case "text": {
+          beginChunk();
+          // 块级 text 通常内嵌行内 tokens；惰性延续行（如 `- a` 后的缩进续行）没有时
+          // 重新走行内解析，保证标记仍生效
+          inline.push(...toModelTokens(sub.tokens?.length ? sub.tokens : inlineTokensOf(sub.text)));
+          break;
+        }
+        case "list": {
+          const child = toListNode(sub as Tokens.List);
+          if (children) children.items.push(...child.items);
+          else children = child;
+          break;
+        }
+        case "code":
+          // 列表项内的围栏代码块：模型无块级插槽，保内容为文本
+          beginChunk();
+          inline.push({ t: "text", v: sub.text });
+          break;
+        case "html":
+          beginChunk();
+          inline.push({ t: "text", v: sub.text });
+          break;
+        default: {
+          const raw = (sub as Token).raw ?? "";
+          if (raw !== "") {
+            beginChunk();
+            inline.push({ t: "text", v: raw });
+          }
+        }
+      }
+    }
+    if (item.task && pendingTask !== "") {
+      // checkbox token 缺失的罕见路径：把遗留标记前置
+      inline.unshift({ t: "text", v: pendingTask });
+    }
+    node.items.push({ inline, children });
+  }
+  return node;
+}
+
+/** 引用块：从 raw 逐行剥 `>` 前缀后按行内解析 —— 引用内块级标记保持字面（旧版同款语义）。 */
+function quoteLinesOf(t: Tokens.Blockquote): InlineToken[][] {
+  const rawLines = t.raw.split("\n");
+  if (rawLines[rawLines.length - 1] === "") rawLines.pop();
+  const lines: InlineToken[][] = [];
+  for (const line of rawLines) {
+    const stripped = line.replace(/^[ \t]*>[ \t]?/, "");
+    lines.push(parseInline(stripped));
+  }
+  return lines.length > 0 ? lines : [[]];
+}
+
+/** 块级 raw HTML（<script>/<div>/注释等）：整体降级为字面段落行，模板转义后显示。 */
+function linesFromHtmlBlock(t: Tokens.HTML): InlineToken[][] {
+  const rawLines = t.text.replace(/\r\n/g, "\n").split("\n");
+  if (rawLines[rawLines.length - 1] === "" && rawLines.length > 1) rawLines.pop();
+  return rawLines.length > 0 ? rawLines.map(parseInline) : [[]];
+}
+
+function toBlock(t: Token): Block | undefined {
+  switch (t.type) {
+    case "space":
+    case "def":
+      // 空白与引用定义（[id]: url）不产块；定义只服务链接解析
+      return undefined;
+    case "heading": {
+      const inner = t.tokens ?? [];
+      return {
+        type: "heading",
+        level: Math.min(6, Math.max(1, t.depth)) as 1 | 2 | 3 | 4 | 5 | 6,
+        inline: toModelTokens(inner),
+      };
+    }
+    case "paragraph": {
+      const lines = splitAtBreaks(toModelTokens(t.tokens ?? []));
+      // 空内容兜底为一行空文本，避免模板渲染空 <p> 悬空留白
+      return { type: "p", lines: lines.length > 0 ? lines : [[]] };
+    }
+    case "text": {
+      // 段落被列表等截断后的惰性延续；无行内 tokens 时退化按文本处理
+      const tokens = t.tokens?.length ? t.tokens : inlineTokensOf(t.text);
+      const lines = splitAtBreaks(toModelTokens(tokens));
+      return { type: "p", lines: lines.length > 0 ? lines : [[]] };
+    }
+    case "code": {
+      const { lang, caption } = fenceMeta(t.lang);
+      return { type: "code", lang, path: PATH_LABEL.test(caption) ? caption : undefined, codeLines: codeLinesOf(t as Tokens.Code) };
+    }
+    case "list":
+      return { type: "list", ...toListNode(t as Tokens.List) };
+    case "blockquote":
+      return { type: "quote", lines: quoteLinesOf(t as Tokens.Blockquote) };
+    case "table": {
+      // Token 联合里混有松散的 Generic（索引签名 any），收窄后属性仍带 any，
+      // 这里显式落到具体接口，保住 header/rows/align 的类型
+      const table = t as Tokens.Table;
+      return {
+        type: "table",
+        headers: table.header.map((cell) => toModelTokens(cell.tokens)),
+        align: table.align,
+        rows: table.rows.map((row) => row.map((cell) => toModelTokens(cell.tokens))),
+      };
+    }
+    case "hr":
+      return { type: "hr" };
+    case "html":
+      return { type: "p", lines: linesFromHtmlBlock(t as Tokens.HTML) };
+    default:
+      // 未知扩展块：不渲染，避免把未审计内容带进文档
+      return undefined;
+  }
+}
+
+/** 源文本 → Block[]。块级结构由 marked 词法器保证 CommonMark/GFM 语义。 */
 export function parseBlocks(content: string): Block[] {
   const out: Block[] = [];
-  const lines = content.split("\n");
-  let i = 0;
-
-  while (i < lines.length) {
-    const line = lines[i];
-
-    // 围栏代码块：内容原样保留，闭合围栏缺失时吃到文末（流式输出常见半截围栏）
-    const fence = line.match(FENCE_RE);
-    if (fence) {
-      const lang = fence[1] ?? "";
-      const caption = fence[2]?.trim() ?? "";
-      const codeLines: string[] = [];
-      i += 1;
-      while (i < lines.length && !lines[i].startsWith("```")) {
-        codeLines.push(lines[i]);
-        i += 1;
-      }
-      i += 1;
-      out.push({ type: "code", lang, path: PATH_LABEL.test(caption) ? caption : undefined, codeLines });
-      continue;
-    }
-
-    if (line.trim().length === 0) {
-      i += 1;
-      continue;
-    }
-
-    const heading = line.match(HEADING_RE);
-    if (heading) {
-      out.push({
-        type: "heading",
-        level: heading[1].length as 1 | 2 | 3 | 4 | 5 | 6,
-        inline: parseInline(heading[2].trim()),
-      });
-      i += 1;
-      continue;
-    }
-
-    if (HR_RE.test(line)) {
-      out.push({ type: "hr" });
-      i += 1;
-      continue;
-    }
-
-    // 表格：当前行含 | 且下一行是对齐分隔行，两者缺一即退回普通段落
-    if (isTableStart(lines, i)) {
-      const headers = splitRow(line).map(parseInline);
-      const align = parseAlign(lines[i + 1]);
-      i += 2;
-      const rows: InlineToken[][][] = [];
-      while (i < lines.length && lines[i].includes("|") && lines[i].trim().length > 0) {
-        rows.push(splitRow(lines[i]).map(parseInline));
-        i += 1;
-      }
-      out.push({ type: "table", headers, align, rows });
-      continue;
-    }
-
-    const list = line.match(LIST_RE);
-    if (list) {
-      // 先把连续列表行整段收下（不按有序性切断，否则 `1. a` 下的 `- a1` 会掉出嵌套），
-      // 再由 buildListNode 按缩进折树、按同层有序性切块。
-      const rows: ListRow[] = [];
-      while (i < lines.length) {
-        const item = lines[i].match(LIST_RE);
-        if (!item) break;
-        rows.push({
-          depth: indentWidth(item[1]),
-          ordered: item[3] !== undefined,
-          num: item[3] !== undefined ? Number(item[3]) : 1,
-          text: item[4],
-        });
-        i += 1;
-      }
-      let cursor = 0;
-      while (cursor < rows.length) {
-        const { node, next } = buildListNode(rows, cursor);
-        out.push({ type: "list", ...node });
-        // buildListNode 至少消费一行；此处兜底防御，避免异常缩进造成死循环
-        cursor = next > cursor ? next : cursor + 1;
-      }
-      continue;
-    }
-
-    const quote = line.match(QUOTE_RE);
-    if (quote) {
-      const quoteLines: InlineToken[][] = [];
-      while (i < lines.length) {
-        const item = lines[i].match(QUOTE_RE);
-        if (!item) break;
-        quoteLines.push(parseInline(item[1]));
-        i += 1;
-      }
-      out.push({ type: "quote", lines: quoteLines });
-      continue;
-    }
-
-    // 段落：吃到空行或下一个块级起始为止，内部换行保留
-    const paraLines: InlineToken[][] = [];
-    while (i < lines.length) {
-      if (startsBlock(lines, i)) break;
-      paraLines.push(parseInline(lines[i]));
-      i += 1;
-    }
-    // 兜底：理论上不可达（块级分支已在前面全部拦截），但空推进会死循环，宁可显式跳行
-    if (paraLines.length === 0) {
-      i += 1;
-      continue;
-    }
-    out.push({ type: "p", lines: paraLines });
+  for (const token of marked.lexer(content, LEX_OPTIONS)) {
+    const block = toBlock(token);
+    if (block) out.push(block);
   }
-
   return out;
+}
+
+/** 行内标记解析：code / bold / italic / strike / link 等，块级语法保持字面。 */
+export function parseInline(text: string): InlineToken[] {
+  return toModelTokens(inlineTokensOf(text));
 }

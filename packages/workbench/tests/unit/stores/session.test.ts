@@ -204,3 +204,61 @@ describe("归属迁移与持久化", () => {
     }
   });
 });
+
+describe("acp 绑定（惰性恢复数据）", () => {
+  it("setAcpBinding 写入并随 persist/重载往返", () => {
+    injectStorage();
+    try {
+      const store = useSessionStore();
+      const session = store.createSession(null, "绑定会话");
+      const binding = { sessionId: "acp-sess-1", providerId: "claude-code", cwd: "/home/test/proj", savedAt: 1234 };
+      store.setAcpBinding(session.id, binding);
+
+      setActivePinia(createPinia());
+      const reloaded = useSessionStore();
+      expect(reloaded.getSession(session.id)?.acp).toEqual(binding);
+    } finally {
+      delete storageHolder.localStorage;
+    }
+  });
+
+  it("setAcpBinding 传 null 清除绑定", () => {
+    injectStorage();
+    try {
+      const store = useSessionStore();
+      const session = store.createSession(null, "清除绑定");
+      store.setAcpBinding(session.id, { sessionId: "s1", providerId: "p1", cwd: "/cwd", savedAt: 1 });
+      expect(store.getSession(session.id)?.acp?.sessionId).toBe("s1");
+
+      store.setAcpBinding(session.id, null);
+      expect(store.getSession(session.id)?.acp).toBeUndefined();
+      setActivePinia(createPinia());
+      expect(useSessionStore().getSession(session.id)?.acp).toBeUndefined();
+    } finally {
+      delete storageHolder.localStorage;
+    }
+  });
+
+  it("历史消息 adoption 不丢 acp 字段（消息段落归一只改 messages）", () => {
+    injectStorage();
+    try {
+      const store = useSessionStore();
+      const session = store.createSession("p-x", "adopt");
+      store.appendMessage(session.id, {
+        id: "m-old",
+        role: "assistant",
+        content: "旧文",
+        ts: Date.now(),
+        segments: [{ kind: "text", id: "t1", from: 0, to: null }],
+      });
+      store.setAcpBinding(session.id, { sessionId: "s-acp", providerId: "p1", cwd: "/c", savedAt: 5 });
+
+      // 模拟落盘侧回灌整表（adoptSessions 路径）
+      setActivePinia(createPinia());
+      const reloaded = useSessionStore();
+      expect(reloaded.getSession(session.id)?.acp?.sessionId).toBe("s-acp");
+    } finally {
+      delete storageHolder.localStorage;
+    }
+  });
+});

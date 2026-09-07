@@ -68,12 +68,22 @@ pub fn fs_list_dir(path: String) -> Result<Vec<DirEntryInfo>, String> {
     let reader = std::fs::read_dir(&path).map_err(|e| format!("打开目录失败: {e}"))?;
     for entry in reader {
         let entry = entry.map_err(|e| format!("读取目录项失败: {e}"))?;
-        let metadata = entry.metadata().map_err(|e| format!("读取目录项元数据失败: {e}"))?;
-        let kind = if metadata.is_dir() { "directory" } else { "file" };
+        let metadata = entry
+            .metadata()
+            .map_err(|e| format!("读取目录项元数据失败: {e}"))?;
+        let kind = if metadata.is_dir() {
+            "directory"
+        } else {
+            "file"
+        };
         out.push(DirEntryInfo {
             name: entry.file_name().to_string_lossy().into_owned(),
             kind: kind.to_string(),
-            size: if metadata.is_file() { Some(metadata.len()) } else { None },
+            size: if metadata.is_file() {
+                Some(metadata.len())
+            } else {
+                None
+            },
             path: entry.path().to_string_lossy().into_owned(),
         });
     }

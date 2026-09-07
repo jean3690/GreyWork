@@ -42,6 +42,8 @@ import { useAgentStore } from "@/stores/agent";
 import { useSettingsStore } from "@/stores/settings";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useChatStore } from "@/stores/chat";
+import { useNoticeStore } from "@/stores/notice";
+import { useSessionStore } from "@/stores/session";
 
 function emit(event: AcpEventEnvelope): void {
   expect(h.listener).not.toBeNull();
@@ -323,6 +325,89 @@ describe("dispatchToAcp 写入对话流", () => {
     emit({ kind: "prompt-done", payload: { turnId: 5, response: {} } });
     expect(agentStore.acpBusy).toBe(false);
     expect(agentStore.acpStreamId).toBeNull();
+  });
+
+  it("prompt-done 追加完成脚标并发 success 通知（用户明确感知回合已结束）", async () => {
+    h.startAgent.mockResolvedValue(7);
+    h.openSession.mockResolvedValue({ sessionId: "session-1", configOptions: [] });
+    const turn = deferred<unknown>();
+    h.prompt.mockImplementation(() => turn.promise);
+    const agentStore = useAgentStore();
+    const chat = useChatStore();
+    const notices = useNoticeStore();
+
+    const pending = agentStore.dispatchToAcp("整理本周改动");
+    await vi.waitFor(() => expect(agentStore.acpBusy).toBe(true));
+    emit({
+      kind: "session-update",
+      payload: { update: { sessionUpdate: "agent_message_chunk", content: { text: "已整理完毕" } } },
+    });
+    chat.flushPendingContent();
+
+    turn.resolve({ turnId: 7 });
+    await pending;
+    // prompt-done 前内容就是原样答复，不作任何注入
+    expect(chat.threads[chat.activeThreadId]?.at(-1)?.content).toBe("已整理完毕");
+    emit({ kind: "prompt-done", payload: { turnId: 7, response: {} } });
+
+    const message = chat.threads[chat.activeThreadId]?.at(-1);
+    expect(message?.content).toContain("✓ 任务已完成");
+    expect(chat.threads[chat.activeThreadId]?.at(-1)?.content).toContain("已整理完毕");
+    expect(agentStore.acpBusy).toBe(false);
+    expect(notices.list.some((notice) => notice.kind === "success" && notice.title === "任务已完成")).toBe(true);
+  });
+
+  it("prompt-done 无输出时落「无文本输出」而不追加完成脚标（不为空消息再补一行）", async () => {
+    h.startAgent.mockResolvedValue(7);
+    h.openSession.mockResolvedValue({ sessionId: "session-1", configOptions: [] });
+    h.prompt.mockResolvedValue({ turnId: 8 });
+    const agentStore = useAgentStore();
+    const chat = useChatStore();
+
+    await agentStore.dispatchToAcp("没输出的回合");
+    emit({ kind: "prompt-done", payload: { turnId: 8, response: {} } });
+
+    const message = chat.threads[chat.activeThreadId]?.at(-1);
+    expect(message?.content).toBe("（本次回合无文本输出）");
+    expect(message?.content).not.toContain("✓ 任务已完成");
+  });
+
+  it("prompt-done 带 error：落失败文案而非「无文本输出」，不发完成脚标/success 通知", async () => {
+    h.startAgent.mockResolvedValue(7);
+    h.openSession.mockResolvedValue({ sessionId: "session-1", configOptions: [] });
+    h.prompt.mockResolvedValue({ turnId: 9 });
+    const agentStore = useAgentStore();
+    const chat = useChatStore();
+    const notices = useNoticeStore();
+
+    await agentStore.dispatchToAcp("后端会挂的回合");
+    emit({ kind: "prompt-done", payload: { turnId: 9, error: "Cannot connect to API: typo in the url?" } });
+
+    const message = chat.threads[chat.activeThreadId]?.at(-1);
+    expect(message?.content).toBe("[LLM 调用失败] Cannot connect to API: typo in the url?");
+    expect(message?.content).not.toContain("✓ 任务已完成");
+    expect(message?.content).not.toBe("（本次回合无文本输出）");
+    expect(agentStore.acpBusy).toBe(false);
+    expect(notices.list.some((notice) => notice.kind === "success" && notice.title === "任务已完成")).toBe(false);
+  });
+
+  it("prompt-done 带 error 且已有流式内容：失败行追加到末尾，不吞掉已产出的文本", async () => {
+    h.startAgent.mockResolvedValue(7);
+    h.openSession.mockResolvedValue({ sessionId: "session-1", configOptions: [] });
+    h.prompt.mockResolvedValue({ turnId: 10 });
+    const agentStore = useAgentStore();
+    const chat = useChatStore();
+
+    await agentStore.dispatchToAcp("流到一半失败的回合");
+    emit({
+      kind: "session-update",
+      payload: { update: { sessionUpdate: "agent_message_chunk", content: { text: "前半句" } } },
+    });
+    chat.flushPendingContent();
+    emit({ kind: "prompt-done", payload: { turnId: 10, error: "stream interrupted" } });
+
+    const message = chat.threads[chat.activeThreadId]?.at(-1);
+    expect(message?.content).toBe("前半句\n\n[LLM 调用失败] stream interrupted");
   });
 
   it("thought 事件并进同一思考段；被正文打断后另起一段（多段各自折叠的数据基础）", async () => {
@@ -705,6 +790,83 @@ describe("ACP provider 偏好持久化（场景一 Guid 预选）", () => {
   });
 });
 
+describe("自配 ACP 后端管理", () => {
+  beforeEach(() => {
+    const store = new Map<string, string>();
+    const stub: Storage = {
+      get length() {
+        return store.size;
+      },
+      clear: () => store.clear(),
+      getItem: (key) => store.get(key) ?? null,
+      key: (index) => [...store.keys()][index] ?? null,
+      removeItem: (key) => void store.delete(key),
+      setItem: (key, value) => void store.set(key, String(value)),
+    };
+    vi.stubGlobal("localStorage", stub);
+    vi.stubGlobal("window", { localStorage: stub });
+  });
+
+  it("addAgentProvider 新增启用项并持久化（含命令派生探测）", () => {
+    const agentStore = useAgentStore();
+    const before = agentStore.agentProviders.length;
+    expect(agentStore.addAgentProvider("My Agent", "my-agent acp")).toBeNull();
+    expect(agentStore.agentProviders).toHaveLength(before + 1);
+    const added = agentStore.agentProviders.at(-1);
+    expect(added?.name).toBe("My Agent");
+    expect(added?.command).toBe("my-agent acp");
+    expect(added?.enabled).toBe(true);
+    expect(added?.id.startsWith("custom-")).toBe(true);
+    expect(added?.detect).toEqual(["my-agent"]);
+    const persisted = JSON.parse(localStorage.getItem("greywork.agent-providers") ?? "{}");
+    expect(persisted.providers.some((p: { id: string }) => p.id === added?.id)).toBe(true);
+  });
+
+  it("名称 / 命令为空时拒绝并返回错误文案", () => {
+    const agentStore = useAgentStore();
+    expect(agentStore.addAgentProvider("  ", "my-agent acp")).toContain("名称不能为空");
+    expect(agentStore.addAgentProvider("My", "  ")).toContain("命令不能为空");
+  });
+
+  it("updateAgentProvider 编辑自配项；预设项拒绝", () => {
+    const agentStore = useAgentStore();
+    expect(agentStore.addAgentProvider("Old", "old-agent acp")).toBeNull();
+    const id = agentStore.agentProviders.at(-1)!.id;
+    expect(agentStore.updateAgentProvider(id, "New", "new-agent --acp")).toBeNull();
+    const updated = agentStore.agentProviders.find((provider) => provider.id === id);
+    expect(updated?.name).toBe("New");
+    expect(updated?.command).toBe("new-agent --acp");
+    expect(updated?.detect).toEqual(["new-agent"]);
+    expect(agentStore.updateAgentProvider("opencode", "Hacked", "evil acp")).toContain("仅用户自配");
+  });
+
+  it("removeAgentProvider 仅删自配项；删除当前选中时回落选择", async () => {
+    const agentStore = useAgentStore();
+    expect(agentStore.addAgentProvider("My", "my-agent acp")).toBeNull();
+    const id = agentStore.agentProviders.at(-1)!.id;
+    agentStore.selectProvider(id);
+    agentStore.toggleRouteToAcp();
+    expect(await agentStore.removeAgentProvider(id)).toBeNull();
+    expect(agentStore.agentProviders.some((provider) => provider.id === id)).toBe(false);
+    expect(agentStore.selectedProviderId).not.toBe(id);
+    expect(await agentStore.removeAgentProvider("opencode")).toContain("仅用户自配");
+  });
+
+  it("回读缓存时 custom-* 项不被预设合并丢弃（重启存活）", () => {
+    localStorage.setItem(
+      "greywork.agent-providers",
+      JSON.stringify({
+        providers: [{ id: "custom-abc", name: "My Agent", kind: "acp", command: "my-agent acp", enabled: true }],
+      }),
+    );
+    const agentStore = useAgentStore();
+    const custom = agentStore.agentProviders.find((provider) => provider.id === "custom-abc");
+    expect(custom).toBeDefined();
+    expect(custom?.command).toBe("my-agent acp");
+    expect(custom?.enabled).toBe(true);
+  });
+});
+
 describe("权限临时降级与每工作区配置记忆", () => {
   it("起 agent 用生效档位而非基线档位", async () => {
     h.startAgent.mockResolvedValue(7);
@@ -774,6 +936,94 @@ describe("权限临时降级与每工作区配置记忆", () => {
     await agentStore.applyWorkspaceAgentConfig(workspaceStore.workspaces[0]?.id ?? null);
     expect(agentStore.routeToAcp).toBe(before);
     expect(h.startAgent).not.toHaveBeenCalled();
+  });
+});
+
+describe("计划模式 · ACP 门", () => {
+  /** 本文件更早的 describe 往 globalThis.localStorage 注入过内存存储（vi.stubGlobal 不自动清理），
+      会话会跨用例泄漏到下一个 pinia；每条用例显式新建空闲会话，隔离旧数据。 */
+  function freshProjectThread(): void {
+    const chat = useChatStore();
+    chat.activeThreadId = useSessionStore().createSession(null, "计划测试").id;
+  }
+
+  it("beginAcpPlan：入流 user+支架并挂起计划卡，不派发", () => {
+    const agentStore = useAgentStore();
+    const chat = useChatStore();
+    freshProjectThread();
+
+    agentStore.beginAcpPlan("重构模块 A");
+
+    const list = chat.threads[chat.activeThreadId];
+    expect(list.map((m) => m.role)).toEqual(["user", "assistant"]);
+    expect(list[1]?.planPending).toBe(true);
+    expect(list[1]?.planDraft).toBe("重构模块 A");
+    expect(list[1]?.acp).toBe("OpenCode");
+    expect(list[1]?.content).toBe("");
+    expect(h.prompt).not.toHaveBeenCalled();
+    expect(agentStore.acpBusy).toBe(false);
+  });
+
+  it("confirmAcpPlan：解除计划卡并按 planDraft 派发，不重复入流", async () => {
+    h.startAgent.mockResolvedValue(7);
+    h.openSession.mockResolvedValue({ sessionId: "session-plan", configOptions: [] });
+    const turn = deferred<unknown>();
+    h.prompt.mockImplementation(() => turn.promise);
+    const agentStore = useAgentStore();
+    const chat = useChatStore();
+    freshProjectThread();
+
+    agentStore.beginAcpPlan("重构模块 A");
+    const message = chat.threads[chat.activeThreadId].find((m) => m.planPending)!;
+    agentStore.confirmAcpPlan(chat.activeThreadId, message);
+
+    expect(message.planPending).toBe(false);
+    // 支架复用：确认不重复入流（仍只有 user + assistant 两条）
+    expect(chat.threads[chat.activeThreadId].map((m) => m.role)).toEqual(["user", "assistant"]);
+    await vi.waitFor(() => {
+      expect(h.startAgent).toHaveBeenCalledTimes(1);
+      expect(h.prompt).toHaveBeenCalledWith(7, "重构模块 A");
+      expect(agentStore.acpBusy).toBe(true);
+    });
+
+    turn.resolve({ turnId: 1 });
+  });
+
+  it("回合运行中确认：忽略并保持卡片挂起", async () => {
+    h.startAgent.mockResolvedValue(7);
+    h.openSession.mockResolvedValue({ sessionId: "session-busy", configOptions: [] });
+    const first = deferred<unknown>();
+    h.prompt.mockImplementation(() => first.promise);
+    const agentStore = useAgentStore();
+    const chat = useChatStore();
+    freshProjectThread();
+
+    // 先开一个真实回合占住 acpBusy
+    void agentStore.dispatchToAcp("第一回合");
+    await vi.waitFor(() => expect(agentStore.acpBusy).toBe(true));
+
+    // 第二项目挂卡，运行中确认被忽略
+    agentStore.beginAcpPlan("第二项目");
+    const message = chat.threads[chat.activeThreadId].find((m) => m.planPending)!;
+    agentStore.confirmAcpPlan(chat.activeThreadId, message);
+
+    expect(message.planPending).toBe(true);
+    expect(h.prompt).toHaveBeenCalledTimes(1);
+    first.resolve({ turnId: 1 });
+  });
+
+  it("无 planDraft 或无待确认状态的确认是 no-op", async () => {
+    const agentStore = useAgentStore();
+    const chat = useChatStore();
+    freshProjectThread();
+
+    agentStore.beginAcpPlan("重构模块 A");
+    const message = chat.threads[chat.activeThreadId].find((m) => m.planPending)!;
+    message.planPending = false; // 已确认过 / 状态失效
+    agentStore.confirmAcpPlan(chat.activeThreadId, message);
+
+    expect(h.startAgent).not.toHaveBeenCalled();
+    expect(h.prompt).not.toHaveBeenCalled();
   });
 });
 

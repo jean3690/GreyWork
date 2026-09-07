@@ -54,12 +54,20 @@ fn readonly_system_dirs() -> Vec<PathBuf> {
 
 /// 将原始 agent 命令包裹进 bwrap 沙盒，返回 JSON 配置串（AcpAgent::from_str 可解析）。
 /// workspace 必须是已存在目录；home 为只读家目录（缺失时跳过该绑定）。
-pub fn wrap_command(mode: SandboxMode, workspace: &Path, home: Option<&Path>, agent_cmd: &str) -> Result<String, String> {
+pub fn wrap_command(
+    mode: SandboxMode,
+    workspace: &Path,
+    home: Option<&Path>,
+    agent_cmd: &str,
+) -> Result<String, String> {
     if mode == SandboxMode::Off {
         return Ok(agent_cmd.to_string());
     }
     if !Path::new(workspace).is_dir() {
-        return Err(format!("sandbox: workspace must be an existing directory, got {}", workspace.display()));
+        return Err(format!(
+            "sandbox: workspace must be an existing directory, got {}",
+            workspace.display()
+        ));
     }
 
     let mut args: Vec<String> = vec![
@@ -72,7 +80,11 @@ pub fn wrap_command(mode: SandboxMode, workspace: &Path, home: Option<&Path>, ag
         "/tmp".to_string(),
     ];
     for dir in readonly_system_dirs() {
-        args.extend(["--ro-bind".to_string(), dir.to_string_lossy().into_owned(), dir.to_string_lossy().into_owned()]);
+        args.extend([
+            "--ro-bind".to_string(),
+            dir.to_string_lossy().into_owned(),
+            dir.to_string_lossy().into_owned(),
+        ]);
     }
     if let Some(home) = home.filter(|candidate| Path::new(candidate).is_dir()) {
         let home = home.to_string_lossy().into_owned();
@@ -123,7 +135,8 @@ mod tests {
     fn wrap_fs_binds_workspace_readonly_system_and_unshares_net() {
         let workspace = std::env::temp_dir().join("greywork-sandbox-ws");
         std::fs::create_dir_all(&workspace).unwrap();
-        let config = wrap_command(SandboxMode::Filesystem, &workspace, None, "opencode acp").unwrap();
+        let config =
+            wrap_command(SandboxMode::Filesystem, &workspace, None, "opencode acp").unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&config).unwrap();
         assert_eq!(parsed["command"], "bwrap");
         let args = parsed["args"].as_array().unwrap();
@@ -144,7 +157,13 @@ mod tests {
     fn wrap_full_does_not_unshare_net() {
         let workspace = std::env::temp_dir().join("greywork-sandbox-ws2");
         std::fs::create_dir_all(&workspace).unwrap();
-        let config = wrap_command(SandboxMode::Full, &workspace, None, "codex acp").unwrap();
+        let config = wrap_command(
+            SandboxMode::Full,
+            &workspace,
+            None,
+            "npx -y @agentclientprotocol/codex-acp",
+        )
+        .unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&config).unwrap();
         let joined = parsed["args"]
             .as_array()

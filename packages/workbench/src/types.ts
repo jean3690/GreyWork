@@ -105,6 +105,8 @@ export interface ThreadMessage {
   ts: number;
   steps?: ChatStep[];
   planPending?: boolean;
+  /** 计划门待派发的意图文本（ACP 计划卡：确认后作为 prompt 派发，取消则丢弃）。 */
+  planDraft?: string;
   attachments?: string[];
   /** 完成后产出的交付物 id（artifactStore.artifacts） */
   artifacts?: string[];

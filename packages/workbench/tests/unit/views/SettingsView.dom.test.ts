@@ -46,4 +46,48 @@ describe("SettingsView", () => {
     expect(wrapper.text()).toContain("Agent");
     expect(wrapper.text()).toContain("模型供应商与默认后端");
   });
+
+  it("agent 分区可新增自配 ACP 后端：填名称与命令后出现在列表", async () => {
+    const { wrapper } = await mountSettings("agent");
+    const addButton = wrapper.findAll("button").find((button) => button.text().trim() === "新增后端");
+    expect(addButton).toBeDefined();
+    await addButton!.trigger("click");
+    expect(wrapper.text()).toContain("新增 ACP 后端");
+
+    const inputs = wrapper.findAll("input");
+    const nameInput = inputs.find((input) => input.attributes("placeholder") === "如 My Agent");
+    const commandInput = inputs.find((input) => input.attributes("placeholder")?.startsWith("如 my-agent"));
+    expect(nameInput).toBeDefined();
+    expect(commandInput).toBeDefined();
+    await nameInput!.setValue("My Agent");
+    await commandInput!.setValue("my-agent acp");
+
+    const saveButton = wrapper.findAll("button").find((button) => button.text().trim() === "保存");
+    expect(saveButton).toBeDefined();
+    await saveButton!.trigger("click");
+
+    expect(wrapper.text()).toContain("My Agent");
+    expect(wrapper.text()).toContain("my-agent acp");
+  });
+});
+
+describe("SettingsView team 分区", () => {
+  it("渲染并发度滑块；拖动后写回 settings.maxParallel 并持久化", async () => {
+    const { wrapper } = await mountSettings("team");
+    const settings = useSettingsStore();
+    expect(wrapper.text()).toContain("编排并发度");
+
+    const slider = wrapper.find('[data-testid="max-parallel"]');
+    expect(slider.exists()).toBe(true);
+    expect(slider.attributes("min")).toBe("1");
+    expect(slider.attributes("max")).toBe("8");
+    expect((slider.element as HTMLInputElement).value).toBe("2");
+
+    await slider.setValue("4");
+    expect(settings.maxParallel).toBe(4);
+    expect(wrapper.find('[data-testid="max-parallel-value"]').text()).toBe("4");
+    // 已持久化（写 store + persist 路径）
+    setActivePinia(createPinia());
+    expect(useSettingsStore().maxParallel).toBe(4);
+  });
 });

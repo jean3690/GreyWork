@@ -7,6 +7,7 @@ import {
   type CoworkMail,
   type CoworkRole,
   type CoworkSlotInit,
+  type CoworkSpecialty,
   type CoworkTaskStatus,
   type WakeState,
 } from "@greywork/cowork";
@@ -50,6 +51,8 @@ interface SlotRuntime {
 export interface CoworkMemberInit {
   name: string;
   role: CoworkRole;
+  /** teammate 的职能标签（可空 = 通用成员）；leader 忽略。 */
+  specialty?: CoworkSpecialty;
 }
 
 export interface CoworkSlotView {
@@ -59,6 +62,7 @@ export interface CoworkSlotView {
   status: string;
   turns: number;
   threadId: string;
+  specialty?: CoworkSpecialty;
   wake: WakeState;
   unread: number;
   error?: string;
@@ -162,6 +166,7 @@ export const useCoworkStore = defineStore("cowork", () => {
       status: slot.status,
       turns: slot.turns,
       threadId: slot.threadId,
+      specialty: slot.specialty,
       wake: current.wakeStateOf(slot.id),
       unread: current.run.mail.filter((mail) => !mail.read && mail.to === slot.id).length,
       error: slot.error,
@@ -274,7 +279,20 @@ export const useCoworkStore = defineStore("cowork", () => {
     chat.flushPendingContent();
     const message = runtime.messageId ? chat.threads[runtime.threadId]?.find((candidate) => candidate.id === runtime.messageId) : undefined;
     const output = message?.content ?? "";
-    if (message && !output.trim()) chat.setMessageContent(message.id, t("chat.noOutput"), runtime.threadId);
+    if (message) {
+      const errorText = outcome.ok ? "" : (outcome.error ?? "").trim();
+      if (errorText) {
+        // 失败回合：落失败文案而非「无文本输出」；有流式内容则末尾追加，leader 通知照常由 engine 发。
+        const text = t("chat.llmCallFailed", { detail: errorText });
+        if (!output.trim()) chat.setMessageContent(message.id, text, runtime.threadId);
+        else {
+          chat.appendMessageContent(message.id, `\n\n${text}`, runtime.threadId);
+          chat.flushPendingContent();
+        }
+      } else if (!output.trim()) {
+        chat.setMessageContent(message.id, t("chat.noOutput"), runtime.threadId);
+      }
+    }
     runtime.messageId = null;
     runtime.turnId = null;
     if (outcome.ok) current.applyOutput(slotId, output);
@@ -382,7 +400,14 @@ export const useCoworkStore = defineStore("cowork", () => {
         // 每个成员位都拿到同一批启用的 MCP 服务器：协作里各人的工具面应当一致。
         const opened = await acp.openSession(handle, workspace, settings.enabledMcpServers);
         created.push({
-          init: { id: `slot-${index}`, name: member.name, role: member.role, threadId: session.id },
+          init: {
+            id: `slot-${index}`,
+            name: member.name,
+            role: member.role,
+            threadId: session.id,
+            // 职能标签仅对执行者注入；leader 由引擎忽略（engine 层已过滤）。
+            specialty: member.specialty,
+          },
           runtime: { handle, sessionId: opened.sessionId, threadId: session.id, messageId: null, turnId: null },
         });
       }

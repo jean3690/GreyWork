@@ -19,6 +19,8 @@ import {
   buildActivityRows,
   durationOf,
   formatDuration,
+  settledCount,
+  timelineSpan,
 } from "../../lib/tool-activity";
 import type { ToolActivity, ToolActivityKind } from "../../types";
 
@@ -60,6 +62,16 @@ const open = ref(false);
 const rows = computed(() => buildActivityRows(props.activities));
 const lifecycle = computed(() => aggregateLifecycle(props.activities));
 const summary = computed(() => aggregateSummary(props.activities, lifecycle.value));
+
+/** 执行进度：已结算 / 全部（飞行中的实时计数，支持「3/7」式进度感知）。 */
+const progress = computed(() => {
+  const total = props.activities.length;
+  if (total === 0) return null;
+  return { settled: settledCount(props.activities), total };
+});
+
+/** 任务级总耗时：最早开始 → 最晚结束（不依赖单条调用的重叠时长）。 */
+const span = computed(() => timelineSpan(props.activities));
 
 /** 本条消息里出现过的 MCP 服务器（去重保序）——折叠态也必须能看见。 */
 const mcpServers = computed(() => {
@@ -115,6 +127,16 @@ watch(
         data-testid="tool-mcp-badge"
       >
         <Icon name="earth" :size="9" />{{ t("chatView.tools.mcp") }} · {{ server }}
+      </span>
+      <span
+        v-if="lifecycle === 'running' && progress"
+        class="flex-none font-mono text-[10px] tabular-nums text-dim2"
+        data-testid="tool-progress"
+      >
+        {{ progress.settled }}/{{ progress.total }}
+      </span>
+      <span v-else-if="span != null" class="flex-none font-mono text-[10px] tabular-nums text-dim2" data-testid="tool-span">
+        {{ formatDuration(span) }}
       </span>
       <span class="ml-auto flex h-4 flex-none items-center rounded-full px-1.5 text-[10px]" :class="STATUS_BADGE[lifecycle]">
         {{ statusText }}

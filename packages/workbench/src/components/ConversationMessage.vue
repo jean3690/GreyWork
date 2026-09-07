@@ -12,11 +12,12 @@ import ArtifactCards from "./ArtifactCards.vue";
 import StreamText from "./chat/StreamText.vue";
 import ThinkingBlock from "./chat/ThinkingBlock.vue";
 import ToolTimeline from "./chat/ToolTimeline.vue";
+import PlanCard from "./chat/PlanCard.vue";
 import { useAgentStore } from "../stores/agent";
 import { useChatStore } from "../stores/chat";
 import type { MessageSegment, ThreadMessage, ToolActivity } from "../types";
 
-const props = defineProps<{ message: ThreadMessage }>();
+const props = withDefaults(defineProps<{ message: ThreadMessage; threadId?: string }>(), { threadId: "" });
 
 const agent = useAgentStore();
 const chat = useChatStore();
@@ -67,6 +68,7 @@ function timeLabel(ts: number): string {
       <p class="whitespace-pre-wrap text-[13.5px] leading-[1.7] text-foreground [overflow-wrap:anywhere]">{{ message.content }}</p>
     </div>
     <div v-else class="flex max-w-[92%] flex-col gap-2.5">
+      <PlanCard v-if="message.planPending" :thread-id="threadId || chat.activeThreadId" :message="message" />
       <div
         v-if="awaitingOutput"
         class="flex h-9 items-center gap-2.5 rounded-[12px] border border-line bg-panel-2 px-3.5 text-[12px] text-dim"

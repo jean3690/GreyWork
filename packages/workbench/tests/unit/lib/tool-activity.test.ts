@@ -8,6 +8,8 @@ import {
   parseToolActivityPayload,
   parseToolCallUpdate,
   runningNowLabel,
+  settledCount,
+  timelineSpan,
   toToolActivity,
   type AggregateRow,
 } from "@/lib/tool-activity";
@@ -244,6 +246,36 @@ describe("lifecycle / summary", () => {
 describe("durationOf", () => {
   it("已完成返回稳定耗时", () => {
     expect(durationOf(act({ toolCallId: "x", startedAt: 100, finishedAt: 1600 }))).toBe(1500);
+  });
+});
+
+describe("timelineSpan / settledCount", () => {
+  it("timelineSpan 取最早开始到最晚结束（并行调用算一次墙钟）", () => {
+    const span = timelineSpan([
+      act({ toolCallId: "a", startedAt: T, finishedAt: T + 900 }),
+      act({ toolCallId: "b", startedAt: T + 500, finishedAt: T + 1500 }),
+    ]);
+    expect(span).toBe(1500);
+  });
+
+  it("飞行中的调用按 now 计时", () => {
+    const span = timelineSpan([act({ toolCallId: "a", startedAt: T, status: "in_progress", finishedAt: null })], T + 1200);
+    expect(span).toBe(1200);
+  });
+
+  it("空时间线返回 null（不显示耗时）", () => {
+    expect(timelineSpan([])).toBeNull();
+  });
+
+  it("settledCount 只计已结算调用", () => {
+    expect(
+      settledCount([
+        act({ toolCallId: "a", status: "completed" }),
+        act({ toolCallId: "b", status: "in_progress", finishedAt: null }),
+        act({ toolCallId: "c", status: "pending", finishedAt: null }),
+        act({ toolCallId: "d", status: "failed" }),
+      ]),
+    ).toBe(2);
   });
 });
 

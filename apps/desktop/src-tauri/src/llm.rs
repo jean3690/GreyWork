@@ -514,14 +514,26 @@ mod tests {
         let addr = listener.local_addr().expect("addr");
         let content_type = content_type.to_string();
         tokio::spawn(async move {
-            if let Ok((mut stream, _)) = listener.accept().await {
-                let header = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\n\r\n",
-                    content_type,
-                    body.len()
-                );
-                let _ = tokio::io::AsyncWriteExt::write_all(&mut stream, header.as_bytes()).await;
-                let _ = tokio::io::AsyncWriteExt::write_all(&mut stream, body.as_bytes()).await;
+            // 循环 accept：reqwest 偶发重连/复用连接时，单次 accept 的服务器会让
+            // 第二次连接直接撞 RST，客户端侧表现为偶发「error decoding response
+            // body」。每连接独立子任务：先吞掉请求（防写响应时对端仍在写导致
+            // RST），响应头体一次写完，再显式 shutdown 干净收尾。
+            while let Ok((mut stream, _)) = listener.accept().await {
+                let body = body.clone();
+                let content_type = content_type.clone();
+                tokio::spawn(async move {
+                    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                    let mut buf = vec![0u8; 4096];
+                    let _ = stream.read(&mut buf).await;
+                    let mut wire = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        body.len()
+                    )
+                    .into_bytes();
+                    wire.extend_from_slice(body.as_bytes());
+                    let _ = stream.write_all(&wire).await;
+                    let _ = stream.shutdown().await;
+                });
             }
         });
         format!("http://{addr}/v1")
@@ -529,6 +541,15 @@ mod tests {
 
     fn complete_message(text: &str) -> String {
         format!(r#"{{"choices":[{{"message":{{"role":"assistant","content":"{text}"}}}}]}}"#)
+    }
+
+    /// chat_complete 只在声明的 env 变量非空时才发起请求；CI 与多数本地环境
+    /// 都没有这个变量（名字带 TEST 前缀，示意无需真实密钥）。测试自设同名同值，
+    /// 两个用例并行 set 也互不干扰（std env 内部有锁）。
+    fn mock_api_key_env() -> String {
+        const ENV: &str = "GREYWORK_TEST_NO_SUCH_KEY";
+        std::env::set_var(ENV, "test-key");
+        ENV.to_string()
     }
 
     #[tokio::test]
@@ -542,7 +563,7 @@ mod tests {
         let reply = chat_complete(
             &url,
             "mock-model",
-            "GREYWORK_TEST_NO_SUCH_KEY",
+            &mock_api_key_env(),
             vec![LlmChatMessage {
                 role: "user".into(),
                 content: "hi".into(),
@@ -560,7 +581,7 @@ mod tests {
         let reply = chat_complete(
             &url,
             "mock-model",
-            "GREYWORK_TEST_NO_SUCH_KEY",
+            &mock_api_key_env(),
             vec![LlmChatMessage {
                 role: "user".into(),
                 content: "hi".into(),

@@ -12,7 +12,7 @@ import { defineStore } from "pinia";
 import { computed, ref, watch } from "vue";
 import { i18n } from "../i18n";
 import { notify } from "./notice";
-import { mergeToolActivities } from "../lib/tool-activity";
+import { mergeToolActivities, formatDuration } from "../lib/tool-activity";
 import type { ChatStep, QueuedCommand, ThreadMessage, ToolActivity } from "../types";
 
 const t = i18n.global.t;
@@ -558,6 +558,8 @@ export const useChatStore = defineStore("chat", () => {
     live.planPending = false;
     sessionStore.markDirty();
     busy.value = true;
+    // 演示管线回合起点：完成时报真实耗时（mock 工具时间线 startedAt/finishedAt 同刻，无法自算）。
+    const turnStartAt = Date.now();
     // 本条消息正在被写入：思考段据此判定「仍在流」并保持展开（与真实 ACP 回合同一判据）。
     streamingMessageId.value = live.id;
     // 思考链：分句揭示推理。头几句在动手之前，末句留到工具跑完之后 —— 复现真实回合的
@@ -610,6 +612,14 @@ export const useChatStore = defineStore("chat", () => {
           setMessageContent(live.id, speedBoost.value ? t("chat.completedSpeed") : t("chat.completed"));
           busy.value = false;
           streamingMessageId.value = null;
+          // 演示管线完成同样给「任务完成」成功通知（与真实 ACP 路径对齐）。
+          const duration = formatDuration(Date.now() - turnStartAt);
+          notify({
+            kind: "success",
+            key: "mock-turn-done",
+            title: t("chat.completedToast"),
+            detail: t("chat.completedDetail", { duration }),
+          });
           // 消息级记账：每条产物 id 都要回挂到本条消息，对话内「文件变更」块才列得全。
           // 此前只有主 md 记了账，xlsx/pptx/html 都漏在 artifacts 之外。
           const record = (id: string): void => {
@@ -789,6 +799,7 @@ export const useChatStore = defineStore("chat", () => {
         ts: Date.now(),
         steps: buildSteps(trimmed),
         planPending: true,
+        planDraft: trimmed,
       };
       push(activeThreadId.value, pending);
       return pending;
@@ -800,7 +811,8 @@ export const useChatStore = defineStore("chat", () => {
   }
 
   function confirmPlan(_threadId: string, message: ThreadMessage): void {
-    void dispatchAssistant(message);
+    // 计划卡存的意图文本在此交还执行管线：产物/工具识别基于用户原始输入，而非占位内容。
+    void dispatchAssistant(message, message.planDraft ?? "");
   }
 
   function cancelPlan(threadId: string, message: ThreadMessage): void {

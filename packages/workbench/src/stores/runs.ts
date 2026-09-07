@@ -9,7 +9,7 @@ import {
 } from "@greywork/agents";
 import { createJsonStorage } from "@greywork/core";
 import { defineStore } from "pinia";
-import { ref } from "vue";
+import { ref, computed } from "vue";
 import { acp } from "../lib/acp-client";
 import { teamRunsBackend, type TeamRunRow } from "../lib/team-runs-backend";
 import { resolveWorkspaceDir } from "../lib/workspace-dir";
@@ -91,8 +91,12 @@ export const useRunsStore = defineStore("runs", () => {
         console.error("[runs] 编排存档加载失败，沿用本地缓存", error);
       });
   })();
-  /** 并行子任务上限：每个子任务一个独立 ACP 进程，避免资源失控。 */
-  const maxParallel = ref(2);
+  /**
+   * 并行子任务上限：每个子任务一个独立 ACP 进程，避免资源失控。
+   * 取自设置项（可在 team 设置页调整），改 computed 后自动传导到 cowork 引擎
+   * （stores/cowork.ts 传的是 `() => runsStore.maxParallel`，engine 每次求值）。
+   */
+  const maxParallel = computed(() => settings.maxParallel);
   /** 子任务会话映射：subtaskId → 独立 handle/session 与支架定位。 */
   interface SubtaskSession {
     handle: number;
@@ -177,11 +181,23 @@ export const useRunsStore = defineStore("runs", () => {
     await pending;
   }
 
-  function finishSubtask(run: PlannerRun, sub: Subtask, session: SubtaskSession): void {
-    // 空内容兜底 + 回收子任务进程
+  function finishSubtask(run: PlannerRun, sub: Subtask, session: SubtaskSession, error?: string): void {
+    const errorText = error?.trim() ?? "";
+    // 空内容兜底 + 回收子任务进程。失败回合（error 有值）落失败文案并如实标记 failed，
+    // 而不是「无文本输出 + done」——挂掉的后端不该被算成完成。
     const message = chat.threads[session.threadId]?.find((candidate) => candidate.id === session.messageId);
-    if (message && !message.content.trim()) chat.setMessageContent(message.id, t("chat.noOutput"), session.threadId);
-    sub.status = "done";
+    if (message && errorText) {
+      const text = t("chat.llmCallFailed", { detail: errorText });
+      if (!message.content.trim()) chat.setMessageContent(message.id, text, session.threadId);
+      else {
+        chat.appendMessageContent(message.id, `\n\n${text}`, session.threadId);
+        chat.flushPendingContent();
+      }
+      sub.error = errorText;
+    } else if (message && !message.content.trim()) {
+      chat.setMessageContent(message.id, t("chat.noOutput"), session.threadId);
+    }
+    sub.status = errorText ? "failed" : "done";
     subtaskSessions.delete(sub.id);
     void Promise.resolve(acp.stop(session.handle)).catch(() => undefined);
     checkRunDone(run);
@@ -390,12 +406,12 @@ export const useRunsStore = defineStore("runs", () => {
       }
       return true;
     },
-    /** prompt-done：按 handle 命中子任务 → finishSubtask + 解除回执（驱动并发泵）。 */
-    routeSubtaskDone: (handle) => {
+    /** prompt-done：按 handle 命中子任务 → finishSubtask + 解除回执（驱动并发泵）。error = 回合失败原因。 */
+    routeSubtaskDone: (handle, error) => {
       const entry = findSubtaskByHandle(handle);
       if (!entry) return false;
       const { run, sub, session } = entry;
-      finishSubtask(run, sub, session);
+      finishSubtask(run, sub, session, error);
       subtaskPending.get(sub.id)?.resolve();
       subtaskPending.delete(sub.id);
       return true;

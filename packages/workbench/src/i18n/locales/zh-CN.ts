@@ -72,6 +72,9 @@ export const zhCN = {
     stopped: "[已停止]",
     completed: "任务已完成。所有步骤均执行成功，右侧面板可查看生成的文件、Git Diff 与引用来源。",
     completedSpeed: "任务已完成（速度模式 · 提速约 1.5 倍）。所有步骤执行成功，可在右侧面板查看产物、Diff 与来源。",
+    completedToast: "任务已完成",
+    completedDetail: "耗时 {duration}",
+    completedFooter: "\n\n---\n✓ 任务已完成 · 耗时 {duration}",
     weeklyReport: "周报",
     taskResult: "任务结果",
     reportJustGenerated: "Markdown · 刚刚生成",
@@ -229,6 +232,14 @@ export const zhCN = {
     role: {
       leader: "leader",
       teammate: "成员",
+    },
+    specialty: {
+      label: "职能",
+      none: "通用",
+      planner: "拆解",
+      researcher: "调研",
+      builder: "实现",
+      reviewer: "审查",
     },
     runStatus: {
       running: "进行中",
@@ -600,6 +611,9 @@ export const zhCN = {
     planBarRunning: "执行计划",
     planBarWorking: "执行中…",
     planBarToggle: "收起 / 展开执行计划",
+    cancelPlan: "取消方案",
+    planAcpTarget: "派发 · {backend}",
+    planAcpDispatch: "确认后将把以下需求交给 {backend} 执行：",
     thinking: "思考过程",
     thought: "已思考",
     waiting: "正在思考…",
@@ -833,6 +847,9 @@ export const zhCN = {
     llmNotConfiguredHint: "在 设置 → Agent → 模型供应商 填好 API Key 环境变量并重启应用后重试。",
     acpBinaryMissing: "没找到 agent 命令：{command}",
     acpBinaryMissingHint: "先安装该 CLI（如 npm i -g opencode），或在 设置 → Agent 换一个后端。",
+    agentProviderNameRequired: "后端名称不能为空",
+    agentProviderCommandRequired: "启动命令不能为空",
+    agentProviderNotEditable: "仅用户自配的后端可编辑 / 删除",
   },
 };
 

@@ -79,7 +79,7 @@ pub fn spawn_ticker(app: tauri::AppHandle, db_path: PathBuf) {
                 };
                 if !cron_matches(
                     expr,
-                    now.weekday().num_days_from_monday() as u32,
+                    now.weekday().num_days_from_monday(),
                     now.hour(),
                     now.minute(),
                 ) {
@@ -198,7 +198,7 @@ fn field_matches(field: &str, value: u32, min: u32, max: u32) -> bool {
         let Ok(hi) = normalize_range(hi, min, max) else {
             continue;
         };
-        if value >= lo && value <= hi && (value - lo) % step == 0 {
+        if value >= lo && value <= hi && (value - lo).is_multiple_of(step) {
             return true;
         }
     }

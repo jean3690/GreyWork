@@ -9,6 +9,15 @@
 /** 成员位角色：leader 只做拆解/派活/汇总，teammate 执行具体任务。 */
 export type CoworkRole = "leader" | "teammate";
 
+/**
+ * teammate 职能标签（取自 `@greywork/agents` 的 AgentRole 子集）。
+ *
+ * 不把两套角色体系合并：cowork 的 leader/teammate 是「一个 leader 带 N 个执行者」的
+ * 协作模型，而 agents 的 6 角色是 planner 分解用的。这里只给 teammate 挂一个可选职能，
+ * 让 prompt 能注入一句话定位，leader 不带标签。本地定义，不给 cowork 引 agents 依赖。
+ */
+export type CoworkSpecialty = "planner" | "researcher" | "builder" | "reviewer";
+
 /** 成员位生命周期：pending 运行时未起 / ready 可派活 / failed 起不来或回合出错（可重试）。 */
 export type SlotStatus = "pending" | "ready" | "failed";
 
@@ -87,6 +96,8 @@ export interface CoworkSlot {
   threadId: string;
   /** 已消耗回合数，预算账本的计费单位。 */
   turns: number;
+  /** teammate 的职能标签（仅提示 prompt 定位用，不改变协作模型）。 */
+  specialty?: CoworkSpecialty;
   /** 最近一次失败原因（status 为 failed 时有值）。 */
   error?: string;
 }

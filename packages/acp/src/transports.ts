@@ -93,6 +93,8 @@ export interface AcpSessionOpened {
   mcpServers?: string[];
   /** 因能力不匹配 / 配置不全被跳过的服务器。 */
   skippedMcpServers?: McpSkippedServer[];
+  /** 该会话由 `session/load` 恢复而来（区别于新建）。前端据此跳过「新会话」类提示。 */
+  restored?: boolean;
 }
 
 /** 权限请求载荷（宿主 permission-request / permission-auto 事件的 payload）。 */
@@ -126,6 +128,11 @@ export interface AcpTransport {
   setPermissionTier(handle: number, tier: PermissionTier): Promise<void>;
   /** 建会话；`mcpServers` 随 session/new 声明给 agent（能力不匹配的由宿主跳过并回报）。 */
   openSession(handle: number, cwd: string, mcpServers?: readonly McpServerConfig[]): Promise<AcpSessionOpened>;
+  /**
+   * 恢复已存在的会话（session/load）；`sessionId` 为先前落盘的 ACP 会话 id。
+   * agent 不支持时宿主返回错误，调用方应静默回落 openSession。
+   */
+  loadSession(handle: number, cwd: string, sessionId: string, mcpServers?: readonly McpServerConfig[]): Promise<AcpSessionOpened>;
   /** 设置会话配置选项（select 传字符串值，boolean 传布尔值）；返回全量最新配置选项。 */
   setSessionConfig(handle: number, configId: string, value: string | boolean): Promise<AcpSessionConfigOption[]>;
   /** 发送一轮 prompt，立即返回 turnId；回合结果经 `prompt-done` 事件送达。 */

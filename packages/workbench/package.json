@@ -50,6 +50,8 @@
     "exceljs": "^4.4.0",
     "jszip": "^3.10.1",
     "lucide-vue-next": "^0.544.0",
+    "marked": "^18.0.11",
+    "mermaid": "^11.17.2",
     "pdfjs-dist": "^6.3.289",
     "pinia": "^3.0.3",
     "pptxgenjs": "^4.0.1",

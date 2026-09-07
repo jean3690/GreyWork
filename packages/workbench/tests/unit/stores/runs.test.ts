@@ -41,6 +41,7 @@ vi.mock("@greywork/acp", () => ({
 
 import { useRunsStore } from "@/stores/runs";
 import { useChatStore } from "@/stores/chat";
+import { useSettingsStore } from "@/stores/settings";
 
 function emit(event: AcpEventEnvelope): void {
   expect(h.listener).not.toBeNull();
@@ -145,6 +146,96 @@ describe("并行编排（dispatchRun）", () => {
     await vi.waitFor(() => expect(runsStore.runs[0]?.status).toBe("failed"));
     expect(runsStore.runs[0]?.subtasks).toHaveLength(0);
     expect(h.startAgent).toHaveBeenCalledTimes(1); // 仅 planner
+  });
+
+  it("planner 回合失败（prompt-done 带 error）：planner 钩子落 [Planner 失败] 文案，run failed 不派发子任务", async () => {
+    let handleSeq = 0;
+    h.startAgent.mockImplementation(() => Promise.resolve(++handleSeq));
+    h.openSession.mockImplementation(() => Promise.resolve({ sessionId: "session-1", configOptions: [] }));
+    h.prompt.mockImplementation(() => new Promise<unknown>(() => undefined));
+    const runsStore = useRunsStore();
+    const chat = useChatStore();
+
+    void runsStore.dispatchRun("分析客流数据");
+    await vi.waitFor(() => expect(h.prompt).toHaveBeenCalledWith(1, expect.stringContaining("你是任务编排器")));
+
+    emit({ kind: "prompt-done", payload: { handle: 1, error: "Cannot connect to API: typo in the url?" } });
+
+    await vi.waitFor(() => expect(runsStore.runs[0]?.status).toBe("failed"));
+    expect(runsStore.runs[0]?.subtasks).toHaveLength(0);
+    expect(h.startAgent).toHaveBeenCalledTimes(1); // 仅 planner，未派子任务
+    const scaffold = chat.threads[chat.activeThreadId]?.find((m) => m.role === "assistant");
+    expect(scaffold?.content).toContain("[Planner 失败]");
+    expect(scaffold?.content).toContain("Cannot connect to API: typo in the url?");
+  });
+
+  it("子任务回合失败（prompt-done 带 error）：该子任务 failed、run failed、支架落失败文案而非无文本输出", async () => {
+    let handleSeq = 0;
+    let sessionSeq = 0;
+    h.startAgent.mockImplementation(() => Promise.resolve(++handleSeq));
+    h.openSession.mockImplementation(() => Promise.resolve({ sessionId: `session-${++sessionSeq}`, configOptions: [] }));
+    h.prompt.mockImplementation(() => new Promise<unknown>(() => undefined));
+    const runsStore = useRunsStore();
+    const chat = useChatStore();
+
+    void runsStore.dispatchRun("分析客流数据");
+    await vi.waitFor(() => expect(h.prompt).toHaveBeenCalledWith(1, expect.stringContaining("你是任务编排器")));
+    emit({
+      kind: "session-update",
+      payload: {
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { text: '[{"role":"researcher","prompt":"抓取数据"},{"role":"geo-analyst","prompt":"空间聚类"}]' },
+        },
+      },
+    });
+    chat.flushPendingContent();
+    emit({ kind: "prompt-done", payload: { handle: 1, response: {} } });
+
+    await vi.waitFor(() => expect(h.startAgent).toHaveBeenCalledTimes(3)); // 1 planner + 2 subtask
+    // 子任务 1 正常完成；子任务 2 后端失败
+    emit({ kind: "prompt-done", payload: { handle: 2, response: {} } });
+    emit({ kind: "prompt-done", payload: { handle: 3, error: "API connection refused" } });
+
+    await vi.waitFor(() => expect(runsStore.runs[0]?.status).toBe("failed"));
+    expect(runsStore.runs[0]?.subtasks.map((s) => s.status)).toEqual(["done", "failed"]);
+    expect(runsStore.runs[0]?.subtasks[1]?.error).toBe("API connection refused");
+    const bubbles = chat.threads[chat.activeThreadId]?.filter((m) => m.role === "assistant") ?? [];
+    // 失败子任务的支架落失败文案（成功但空输出的子任务仍走 noOutput 兜底，那是合法路径）
+    expect(bubbles.some((b) => b.content === "[LLM 调用失败] API connection refused")).toBe(true);
+    expect(bubbles.filter((b) => b.content.includes("[LLM 调用失败]"))).toHaveLength(1);
+  });
+
+  it("并发度取设置项：maxParallel=4 时三个子任务同时派发（回合未完成不阻塞后续）", async () => {
+    let handleSeq = 0;
+    h.startAgent.mockImplementation(() => Promise.resolve(++handleSeq));
+    h.openSession.mockImplementation(() => Promise.resolve({ sessionId: `session-${handleSeq}`, configOptions: [] }));
+    h.prompt.mockImplementation(() => new Promise<unknown>(() => undefined)); // 回合永不结束
+    useSettingsStore().maxParallel = 4;
+    const runsStore = useRunsStore();
+    const chat = useChatStore();
+
+    void runsStore.dispatchRun("分析客流数据");
+    await vi.waitFor(() => {
+      expect(h.prompt).toHaveBeenCalledWith(1, expect.stringContaining("你是任务编排器"));
+    });
+    emit({
+      kind: "session-update",
+      payload: {
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: {
+            text: '[{"role":"researcher","prompt":"抓取数据"},{"role":"geo-analyst","prompt":"空间聚类"},{"role":"builder","prompt":"出图"}]',
+          },
+        },
+      },
+    });
+    chat.flushPendingContent();
+    emit({ kind: "prompt-done", payload: { handle: 1, response: {} } });
+
+    // 三个子任务在没有任何回合完成的情况下全部派发（= 并发度按 4 生效）
+    await vi.waitFor(() => expect(h.startAgent).toHaveBeenCalledTimes(4)); // 1 planner + 3 subtask
+    expect(runsStore.runs[0]?.subtasks.every((sub) => sub.status === "running")).toBe(true);
   });
 });
 

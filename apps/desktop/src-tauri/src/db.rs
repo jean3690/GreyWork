@@ -110,6 +110,7 @@ impl Db {
     }
 
     /// 内存库（测试用）：WAL 对 memory 库退化为 memory 模式，不报错。
+    #[cfg(test)]
     pub fn open_in_memory() -> Result<Self, String> {
         Self::with_connection(
             Connection::open_in_memory().map_err(|e| format!("打开内存库失败: {e}"))?,
@@ -184,6 +185,8 @@ impl Db {
     /// 全量替换快照（事务）：库中不在快照里的会话连同消息删除；
     /// 在场会话先清消息再整批重插（消息不透明，无法行级 diff）。
     /// 首次调用写入 initialized 标记，此后空快照 = 用户清空，不再回退种子。
+    /// 生产只读旧库（load_snapshot 供文件面迁移）；写侧仅测试模拟旧库用。
+    #[cfg(test)]
     pub fn sync_snapshot(&self, snapshot: &SessionsSnapshotDto) -> Result<(), String> {
         let mut conn = self.conn.lock();
         let tx = conn
@@ -516,6 +519,26 @@ impl Db {
         Ok(())
     }
 
+    /// 已启用 ACP 后端的启动程序名（spawn 白名单扩展面）。
+    ///
+    /// 取每条启用后端命令首 token 的 basename（`npx -y pkg` → `npx`，`/usr/bin/x --acp` → `x`），
+    /// 供 `acp_start` 在内置白名单之外放行用户自配的 agent。未接管目录 / 无启用项 → 空数组。
+    /// 仅收敛「能被启动的程序面」的扩展：shell 元字符拒绝仍由 process_guard 生效。
+    pub fn enabled_agent_programs(&self) -> Vec<String> {
+        let Ok(Some(providers)) = self.load_agent_providers() else {
+            return Vec::new();
+        };
+        providers
+            .iter()
+            .filter(|provider| provider.enabled)
+            .filter_map(|provider| {
+                let program = provider.command.split_whitespace().next()?;
+                let basename = program.rsplit(['/', '\\']).next().unwrap_or(program);
+                (!basename.is_empty()).then(|| basename.to_string())
+            })
+            .collect()
+    }
+
     /// 全量替换自动化清单（事务；与 sessions 同语义——库中不在快照的任务删除）。
     /// 首次调用写 automation_initialized 标记。
     pub fn sync_automations(&self, tasks: &[AutomationTaskDto]) -> Result<(), String> {
@@ -833,23 +856,6 @@ fn migrate(conn: &mut Connection) -> rusqlite::Result<()> {
 }
 
 /* ===== Tauri commands（薄壳：逻辑在 Db 方法，便于脱离 State 单测） ===== */
-
-/// 读全量会话快照；库未被接管（首次启动）时返回 null，前端以本地内容为真源回写。
-#[tauri::command]
-pub fn db_sessions_load(
-    state: tauri::State<'_, Db>,
-) -> Result<Option<SessionsSnapshotDto>, String> {
-    state.load_snapshot()
-}
-
-/// 全量替换会话快照（事务幂等；调用方为渲染端 debounce 持久层）。
-#[tauri::command]
-pub fn db_sessions_sync(
-    state: tauri::State<'_, Db>,
-    snapshot: SessionsSnapshotDto,
-) -> Result<(), String> {
-    state.sync_snapshot(&snapshot)
-}
 
 /// 读设置快照（meta.settings）；从未持久化过 → null。
 #[tauri::command]
@@ -1354,6 +1360,43 @@ mod tests {
         let loaded = db.load_agent_providers().unwrap().expect("some");
         assert_eq!(loaded.len(), 1);
         assert!(!loaded[0].enabled);
+    }
+
+    #[test]
+    fn enabled_agent_programs_collects_first_tokens_of_enabled_only() {
+        let db = Db::open_in_memory().expect("open");
+        db.sync_agent_providers(&[
+            provider("opencode", true), // "opencode acp" → opencode
+            provider("codex", false),   // 禁用 → 不进入可 spawn 面
+            AgentProviderDto {
+                id: "custom-1".to_string(),
+                name: "My Agent".to_string(),
+                kind: "acp".to_string(),
+                command: "/usr/bin/my-agent --acp".to_string(),
+                enabled: true, // 绝对路径 → 取 basename
+            },
+            AgentProviderDto {
+                id: "custom-2".to_string(),
+                name: "npx 型".to_string(),
+                kind: "acp".to_string(),
+                command: "npx -y @acp/whatever".to_string(),
+                enabled: true,
+            },
+        ])
+        .unwrap();
+        assert_eq!(
+            db.enabled_agent_programs(),
+            vec!["opencode", "my-agent", "npx"]
+        );
+    }
+
+    #[test]
+    fn enabled_agent_programs_empty_before_takeover() {
+        let db = Db::open_in_memory().expect("open");
+        assert!(db.enabled_agent_programs().is_empty());
+        // 空目录接管后依旧为空（无启用项）
+        db.sync_agent_providers(&[]).unwrap();
+        assert!(db.enabled_agent_programs().is_empty());
     }
 
     #[test]

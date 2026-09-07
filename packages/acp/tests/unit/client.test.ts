@@ -31,6 +31,15 @@ function fakeTransport(): AcpTransport & { events: AcpEventEnvelope[] } {
         mcpServers: (mcpServers ?? []).map((server) => server.name),
       };
     },
+    async loadSession(_handle, _cwd, sessionId, mcpServers) {
+      events.push({ kind: "session-loaded", payload: { sessionId, mcpServers } });
+      return {
+        sessionId,
+        configOptions: [],
+        restored: true,
+        mcpServers: (mcpServers ?? []).map((server) => server.name),
+      };
+    },
     async probeMcp(config) {
       return {
         transport: config.transport,
@@ -131,30 +140,42 @@ describe("WebSocketTransport（web 远程骨架）", () => {
   });
 });
 
+/** 模拟 SDK createWebSocketStream 需要的 WebSocketLike：`.on/.off` 事件风格。 */
 class FakeWebSocket {
   static instances: FakeWebSocket[] = [];
   readyState = 0;
-  onopen: (() => void) | null = null;
-  onerror: (() => void) | null = null;
-  onclose: (() => void) | null = null;
-  onmessage: ((event: { data: string }) => void) | null = null;
   sent: string[] = [];
+  private handlers = new Map<string, Set<(...args: unknown[]) => void>>();
 
-  constructor() {
+  constructor(url?: string, _protocols?: string | string[], _options?: { headers?: Record<string, string> }) {
+    void url;
     FakeWebSocket.instances.push(this);
     queueMicrotask(() => {
       this.readyState = 1;
-      this.onopen?.();
+      this.emit("open");
     });
+  }
+
+  on(type: string, listener: (...args: unknown[]) => void): void {
+    if (!this.handlers.has(type)) this.handlers.set(type, new Set());
+    this.handlers.get(type)!.add(listener);
+  }
+
+  off(type: string, listener: (...args: unknown[]) => void): void {
+    this.handlers.get(type)?.delete(listener);
+  }
+
+  private emit(type: string, ...args: unknown[]): void {
+    for (const listener of [...(this.handlers.get(type) ?? [])]) (listener as (...a: unknown[]) => void)(...args);
   }
 
   send(raw: string): void {
     this.sent.push(raw);
-    const request = JSON.parse(raw) as { id?: number; method?: string; params?: Record<string, unknown> };
+    const request = JSON.parse(raw) as { id?: number; method?: string };
     if (request.id === undefined) return;
     const result =
       request.method === "initialize"
-        ? { protocolVersion: 1 }
+        ? { protocolVersion: 1, agentCapabilities: { loadSession: false } }
         : request.method === "session/new"
           ? { sessionId: "remote-session", configOptions: [] }
           : request.method === "session/set_config_option"
@@ -162,54 +183,61 @@ class FakeWebSocket {
             : request.method === "session/prompt"
               ? { stopReason: "end_turn" }
               : {};
-    queueMicrotask(() => this.onmessage?.({ data: JSON.stringify({ jsonrpc: "2.0", id: request.id, result }) }));
+    queueMicrotask(() => {
+      this.emit("message", JSON.stringify({ jsonrpc: "2.0", id: request.id, result }));
+    });
   }
 
   close(): void {
     this.readyState = 3;
-    this.onclose?.();
+    this.emit("close");
   }
 
   permissionRequest(id: number): void {
-    this.onmessage?.({
-      data: JSON.stringify({
+    this.emit(
+      "message",
+      JSON.stringify({
         jsonrpc: "2.0",
         id,
         method: "session/request_permission",
-        params: { toolCallId: "call-1", kind: "read", options: [] },
+        params: {
+          sessionId: "remote-session",
+          toolCall: { toolCallId: "call-1", kind: "read", title: "Read file" },
+          options: [{ optionId: "allow", name: "Allow", kind: "allow_once" }],
+        },
       }),
-    });
+    );
   }
 
   update(text: string): void {
-    this.onmessage?.({
-      data: JSON.stringify({
+    this.emit(
+      "message",
+      JSON.stringify({
         jsonrpc: "2.0",
         method: "session/update",
-        params: { update: { sessionUpdate: "agent_message_chunk", content: { text } } },
+        params: {
+          sessionId: "remote-session",
+          update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text } },
+        },
       }),
-    });
+    );
   }
 
   toolCallUpdate(update: Record<string, unknown>): void {
-    this.onmessage?.({
-      data: JSON.stringify({
+    this.emit(
+      "message",
+      JSON.stringify({
         jsonrpc: "2.0",
         method: "session/update",
         params: { sessionId: "remote-session", update },
       }),
-    });
+    );
   }
+}
 
-  toolCallContentChunk(update: Record<string, unknown>): void {
-    this.onmessage?.({
-      data: JSON.stringify({
-        jsonrpc: "2.0",
-        method: "session/update",
-        params: { sessionId: "remote-session", update: { sessionUpdate: "tool_call_content_chunk", ...update } },
-      }),
-    });
-  }
+/** 放空已入队的微任务，让 SDK 连接层的响应帧/取消帧落到 socket.send。 */
+function flushMicrotasks(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 describe("WebSocketTransport ACP JSON-RPC", () => {
@@ -226,12 +254,14 @@ describe("WebSocketTransport ACP JSON-RPC", () => {
     expect((await transport.setSessionConfig(1, "model", "fast"))[0]?.currentValue).toBe("fast");
     socket.update("hello");
     socket.permissionRequest(99);
+    await flushMicrotasks();
     await transport.respondPermission(99, "allow");
+    await flushMicrotasks();
     expect(JSON.parse(socket.sent.at(-1)!).result.outcome.optionId).toBe("allow");
     expect(events.map((event) => event.kind)).toEqual(["started", "session-update", "permission-request"]);
   });
 
-  it("转发真实 ACP v2 tool_call_update 顶层负载（真实数据源）", async () => {
+  it("转发真实 ACP tool_call_update 负载（content 走 ToolCallUpdate，非 v2 专有帧）", async () => {
     FakeWebSocket.instances = [];
     const options: WebSocketTransportOptions = { url: "ws://acp.test", socketFactory: () => new FakeWebSocket() as unknown as WebSocket };
     const transport = new WebSocketTransport(options);
@@ -248,27 +278,28 @@ describe("WebSocketTransport ACP JSON-RPC", () => {
       status: "pending",
     });
     socket.toolCallUpdate({ sessionUpdate: "tool_call_update", toolCallId: "call_001", status: "in_progress" });
-    socket.toolCallContentChunk({ toolCallId: "call_001", content: { type: "terminal", terminalId: "term_1" } });
+    socket.toolCallUpdate({
+      sessionUpdate: "tool_call_update",
+      toolCallId: "call_001",
+      content: [{ type: "terminal", terminalId: "term_1" }],
+    });
     socket.toolCallUpdate({ sessionUpdate: "tool_call_update", toolCallId: "call_001", status: "completed" });
+    await flushMicrotasks();
 
     const toolEvents = events.filter((e) => e.kind === "session-update");
     const updates = toolEvents.map((e) => {
-      const payload = e.payload as { sessionId?: string; update?: { sessionUpdate?: string; status?: string } };
+      const payload = e.payload as { sessionId?: string; update?: { sessionUpdate?: string; status?: string; content?: unknown[] } };
       expect(payload.sessionId).toBe("remote-session");
       return payload.update;
     });
-    expect(updates.map((u) => u?.sessionUpdate)).toEqual([
-      "tool_call_update",
-      "tool_call_update",
-      "tool_call_content_chunk",
-      "tool_call_update",
-    ]);
-    expect(updates.filter((u) => u?.sessionUpdate === "tool_call_update").map((u) => u?.status)).toEqual([
-      "pending",
-      "in_progress",
-      "completed",
-    ]);
-    expect(updates.some((u) => u?.sessionUpdate === "tool_call_content_chunk")).toBe(true);
+    expect(updates.map((u) => u?.sessionUpdate)).toEqual(["tool_call_update", "tool_call_update", "tool_call_update", "tool_call_update"]);
+    expect(
+      updates
+        .filter((u) => u?.sessionUpdate === "tool_call_update")
+        .map((u) => u?.status)
+        .filter((s) => s !== undefined),
+    ).toEqual(["pending", "in_progress", "completed"]);
+    expect(updates.find((u) => Array.isArray(u?.content))?.content).toEqual([{ type: "terminal", terminalId: "term_1" }]);
   });
 
   it("sends ACP cancel and rejects an unconfigured remote transport", async () => {
@@ -279,6 +310,7 @@ describe("WebSocketTransport ACP JSON-RPC", () => {
     await configured.openSession(1, "/tmp");
     const socket = FakeWebSocket.instances.at(-1)!;
     await configured.stop(1);
+    await flushMicrotasks();
     expect(JSON.parse(socket.sent.at(-1)!).method).toBe("session/cancel");
   });
 });

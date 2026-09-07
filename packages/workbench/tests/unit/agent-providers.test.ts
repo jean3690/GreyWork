@@ -77,7 +77,7 @@ function installInvoke(agentsLoad: unknown): void {
 
 const dbProviders = [
   { id: "opencode", name: "OpenCode", kind: "acp", command: "opencode acp", enabled: true },
-  { id: "codex", name: "Codex", kind: "acp", command: "codex acp", enabled: true },
+  { id: "codex", name: "Codex", kind: "acp", command: "npx -y @agentclientprotocol/codex-acp", enabled: true },
 ];
 
 describe("agent 后端目录（桌面态：SQLite 真源）", () => {
@@ -95,14 +95,30 @@ describe("agent 后端目录（桌面态：SQLite 真源）", () => {
     vi.clearAllMocks();
   });
 
-  it("库已接管：hydrate 后目录覆盖内置缺省", async () => {
+  it("库已接管（旧快照仅 2 项）：merge 补齐全部预设，且保留库里的 enabled 偏好", async () => {
     installInvoke(dbProviders);
     const agentStore = useAgentStore();
     await agentStore.providersHydrated;
 
-    expect(agentStore.agentProviders).toHaveLength(2);
-    expect(agentStore.agentProviders.map((p) => p.id)).toEqual(["opencode", "codex"]);
-    expect(agentStore.agentProviders.every((p) => p.enabled)).toBe(true);
+    // 旧库只有 opencode/codex，但合并后必须把新增预设（gemini/qwen/kimi…）带出来
+    const ids = agentStore.agentProviders.map((p) => p.id);
+    expect(ids).toContain("opencode");
+    expect(ids).toContain("codex");
+    expect(ids).toContain("gemini");
+    expect(ids).toContain("qwen-code");
+    expect(ids).toContain("kimi");
+    expect(ids).toContain("amp");
+    expect(ids.length).toBeGreaterThanOrEqual(12);
+    // 库里的 enabled 偏好被保留；库没有的预设带默认 enabled（false）
+    expect(agentStore.agentProviders.find((p) => p.id === "opencode")?.enabled).toBe(true);
+    expect(agentStore.agentProviders.find((p) => p.id === "codex")?.enabled).toBe(true);
+    expect(agentStore.agentProviders.find((p) => p.id === "gemini")?.enabled).toBe(false);
+    // detect 元数据不落库，合并后按 id 从注册表补回
+    expect(agentStore.agentProviders.find((p) => p.id === "opencode")?.detect).toEqual(["opencode"]);
+    // 合并结果回写库（自修复旧快照）
+    const syncCall = invokeMock.mock.calls.find(([cmd]) => cmd === "db_agents_sync");
+    const synced = (syncCall?.[1] as { providers: Array<{ id: string }> }).providers;
+    expect(synced.length).toBe(agentStore.agentProviders.length);
   });
 
   it("库未接管：内置缺省首落库", async () => {
@@ -122,8 +138,10 @@ describe("agent 后端目录（桌面态：SQLite 真源）", () => {
 
     await agentStore.setAgentProviderEnabled("codex", false);
     expect(agentStore.agentProviders.find((p) => p.id === "codex")?.enabled).toBe(false);
-    const syncCall = invokeMock.mock.calls.find(([cmd]) => cmd === "db_agents_sync");
-    const providers = (syncCall?.[1] as { providers: Array<{ id: string; enabled: boolean }> }).providers;
+    // 取最后一次 sync（hydrate 自修复 + 本次切换各有一次；断言切换后的固化结果）
+    const syncCalls = invokeMock.mock.calls.filter(([cmd]) => cmd === "db_agents_sync");
+    const lastSync = syncCalls[syncCalls.length - 1]!;
+    const providers = (lastSync[1] as { providers: Array<{ id: string; enabled: boolean }> }).providers;
     expect(providers.find((p) => p.id === "codex")?.enabled).toBe(false);
     const cached = JSON.parse(localStorage.getItem("greywork.agent-providers") ?? "{}");
     expect(cached.providers.find((p: { id: string }) => p.id === "codex")?.enabled).toBe(false);
@@ -157,14 +175,15 @@ describe("agent 后端目录（桌面态：SQLite 真源）", () => {
     expect(opencode.detect).toEqual(["opencode"]);
     expect(agentStore.providerInstalled(opencode)).toBe(true);
     expect(agentStore.providerInstallLabel(opencode)).toBe("已安装");
-    expect(agentStore.providerInstallLabel(codex)).toBe("未安装");
+    // codex 预设走官方 ACP 适配器（npx 分发）：本机没装原生 codex 时显示「首次启动下载」
+    expect(agentStore.providerInstallLabel(codex)).toBe("首次启动下载");
   });
 
   it("npx 型后端未预装 → 提示首次启动下载（不是未安装）", async () => {
     installInvoke(null);
     invokeMock.mockImplementation((cmd: string) => {
       if (cmd === "acp_detect_programs") {
-        return Promise.resolve([{ program: "gemini", installed: false, path: null }]);
+        return Promise.resolve([{ program: "qwen", installed: false, path: null }]);
       }
       if (cmd === "db_agents_load") return Promise.resolve(null);
       return Promise.resolve(undefined);
@@ -173,8 +192,8 @@ describe("agent 后端目录（桌面态：SQLite 真源）", () => {
     await agentStore.providersHydrated;
     await agentStore.refreshAgentDetection();
 
-    const gemini = agentStore.agentProviders.find((p) => p.id === "gemini")!;
-    expect(agentStore.providerInstallLabel(gemini)).toBe("首次启动下载");
+    const qwen = agentStore.agentProviders.find((p) => p.id === "qwen-code")!;
+    expect(agentStore.providerInstallLabel(qwen)).toBe("首次启动下载");
   });
 
   it("禁用当前选中后端（routeToAcp 中）→ 自动切回 Local", async () => {
