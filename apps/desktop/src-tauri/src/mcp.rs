@@ -80,11 +80,17 @@ pub fn plan_servers(
         match config.transport.as_str() {
             "http" => {
                 if !caps.http {
-                    skipped.push(McpSkipped { name, reason: "http_unsupported".into() });
+                    skipped.push(McpSkipped {
+                        name,
+                        reason: "http_unsupported".into(),
+                    });
                     continue;
                 }
                 let Some(url) = config.url.as_deref().filter(|url| !url.trim().is_empty()) else {
-                    skipped.push(McpSkipped { name, reason: "missing_url".into() });
+                    skipped.push(McpSkipped {
+                        name,
+                        reason: "missing_url".into(),
+                    });
                     continue;
                 };
                 servers.push(McpServer::Http(
@@ -93,11 +99,17 @@ pub fn plan_servers(
             }
             "sse" => {
                 if !caps.sse {
-                    skipped.push(McpSkipped { name, reason: "sse_unsupported".into() });
+                    skipped.push(McpSkipped {
+                        name,
+                        reason: "sse_unsupported".into(),
+                    });
                     continue;
                 }
                 let Some(url) = config.url.as_deref().filter(|url| !url.trim().is_empty()) else {
-                    skipped.push(McpSkipped { name, reason: "missing_url".into() });
+                    skipped.push(McpSkipped {
+                        name,
+                        reason: "missing_url".into(),
+                    });
                     continue;
                 };
                 servers.push(McpServer::Sse(
@@ -105,9 +117,15 @@ pub fn plan_servers(
                 ));
             }
             "stdio" => {
-                let Some(command) = config.command.as_deref().filter(|cmd| !cmd.trim().is_empty())
+                let Some(command) = config
+                    .command
+                    .as_deref()
+                    .filter(|cmd| !cmd.trim().is_empty())
                 else {
-                    skipped.push(McpSkipped { name, reason: "missing_command".into() });
+                    skipped.push(McpSkipped {
+                        name,
+                        reason: "missing_command".into(),
+                    });
                     continue;
                 };
                 let env = config
@@ -283,12 +301,13 @@ pub async fn mcp_probe(
     command: Option<String>,
     args: Option<Vec<String>>,
     env: Option<HashMap<String, String>>,
+    headers: Option<Vec<McpHeader>>,
     timeout_secs: Option<u64>,
 ) -> Result<McpProbeReport, String> {
     match transport.as_str() {
         "http" => {
             let url = url.ok_or_else(|| "http transport requires url".to_string())?;
-            probe_http(url, timeout_secs).await
+            probe_http(url, headers.unwrap_or_default(), timeout_secs).await
         }
         "stdio" => {
             let command = command.ok_or_else(|| "stdio transport requires command".to_string())?;
@@ -299,9 +318,32 @@ pub async fn mcp_probe(
     }
 }
 
+/// 把用户声明的请求头转成 reqwest HeaderMap；非法头名/值直接报错（fail-closed），
+/// 避免静默丢掉鉴权头导致探活结果与真实会话不一致。
+fn build_header_map(headers: &[McpHeader]) -> Result<reqwest::header::HeaderMap, String> {
+    let mut map = reqwest::header::HeaderMap::new();
+    for header in headers {
+        let name = header.name.trim();
+        let value = header.value.trim();
+        if name.is_empty() || value.is_empty() {
+            continue;
+        }
+        let name = reqwest::header::HeaderName::from_bytes(name.as_bytes())
+            .map_err(|error| format!("invalid header name {name:?}: {error}"))?;
+        let value = reqwest::header::HeaderValue::from_str(value)
+            .map_err(|error| format!("invalid header value for {name}: {error}"))?;
+        map.insert(name, value);
+    }
+    Ok(map)
+}
+
 /// 远程探活：POST initialize（Accept 含 text/event-stream）→ 取 `Mcp-Session-Id`
 /// → POST initialized 通知 → POST tools/list。
-async fn probe_http(url: String, timeout_secs: Option<u64>) -> Result<McpProbeReport, String> {
+async fn probe_http(
+    url: String,
+    headers: Vec<McpHeader>,
+    timeout_secs: Option<u64>,
+) -> Result<McpProbeReport, String> {
     let lower = url.to_lowercase();
     if !(lower.starts_with("http://") || lower.starts_with("https://")) {
         return Err(format!("mcp url must be http(s), got: {url}"));
@@ -314,11 +356,15 @@ async fn probe_http(url: String, timeout_secs: Option<u64>) -> Result<McpProbeRe
         ))
         .build()
         .map_err(|error| format!("failed to build http client: {error}"))?;
+    let auth = build_header_map(&headers)?;
 
     let init = client
         .post(&url)
         .header("Accept", "application/json, text/event-stream")
-        .json(&json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": init_params() }))
+        .headers(auth.clone())
+        .json(
+            &json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": init_params() }),
+        )
         .send()
         .await
         .map_err(|error| format!("initialize request failed: {error}"))?;
@@ -355,7 +401,8 @@ async fn probe_http(url: String, timeout_secs: Option<u64>) -> Result<McpProbeRe
     let _ = with_session(
         client
             .post(&url)
-            .header("Accept", "application/json, text/event-stream"),
+            .header("Accept", "application/json, text/event-stream")
+            .headers(auth.clone()),
     )
     .body(json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }).to_string())
     .send()
@@ -364,7 +411,8 @@ async fn probe_http(url: String, timeout_secs: Option<u64>) -> Result<McpProbeRe
     let list = with_session(
         client
             .post(&url)
-            .header("Accept", "application/json, text/event-stream"),
+            .header("Accept", "application/json, text/event-stream")
+            .headers(auth),
     )
     .json(&json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {} }))
     .send()
@@ -591,8 +639,14 @@ mod tests {
         assert_eq!(
             skipped,
             vec![
-                McpSkipped { name: "remote-http".into(), reason: "http_unsupported".into() },
-                McpSkipped { name: "remote-sse".into(), reason: "sse_unsupported".into() },
+                McpSkipped {
+                    name: "remote-http".into(),
+                    reason: "http_unsupported".into()
+                },
+                McpSkipped {
+                    name: "remote-sse".into(),
+                    reason: "sse_unsupported".into()
+                },
             ]
         );
 
@@ -615,8 +669,14 @@ mod tests {
         assert_eq!(
             skipped,
             vec![
-                McpSkipped { name: "no-url".into(), reason: "missing_url".into() },
-                McpSkipped { name: "no-command".into(), reason: "missing_command".into() },
+                McpSkipped {
+                    name: "no-url".into(),
+                    reason: "missing_url".into()
+                },
+                McpSkipped {
+                    name: "no-command".into(),
+                    reason: "missing_command".into()
+                },
                 McpSkipped {
                     name: "weird".into(),
                     reason: "unknown_transport:carrier-pigeon".into()
@@ -630,7 +690,8 @@ mod tests {
         let plain = r#"{"jsonrpc":"2.0","id":1,"result":{"ok":true}}"#;
         assert_eq!(parse_body_result(plain, 1).unwrap()["ok"], true);
 
-        let sse = "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"tools\":[]}}\n";
+        let sse =
+            "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"tools\":[]}}\n";
         assert!(parse_body_result(sse, 2).unwrap()["tools"].is_array());
 
         let error = r#"{"jsonrpc":"2.0","id":1,"error":{"code":-1,"message":"nope"}}"#;
@@ -667,13 +728,57 @@ mod tests {
         assert_eq!(buf, "residue");
     }
 
+    #[test]
+    fn header_map_carries_auth_and_rejects_invalid_names() {
+        use reqwest::header::HeaderValue;
+
+        let map = build_header_map(&[
+            McpHeader {
+                name: "Authorization".into(),
+                value: "Bearer tok".into(),
+            },
+            McpHeader {
+                name: "X-Env".into(),
+                value: "prod".into(),
+            },
+            // 空 name/value 对跳过而非报错（表单遗留空行）
+            McpHeader {
+                name: "  ".into(),
+                value: "x".into(),
+            },
+            McpHeader {
+                name: "X-Empty".into(),
+                value: "".into(),
+            },
+        ])
+        .expect("valid headers build");
+        assert_eq!(map.len(), 2);
+        assert_eq!(
+            map.get("authorization"),
+            Some(&HeaderValue::from_static("Bearer tok"))
+        );
+        assert_eq!(map.get("x-env"), Some(&HeaderValue::from_static("prod")));
+
+        // fail-closed：非法头名整体报错，不静默丢弃
+        assert!(build_header_map(&[McpHeader {
+            name: "bad header name".into(),
+            value: "x".into(),
+        }])
+        .is_err());
+        assert!(build_header_map(&[McpHeader {
+            name: "X-Value".into(),
+            value: "bad\nvalue".into(),
+        }])
+        .is_err());
+    }
+
     /// 真实网络：对 DeepWiki 官方 MCP 端点跑一遍探活。
     /// 默认跳过（CI 无外网）；手动验证用
     /// `cargo test --lib mcp::tests::live_deepwiki_probe -- --ignored --nocapture`。
     #[tokio::test]
     #[ignore = "requires network access to mcp.deepwiki.com"]
     async fn live_deepwiki_probe() {
-        let report = probe_http("https://mcp.deepwiki.com/mcp".to_string(), Some(30))
+        let report = probe_http("https://mcp.deepwiki.com/mcp".to_string(), Vec::new(), Some(30))
             .await
             .expect("deepwiki probe");
         eprintln!(
