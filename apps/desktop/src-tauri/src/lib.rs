@@ -5,10 +5,12 @@ mod http;
 mod llm;
 mod log;
 pub mod mcp;
+mod mcp_registry;
 mod notify;
 mod process_guard;
 mod sandbox;
 mod scheduler;
+mod skills_market;
 mod store_fs;
 mod sys;
 mod web_search;
@@ -40,6 +42,7 @@ pub fn run() {
             acp_host::acp_permission_respond,
             acp_host::acp_start,
             acp_host::acp_new_session,
+            acp_host::acp_load_session,
             acp_host::acp_send,
             acp_host::acp_set_config,
             acp_host::acp_stop,
@@ -49,6 +52,11 @@ pub fn run() {
             llm::llm_chat_start,
             llm::llm_chat_stop,
             mcp::mcp_probe,
+            skills_market::skills_search,
+            skills_market::skills_download,
+            skills_market::skills_install,
+            skills_market::skills_uninstall,
+            mcp_registry::mcp_search,
             web_search::web_search,
             workspace_fs::fs_read_text_file,
             workspace_fs::fs_read_binary,
