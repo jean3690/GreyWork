@@ -94,16 +94,16 @@ describe("vfs store", () => {
   it("opens, edits and saves through the store", async () => {
     setActivePinia(createPinia());
     const vfs = useVfsStore();
-    await vfs.open("src/plugins/index.ts");
-    expect(vfs.activeContent).toBe(WORKSPACE_SEED["src/plugins/index.ts"]);
+    await vfs.open("packages/shell/src/reasoning.ts");
+    expect(vfs.activeContent).toBe(WORKSPACE_SEED["packages/shell/src/reasoning.ts"]);
     expect(vfs.dirty).toBe(false);
 
     vfs.activeContent = `${vfs.activeContent}\n// edited\n`;
     expect(vfs.dirty).toBe(true);
     await vfs.saveActive();
     expect(vfs.dirty).toBe(false);
-    await expect(workspaceFs.readFile("src/plugins/index.ts")).resolves.toContain("// edited");
-    expect(vfs.changes.some((change) => change.path === "src/plugins/index.ts" && change.status === "modified")).toBe(true);
+    await expect(workspaceFs.readFile("packages/shell/src/reasoning.ts")).resolves.toContain("// edited");
+    expect(vfs.changes.some((change) => change.path === "packages/shell/src/reasoning.ts" && change.status === "modified")).toBe(true);
   });
 
   it("writes pipeline files and refreshes changes", async () => {

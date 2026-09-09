@@ -1,4 +1,4 @@
-import type { Artifact, ReviewItem, SourceRef } from "../types";
+import type { Artifact } from "../types";
 import { appEvents } from "../events";
 import { useVfsStore } from "./vfs";
 import { saveArtifactToDisk } from "../lib/artifact-dir";
@@ -30,15 +30,13 @@ export interface ArtifactDelivery {
 }
 
 /**
- * 活动产物：交付物 / 审查 / 来源（ActivityPanel 数据源；Diff 由 vfsStore 驱动）。
+ * 活动产物：交付物卡片（ActivityPanel 数据源；Diff 由 vfsStore 驱动）。
  * 初始为空：早期版本首启塞示例交付物，全新用户会被「昨天做过什么」的假象误导；
- * 产物只应来自真实运行（deliverArtifact / 审查管线）。
+ * 产物只应来自真实运行（deliverArtifact）。
  */
 export const useArtifactStore = defineStore("artifact", () => {
   const vfsStore = useVfsStore();
   const artifacts = ref<Artifact[]>([]);
-  const reviewItems = ref<ReviewItem[]>([]);
-  const sources = ref<SourceRef[]>([]);
 
   /** 交付物流线终点：追加一条交付物卡片并返回其 id。 */
   function pushArtifact(
@@ -83,6 +81,5 @@ export const useArtifactStore = defineStore("artifact", () => {
   function byId(id: string): Artifact | undefined {
     return artifacts.value.find((artifact) => artifact.id === id);
   }
-
-  return { artifacts, reviewItems, sources, pushArtifact, deliverArtifact, byId };
+  return { artifacts, pushArtifact, deliverArtifact, byId };
 });

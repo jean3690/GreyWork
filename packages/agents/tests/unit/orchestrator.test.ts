@@ -26,16 +26,16 @@ describe("buildPlanPrompt", () => {
 describe("parsePlan", () => {
   it("解析纯 JSON 数组，校验 role 合法性并跳过空 prompt", () => {
     const text = JSON.stringify([
-      { role: "researcher", prompt: "抓取客流数据" },
-      { role: "geo-analyst", prompt: "空间聚类" },
+      { role: "researcher", prompt: "抓取竞品定价数据" },
+      { role: "reviewer", prompt: "复核结论" },
       { role: "unknown-role", prompt: "非法角色" },
       { role: "builder", prompt: "" },
     ]);
     const plan = parsePlan(text);
     expect(plan).not.toBeNull();
     expect(plan).toHaveLength(3);
-    expect(plan?.[0]).toMatchObject({ role: "researcher", prompt: "抓取客流数据", status: "pending" });
-    expect(plan?.[1]).toMatchObject({ role: "geo-analyst", prompt: "空间聚类" });
+    expect(plan?.[0]).toMatchObject({ role: "researcher", prompt: "抓取竞品定价数据", status: "pending" });
+    expect(plan?.[1]).toMatchObject({ role: "reviewer", prompt: "复核结论" });
     // id 全局唯一（parsePlan 与 createSubtask 共享计数）
     expect(new Set(plan?.map((sub) => sub.id)).size).toBe(plan?.length);
     expect(plan?.[0]?.id).toMatch(/^sub-\d+$/);

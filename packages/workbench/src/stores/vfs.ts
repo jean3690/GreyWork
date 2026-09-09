@@ -10,23 +10,6 @@ import { computed, ref } from "vue";
 
 /** 种子工作区：虚拟文件系统的初始快照，同时是内存 git 的首个基线。 */
 export const WORKSPACE_SEED: Record<string, string> = {
-  "src/plugins/index.ts": [
-    "import { createPluginRegistry } from '@greywork/plugins';",
-    "import { createCommandGuard } from '@greywork/plugins';",
-    "",
-    "const registry = createPluginRegistry();",
-    "const guard = createCommandGuard();",
-    "",
-    "registry.register({",
-    "  id: 'skill-gis',",
-    "  kind: 'skill',",
-    "  name: 'GIS 分析 Skill',",
-    "  entry: 'skills/gis.md',",
-    "});",
-    "",
-    "export const gw = { registry, guard };",
-    "",
-  ].join("\n"),
   "packages/shell/src/reasoning.ts": [
     "/** 推理等级 → 采样参数（宿主接入前为静态映射）。 */",
     "export const REASONING_PRESET = {",
@@ -40,17 +23,17 @@ export const WORKSPACE_SEED: Record<string, string> = {
   "reports/城市态势报告.md": [
     "# 城市态势报告",
     "",
-    "GreyWork 自动从 GeoJSON 与 MBTiles 中提取空间统计。",
+    "GreyWork 自动从多源数据中提取统计。",
     "",
-    "> 百万级点云已在 DuckDB-WASM 中完成聚合。",
+    "> 本报告由编排运行生成，可编辑后导出。",
     "",
   ].join("\n"),
   "data/stations.csv": [
-    "id,name,lon,lat,value",
-    "pt-001,北京站,116.3913,39.9075,1284",
-    "pt-002,上海站,121.4737,31.2304,2231",
-    "pt-003,深圳站,114.0579,22.5431,876",
-    "pt-004,新加坡站,103.8198,1.3521,542",
+    "id,name,city,value",
+    "pt-001,站点A,北京,1284",
+    "pt-002,站点B,上海,2231",
+    "pt-003,站点C,深圳,876",
+    "pt-004,站点D,新加坡,542",
     "",
   ].join("\n"),
 };
@@ -131,7 +114,7 @@ export function buildFileTree(paths: string[]): VfsTreeNode[] {
 /** 活动工作区：路径清单 + 当前打开文件 + 相对 git 基线的变更（带行级增删统计）。 */
 export const useVfsStore = defineStore("vfs", () => {
   const paths = ref<string[]>(Object.keys(WORKSPACE_SEED).sort());
-  const activePath = ref("src/plugins/index.ts");
+  const activePath = ref("packages/shell/src/reasoning.ts");
   const activeContent = ref(WORKSPACE_SEED[activePath.value] ?? "");
   const savedContent = ref(activeContent.value);
   /** git 变更（status + 行级统计，来自内存 git 的真实基线）。 */

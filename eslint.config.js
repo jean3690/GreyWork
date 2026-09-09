@@ -16,6 +16,9 @@ export default defineConfigWithVueTs(
       "apps/desktop/e2e/**",
       "**/vitest.config.ts",
       "eslint.config.js",
+      // 插件市场源仓库（发布产物 JSON + worker JS），运行时经 registry URL 拉取，
+      // 不参与本仓 tsconfig project service
+      "plugin-market/**",
       // vendored 的 agent skills（markdown 文档 + 自带配置），不是本仓代码，
       // 也不在 tsconfig 的 project service 里 —— 交给 eslint 解析只会报 parsing error
       ".agents/**",
@@ -72,7 +75,7 @@ export default defineConfigWithVueTs(
     },
   },
   {
-    files: ["packages/{agents,gis}/src/**"],
+    files: ["packages/agents/src/**"],
     rules: {
       "no-restricted-imports": [
         "error",

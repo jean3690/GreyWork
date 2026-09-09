@@ -36,7 +36,6 @@ const dbSettings = {
   locale: "en-US",
   selectedModelProviderId: "opencode",
   modelProviders: [{ id: "opencode", name: "OpenCode", model: "ling-3.0-flash-fin-free", enabled: true, reasoningEffort: "high" }],
-  cliIntegrations: [],
 };
 
 describe("settings store 桌面接管（SQLite 真源）", () => {
