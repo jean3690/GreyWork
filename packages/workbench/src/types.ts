@@ -7,18 +7,6 @@ export interface Workspace {
   description: string;
 }
 
-export interface ThreadItem {
-  id: string;
-  title: string;
-  time: string;
-}
-
-export interface ThreadGroup {
-  workspace: string;
-  workspaceId?: string;
-  threads: ThreadItem[];
-}
-
 export type ChatStepKind = "read" | "exec" | "test" | "search" | "write";
 
 export interface ChatStep {
@@ -182,15 +170,4 @@ export interface Artifact {
    * 卡片的「在文件夹中打开」据此定位；浏览器态无磁盘通道，此项缺省。
    */
   diskPath?: string;
-}
-
-export interface ReviewItem {
-  level: "high" | "medium" | "low";
-  file: string;
-  comment: string;
-}
-
-export interface SourceRef {
-  title: string;
-  host: string;
 }

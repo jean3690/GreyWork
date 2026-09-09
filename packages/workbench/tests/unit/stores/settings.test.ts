@@ -20,18 +20,16 @@ beforeEach(() => {
 });
 
 describe("settings 持久化", () => {
-  it("persist 后 loadPersisted 往返一致（含 reasoningEffort 与 cliIntegrations）", () => {
+  it("persist 后 loadPersisted 往返一致（含 reasoningEffort）", () => {
     const settings = useSettingsStore();
     const provider = settings.modelProviders[0];
     provider.reasoningEffort = "high";
-    settings.cliIntegrations[0].reasoningEffort = "max";
     settings.locale = "en-US";
     settings.persist();
 
     setActivePinia(createPinia());
     const reloaded = useSettingsStore();
     expect(reloaded.modelProviders[0].reasoningEffort).toBe("high");
-    expect(reloaded.cliIntegrations[0].reasoningEffort).toBe("max");
     expect(reloaded.locale).toBe("en-US");
   });
 
@@ -40,13 +38,11 @@ describe("settings 持久化", () => {
       "greywork.settings",
       JSON.stringify({
         modelProviders: [{ id: "x", name: "X", model: "m", enabled: true, reasoningEffort: "ultra" }],
-        cliIntegrations: [{ id: "cli", name: "CLI", reasoningEffort: "xhigh" }],
       }),
     );
     setActivePinia(createPinia());
     const settings = useSettingsStore();
     expect(settings.modelProviders[0].reasoningEffort).toBe("auto");
-    expect(settings.cliIntegrations[0].reasoningEffort).toBe("auto");
   });
 
   it("损坏的本地设置回退默认", () => {

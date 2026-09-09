@@ -48,12 +48,12 @@ export function buildPlanPrompt(goal: string): string {
     "你是任务编排器。请把以下目标拆解为可并行执行的子任务。",
     `目标：${goal}`,
     "只输出 JSON，不要任何解释文字。JSON 格式：",
-    '[{"role":"planner|researcher|builder|geo-analyst|spatial-artist|reviewer","prompt":"自包含的子任务指令"}]',
+    '[{"role":"planner|researcher|builder|reviewer","prompt":"自包含的子任务指令"}]',
     "要求：2-5 个子任务；每条 prompt 自包含、可直接交给另一个 agent 独立执行；不要包含本指令。",
   ].join("\n");
 }
 
-const VALID_ROLES = new Set<string>(["planner", "researcher", "builder", "geo-analyst", "spatial-artist", "reviewer"]);
+const VALID_ROLES = new Set<string>(["planner", "researcher", "builder", "reviewer"]);
 
 /** 从 agent 响应文本中容错提取子任务数组；无法解析时返回 null。
  * 提取策略：取首个 `[` 到末个 `]` 之间的 JSON，逐项校验 role/prompt。 */

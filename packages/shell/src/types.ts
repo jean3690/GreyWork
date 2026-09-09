@@ -1,18 +1,4 @@
-import type { AgentLoopConfig } from "@greywork/agents";
-import type { CommandPolicy } from "@greywork/plugins";
-
 export type ReasoningEffort = "auto" | "low" | "medium" | "high" | "max";
-
-export interface SessionMeta {
-  id: string;
-  title: string;
-  createdAt: string;
-  updatedAt: string;
-  // spatial / gis / analytics 包已下线（2026-09-05），视图枚举随之收敛
-  activeView: "overview" | "agents" | "editor" | "market" | "settings";
-  pluginIds: string[];
-  agentLoop?: AgentLoopConfig;
-}
 
 export interface ModelProviderConfig {
   id: string;
@@ -31,48 +17,4 @@ export interface WebSearchProviderConfig {
   endpoint?: string;
   apiKeyEnv?: string;
   enabled: boolean;
-}
-
-export interface AiLoopPolicy {
-  maxRounds: number;
-  commandGuard: CommandPolicy;
-  toolAllowlist?: string[];
-  requireApproval?: string[];
-}
-
-export interface SessionManager {
-  createSession(title?: string): SessionMeta;
-  getSession(id: string): SessionMeta | undefined;
-  listSessions(): SessionMeta[];
-  touchSession(id: string): void;
-  closeSession(id: string): boolean;
-  setView(id: string, view: SessionMeta["activeView"]): void;
-  attachPlugin(id: string, pluginId: string): void;
-}
-
-export type CliKind = "opencode" | "claude-code" | "pi" | "custom";
-
-export interface CliIntegration {
-  id: string;
-  kind: CliKind;
-  name: string;
-  command: string;
-  args?: string[];
-  available: boolean;
-  model?: string;
-  reasoningEffort?: ReasoningEffort;
-}
-
-export interface CliSession {
-  id: string;
-  cliId: string;
-  title: string;
-  status: "running" | "idle" | "done";
-  startedAt: string;
-}
-
-export interface CliSessionManager {
-  list(): CliSession[];
-  start(cliId: string, title?: string): CliSession;
-  stop(id: string): boolean;
 }

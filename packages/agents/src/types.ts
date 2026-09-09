@@ -1,4 +1,4 @@
-export type AgentRole = "planner" | "researcher" | "builder" | "geo-analyst" | "spatial-artist" | "reviewer";
+export type AgentRole = "planner" | "researcher" | "builder" | "reviewer";
 
 export type AgentStatus = "idle" | "working" | "blocked" | "offline";
 
@@ -18,4 +18,4 @@ export interface AgentLoopConfig {
   skillIds?: string[];
 }
 
-export const AGENT_ROLES: AgentRole[] = ["planner", "researcher", "builder", "geo-analyst", "spatial-artist", "reviewer"];
+export const AGENT_ROLES: AgentRole[] = ["planner", "researcher", "builder", "reviewer"];

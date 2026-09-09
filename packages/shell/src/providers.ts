@@ -167,38 +167,6 @@ export const DEFAULT_WEB_SEARCH_PROVIDERS: WebSearchProviderConfig[] = [
   { id: "custom", name: "自定义搜索", endpoint: "", apiKeyEnv: "CUSTOM_SEARCH_API_KEY", enabled: false },
 ];
 
-export function createModelProviderRegistry() {
-  const providers = new Map(DEFAULT_MODEL_PROVIDERS.map((p) => [p.id, p]));
-  return {
-    list() {
-      return Array.from(providers.values());
-    },
-    get(id: string) {
-      return providers.get(id);
-    },
-    set(provider: ModelProviderConfig) {
-      if (!provider.id) throw new Error("provider.id is required");
-      providers.set(provider.id, provider);
-    },
-  };
-}
-
-export function createWebSearchProviderRegistry() {
-  const providers = new Map(DEFAULT_WEB_SEARCH_PROVIDERS.map((p) => [p.id, p]));
-  return {
-    list() {
-      return Array.from(providers.values());
-    },
-    get(id: string) {
-      return providers.get(id);
-    },
-    set(provider: WebSearchProviderConfig) {
-      if (!provider.id) throw new Error("provider.id is required");
-      providers.set(provider.id, provider);
-    },
-  };
-}
-
 /** ACP agent 后端注册表（与 ModelProviderRegistry 同构）。 */
 export function createAgentProviderRegistry() {
   const providers = new Map(DEFAULT_AGENT_PROVIDERS.map((p) => [p.id, p]));

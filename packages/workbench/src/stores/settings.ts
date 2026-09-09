@@ -1,14 +1,6 @@
 import { createJsonStorage } from "@greywork/core";
 import type { McpServerConfig } from "@greywork/acp";
-import {
-  DEFAULT_AI_LOOP_POLICY,
-  DEFAULT_MODEL_PROVIDERS,
-  DEFAULT_WEB_SEARCH_PROVIDERS,
-  createDefaultCliIntegrations,
-  type CliIntegration,
-  type ModelProviderConfig,
-  type ReasoningEffort,
-} from "@greywork/shell";
+import { DEFAULT_MODEL_PROVIDERS, DEFAULT_WEB_SEARCH_PROVIDERS, type ModelProviderConfig, type ReasoningEffort } from "@greywork/shell";
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { settingsBackend } from "../lib/settings-backend";
@@ -110,7 +102,6 @@ export interface SavedSettings {
   locale?: AppLocale;
   selectedModelProviderId?: string | null;
   modelProviders?: ModelProviderConfig[];
-  cliIntegrations?: CliIntegration[];
   permissionTier?: PermTier;
   sandboxMode?: SandboxMode;
   workspaceDir?: string;
@@ -124,7 +115,7 @@ const settingsStorage = createJsonStorage<SavedSettings>(
   (value): value is SavedSettings => typeof value === "object" && value !== null && !Array.isArray(value),
 );
 
-/** 全局设置：权限档位 / 计划模式 / token 快照 / 供应商芯片 / 已启用插件。 */
+/** 全局设置：权限档位 / 计划模式 / token 快照 / 供应商芯片 / MCP 服务器声明。 */
 export const useSettingsStore = defineStore("settings", () => {
   const permissionTier = ref<PermTier>("workspace");
   /** 沙盒档位：off 直启；fs = bwrap 文件系统隔离 + 网络关闭；full = 隔离 + 网络放行。 */
@@ -158,10 +149,6 @@ export const useSettingsStore = defineStore("settings", () => {
     })),
   );
   const webSearchProviders = DEFAULT_WEB_SEARCH_PROVIDERS;
-  /** CLI 接入清单（openai / claude / 自定义；reasoningEffort 与模型供应商统一枚举）。 */
-  const cliIntegrations = ref<CliIntegration[]>(createDefaultCliIntegrations());
-  /** 注册表激活项（plugins/loader 驱动）。 */
-  const enabledPlugins = ref(new Set<string>());
   /** 已声明的 MCP 服务器（含未启用项）。 */
   const mcpServers = ref<McpServerEntry[]>(DEFAULT_MCP_SERVERS.map((server) => ({ ...server })));
   /** 下发给 agent 的那一批：只取启用项，并剥掉 id/enabled 这类纯本地字段。 */
@@ -203,17 +190,7 @@ export const useSettingsStore = defineStore("settings", () => {
         }));
       }
     }
-    if (Array.isArray(saved.cliIntegrations)) {
-      const validCli = saved.cliIntegrations.filter((cli) => cli && typeof cli.id === "string" && typeof cli.name === "string");
-      if (validCli.length) {
-        cliIntegrations.value = validCli.map((cli) => ({
-          ...cli,
-          reasoningEffort: normalizeReasoningEffort(cli.reasoningEffort),
-        }));
-      }
-    }
     if (Array.isArray(saved.mcpServers)) {
-      // 结构不合法的条目直接丢：一台配坏的服务器不该让整份设置回落默认。
       mcpServers.value = saved.mcpServers
         .filter((server) => server && typeof server.id === "string" && typeof server.name === "string" && MCP_TRANSPORTS[server.transport])
         .map((server) => ({ ...server, enabled: server.enabled === true }));
@@ -226,7 +203,6 @@ export const useSettingsStore = defineStore("settings", () => {
       locale: locale.value,
       selectedModelProviderId: selectedModelProviderId.value,
       modelProviders: modelProviders.value,
-      cliIntegrations: cliIntegrations.value,
       permissionTier: permissionTier.value,
       sandboxMode: sandboxMode.value,
       workspaceDir: workspaceDir.value,
@@ -263,10 +239,6 @@ export const useSettingsStore = defineStore("settings", () => {
         notify({ kind: "warning", key: "settings-load", title: t("errors.settingsSyncFailed"), detail: String(error) });
       });
   })();
-
-  function syncEnabledPlugins(ids: readonly string[]): void {
-    enabledPlugins.value = new Set(ids);
-  }
 
   /** 新增或按 id 覆盖一台 MCP 服务器。 */
   function upsertMcpServer(entry: McpServerEntry): void {
@@ -332,9 +304,7 @@ export const useSettingsStore = defineStore("settings", () => {
     locale,
     selectedModelProviderId,
     modelProviders,
-    cliIntegrations,
     webSearchProviders,
-    enabledPlugins,
     mcpServers,
     enabledMcpServers,
     upsertMcpServer,
@@ -344,10 +314,8 @@ export const useSettingsStore = defineStore("settings", () => {
     upsertModelProvider,
     removeModelProvider,
     resetModelProviders,
-    syncEnabledPlugins,
     persist,
     /** 桌面态启动接管完成信号（null = 浏览器态无后端）；await 后库内容已就位。 */
     hydrated: backendHydratePromise,
-    aiLoopPolicy: DEFAULT_AI_LOOP_POLICY,
   };
 });

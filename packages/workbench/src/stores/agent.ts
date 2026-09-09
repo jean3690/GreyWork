@@ -1,4 +1,4 @@
-import { AGENT_ROLES, type Agent } from "@greywork/agents";
+import type { Agent } from "@greywork/agents";
 import type {
   AcpPermissionRequestPayload,
   AcpSessionConfigOption,
@@ -33,13 +33,6 @@ const CONNECT_ABORTED = "__gw_aborted_connect__";
 /** 判读 spawn 类错误（缺 CLI / 命令不存在），UI 据此给安装指引而不是原文。 */
 function looksLikeMissingBinary(message: string): boolean {
   return /ENOENT|No such file|not found|command not found|spawn\b.*fail/i.test(message);
-}
-
-export interface WorkflowStep {
-  id: string;
-  label: string;
-  status: "wait" | "active" | "done";
-  desc: string;
 }
 
 /** 编排域（runs store）经此桥消费 ACP 事件：子任务 chunk/完成按 sessionId/handle 归属路由。 */
@@ -94,7 +87,7 @@ const providerPrefStorage = createJsonStorage<ProviderPreference>(
   (value): value is ProviderPreference => typeof value === "object" && value !== null && "providerId" in value,
 );
 
-/** Agent 编排：编队 / 流水线 / 循环策略 / ACP 后端派发（AgentsView 与 Chat·Cowork 数据源）。 */
+/** Agent 会话域与 ACP 后端派发（Chat / Cowork / Runs 的数据源）。 */
 export const useAgentStore = defineStore("agent", () => {
   const settings = useSettingsStore();
   const chat = useChatStore();
@@ -105,13 +98,6 @@ export const useAgentStore = defineStore("agent", () => {
    * 等真实 agent 注册/运行接入后再回填。
    */
   const agents = ref<Agent[]>([]);
-  const roles = ref(AGENT_ROLES);
-  const workflowSteps = ref<WorkflowStep[]>([
-    { id: "collect", label: "agents.pipeline.collect.label", status: "done", desc: "agents.pipeline.collect.desc" },
-    { id: "analyze", label: "agents.pipeline.analyze.label", status: "active", desc: "agents.pipeline.analyze.desc" },
-    { id: "report", label: "agents.pipeline.report.label", status: "wait", desc: "agents.pipeline.report.desc" },
-    { id: "review", label: "agents.pipeline.review.label", status: "wait", desc: "agents.pipeline.review.desc" },
-  ]);
 
   /* ===== ACP 后端（工作台接入） ===== */
   const agentProviderRegistry = createAgentProviderRegistry();
@@ -1095,8 +1081,6 @@ export const useAgentStore = defineStore("agent", () => {
 
   return {
     agents,
-    roles,
-    workflowSteps,
     agentProviders,
     selectedProviderId,
     routeToAcp,
