@@ -5,7 +5,7 @@
  * 未知扩展一律归 `raw`（CodeMirror 纯文本兜底），永远不会「打不开」。
  */
 
-export type ViewerKind = "md" | "html" | "csv" | "code" | "xlsx" | "docx" | "pptx" | "pdf" | "diff" | "image" | "raw";
+export type ViewerKind = "md" | "html" | "csv" | "code" | "xlsx" | "docx" | "pptx" | "pdf" | "diff" | "image" | "web" | "raw";
 
 const EXT_KIND: Record<string, ViewerKind> = {
   md: "md",

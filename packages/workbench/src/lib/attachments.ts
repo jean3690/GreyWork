@@ -224,6 +224,53 @@ export function inlineTextAttachment(name: string, content: string, truncated: b
   return `\n\n---\n[附件：${name}]\n${fence}\n${body}\n${fence}\n`;
 }
 
+/**
+ * 文本附件的文件名安全化：去掉路径分隔符与控制字符、压空白、限长，统一成 `.md`。
+ * 标题来自网页，可能含 `/`、引号等，直接当文件名会出问题或影响后缀推断。
+ */
+export function safeAttachmentName(title: string, fallback = "web-article"): string {
+  const cleaned = Array.from(title)
+    // 剔除控制字符（用码点过滤而非正则，避免 no-control-regex 规则）
+    .filter((ch) => {
+      const code = ch.codePointAt(0) ?? 0;
+      return code > 0x1f && code !== 0x7f;
+    })
+    .join("")
+    .replace(/[\\/:*?"<>|]/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/\.[a-z0-9]{1,8}$/i, "")
+    .trim()
+    .slice(0, 80);
+  return `${cleaned || fallback}.md`;
+}
+
+/**
+ * 由一段现成文本（如网页正文）构造文本附件；超限返回拒绝原因，不抛异常。
+ * 截断在上限内先做，`size` 以 UTF-8 字节计，与文件附件口径一致。
+ */
+export function buildTextAttachment(
+  name: string,
+  content: string,
+  existing: readonly Attachment[],
+  isDesktop: boolean,
+): { attachment: Attachment } | { rejection: AttachmentRejection } {
+  const safeName = safeAttachmentName(name);
+  const { text, truncated } = clipText(content);
+  const size = new TextEncoder().encode(text).length;
+  const rejection = validateAttachment({ name: safeName, mime: "text/markdown", size }, existing, isDesktop);
+  if (rejection) return { rejection };
+  return {
+    attachment: createAttachment({
+      kind: "text",
+      name: safeName,
+      mime: "text/markdown",
+      size,
+      text,
+      ...(truncated ? { truncated: true } : {}),
+    }),
+  };
+}
+
 /** 人类可读体积（附件 chip 与限额文案共用）。 */
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;

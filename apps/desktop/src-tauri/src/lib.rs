@@ -15,6 +15,7 @@ mod scheduler;
 mod skills_market;
 mod store_fs;
 mod sys;
+mod web_fetch;
 mod workspace_fs;
 
 use tauri::Manager;
@@ -85,6 +86,7 @@ pub fn run() {
             plugin_window::plugin_window_close,
             plugin_market::plugin_market_preview,
             mcp_registry::mcp_search,
+            web_fetch::web_fetch,
             workspace_fs::fs_read_text_file,
             workspace_fs::fs_read_binary,
             workspace_fs::fs_write_text_file,

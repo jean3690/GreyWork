@@ -18,11 +18,12 @@ const nextTabId = createIdFactory("pv");
  * 内容来源。
  * - `vfs`：内存虚拟文件系统（管线产物、种子文件），路径是相对路径
  * - `disk`：真实磁盘（工作区文件树），路径是绝对路径
+ * - `web`：抓取到的网页正文，路径是归一化后的 URL（内容在 lib/web-fetch 的缓存里）
  *
  * 做成显式字段而不是「按路径是否以 / 开头猜」：Windows 的绝对路径不以 / 开头，
  * 而猜错的代价是读不到文件或读错文件。
  */
-export type PreviewSource = "vfs" | "disk";
+export type PreviewSource = "vfs" | "disk" | "web";
 
 export interface PreviewTab {
   id: string;
@@ -86,7 +87,7 @@ export const usePreviewStore = defineStore("preview", () => {
    * 同路径不重复开（artifact 卡片被连点多次、或树里反复点同一文件都只聚焦）。
    * `basename` 用 `/` 切，磁盘路径的名字在 Windows 上可能带 `\` —— 由调用方传 name 兜住。
    */
-  function open(path: string, name?: string, source: PreviewSource = "vfs"): string {
+  function open(path: string, name?: string, source: PreviewSource = "vfs", kind?: ViewerKind): string {
     const existing = tabs.value.find((tab) => tab.path === path && tab.source === source);
     if (existing) {
       activeId.value = existing.id;
@@ -97,7 +98,8 @@ export const usePreviewStore = defineStore("preview", () => {
       id: nextTabId(),
       path,
       name: name ?? basename(path),
-      kind: kindOfPath(path),
+      // 网页正文的 URL 没有可用扩展名，调用方显式给 kind；其余仍按扩展名推断。
+      kind: kind ?? kindOfPath(path),
       source,
       revision: 0,
     };

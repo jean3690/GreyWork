@@ -24,6 +24,7 @@ const VIEWERS: Record<ViewerKind, Component> = {
   pptx: defineAsyncComponent(() => import("./SlideViewer.vue")),
   pdf: defineAsyncComponent(() => import("./PdfViewer.vue")),
   diff: defineAsyncComponent(() => import("./DiffViewer.vue")),
+  web: defineAsyncComponent(() => import("./WebPageViewer.vue")),
 };
 
 const viewer = computed(() => VIEWERS[props.tab.kind]);

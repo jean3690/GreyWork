@@ -25,6 +25,17 @@ export const zhCN = {
   notice: {
     dismiss: "关闭通知",
   },
+  web: {
+    title: "抓取网页",
+    urlPlaceholder: "输入网址，如 example.com/article",
+    fetch: "抓取",
+    fetching: "抓取中…",
+    error: "抓取失败：{detail}",
+    empty: "没有提取到正文内容。",
+    sendToChat: "发送到对话",
+    sendToChatDone: "已加入输入卡附件，按发送即可交给 agent。",
+    unsupportedRuntime: "网页抓取仅桌面端可用。",
+  },
   chat: {
     placeholder: {
       hint: "Enter 发送 · Shift+Enter 换行",
