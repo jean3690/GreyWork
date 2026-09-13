@@ -9,6 +9,7 @@ import AcpSessionConfig from "@/components/AcpSessionConfig.vue";
 import { i18n } from "@/i18n";
 import AgentProviderBar from "@/components/AgentProviderBar.vue";
 import { useAgentStore } from "@/stores/agent";
+import { useSettingsStore } from "@/stores/settings";
 
 const h = vi.hoisted(() => ({
   startAgent: vi.fn(),
@@ -96,6 +97,8 @@ const Harness = defineComponent({
 function mountBar() {
   const pinia = createPinia();
   setActivePinia(pinia);
+  // ACP 建会话要解析工作区：happy-dom 非 Tauri 运行时，设置项为空则 resolveWorkspaceDir 抛错。
+  useSettingsStore().workspaceDir = "/home/test";
   const wrapper = mount(Harness, { global: { plugins: [pinia, i18n] } });
   return { pinia, wrapper };
 }

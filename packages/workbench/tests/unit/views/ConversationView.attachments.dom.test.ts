@@ -66,6 +66,8 @@ function stored(item: Attachment): Attachment {
 async function mountConversation() {
   const pinia = createPinia();
   setActivePinia(pinia);
+  // ACP 建会话要解析工作区：happy-dom 非 Tauri 运行时，设置项为空则 resolveWorkspaceDir 抛错。
+  useSettingsStore().workspaceDir = "/home/test";
   const sessionStore = useSessionStore();
   const session = sessionStore.createSession(null, "附件测试");
   const router = createAppRouter();

@@ -45,6 +45,7 @@ vi.mock("@greywork/acp", () => ({
 import { useAgentStore } from "@/stores/agent";
 import { usePreviewStore } from "@/stores/preview";
 import { useSessionStore } from "@/stores/session";
+import { useSettingsStore } from "@/stores/settings";
 
 const storageHolder = globalThis as { localStorage?: Storage };
 
@@ -76,6 +77,8 @@ function emit(event: AcpEventEnvelope): void {
 
 beforeEach(() => {
   setActivePinia(createPinia());
+  // ACP 建会话要解析工作区：node 环境非 Tauri 运行时，设置项为空则 resolveWorkspaceDir 抛错。
+  useSettingsStore().workspaceDir = "/home/test";
   vi.clearAllMocks();
   injectStorage();
   h.isAvailable.mockImplementation(() => true);

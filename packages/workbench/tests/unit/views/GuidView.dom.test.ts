@@ -54,9 +54,13 @@ describe("GuidView", () => {
     await wrapper.get('textarea[aria-label="发送消息"]').trigger("keydown", { key: "Enter" });
     // mock 演示管线的 sim 定时器归 chat store 管，测完清掉避免残留
     try {
-      await vi.waitFor(() => {
-        expect(router.currentRoute.value.path).toContain(`/conversation/${sessionStore.activeSessionId}`);
-      });
+      // 路由跳转虽同步发起，但整仓并行跑测试时事件循环会被挤占，放宽默认 1s 等待窗。
+      await vi.waitFor(
+        () => {
+          expect(router.currentRoute.value.path).toContain(`/conversation/${sessionStore.activeSessionId}`);
+        },
+        { timeout: 3000 },
+      );
       expect(sessionStore.sessions.length).toBe(before + 1);
       const messages = sessionStore.getSession(sessionStore.activeSessionId ?? "")?.messages ?? [];
       expect(messages.some((message) => message.role === "user" && message.content === "分析站点客流数据")).toBe(true);
@@ -94,9 +98,13 @@ describe("GuidView · 斜杠命令", () => {
 
     try {
       await textarea.trigger("keydown", { key: "Enter" });
-      await vi.waitFor(() => {
-        expect(router.currentRoute.value.path).toContain(`/conversation/${sessionStore.activeSessionId}`);
-      });
+      // 同上：整仓并行时放宽等待窗，避免事件循环被挤占导致假失败。
+      await vi.waitFor(
+        () => {
+          expect(router.currentRoute.value.path).toContain(`/conversation/${sessionStore.activeSessionId}`);
+        },
+        { timeout: 3000 },
+      );
       const messages = sessionStore.getSession(sessionStore.activeSessionId ?? "")?.messages ?? [];
       expect(messages.some((message) => message.role === "user" && message.content === template)).toBe(true);
     } finally {
