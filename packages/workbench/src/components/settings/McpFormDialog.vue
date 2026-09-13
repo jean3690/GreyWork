@@ -31,6 +31,9 @@ export interface McpFormPreset {
   name: string;
   transport: McpServerEntry["transport"];
   url?: string;
+  /** stdio 草稿的启动命令（来自 registry 包类型，如 npx / uvx）。 */
+  command?: string;
+  args?: string[];
   /** 环境变量名清单（来自 registry 的 packages[].environmentVariables）。 */
   envHint?: string[];
 }
@@ -94,8 +97,8 @@ function resetDraft(): void {
     name.value = props.preset.name;
     transport.value = props.preset.transport;
     url.value = props.preset.url ?? "";
-    command.value = "";
-    args.value = "";
+    command.value = props.preset.command ?? "";
+    args.value = (props.preset.args ?? []).join("\n");
     headerRows.value = [{ name: "", value: "" }];
     envRows.value = (props.preset.envHint ?? []).map((envName) => ({ name: envName, value: "" }));
     if (envRows.value.length === 0) envRows.value = [{ name: "", value: "" }];

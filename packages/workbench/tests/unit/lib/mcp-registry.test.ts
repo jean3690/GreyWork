@@ -47,7 +47,7 @@ describe("registryEntryToDraft", () => {
     expect(draft).toMatchObject({ ok: true, transport: "sse", url: "https://x/sse" });
   });
 
-  it("rejects stdio-only packages as unsupported (no host launch path)", () => {
+  it("npm-only 条目退化为 stdio 草稿：npx -y <pkg>", () => {
     const draft = registryEntryToDraft(
       entry({
         remotes: [],
@@ -55,10 +55,29 @@ describe("registryEntryToDraft", () => {
       }),
     );
     expect(draft).toEqual({
-      ok: false,
-      reason: "no-remote",
-      transports: [],
+      ok: true,
+      transport: "stdio",
+      command: "npx",
+      args: ["-y", "@scope/server"],
+      envNames: ["TOKEN"],
     });
+  });
+
+  it("pypi 包退化为 stdio 草稿：uvx <pkg>", () => {
+    const draft = registryEntryToDraft(
+      entry({ remotes: [], packages: [{ registry_type: "pypi", identifier: "mcp-server-git", env_names: [] }] }),
+    );
+    expect(draft).toMatchObject({ ok: true, transport: "stdio", command: "uvx", args: ["mcp-server-git"] });
+  });
+
+  it("remote 优先于包启动", () => {
+    const draft = registryEntryToDraft(
+      entry({
+        remotes: [{ transport: "streamable-http", url: "https://x/mcp" }],
+        packages: [{ registry_type: "npm", identifier: "@x/y", env_names: [] }],
+      }),
+    );
+    expect(draft).toMatchObject({ ok: true, transport: "http" });
   });
 
   it("reports unsupported transports when remotes exist but none are registrable", () => {
@@ -67,6 +86,28 @@ describe("registryEntryToDraft", () => {
       ok: false,
       reason: "unsupported-only",
       transports: ["websocket"],
+      packageTypes: [],
+    });
+  });
+
+  it("仅有非 npm/pypi 包时报告包类型不支持", () => {
+    const draft = registryEntryToDraft(
+      entry({ remotes: [], packages: [{ registry_type: "docker", identifier: "ghcr.io/x/y", env_names: [] }] }),
+    );
+    expect(draft).toEqual({
+      ok: false,
+      reason: "unsupported-packages",
+      transports: [],
+      packageTypes: ["docker"],
+    });
+  });
+
+  it("既无 remote 也无包时报告无可用信息", () => {
+    expect(registryEntryToDraft(entry({ remotes: [], packages: [] }))).toEqual({
+      ok: false,
+      reason: "no-remote",
+      transports: [],
+      packageTypes: [],
     });
   });
 
