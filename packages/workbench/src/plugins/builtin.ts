@@ -25,4 +25,21 @@ export const BUILTIN_PLUGINS: PluginManifest[] = [
       capabilities: ["plugin-admin"],
     },
   },
+  {
+    id: "core.artifacts",
+    name: "产物面板",
+    version: "0.1.0",
+    description: "底部活动面板（activityPanel）的「产物」页签：汇总会话中生成的全部产物，点击即右栏预览。启用后标题栏出现活动面板开关。",
+    contributes: {
+      uiRegions: [
+        {
+          region: "activityPanel",
+          id: "activity.artifacts",
+          title: "产物",
+          order: 0,
+          component: defineAsyncComponent(() => import("../components/activity/ArtifactsPanel.vue")),
+        },
+      ],
+    },
+  },
 ];

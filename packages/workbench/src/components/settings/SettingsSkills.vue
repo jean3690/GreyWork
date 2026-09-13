@@ -102,7 +102,7 @@ function installedOf(entry: MarketSkillEntry): InstalledSkill | undefined {
       </div>
       <p class="mb-3 text-[11px] leading-relaxed text-dim2">
         扫描工作区 <b>{{ skills.workspace?.dir ?? ".agents/skills" }}</b> 的磁盘真源（外部 agent 手动放入的技能也会出现）。
-        <template v-if="skills.workspace && !skills.workspace.root.bound">当前未绑定工作区，回落设置项 / 桌面主目录。</template>
+        <template v-if="skills.workspace && !skills.workspace.root.bound">当前未绑定工作区，回落设置项 / 应用私有目录。</template>
         <template v-else-if="skills.workspace?.root.bound">已绑定当前工作区。</template>
         <template v-if="!skills.hostAvailable">浏览器预览态只读：安装/卸载需要桌面版（Tauri）。</template>
       </p>

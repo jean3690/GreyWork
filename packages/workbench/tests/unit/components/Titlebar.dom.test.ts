@@ -125,3 +125,44 @@ describe("标题栏右栏开关", () => {
     expect(wrapper.find('[data-testid="titlebar-preview-toggle"]').exists()).toBe(false);
   });
 });
+
+describe("标题栏活动面板开关", () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    window.localStorage.clear();
+    vi.stubGlobal("__TAURI_INTERNALS__", {});
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    window.localStorage.clear();
+  });
+
+  it("视口可用时渲染开关，点击展开/收起并落盘", async () => {
+    const wrapper = await mountTitlebar();
+    const { useActivityStore } = await import("@/stores/activity");
+    const activity = useActivityStore();
+
+    const button = wrapper.get('[data-testid="titlebar-activity-toggle"]');
+    expect(button.attributes("aria-label")).toBe("展开活动面板");
+    expect(activity.open).toBe(false);
+
+    await button.trigger("click");
+    expect(activity.open).toBe(true);
+    expect(wrapper.get('[data-testid="titlebar-activity-toggle"]').attributes("aria-label")).toBe("收起活动面板");
+    expect(window.localStorage.getItem("greywork.activity.band")).toBe('{"open":true,"active":null}');
+
+    await wrapper.get('[data-testid="titlebar-activity-toggle"]').trigger("click");
+    expect(activity.open).toBe(false);
+    expect(window.localStorage.getItem("greywork.activity.band")).toBe('{"open":false,"active":null}');
+  });
+
+  it("窄屏（活动面板不渲染）时开关一并消失", async () => {
+    const wrapper = await mountTitlebar();
+    const { useActivityStore } = await import("@/stores/activity");
+    useActivityStore().setAvailable(false);
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.find('[data-testid="titlebar-activity-toggle"]').exists()).toBe(false);
+  });
+});

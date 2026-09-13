@@ -11,6 +11,7 @@
     "core:window:allow-close",
     "opener:default",
     "dialog:default",
-    "notification:default"
+    "notification:default",
+    "clipboard-manager:allow-read-image"
   ]
 }

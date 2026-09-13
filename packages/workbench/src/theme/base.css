@@ -20,6 +20,24 @@
   box-sizing: border-box;
 }
 
+/* 固定像素字号是工作台密度的一部分；整体缩放可让字号与控件命中区同步变化，
+ * 避免仅放大文字后在 20–34px 高的紧凑控件中被裁切。 */
+:root {
+  --gw-ui-scale: 1;
+}
+:root[data-font-size="small"] {
+  --gw-ui-scale: 0.9;
+}
+:root[data-font-size="large"] {
+  --gw-ui-scale: 1.15;
+}
+html #app {
+  width: calc(100% / var(--gw-ui-scale));
+  height: calc(100% / var(--gw-ui-scale));
+  transform: scale(var(--gw-ui-scale));
+  transform-origin: top left;
+}
+
 body {
   margin: 0;
   background: var(--ink);
@@ -216,7 +234,8 @@ textarea:focus-visible,
   gap: 3px;
   padding: 4px 6px;
   border: none;
-  background: #eceefd;
+  /* 曾硬编码 #eceefd（浅薰衣草），暗色下是一整条亮带。--brand-light 两态都已调过。 */
+  background: var(--brand-light);
   box-shadow: none;
   overflow-x: auto;
 }

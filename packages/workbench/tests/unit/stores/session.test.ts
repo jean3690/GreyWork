@@ -1,7 +1,15 @@
 // 会话存储契约：CRUD / 归属项目 / 持久化往返 / 项目删除迁移。
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
+
+const h = vi.hoisted(() => ({ pruneAttachmentLibrary: vi.fn<(id: string) => Promise<void>>(() => Promise.resolve()) }));
+
+vi.mock("@/state/attachment-library", () => ({
+  pruneAttachmentLibrary: (id: string) => h.pruneAttachmentLibrary(id),
+}));
+
 import { useSessionStore } from "@/stores/session";
+import type { Attachment } from "@/types";
 
 const storageHolder = globalThis as { localStorage?: Storage };
 
@@ -28,6 +36,7 @@ function injectStorage(): void {
 
 beforeEach(() => {
   setActivePinia(createPinia());
+  h.pruneAttachmentLibrary.mockClear();
 });
 
 describe("基础 CRUD", () => {
@@ -43,6 +52,20 @@ describe("基础 CRUD", () => {
     expect(session.id).toBeTruthy();
     expect(store.activeSessionId).toBe(session.id);
     expect(store.getSession(session.id)?.workspaceId).toBe("p-city");
+  });
+
+  it("deleteSession 同时请求清理该会话的附件目录", () => {
+    const store = useSessionStore();
+    const session = store.createSession(null, "带附件的会话");
+    store.deleteSession(session.id);
+    expect(store.getSession(session.id)).toBeUndefined();
+    expect(h.pruneAttachmentLibrary).toHaveBeenCalledWith(session.id);
+  });
+
+  it("deleteSession 对不存在的 id 不做任何事（不误删附件）", () => {
+    const store = useSessionStore();
+    store.deleteSession("ses-not-there");
+    expect(h.pruneAttachmentLibrary).not.toHaveBeenCalled();
   });
 
   it("ensure 复用已有会话，缺 id 时按给定 id 创建", () => {
@@ -257,6 +280,43 @@ describe("acp 绑定（惰性恢复数据）", () => {
       setActivePinia(createPinia());
       const reloaded = useSessionStore();
       expect(reloaded.getSession(session.id)?.acp?.sessionId).toBe("s-acp");
+    } finally {
+      delete storageHolder.localStorage;
+    }
+  });
+
+  it("历史消息的旧形状附件（string[] / 畸形对象）在回灌时被丢弃，合法记录保留", () => {
+    injectStorage();
+    try {
+      const store = useSessionStore();
+      const session = store.createSession("p-x", "attachments");
+      const legacy = {
+        id: "m-legacy",
+        role: "user" as const,
+        content: "旧附件",
+        ts: Date.now(),
+        attachments: ["a.png"] as unknown as Attachment[],
+      };
+      const broken = {
+        id: "m-broken",
+        role: "user" as const,
+        content: "畸形附件",
+        ts: Date.now(),
+        attachments: [{ id: "x" }] as unknown as Attachment[],
+      };
+      const valid: Attachment = { id: "att-1", kind: "image", name: "a.png", mime: "image/png", size: 4, path: "/tmp/a.png" };
+      const kept = { id: "m-kept", role: "user" as const, content: "新附件", ts: Date.now(), attachments: [valid] };
+      store.appendMessage(session.id, legacy);
+      store.appendMessage(session.id, broken);
+      store.appendMessage(session.id, kept);
+
+      // 模拟落盘侧回灌整表（adoptSessions → adoptMessages 归一化）
+      setActivePinia(createPinia());
+      const reloaded = useSessionStore();
+      const messages = reloaded.getSession(session.id)?.messages ?? [];
+      expect(messages.find((item) => item.id === "m-legacy")?.attachments).toBeUndefined();
+      expect(messages.find((item) => item.id === "m-broken")?.attachments).toBeUndefined();
+      expect(messages.find((item) => item.id === "m-kept")?.attachments).toEqual([valid]);
     } finally {
       delete storageHolder.localStorage;
     }

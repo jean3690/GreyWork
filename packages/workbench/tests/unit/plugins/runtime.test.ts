@@ -1,7 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createCapabilityLoader } from "@/plugins/loader";
 import { BUILTIN_PLUGINS } from "@/plugins/builtin";
-import { isPluginEnabled, pluginActive, pluginManifests, registerPlugin, resetPluginRuntime, setPluginEnabled } from "@/plugins/runtime";
+import {
+  capabilityGrants,
+  grantPluginCapability,
+  isPluginCapabilityGranted,
+  isPluginEnabled,
+  pluginActive,
+  pluginManifests,
+  registerPlugin,
+  resetPluginRuntime,
+  revokePluginCapability,
+  setPluginEnabled,
+} from "@/plugins/runtime";
 import { setCapabilityLoaderForTest } from "@/plugins/current";
 import type { PluginManifest } from "@/plugins/types";
 
@@ -69,7 +80,10 @@ describe("bootPlugins", () => {
 describe("启停与持久化", () => {
   it("disable 即时停用并落盘；换 loader 重放时按存档还原（空存档仍默认全开）", async () => {
     await boot();
-    await setPluginEnabled("core.plugins", false);
+    // 全关：逐个停用全部内置（新增内置后不能只停 core.plugins 就断言 []）
+    for (const manifest of BUILTIN_PLUGINS) {
+      await setPluginEnabled(manifest.id, false);
+    }
     expect(pluginActive.value).toEqual([]);
     expect(storageHolder.localStorage?.getItem("greywork.plugins.enabled")).toBe("[]");
 
@@ -83,10 +97,51 @@ describe("启停与持久化", () => {
 
   it("enable 把停用的插件拉回活跃并更新存档", async () => {
     await boot();
-    await setPluginEnabled("core.plugins", false);
+    for (const manifest of BUILTIN_PLUGINS) {
+      await setPluginEnabled(manifest.id, false);
+    }
     await setPluginEnabled("core.plugins", true);
     expect(isPluginEnabled("core.plugins")).toBe(true);
     expect(pluginActive.value).toEqual(["core.plugins"]);
+  });
+
+  it("老存档不自动启用后加的内置插件（无迁移：存档是完整活跃集，[] 是全关的事实）", async () => {
+    // 模拟 core.artifacts 上线前的老用户：存档里只有 core.plugins
+    storageHolder.localStorage?.setItem("greywork.plugins.enabled", JSON.stringify(["core.plugins"]));
+    await boot();
+    expect(pluginActive.value).toEqual(["core.plugins"]);
+    expect(isPluginEnabled("core.artifacts")).toBe(false);
+    // 存回的还是原样，没被 boot 偷偷改掉
+    expect(storageHolder.localStorage?.getItem("greywork.plugins.enabled")).toBe('["core.plugins"]');
+  });
+});
+
+describe("能力授权与持久化", () => {
+  it("第三方插件未授权时拒绝激活，授权后可激活", async () => {
+    await boot();
+    registerPlugin({ id: "ext.secure", name: "需授权插件", version: "1.0.0", requires: ["workspace:write"] });
+
+    await expect(setPluginEnabled("ext.secure", true)).rejects.toThrow(/missing grants.*workspace:write/);
+    expect(isPluginEnabled("ext.secure")).toBe(false);
+
+    grantPluginCapability("workspace:write");
+    expect(isPluginCapabilityGranted("workspace:write")).toBe(true);
+    expect(storageHolder.localStorage?.getItem("greywork.plugins.capabilityGrants")).toBe('["workspace:write"]');
+    await setPluginEnabled("ext.secure", true);
+    expect(isPluginEnabled("ext.secure")).toBe(true);
+  });
+
+  it("boot 重放授权；撤销授权不强停活跃插件，但阻止其下次激活", async () => {
+    storageHolder.localStorage?.setItem("greywork.plugins.capabilityGrants", JSON.stringify(["workspace:write"]));
+    await boot();
+    expect(capabilityGrants.value).toEqual(["workspace:write"]);
+
+    registerPlugin({ id: "ext.secure", name: "需授权插件", version: "1.0.0", requires: ["workspace:write"] });
+    await setPluginEnabled("ext.secure", true);
+    revokePluginCapability("workspace:write");
+    expect(isPluginEnabled("ext.secure")).toBe(true);
+    await setPluginEnabled("ext.secure", false);
+    await expect(setPluginEnabled("ext.secure", true)).rejects.toThrow(/missing grants/);
   });
 });
 

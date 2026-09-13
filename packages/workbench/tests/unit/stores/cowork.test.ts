@@ -17,7 +17,7 @@ vi.mock("@greywork/acp", () => ({
   createAcpClient: () =>
     ({
       isAvailable: () => h.isAvailable(),
-      startAgent: (cmd: string, tier: string) => h.startAgent(cmd, tier),
+      startAgent: (cmd: string, tier: string, sandbox?: string, workspace?: string | null) => h.startAgent(cmd, tier, sandbox, workspace),
       openSession: (handle: number, cwd: string, mcpServers?: unknown) => h.openSession(handle, cwd, mcpServers),
       setSessionConfig: vi.fn(),
       setPermissionTier: vi.fn(),
@@ -32,8 +32,10 @@ vi.mock("@greywork/acp", () => ({
     }) as never,
   desktopHomeDir: () => h.homeDir(),
 }));
+vi.mock("@/lib/workspace-dir", () => ({ resolveWorkspaceDir: () => h.homeDir() }));
 
 import { useChatStore } from "@/stores/chat";
+import { useAgentStore } from "@/stores/agent";
 import { useSettingsStore } from "@/stores/settings";
 import { useCoworkStore } from "@/stores/cowork";
 import { useSessionStore } from "@/stores/session";
@@ -312,5 +314,47 @@ describe("stopRun", () => {
     expect(h.stop).toHaveBeenCalledTimes(2);
     expect(h.stop.mock.calls.map((call) => call[0]).sort()).toEqual([1, 2]);
     expect(cowork.status).toBe("cancelled");
+  });
+});
+
+describe("成员各自指定 ACP 后端", () => {
+  /** 默认目录里首个后端即全局选中；再挂一个自配后端，作为「某位成员的专属后端」。 */
+  async function withExtraProvider() {
+    const agent = useAgentStore();
+    expect(agent.addAgentProvider("Second Agent", "second-agent acp")).toBeNull();
+    const custom = agent.agentProviders.find((provider) => provider.name === "Second Agent")!;
+    let handleSeq = 0;
+    h.startAgent.mockImplementation(() => Promise.resolve(++handleSeq));
+    h.openSession.mockImplementation((handle: number) => Promise.resolve({ sessionId: `s-${handle}`, configOptions: [] }));
+    h.prompt.mockResolvedValue({ turnId: 1 });
+    return { agent, custom };
+  }
+
+  it("按成员位的 providerId 分别起进程；未指定的跟随全局选中", async () => {
+    const { agent, custom } = await withExtraProvider();
+    const globalCommand = agent.agentProviders.find((provider) => provider.id === agent.selectedProviderId)!.command;
+
+    const cowork = useCoworkStore();
+    const failure = await cowork.startRun("目标", [
+      { name: "Leader", role: "leader" },
+      { name: "Builder", role: "teammate", providerId: custom.id },
+    ]);
+    expect(failure).toBeNull();
+
+    expect(h.startAgent).toHaveBeenCalledTimes(2);
+    expect(h.startAgent.mock.calls.map((call) => call[0])).toEqual([globalCommand, "second-agent acp"]);
+  });
+
+  it("成员指向不存在的后端：先校验再起进程，一个都不起", async () => {
+    await withExtraProvider();
+    const cowork = useCoworkStore();
+    const failure = await cowork.startRun("目标", [
+      { name: "Leader", role: "leader" },
+      { name: "Builder", role: "teammate", providerId: "custom-鬼影" },
+    ]);
+
+    expect(failure).toBeTruthy();
+    expect(h.startAgent).not.toHaveBeenCalled();
+    expect(cowork.status).toBeNull();
   });
 });

@@ -23,7 +23,7 @@ vi.mock("@greywork/acp", () => ({
   createAcpClient: () =>
     ({
       isAvailable: () => h.isAvailable(),
-      startAgent: (cmd: string, tier: string) => h.startAgent(cmd, tier),
+      startAgent: (cmd: string, tier: string, sandbox?: string, workspace?: string | null) => h.startAgent(cmd, tier, sandbox, workspace),
       openSession: (handle: number, cwd: string, mcpServers?: unknown) => h.openSession(handle, cwd, mcpServers),
       probeMcp: (config: unknown) => h.probeMcp(config),
       setSessionConfig: (handle: number, configId: string, value: string | boolean) => h.setSessionConfig(handle, configId, value),
@@ -38,6 +38,7 @@ vi.mock("@greywork/acp", () => ({
     }) as never,
   desktopHomeDir: () => h.homeDir(),
 }));
+vi.mock("@/lib/workspace-dir", () => ({ resolveWorkspaceDir: () => h.homeDir() }));
 
 import { useRunsStore } from "@/stores/runs";
 import { useChatStore } from "@/stores/chat";
@@ -263,8 +264,8 @@ describe("replan（执行中调整计划）", () => {
     chat.flushPendingContent();
     emit({ kind: "prompt-done", payload: { handle: 1, response: {} } });
     await vi.waitFor(() => expect(runsStore.runs[0]?.subtasks).toHaveLength(2));
-    // 等待两个子任务各自完成 startAgent/openSession（session 已注册，handle 2/3）
-    await vi.waitFor(() => expect(h.startAgent).toHaveBeenCalledTimes(3));
+    // startAgent 返回不等于 openSession 已完成；等待两个子任务真正发出 prompt 后再注入完成事件。
+    await vi.waitFor(() => expect(h.prompt).toHaveBeenCalledTimes(3));
     emit({ kind: "prompt-done", payload: { handle: 2, response: {} } });
     emit({ kind: "prompt-done", payload: { handle: 3, response: {} } });
     await vi.waitFor(() => expect(runsStore.runs[0]?.status).toBe("done"));
@@ -308,8 +309,8 @@ describe("replan（执行中调整计划）", () => {
     await vi.waitFor(() => expect(h.prompt.mock.calls.length).toBeGreaterThan(promptsBefore));
     expect(runsStore.runs[0]?.status).toBe("running");
 
-    // 新子任务完成 → run 恢复 done
-    await vi.waitFor(() => expect(h.startAgent).toHaveBeenCalledTimes(4)); // 新 session 已注册
+    // 新子任务 openSession 完成并发出 prompt 后再注入完成事件。
+    await vi.waitFor(() => expect(h.prompt.mock.calls.length).toBeGreaterThan(promptsBefore));
     emit({ kind: "prompt-done", payload: { handle: 4, response: {} } });
     await vi.waitFor(() => expect(runsStore.runs[0]?.status).toBe("done"));
   });

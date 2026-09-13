@@ -21,15 +21,30 @@ const storage = createJsonStorage<string[]>(
   (value): value is string[] => Array.isArray(value) && value.every((item) => typeof item === "string"),
 );
 
+/**
+ * 授权存档：能力白名单（事实集）。与 enabled 存档同构：
+ * 无默认值、boot 不写回、坏值回退空 —— 空数组 = 无任何授权。
+ */
+const GRANTS_STORAGE_KEY = "greywork.plugins.capabilityGrants";
+
+const grantsStorage = createJsonStorage<string[]>(
+  GRANTS_STORAGE_KEY,
+  (value): value is string[] => Array.isArray(value) && value.every((item) => typeof item === "string"),
+);
+
 /** 已注册清单（内置 + 运行期 register）。 */
 export const pluginManifests = ref<readonly PluginManifest[]>([]);
 /** 当前活跃插件 id（随 enable/disable 与 boot 刷新）。 */
 export const pluginActive = ref<readonly string[]>([]);
+/** 已授权能力 id（事实集；随 grant/revoke 与 boot 刷新）。 */
+export const capabilityGrants = ref<readonly string[]>([]);
 
 let booted = false;
 
 function sync(): void {
-  pluginActive.value = useCapabilityLoader().activeIds();
+  const loader = useCapabilityLoader();
+  pluginActive.value = loader.activeIds();
+  capabilityGrants.value = loader.grantedCapabilities();
 }
 
 /** 外壳启动接线：注册内置清单并激活存档里允许的插件（幂等）。 */
@@ -37,6 +52,9 @@ export async function bootPlugins(): Promise<void> {
   if (booted) return;
   booted = true;
   const loader = useCapabilityLoader();
+  const storedGrants = grantsStorage.read() ?? [];
+  for (const capability of storedGrants) loader.grantCapability(capability);
+  loader.setTrustedPluginIds(BUILTIN_PLUGINS.map((manifest) => manifest.id));
   for (const manifest of BUILTIN_PLUGINS) {
     try {
       loader.register(manifest);
@@ -65,6 +83,12 @@ export function registerPlugin(manifest: PluginManifest): void {
   pluginManifests.value = [...pluginManifests.value, manifest];
 }
 
+/** 注销未激活插件；市场卸载使用，清单与 loader 保持原子一致。 */
+export function unregisterPlugin(id: string): void {
+  useCapabilityLoader().unregister(id);
+  pluginManifests.value = pluginManifests.value.filter((manifest) => manifest.id !== id);
+}
+
 export async function setPluginEnabled(id: string, enabled: boolean): Promise<void> {
   const loader = useCapabilityLoader();
   if (enabled) await loader.activate(id);
@@ -75,6 +99,26 @@ export async function setPluginEnabled(id: string, enabled: boolean): Promise<vo
 
 export function isPluginEnabled(id: string): boolean {
   return pluginActive.value.includes(id);
+}
+
+/** 持久化授予能力；只影响之后的激活判定，不暗中启停插件。 */
+export function grantPluginCapability(capability: string): void {
+  const loader = useCapabilityLoader();
+  loader.grantCapability(capability);
+  sync();
+  grantsStorage.write([...capabilityGrants.value]);
+}
+
+/** 持久化撤销能力；已激活插件保持运行，重新激活时再次受门禁约束。 */
+export function revokePluginCapability(capability: string): void {
+  const loader = useCapabilityLoader();
+  loader.revokeCapability(capability);
+  sync();
+  grantsStorage.write([...capabilityGrants.value]);
+}
+
+export function isPluginCapabilityGranted(capability: string): boolean {
+  return capabilityGrants.value.includes(capability);
 }
 
 /**
@@ -104,4 +148,5 @@ export function resetPluginRuntime(): void {
   booted = false;
   pluginManifests.value = [];
   pluginActive.value = [];
+  capabilityGrants.value = [];
 }

@@ -49,6 +49,8 @@
   --color-amber: var(--amber);
   --color-violet: var(--violet);
   --color-panel: var(--panel);
+  --color-paper: var(--paper);
+  --color-paper-ink: var(--paper-ink);
   --color-accent-ink: var(--accent-ink);
   --color-bubble: var(--bubble);
   --color-console: var(--console);

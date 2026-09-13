@@ -1,4 +1,5 @@
 import { createAcpClient } from "@greywork/acp";
+import type { AgentProviderConfig } from "@greywork/shell";
 import {
   createCoworkEngine,
   type CoworkDispatchInput,
@@ -53,6 +54,8 @@ export interface CoworkMemberInit {
   role: CoworkRole;
   /** teammate 的职能标签（可空 = 通用成员）；leader 忽略。 */
   specialty?: CoworkSpecialty;
+  /** 该成员位专用的 ACP 后端 id；空 = 跟随全局选中的后端。 */
+  providerId?: string;
 }
 
 export interface CoworkSlotView {
@@ -372,6 +375,16 @@ export const useCoworkStore = defineStore("cowork", () => {
   }
 
   /**
+   * 成员位用哪个 ACP 后端：没指定就跟全局选中的那个（旧行为）。
+   * 之所以接在成员数据上而不是整个 run 上：一次协作的价值就在于不同角色由不同 agent 跑，
+   * 拆活的 leader 与执行的 builder 用同一个后端只是退化情况。
+   */
+  function providerOf(member: CoworkMemberInit): AgentProviderConfig | undefined {
+    const wanted = member.providerId ?? agentStore.selectedProviderId;
+    return agentStore.agentProviders.find((item) => item.id === wanted);
+  }
+
+  /**
    * 起一次协作运行：每个成员位一个独立会话 + 独立 ACP 进程/会话。
    * 返回错误文案（null = 成功），与既有 store 的错误约定一致。
    */
@@ -382,8 +395,8 @@ export const useCoworkStore = defineStore("cowork", () => {
     if (members.length === 0) return t("cowork.errors.noMembers");
     if (members.filter((member) => member.role === "leader").length !== 1) return t("cowork.errors.needOneLeader");
     if (!acp.isAvailable()) return t("errors.acpTransportUnavailable");
-    const provider = agentStore.agentProviders.find((item) => item.id === agentStore.selectedProviderId);
-    if (!provider) return t("errors.acpNotSelected");
+    // 逐个成员先验后端：拉进程起一半才发现某位成员后端不存在，前面那几个 agent 进程就成了孤儿。
+    if (members.some((member) => !providerOf(member))) return t("errors.acpNotSelected");
 
     starting.value = true;
     lastError.value = null;
@@ -395,6 +408,9 @@ export const useCoworkStore = defineStore("cowork", () => {
       let index = 0;
       for (const member of members) {
         index += 1;
+        // 进循环前已逐个校验过，此处的兜底只是为了让 TS 信任后面 provider.command。
+        const provider = providerOf(member);
+        if (!provider) return t("errors.acpNotSelected");
         const session = sessionStore.createSession(workspaceStore.activeWorkspaceId, `${member.name} · ${trimmed}`);
         const handle = await acp.startAgent(provider.command, settings.effectivePermissionTier, settings.sandboxMode, workspace);
         // 每个成员位都拿到同一批启用的 MCP 服务器：协作里各人的工具面应当一致。

@@ -622,8 +622,13 @@ impl Db {
 
     /// 拉取可执行队列：pending 且到期在最近窗口内（超窗由 sweep 清理，陈旧任务不执行）。
     pub fn automation_due_list(&self) -> Result<Vec<AutomationDueDto>, String> {
+        self.automation_due_list_at(Self::now_ms())
+    }
+
+    /// 固定时刻的可执行队列快照。生产入口传当前时间；测试用固定时间锁定窗口边界。
+    fn automation_due_list_at(&self, now: i64) -> Result<Vec<AutomationDueDto>, String> {
         let conn = self.conn.lock();
-        let cutoff = Self::now_ms() - PENDING_DUE_WINDOW_MS;
+        let cutoff = now - PENDING_DUE_WINDOW_MS;
         let mut stmt = conn
             .prepare(
                 "SELECT id, task_id, name, target, intent, due_at FROM automation_due
@@ -697,13 +702,16 @@ impl Db {
         Ok(changed > 0)
     }
 
-    /// 队列清扫：pending 超窗（60min 无人消费）删除；任何状态超 24h 删除。
-    /// 宿主 tick 周期调用（30s 一次，空表开销可忽略）。
+    /// 队列清扫：pending 超窗（60min 无人消费）删除；终态记录完成超过 24h 删除。
     pub fn automation_due_sweep(&self) -> Result<(), String> {
+        self.automation_due_sweep_at(Self::now_ms())
+    }
+
+    /// 固定时刻执行清扫，确保查询与删除共享同一个窗口边界。
+    fn automation_due_sweep_at(&self, now: i64) -> Result<(), String> {
         let conn = self.conn.lock();
-        let now = Self::now_ms();
         conn.execute(
-            "DELETE FROM automation_due WHERE due_at < ?1 OR (status = 'pending' AND due_at < ?2)",
+            "DELETE FROM automation_due WHERE updated_at < ?1 OR (status = 'pending' AND due_at < ?2)",
             params![now - DUE_KEEP_MS, now - PENDING_DUE_WINDOW_MS],
         )
         .map_err(|e| format!("清理到期队列失败: {e}"))?;
@@ -1517,15 +1525,16 @@ mod tests {
             )
             .unwrap();
         }
-        db.automation_due_sweep().unwrap();
-        let remaining = db.automation_due_list().unwrap();
-        assert_eq!(remaining.len(), 0, "超窗 pending 清理后不剩");
+        db.automation_due_sweep_at(now).unwrap();
+        let remaining = db.automation_due_list_at(now).unwrap();
+        assert_eq!(remaining.len(), 1, "窗口边界的 pending 仍可执行");
+        assert_eq!(remaining[0].task_id, "at-2");
         {
             let conn = db.conn.lock();
             let count: i64 = conn
                 .query_row("SELECT count(*) FROM automation_due", [], |row| row.get(0))
                 .unwrap();
-            assert_eq!(count, 1, "仅 t2（窗口内 pending）保留");
+            assert_eq!(count, 1, "仅 t2（窗口边界 pending）保留");
         }
     }
 

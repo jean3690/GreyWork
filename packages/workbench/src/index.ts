@@ -8,9 +8,22 @@ export { capabilitySeam } from "./plugins/loader";
 export type { CapabilityLoader } from "./plugins/loader";
 export type { PluginManifest, ModeContribution, UiRegionContribution, UiRegionId } from "./plugins/types";
 // 插件宿主 API：外部 host 可在 Shell 挂载前 registerPlugin / 换 loader。
-export { bootPlugins, registerPlugin, setPluginEnabled, isPluginEnabled, restoreBuiltinPlugins } from "./plugins/runtime";
+export {
+  bootPlugins,
+  registerPlugin,
+  setPluginEnabled,
+  isPluginEnabled,
+  unregisterPlugin,
+  grantPluginCapability,
+  revokePluginCapability,
+  isPluginCapabilityGranted,
+  restoreBuiltinPlugins,
+} from "./plugins/runtime";
+export { bootInstalledMarketPlugins } from "./plugins/market";
 // 桌面宿主（拖放打开等）需要的状态入口。
 export { usePreviewStore } from "./stores/preview";
+// 输入卡附件拖放区判定：App.vue 的全局拖放要先剔除落在输入卡上的那次。
+export { DROPZONE_ATTR, isPhysicalPointInDropzone } from "./lib/use-attachments";
 export { setCapabilityLoaderForTest, useCapabilityLoader } from "./plugins/current";
 export { i18n, setLocale } from "./i18n";
 export type { AppLocale } from "./i18n";

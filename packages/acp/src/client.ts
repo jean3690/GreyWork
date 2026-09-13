@@ -15,11 +15,13 @@ import {
 } from "@agentclientprotocol/sdk";
 import { createWebSocketStream, type WebSocketConstructor, type WebSocketLike } from "@agentclientprotocol/sdk/experimental/ws-client";
 import type {
+  AcpAvailableCommand,
   AcpConfigOptionChoice,
   AcpEventEnvelope,
   AcpPermissionOptionInfo,
   AcpPermissionRequestPayload,
   AcpPromptResult,
+  AcpPromptUnit,
   AcpSandboxMode,
   AcpSessionConfigOption,
   AcpSessionInfo,
@@ -180,7 +182,7 @@ export class WebSocketTransport implements AcpTransport {
     return toConfigOptions(result.configOptions);
   }
 
-  async prompt(handle: number, text: string): Promise<{ turnId: number }> {
+  async prompt(handle: number, text: string, units: readonly AcpPromptUnit[] = []): Promise<{ turnId: number }> {
     const ctx = await this.ensureConnected();
     // 与桌面传输一致：立即返回 turnId，回合结果经 prompt-done 事件送达。
     const turnId = this.nextTurnId++;
@@ -192,7 +194,7 @@ export class WebSocketTransport implements AcpTransport {
     ctx
       .request(AGENT_METHODS.session_prompt, {
         sessionId: this.requireSession(),
-        prompt: [{ type: "text", text }],
+        prompt: [{ type: "text", text }, ...units],
       })
       .then((response) => {
         this.emit({ kind: "prompt-done", payload: { handle, turnId, response } });
@@ -349,7 +351,7 @@ export interface AcpClient {
   /** 改写在途会话的权限档位（临时降级/回升）；桌面宿主立即生效。 */
   setPermissionTier(handle: number, tier: PermissionTier): Promise<void>;
   setSessionConfig(handle: number, configId: string, value: string | boolean): Promise<AcpSessionConfigOption[]>;
-  prompt(handle: number, text: string): Promise<{ turnId: number }>;
+  prompt(handle: number, text: string, units?: readonly AcpPromptUnit[]): Promise<{ turnId: number }>;
   stop(handle: number, turnId?: number): Promise<void>;
   respondPermission(requestId: number, optionId: string | null): Promise<void>;
   list(): Promise<AcpSessionInfo[]>;
@@ -368,7 +370,7 @@ export function createAcpClient(transport: AcpTransport = defaultTransport()): A
     loadSession: (handle, cwd, sessionId, mcpServers) => transport.loadSession(handle, cwd, sessionId, mcpServers),
     setSessionConfig: (handle, configId, value) => transport.setSessionConfig(handle, configId, value),
     setPermissionTier: (handle, tier) => transport.setPermissionTier(handle, tier),
-    prompt: (handle, text) => transport.prompt(handle, text),
+    prompt: (handle, text, units) => transport.prompt(handle, text, units),
     stop: (handle, turnId) => transport.stop(handle, turnId),
     respondPermission: (requestId, optionId) => transport.respondPermission(requestId, optionId),
     list: () => transport.list(),
@@ -390,11 +392,13 @@ export async function desktopHomeDir(): Promise<string | null> {
 }
 
 export type {
+  AcpAvailableCommand,
   AcpEventEnvelope,
   AcpConfigOptionChoice,
   AcpPermissionOptionInfo,
   AcpPermissionRequestPayload,
   AcpPromptResult,
+  AcpPromptUnit,
   AcpSandboxMode,
   AcpSessionConfigOption,
   AcpSessionInfo,

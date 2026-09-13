@@ -1,10 +1,10 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
 import Icon from "./Icon.vue";
 
-/** 侧栏底部：主题切换 + 设置入口 + 用户块。theme 为 "dark"|"light"|"system"。 */
-defineProps<{ theme: string }>();
+const { t } = useI18n();
 
-const emit = defineEmits<{ toggleTheme: []; navigate: [path: string] }>();
+const emit = defineEmits<{ openSettings: []; navigate: [path: string] }>();
 
 /** 行按钮统一样式：34px 高、8px 圆角，与 GreyWork Sider 一致。 */
 const rowClass =
@@ -13,19 +13,11 @@ const rowClass =
 
 <template>
   <div class="flex shrink-0 flex-col gap-0.5 border-t border-line-2 p-2">
-    <button :class="rowClass" @click="emit('toggleTheme')">
-      <span class="grid size-5 place-items-center rounded-[5px] bg-panel text-dim">
-        <Icon :name="theme === 'dark' ? 'sun' : 'moon'" :size="14" />
-      </span>
-      <span>{{ theme === "dark" ? "浅色模式" : "深色模式" }}</span>
-    </button>
-
-    <button :class="rowClass" @click="emit('navigate', '/settings/appearance')">
+    <button :class="rowClass" data-testid="sider-settings" @click="emit('openSettings')">
       <span class="grid size-5 place-items-center rounded-[5px] bg-panel text-dim">
         <Icon name="setting" :size="14" />
       </span>
-      设置
-      <Icon name="right" :size="12" class="ml-auto text-dim2" />
+      {{ t(`settings.title`) }}
     </button>
 
     <button :class="rowClass" @click="emit('navigate', '/assistants')">

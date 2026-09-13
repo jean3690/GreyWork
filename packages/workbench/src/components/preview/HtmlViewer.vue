@@ -35,14 +35,18 @@ const tabClass = (active: boolean): string =>
 
     <p v-if="loading" class="px-4 py-3 text-[12px] text-dim2">读取中…</p>
     <p v-else-if="error" role="alert" class="px-4 py-3 text-[12px] text-orange">读取失败：{{ error }}</p>
-    <iframe
-      v-else-if="mode === 'render'"
-      data-testid="html-viewer-frame"
-      title="HTML 预览"
-      sandbox="allow-same-origin"
-      :srcdoc="srcdoc"
-      class="min-h-0 w-full flex-1 border-0 bg-white"
-    />
+    <!-- 纸张化：外层是主题底，里面这张才是文档本身。被预览的 HTML 多半自带排版，
+         把整个面板涂白会在暗色里糊出一大块眩光；不给脚本也改不了它的正文色，
+         所以只能像 DocViewer 那样把它收成一张纸，而不是翻成深底。 -->
+    <div v-else-if="mode === 'render'" class="min-h-0 flex-1 overflow-hidden bg-panel p-3">
+      <iframe
+        data-testid="html-viewer-frame"
+        title="HTML 预览"
+        sandbox="allow-same-origin"
+        :srcdoc="srcdoc"
+        class="size-full rounded-[6px] border border-line-2 bg-paper"
+      />
+    </div>
     <TextViewer v-else :tab="props.tab" class="min-h-0 flex-1" />
   </div>
 </template>

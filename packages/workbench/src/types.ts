@@ -86,6 +86,34 @@ export type MessageSegment =
 /** 思考段（组件 props 用的具名别名）。 */
 export type ThinkingSegment = Extract<MessageSegment, { kind: "thinking" }>;
 
+export type AttachmentKind = "image" | "text";
+
+/**
+ * 一条随消息发出的附件（图片 / 文本文件）。
+ *
+ * 生命周期分两段：采集期是内存草稿（只有 dataUrl/text，用于输入卡即时预览），
+ * 发送时落进附件库并**剥离内联数据**只留 path —— 会话是整条 ThreadMessage 落盘的，
+ * 把 base64 留在消息里会把 localStorage 与会话 JSON 一起撑爆。浏览器态没有
+ * 文件系统，只能保留内联副本（限额因此更严）。
+ */
+export interface Attachment {
+  id: string;
+  kind: AttachmentKind;
+  /** 原始文件名（basename，展示与内联标题用）。 */
+  name: string;
+  mime: string;
+  /** 字节数。 */
+  size: number;
+  /** 桌面态落库后的绝对路径：~/.greyWork/attachments/<会话id>/<附件id>.<ext>。 */
+  path?: string;
+  /** 图片数据副本：浏览器态唯一真源 / 桌面态仅存在于落库前的草稿。 */
+  dataUrl?: string;
+  /** 文本内容副本：仅浏览器态保留（桌面态发送时按 path 现读）。 */
+  text?: string;
+  /** 文本已按内联上限截断（仅浏览器态可判定，用于展示提示）。 */
+  truncated?: boolean;
+}
+
 export interface ThreadMessage {
   id: string;
   role: "user" | "assistant" | "system";
@@ -95,7 +123,9 @@ export interface ThreadMessage {
   planPending?: boolean;
   /** 计划门待派发的意图文本（ACP 计划卡：确认后作为 prompt 派发，取消则丢弃）。 */
   planDraft?: string;
-  attachments?: string[];
+  attachments?: Attachment[];
+  /** 计划门待派发附件（确认后随 planDraft 一起交给 ACP；取消则丢弃）。 */
+  planAttachments?: Attachment[];
   /** 完成后产出的交付物 id（artifactStore.artifacts） */
   artifacts?: string[];
   /** 本条消息内的工具调用时间线（会话消息中嵌入；沿用 ACP 同款生命周期）。 */
@@ -141,7 +171,7 @@ export interface MessageTip {
 export interface QueuedCommand {
   id: string;
   input: string;
-  attachments: string[];
+  attachments: Attachment[];
   ts: number;
 }
 

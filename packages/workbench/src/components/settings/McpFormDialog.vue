@@ -44,6 +44,8 @@ const props = defineProps<{
   open: boolean;
   entry: McpServerEntry | null;
   preset?: McpFormPreset | null;
+  /** 其他条目已占用的名称；MCP server name 必须在会话内唯一。 */
+  existingNames?: string[];
 }>();
 
 const emit = defineEmits<{ save: [payload: McpDraftPayload]; cancel: [] }>();
@@ -56,6 +58,7 @@ const args = ref("");
 const headerRows = ref<KvRow[]>([{ name: "", value: "" }]);
 const envRows = ref<KvRow[]>([{ name: "", value: "" }]);
 const error = ref<string | null>(null);
+const showSecrets = ref(false);
 
 function rowsToHeaders(rows: KvRow[]): Array<{ name: string; value: string }> {
   return rows.filter((row) => row.name.trim() && row.value.trim()).map((row) => ({ name: row.name.trim(), value: row.value.trim() }));
@@ -65,7 +68,8 @@ function rowsToEnv(rows: KvRow[]): Record<string, string> {
   const out: Record<string, string> = {};
   for (const row of rows) {
     const key = row.name.trim();
-    if (key) out[key] = row.value;
+    // 空值不注入，避免 registry 环境变量提示行意外覆盖进程原有环境。
+    if (key && row.value.length > 0) out[key] = row.value;
   }
   return out;
 }
@@ -73,12 +77,13 @@ function rowsToEnv(rows: KvRow[]): Record<string, string> {
 /** 用 entry（编辑）或 preset（登记）或空表单重置草稿。 */
 function resetDraft(): void {
   error.value = null;
+  showSecrets.value = false;
   if (props.entry) {
     name.value = props.entry.name;
     transport.value = props.entry.transport;
     url.value = props.entry.url ?? "";
     command.value = props.entry.command ?? "";
-    args.value = (props.entry.args ?? []).join(" ");
+    args.value = (props.entry.args ?? []).join("\n");
     headerRows.value =
       props.entry.headers && props.entry.headers.length > 0
         ? props.entry.headers.map((header) => ({ name: header.name, value: header.value }))
@@ -148,11 +153,24 @@ function save(): void {
     error.value = "请先填服务器名";
     return;
   }
+  if ((props.existingNames ?? []).some((candidate) => candidate.trim().toLocaleLowerCase() === trimmedName.toLocaleLowerCase())) {
+    error.value = `服务器名「${trimmedName}」已存在`;
+    return;
+  }
   const trimmedUrl = url.value.trim();
   const trimmedCommand = command.value.trim();
   if (transport.value === "stdio" ? !trimmedCommand : !trimmedUrl) {
-    error.value = transport.value === "stdio" ? "stdio 需要可执行文件绝对路径" : "远程传输需要 URL";
+    error.value = transport.value === "stdio" ? "stdio 需要可执行命令" : "远程传输需要 URL";
     return;
+  }
+  if (transport.value !== "stdio") {
+    try {
+      const parsed = new URL(trimmedUrl);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error("protocol");
+    } catch {
+      error.value = "MCP URL 必须是有效的 http(s) 地址";
+      return;
+    }
   }
   const payload: McpDraftPayload = {
     name: trimmedName,
@@ -162,8 +180,9 @@ function save(): void {
     ...(transport.value === "stdio"
       ? {
           command: trimmedCommand,
+          // 每行一个 argv，保留参数内部空格；不经 shell，也不做引号展开。
           args: args.value
-            .split(/\s+/)
+            .split(/\r?\n/)
             .map((arg) => arg.trim())
             .filter((arg) => arg.length > 0),
         }
@@ -206,6 +225,7 @@ function save(): void {
         <input
           v-model="name"
           class="w-full rounded-[8px] border border-line bg-panel-2 px-2.5 py-1.5 text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
+          data-testid="mcp-name"
           placeholder="名称（agent 会看到这个名字）"
         />
         <select
@@ -220,18 +240,21 @@ function save(): void {
           v-if="transport !== 'stdio'"
           v-model="url"
           class="w-full rounded-[8px] border border-line bg-panel-2 px-2.5 py-1.5 font-mono text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
+          data-testid="mcp-url"
           placeholder="https://mcp.deepwiki.com/mcp"
         />
         <template v-else>
           <input
             v-model="command"
             class="w-full rounded-[8px] border border-line bg-panel-2 px-2.5 py-1.5 font-mono text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
-            placeholder="/usr/bin/npx（可执行文件绝对路径）"
+            placeholder="npx 或 /usr/bin/npx"
           />
-          <input
+          <textarea
             v-model="args"
-            class="w-full rounded-[8px] border border-line bg-panel-2 px-2.5 py-1.5 font-mono text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
-            placeholder="参数，空格分隔"
+            data-testid="mcp-args"
+            rows="3"
+            class="w-full resize-y rounded-[8px] border border-line bg-panel-2 px-2.5 py-1.5 font-mono text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
+            placeholder="参数，每行一个（参数内部可含空格）"
           />
         </template>
 
@@ -240,13 +263,22 @@ function save(): void {
           <div class="pt-1">
             <div class="mb-1 flex items-center justify-between">
               <span class="text-[11px] font-medium text-dim">请求头（可选，鉴权等）</span>
-              <button
-                type="button"
-                class="cursor-pointer text-[11px] text-dim transition-colors hover:text-foreground"
-                @click="addHeaderRow"
-              >
-                ＋ 添加一行
-              </button>
+              <div class="flex items-center gap-2">
+                <button
+                  type="button"
+                  class="cursor-pointer text-[11px] text-dim transition-colors hover:text-foreground"
+                  @click="showSecrets = !showSecrets"
+                >
+                  {{ showSecrets ? "隐藏值" : "显示值" }}
+                </button>
+                <button
+                  type="button"
+                  class="cursor-pointer text-[11px] text-dim transition-colors hover:text-foreground"
+                  @click="addHeaderRow"
+                >
+                  ＋ 添加一行
+                </button>
+              </div>
             </div>
             <div v-for="(row, index) in headerRows" :key="index" class="mb-1 flex items-center gap-1.5">
               <input
@@ -256,6 +288,7 @@ function save(): void {
               />
               <input
                 v-model="row.value"
+                :type="showSecrets ? 'text' : 'password'"
                 class="min-w-0 flex-1 rounded-[8px] border border-line bg-panel-2 px-2 py-1 font-mono text-[11px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
                 placeholder="值"
               />
@@ -274,9 +307,22 @@ function save(): void {
           <div class="pt-1">
             <div class="mb-1 flex items-center justify-between">
               <span class="text-[11px] font-medium text-dim">环境变量（可选，注入子进程）</span>
-              <button type="button" class="cursor-pointer text-[11px] text-dim transition-colors hover:text-foreground" @click="addEnvRow">
-                ＋ 添加一行
-              </button>
+              <div class="flex items-center gap-2">
+                <button
+                  type="button"
+                  class="cursor-pointer text-[11px] text-dim transition-colors hover:text-foreground"
+                  @click="showSecrets = !showSecrets"
+                >
+                  {{ showSecrets ? "隐藏值" : "显示值" }}
+                </button>
+                <button
+                  type="button"
+                  class="cursor-pointer text-[11px] text-dim transition-colors hover:text-foreground"
+                  @click="addEnvRow"
+                >
+                  ＋ 添加一行
+                </button>
+              </div>
             </div>
             <div v-for="(row, index) in envRows" :key="index" class="mb-1 flex items-center gap-1.5">
               <input
@@ -286,6 +332,7 @@ function save(): void {
               />
               <input
                 v-model="row.value"
+                :type="showSecrets ? 'text' : 'password'"
                 class="min-w-0 flex-1 rounded-[8px] border border-line bg-panel-2 px-2 py-1 font-mono text-[11px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
                 placeholder="值"
               />
@@ -312,7 +359,12 @@ function save(): void {
         >
           取消
         </button>
-        <button type="button" class="rounded-[8px] bg-accent px-3 py-1.5 text-[12px] font-medium text-accent-ink" @click="save">
+        <button
+          data-testid="mcp-save"
+          type="button"
+          class="rounded-[8px] bg-accent px-3 py-1.5 text-[12px] font-medium text-accent-ink"
+          @click="save"
+        >
           {{ entry ? "保存" : "添加" }}
         </button>
       </div>

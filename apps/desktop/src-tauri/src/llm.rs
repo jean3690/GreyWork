@@ -29,10 +29,14 @@ struct LlmEventEnvelope {
 }
 
 /// 渲染端提交的对话消息（历史上下文 + 本轮输入）。
+///
+/// `content` 有意用 `serde_json::Value` 而不是 String 或自定义 enum：纯文本消息是 string，
+/// 带图片的消息是 OpenAI vision 的 content parts 数组，形状由协议决定、本层不解释，
+/// 直接原样透传即可（用 enum 还得自定义 Deserialize，收益只是编译期收窄）。
 #[derive(Deserialize)]
 pub struct LlmChatMessage {
     pub role: String,
-    pub content: String,
+    pub content: serde_json::Value,
 }
 
 /// 全局 LLM 主机状态：请求 id 分配 + 可中止的流任务句柄。
@@ -110,14 +114,22 @@ fn delta_from_sse_data(data: &str) -> Option<String> {
 }
 
 /// 非流式完整响应（服务端忽略 stream 时）提取全文。
+/// content 可能是 string，也可能是 parts 数组（部分兼容端点对带图请求回数组），后者拼接 text 段。
 fn content_from_completion(body: &serde_json::Value) -> Option<String> {
     let content = body
         .get("choices")?
         .get(0)?
         .get("message")?
-        .get("content")?
-        .as_str()?;
-    (!content.is_empty()).then(|| content.to_string())
+        .get("content")?;
+    if let Some(text) = content.as_str() {
+        return (!text.is_empty()).then(|| text.to_string());
+    }
+    let joined: String = content
+        .as_array()?
+        .iter()
+        .filter_map(|part| part.get("text").and_then(|text| text.as_str()))
+        .collect();
+    (!joined.is_empty()).then_some(joined)
 }
 
 /// 发起一轮流式对话；返回请求 id（用于 llm_chat_stop 中止）。
@@ -427,16 +439,47 @@ mod tests {
         assert_eq!(content_from_completion(&serde_json::Value::Null), None);
     }
 
+    /// 兼容端点对带图请求可能回 content parts 数组：拼接 text 段，别当成「空回复」。
+    #[test]
+    fn completion_body_joins_content_parts_array() {
+        let body: serde_json::Value = serde_json::from_str(
+            r#"{"choices":[{"message":{"role":"assistant","content":[{"type":"text","text":"看"},{"type":"text","text":"到了"}]}}]}"#,
+        )
+        .unwrap();
+        assert_eq!(content_from_completion(&body).as_deref(), Some("看到了"));
+        // 数组里没有 text 段（如只有图片）→ None，交由调用方报「空回复」
+        let no_text: serde_json::Value = serde_json::from_str(
+            r#"{"choices":[{"message":{"content":[{"type":"image","data":"x"}]}}]}"#,
+        )
+        .unwrap();
+        assert_eq!(content_from_completion(&no_text), None);
+    }
+
+    /// 带图请求的 content parts 数组要原样透传给端点，不能被本层改写。
+    #[test]
+    fn request_body_passes_content_parts_through() {
+        let parts = serde_json::json!([
+            { "type": "text", "text": "这张图有什么问题" },
+            { "type": "image_url", "image_url": { "url": "data:image/png;base64,AAAA" } },
+        ]);
+        let messages = vec![LlmChatMessage {
+            role: "user".into(),
+            content: parts.clone(),
+        }];
+        let body = chat_request_body("gpt-test", &messages, "auto");
+        assert_eq!(body["messages"][0]["content"], parts);
+    }
+
     #[test]
     fn request_body_marks_stream_and_maps_messages() {
         let messages = vec![
             LlmChatMessage {
                 role: "system".into(),
-                content: "sys".into(),
+                content: serde_json::json!("sys"),
             },
             LlmChatMessage {
                 role: "user".into(),
-                content: "hi".into(),
+                content: serde_json::json!("hi"),
             },
         ];
         let body = chat_request_body("gpt-test", &messages, "high");
@@ -566,7 +609,7 @@ mod tests {
             &mock_api_key_env(),
             vec![LlmChatMessage {
                 role: "user".into(),
-                content: "hi".into(),
+                content: serde_json::json!("hi"),
             }],
             "auto",
         )
@@ -584,7 +627,7 @@ mod tests {
             &mock_api_key_env(),
             vec![LlmChatMessage {
                 role: "user".into(),
-                content: "hi".into(),
+                content: serde_json::json!("hi"),
             }],
             "auto",
         )

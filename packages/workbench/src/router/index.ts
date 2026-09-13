@@ -8,8 +8,9 @@ import { createRouter, createWebHashHistory, type Router, type RouteRecordRaw } 
  *   /assistants     助手库（Agent 设置页的读入口）
  *   /scheduled      定时任务
  *   /team           团队
- *   /settings/*     设置（Agent / 助手 / 外观 / 系统 等子页）
  *   /plugin/:modeId 插件贡献的模式页（组件取自 seam 的 modes 快照，无需注册路由）
+ *
+ * 设置不是路由：它是 Shell 持有的弹窗（components/SettingsDialog.vue），状态不进 URL。
  *
  * 视图全部懒加载：ConversationView 的对话 store 链会把 ExcelJS / pptxgenjs /
  * jszip 焊进出入口 chunk，让从不产表格/幻灯的用户在开屏就解析这几百 KB 写入器。
@@ -23,12 +24,8 @@ export function createAppRouter(): Router {
     { path: "/scheduled", component: () => import("../views/ScheduledView.vue") },
     { path: "/team", component: () => import("../views/TeamView.vue") },
     { path: "/plugin/:modeId", component: () => import("../views/PluginView.vue") },
-    { path: "/settings", redirect: "/settings/agent" },
-    {
-      path: "/settings/:section",
-      component: () => import("../views/SettingsView.vue"),
-      props: (route) => ({ section: route.params.section }),
-    },
+    // 插件悬浮窗口内容（透明置顶小窗加载 #/plugin-window；Shell 按 meta.bare 只出 router-view）。
+    { path: "/plugin-window", component: () => import("../views/PluginWindowView.vue"), meta: { bare: true } },
     { path: "/:pathMatch(.*)*", redirect: "/guid" },
   ];
 

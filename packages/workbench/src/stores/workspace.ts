@@ -43,6 +43,8 @@ export interface WorkspaceRecord extends Workspace {
   lastUsedAt: number;
   /** 该工作区记住的 ACP / agent 配置。 */
   agentConfig?: WorkspaceAgentConfig;
+  /** 侧栏展示图标（Icon 名）；缺省按「普通对话 / 工作区」兜底。 */
+  icon?: string;
 }
 
 const STORAGE_KEY = "greywork.workspaces";
@@ -82,7 +84,8 @@ function hasWorkspaceCore(value: unknown): value is Omit<WorkspaceRecord, "lastU
     typeof record.updatedAt === "number" &&
     Array.isArray(record.files) &&
     record.files.every(isWorkspaceFile) &&
-    (record.folder === undefined || typeof record.folder === "string")
+    (record.folder === undefined || typeof record.folder === "string") &&
+    (record.icon === undefined || typeof record.icon === "string")
   );
 }
 
@@ -349,6 +352,15 @@ export const useWorkspaceStore = defineStore("workspace", () => {
     persist();
   }
 
+  /** 改工作区图标（传 null 回到兜底图标）；纯展示，不动 updatedAt（那代表内容变更）。 */
+  function setWorkspaceIcon(id: string, icon: string | null): void {
+    const workspace = workspaceById(id);
+    if (!workspace) return;
+    if (icon) workspace.icon = icon;
+    else delete workspace.icon;
+    persist();
+  }
+
   /** 登记已存放（打开）文件（同 vfsPath 去重）。 */
   function addFile(id: string, entry: WorkspaceFile): void {
     const workspace = workspaceById(id);
@@ -383,6 +395,7 @@ export const useWorkspaceStore = defineStore("workspace", () => {
     updateDescription,
     deleteWorkspace,
     setFolder,
+    setWorkspaceIcon,
     agentConfigOf,
     setAgentConfig,
     addFile,

@@ -5,10 +5,47 @@
     <link rel="icon" type="image/svg+xml" href="/logo.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>GreyWork · Desktop</title>
+    <script>
+      /*
+       * 首帧外观：必须在主题 CSS 和 Vue 启动之前同步写好 data-*，否则浅色用户每次
+       * 刷新都会先闪一帧深色（Tauri 窗口 visible:false 只挡住桌面端，浏览器 dev 没有这道闸）。
+       *
+       * 这里只做「读 localStorage → 写三个属性」，不碰任何业务状态：
+       * stores/settings.ts 的 applySaved() 随后会用同一份快照接管，两者取值口径一致
+       * （palette/colorMode/fontSize 的三元回落规则与默认值必须同步改）。
+       */
+      (function () {
+        try {
+          var saved = JSON.parse(localStorage.getItem("greywork.settings") || "{}");
+          var palette = ["greywork", "night-blue", "night-green", "github", "fox"].indexOf(saved.theme) >= 0 ? saved.theme : "greywork";
+          // v0.1 兼容：旧快照把明暗存在 theme 上，口径与 stores/settings.ts 的 applySaved 一致。
+          var mode =
+            ["dark", "light", "system"].indexOf(saved.colorMode) >= 0
+              ? saved.colorMode
+              : ["dark", "light", "system"].indexOf(saved.theme) >= 0
+                ? saved.theme
+                : "dark";
+          if (mode === "system") {
+            mode = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+          }
+          var fontSize = ["small", "medium", "large"].indexOf(saved.fontSize) >= 0 ? saved.fontSize : "medium";
+          var root = document.documentElement;
+          root.dataset.palette = palette;
+          root.dataset.theme = mode;
+          root.dataset.fontSize = fontSize;
+        } catch (error) {
+          /* 存储被禁用 / 快照损坏：保持下面的默认深色，不阻塞启动。 */
+        }
+      })();
+    </script>
     <style>
-      /* 首帧底色与默认深色主题一致：CSS 加载前不闪白（tauri 窗口底色同值）。 */
+      /* CSS 加载前的兜底底色，随上面脚本解析出的 data-theme 分支（令牌此时还没到）。
+         值与 tokens.css 的 --ink 对齐：灰了会在纯黑上闪一下浅边。 */
       html {
-        background-color: #0e0e0e;
+        background-color: #000000;
+      }
+      html[data-theme="light"] {
+        background-color: #ffffff;
       }
     </style>
   </head>

@@ -5,7 +5,7 @@
  *
  * 数据全在 settings store（变更即持久化）；「测试连接」走宿主 mcp_probe。
  */
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { useAgentStore } from "../../stores/agent";
 import { useSettingsStore, type McpServerEntry } from "../../stores/settings";
 import { MCP_SKIP_REASONS, MCP_TRANSPORT_LABELS } from "../../lib/mcp-labels";
@@ -18,13 +18,17 @@ const settings = useSettingsStore();
 const agent = useAgentStore();
 
 /** 每台服务器最近一次「测试连接」的结果（成功列工具，失败给原因）。 */
-const mcpProbes = ref<Record<string, { server?: string; tools?: string[]; error?: string }>>({});
-const mcpProbing = ref<string | null>(null);
+const mcpProbes = ref<Record<string, { server?: string; tools?: string[]; durationMs?: number; error?: string }>>({});
+/** 允许不同服务器并发探活，但同一台在请求完成前不可重复触发。 */
+const mcpProbing = ref<Record<string, true>>({});
 
 // ---------- 新增 / 编辑弹窗 ----------
 const editorOpen = ref(false);
 const editorEntry = ref<McpServerEntry | null>(null);
 const editorPreset = ref<McpFormPreset | null>(null);
+const editorExistingNames = computed(() =>
+  settings.mcpServers.filter((server) => server.id !== editorEntry.value?.id).map((server) => server.name),
+);
 
 function openAdd(): void {
   editorEntry.value = null;
@@ -40,11 +44,12 @@ function openEdit(entry: McpServerEntry): void {
 
 function onEditorSave(payload: McpDraftPayload): void {
   if (editorEntry.value) {
-    // 编辑：保留原 id 与启停状态
+    // 编辑：保留原 id 与启停状态，并清掉已失效的探活结果。
     settings.upsertMcpServer({
       ...editorEntry.value,
       ...payload,
     });
+    delete mcpProbes.value[editorEntry.value.id];
   } else {
     settings.upsertMcpServer({
       id: `mcp-${Date.now().toString(36)}`,
@@ -73,19 +78,27 @@ function onRegistryRegister(entry: McpRegistryEntry): void {
 
 // ---------- 测试连接 ----------
 async function testMcpServer(entry: McpServerEntry): Promise<void> {
-  mcpProbing.value = entry.id;
-  const { id: _id, enabled: _enabled, ...config } = entry;
-  const { report, error } = await agent.probeMcpServer(config);
-  mcpProbing.value = null;
-  mcpProbes.value = {
-    ...mcpProbes.value,
-    [entry.id]: error
-      ? { error }
-      : {
-          server: report?.serverName ? `${report.serverName} ${report.serverVersion ?? ""}`.trim() : undefined,
-          tools: report?.tools.map((tool) => tool.name) ?? [],
-        },
-  };
+  if (mcpProbing.value[entry.id]) return;
+  mcpProbing.value = { ...mcpProbing.value, [entry.id]: true };
+  try {
+    const { id: _id, enabled: _enabled, ...config } = entry;
+    const { report, error } = await agent.probeMcpServer(config);
+    mcpProbes.value = {
+      ...mcpProbes.value,
+      [entry.id]: error
+        ? { error }
+        : {
+            server: report?.serverName ? `${report.serverName} ${report.serverVersion ?? ""}`.trim() : undefined,
+            tools: report?.tools.map((tool) => tool.name) ?? [],
+            durationMs: report?.durationMs,
+          },
+    };
+  } catch (error) {
+    mcpProbes.value = { ...mcpProbes.value, [entry.id]: { error: String(error) } };
+  } finally {
+    const { [entry.id]: _done, ...remaining } = mcpProbing.value;
+    mcpProbing.value = remaining;
+  }
 }
 
 // ---------- 删除确认 ----------
@@ -135,10 +148,11 @@ const registryOpen = ref(false);
             <button
               type="button"
               class="rounded-[8px] border border-line px-2 py-1 text-[11px] text-dim transition-colors hover:text-foreground disabled:opacity-50"
-              :disabled="mcpProbing === entry.id"
+              :disabled="Boolean(mcpProbing[entry.id]) || entry.transport === 'sse'"
+              :title="entry.transport === 'sse' ? 'SSE 需由 agent 建立长连接，宿主不代为探活' : undefined"
               @click="testMcpServer(entry)"
             >
-              {{ mcpProbing === entry.id ? "连接中…" : "测试连接" }}
+              {{ entry.transport === "sse" ? "由 agent 连接" : mcpProbing[entry.id] ? "连接中…" : "测试连接" }}
             </button>
             <button
               type="button"
@@ -159,13 +173,16 @@ const registryOpen = ref(false);
             {{ mcpProbes[entry.id]?.error }}
           </p>
           <p v-else-if="mcpProbes[entry.id]" class="mt-1.5 text-[11px] text-dim">
-            {{ mcpProbes[entry.id]?.server ?? "已连接" }} · 工具 {{ mcpProbes[entry.id]?.tools?.length ?? 0 }}：
-            {{ (mcpProbes[entry.id]?.tools ?? []).join("、") }}
+            {{ mcpProbes[entry.id]?.server ?? "已连接" }} · {{ mcpProbes[entry.id]?.durationMs ?? 0 }}ms · 工具
+            {{ mcpProbes[entry.id]?.tools?.length ?? 0
+            }}<template v-if="(mcpProbes[entry.id]?.tools?.length ?? 0) > 0"
+              >：{{ (mcpProbes[entry.id]?.tools ?? []).join("、") }}</template
+            >
           </p>
         </div>
       </div>
 
-      <div class="mt-3 flex gap-2">
+      <div class="mt-3 flex flex-wrap gap-2">
         <button
           type="button"
           class="h-6 cursor-pointer rounded-[6px] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
@@ -180,6 +197,22 @@ const registryOpen = ref(false);
         >
           从官方 Registry 添加
         </button>
+        <button
+          v-if="settings.mcpServers.some((server) => !server.enabled)"
+          type="button"
+          class="h-6 cursor-pointer rounded-[6px] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
+          @click="settings.setAllMcpServersEnabled(true)"
+        >
+          全部启用
+        </button>
+        <button
+          v-if="settings.mcpServers.some((server) => server.enabled)"
+          type="button"
+          class="h-6 cursor-pointer rounded-[6px] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
+          @click="settings.setAllMcpServersEnabled(false)"
+        >
+          全部停用
+        </button>
       </div>
     </div>
 
@@ -191,7 +224,14 @@ const registryOpen = ref(false);
       </p>
     </div>
 
-    <McpFormDialog :open="editorOpen" :entry="editorEntry" :preset="editorPreset" @save="onEditorSave" @cancel="editorOpen = false" />
+    <McpFormDialog
+      :open="editorOpen"
+      :entry="editorEntry"
+      :preset="editorPreset"
+      :existing-names="editorExistingNames"
+      @save="onEditorSave"
+      @cancel="editorOpen = false"
+    />
 
     <McpRegistryPane :open="registryOpen" @close="registryOpen = false" @register="onRegistryRegister" />
 

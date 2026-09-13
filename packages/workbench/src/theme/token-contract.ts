@@ -44,6 +44,8 @@ export const THEME_TOKENS: readonly ThemeTokenDescriptor[] = [
   { key: "--side", group: "background", scope: "appearance-scoped", description: "侧边栏底色" },
   { key: "--bubble", group: "background", scope: "appearance-scoped", description: "用户消息气泡底（= GreyWork message-user-bg）" },
   { key: "--console", group: "background", scope: "appearance-invariant", description: "终端 / SQL 控制台固定深底" },
+  { key: "--paper", group: "background", scope: "appearance-scoped", description: "文档纸张底（暗态压暗纯白消眩光）" },
+  { key: "--paper-ink", group: "text", scope: "appearance-invariant", description: "纸张上的默认正文色" },
   { key: "--message-tips-bg", group: "background", scope: "appearance-scoped", description: "提示面板背景（= GreyWork message-tips-bg）" },
   {
     key: "--workspace-btn-bg",

@@ -9,10 +9,16 @@ export interface LlmEventEnvelope {
   payload: { delta?: string; message?: string };
 }
 
+/**
+ * 消息内容块（OpenAI vision 线格式）。纯文本消息仍用 string，只有带附件时才升级成数组，
+ * 兼容端点不必为「用不到的 parts」买单。
+ */
+export type LlmContentPart = { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } };
+
 /** 对话消息（与 Rust 侧 LlmChatMessage 对应）。 */
 export interface LlmChatMessage {
   role: "system" | "user" | "assistant";
-  content: string;
+  content: string | LlmContentPart[];
 }
 
 export interface LlmChatParams {

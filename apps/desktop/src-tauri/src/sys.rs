@@ -34,32 +34,15 @@ pub async fn sys_info(
     })
 }
 
-/// 校验待揭示的路径：非空、绝对、真实存在。
+/// 在系统文件管理器中揭示已获授权的路径。
 ///
-/// 抽成纯函数便于单测；`reveal_path` 只负责把校验过的路径交给 opener 插件。
-/// 目录与文件都合法（目录 → 打开目录本身，文件 → 在其所在目录中选中）。
-fn validate_reveal_path(raw: &str) -> Result<std::path::PathBuf, String> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return Err("路径为空".into());
-    }
-    let path = std::path::PathBuf::from(trimmed);
-    if !path.is_absolute() {
-        return Err("只接受绝对路径".into());
-    }
-    if !path.exists() {
-        return Err(format!("路径不存在: {trimmed}"));
-    }
-    Ok(path)
-}
-
-/// 在系统文件管理器中揭示某路径（交付物卡片「在文件夹中打开」）。
-///
-/// 走已在依赖里的 opener 插件（capability `opener:default` 已含
-/// `allow-reveal-item-in-dir`），不自造平台分支。
+/// 与读写命令共用宿主授权面；渲染端不能利用 opener 探测或打开任意本机路径。
 #[tauri::command]
-pub fn reveal_path(path: String) -> Result<(), String> {
-    let target = validate_reveal_path(&path)?;
+pub fn reveal_path(
+    access: tauri::State<'_, crate::workspace_fs::WorkspaceFsAccess>,
+    path: String,
+) -> Result<(), String> {
+    let target = access.validate_existing(path.trim())?;
     tauri_plugin_opener::reveal_item_in_dir(&target).map_err(|e| format!("打开文件夹失败: {e}"))
 }
 
@@ -85,15 +68,5 @@ mod tests {
         assert!(map.contains_key("logDir"));
         assert!(map.contains_key("activeAgents"));
         assert_eq!(map["version"], "0.1.0");
-    }
-
-    #[test]
-    fn reveal_path_rejects_empty_relative_and_missing() {
-        assert!(validate_reveal_path("   ").is_err());
-        assert!(validate_reveal_path("relative/dir").is_err());
-        assert!(validate_reveal_path("/definitely/not/here/gw-missing").is_err());
-        // 存在的绝对路径（目录）通过
-        let tmp = std::env::temp_dir();
-        assert_eq!(validate_reveal_path(&tmp.to_string_lossy()).unwrap(), tmp);
     }
 }

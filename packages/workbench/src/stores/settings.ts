@@ -1,9 +1,10 @@
 import { createJsonStorage } from "@greywork/core";
 import type { McpServerConfig } from "@greywork/acp";
-import { DEFAULT_MODEL_PROVIDERS, DEFAULT_WEB_SEARCH_PROVIDERS, type ModelProviderConfig, type ReasoningEffort } from "@greywork/shell";
+import { DEFAULT_MODEL_PROVIDERS, type ModelProviderConfig, type ReasoningEffort } from "@greywork/shell";
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { settingsBackend } from "../lib/settings-backend";
+import { applyAppearance as applyAppearanceToDom } from "../lib/theme";
 import { notify } from "./notice";
 import { i18n } from "../i18n";
 
@@ -32,41 +33,50 @@ export const PERM_LABELS: Record<PermTier, string> = {
   full: "settings.permissions.full.label",
 };
 
-/** 沙盒档位（方案 2 P1：宿主 OS 级隔离）。label/desc 为 i18n key。 */
-export type SandboxMode = "off" | "fs" | "full";
+/** 沙盒策略。auto 在 Linux bwrap 可用时启用 fs，否则宿主显式记录未隔离告警。 */
+export type SandboxMode = "auto" | "off" | "fs" | "full";
 export const SANDBOX_MODES: { value: SandboxMode; label: string; desc: string }[] = [
+  { value: "auto", label: "settings.sandbox.auto.label", desc: "settings.sandbox.auto.desc" },
   { value: "off", label: "settings.sandbox.off.label", desc: "settings.sandbox.off.desc" },
   { value: "fs", label: "settings.sandbox.fs.label", desc: "settings.sandbox.fs.desc" },
   { value: "full", label: "settings.sandbox.full.label", desc: "settings.sandbox.full.desc" },
 ];
 
-const SANDBOX_MODE_VALUES: Record<SandboxMode, true> = { off: true, fs: true, full: true };
+const SANDBOX_MODE_VALUES: Record<SandboxMode, true> = { auto: true, off: true, fs: true, full: true };
 
 /** 编排并发度合法区间（含端点）。 */
 export const MAX_PARALLEL_RANGE = { min: 1, max: 8 } as const;
 
-/**
- * 权限档位 → 建议沙盒档位。
- *
- * 两者是**互相独立**的边界：权限三档是宿主在 ACP 工具调用层的授权判定
- * （acp_host.rs 的 PermissionTier），沙盒档位是 bwrap 在 OS 层的隔离
- * （sandbox.rs）。授权放得越宽，越需要 OS 层兜底 —— `full` 权限 + `off` 沙盒
- * 等于没有任何边界，因此这里给出配套建议供设置页一键联动。
- */
-export function recommendedSandboxMode(tier: PermTier): SandboxMode {
-  switch (tier) {
-    // 只读档没有写入面，OS 隔离收益低，反而挡掉 agent 读配置
-    case "read-only":
-      return "off";
-    case "workspace":
-      return "fs";
-    case "full":
-      return "full";
-  }
+/** 权限档位 → 建议沙盒策略。默认一律 auto；放行网络必须由用户显式选择 full。 */
+export function recommendedSandboxMode(_tier: PermTier): SandboxMode {
+  return "auto";
 }
 
 export type RunMode = "local" | "worktree" | "cloud";
-export type ThemeMode = "dark" | "light" | "system";
+export type ThemeId = "greywork" | "night-blue" | "night-green" | "github" | "fox";
+export type ColorMode = "dark" | "light" | "system";
+export type FontSize = "small" | "medium" | "large";
+
+/** label 是专有名词（不翻译），description 是 i18n key（settings.themes.*，与 value 对齐）。 */
+export const THEMES: readonly { value: ThemeId; label: string; description: string; colors: readonly [string, string, string] }[] = [
+  { value: "greywork", label: "GreyWork", description: "settings.themes.greywork", colors: ["#000000", "#4d9fff", "#a1aacb"] },
+  { value: "night-blue", label: "Night Blue", description: "settings.themes.nightBlue", colors: ["#050a12", "#4d9fff", "#8fb3d9"] },
+  { value: "night-green", label: "Night Green", description: "settings.themes.nightGreen", colors: ["#040d07", "#2fbf71", "#7db894"] },
+  { value: "github", label: "GitHub", description: "settings.themes.github", colors: ["#0d1117", "#2f81f7", "#8b949e"] },
+  { value: "fox", label: "Fox", description: "settings.themes.fox", colors: ["#1a1210", "#fb923c", "#f1d5c5"] },
+];
+
+/** label 是 i18n key（settings.fontSizes.*，与 value 对齐）。 */
+export const FONT_SIZES: readonly { value: FontSize; label: string; scale: number }[] = [
+  { value: "small", label: "settings.fontSizes.small", scale: 0.9 },
+  { value: "medium", label: "settings.fontSizes.medium", scale: 1 },
+  { value: "large", label: "settings.fontSizes.large", scale: 1.15 },
+];
+
+const THEME_VALUES: Record<ThemeId, true> = { greywork: true, "night-blue": true, "night-green": true, github: true, fox: true };
+const COLOR_MODE_VALUES: Record<ColorMode, true> = { dark: true, light: true, system: true };
+const FONT_SIZE_VALUES: Record<FontSize, true> = { small: true, medium: true, large: true };
+
 export const RUN_MODES: { value: RunMode; label: string; hint: string }[] = [
   { value: "local", label: "Local", hint: "settings.runModes.local.hint" },
   { value: "worktree", label: "Worktree", hint: "settings.runModes.worktree.hint" },
@@ -98,7 +108,10 @@ export const DEFAULT_MCP_SERVERS: readonly McpServerEntry[] = [
 
 /** 持久化设置外形（字段均可缺省；缺失项回落默认值）。 */
 export interface SavedSettings {
-  theme?: ThemeMode;
+  /** 主题配色；旧快照可能是 dark/light/system，applySaved 会迁移到 colorMode。 */
+  theme?: ThemeId | ColorMode;
+  colorMode?: ColorMode;
+  fontSize?: FontSize;
   locale?: AppLocale;
   selectedModelProviderId?: string | null;
   modelProviders?: ModelProviderConfig[];
@@ -118,8 +131,8 @@ const settingsStorage = createJsonStorage<SavedSettings>(
 /** 全局设置：权限档位 / 计划模式 / token 快照 / 供应商芯片 / MCP 服务器声明。 */
 export const useSettingsStore = defineStore("settings", () => {
   const permissionTier = ref<PermTier>("workspace");
-  /** 沙盒档位：off 直启；fs = bwrap 文件系统隔离 + 网络关闭；full = 隔离 + 网络放行。 */
-  const sandboxMode = ref<SandboxMode>("off");
+  /** 默认自动启用可用的宿主沙箱；off 只能由用户显式选择。 */
+  const sandboxMode = ref<SandboxMode>("auto");
   /** 多智能体编排并发度（同时跑的回合上限）。默认 2，与既有并行编排一致。 */
   const maxParallel = ref(2);
   /**
@@ -133,11 +146,14 @@ export const useSettingsStore = defineStore("settings", () => {
   const effectivePermissionTier = computed<PermTier>(() => (tempReadOnly.value ? "read-only" : permissionTier.value));
   /** 运行模式（顶栏胶囊）；worktree/cloud 为宿主能力预留，当前仅 local 生效。 */
   const runMode = ref<RunMode>("local");
-  /** ACP 会话工作区目录（空 = 桌面主目录；宿主侧校验绝对路径且非根）。 */
+  /** ACP 会话工作区目录（空 = 宿主私有 ~/.greyWork；宿主只接受已授权目录）。 */
   const workspaceDir = ref("");
   const planMode = ref(false);
-  /* 默认暗色优先（GreyWork 旗舰外观）；浅色在设置里手动可选，system 跟随系统。 */
-  const theme = ref<ThemeMode>("dark");
+  /** 主题配色与明暗模式正交：同一主题都提供浅色和深色。 */
+  const theme = ref<ThemeId>("greywork");
+  const colorMode = ref<ColorMode>("dark");
+  /** 界面字号以整体 UI 缩放实现，固定像素字号与控件命中区一起保持比例。 */
+  const fontSize = ref<FontSize>("medium");
   /** 界面语言（i18n 实例初值同源于此 localStorage；切换经外壳 watch → setLocale）。 */
   const locale = ref<AppLocale>("zh-CN");
   const selectedModelProviderId = ref<string | null>(null);
@@ -148,7 +164,6 @@ export const useSettingsStore = defineStore("settings", () => {
       reasoningEffort: provider.reasoningEffort ?? "auto",
     })),
   );
-  const webSearchProviders = DEFAULT_WEB_SEARCH_PROVIDERS;
   /** 已声明的 MCP 服务器（含未启用项）。 */
   const mcpServers = ref<McpServerEntry[]>(DEFAULT_MCP_SERVERS.map((server) => ({ ...server })));
   /** 下发给 agent 的那一批：只取启用项，并剥掉 id/enabled 这类纯本地字段。 */
@@ -159,17 +174,51 @@ export const useSettingsStore = defineStore("settings", () => {
   /** 校验并应用一份持久化快照（localStorage / SQLite 共用同一校验面）。 */
   const PERM_TIER_VALUES: Record<PermTier, true> = { "read-only": true, workspace: true, full: true };
 
+  /**
+   * 同步把当前外观写到根节点并广播。设置控件调用此入口后，背景色在同一事件中生效；
+   * Shell 的 watch 仍负责跟随系统模式变化，但不再是用户点击后的唯一应用路径。
+   *
+   * 落地点只有 lib/theme 的 applyAppearance 一处（写 data-* + 发 APPEARANCE_EVENT），
+   * system 的解析也在那里，避免两处各写一份解析规则。
+   */
+  function applyAppearance(): void {
+    applyAppearanceToDom({ palette: theme.value, colorMode: colorMode.value, fontSize: fontSize.value });
+  }
+
+  function setTheme(value: ThemeId): void {
+    theme.value = value;
+    applyAppearance();
+    persist();
+  }
+
+  function setColorMode(value: ColorMode): void {
+    colorMode.value = value;
+    applyAppearance();
+    persist();
+  }
+
+  function setFontSize(value: FontSize): void {
+    fontSize.value = value;
+    applyAppearance();
+    persist();
+  }
+
   function applySaved(saved: SavedSettings | null | undefined): void {
     if (!saved) return;
     if (saved.permissionTier && PERM_TIER_VALUES[saved.permissionTier]) permissionTier.value = saved.permissionTier;
-    if (saved.sandboxMode && SANDBOX_MODE_VALUES[saved.sandboxMode]) sandboxMode.value = saved.sandboxMode;
+    // 无字段（旧快照）与非法值都迁移到 auto；绝不因损坏配置回落为直启。
+    sandboxMode.value = saved.sandboxMode && SANDBOX_MODE_VALUES[saved.sandboxMode] ? saved.sandboxMode : "auto";
     if (typeof saved.workspaceDir === "string") workspaceDir.value = saved.workspaceDir;
     // 并发度：仅整数且落在区间内才接受；越界 / 非法值静默回落默认 2（不写通知）。
     if (Number.isInteger(saved.maxParallel)) {
       const n = saved.maxParallel as number;
       maxParallel.value = n >= MAX_PARALLEL_RANGE.min && n <= MAX_PARALLEL_RANGE.max ? n : 2;
     }
-    if (saved.theme === "dark" || saved.theme === "light" || saved.theme === "system") theme.value = saved.theme;
+    if (saved.theme && THEME_VALUES[saved.theme as ThemeId]) theme.value = saved.theme as ThemeId;
+    if (saved.colorMode && COLOR_MODE_VALUES[saved.colorMode]) colorMode.value = saved.colorMode;
+    // v0.1 兼容：旧 theme 字段承载明暗模式；读入后下一次 persist 会写成新结构。
+    else if (saved.theme && COLOR_MODE_VALUES[saved.theme as ColorMode]) colorMode.value = saved.theme as ColorMode;
+    if (saved.fontSize && FONT_SIZE_VALUES[saved.fontSize]) fontSize.value = saved.fontSize;
     if (saved.locale === "zh-CN" || saved.locale === "en-US") locale.value = saved.locale;
     if (typeof saved.selectedModelProviderId === "string" || saved.selectedModelProviderId === null) {
       selectedModelProviderId.value = saved.selectedModelProviderId;
@@ -195,11 +244,14 @@ export const useSettingsStore = defineStore("settings", () => {
         .filter((server) => server && typeof server.id === "string" && typeof server.name === "string" && MCP_TRANSPORTS[server.transport])
         .map((server) => ({ ...server, enabled: server.enabled === true }));
     }
+    applyAppearance();
   }
 
   function persist(): void {
     const snapshot: SavedSettings = {
       theme: theme.value,
+      colorMode: colorMode.value,
+      fontSize: fontSize.value,
       locale: locale.value,
       selectedModelProviderId: selectedModelProviderId.value,
       modelProviders: modelProviders.value,
@@ -291,6 +343,13 @@ export const useSettingsStore = defineStore("settings", () => {
     persist();
   }
 
+  /** 批量启停只持久化一次；已建立会话仍保持建会话时的声明快照。 */
+  function setAllMcpServersEnabled(enabled: boolean): void {
+    if (mcpServers.value.every((server) => server.enabled === enabled)) return;
+    mcpServers.value = mcpServers.value.map((server) => ({ ...server, enabled }));
+    persist();
+  }
+
   return {
     permissionTier,
     sandboxMode,
@@ -301,15 +360,21 @@ export const useSettingsStore = defineStore("settings", () => {
     workspaceDir,
     planMode,
     theme,
+    colorMode,
+    fontSize,
+    applyAppearance,
+    setTheme,
+    setColorMode,
+    setFontSize,
     locale,
     selectedModelProviderId,
     modelProviders,
-    webSearchProviders,
     mcpServers,
     enabledMcpServers,
     upsertMcpServer,
     removeMcpServer,
     setMcpServerEnabled,
+    setAllMcpServersEnabled,
     selectModelProvider,
     upsertModelProvider,
     removeModelProvider,

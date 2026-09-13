@@ -17,12 +17,14 @@ export interface HistoryGroup {
   name: string;
   /** 兜底行（p-general + 未绑定会话）：没有存放文件夹，不可重命名 / 换绑 / 删除。 */
   general: boolean;
+  /** 工作区自定义图标名；undefined = UI 按 general 与否兜底到 message / folder。 */
+  icon?: string;
   sessions: HistorySession[];
 }
 
 export interface GroupingInput {
   /** 展示用工作区（含 p-general；可按 id 过滤哪些参与分组）。 */
-  workspaces: { id: string; name: string }[];
+  workspaces: { id: string; name: string; icon?: string }[];
   /** 会话 → 归属工作区 id（null = 未绑定）。 */
   sessions: { id: string; title: string; updatedAt: number; workspaceId: string | null }[];
   /** 按标题过滤关键字（小写已归一）。 */
@@ -42,7 +44,7 @@ export function groupSessions(input: GroupingInput): HistoryGroup[] {
 
   const groups: HistoryGroup[] = input.workspaces
     .filter((workspace) => workspace.id !== "p-general")
-    .map((workspace) => ({ id: workspace.id, name: workspace.name, general: false, sessions: groupOf(workspace.id) }))
+    .map((workspace) => ({ id: workspace.id, name: workspace.name, general: false, icon: workspace.icon, sessions: groupOf(workspace.id) }))
     // 只有搜索时才丢空行：平时空工作区也得在列表里，它是可切换的落点
     .filter((group) => !keyword || group.sessions.length > 0);
 

@@ -38,7 +38,7 @@ export const useFileTreeStore = defineStore("fileTree", () => {
   const mode = ref<FileTreeMode>("vfs");
   /** disk 模式的根目录绝对路径；vfs 模式为空串。 */
   const root = ref("");
-  /** 根目录是否来自用户绑定的工作区文件夹（false = 设置项/主目录兜底，界面要提示绑定）。 */
+  /** 是否来自用户绑定目录（false = 设置项/应用私有根兜底，界面应提示绑定）。 */
   const bound = ref(false);
   const diskNodes = ref<FileTreeNode[]>([]);
   /** 已展开的目录路径。展开态与子节点分开存：折叠不丢已加载的内容。 */

@@ -7,20 +7,25 @@
  * 让从不打开表格的用户也付启动代价（`PreviewSurface` 已按 kind 分包，这里别破坏它）。
  */
 import { toRef } from "vue";
-import { isDarkMode, registerPresetPlugins, useUniverHost } from "../../lib/univer-host";
+import { registerPresetPlugins, useUniverHost } from "../../lib/univer-host";
+import { isDarkMode, watchTheme } from "../../lib/theme";
 import type { PreviewTab } from "../../stores/preview";
 
 const props = defineProps<{ tab: PreviewTab }>();
 
 const { host, loading, error, bootError } = useUniverHost(toRef(props, "tab"), async (container, bytes) => {
-  const [{ Univer, UniverInstanceType, LocaleType }, { UniverSheetsCorePreset }, { buildUniverLocaleConfig }, { xlsxToUniverWorkbook }] =
-    await Promise.all([
-      import("@univerjs/core"),
-      import("@univerjs/preset-sheets-core"),
-      import("../../lib/univer-locale"),
-      import("../../lib/univer-xlsx"),
-      import("@univerjs/preset-sheets-core/lib/index.css"),
-    ]);
+  const [
+    { Univer, UniverInstanceType, LocaleType, ThemeService },
+    { UniverSheetsCorePreset },
+    { buildUniverLocaleConfig },
+    { xlsxToUniverWorkbook },
+  ] = await Promise.all([
+    import("@univerjs/core"),
+    import("@univerjs/preset-sheets-core"),
+    import("../../lib/univer-locale"),
+    import("../../lib/univer-xlsx"),
+    import("@univerjs/preset-sheets-core/lib/index.css"),
+  ]);
 
   const preset = UniverSheetsCorePreset({ container });
   const { locale, locales } = await buildUniverLocaleConfig();
@@ -33,7 +38,18 @@ const { host, loading, error, bootError } = useUniverHost(toRef(props, "tab"), a
   registerPresetPlugins(univer, preset.plugins);
   univer.createUnit(UniverInstanceType.UNIVER_SHEET, await xlsxToUniverWorkbook(bytes));
 
-  return { dispose: () => univer.dispose() };
+  // 构造参数里的 darkMode 只管首帧：Univer 没有跟随宿主的配置项，切换外观只能事后
+  // 推给它。ThemeService 是它自己的明暗真源，setDarkMode 会重刷 canvas 与 UI 皮肤，
+  // 比销毁重建便宜得多（重建会丢滚动位置和选区）。
+  const themeService = univer.__getInjector().get(ThemeService);
+  const stopWatchTheme = watchTheme((theme) => themeService.setDarkMode(theme === "dark"));
+
+  return {
+    dispose: () => {
+      stopWatchTheme();
+      univer.dispose();
+    },
+  };
 });
 </script>
 

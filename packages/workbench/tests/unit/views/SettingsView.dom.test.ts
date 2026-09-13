@@ -1,24 +1,28 @@
-// 设置页契约：分区由路由 :section 决定；外观区可切语言（写回 settings.locale）。
+// 设置面板契约：分区由 `section` prop 决定（设置本身是 SettingsDialog 弹窗，不再是路由页）；
+// 外观区可切语言（写回 settings.locale）。
 import { beforeEach, describe, expect, it } from "vitest";
 import { mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import SettingsView from "@/views/SettingsView.vue";
 import { createAppRouter } from "@/router";
-import { i18n } from "@/i18n";
+import { i18n, setLocale } from "@/i18n";
 import { useSettingsStore } from "@/stores/settings";
+import { useAgentStore } from "@/stores/agent";
 
 async function mountSettings(section: string) {
   const pinia = createPinia();
   setActivePinia(pinia);
   const router = createAppRouter();
-  await router.push(`/settings/${section}`);
+  await router.push("/guid");
   await router.isReady();
-  const wrapper = mount(SettingsView, { global: { plugins: [pinia, i18n, router] } });
+  const wrapper = mount(SettingsView, { props: { section }, global: { plugins: [pinia, i18n, router] } });
   return { pinia, router, wrapper };
 }
 
 beforeEach(() => {
   window.localStorage.clear();
+  // i18n 是全局单例，上一个用例切到 en-US 会漏给下一个；断言中文文案的用例会因此翻车。
+  setLocale("zh-CN");
 });
 
 describe("SettingsView", () => {
@@ -28,16 +32,38 @@ describe("SettingsView", () => {
     expect(wrapper.text()).toContain("默认模型供应商");
   });
 
-  it("appearance 分区渲染主题与语言；点 English 切走 settings.locale", async () => {
+  it("appearance 分区可独立切换主题、深色模式和字号并持久化", async () => {
     const { wrapper } = await mountSettings("appearance");
     const settings = useSettingsStore();
-    expect(wrapper.text()).toContain("外观");
-    expect(wrapper.text()).toContain("语言");
+    expect(wrapper.text()).toContain("主题配色");
+    expect(wrapper.text()).toContain("深色模式");
+    expect(wrapper.text()).toContain("界面字号");
 
+    await wrapper.get('[data-testid="theme-github"]').trigger("click");
+    await wrapper.get('[data-testid="color-mode-light"]').trigger("click");
+    await wrapper.get('[data-testid="font-size-large"]').trigger("click");
+
+    expect(settings.theme).toBe("github");
+    expect(settings.colorMode).toBe("light");
+    expect(settings.fontSize).toBe("large");
+    expect(document.documentElement.dataset.theme).toBe("light");
+
+    await wrapper.get('[data-testid="color-mode-dark"]').trigger("click");
+    expect(settings.colorMode).toBe("dark");
+    expect(document.documentElement.dataset.theme).toBe("dark");
+
+    const reloaded = useSettingsStore();
+    expect(reloaded.theme).toBe("github");
+    expect(reloaded.colorMode).toBe("dark");
+    expect(reloaded.fontSize).toBe("large");
+  });
+
+  it("appearance 分区可切换界面语言", async () => {
+    const { wrapper } = await mountSettings("appearance");
+    const settings = useSettingsStore();
     const english = wrapper.findAll("button").find((button) => button.text().trim() === "English");
     expect(english).toBeDefined();
     await english!.trigger("click");
-
     expect(settings.locale).toBe("en-US");
   });
 
@@ -89,5 +115,39 @@ describe("SettingsView team 分区", () => {
     // 已持久化（写 store + persist 路径）
     setActivePinia(createPinia());
     expect(useSettingsStore().maxParallel).toBe(4);
+  });
+});
+
+describe("SettingsView ACP 图标", () => {
+  it("点行首图标换图标：选择器和预设后端都可用，选中即写回 store", async () => {
+    const { wrapper } = await mountSettings("agent");
+    const agent = useAgentStore();
+    const preset = agent.agentProviders[0]!;
+    expect(preset.icon).toBeUndefined();
+
+    expect(wrapper.find('[data-testid="agent-icon-picker"]').exists()).toBe(false);
+    await wrapper.get(`[data-testid="agent-icon-${preset.id}"]`).trigger("click");
+    await wrapper.get('[data-testid="icon-option-lightning"]').trigger("click");
+
+    expect(agent.agentProviders.find((provider) => provider.id === preset.id)?.icon).toBe("lightning");
+  });
+
+  it("新增自配后端时可顺手选图标，保存后带上它", async () => {
+    const { wrapper } = await mountSettings("agent");
+    const addButton = wrapper.findAll("button").find((button) => button.text().trim() === "新增后端");
+    await addButton!.trigger("click");
+
+    const inputs = wrapper.findAll("input");
+    await inputs.find((input) => input.attributes("placeholder") === "如 My Agent")!.setValue("My Agent");
+    await inputs.find((input) => input.attributes("placeholder")?.startsWith("如 my-agent"))!.setValue("my-agent acp");
+    await wrapper.get('[data-testid="icon-option-magic"]').trigger("click");
+
+    await wrapper
+      .findAll("button")
+      .find((button) => button.text().trim() === "保存")!
+      .trigger("click");
+
+    const agent = useAgentStore();
+    expect(agent.agentProviders.find((provider) => provider.name === "My Agent")?.icon).toBe("magic");
   });
 });

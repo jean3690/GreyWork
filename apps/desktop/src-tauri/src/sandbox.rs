@@ -1,22 +1,17 @@
-//! OS 级沙盒（方案 2 P1）：Linux bubblewrap 包裹外部 agent 进程。
+//! OS 级沙盒：Linux bubblewrap 包裹外部 agent 进程。
 //!
-//! 设计：
-//! - 系统路径只读绑定（/usr /lib /lib64 /bin /etc /opt …）
-//! - 家目录只读绑定（agent 读取 ~/.config、~/.claude 等配置）
-//! - 工作区读写绑定（产物落盘处）
-//! - `/tmp` 使用 tmpfs（隔离临时文件）
-//! - `--unshare-net` 默认关闭网络（full 模式放行）
-//! - `--die-with-parent`：宿主退出即回收子进程
+//! - 系统路径只读，工作区读写，`/tmp` 独立；
+//! - `fs` 关闭网络，`full` 放行网络；
+//! - `auto` 在 bwrap 可用时等价于 `fs`，否则显式记录未沙箱告警；
+//! - 不挂载完整 HOME，只把已存在的 Agent 配置目录/文件只读映射到隔离 HOME。
 //!
-//! 包裹命令以 JSON 形式交给 `AcpAgent::from_str`（shell_words 对含空格的
-//! 绝对路径不可靠，JSON 配置天然免转义）。macOS / Windows 平台本期未实现，
-//! 返回明确错误文案由前端展示。
+//! 包裹命令以 JSON 交给 `AcpAgent::from_str`，避免命令路径再经 shell 解释。
 
 use std::path::{Path, PathBuf};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SandboxMode {
-    #[default]
+    Auto,
     Off,
     /// 文件系统隔离 + 网络关闭（--unshare-net）。
     Filesystem,
@@ -25,11 +20,21 @@ pub enum SandboxMode {
 }
 
 impl SandboxMode {
-    pub fn parse(raw: Option<&str>) -> Self {
+    pub fn parse(raw: Option<&str>) -> Result<Self, String> {
         match raw.map(str::trim) {
-            Some("fs") => SandboxMode::Filesystem,
-            Some("full") => SandboxMode::Full,
-            _ => SandboxMode::Off,
+            None | Some("") | Some("auto") => Ok(SandboxMode::Auto),
+            Some("off") => Ok(SandboxMode::Off),
+            Some("fs") => Ok(SandboxMode::Filesystem),
+            Some("full") => Ok(SandboxMode::Full),
+            Some(value) => Err(format!("sandbox: unknown mode {value:?}")),
+        }
+    }
+
+    pub fn resolve(self, available: bool) -> Self {
+        match self {
+            SandboxMode::Auto if available => SandboxMode::Filesystem,
+            SandboxMode::Auto => SandboxMode::Off,
+            mode => mode,
         }
     }
 }
@@ -52,8 +57,55 @@ fn readonly_system_dirs() -> Vec<PathBuf> {
         .collect()
 }
 
+/// 只暴露 agent 启动/认证所需配置。工作副本之外的 HOME 内容（SSH 密钥、浏览器、
+/// 云厂商凭据等）默认不可见；新增 agent 若确有配置需求，应在这里显式加入。
+const AGENT_HOME_PATHS: &[&str] = &[
+    ".claude",
+    ".codex",
+    ".config/opencode",
+    ".config/gemini",
+    ".config/qwen",
+    ".config/qwen-code",
+    ".config/kimi",
+    ".config/goose",
+    ".config/github-copilot",
+    ".gitconfig",
+];
+
+fn isolated_home_args(home: &Path) -> Vec<String> {
+    let isolated = "/tmp/greywork-home";
+    let mut args = vec![
+        "--dir".to_string(),
+        isolated.to_string(),
+        "--dir".to_string(),
+        format!("{isolated}/.config"),
+        "--setenv".to_string(),
+        "HOME".to_string(),
+        isolated.to_string(),
+    ];
+    for relative in AGENT_HOME_PATHS {
+        let source = home.join(relative);
+        if !source.exists() {
+            continue;
+        }
+        let target = format!("{isolated}/{relative}");
+        if let Some(parent) = Path::new(&target).parent() {
+            if parent != Path::new(isolated) && parent != Path::new(&format!("{isolated}/.config"))
+            {
+                args.extend(["--dir".to_string(), parent.to_string_lossy().into_owned()]);
+            }
+        }
+        args.extend([
+            "--ro-bind".to_string(),
+            source.to_string_lossy().into_owned(),
+            target,
+        ]);
+    }
+    args
+}
+
 /// 将原始 agent 命令包裹进 bwrap 沙盒，返回 JSON 配置串（AcpAgent::from_str 可解析）。
-/// workspace 必须是已存在目录；home 为只读家目录（缺失时跳过该绑定）。
+/// workspace 必须是已存在目录；home 仅用于查找白名单中的 Agent 配置路径。
 pub fn wrap_command(
     mode: SandboxMode,
     workspace: &Path,
@@ -87,8 +139,7 @@ pub fn wrap_command(
         ]);
     }
     if let Some(home) = home.filter(|candidate| Path::new(candidate).is_dir()) {
-        let home = home.to_string_lossy().into_owned();
-        args.extend(["--ro-bind".to_string(), home.clone(), home]);
+        args.extend(isolated_home_args(home));
     }
     let ws = workspace.to_string_lossy().into_owned();
     args.extend(["--bind".to_string(), ws.clone(), ws]);
@@ -114,12 +165,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn sandbox_mode_parse_fails_closed_to_off() {
-        assert_eq!(SandboxMode::parse(Some("fs")), SandboxMode::Filesystem);
-        assert_eq!(SandboxMode::parse(Some("full")), SandboxMode::Full);
-        assert_eq!(SandboxMode::parse(Some("yolo")), SandboxMode::Off);
-        assert_eq!(SandboxMode::parse(None), SandboxMode::Off);
-        assert_eq!(SandboxMode::parse(Some("FS")), SandboxMode::Off); // 大小写敏感
+    fn sandbox_mode_parse_rejects_unknown_values() {
+        assert_eq!(SandboxMode::parse(None).unwrap(), SandboxMode::Auto);
+        assert_eq!(SandboxMode::parse(Some("auto")).unwrap(), SandboxMode::Auto);
+        assert_eq!(SandboxMode::parse(Some("off")).unwrap(), SandboxMode::Off);
+        assert_eq!(
+            SandboxMode::parse(Some("fs")).unwrap(),
+            SandboxMode::Filesystem
+        );
+        assert_eq!(SandboxMode::parse(Some("full")).unwrap(), SandboxMode::Full);
+        assert!(SandboxMode::parse(Some("yolo")).is_err());
+        assert!(SandboxMode::parse(Some("FS")).is_err());
+        assert_eq!(SandboxMode::Auto.resolve(true), SandboxMode::Filesystem);
+        assert_eq!(SandboxMode::Auto.resolve(false), SandboxMode::Off);
     }
 
     #[test]
@@ -173,6 +231,36 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(!joined.contains(&"--unshare-net"));
         std::fs::remove_dir_all(&workspace).unwrap();
+    }
+
+    #[test]
+    fn wrap_mounts_only_known_agent_config_under_isolated_home() {
+        let root = std::env::temp_dir().join("greywork-sandbox-home");
+        let home = root.join("home");
+        let workspace = root.join("workspace");
+        std::fs::create_dir_all(home.join(".config/opencode")).unwrap();
+        std::fs::create_dir_all(home.join("Documents")).unwrap();
+        std::fs::create_dir_all(&workspace).unwrap();
+        let config = wrap_command(
+            SandboxMode::Filesystem,
+            &workspace,
+            Some(&home),
+            "opencode acp",
+        )
+        .unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&config).unwrap();
+        let joined = parsed["args"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| value.as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert!(joined.contains(&"HOME"));
+        assert!(joined.contains(&"/tmp/greywork-home"));
+        assert!(joined.contains(&"/tmp/greywork-home/.config/opencode"));
+        assert!(!joined.contains(&home.to_str().unwrap()));
+        assert!(!joined.iter().any(|arg| arg.ends_with("Documents")));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

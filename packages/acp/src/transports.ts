@@ -16,8 +16,8 @@ export interface AcpSessionInfo {
   hasSession: boolean;
 }
 
-/** 沙盒档位：off 直启；fs = 文件系统隔离 + 网络关闭；full = 隔离 + 网络放行。 */
-export type AcpSandboxMode = "off" | "fs" | "full";
+/** 沙盒策略：auto = 可用时启用文件系统隔离；off 必须由用户显式选择。 */
+export type AcpSandboxMode = "auto" | "off" | "fs" | "full";
 
 export interface AcpPromptResult {
   stopReason?: string;
@@ -42,6 +42,19 @@ export interface AcpSessionConfigOption {
   type: "select" | "boolean" | (string & {});
   currentValue?: string | boolean | null;
   options?: AcpConfigOptionChoice[];
+  [key: string]: unknown;
+}
+
+/**
+ * agent 上报的可用命令（AvailableCommandsUpdate 条目），输入框斜杠菜单的数据源。
+ *
+ * 协议侧 name 不带 `/`（如 `create_plan`）；`input.hint` 存在表示该命令后要跟一段
+ * 自由文本参数（提示语），无 input 即无参命令。
+ */
+export interface AcpAvailableCommand {
+  name: string;
+  description: string;
+  input?: { hint: string };
   [key: string]: unknown;
 }
 
@@ -95,7 +108,15 @@ export interface AcpSessionOpened {
   skippedMcpServers?: McpSkippedServer[];
   /** 该会话由 `session/load` 恢复而来（区别于新建）。前端据此跳过「新会话」类提示。 */
   restored?: boolean;
+  /** agent 是否接受图片 prompt（initialize 声明的 promptCapabilities.image；未声明 = false）。 */
+  imagePrompts?: boolean;
 }
+
+/**
+ * prompt 的附加内容单元。正文恒为独立的 text 块由宿主构造，这里只承载附件：
+ * 图片走 base64 image 块，文本文件内联为 text 块。
+ */
+export type AcpPromptUnit = { type: "image"; data: string; mimeType: string } | { type: "text"; text: string };
 
 /** 权限请求载荷（宿主 permission-request / permission-auto 事件的 payload）。 */
 export interface AcpPermissionOptionInfo {
@@ -135,8 +156,8 @@ export interface AcpTransport {
   loadSession(handle: number, cwd: string, sessionId: string, mcpServers?: readonly McpServerConfig[]): Promise<AcpSessionOpened>;
   /** 设置会话配置选项（select 传字符串值，boolean 传布尔值）；返回全量最新配置选项。 */
   setSessionConfig(handle: number, configId: string, value: string | boolean): Promise<AcpSessionConfigOption[]>;
-  /** 发送一轮 prompt，立即返回 turnId；回合结果经 `prompt-done` 事件送达。 */
-  prompt(handle: number, text: string): Promise<{ turnId: number }>;
+  /** 发送一轮 prompt，立即返回 turnId；回合结果经 `prompt-done` 事件送达。`units` = 随行的附件内容块。 */
+  prompt(handle: number, text: string, units?: readonly AcpPromptUnit[]): Promise<{ turnId: number }>;
   /** 停止：传 turnId 仅取消该回合（agent 进程保留）；缺省停止整个会话。 */
   stop(handle: number, turnId?: number): Promise<void>;
   respondPermission(requestId: number, optionId: string | null): Promise<void>;

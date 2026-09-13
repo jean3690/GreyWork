@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import { useRunsStore } from "../stores/runs";
+import { useAgentStore } from "../stores/agent";
 import { useChatStore } from "../stores/chat";
 import { useCoworkStore, type CoworkMemberInit } from "../stores/cowork";
 import { useSessionStore } from "../stores/session";
@@ -18,8 +19,12 @@ const { t } = useI18n();
 const runsStore = useRunsStore();
 const cowork = useCoworkStore();
 const sessionStore = useSessionStore();
+const agentStore = useAgentStore();
 const chat = useChatStore();
 const router = useRouter();
+
+/** 可选的 ACP 后端：成员位各自挑一个，不选则跟随全局。 */
+const acpProviders = computed(() => agentStore.agentProviders);
 
 // ---------- Cowork ----------
 
@@ -160,10 +165,10 @@ function roleLabel(role: string): string {
       />
       <div class="mt-3 text-[11px] font-medium text-dim">{{ t("cowork.members") }}</div>
       <div class="mt-1.5 flex flex-col gap-1.5">
-        <div v-for="(member, index) in memberDrafts" :key="index" class="flex items-center gap-1.5">
+        <div v-for="(member, index) in memberDrafts" :key="index" class="flex flex-wrap items-center gap-1.5">
           <input
             v-model="member.name"
-            class="min-w-0 flex-1 rounded-[8px] border border-line bg-panel-2 px-2.5 py-1.5 text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
+            class="min-w-[120px] flex-1 rounded-[8px] border border-line bg-panel-2 px-2.5 py-1.5 text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
             :placeholder="t('cowork.memberNamePlaceholder')"
           />
           <select
@@ -186,6 +191,17 @@ function roleLabel(role: string): string {
             <option value="researcher">{{ t("cowork.specialty.researcher") }}</option>
             <option value="builder">{{ t("cowork.specialty.builder") }}</option>
             <option value="reviewer">{{ t("cowork.specialty.reviewer") }}</option>
+          </select>
+          <!-- 后端按成员选：整个队伍跑同一个 agent 只是退化情况 -->
+          <select
+            v-model="member.providerId"
+            class="max-w-[150px] rounded-[8px] border border-line bg-panel-2 px-2 py-1.5 text-[12px] text-foreground outline-none focus:border-accent"
+            data-testid="member-provider"
+            :aria-label="t('cowork.provider.label')"
+            :title="t('cowork.provider.label')"
+          >
+            <option :value="undefined">{{ t("cowork.provider.followGlobal") }}</option>
+            <option v-for="provider in acpProviders" :key="provider.id" :value="provider.id">{{ provider.name }}</option>
           </select>
           <button
             type="button"

@@ -6,6 +6,7 @@ import { groupSessions, type HistoryGroup } from "../lib/grouped";
 import { pickWorkspaceFolder } from "../lib/workspace-picker";
 import { bindWorkspaceFolder } from "../lib/workspace-bind";
 import Icon from "./Icon.vue";
+import IconPicker from "./IconPicker.vue";
 import GroupedHistorySessions from "./GroupedHistorySessions.vue";
 
 /**
@@ -107,6 +108,22 @@ function folderOf(group: HistoryGroup): string | undefined {
   return workspaceStore.workspaceById(group.id)?.folder;
 }
 
+/** 行首图标：用户选过就用选的，否则按「工作区 / 普通对话」兜底。 */
+function iconOf(group: HistoryGroup): string {
+  return group.icon ?? (group.general ? "message" : "folder");
+}
+
+/** 图标选择器就地挂在行下（与 ⋯ 面板同生命周期）；点选即存，不需要额外确认。 */
+const iconPickerWorkspaceId = ref<string | null>(null);
+
+function toggleIconPicker(id: string): void {
+  iconPickerWorkspaceId.value = iconPickerWorkspaceId.value === id ? null : id;
+}
+
+function pickWorkspaceIcon(id: string, icon: string): void {
+  workspaceStore.setWorkspaceIcon(id, icon || null);
+}
+
 const UNBOUND_HINT = "未绑定文件夹：会话存 ~/.greyWork/sessions";
 
 function rowHint(group: HistoryGroup): string {
@@ -195,10 +212,14 @@ const openMenuId = ref<string | null>(null);
 
 function toggleMenu(id: string): void {
   openMenuId.value = openMenuId.value === id ? null : id;
-  if (openMenuId.value === null) {
-    renamingWorkspaceId.value = null;
-    pendingDeleteWorkspaceId.value = null;
-  }
+  if (openMenuId.value === null) resetRowDrafts();
+}
+
+/** 面板关闭时要一并撤回的半途状态：重命名输入框与图标选择器。 */
+function resetRowDrafts(): void {
+  renamingWorkspaceId.value = null;
+  pendingDeleteWorkspaceId.value = null;
+  iconPickerWorkspaceId.value = null;
 }
 
 /** 删除工作区：其会话先迁回「普通对话」，再移除工作区本身。 */
@@ -286,12 +307,7 @@ onMounted(() => {
             :title="rowHint(group)"
             @click="selectRow(group)"
           >
-            <Icon
-              :name="group.general ? 'message' : 'folder'"
-              :size="12"
-              class="shrink-0"
-              :class="isActiveRow(group) ? 'text-cyan' : 'text-dim2'"
-            />
+            <Icon :name="iconOf(group)" :size="12" class="shrink-0" :class="isActiveRow(group) ? 'text-cyan' : 'text-dim2'" />
             <span class="min-w-0 flex-1 truncate text-[12.5px] font-medium">{{ group.name }}</span>
             <Icon v-if="workspaceStore.defaultWorkspaceId === group.id" name="pin" :size="10" class="shrink-0 text-cyan" />
             <span class="shrink-0 text-[10px] text-dim2 tabular-nums">{{ group.sessions.length }}</span>
@@ -357,6 +373,26 @@ onMounted(() => {
               <Icon name="edit" :size="11" class="text-dim2" />
               重命名
             </button>
+            <button
+              type="button"
+              :data-testid="`workspace-icon-${group.id}`"
+              class="flex h-6 w-full cursor-pointer items-center gap-1.5 rounded-[5px] px-1.5 text-left text-[11.5px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+              :aria-expanded="iconPickerWorkspaceId === group.id"
+              title="改这个工作区在侧栏显示的图标"
+              @click="toggleIconPicker(String(group.id))"
+            >
+              <Icon :name="iconOf(group)" :size="11" class="text-dim2" />
+              图标
+            </button>
+            <div v-if="iconPickerWorkspaceId === group.id" class="border-t border-line-2 pt-1">
+              <IconPicker
+                :model-value="group.icon ?? ''"
+                :columns="6"
+                clearable
+                clear-label="默认"
+                @update:model-value="pickWorkspaceIcon(String(group.id), $event)"
+              />
+            </div>
             <button
               type="button"
               :data-testid="`workspace-default-${group.id}`"

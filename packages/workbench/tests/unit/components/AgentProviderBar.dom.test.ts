@@ -2,7 +2,7 @@
 // 取决于 agent 在 session/new 暴露的 select 型配置）；模型未暴露思考强度时展示提示桩；
 // 连接失败就地展示错误文案并可点击重试；已连接重复点击不再重复建会话。
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { flushPromises, mount } from "@vue/test-utils";
+import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { defineComponent } from "vue";
 import { createPinia, setActivePinia } from "pinia";
 import AcpSessionConfig from "@/components/AcpSessionConfig.vue";
@@ -100,11 +100,16 @@ function mountBar() {
   return { pinia, wrapper };
 }
 
-function openCodeButton(wrapper: ReturnType<typeof mount>) {
-  const buttons = wrapper.findAll("button");
-  const target = buttons.find((button) => button.text().includes("OpenCode"));
-  expect(target, "OpenCode 胶囊应存在").toBeDefined();
-  return target!;
+function providerButton(wrapper: VueWrapper, id: string) {
+  const button = wrapper.find(`[data-testid="acp-provider-button"][data-provider-id="${id}"]`);
+  if (button.exists()) return button;
+  const overflow = wrapper.find(`[data-testid="acp-overflow-item"][data-provider-id="${id}"]`);
+  expect(overflow.exists(), `${id} 应出现在主轨道或溢出菜单`).toBe(true);
+  return overflow;
+}
+
+function openCodeButton(wrapper: VueWrapper) {
+  return providerButton(wrapper, "opencode");
 }
 
 beforeEach(() => {
@@ -115,6 +120,32 @@ beforeEach(() => {
 });
 
 describe("AgentProviderBar · ACP 会话配置选择器", () => {
+  it("首屏只显示图标；点击后仅当前 ACP 展开名称", async () => {
+    const { wrapper } = mountBar();
+    expect(wrapper.text()).toContain("ACP 选择");
+    expect(openCodeButton(wrapper).text()).not.toContain("OpenCode");
+
+    h.startAgent.mockResolvedValue(7);
+    h.openSession.mockResolvedValue(options(true));
+    await openCodeButton(wrapper).trigger("click");
+    await vi.waitFor(() => expect(openCodeButton(wrapper).text()).toContain("OpenCode"));
+
+    const codex = providerButton(wrapper, "codex");
+    expect(codex.text()).not.toContain("Codex");
+    await codex.trigger("click");
+    await vi.waitFor(() => expect(providerButton(wrapper, "codex").text()).toContain("Codex"));
+    expect(openCodeButton(wrapper).text()).not.toContain("OpenCode");
+  });
+
+  it("收起图标提供名称提示，并只请求 Lobe 实际提供的图标变体", () => {
+    const { wrapper } = mountBar();
+    const openCode = openCodeButton(wrapper);
+    expect(openCode.attributes("title")).toBe("OpenCode");
+    expect(wrapper.findAll('[data-testid="acp-provider-tooltip"]').some((tooltip) => tooltip.text() === "OpenCode")).toBe(true);
+    const brand = openCode.get('[data-testid="agent-brand-icon"]');
+    expect(brand.attributes("src")).toContain("@lobehub/icons-static-svg@latest/icons/opencode.svg");
+    expect(brand.attributes("src")).not.toContain("opencode-color.svg");
+  });
   it("模型暴露 effort：底栏（发送按钮旁）渲染模型 / 思考强度 / 会话模式三组选择器", async () => {
     h.startAgent.mockResolvedValue(7);
     h.openSession.mockResolvedValue(options(true));
@@ -178,21 +209,36 @@ describe("AgentProviderBar · ACP 会话配置选择器", () => {
     expect(wrapper.text()).toContain("思考强度 · Low");
   });
 
-  it("选择条列出全部 ACP 后端（不止已启用），未启用的可一步选到并启用", async () => {
+  it("多余 ACP 收入省略菜单，从菜单选择后回到主轨道并展开", async () => {
     h.startAgent.mockResolvedValue(7);
     h.openSession.mockResolvedValue(options(true));
     const { wrapper } = mountBar();
     const agentStore = useAgentStore();
 
-    // 预设里除 opencode 外默认禁用，但都应出现在条上（用户提供「其他 ACP 选择」）。
-    const codex = wrapper.findAll("button").find((button) => button.text().includes("Codex"));
-    expect(codex, "Codex 胶囊应出现在选择条").toBeDefined();
+    const overflowToggle = wrapper.get('[data-testid="acp-overflow-toggle"]');
+    expect(overflowToggle.attributes("aria-label")).toBe("更多 ACP");
+    await overflowToggle.trigger("click");
+    const overflowItems = wrapper.findAll('[data-testid="acp-overflow-item"]');
+    expect(overflowItems.length).toBeGreaterThan(0);
 
-    // 点击未启用的 Codex：先启用再建会话（选择即启用）。
-    await codex!.trigger("click");
+    const target = overflowItems.at(-1)!;
+    const targetId = target.attributes("data-provider-id")!;
+    const targetName = agentStore.agentProviders.find((provider) => provider.id === targetId)!.name;
+    await target.trigger("click");
+    await vi.waitFor(() => expect(agentStore.selectedProviderId).toBe(targetId));
+    expect(wrapper.find('[data-testid="acp-overflow-menu"]').exists()).toBe(false);
+    expect(providerButton(wrapper, targetId).text()).toContain(targetName);
+  });
+
+  it("未启用 ACP 可一步选择并启用", async () => {
+    h.startAgent.mockResolvedValue(7);
+    h.openSession.mockResolvedValue(options(true));
+    const { wrapper } = mountBar();
+    const agentStore = useAgentStore();
+
+    await providerButton(wrapper, "codex").trigger("click");
     await vi.waitFor(() => expect(agentStore.acpConnected).toBe(true));
-    expect(agentStore.agentProviders.find((p) => p.id === "codex")?.enabled).toBe(true);
-    // 连接命令应为 codex 的启动命令（证明选中的是 Codex 而非 OpenCode）。
+    expect(agentStore.agentProviders.find((provider) => provider.id === "codex")?.enabled).toBe(true);
     expect(h.startAgent).toHaveBeenCalledWith("npx -y @agentclientprotocol/codex-acp", expect.any(String));
   });
 });
@@ -212,8 +258,7 @@ describe("AgentProviderBar · 安装状态探测与胶囊标注", () => {
     await vi.waitFor(() => expect(h.invoke).toHaveBeenCalledWith("acp_detect_programs", expect.any(Object)));
   });
 
-  it("探测命中：已装后端显「已安装」，npx 型未装显「首次启动下载」，原生未装显「未安装」", async () => {
-    // opencode 已装；codex（npx 适配器）未装 → 首次启动下载；gemini（原生二进制）未装 → 未安装。
+  it("探测结果进入图标提示；展开项只显示名称与状态点", async () => {
     h.invoke.mockImplementation((cmd: string) =>
       cmd === "acp_detect_programs"
         ? Promise.resolve([
@@ -226,18 +271,11 @@ describe("AgentProviderBar · 安装状态探测与胶囊标注", () => {
     h.startAgent.mockResolvedValue(7);
     h.openSession.mockResolvedValue(options(true));
     const { wrapper } = mountBar();
-    await vi.waitFor(() => expect(wrapper.text()).toContain("已安装"));
 
-    const opencode = wrapper.findAll("button").find((button) => button.text().includes("OpenCode"));
-    expect(opencode!.text()).toContain("已安装");
-
-    // codex 走官方 npx 适配器：未装时明示「首次启动下载」而非「未安装」。
-    const codex = wrapper.findAll("button").find((button) => button.text().includes("Codex"));
-    expect(codex!.text()).toContain("首次启动下载");
-    expect(codex!.text()).not.toContain("未安装");
-
-    // gemini 原生二进制（gemini --acp）：未装时显「未安装」。
-    const gemini = wrapper.findAll("button").find((button) => button.text().includes("Gemini"));
-    expect(gemini!.text()).toContain("未安装");
+    await vi.waitFor(() => expect(openCodeButton(wrapper).attributes("title")).toContain("已安装"));
+    expect(openCodeButton(wrapper).text()).not.toContain("已安装");
+    expect(providerButton(wrapper, "codex").attributes("title")).toContain("首次启动下载");
+    await wrapper.get('[data-testid="acp-overflow-toggle"]').trigger("click");
+    expect(providerButton(wrapper, "gemini").attributes("title")).toContain("未安装");
   });
 });

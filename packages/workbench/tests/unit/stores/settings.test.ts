@@ -1,6 +1,7 @@
 // 设置持久化验收：persist/loadPersisted 往返一致、推理等级非法值回退、损坏数据回退默认。
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
+import { agentProviderLobeIcon } from "@greywork/shell";
 
 const storage = new Map<string, string>();
 const localStorageStub = {
@@ -19,18 +20,41 @@ beforeEach(() => {
   setActivePinia(createPinia());
 });
 
+describe("ACP 品牌图标", () => {
+  it("按 Lobe toc 选择可用变体，自定义图标优先", () => {
+    expect(agentProviderLobeIcon({ id: "claude-code" })).toEqual({ slug: "claudecode", type: "color" });
+    expect(agentProviderLobeIcon({ id: "opencode" })).toEqual({ slug: "opencode", type: "mono" });
+    expect(agentProviderLobeIcon({ id: "opencode", icon: "magic" })).toBeNull();
+    expect(agentProviderLobeIcon({ id: "custom-agent" })).toBeNull();
+  });
+});
+
 describe("settings 持久化", () => {
-  it("persist 后 loadPersisted 往返一致（含 reasoningEffort）", () => {
+  it("persist 后主题、模式与字号往返一致", () => {
     const settings = useSettingsStore();
     const provider = settings.modelProviders[0];
     provider.reasoningEffort = "high";
+    settings.theme = "github";
+    settings.colorMode = "light";
+    settings.fontSize = "large";
     settings.locale = "en-US";
     settings.persist();
 
     setActivePinia(createPinia());
     const reloaded = useSettingsStore();
     expect(reloaded.modelProviders[0].reasoningEffort).toBe("high");
+    expect(reloaded.theme).toBe("github");
+    expect(reloaded.colorMode).toBe("light");
+    expect(reloaded.fontSize).toBe("large");
     expect(reloaded.locale).toBe("en-US");
+  });
+
+  it("旧 theme 明暗字段迁移到 colorMode，主题回落 GreyWork", () => {
+    storage.set("greywork.settings", JSON.stringify({ theme: "system" }));
+    setActivePinia(createPinia());
+    const settings = useSettingsStore();
+    expect(settings.theme).toBe("greywork");
+    expect(settings.colorMode).toBe("system");
   });
 
   it("loadPersisted 对非法 reasoningEffort 回退 auto", () => {
@@ -77,8 +101,9 @@ describe("权限档位与沙盒联动", () => {
     expect(reloaded.effectivePermissionTier).toBe("full");
   });
 
-  it("沙盒档位往返持久化，非法值回退默认 off", () => {
+  it("沙盒档位往返持久化，旧快照缺失与非法值都迁移到 auto", () => {
     const settings = useSettingsStore();
+    expect(settings.sandboxMode).toBe("auto");
     settings.sandboxMode = "fs";
     settings.persist();
     setActivePinia(createPinia());
@@ -86,13 +111,17 @@ describe("权限档位与沙盒联动", () => {
 
     storage.set("greywork.settings", JSON.stringify({ sandboxMode: "yolo" }));
     setActivePinia(createPinia());
-    expect(useSettingsStore().sandboxMode).toBe("off");
+    expect(useSettingsStore().sandboxMode).toBe("auto");
+
+    storage.set("greywork.settings", JSON.stringify({ permissionTier: "workspace" }));
+    setActivePinia(createPinia());
+    expect(useSettingsStore().sandboxMode).toBe("auto");
   });
 
-  it("recommendedSandboxMode 按授权宽度给隔离强度", () => {
-    expect(recommendedSandboxMode("read-only")).toBe("off");
-    expect(recommendedSandboxMode("workspace")).toBe("fs");
-    expect(recommendedSandboxMode("full")).toBe("full");
+  it("recommendedSandboxMode 默认选择自动隔离，网络放行不被权限档位隐式开启", () => {
+    expect(recommendedSandboxMode("read-only")).toBe("auto");
+    expect(recommendedSandboxMode("workspace")).toBe("auto");
+    expect(recommendedSandboxMode("full")).toBe("auto");
   });
 });
 
@@ -137,6 +166,25 @@ describe("MCP 服务器声明", () => {
     settings.upsertMcpServer({ id: "deepwiki", name: "deepwiki-2", transport: "sse", url: "https://x/sse", enabled: true });
     expect(settings.mcpServers).toHaveLength(1);
     expect(settings.mcpServers[0]).toMatchObject({ name: "deepwiki-2", transport: "sse" });
+  });
+
+  it("批量启停一次更新全部条目并持久化", () => {
+    const settings = useSettingsStore();
+    settings.upsertMcpServer({ id: "notes", name: "notes", transport: "stdio", command: "npx", enabled: false });
+
+    settings.setAllMcpServersEnabled(true);
+    expect(settings.mcpServers.every((server) => server.enabled)).toBe(true);
+
+    setActivePinia(createPinia());
+    expect(
+      useSettingsStore()
+        .enabledMcpServers.map((server) => server.name)
+        .sort(),
+    ).toEqual(["deepwiki", "notes"]);
+
+    useSettingsStore().setAllMcpServersEnabled(false);
+    setActivePinia(createPinia());
+    expect(useSettingsStore().enabledMcpServers).toEqual([]);
   });
 
   it("快照里结构不合法的条目被丢弃，合法的保留", () => {

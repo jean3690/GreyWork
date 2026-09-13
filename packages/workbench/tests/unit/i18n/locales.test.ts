@@ -40,4 +40,22 @@ describe("i18n locales", () => {
     expect(i18n.global.t("errors.startFailed", { detail: "boom" })).toBe("启动失败：boom");
     expect(i18n.global.t("market.fileCount", { count: 3 })).toBe("3 个文件");
   });
+
+  it("外观术语统一：功能名「深色模式」，取值「深色 / 浅色 / 跟随系统」", () => {
+    setLocale("zh-CN");
+    expect(i18n.global.t("settings.colorMode.title")).toBe("深色模式");
+    expect([
+      i18n.global.t("settings.colorMode.dark"),
+      i18n.global.t("settings.colorMode.light"),
+      i18n.global.t("settings.colorMode.system"),
+    ]).toEqual(["深色", "浅色", "跟随系统"]);
+
+    // 旧称（暗黑模式 / 深浅模式 / 明暗模式）不得回到界面文案里
+    for (const key of ["settings.colorMode.title", "settings.appearance.paletteHint", "settings.sections.appearance.desc"]) {
+      expect(i18n.global.t(key)).not.toMatch(/暗黑|深浅|明暗/);
+    }
+
+    // 侧栏快捷行的提示带当前模式与下一个模式
+    expect(i18n.global.t("settings.colorMode.cycle", { current: "深色", next: "浅色" })).toBe("外观：深色，点击切换为浅色");
+  });
 });

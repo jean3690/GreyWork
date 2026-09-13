@@ -91,9 +91,3 @@ export function registerPresetPlugins(univer: object, plugins: readonly unknown[
     else register(entry);
   }
 }
-
-/** 跟随外壳主题：Shell 把 `data-theme` 写在 documentElement 上。 */
-export function isDarkMode(): boolean {
-  if (typeof document === "undefined") return true;
-  return document.documentElement.dataset.theme !== "light";
-}

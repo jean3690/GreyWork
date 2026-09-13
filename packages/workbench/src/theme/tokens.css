@@ -1,10 +1,10 @@
 /* GreyWork 设计令牌 · 单一来源（v8：GreyWork 暗色优先 · 近黑分层 · 蓝主键 · 紫罗兰品牌，2026-09-01）
  * 语义名沿用 ui-design.md；结构性布局变量使用 --gw- 前缀。
  * 唯一定义处：任何组件不得另行硬编码这些值；shadcn 主题由 theme/shadcn.css 派生。
- * 视觉语言：默认深色 —— 近黑分层画布（bg-base #0e0e0e → bg-2 #262626 → 边框 #333333）、
+ * 视觉语言：默认深色 —— 纯黑起底的分层画布（bg-base #000000 → bg-2 #141414 → 边框 #1f1f1f）、
  * 蓝主键 #4d9fff、紫罗兰品牌 #a1aacb（--brand-1..10 色阶）；浅色保留为可选外观。
- * 聊天专用：用户气泡蓝调 #1e2a3a、提示面板 #1a2333、思考渐变 135deg #464767→#323232、
- * 工作区按钮底 #1f1f1f。彩色只出现在助手头像（--grey-*）、状态信号与语义色。 */
+ * 聊天专用：气泡 #141414、提示面板 #111111、思考渐变 135deg #1a1a1a→#0d0d0d、
+ * 工作区按钮底 #121212 —— 一律中性黑灰。彩色只出现在助手头像（--grey-*）、状态信号与语义色。 */
 @import "@fontsource-variable/archivo/wdth.css";
 @import "@fontsource-variable/jetbrains-mono";
 
@@ -35,6 +35,12 @@
   --bubble: #e9efff;
   /* 终端 / SQL 控制台固定深底（artifact 不随主题翻转） */
   --console: #0a111b;
+
+  /* 文档纸张（docx / 第三方 HTML 预览）：刻意不跟随暗色画布 —— 正文颜色来自
+   * 文件本身，翻成深底会让黑字糊掉。暗态只把纯白压暗一档消眩光。 */
+  --paper: #ffffff;
+  /* 纸张上的默认正文色（run 未显式指定 color 时用）。文档色，两态同值。 */
+  --paper-ink: #1f2328;
 
   /* GreyWork 多色系统：不同 Agent / 助手卡使用不同主题色（仅 Agent 语义，不作主强调） */
   --grey-blue: #3b82f6;
@@ -93,21 +99,26 @@
 }
 
 /* 深色 = GreyWork Dark（默认外观，外壳首帧即写 data-theme="dark"）：
- * 近黑分层 bg-base #0e0e0e → bg-1 #1a1a1a → bg-2 #262626 → 边框 #333333；
+ * 纯黑起底的分层 bg-base #000000 → bg-1 #0a0a0a → bg-2 #141414 → 边框 #1f1f1f；
  * text-primary #ffffff / text-secondary #ced3da；蓝主键 #4d9fff；紫罗兰品牌 #a1aacb；
- * 聊天气泡 #1e2a3a、提示 #1a2333、思考渐变 135deg #464767→#323232、工作区按钮 #1f1f1f。 */
+ * 聊天气泡 #141414、提示 #111111、思考渐变 135deg #1a1a1a→#0d0d0d、工作区按钮 #121212。
+ *
+ * 画布取纯黑（OLED 友好）：每档之间留 ≥5 级灰阶，所以纯黑下卡片、输入框、悬浮层
+ * 依旧分得开，不靠边框硬撑 —— 这也是没有把面板一并拉黑的原因。
+ * 聊天区不着色：气泡 / 提示 / 思考面板全是中性黑灰，彩色只留给状态信号和助手头像。 */
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --ink: #0e0e0e;
-  --panel: #1a1a1a;
-  --panel-2: #262626;
-  --side: #151515;
-  --line: #333333;
-  --line-2: #404040;
+  --ink: #000000;
+  --paper: #e9e9e9;
+  --panel: #0a0a0a;
+  --panel-2: #141414;
+  --side: #050505;
+  --line: #1f1f1f;
+  --line-2: #2e2e2e;
   --text: #ffffff;
   --dim: #ced3da;
   --dim2: #8a9099;
-  --bubble: #1e2a3a;
+  --bubble: #141414;
   --amber: #ff9a2e;
   --cyan: #4d9fff;
   --violet: #8b5cf6;
@@ -129,47 +140,320 @@
   --brand-8: #d1d5e5;
   --brand-9: #e5e7f0;
   --brand-10: #eff0f6;
-  --message-tips-bg: #1a2333;
-  --thought-gradient: linear-gradient(135deg, #464767, #323232);
-  --workspace-btn-bg: #1f1f1f;
+  --message-tips-bg: #111111;
+  --thought-gradient: linear-gradient(135deg, #1a1a1a, #0d0d0d);
+  --workspace-btn-bg: #121212;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root[data-theme="system"] {
-    color-scheme: dark;
-    --ink: #0e0e0e;
-    --panel: #1a1a1a;
-    --panel-2: #262626;
-    --side: #151515;
-    --line: #333333;
-    --line-2: #404040;
-    --text: #ffffff;
-    --dim: #ced3da;
-    --dim2: #8a9099;
-    --bubble: #1e2a3a;
-    --amber: #ff9a2e;
-    --cyan: #4d9fff;
-    --violet: #8b5cf6;
-    --mint: #23c343;
-    --orange: #f76560;
-    --accent: #4d9fff;
-    --accent-ink: #ffffff;
-    --accent-hi: #6ab0ff;
-    --brand: #a1aacb;
-    --brand-light: #3d4150;
-    --brand-hover: #6a749b;
-    --brand-1: #2a2a2a;
-    --brand-2: #3d4150;
-    --brand-3: #525a77;
-    --brand-4: #6a749b;
-    --brand-5: #838fba;
-    --brand-6: #a1aacb;
-    --brand-7: #b5bcd6;
-    --brand-8: #d1d5e5;
-    --brand-9: #e5e7f0;
-    --brand-10: #eff0f6;
-    --message-tips-bg: #1a2333;
-    --thought-gradient: linear-gradient(135deg, #464767, #323232);
-    --workspace-btn-bg: #1f1f1f;
-  }
+/* GitHub：低装饰、高对比的代码工作台色板。配色覆盖全部 appearance-scoped 令牌，
+ * 保留 GreyWork 的结构、字族和 Agent 身份色。 */
+:root[data-palette="github"][data-theme="light"] {
+  color-scheme: light;
+  --ink: #ffffff;
+  --panel: #f6f8fa;
+  --panel-2: #eaeef2;
+  --side: #f6f8fa;
+  --line: #d0d7de;
+  --line-2: #afb8c1;
+  --text: #1f2328;
+  --dim: #59636e;
+  --dim2: #6e7781;
+  --bubble: #ddf4ff;
+  --amber: #9a6700;
+  --cyan: #0969da;
+  --violet: #8250df;
+  --mint: #1a7f37;
+  --orange: #cf222e;
+  --accent: #1f883d;
+  --accent-ink: #ffffff;
+  --accent-hi: #1a7f37;
+  --brand: #0969da;
+  --brand-light: #ddf4ff;
+  --brand-hover: #54aeff;
+  --brand-1: #ddf4ff;
+  --brand-2: #b6e3ff;
+  --brand-3: #80ccff;
+  --brand-4: #54aeff;
+  --brand-5: #218bff;
+  --brand-6: #0969da;
+  --brand-7: #0550ae;
+  --brand-8: #033d8b;
+  --brand-9: #0a3069;
+  --brand-10: #002155;
+  --message-tips-bg: #ddf4ff;
+  --thought-gradient: linear-gradient(135deg, #ddf4ff, #f6f8fa);
+  --workspace-btn-bg: #eaeef2;
+}
+
+:root[data-palette="github"][data-theme="dark"] {
+  color-scheme: dark;
+  --ink: #0d1117;
+  --panel: #161b22;
+  --panel-2: #21262d;
+  --side: #010409;
+  --line: #30363d;
+  --line-2: #484f58;
+  --text: #f0f6fc;
+  --dim: #b1bac4;
+  --dim2: #8b949e;
+  --bubble: #0c2d6b;
+  --amber: #d29922;
+  --cyan: #58a6ff;
+  --violet: #bc8cff;
+  --mint: #3fb950;
+  --orange: #f85149;
+  --accent: #238636;
+  --accent-ink: #ffffff;
+  --accent-hi: #2ea043;
+  --brand: #58a6ff;
+  --brand-light: #0c2d6b;
+  --brand-hover: #1f6feb;
+  --brand-1: #0c2d6b;
+  --brand-2: #033d8b;
+  --brand-3: #0550ae;
+  --brand-4: #0969da;
+  --brand-5: #218bff;
+  --brand-6: #58a6ff;
+  --brand-7: #80ccff;
+  --brand-8: #b6e3ff;
+  --brand-9: #ddf4ff;
+  --brand-10: #ffffff;
+  --message-tips-bg: #0c2d6b;
+  --thought-gradient: linear-gradient(135deg, #1f3a5f, #21262d);
+  --workspace-btn-bg: #21262d;
+}
+
+/* Fox：焦糖橙为动作色，暖灰代替纯灰；亮色保持纸面感，暗色保持低眩光。 */
+:root[data-palette="fox"][data-theme="light"] {
+  color-scheme: light;
+  --ink: #fffaf5;
+  --panel: #fff4e8;
+  --panel-2: #f8e8d8;
+  --side: #fdf0e3;
+  --line: #e7cfba;
+  --line-2: #cfae91;
+  --text: #321e16;
+  --dim: #6f4f40;
+  --dim2: #856657;
+  --bubble: #ffdfc2;
+  --amber: #b45309;
+  --cyan: #0f766e;
+  --violet: #7c3aed;
+  --mint: #15803d;
+  --orange: #c2410c;
+  --accent: #ea580c;
+  --accent-ink: #ffffff;
+  --accent-hi: #f97316;
+  --brand: #c2410c;
+  --brand-light: #ffedd5;
+  --brand-hover: #fb923c;
+  --brand-1: #fff7ed;
+  --brand-2: #ffedd5;
+  --brand-3: #fed7aa;
+  --brand-4: #fdba74;
+  --brand-5: #fb923c;
+  --brand-6: #f97316;
+  --brand-7: #ea580c;
+  --brand-8: #c2410c;
+  --brand-9: #9a3412;
+  --brand-10: #7c2d12;
+  --message-tips-bg: #ffedd5;
+  --thought-gradient: linear-gradient(135deg, #ffedd5, #f8e8d8);
+  --workspace-btn-bg: #f5e2d0;
+}
+
+:root[data-palette="fox"][data-theme="dark"] {
+  color-scheme: dark;
+  --ink: #1a1210;
+  --panel: #251916;
+  --panel-2: #35241e;
+  --side: #201512;
+  --line: #4a3128;
+  --line-2: #684536;
+  --text: #fff7ed;
+  --dim: #e7c7b6;
+  --dim2: #b9927f;
+  --bubble: #532b1b;
+  --amber: #fbbf24;
+  --cyan: #5eead4;
+  --violet: #c4b5fd;
+  --mint: #4ade80;
+  --orange: #fb7185;
+  --accent: #fb923c;
+  --accent-ink: #25120a;
+  --accent-hi: #fdba74;
+  --brand: #fb923c;
+  --brand-light: #4a2718;
+  --brand-hover: #f97316;
+  --brand-1: #3a2118;
+  --brand-2: #4a2718;
+  --brand-3: #67351d;
+  --brand-4: #9a4d20;
+  --brand-5: #c65f20;
+  --brand-6: #fb923c;
+  --brand-7: #fdba74;
+  --brand-8: #fed7aa;
+  --brand-9: #ffedd5;
+  --brand-10: #fff7ed;
+  --message-tips-bg: #3a2118;
+  --thought-gradient: linear-gradient(135deg, #5a3020, #2f211c);
+  --workspace-btn-bg: #35241e;
+}
+
+/* Night Blue：黑偏蓝 —— 结构面取带蓝调的近黑（#010306 → #050a12 → #0b1220），
+ * 色相只在边框与悬浮层上看得出来（--line #16202f / --line-2 #223044）；
+ * 主键仍是 GreyWork 蓝，避免深底上的双重色偏。浅色是同一色相的冷灰纸面。 */
+:root[data-palette="night-blue"][data-theme="light"] {
+  color-scheme: light;
+  --ink: #ffffff;
+  --panel: #f5f8fc;
+  --panel-2: #e9eff7;
+  --side: #f2f6fb;
+  --line: #dbe4ef;
+  --line-2: #c2cfe0;
+  --text: #05080f;
+  --dim: #3f4a5c;
+  --dim2: #5b6779;
+  --bubble: #e3edfd;
+  --amber: #ff7d00;
+  --cyan: #165dff;
+  --violet: #8b5cf6;
+  --mint: #00b42a;
+  --orange: #f53f3f;
+  --accent: #165dff;
+  --accent-ink: #ffffff;
+  --accent-hi: #3d7bff;
+  --brand: #5b7fa6;
+  --brand-light: #eef4fb;
+  --brand-hover: #a8c4e0;
+  --brand-1: #eff4fb;
+  --brand-2: #e2ebf8;
+  --brand-3: #c9dbef;
+  --brand-4: #a8c4e0;
+  --brand-5: #7fa3c8;
+  --brand-6: #5b7fa6;
+  --brand-7: #45637f;
+  --brand-8: #32495e;
+  --brand-9: #1d2c3b;
+  --brand-10: #0c141d;
+  --message-tips-bg: #e8f1fe;
+  --thought-gradient: linear-gradient(135deg, #e8f1fe, #f1f5fa);
+  --workspace-btn-bg: #e9eff7;
+}
+
+:root[data-palette="night-blue"][data-theme="dark"] {
+  color-scheme: dark;
+  --ink: #010306;
+  --panel: #050a12;
+  --panel-2: #0b1220;
+  --side: #03070d;
+  --line: #16202f;
+  --line-2: #223044;
+  --text: #ffffff;
+  --dim: #c8d2e0;
+  --dim2: #8794a8;
+  --bubble: #0b1220;
+  --amber: #ff9a2e;
+  --cyan: #4d9fff;
+  --violet: #8b5cf6;
+  --mint: #23c343;
+  --orange: #f76560;
+  --accent: #4d9fff;
+  --accent-ink: #ffffff;
+  --accent-hi: #6ab0ff;
+  --brand: #8fb3d9;
+  --brand-light: #101c2c;
+  --brand-hover: #5f89b8;
+  --brand-1: #0b1220;
+  --brand-2: #101c2c;
+  --brand-3: #1a2c42;
+  --brand-4: #2c4560;
+  --brand-5: #4a6b8f;
+  --brand-6: #8fb3d9;
+  --brand-7: #b3cbe4;
+  --brand-8: #cfe0f0;
+  --brand-9: #e4eefa;
+  --brand-10: #f2f8ff;
+  --message-tips-bg: #0a101c;
+  --thought-gradient: linear-gradient(135deg, #121a2a, #060a12);
+  --workspace-btn-bg: #0a1018;
+}
+
+/* Night Green：黑偏绿 —— 同一套分层逻辑换到绿相（#010503 → #040d07 → #0a1810），
+ * 边框 #16281c / #22392c 才露出绿调；主键改绿色（深底上的绿键才立得住），
+ * 状态用的 --mint 仍比主键亮一档，不与成功信号撞色。浅色是同色相的暖灰纸面。 */
+:root[data-palette="night-green"][data-theme="light"] {
+  color-scheme: light;
+  --ink: #ffffff;
+  --panel: #f4faf6;
+  --panel-2: #e7f3ec;
+  --side: #f1f8f3;
+  --line: #d8e8de;
+  --line-2: #bdd4c6;
+  --text: #04100a;
+  --dim: #3c4f44;
+  --dim2: #57695d;
+  --bubble: #e0f3e8;
+  --amber: #ff7d00;
+  --cyan: #165dff;
+  --violet: #8b5cf6;
+  --mint: #00b42a;
+  --orange: #f53f3f;
+  --accent: #0f8a4a;
+  --accent-ink: #ffffff;
+  --accent-hi: #16a35a;
+  --brand: #4f9e73;
+  --brand-light: #eefaf2;
+  --brand-hover: #a2d9b8;
+  --brand-1: #eefaf2;
+  --brand-2: #e0f5e7;
+  --brand-3: #c6ebd3;
+  --brand-4: #a2d9b8;
+  --brand-5: #77c299;
+  --brand-6: #4f9e73;
+  --brand-7: #3b7d59;
+  --brand-8: #2b5d42;
+  --brand-9: #1a3d2b;
+  --brand-10: #0a1f15;
+  --message-tips-bg: #e6f8ec;
+  --thought-gradient: linear-gradient(135deg, #e6f8ec, #f1f7f3);
+  --workspace-btn-bg: #e7f3ec;
+}
+
+:root[data-palette="night-green"][data-theme="dark"] {
+  color-scheme: dark;
+  --ink: #010503;
+  --panel: #040d07;
+  --panel-2: #0a1810;
+  --side: #020805;
+  --line: #16281c;
+  --line-2: #22392c;
+  --text: #ffffff;
+  --dim: #c6d6cb;
+  --dim2: #85988c;
+  --bubble: #0a1810;
+  --amber: #ff9a2e;
+  --cyan: #4d9fff;
+  --violet: #8b5cf6;
+  --mint: #23c343;
+  --orange: #f76560;
+  --accent: #2fbf71;
+  --accent-ink: #04140a;
+  --accent-hi: #4ad188;
+  --brand: #7db894;
+  --brand-light: #0f2318;
+  --brand-hover: #5b9d78;
+  --brand-1: #08120c;
+  --brand-2: #0f2318;
+  --brand-3: #1b3a28;
+  --brand-4: #2f5c42;
+  --brand-5: #4d8460;
+  --brand-6: #7db894;
+  --brand-7: #a8d3b8;
+  --brand-8: #c9e6d5;
+  --brand-9: #e2f4e9;
+  --brand-10: #f1faf5;
+  --message-tips-bg: #081510;
+  --thought-gradient: linear-gradient(135deg, #101f17, #050a07);
+  --workspace-btn-bg: #08120c;
 }

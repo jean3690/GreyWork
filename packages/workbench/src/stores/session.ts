@@ -7,6 +7,8 @@ import { i18n } from "../i18n";
 
 const t = i18n.global.t;
 import { toWorkspaceDirRefs } from "../lib/session-backend";
+import { normalizeAttachments } from "../lib/attachments";
+import { pruneAttachmentLibrary } from "../state/attachment-library";
 import { useWorkspaceStore } from "./workspace";
 import type { MessageSegment, ThreadMessage } from "../types";
 
@@ -108,12 +110,28 @@ function migrateLegacySessions(value: LegacyPersistedSessions): PersistedSession
 }
 
 /**
+ * 附件旧档兼容：早期 `attachments` 是 `string[]`（且从未写入过非空值），字符串无法
+ * 还原成文件，一律丢弃；畸形对象同理。没有附件字段的消息原样返回，避免无谓复制。
+ */
+function adoptAttachments(message: ThreadMessage): ThreadMessage {
+  if (!message.attachments && !message.planAttachments) return message;
+  const attachments = normalizeAttachments(message.attachments);
+  const planAttachments = normalizeAttachments(message.planAttachments);
+  return {
+    ...message,
+    attachments: attachments.length ? attachments : undefined,
+    planAttachments: planAttachments.length ? planAttachments : undefined,
+  };
+}
+
+/**
  * 采纳外部消息档：历史消息把思考存在 `thinking` 平铺字段上，没有段落表。
  * 旧档的真实到达顺序已无从还原，按当年的渲染顺序（思考 → 工具 → 正文）重建为段落，
  * 这样渲染层只有一条路径，不必为老数据保留第二套分支。
  */
 function adoptMessages(messages: ThreadMessage[]): ThreadMessage[] {
-  return messages.map((message) => {
+  return messages.map((raw) => {
+    const message = adoptAttachments(raw);
     if (message.role !== "assistant" || (message.segments && message.segments.length > 0)) return message;
     // 旧字段已从 ThreadMessage 移除，这里只为迁移读一次
     const legacy = message as ThreadMessage & { thinking?: string; thinkingAt?: number; thinkingFor?: number };
@@ -337,6 +355,9 @@ export const useSessionStore = defineStore("session", () => {
     // 落盘侧只删显式清单里的文件，这里不登记就会留下孤儿会话文件
     pendingDeletions.add(id);
     if (activeSessionId.value === id) activeSessionId.value = null;
+    // 附件目录不跟着会话走就没机会再清（会话 id 是唯一入口）：best-effort 删除，
+    // 失败只提示不阻断 —— 会话本身已经删掉了，回滚它才是更糟的结果。
+    void pruneAttachmentLibrary(id);
     persist();
   }
 

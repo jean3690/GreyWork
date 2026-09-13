@@ -8,8 +8,14 @@ vi.mock("@/lib/mermaid", () => ({
   renderMermaid: vi.fn(),
 }));
 import { renderMermaid } from "@/lib/mermaid";
+import { applyAppearance } from "@/lib/theme";
 
 const mockRender = vi.mocked(renderMermaid);
+
+/** 切外观要走真实入口：只改 data-theme 是不会广播的，组件收不到。 */
+function setColorMode(colorMode: "dark" | "light" | "system"): void {
+  applyAppearance({ palette: "greywork", colorMode, fontSize: "medium" });
+}
 
 const SOURCE = "flowchart LR\n  A[解析] --> B{渲染}";
 const MARKDOWN = `上文\n\n\`\`\`mermaid\n${SOURCE}\n\`\`\`\n\n下文`;
@@ -19,11 +25,11 @@ function svgOf(label: string): string {
   return `<svg data-mermaid="${label}" viewBox="0 0 400 100" style="max-width: 400px"><text>${label}</text></svg>`;
 }
 
-/** 每个用例的挂载件：observer 挂在 documentElement 上，跨用例不卸会互相触发重渲。 */
+/** 每个用例的挂载件：订阅挂在 window 上，跨用例不卸会互相触发重渲。 */
 const wrappers: VueWrapper[] = [];
 
 beforeEach(() => {
-  document.documentElement.dataset.theme = "light";
+  setColorMode("light");
 });
 
 afterEach(() => {
@@ -105,8 +111,8 @@ describe("MarkdownText · mermaid 围栏分派", () => {
     expect(wrapper.text()).toContain("300%");
   });
 
-  it("深色外观（data-theme=dark）时以 dark 主题渲染", async () => {
-    document.documentElement.dataset.theme = "dark";
+  it("深色外观时以 dark 主题渲染", async () => {
+    setColorMode("dark");
     mockRender.mockResolvedValue({ svg: svgOf("dark") });
     mountMarkdown(MARKDOWN);
     await flushPromises();
@@ -134,7 +140,7 @@ describe("MarkdownText · mermaid 围栏分派", () => {
     expect(mockRender).toHaveBeenLastCalledWith(SOURCE, false);
 
     mockRender.mockResolvedValueOnce({ svg: svgOf("switched") });
-    document.documentElement.dataset.theme = "dark";
+    setColorMode("dark");
     await vi.waitFor(() => expect(mockRender).toHaveBeenCalledTimes(2));
     await flushPromises();
 

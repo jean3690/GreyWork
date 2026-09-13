@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted } from "vue";
 import { Shell } from "@greywork/workbench";
-import { usePreviewStore } from "@greywork/workbench";
+import { isPhysicalPointInDropzone, usePreviewStore } from "@greywork/workbench";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 
 /**
@@ -10,6 +10,9 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
  * 拖放接线：tauri.conf.json 开了 dragDropEnabled，宿主截获 OS 拖放事件后
  * 需要由渲染端监听（HTML5 drop 在 Tauri 窗口内收不到）。落在窗口上的文件
  * 直接以 disk 源打开到预览面板 —— 文件预览工作台最自然的入口。
+ * 例外：落在聊天输入卡上的拖放由输入卡自己收编为附件（`data-attachment-dropzone`），
+ * 这里必须先让位，否则一次拖放会同时贴附件与开预览。
+ *
  * 浏览器 dev 预览没有 webview 宿主，getCurrentWebview 抛错即静默降级。
  */
 const preview = usePreviewStore();
@@ -19,12 +22,18 @@ onMounted(() => {
   void (async () => {
     try {
       unlistenDrop = await getCurrentWebview().onDragDropEvent((event) => {
-        if (event.payload.type !== "drop") return;
-        const path = event.payload.paths[0];
-        if (!path) return;
-        const name = path.split(/[\\/]/).pop() ?? path;
-        // kindOfPath 未知扩展也归 raw（CodeMirror 兜底），永远不会「打不开」。
-        preview.open(path, name, "disk");
+        // 先取到局部常量再进异步块：TS 对 const 的判别联合收窄能穿透闭包，
+        // 直接读 event.payload.type 之后再访问 payload.paths 会被判为不存在。
+        const payload = event.payload;
+        if (payload.type !== "drop") return;
+        void (async () => {
+          if (await isPhysicalPointInDropzone(payload.position)) return;
+          const path = payload.paths[0];
+          if (!path) return;
+          const name = path.split(/[\\/]/).pop() ?? path;
+          // kindOfPath 未知扩展也归 raw（CodeMirror 兜底），永远不会「打不开」。
+          preview.open(path, name, "disk");
+        })();
       });
     } catch {
       // 浏览器 dev / 无 Tauri 通道：拖放不可用，静默降级。

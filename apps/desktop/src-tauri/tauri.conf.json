@@ -18,7 +18,7 @@
         "minWidth": 960,
         "minHeight": 640,
         "visible": false,
-        "backgroundColor": "#0e0e0e",
+        "backgroundColor": "#000000",
         "resizable": true,
         "center": true,
         "decorations": false,
@@ -26,8 +26,8 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost https://cdn.jsdelivr.net; worker-src 'self' blob:",
-      "devCsp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost https://cdn.jsdelivr.net ws://localhost:1420; worker-src 'self' blob:"
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost; worker-src 'self' blob:",
+      "devCsp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost ws://localhost:1420; worker-src 'self' blob:"
     }
   },
   "bundle": {

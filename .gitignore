@@ -25,3 +25,7 @@ sample-preview.docx
 
 # 本地开发链接：greyAgent 为独立仓库，软链接引用其实时源码（不纳入版本库）
 /greyAgent
+
+# 插件市场签名私钥（ed25519）：公钥硬编码在宿主 plugin_market.rs，私钥永不入库
+plugin-market/.signing-key*
+plugin-market/.signing-key.pem

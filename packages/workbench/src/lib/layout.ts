@@ -16,6 +16,15 @@ export const MIN_CONTENT_PX = 360;
 /** 预览 tab 条高度（与 Sider 工具条同高，横向对齐）。 */
 export const PREVIEW_TAB_BAR_HEIGHT = 34;
 
+/**
+ * 底部活动面板高度（含标签条）：固定高 + 内部滚动；v1 不做拖拽调高。
+ * 收起 = 高度归零（过渡），内容保持挂载，与右栏折叠同一策略。
+ */
+export const ACTIVITY_BAND_HEIGHT_PX = 220;
+
+/** 左栏插件分组宿主最大高：超出内部滚动，防止单个高分组把会话历史压垮。 */
+export const SIDEBAR_REGIONS_MAX_HEIGHT_PX = 240;
+
 /** 同时打开的预览 tab 上限：超出丢最旧的非激活 tab（防止一路产物把内存和 tab 条撑爆）。 */
 export const MAX_PREVIEW_TABS = 12;
 

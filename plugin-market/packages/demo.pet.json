@@ -1,0 +1,197 @@
+{
+  "schemaVersion": 1,
+  "manifest": {
+    "id": "demo.pet",
+    "name": "桌面宠物 · 猫",
+    "version": "1.3.0",
+    "description": "会饿会困会被撸的小猫：真实时间衰减 + 受控 SVG 动画；在工作台前端自由拖动，不占页面布局。",
+    "kind": "worker",
+    "runtime": {
+      "type": "worker",
+      "entry": "https://raw.githubusercontent.com/jean3690/greywork-plugin-market/c1e38f2171001aa48fc86a9e777708a644ef1db7/packages/demo.pet.js",
+      "sha256": "af8a15ab4ae7355fda5bb8810f73d8d6f4225be9f216c8ab772622172d551f7d",
+      "render": {
+        "handler": "draw",
+        "fps": 12,
+        "width": 160,
+        "height": 140
+      }
+    },
+    "requires": ["window.floating"],
+    "contributes": {
+      "modes": [
+        {
+          "id": "demo-pet",
+          "title": "宠物猫",
+          "icon": "magic",
+          "page": {
+            "eyebrow": "Marketplace plugin · worker",
+            "heading": "桌面小猫",
+            "body": "一只会饿会困的猫。状态按真实时间衰减（离线也算，上限 12 小时）；每次交互先结算再生效。点「撸猫」涨心情，饿了喂食，困了小憩。",
+            "fields": [
+              {
+                "key": "face",
+                "label": "表情",
+                "kind": "text",
+                "default": "😸",
+                "maxLength": 8
+              },
+              {
+                "key": "satiety",
+                "label": "饱食",
+                "kind": "number",
+                "default": 80,
+                "min": 0,
+                "max": 100,
+                "step": 1
+              },
+              {
+                "key": "mood",
+                "label": "心情",
+                "kind": "number",
+                "default": 80,
+                "min": 0,
+                "max": 100,
+                "step": 1
+              },
+              {
+                "key": "energy",
+                "label": "精力",
+                "kind": "number",
+                "default": 80,
+                "min": 0,
+                "max": 100,
+                "step": 1
+              },
+              {
+                "key": "lasttick",
+                "label": "上次结算（毫秒时间戳）",
+                "kind": "number",
+                "default": 0,
+                "min": 0
+              },
+              {
+                "key": "petcount",
+                "label": "被撸次数",
+                "kind": "number",
+                "default": 0,
+                "min": 0
+              },
+              {
+                "key": "note",
+                "label": "状态备注",
+                "kind": "text",
+                "default": "刚领养回家",
+                "maxLength": 80
+              }
+            ],
+            "outputs": [
+              {
+                "label": "当前状态",
+                "valueKey": "face"
+              },
+              {
+                "label": "饱食",
+                "valueKey": "satiety",
+                "suffix": "/100"
+              },
+              {
+                "label": "心情",
+                "valueKey": "mood",
+                "suffix": "/100"
+              },
+              {
+                "label": "精力",
+                "valueKey": "energy",
+                "suffix": "/100"
+              },
+              {
+                "label": "已撸",
+                "valueKey": "petcount",
+                "suffix": "次"
+              },
+              {
+                "label": "备注",
+                "valueKey": "note"
+              }
+            ],
+            "actions": [
+              {
+                "id": "settle",
+                "label": "看看它",
+                "style": "secondary",
+                "operation": {
+                  "type": "invoke",
+                  "handler": "settle"
+                }
+              },
+              {
+                "id": "pet",
+                "label": "撸猫",
+                "style": "primary",
+                "operation": {
+                  "type": "invoke",
+                  "handler": "pet"
+                }
+              },
+              {
+                "id": "feed",
+                "label": "喂食",
+                "style": "primary",
+                "operation": {
+                  "type": "invoke",
+                  "handler": "feed"
+                }
+              },
+              {
+                "id": "rest",
+                "label": "小憩",
+                "style": "secondary",
+                "operation": {
+                  "type": "invoke",
+                  "handler": "rest"
+                }
+              },
+              {
+                "id": "reset",
+                "label": "重新领养",
+                "style": "danger",
+                "operation": {
+                  "type": "reset"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "uiRegions": [
+        {
+          "region": "workspaceOverlay",
+          "id": "pet.overlay",
+          "title": "宠物",
+          "order": 5,
+          "width": 160,
+          "height": 150,
+          "actions": [
+            {
+              "id": "feed",
+              "label": "喂食"
+            },
+            {
+              "id": "pet",
+              "label": "撸猫"
+            },
+            {
+              "id": "rest",
+              "label": "小憩"
+            }
+          ]
+        }
+      ]
+    },
+    "window": {
+      "width": 200,
+      "height": 200
+    }
+  }
+}
