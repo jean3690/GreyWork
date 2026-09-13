@@ -69,7 +69,9 @@ function onRegistryRegister(entry: McpRegistryEntry): void {
     registry: entry,
     name: entry.title || entry.name,
     transport: draft.transport,
-    url: draft.url,
+    url: draft.transport === "stdio" ? undefined : draft.url,
+    command: draft.transport === "stdio" ? draft.command : undefined,
+    args: draft.transport === "stdio" ? draft.args : undefined,
     envHint: draft.envNames,
   };
   editorEntry.value = null;

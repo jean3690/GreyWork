@@ -3,8 +3,9 @@
  * MCP 官方 Registry（registry.modelcontextprotocol.io）浏览与登记。
  *
  * 仅桌面态可用：搜索走宿主命令 mcp_search（浏览器态无代理直连）。
- * 「登记」只做一件事——把条目转成可编辑的登记草稿交给父级弹窗
- * （transport 归一 streamable-http → http），stdio-only 条目不可登记。
+ * 「登记」只做一件事——把条目转成可编辑的登记草稿交给父级弹窗：
+ * remote 归一（streamable-http → http，其次 sse）；无 remote 的 npm/pypi 包推出
+ * `npx -y` / `uvx` 的 stdio 草稿；其余类型不可登记。
  */
 import { computed, ref, watch } from "vue";
 import { isTauriRuntime } from "@greywork/core";
@@ -181,9 +182,11 @@ function titleOf(entry: McpRegistryEntry): string {
             </div>
             <p v-if="!row.draft.ok && !row.registered" class="mt-1.5 text-[10.5px] text-dim2">
               {{
-                row.draft.reason === "no-remote"
-                  ? "该条目只有 stdio/npm 包，需要本地命令启动，暂不支持一键登记"
-                  : `远程端点传输 ${row.draft.transports.join("、")} 暂不支持`
+                row.draft.reason === "unsupported-only"
+                  ? `远程端点传输 ${row.draft.transports.join("、")} 暂不支持`
+                  : row.draft.reason === "unsupported-packages"
+                    ? `包类型 ${row.draft.packageTypes.join("、")} 暂不支持一键登记（仅支持 npm / pypi）`
+                    : "该条目没有可用于一键登记的信息"
               }}
             </p>
           </div>

@@ -44,6 +44,39 @@ describe("McpFormDialog", () => {
     });
   });
 
+  it("registry stdio 草稿预填命令与参数，保存即 stdio 载荷", async () => {
+    // 父级常驻挂载、以 open 翻转触发 reset；这里同样先 false 再置 true。
+    const wrapper = mount(McpFormDialog, {
+      props: {
+        open: false,
+        entry: null,
+        existingNames: [],
+        preset: {
+          source: "registry",
+          registry: { name: "ac.x/mcp", remotes: [], packages: [] },
+          name: "files",
+          transport: "stdio",
+          command: "npx",
+          args: ["-y", "@modelcontextprotocol/server-filesystem"],
+          envHint: ["ROOT"],
+        },
+      },
+    });
+    await wrapper.setProps({ open: true });
+
+    expect((wrapper.get('input[placeholder="npx 或 /usr/bin/npx"]').element as HTMLInputElement).value).toBe("npx");
+    expect((wrapper.get('[data-testid="mcp-args"]').element as HTMLTextAreaElement).value).toBe(
+      "-y\n@modelcontextprotocol/server-filesystem",
+    );
+
+    await wrapper.get('[data-testid="mcp-save"]').trigger("click");
+    expect(wrapper.emitted("save")?.[0]?.[0]).toMatchObject({
+      transport: "stdio",
+      command: "npx",
+      args: ["-y", "@modelcontextprotocol/server-filesystem"],
+    });
+  });
+
   it("鉴权值默认以密码框呈现，可显式切换显示", async () => {
     const wrapper = render();
     const secret = wrapper.get('input[placeholder="值"]');
