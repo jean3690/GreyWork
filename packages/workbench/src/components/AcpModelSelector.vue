@@ -82,7 +82,7 @@ const visibleChoices = computed(() => {
 const panelHeight = (): number => Math.min(320, visibleChoices.value.length * 30) + (showSearch.value ? 40 : 0) + 12;
 
 /** 输入卡贴底时向下会出界 → 按上下净空翻转（openUp = bottom-full）。 */
-const { openUp, place: placePanel } = usePanelPlacement(rootEl, panelHeight);
+const { openUp, alignLeft, place: placePanel } = usePanelPlacement(rootEl, panelHeight, 340);
 
 function openMenu(): void {
   if (!selectable.value || switching.value) return;
@@ -156,8 +156,8 @@ function toggle(): void {
 
     <div
       v-if="open && selectable"
-      class="absolute right-0 z-30 w-[min(340px,calc(100vw-16px))] rounded-[10px] border border-line bg-popover shadow-lg"
-      :class="openUp ? 'bottom-full mb-1' : 'top-full mt-1'"
+      class="absolute z-40 w-[min(340px,calc(100vw-16px))] rounded-[10px] border border-line bg-popover shadow-lg"
+      :class="[openUp ? 'bottom-full mb-1' : 'top-full mt-1', alignLeft ? 'left-0' : 'right-0']"
       @keydown.esc.prevent="closeMenu"
     >
       <div v-if="showSearch" class="flex items-center gap-1.5 border-b border-line px-2.5 py-2">

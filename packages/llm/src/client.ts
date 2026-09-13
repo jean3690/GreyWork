@@ -1,5 +1,5 @@
 import { TauriLlmTransport } from "./tauri-transport";
-import type { LlmChatMessage, LlmChatParams, LlmClient, LlmEventEnvelope } from "./transports";
+import type { LlmChatMessage, LlmChatParams, LlmClient, LlmContentPart, LlmEventEnvelope } from "./transports";
 
 export class LlmUnavailableError extends Error {
   constructor() {
@@ -22,5 +22,5 @@ export function createLlmClient(): LlmClient {
   };
 }
 
-export type { LlmChatMessage, LlmChatParams, LlmClient, LlmEventEnvelope };
+export type { LlmChatMessage, LlmChatParams, LlmClient, LlmContentPart, LlmEventEnvelope };
 export { isTauriRuntime } from "./transports";

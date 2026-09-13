@@ -1,9 +1,9 @@
 /**
- * 胶囊弹出面板的方向决策（模型选择 / 权限档位共用）。
+ * 胶囊弹出面板的方向与水平对齐决策（模型选择 / 权限档位共用）。
  *
- * 这些选择器长在输入卡底栏、贴着窗口底边：面板固定向下（top-full）会伸出视口，
- * 列表尾部点不到。打开前量一次锚点上下净空，下方装不下且上方更宽裕 → 向上弹（bottom-full）。
- * 只在 open 时量一次（与面板同生命周期），开着时改窗口尺寸不重算——面板随即会被点掉。
+ * 这些选择器位于输入框下方：纵向按上下净空翻转；横向默认右对齐，但若面板会越过
+ * 所在 main 的左边界（进入侧栏或被 main overflow 裁切），则改为从触发器左侧向右展开。
+ * 只在 open 时量一次；面板随点击外部关闭，窗口变更无需持续监听。
  */
 import { ref, type Ref } from "vue";
 
@@ -27,20 +27,28 @@ export function shouldOpenUp({ anchorTop, anchorBottom, viewportHeight, panelHei
   return below < panelHeight && above > below;
 }
 
+/** true = 改为左对齐（面板从锚点向右展开），避免右对齐越过可见容器左边界。 */
+export function shouldAlignLeft(anchorRight: number, panelWidth: number, boundaryLeft: number): boolean {
+  return anchorRight - panelWidth < boundaryLeft + EDGE_GAP;
+}
+
 /**
- * 组件侧：`anchor` 绑定触发器所在的定位容器（relative 那层），`panelHeight` 为面板估算高
- * （内容随选项数变化时传 getter）。每次展开前调 `place()`，模板按 `openUp` 选 bottom-full / top-full。
+ * 组件侧：`anchor` 绑定触发器所在的定位容器（relative 那层）；每次展开前调 `place()`，
+ * 模板按 `openUp` 选 bottom-full / top-full，按 `alignLeft` 选 left-0 / right-0。
  */
 export function usePanelPlacement(
   anchor: Ref<HTMLElement | null>,
   panelHeight: number | (() => number),
-): { openUp: Ref<boolean>; place: () => void } {
+  panelWidth: number,
+): { openUp: Ref<boolean>; alignLeft: Ref<boolean>; place: () => void } {
   const openUp = ref(false);
+  const alignLeft = ref(false);
 
   function place(): void {
     const el = anchor.value;
     if (!el) {
       openUp.value = false;
+      alignLeft.value = false;
       return;
     }
     const rect = el.getBoundingClientRect();
@@ -50,7 +58,9 @@ export function usePanelPlacement(
       viewportHeight: window.innerHeight || document.documentElement.clientHeight,
       panelHeight: typeof panelHeight === "function" ? panelHeight() : panelHeight,
     });
+    const boundaryLeft = el.closest("main")?.getBoundingClientRect().left ?? 0;
+    alignLeft.value = shouldAlignLeft(rect.right, panelWidth, boundaryLeft);
   }
 
-  return { openUp, place };
+  return { openUp, alignLeft, place };
 }

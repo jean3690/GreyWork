@@ -163,6 +163,30 @@ describe("GroupedHistory · 工作区列表", () => {
     expect(wrapper.text()).toContain("新对话");
   });
 
+  it("⋯ 面板里换图标：点选即落库，不需要额外保存动作", async () => {
+    const wrapper = mountHistory();
+    const store = useWorkspaceStore();
+
+    await wrapper.get('[data-testid="workspace-menu-w-alpha"]').trigger("click");
+    await wrapper.get('[data-testid="workspace-icon-w-alpha"]').trigger("click");
+    await wrapper.get('[data-testid="icon-option-lightning"]').trigger("click");
+
+    expect(store.workspaceById("w-alpha")?.icon).toBe("lightning");
+    // 换了 store 仍读到：图标随工作区记录一起落盘
+    setActivePinia(createPinia());
+    expect(useWorkspaceStore().workspaceById("w-alpha")?.icon).toBe("lightning");
+  });
+
+  it("收起 ⋯ 面板会一并收起图标选择器", async () => {
+    const wrapper = mountHistory();
+    await wrapper.get('[data-testid="workspace-menu-w-alpha"]').trigger("click");
+    await wrapper.get('[data-testid="workspace-icon-w-alpha"]').trigger("click");
+    expect(wrapper.find('[data-testid="icon-picker"]').exists()).toBe(true);
+
+    await wrapper.get('[data-testid="workspace-menu-w-alpha"]').trigger("click");
+    expect(wrapper.find('[data-testid="icon-picker"]').exists()).toBe(false);
+  });
+
   it("未绑定文件夹的工作区给「绑定文件夹」，且不再念叨落盘位置", async () => {
     const wrapper = mountHistory();
     await wrapper.get('[data-testid="workspace-menu-w-beta"]').trigger("click");

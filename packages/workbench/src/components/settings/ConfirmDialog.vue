@@ -20,6 +20,7 @@ const emit = defineEmits<{ confirm: []; cancel: [] }>();
     <div class="w-full max-w-[380px] rounded-[14px] border border-line bg-panel p-4 shadow-xl">
       <div class="text-[13px] font-medium text-foreground">{{ title }}</div>
       <p v-if="message" class="mt-1.5 text-[12px] leading-relaxed text-dim2">{{ message }}</p>
+      <slot></slot>
       <div class="mt-4 flex justify-end gap-2">
         <button
           type="button"

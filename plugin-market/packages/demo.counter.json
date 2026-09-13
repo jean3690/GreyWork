@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "manifest": {
+    "id": "demo.counter",
+    "name": "Demo 计数器",
+    "version": "1.1.0",
+    "description": "声明式工作台示例：持久化设置、受控动作与动态输出，不执行远端 JavaScript。",
+    "requires": ["demo:run"],
+    "contributes": {
+      "modes": [
+        {
+          "id": "demo-counter",
+          "title": "Demo",
+          "icon": "lightning",
+          "page": {
+            "eyebrow": "Marketplace plugin · 1.1",
+            "heading": "专注计数器",
+            "body": "设置一个目标，用受控动作记录进度。数据只保存在 GreyWork 的插件状态中；插件包仍然只包含 JSON。",
+            "fields": [
+              {
+                "key": "name",
+                "label": "目标名称",
+                "description": "为这轮专注设一个容易识别的名字。",
+                "kind": "text",
+                "default": "完成当前任务",
+                "maxLength": 80
+              },
+              {
+                "key": "count",
+                "label": "当前进度",
+                "description": "动作会在 0–100 之间更新该数值。",
+                "kind": "number",
+                "default": 0,
+                "min": 0,
+                "max": 100,
+                "step": 1
+              },
+              {
+                "key": "notifications",
+                "label": "完成时提醒",
+                "description": "此设置会持久保存；当前示例只展示状态，不发送系统通知。",
+                "kind": "toggle",
+                "default": true
+              }
+            ],
+            "outputs": [
+              { "label": "当前进度", "valueKey": "count", "suffix": "次" },
+              { "label": "当前目标", "valueKey": "name" }
+            ],
+            "actions": [
+              {
+                "id": "add-one",
+                "label": "+1",
+                "style": "primary",
+                "operation": { "type": "increment", "key": "count", "amount": 1 }
+              },
+              {
+                "id": "add-five",
+                "label": "+5",
+                "style": "secondary",
+                "operation": { "type": "increment", "key": "count", "amount": 5 }
+              },
+              {
+                "id": "reset",
+                "label": "恢复默认值",
+                "style": "danger",
+                "operation": { "type": "reset" }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

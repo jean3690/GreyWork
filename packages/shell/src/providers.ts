@@ -1,4 +1,4 @@
-import type { ModelProviderConfig, WebSearchProviderConfig } from "./types";
+import type { ModelProviderConfig } from "./types";
 
 /** ACP agent 后端配置（agent-provider 注册表项）。 */
 export interface AgentProviderConfig {
@@ -12,6 +12,42 @@ export interface AgentProviderConfig {
   detect?: string[];
   /** 未安装时的安装提示（设置页展示）。 */
   installHint?: string;
+  /** 展示图标（lib/icons 图标名）；缺省由 agentProviderIcon 兜底。 */
+  icon?: string;
+}
+
+/** 后端未自定义图标时的兜底。 */
+export const DEFAULT_AGENT_PROVIDER_ICON = "robot";
+
+/** 后端展示图标：用户没选就用兜底。 */
+export function agentProviderIcon(provider: { icon?: string }): string {
+  return provider.icon ?? DEFAULT_AGENT_PROVIDER_ICON;
+}
+
+/** ACP 预设后端对应的 @lobehub/icons 静态资源配置。 */
+export interface AgentProviderLobeIcon {
+  slug: string;
+  /** 仅在 Lobe toc 声明 hasColor 时请求 color；否则必须请求 mono，避免 CDN 404。 */
+  type: "color" | "mono";
+}
+
+const AGENT_PROVIDER_LOBE_ICON: Readonly<Record<string, AgentProviderLobeIcon>> = {
+  opencode: { slug: "opencode", type: "mono" },
+  codex: { slug: "codex", type: "color" },
+  "claude-code": { slug: "claudecode", type: "color" },
+  gemini: { slug: "geminicli", type: "color" },
+  "qwen-code": { slug: "qwen", type: "color" },
+  kimi: { slug: "moonshot", type: "mono" },
+  glm: { slug: "chatglm", type: "color" },
+  cursor: { slug: "cursor", type: "mono" },
+  copilot: { slug: "githubcopilot", type: "mono" },
+  goose: { slug: "goose", type: "mono" },
+  amp: { slug: "amp", type: "color" },
+};
+
+/** Lobe Icons 品牌资源；用户自定义展示图标优先，因此只给未覆盖的预设返回配置。 */
+export function agentProviderLobeIcon(provider: Pick<AgentProviderConfig, "id" | "icon">): AgentProviderLobeIcon | null {
+  return provider.icon ? null : (AGENT_PROVIDER_LOBE_ICON[provider.id] ?? null);
 }
 
 /**
@@ -153,18 +189,6 @@ export const DEFAULT_MODEL_PROVIDERS: ModelProviderConfig[] = [
   },
   { id: "ollama", name: "Ollama 本地", kind: "ollama", baseUrl: "http://localhost:11434", model: "qwen2.5", enabled: false },
   { id: "custom", name: "自定义供应商", kind: "custom", baseUrl: "", model: "", apiKeyEnv: "CUSTOM_LLM_API_KEY", enabled: false },
-];
-
-export const DEFAULT_WEB_SEARCH_PROVIDERS: WebSearchProviderConfig[] = [
-  { id: "tavily", name: "Tavily", endpoint: "https://api.tavily.com/search", apiKeyEnv: "TAVILY_API_KEY", enabled: true },
-  {
-    id: "brave",
-    name: "Brave Search",
-    endpoint: "https://api.search.brave.com/res/v1/web/search",
-    apiKeyEnv: "BRAVE_API_KEY",
-    enabled: false,
-  },
-  { id: "custom", name: "自定义搜索", endpoint: "", apiKeyEnv: "CUSTOM_SEARCH_API_KEY", enabled: false },
 ];
 
 /** ACP agent 后端注册表（与 ModelProviderRegistry 同构）。 */

@@ -26,6 +26,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub const GREY_WORK_DIR: &str = ".greyWork";
 pub const SESSIONS_SUB_DIR: &str = "sessions";
+/// 会话附件目录（渲染端 `state/attachment-library.ts` 按同一布局写入）。
+pub const ATTACHMENTS_SUB_DIR: &str = "attachments";
 const READY_MARKER: &str = ".ready";
 const ACTIVE_FILE: &str = "active.json";
 
@@ -172,11 +174,67 @@ fn validate_folder(folder: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+fn validate_authorized_folder(
+    access: &crate::workspace_fs::WorkspaceFsAccess,
+    folder: &str,
+) -> Result<(), String> {
+    let authorized = access.validate_existing(folder)?;
+    if authorized.is_dir() {
+        Ok(())
+    } else {
+        Err("工作区授权路径不是目录".into())
+    }
+}
+
+fn validate_authorized_workspaces(
+    access: &crate::workspace_fs::WorkspaceFsAccess,
+    workspaces: &[WorkspaceDirDto],
+) -> Result<(), String> {
+    for workspace in workspaces {
+        if let Some(folder) = workspace
+            .folder
+            .as_deref()
+            .filter(|folder| !folder.is_empty())
+        {
+            validate_authorized_folder(access, folder)?;
+        }
+    }
+    Ok(())
+}
+
 /// 默认数据根：`<home>/.greyWork`（目录不存在则创建）。
 pub fn default_root(home: &Path) -> Result<PathBuf, String> {
     let root = home.join(GREY_WORK_DIR);
     std::fs::create_dir_all(&root).map_err(|e| format!("创建 ~/.greyWork 失败: {e}"))?;
     Ok(root)
+}
+
+/// 校验并拼出某会话的附件目录。
+///
+/// 只认纯 id（非空、无路径分隔符、无 `..`、不以 `.` 开头），且固定拼在附件根之下 ——
+/// 渲染端能调这个命令，就不能把任意路径的删除权交给它。
+fn session_attachments_dir(root: &Path, session_id: &str) -> Result<PathBuf, String> {
+    let invalid = session_id.is_empty()
+        || session_id.len() > 128
+        || session_id.starts_with('.')
+        || session_id.contains('/')
+        || session_id.contains('\\')
+        || session_id.contains("..");
+    if invalid {
+        return Err(format!("非法会话 id: {session_id}"));
+    }
+    Ok(root.join(ATTACHMENTS_SUB_DIR).join(session_id))
+}
+
+/// 删除某会话的附件目录（`~/.greyWork/attachments/<会话id>/`）。
+/// 幂等：目录不存在视为已删（会话从没发过附件是常态）。
+pub fn prune_session_attachments(root: &Path, session_id: &str) -> Result<(), String> {
+    let dir = session_attachments_dir(root, session_id)?;
+    match std::fs::remove_dir_all(&dir) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("删除附件目录失败: {error}")),
+    }
 }
 
 /// 某文件夹（None = 默认根）的会话目录；目录确保存在。
@@ -448,8 +506,10 @@ fn app_home(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 pub fn store_sessions_load(
     app: tauri::AppHandle,
     db: tauri::State<'_, Db>,
+    access: tauri::State<'_, crate::workspace_fs::WorkspaceFsAccess>,
     workspaces: Vec<WorkspaceDirDto>,
 ) -> Result<Option<SessionsSnapshotDto>, String> {
+    validate_authorized_workspaces(&access, &workspaces)?;
     let root = default_root(&app_home(&app)?)?;
     let _lock = StoreLock::acquire(&root)?;
     if let Some(migrated) = migrate_from_db(&root, &db, &workspaces)? {
@@ -465,10 +525,12 @@ pub fn store_sessions_load(
 #[tauri::command]
 pub fn store_sessions_sync(
     app: tauri::AppHandle,
+    access: tauri::State<'_, crate::workspace_fs::WorkspaceFsAccess>,
     snapshot: SessionsSnapshotDto,
     workspaces: Vec<WorkspaceDirDto>,
     deleted_session_ids: Vec<String>,
 ) -> Result<SyncReportDto, String> {
+    validate_authorized_workspaces(&access, &workspaces)?;
     let root = default_root(&app_home(&app)?)?;
     let _lock = StoreLock::acquire(&root)?;
     write_snapshot(&root, &snapshot, &workspaces, &deleted_session_ids)
@@ -478,8 +540,23 @@ pub fn store_sessions_sync(
 #[tauri::command]
 pub fn store_sessions_relocate(
     app: tauri::AppHandle,
+    access: tauri::State<'_, crate::workspace_fs::WorkspaceFsAccess>,
     request: RelocateRequestDto,
 ) -> Result<RelocateReportDto, String> {
+    if let Some(folder) = request
+        .from_folder
+        .as_deref()
+        .filter(|folder| !folder.is_empty())
+    {
+        validate_authorized_folder(&access, folder)?;
+    }
+    if let Some(folder) = request
+        .to_folder
+        .as_deref()
+        .filter(|folder| !folder.is_empty())
+    {
+        validate_authorized_folder(&access, folder)?;
+    }
     let root = default_root(&app_home(&app)?)?;
     let _lock = StoreLock::acquire(&root)?;
     relocate_sessions(&root, &request)
@@ -491,18 +568,38 @@ pub fn store_default_root(app: tauri::AppHandle) -> Result<String, String> {
     default_root(&app_home(&app)?).map(|root| root.to_string_lossy().into_owned())
 }
 
+/// 删除某会话的附件目录（会话被删除时调用）：只删 `<root>/attachments/<会话id>`，
+/// 其余路径一律拒绝，且目录不存在时按已删处理。
+#[tauri::command]
+pub fn attachments_prune_session(app: tauri::AppHandle, session_id: String) -> Result<(), String> {
+    let root = default_root(&app_home(&app)?)?;
+    prune_session_attachments(&root, &session_id)
+}
+
 /// 系统文件夹选择器：让用户自定义工作区文件夹（桌面端目录对话框）。
 #[tauri::command]
-pub async fn pick_workspace_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
+pub async fn pick_workspace_folder(
+    app: tauri::AppHandle,
+    access: tauri::State<'_, crate::workspace_fs::WorkspaceFsAccess>,
+) -> Result<Option<String>, String> {
     use tauri_plugin_dialog::DialogExt;
-    let (tx, rx) = tokio::sync::oneshot::channel::<Option<String>>();
+    let (tx, rx) = tokio::sync::oneshot::channel::<Option<PathBuf>>();
     app.dialog()
         .file()
         .set_title("选择工作区文件夹")
         .pick_folder(move |file_path| {
-            let _ = tx.send(file_path.as_ref().and_then(|p| p.to_string().into()));
+            let _ = tx.send(file_path.and_then(|path| path.as_path().map(PathBuf::from)));
         });
-    rx.await.map_err(|e| format!("目录选择对话框失败: {e}"))
+    let selected = rx
+        .await
+        .map_err(|error| format!("目录选择对话框失败: {error}"))?;
+    selected
+        .map(|path| {
+            access
+                .authorize_selected_path(&path)
+                .map(|path| path.to_string_lossy().into_owned())
+        })
+        .transpose()
 }
 
 #[cfg(test)]
@@ -876,6 +973,41 @@ mod tests {
         db.sync_snapshot(&SessionsSnapshotDto::default()).unwrap();
         let loaded = read_snapshot(&root, &[]).unwrap().unwrap();
         assert_eq!(loaded.sessions.len(), 1);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn prune_session_attachments_removes_only_that_session() {
+        let tmp = temp_home("att");
+        let root = default_root(&tmp).unwrap();
+        let target = root.join("attachments/ses-a");
+        let other = root.join("attachments/ses-b");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::create_dir_all(&other).unwrap();
+        std::fs::write(target.join("att-1.png"), b"x").unwrap();
+
+        prune_session_attachments(&root, "ses-a").unwrap();
+        assert!(!target.exists());
+        assert!(other.exists(), "别的会话的附件不能被带上");
+        // 幂等：目录已不在（或从没发过附件）不算失败
+        prune_session_attachments(&root, "ses-a").unwrap();
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn prune_session_attachments_rejects_traversal_ids() {
+        let tmp = temp_home("att-bad");
+        let root = default_root(&tmp).unwrap();
+        let victim = tmp.join("victim");
+        std::fs::create_dir_all(&victim).unwrap();
+
+        for id in ["", "..", "../victim", "a/b", "a\\b", ".hidden"] {
+            assert!(
+                prune_session_attachments(&root, id).is_err(),
+                "id {id:?} 应被拒绝"
+            );
+        }
+        assert!(victim.exists(), "越界 id 不能删到附件根之外");
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }

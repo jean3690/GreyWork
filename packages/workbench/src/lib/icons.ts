@@ -24,6 +24,8 @@ function c(cx: number, cy: number, r: number, filled = false): IconShape {
 /** 名称 → 形状序列。key 对标 GreyWork 用到的 @icon-park 图标名。 */
 export const ICONS: Readonly<Record<string, readonly IconShape[]>> = {
   plus: [l(24, 9, 24, 39), l(9, 24, 39, 24)],
+  /** 文本附件 chip：页面 + 折角。 */
+  file: [p("M13 7H28L35 14V41H13V7Z"), p("M28 7V14H35")],
   search: [c(19, 19, 12), l(29, 29, 42, 42)],
   "arrow-left": [p("M42 24H6"), p("M17 13L6 24L17 35")],
   "arrow-right": [p("M6 24H42"), p("M31 13L42 24L31 35")],

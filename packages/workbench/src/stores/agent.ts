@@ -1,6 +1,8 @@
 import type { Agent } from "@greywork/agents";
 import type {
+  AcpAvailableCommand,
   AcpPermissionRequestPayload,
+  AcpPromptUnit,
   AcpSessionConfigOption,
   AcpSessionOpened,
   McpProbeReport,
@@ -19,7 +21,10 @@ import { useSettingsStore } from "./settings";
 import { useWorkspaceStore } from "./workspace";
 import { i18n } from "../i18n";
 import { formatDuration, parseToolActivityPayload } from "../lib/tool-activity";
-import type { ThreadMessage } from "../types";
+import type { Attachment, ThreadMessage } from "../types";
+import { inlineTextAttachment } from "../lib/attachments";
+import { normalizeAcpCommands } from "../lib/slash-commands";
+import { readAttachmentBase64, readAttachmentText } from "../state/attachment-library";
 import { resolveWorkspaceDir } from "../lib/workspace-dir";
 import { activeConversationFolder } from "../lib/conversation-folder";
 import { acp } from "../lib/acp-client";
@@ -33,6 +38,41 @@ const CONNECT_ABORTED = "__gw_aborted_connect__";
 /** 判读 spawn 类错误（缺 CLI / 命令不存在），UI 据此给安装指引而不是原文。 */
 function looksLikeMissingBinary(message: string): boolean {
   return /ENOENT|No such file|not found|command not found|spawn\b.*fail/i.test(message);
+}
+
+/**
+ * 附件 → ACP prompt 单元：图片读成 base64 走 image 块，文本内联为 text 块。
+ *
+ * 单条读失败（附件文件被删/移走）只跳过该条并提示，不让整轮派发失败 ——
+ * 文字部分照常送达，用户至少知道发生了什么。`imageSupported` 为 false 时过滤图片
+ * （agent 未声明图片能力），这是 UI 置灰之外的宿主侧兜底。
+ */
+async function toAcpUnits(attachments: readonly Attachment[], imageSupported: boolean): Promise<AcpPromptUnit[]> {
+  const units: AcpPromptUnit[] = [];
+  let imagesDropped = false;
+  for (const item of attachments) {
+    try {
+      if (item.kind === "image") {
+        if (!imageSupported) {
+          imagesDropped = true;
+          continue;
+        }
+        units.push({ type: "image", data: await readAttachmentBase64(item), mimeType: item.mime || "image/png" });
+      } else {
+        const { text, truncated } = await readAttachmentText(item);
+        units.push({ type: "text", text: inlineTextAttachment(item.name, text, truncated) });
+      }
+    } catch (error) {
+      notify({
+        kind: "error",
+        key: "attachment-read",
+        title: t("errors.attachmentReadFailed"),
+        detail: error instanceof Error ? `${item.name}：${error.message}` : item.name,
+      });
+    }
+  }
+  if (imagesDropped) notify({ kind: "warning", key: "attachment-image-unsupported", title: t("chat.attachImagesUnsupported") });
+  return units;
 }
 
 /** 编排域（runs store）经此桥消费 ACP 事件：子任务 chunk/完成按 sessionId/handle 归属路由。 */
@@ -69,6 +109,8 @@ export interface GlobalTurnOptions {
   reuseGlobalSession?: boolean;
   /** 复用已入流的支架（计划门确认路径：user + assistant 已由 beginAcpPlan 推入，不再重复入流）。 */
   reuseScaffold?: { threadId: string; message: ThreadMessage };
+  /** 随本轮 prompt 发出的附件（图片走 image 内容块，文本内联为 text 块）。 */
+  attachments?: readonly Attachment[];
 }
 
 const PROVIDERS_STORAGE_KEY = "greywork.agent-providers";
@@ -76,6 +118,20 @@ const providersStorage = createJsonStorage<{ providers: AgentProviderConfig[] }>
   PROVIDERS_STORAGE_KEY,
   (value): value is { providers: AgentProviderConfig[] } =>
     typeof value === "object" && value !== null && Array.isArray((value as { providers?: unknown }).providers),
+);
+
+/**
+ * 后端图标的用户覆盖层。
+ *
+ * 桌面端真源是 SQLite 的 agent_providers 表，那里没有图标列（图标纯展示、且与
+ * detect/installHint 一样不属于「能被启动的后端」契约）。而合并流程以表为准重建目录
+ * —— 图标只写在 provider 对象上会在每次 hydration 后被冲掉，故单独存一张 id → 图标名
+ * 的映射，合并之后再盖回去。预设后端也走这张表，于是「给预设换个图标」同样成立。
+ */
+const PROVIDER_ICONS_STORAGE_KEY = "greywork.agent-provider-icons";
+const providerIconsStorage = createJsonStorage<{ icons: Record<string, string> }>(
+  PROVIDER_ICONS_STORAGE_KEY,
+  (value): value is { icons: Record<string, string> } => typeof value === "object" && value !== null && "icons" in value,
 );
 
 /** 后端选择偏好（场景一 Guid 预选持久化）：provider id；null = Local LLM。 */
@@ -117,9 +173,28 @@ export const useAgentStore = defineStore("agent", () => {
     const basename = program.split(/[\\/]/).pop() ?? program;
     return basename ? [basename] : [];
   }
+  /** id → 图标名的用户选择（覆盖层持久化；空值项不存，= 用兜底图标）。 */
+  const providerIcons = ref<Record<string, string>>(providerIconsStorage.read()?.icons ?? {});
+
+  /** 覆盖层落盘 + 盖回内存目录；图标不进 SQLite（那里存的是可启动契约）。 */
+  function writeProviderIcons(icons: Record<string, string>): void {
+    providerIcons.value = icons;
+    providerIconsStorage.write({ icons });
+    applyProviderIcons();
+  }
+
+  /** 把覆盖层（或空）盖到当前目录上：真源重建目录后图标不能丢，故每次重建都要重跑。 */
+  function applyProviderIcons(): void {
+    const overlay = providerIcons.value;
+    for (const provider of agentProviders.value) {
+      provider.icon = overlay[provider.id] ?? undefined;
+    }
+  }
+
   const cachedProviders = providersStorage.read()?.providers;
   // 缓存命中也走合并：旧缓存可能只有早期几个预设，升级后要把新增预设带出来。
   const agentProviders = ref<AgentProviderConfig[]>(mergeProviders(cachedProviders));
+  applyProviderIcons();
   const savedPref = providerPrefStorage.read();
   const savedProvider = savedPref?.providerId ? agentProviders.value.find((provider) => provider.id === savedPref?.providerId) : undefined;
   const selectedProviderId = ref<string>(savedProvider?.id ?? agentProviders.value[0]?.id ?? "");
@@ -225,6 +300,12 @@ export const useAgentStore = defineStore("agent", () => {
   const acpMcpServers = ref<string[]>([]);
   /** 上次建会话时被跳过的 MCP 服务器（能力不匹配 / 配置不全），设置页据此明示原因。 */
   const acpMcpSkipped = ref<McpSkippedServer[]>([]);
+  /**
+   * 当前 agent 是否接受图片 prompt（initialize 声明的 promptCapabilities.image）。
+   * null = 未知（尚无会话）；false 时输入卡置灰图片入口——协议里这是 agent 的自述能力，
+   * 不猜、也不发过去让它报错。
+   */
+  const acpImageSupport = ref<boolean | null>(null);
   /** ACP runtime 已连接（有 agent 进程 + 会话）；供 UI 显示重启/选择器。 */
   const acpConnected = ref(false);
 
@@ -238,8 +319,8 @@ export const useAgentStore = defineStore("agent", () => {
   const acpUsage = ref<{ used: number; size: number; cost?: { amount: number; currency: string } } | null>(null);
   /** 最近一次 thinking 流文本（thought 事件聚合）；回合结束保留供检查。 */
   const acpThoughtText = ref("");
-  /** slash 命令目录（commands 事件）；当前无 UI 消费，仅透传。 */
-  const acpCommands = ref<unknown[]>([]);
+  /** slash 命令目录（commands 事件）：输入框菜单的 agent 命令数据源。 */
+  const acpCommands = ref<AcpAvailableCommand[]>([]);
 
   /* ===== 编排桥与全局回合钩子（runs 域经此路由/收尾；不在则按纯会话域运行） ===== */
   /** runs 编排域注册的事件消费桥（子任务会话/句柄归属只存在编排侧，会话域不静态依赖编排域）。 */
@@ -309,9 +390,9 @@ export const useAgentStore = defineStore("agent", () => {
           acpUsage.value = { used: payload.used, size: payload.size ?? 0, cost: payload.cost };
         }
       } else if (event.kind === "commands") {
-        // slash 命令目录更新（AvailableCommandsUpdate）：当前无 UI 消费，仅透传状态。
-        const payload = event.payload as { availableCommands?: unknown[] };
-        if (payload.availableCommands) acpCommands.value = payload.availableCommands;
+        // slash 命令目录更新（AvailableCommandsUpdate）：脏条目逐条丢弃后入目录。
+        const payload = event.payload as { availableCommands?: unknown };
+        acpCommands.value = normalizeAcpCommands(payload.availableCommands);
       } else if (event.kind === "permission-auto") {
         // 宿主按档位自动决策（daily 只读 / auto 直通）：追加一行通知，不打断流
         const payload = event.payload as AcpPermissionRequestPayload;
@@ -439,6 +520,7 @@ export const useAgentStore = defineStore("agent", () => {
         acpSessionId.value = null;
         acpSessionThreadId = null;
         acpConfigOptions.value = [];
+        acpImageSupport.value = null;
         acpBusy.value = false;
         dismissPendingPermission();
         activeTurnId.value = null;
@@ -455,6 +537,7 @@ export const useAgentStore = defineStore("agent", () => {
     acpConfigOptions.value = opened.configOptions;
     acpMcpServers.value = opened.mcpServers ?? [];
     acpMcpSkipped.value = opened.skippedMcpServers ?? [];
+    acpImageSupport.value = opened.imagePrompts === true;
     acpStatus.value = opened.configOptions.length > 0 ? "session_active" : "connected";
     acpConnected.value = true;
   }
@@ -477,6 +560,7 @@ export const useAgentStore = defineStore("agent", () => {
     acpSessionId.value = null;
     acpSessionThreadId = null;
     acpConfigOptions.value = [];
+    acpImageSupport.value = null;
     acpStreamId.value = null;
     acpStatus.value = "disconnected";
     return CONNECT_ABORTED;
@@ -499,7 +583,7 @@ export const useAgentStore = defineStore("agent", () => {
     let workspace: string;
     try {
       // 当前会话绑定带磁盘文件夹的工作区 → 以该文件夹为 ACP 工作区（权限锚定基准）；
-      // 否则回落既有解析（设置项 workspaceDir → 桌面主目录）。
+      // 否则回落设置项 workspaceDir 或宿主私有 ~/.greyWork。
       workspace = activeConversationFolder() ?? (await resolveWorkspaceDir());
     } catch (error) {
       return error instanceof Error ? error.message : String(error);
@@ -587,7 +671,7 @@ export const useAgentStore = defineStore("agent", () => {
       threadId = options.reuseScaffold.threadId;
       message = options.reuseScaffold.message;
     } else {
-      ({ threadId, message } = chat.startAcpTurn(text, providerName));
+      ({ threadId, message } = chat.startAcpTurn(text, providerName, [...(options.attachments ?? [])]));
     }
     acpStream = message;
     acpThreadId = threadId;
@@ -615,7 +699,8 @@ export const useAgentStore = defineStore("agent", () => {
     if (!options.hooks?.preserveThought) acpThoughtText.value = "";
     if (options.hooks) turnHooks = options.hooks;
     try {
-      const { turnId } = await acp.prompt(acpHandle.value as number, text);
+      const units = await toAcpUnits(options.attachments ?? [], acpImageSupport.value !== false);
+      const { turnId } = await acp.prompt(acpHandle.value as number, text, units);
       activeTurnId.value = turnId;
       // 注意：成功后不清 acpStream —— prompt 只是 ack，回合增量经事件异步回流，
       // 支架必须活到 prompt-done / stopped。
@@ -641,31 +726,35 @@ export const useAgentStore = defineStore("agent", () => {
   }
 
   /** 派发意图到选中 ACP 后端（普通对话路径：默认带会话隔离与默认错误文案）。 */
-  async function dispatchToAcp(text: string): Promise<void> {
+  async function dispatchToAcp(text: string, attachments: readonly Attachment[] = []): Promise<void> {
     const providerName = agentProviders.value.find((provider) => provider.id === selectedProviderId.value)?.name ?? "ACP";
-    await sendGlobalTurn(text, providerName);
+    await sendGlobalTurn(text, providerName, { attachments });
   }
 
   /**
    * 计划模式 · ACP 门：先入流 user + 支架并挂起计划卡（planPending），确认前不派发、不建会话。
    * 确认走 confirmAcpPlan 复用同一支架；取消只需 chat.cancelPlan 摘掉卡片。
    */
-  function beginAcpPlan(text: string): void {
+  function beginAcpPlan(text: string, attachments: readonly Attachment[] = []): void {
     const providerName = agentProviders.value.find((provider) => provider.id === selectedProviderId.value)?.name ?? "ACP";
-    const { message } = chat.startAcpTurn(text, providerName);
+    const { message } = chat.startAcpTurn(text, providerName, [...attachments]);
     message.planDraft = text;
+    message.planAttachments = [...attachments];
     message.planPending = true;
   }
 
   /** 计划模式 · ACP 确认：解除计划卡并按 planDraft 派发同一支架（不重复入流）。
    * 回合运行中确认被忽略（卡片保持挂起），等当前回合结束后可再次确认。 */
   function confirmAcpPlan(threadId: string, message: ThreadMessage): void {
-    const text = message.planDraft;
+    const attachments = message.planAttachments ?? [];
+    const text = message.planDraft ?? "";
     const providerName = message.acp;
-    if (!text || !providerName || !message.planPending || acpBusy.value || acpConnecting.value) return;
+    // 空正文 + 无附件 = 没事可派发（挂卡时不校验，是为了让用户在卡片上还能改主意）。
+    if ((!text && attachments.length === 0) || !providerName || !message.planPending || acpBusy.value || acpConnecting.value) return;
     message.planPending = false;
     message.planDraft = undefined;
-    void sendGlobalTurn(text, providerName, { reuseScaffold: { threadId, message } });
+    message.planAttachments = undefined;
+    void sendGlobalTurn(text, providerName, { reuseScaffold: { threadId, message }, attachments });
   }
 
   /** 编排域（runs store）注册事件消费桥；null = 解除。 */
@@ -751,6 +840,12 @@ export const useAgentStore = defineStore("agent", () => {
 
   // 切工作区即换「这个项目的干活方式」；immediate 关掉，避免启动就抢着建连接。
   watch(() => workspaceStore.activeWorkspaceId, applyWorkspaceAgentConfig);
+
+  // 命令目录跟着会话走：新建 / 恢复 / 停止 / 断开都会改 acpSessionId，旧目录一律作废，
+  // 由 agent 在新会话里重新上报（不按事件 sessionId 过滤，避免建会话竞态丢首条目录）。
+  watch(acpSessionId, () => {
+    acpCommands.value = [];
+  });
 
   /** 主动连接当前 ACP 后端并加载会话配置（幂等：已连接直接返回）。 */
   async function connectAcp(): Promise<string | null> {
@@ -899,6 +994,7 @@ export const useAgentStore = defineStore("agent", () => {
         if (providers) {
           // 合并而非整体覆盖：旧库快照缺新预设时，升级后自动补齐（enabled 以库为准）。
           agentProviders.value = mergeProviders(providers).map(withPresetMeta);
+          applyProviderIcons(); // 库里没有图标列：按真源重建目录后靠覆盖层补回
           persistProviders(); // 回写合并结果，把新增预设固化进库（自修复旧快照）
           // selected 在新目录中消失时回落首个 id（routeToAcp 状态保持，activate 再校验 enabled）
           if (!agentProviders.value.some((provider) => provider.id === selectedProviderId.value)) {
@@ -928,30 +1024,47 @@ export const useAgentStore = defineStore("agent", () => {
     }
   }
 
-  /** 新增用户自配 ACP 后端（名称 + 启动命令）；返回错误文案（null = 成功）。 */
-  function addAgentProvider(name: string, command: string): string | null {
+  /** 改任一后端的展示图标（含预设：图标不影响可启动契约，故不套 updateAgentProvider 的预设禁令）。 */
+  function setAgentProviderIcon(id: string, icon: string | null): void {
+    if (!agentProviders.value.some((provider) => provider.id === id)) return;
+    const next = { ...providerIcons.value };
+    if (icon) next[id] = icon;
+    else delete next[id];
+    writeProviderIcons(next);
+  }
+
+  /** 新增用户自配 ACP 后端（名称 + 启动命令 + 可选图标）；返回错误文案（null = 成功）。 */
+  function addAgentProvider(name: string, command: string, icon?: string): string | null {
     const trimmedName = name.trim();
     const trimmedCommand = command.trim();
     if (!trimmedName) return t("errors.agentProviderNameRequired");
     if (!trimmedCommand) return t("errors.agentProviderCommandRequired");
+    const id = newCustomProviderId();
     agentProviders.value.push({
-      id: newCustomProviderId(),
+      id,
       name: trimmedName,
       kind: "acp",
       command: trimmedCommand,
       enabled: true,
       detect: detectProgramOf(trimmedCommand),
     });
+    recordProviderIcon(id, icon);
     persistProviders();
     void refreshAgentDetection();
     return null;
   }
 
+  /** 把图标写进覆盖层（空/undefined = 用兜底图标，不占条目）。 */
+  function recordProviderIcon(id: string, icon?: string): void {
+    if (!icon) return;
+    writeProviderIcons({ ...providerIcons.value, [id]: icon });
+  }
+
   /**
-   * 编辑用户自配 ACP 后端（名称 / 命令）。预设项不可改：合并流程会用注册表元数据
-   * 覆盖回去，改了也不持久，故直接拒绝。
+   * 编辑用户自配 ACP 后端（名称 / 命令 / 图标）。预设项不可改：合并流程会用注册表元数据
+   * 覆盖回去，改了也不持久，故直接拒绝（图标单独经 setAgentProviderIcon 改）。
    */
-  function updateAgentProvider(id: string, name: string, command: string): string | null {
+  function updateAgentProvider(id: string, name: string, command: string, icon?: string): string | null {
     const provider = agentProviders.value.find((candidate) => candidate.id === id);
     if (!provider || !isCustomAgentProvider(id)) return t("errors.agentProviderNotEditable");
     const trimmedName = name.trim();
@@ -961,6 +1074,7 @@ export const useAgentStore = defineStore("agent", () => {
     provider.name = trimmedName;
     provider.command = trimmedCommand;
     provider.detect = detectProgramOf(trimmedCommand);
+    recordProviderIcon(id, icon);
     persistProviders();
     void refreshAgentDetection();
     return null;
@@ -975,6 +1089,9 @@ export const useAgentStore = defineStore("agent", () => {
       await switchToLocalLlm();
     }
     agentProviders.value = agentProviders.value.filter((candidate) => candidate.id !== id);
+    const next = { ...providerIcons.value };
+    delete next[id]; // 连带清图标映射：后端都没了，留着只会让 id 空间漏
+    writeProviderIcons(next);
     if (id === selectedProviderId.value) {
       selectedProviderId.value = agentProviders.value.find((candidate) => candidate.enabled)?.id ?? "";
     }
@@ -1071,6 +1188,7 @@ export const useAgentStore = defineStore("agent", () => {
       acpSessionId.value = null;
       acpSessionThreadId = null;
       acpConfigOptions.value = [];
+      acpImageSupport.value = null;
       dismissPendingPermission();
       acpStreamId.value = null;
       activeTurnId.value = null;
@@ -1091,6 +1209,7 @@ export const useAgentStore = defineStore("agent", () => {
     permissionDeadline,
     acpMcpServers,
     acpMcpSkipped,
+    acpImageSupport,
     acpStreamId,
     acpStatus,
     acpConnected,
@@ -1110,6 +1229,7 @@ export const useAgentStore = defineStore("agent", () => {
     addAgentProvider,
     updateAgentProvider,
     removeAgentProvider,
+    setAgentProviderIcon,
     setAcpConfig,
     connectAcp,
     activateAcpProvider,

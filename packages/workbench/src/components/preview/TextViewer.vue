@@ -7,6 +7,9 @@
  *
  * 语言扩展按扩展名动态 import：workbench 只装了 javascript/json/markdown/html 四个
  * lang 包，`codeLanguageOfPath` 返回 null 时就纯文本渲染，不去猜一个没装的包。
+ *
+ * 高亮配色直接写 CSS 变量（见 buildHighlightStyle）：宿主翻主题时变量换值，
+ * CodeMirror 生成的样式规则原地生效，不需要重建编辑器或重新解析文档。
  */
 import { onUnmounted, ref, toRef, watch } from "vue";
 import { usePreviewText } from "../../lib/preview-content";
@@ -32,14 +35,46 @@ async function languageExtension(language: CodeLanguage | null): Promise<unknown
   return [];
 }
 
+/**
+ * 语法高亮配色：全部指向主题令牌变量，不落具体色值。
+ *
+ * 复用语义色而不是另开一套「代码专用」色板：预览面板和外壳同屏，两套相近但不
+ * 相等的绿/紫会立刻看出割裂。语义色在明/暗两态都已各自调过对比度。
+ */
+async function buildHighlightStyle(): Promise<unknown[]> {
+  const [{ HighlightStyle, syntaxHighlighting }, { tags }] = await Promise.all([
+    import("@codemirror/language"),
+    import("@lezer/highlight"),
+  ]);
+  const style = HighlightStyle.define([
+    { tag: [tags.comment, tags.lineComment, tags.blockComment, tags.docComment], color: "var(--dim2)", fontStyle: "italic" },
+    {
+      tag: [tags.keyword, tags.controlKeyword, tags.operatorKeyword, tags.definitionKeyword, tags.moduleKeyword, tags.modifier],
+      color: "var(--violet)",
+    },
+    { tag: [tags.string, tags.special(tags.string), tags.regexp, tags.character], color: "var(--mint)" },
+    { tag: [tags.number, tags.bool, tags.null, tags.atom, tags.unit], color: "var(--amber)" },
+    { tag: [tags.variableName, tags.propertyName, tags.attributeName], color: "var(--cyan)" },
+    { tag: [tags.function(tags.variableName), tags.function(tags.propertyName)], color: "var(--accent)" },
+    { tag: [tags.typeName, tags.className, tags.namespace, tags.self], color: "var(--cyan)" },
+    { tag: [tags.tagName, tags.angleBracket], color: "var(--orange)" },
+    { tag: [tags.heading, tags.strong], color: "var(--text)", fontWeight: "600" },
+    { tag: [tags.link, tags.url], color: "var(--accent)", textDecoration: "underline" },
+    { tag: [tags.operator, tags.punctuation, tags.separator, tags.bracket, tags.meta], color: "var(--dim)" },
+    { tag: tags.invalid, color: "var(--orange)" },
+  ]);
+  return [syntaxHighlighting(style)];
+}
+
 async function mountEditor(doc: string): Promise<void> {
   const container = host.value;
   if (!container) return;
   try {
-    const [{ EditorState }, viewModule, langExtensions] = await Promise.all([
+    const [{ EditorState }, viewModule, langExtensions, highlight] = await Promise.all([
       import("@codemirror/state"),
       import("@codemirror/view"),
       languageExtension(codeLanguageOfPath(props.tab.path)),
+      buildHighlightStyle(),
     ]);
     const { EditorView, lineNumbers, highlightSpecialChars } = viewModule;
     const state = EditorState.create({
@@ -50,13 +85,22 @@ async function mountEditor(doc: string): Promise<void> {
         EditorView.lineWrapping,
         EditorState.readOnly.of(true),
         EditorView.editable.of(false),
-        // 不引主题包：背景交给外层 Tailwind 令牌，只借用容器的字体与字号。
+        // 不引主题包：底色与文字都走外层 Tailwind 令牌，只借用容器的字体与字号。
         EditorView.theme({
-          "&": { backgroundColor: "transparent", height: "100%", fontSize: "12px" },
+          "&": { backgroundColor: "transparent", height: "100%", fontSize: "12px", color: "var(--text)" },
           ".cm-scroller": { fontFamily: "var(--font-mono, ui-monospace, monospace)" },
-          ".cm-gutters": { backgroundColor: "transparent", border: "none" },
+          ".cm-content": { caretColor: "var(--text)" },
+          ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--text)" },
+          "&.cm-focused": { outline: "none" },
+          ".cm-gutters": { backgroundColor: "transparent", border: "none", color: "var(--dim2)" },
+          ".cm-activeLine": { backgroundColor: "var(--panel-2)" },
+          ".cm-activeLineGutter": { backgroundColor: "transparent", color: "var(--text)" },
+          ".cm-selectionBackground, .cm-content ::selection": { backgroundColor: "var(--brand-3)" },
+          "&.cm-focused .cm-selectionBackground": { backgroundColor: "var(--brand-3)" },
+          ".cm-selectionMatch": { backgroundColor: "var(--brand-2)" },
         }),
         ...(langExtensions as never[]),
+        ...(highlight as never[]),
       ],
     });
     view = new EditorView({ state, parent: container }) as unknown as EditorViewInstance;

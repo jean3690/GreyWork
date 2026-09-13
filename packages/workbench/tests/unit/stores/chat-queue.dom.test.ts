@@ -11,10 +11,11 @@ describe("chat 发送队列（M5）", () => {
 
   it("enqueue / remove / clear 维护队列", () => {
     const chat = useChatStore();
+    const attachment = { id: "att-1", kind: "image" as const, name: "a.png", mime: "image/png", size: 4, path: "/tmp/a.png" };
     chat.enqueueCommand("第一条");
-    chat.enqueueCommand("第二条", ["a.png"]);
+    chat.enqueueCommand("第二条", [attachment]);
     expect(chat.commandQueue.length).toBe(2);
-    expect(chat.commandQueue[1].attachments).toEqual(["a.png"]);
+    expect(chat.commandQueue[1].attachments).toEqual([attachment]);
 
     chat.removeCommand(chat.commandQueue[0].id);
     expect(chat.commandQueue.length).toBe(1);

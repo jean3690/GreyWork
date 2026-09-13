@@ -10,11 +10,3 @@ export interface ModelProviderConfig {
   enabled: boolean;
   reasoningEffort?: ReasoningEffort;
 }
-
-export interface WebSearchProviderConfig {
-  id: string;
-  name: string;
-  endpoint?: string;
-  apiKeyEnv?: string;
-  enabled: boolean;
-}

@@ -1,6 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
 import { isTauriRuntime } from "@greywork/core";
-import { open } from "@tauri-apps/plugin-dialog";
 
 /** 可读取的本地文件源：统一 Tauri 磁盘文件与浏览器 File 对象。 */
 export interface WorkspaceFileSource {
@@ -50,9 +49,7 @@ export function pickWorkspaceFiles(multiple: boolean): Promise<WorkspaceFileSour
 }
 
 async function pickTauriFiles(multiple: boolean): Promise<WorkspaceFileSource[]> {
-  const selected = await open({ multiple, directory: false });
-  if (!selected) return [];
-  const paths = Array.isArray(selected) ? selected : [selected];
+  const paths = await invoke<string[]>("fs_pick_files", { purpose: "workspace", multiple });
   return paths.map((path) => ({
     name: basename(path),
     origin: path,
@@ -100,7 +97,7 @@ export function pickWorkspaceDirectory(): Promise<WorkspaceDirSource | null> {
 }
 
 async function pickTauriDirectory(): Promise<WorkspaceDirSource | null> {
-  const selected = await open({ directory: true });
+  const selected = await invoke<string | null>("pick_workspace_folder");
   if (!selected) return null;
   const raw =
     (await invoke<{ name: string; kind: string; size?: number; path: string }[]>("fs_list_dir", {
@@ -175,12 +172,28 @@ export function ensureDir(path: string): Promise<void> {
 
 /** 把二进制内容写入磁盘（Rust fs_write_binary，base64 载荷 ≤20MB）。 */
 export function writeBinaryFile(path: string, data: Uint8Array): Promise<void> {
+  return invoke("fs_write_binary", { path, dataBase64: bytesToBase64(data) });
+}
+
+/**
+ * Uint8Array → base64（分块，避免大文件一次 apply 撑爆调用栈）。
+ * 附件落库与产物落盘共用同一份实现，避免第二份分块逻辑各自出边界问题。
+ */
+export function bytesToBase64(data: Uint8Array): string {
   const bytes = new Uint8Array(data);
   let binary = "";
   for (let i = 0; i < bytes.length; i += 0x8000) {
     binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
   }
-  return invoke("fs_write_binary", { path, dataBase64: btoa(binary) });
+  return btoa(binary);
+}
+
+/** base64 → Uint8Array（与 bytesToBase64 对称）。 */
+export function base64ToBytes(base64: string): Uint8Array {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return bytes;
 }
 
 /**
@@ -189,11 +202,7 @@ export function writeBinaryFile(path: string, data: Uint8Array): Promise<void> {
  * 经 utf-8 解码后不可逆损坏，所以通道由调用侧按 kind 明确选定。
  */
 export async function readBinaryFile(path: string): Promise<Uint8Array> {
-  const base64 = await invoke<string>("fs_read_binary", { path });
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-  return bytes;
+  return base64ToBytes(await invoke<string>("fs_read_binary", { path }));
 }
 
 /** 浅层列目录（Rust fs_list_dir）。目录树按需逐层展开，不做递归扫描 —— 大仓库一次递归会卡死。 */

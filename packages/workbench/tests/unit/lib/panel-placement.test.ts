@@ -1,6 +1,6 @@
 // 弹出面板方向决策契约：下方装不下且上方更宽裕才向上弹；两侧都不够时取更宽的一侧。
 import { describe, expect, it } from "vitest";
-import { shouldOpenUp } from "@/lib/panel-placement";
+import { shouldAlignLeft, shouldOpenUp } from "@/lib/panel-placement";
 
 /** 720 高视口 + 24 高胶囊；anchorTop 决定胶囊在视口里的纵向位置。 */
 function space(anchorTop: number, panelHeight: number) {
@@ -30,5 +30,15 @@ describe("shouldOpenUp", () => {
   it("面板越高越容易翻转（同一位置按估算高决策）", () => {
     expect(shouldOpenUp(space(400, 120))).toBe(false); // below=284 装得下 120
     expect(shouldOpenUp(space(400, 320))).toBe(true); // 同位置 320 装不下 → 翻转
+  });
+});
+
+describe("shouldAlignLeft", () => {
+  it("右对齐会越过主区左边界时改为左对齐", () => {
+    expect(shouldAlignLeft(340, 200, 248)).toBe(true);
+  });
+
+  it("右对齐仍在主区内时保持右对齐", () => {
+    expect(shouldAlignLeft(700, 340, 248)).toBe(false);
   });
 });

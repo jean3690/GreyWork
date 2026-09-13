@@ -778,9 +778,13 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires network access to mcp.deepwiki.com"]
     async fn live_deepwiki_probe() {
-        let report = probe_http("https://mcp.deepwiki.com/mcp".to_string(), Vec::new(), Some(30))
-            .await
-            .expect("deepwiki probe");
+        let report = probe_http(
+            "https://mcp.deepwiki.com/mcp".to_string(),
+            Vec::new(),
+            Some(30),
+        )
+        .await
+        .expect("deepwiki probe");
         eprintln!(
             "deepwiki: {:?} v{:?} in {}ms",
             report.server_name, report.server_version, report.duration_ms

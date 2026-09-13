@@ -109,7 +109,7 @@ async fn run_one(db: &Db, item: &AutomationDueDto) -> Result<String, String> {
         &api_key_env,
         vec![llm::LlmChatMessage {
             role: "user".into(),
-            content: item.intent.clone(),
+            content: serde_json::json!(item.intent.clone()),
         }],
         "auto",
     )

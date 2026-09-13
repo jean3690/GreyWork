@@ -1,5 +1,5 @@
 //! 共享 HTTP 客户端构造 + 响应体读取超时。
-//! 此前 web_search / llm 各自内联同一段 builder；读超时统一收口——reqwest 的
+//! 此前各处各自内联同一段 builder；读超时统一收口——reqwest 的
 //! connect_timeout 只覆盖 TCP 建连，服务端 accept 后挂死不回包时 .json()/.text()
 //! 会永久悬挂 async command，必须显式包超时。
 

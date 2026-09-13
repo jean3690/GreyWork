@@ -4,12 +4,13 @@
  *
  * - 首帧/重渲前给脉冲骨架占位；渲染成功插入 SVG；
  * - 渲染失败降级为原文代码块 + 一句原因（错误信息与原文都走文本插值，不落 HTML）；
- * - 宿主主题翻转（data-theme 变更，含 system 跟随）自动重渲；
+ * - 宿主明暗翻转（订阅 lib/theme 的 APPEARANCE_EVENT）自动重渲；
  * - code 变化（消息内容更新）时重渲并清掉旧图，避免展示过期图。
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { RotateCcw, ZoomIn, ZoomOut } from "lucide-vue-next";
 import { renderMermaid } from "../lib/mermaid";
+import { isDarkMode, watchTheme } from "../lib/theme";
 
 const props = defineProps<{ code: string }>();
 
@@ -30,12 +31,7 @@ let renderSeq = 0;
 let naturalPx = 0;
 /** 曾经成功渲染过（重渲时保留旧图直到新图就绪，避免骨架闪烁）。 */
 let hadContent = false;
-let observer: MutationObserver | null = null;
-
-/** 与 univer-host.isDarkMode 同一约定：仅显式 light 视为浅色，system 视同深色。 */
-function isDark(): boolean {
-  return document.documentElement.dataset.theme !== "light";
-}
+let stopWatchTheme: (() => void) | null = null;
 
 /**
  * mermaid 输出的 svg 自带 width:100%（响应式），但宽图会因此被压扁到容器宽，
@@ -75,7 +71,7 @@ async function draw(): Promise<void> {
   if (!hadContent) state.value = "pending";
   error.value = "";
   try {
-    const { svg } = await renderMermaid(props.code, isDark());
+    const { svg } = await renderMermaid(props.code, isDarkMode());
     if (!alive || seq !== renderSeq) return;
     if (el) {
       el.innerHTML = svg;
@@ -94,8 +90,7 @@ async function draw(): Promise<void> {
 
 onMounted(() => {
   void draw();
-  observer = new MutationObserver(() => void draw());
-  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  stopWatchTheme = watchTheme(() => void draw());
 });
 
 watch(
@@ -108,7 +103,8 @@ watch(
 
 onBeforeUnmount(() => {
   alive = false;
-  observer?.disconnect();
+  stopWatchTheme?.();
+  stopWatchTheme = null;
 });
 </script>
 

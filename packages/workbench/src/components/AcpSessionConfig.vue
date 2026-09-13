@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * ACP 会话配置选择簇（模型 / 思考强度 / 会话模式等）——渲染在输入卡底栏、发送按钮旁。
+ * ACP 会话配置选择簇（模型 / 思考强度 / 会话模式等）——单独渲染在输入框下方，不与发送按钮同排。
  * 数据源 agent.acpConfigOptions：agent 在 session/new 暴露什么就渲染什么（select 型）。
  * 状态：
  *  - 连接中 → 状态胶囊；
@@ -71,7 +71,7 @@ const connecting = computed(() => agent.acpConnecting || agent.acpStatus === "co
     </span>
     <template v-else>
       <AgentScopeSelect />
-      <AcpModelSelector option-id="model" placeholder="Use CLI model" icon="magic" />
+      <AcpModelSelector option-id="model" placeholder="使用 CLI 模型" icon="magic" />
       <AcpModelSelector
         v-for="extra in extraOptions"
         :key="extra.entry.id"

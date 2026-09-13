@@ -26,18 +26,9 @@ describe("grey router", () => {
     expect(await navigate("/team")).toBe("/team");
   });
 
-  it("settings 缺省段回落到 agent", async () => {
-    expect(await navigate("/settings")).toBe("/settings/agent");
-  });
-
-  it("settings 子页放行并暴露 section 参数", async () => {
-    const router = createAppRouter();
-    const app = createApp(defineComponent({ render: () => null }));
-    app.use(router);
-    await router.push("/settings/appearance");
-    await router.isReady();
-    expect(router.currentRoute.value.path).toBe("/settings/appearance");
-    expect(router.currentRoute.value.params.section).toBe("appearance");
+  it("设置已改为弹窗：/settings 不再是路由，按未匹配路径回落", async () => {
+    expect(await navigate("/settings")).toBe("/guid");
+    expect(await navigate("/settings/appearance")).toBe("/guid");
   });
 
   it("未匹配路径回落到 /guid", async () => {

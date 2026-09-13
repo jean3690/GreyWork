@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
 import { useVirtualizer } from "@tanstack/vue-virtual";
 import { MCP_SKIP_REASONS } from "../lib/mcp-labels";
@@ -9,12 +10,17 @@ import { useChatStore } from "../stores/chat";
 import { useSessionStore } from "../stores/session";
 import { useSettingsStore } from "../stores/settings";
 import { useWorkspaceStore } from "../stores/workspace";
-import type { ThreadMessage } from "../types";
+import type { Attachment, ThreadMessage } from "../types";
 import AcpSessionConfig from "../components/AcpSessionConfig.vue";
 import AgentProviderBar from "../components/AgentProviderBar.vue";
 import Icon from "../components/Icon.vue";
 import ConversationMessage from "../components/ConversationMessage.vue";
 import PermissionCard from "../components/chat/PermissionCard.vue";
+import AttachmentTray from "../components/chat/AttachmentTray.vue";
+import SlashCommandMenu from "../components/chat/SlashCommandMenu.vue";
+import { useAttachments } from "../lib/use-attachments";
+import { useSlashCommands } from "../lib/use-slash-commands";
+import { materializeAttachments } from "../state/attachment-library";
 
 /**
  * GreyWork 风格对话页：消息流 + 底部输入卡。
@@ -22,6 +28,7 @@ import PermissionCard from "../components/chat/PermissionCard.vue";
  */
 const route = useRoute();
 const router = useRouter();
+const { t } = useI18n();
 const agent = useAgentStore();
 const runs = useRunsStore();
 const chat = useChatStore();
@@ -145,26 +152,84 @@ watch(
 /** 回合活跃：LLM 流 / ACP 回合 / ACP 建会话（首个文本与思考都还没来时的窗口）。 */
 const turnActive = computed(() => chat.busy || agent.acpBusy || agent.acpConnecting || agent.acpStatus === "connecting");
 
-function send(): void {
-  const text = draft.value.trim();
-  if (!text || chat.busy || agent.acpBusy || agent.acpConnecting || agent.acpStatus === "connecting") return;
+/** 图片可用性：本地 LLM 无能力声明（交给供应商报错），ACP 以 agent 声明为准。 */
+const imagesAllowed = computed(() => !agent.routeToAcp || agent.acpImageSupport !== false);
+const {
+  items: attachmentItems,
+  dragging: attachmentDragging,
+  full: attachmentsFull,
+  attachEl,
+  pick: pickAttachmentFiles,
+  onPaste: onComposerPaste,
+  onDragOver: onComposerDragOver,
+  onDragLeave: onComposerDragLeave,
+  onDrop: onComposerDrop,
+  remove: removeAttachment,
+  take: takeAttachments,
+} = useAttachments(() => sessionId.value || chat.activeThreadId, { imagesAllowed: () => imagesAllowed.value });
+
+/** 斜杠命令菜单：内置动作 + ACP 命令；发送复用既有 send() 语义（附件 / 计划模式 / 后端路由）。 */
+const textareaEl = ref<HTMLTextAreaElement | null>(null);
+const {
+  open: slashOpen,
+  items: slashItems,
+  activeIndex: slashActiveIndex,
+  activeOptionId: slashActiveOptionId,
+  handleKeydown: handleSlashKeydown,
+  select: selectSlashCommand,
+  dismiss: dismissSlashMenu,
+} = useSlashCommands({
+  draft,
+  textarea: textareaEl,
+  onSend: (text) => {
+    draft.value = text;
+    send();
+  },
+  canSend: () => !turnActive.value,
+});
+
+/**
+ * 带附件的派发：先把草稿落进会话附件库（路径化存储），再按后端分流。
+ * 落库失败会以内联数据降级，附件不会丢。
+ */
+async function dispatchWithAttachments(text: string, items: readonly Attachment[]): Promise<void> {
+  const threadId = sessionId.value || chat.activeThreadId;
+  const ready = items.length ? await materializeAttachments(threadId, items) : [...items];
   if (agent.routeToAcp) {
     if (settings.planMode) {
       // 计划模式：先挂起计划卡，确认后才真正派发（ACP）。
-      agent.beginAcpPlan(text);
+      agent.beginAcpPlan(text, ready);
     } else {
-      void agent.dispatchToAcp(text);
+      await agent.dispatchToAcp(text, ready);
     }
-  } else if (runs.maybeOrchestrate(text)) {
+  } else if (ready.length === 0 && runs.maybeOrchestrate(text)) {
     // 编排意图：并行子任务在 TeamView 看板跟踪（goal 不入本会话消息流）。
+    // 带附件时跳过编排：planner 只做纯文本拆解、子任务各建独立会话，附件无法随行。
   } else {
-    chat.submitText(text);
+    chat.submitText(text, ready);
   }
+}
+
+function send(): void {
+  const text = draft.value.trim();
+  // 允许「只有附件、没有文字」：图片本身就是完整意图（截图问答的常态）。
+  if (
+    (!text && attachmentItems.value.length === 0) ||
+    chat.busy ||
+    agent.acpBusy ||
+    agent.acpConnecting ||
+    agent.acpStatus === "connecting"
+  )
+    return;
+  const items = attachmentItems.value.length ? takeAttachments() : [];
+  void dispatchWithAttachments(text, items);
   draft.value = "";
   scrollToBottom();
 }
 
 function onKeydown(event: KeyboardEvent): void {
+  // 斜杠菜单打开时先由它消费方向键 / Enter / Tab / Esc（含 IME 放行）。
+  if (handleSlashKeydown(event)) return;
   if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
     send();
@@ -257,35 +322,100 @@ function goBack(): void {
     </div>
 
     <div class="shrink-0 border-t border-line-2 bg-panel px-4 py-3 sm:px-6">
-      <div class="mx-auto flex w-full max-w-[860px] flex-col gap-2">
+      <div class="mx-auto flex w-full max-w-[860px] flex-col gap-2.5">
         <PermissionCard />
         <AgentProviderBar />
-        <div class="flex w-full flex-col gap-2 rounded-[16px] border border-line bg-panel-2 p-2.5">
+        <div
+          ref="attachEl"
+          data-attachment-dropzone
+          data-testid="composer-card"
+          class="relative flex w-full flex-col gap-2 rounded-[16px] border bg-panel-2 p-3 shadow-[0_8px_24px_rgba(0,0,0,0.1)] transition-[border-color,box-shadow] focus-within:border-cyan/50 focus-within:shadow-[0_10px_28px_rgba(0,0,0,0.14)]"
+          :class="attachmentDragging ? 'border-cyan ring-2 ring-cyan/40' : 'border-line-2'"
+          @dragover="onComposerDragOver"
+          @dragleave="onComposerDragLeave"
+          @drop="onComposerDrop"
+        >
+          <AttachmentTray :items="attachmentItems" @remove="removeAttachment" />
           <textarea
+            ref="textareaEl"
             v-model="draft"
             rows="3"
-            class="w-full resize-none bg-transparent px-2 py-1 text-[13.5px] leading-relaxed text-foreground outline-none placeholder:text-dim2"
+            role="combobox"
+            aria-autocomplete="list"
+            :aria-expanded="slashOpen"
+            :aria-controls="slashOpen ? 'slash-command-menu' : undefined"
+            :aria-activedescendant="slashActiveOptionId"
+            class="min-h-[76px] w-full resize-none bg-transparent px-2 py-1 text-[14px] leading-relaxed text-foreground outline-none placeholder:text-dim"
             placeholder="输入指令，Enter 发送，Shift+Enter 换行…"
             :aria-label="'发送消息'"
             @keydown="onKeydown"
+            @blur="dismissSlashMenu"
+            @paste="onComposerPaste"
           />
-          <div class="flex items-center gap-2">
-            <span class="shrink-0 pl-2 text-[11px] text-dim2">
-              {{ turnActive ? "处理中…" : "就绪" }}
-            </span>
-            <!-- 配置簇在自己这一列里换行；发送是独立 flex 项且 shrink-0，配置项再多也不会把它顶到下一行 -->
-            <div class="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-1.5">
-              <AcpSessionConfig />
+          <div class="flex min-w-0 flex-wrap items-center gap-1.5 border-t border-line/70 px-2 pt-2" data-testid="composer-config-row">
+            <span v-if="agent.routeToAcp" class="mr-0.5 text-[10px] font-medium tracking-[0.08em] text-dim2">会话配置</span>
+            <AcpSessionConfig />
+          </div>
+          <div class="flex items-center justify-between gap-2" data-testid="composer-action-row">
+            <div class="flex min-w-0 items-center gap-1.5">
+              <button
+                type="button"
+                data-testid="composer-attach"
+                class="grid size-6 shrink-0 cursor-pointer place-items-center rounded-[6px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40"
+                :disabled="turnActive || attachmentsFull"
+                :aria-label="t('chat.uploadFile')"
+                :title="imagesAllowed ? t('chat.uploadFile') : t('chat.attachImagesUnsupported')"
+                @click="pickAttachmentFiles"
+              >
+                <Icon name="plus" :size="14" />
+              </button>
+              <span class="shrink-0 text-[11px] text-dim2">
+                {{ turnActive ? "处理中…" : "就绪" }}
+              </span>
+              <button
+                v-if="settings.planMode"
+                type="button"
+                data-testid="composer-plan-chip"
+                class="flex h-5 shrink-0 cursor-pointer items-center rounded-full border border-line bg-panel px-2 text-[10.5px] text-dim transition-colors hover:text-foreground"
+                :title="t('chat.planModeTitle')"
+                @click="settings.planMode = false"
+              >
+                {{ t("chat.planMode") }}
+              </button>
+              <button
+                v-if="chat.speedBoost"
+                type="button"
+                data-testid="composer-speed-chip"
+                class="flex h-5 shrink-0 cursor-pointer items-center rounded-full border border-line bg-panel px-2 text-[10.5px] text-dim transition-colors hover:text-foreground"
+                :title="t('chat.speedTitle')"
+                @click="chat.speedBoost = false"
+              >
+                {{ t("chat.speedBoost") }}
+              </button>
             </div>
             <button
-              class="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-[10px] bg-accent px-3 text-[12px] font-medium text-accent-ink transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40"
-              :disabled="!draft.trim() || chat.busy || agent.acpBusy || agent.acpConnecting || agent.acpStatus === 'connecting'"
+              data-testid="composer-send"
+              class="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-[10px] border border-accent bg-accent px-3 text-[12px] font-medium text-accent-ink transition-[background-color,border-color,color,opacity] hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:border-line-2 disabled:bg-panel disabled:text-dim2 disabled:opacity-100"
+              :disabled="
+                (!draft.trim() && attachmentItems.length === 0) ||
+                chat.busy ||
+                agent.acpBusy ||
+                agent.acpConnecting ||
+                agent.acpStatus === 'connecting'
+              "
               @click="send"
             >
               发送
               <Icon name="send-one" :size="13" />
             </button>
           </div>
+          <SlashCommandMenu
+            v-if="slashOpen"
+            :items="slashItems"
+            :active-index="slashActiveIndex"
+            @select="selectSlashCommand"
+            @update:active-index="slashActiveIndex = $event"
+          />
         </div>
       </div>
     </div>

@@ -28,6 +28,15 @@ describe("specToHtml", () => {
     expect(html).not.toContain("<table>");
     expect(html).not.toContain('class="kpi"');
   });
+
+  it("dark 选项产出暗色板（浅色板不受影响）", () => {
+    const dark = specToHtml({ title: "T" }, { dark: true });
+    const light = specToHtml({ title: "T" });
+    expect(dark).toContain("color-scheme: dark");
+    expect(dark).toContain("background: #000000");
+    expect(light).toContain("color-scheme: light");
+    expect(light).toContain("background: #fafaf9");
+  });
 });
 
 describe("extractDashboardTitle", () => {

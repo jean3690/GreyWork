@@ -22,7 +22,7 @@ vi.mock("@greywork/acp", () => ({
   createAcpClient: () =>
     ({
       isAvailable: () => h.isAvailable(),
-      startAgent: (cmd: string, tier: string) => h.startAgent(cmd, tier),
+      startAgent: (cmd: string, tier: string, sandbox?: string, workspace?: string | null) => h.startAgent(cmd, tier, sandbox, workspace),
       openSession: (handle: number, cwd: string, mcpServers?: unknown) => h.openSession(handle, cwd, mcpServers),
       probeMcp: (config: unknown) => h.probeMcp(config),
       setSessionConfig: (handle: number, configId: string, value: string | boolean) => h.setSessionConfig(handle, configId, value),
@@ -36,6 +36,13 @@ vi.mock("@greywork/acp", () => ({
       },
     }) as never,
   desktopHomeDir: () => h.homeDir(),
+}));
+vi.mock("@/lib/workspace-dir", () => ({
+  resolveWorkspaceDir: async () => {
+    const dir = await h.homeDir();
+    if (!dir) throw new Error("无法解析工作区目录");
+    return dir;
+  },
 }));
 
 import { useAgentStore } from "@/stores/agent";
@@ -707,6 +714,47 @@ describe("ACP 停止清理", () => {
   });
 });
 
+describe("ACP 命令目录", () => {
+  it("commands 事件归一化入档：剥前导斜杠、去重、脏条目丢弃", async () => {
+    h.startAgent.mockResolvedValue(7);
+    h.openSession.mockResolvedValue({ sessionId: "session-1", configOptions: [] });
+    const agentStore = useAgentStore();
+    await agentStore.connectAcp();
+
+    emit({
+      kind: "commands",
+      payload: {
+        sessionId: "session-1",
+        availableCommands: [
+          { name: "/compact", description: "压缩上下文" },
+          { name: "compact", description: "重复条目" },
+          { name: "bad name", description: "名含空白" },
+          null,
+          { name: "deploy", description: "部署", input: { hint: "环境名" } },
+        ],
+      },
+    });
+
+    expect(agentStore.acpCommands).toEqual([
+      { name: "compact", description: "压缩上下文" },
+      { name: "deploy", description: "部署", input: { hint: "环境名" } },
+    ]);
+  });
+
+  it("会话更替即清空陈旧目录（切回本地 LLM）", async () => {
+    h.startAgent.mockResolvedValue(7);
+    h.openSession.mockResolvedValue({ sessionId: "session-1", configOptions: [] });
+    h.stop.mockResolvedValue(undefined);
+    const agentStore = useAgentStore();
+    await agentStore.connectAcp();
+    emit({ kind: "commands", payload: { availableCommands: [{ name: "compact", description: "压缩上下文" }] } });
+    expect(agentStore.acpCommands).toHaveLength(1);
+
+    await agentStore.switchToLocalLlm();
+    await vi.waitFor(() => expect(agentStore.acpCommands).toEqual([]));
+  });
+});
+
 describe("ACP turn 语义与语义事件", () => {
   it("prompt 记录 turnId，stopAcp 按 turnId 取消单回合", async () => {
     h.prompt.mockResolvedValue({ turnId: 42 });
@@ -878,7 +926,7 @@ describe("权限临时降级与每工作区配置记忆", () => {
 
     const agentStore = useAgentStore();
     await agentStore.dispatchToAcp("跑一下");
-    expect(h.startAgent).toHaveBeenCalledWith("opencode acp", "read-only");
+    expect(h.startAgent).toHaveBeenCalledWith("opencode acp", "read-only", "auto", "/home/test");
   });
 
   it("setTempReadOnly 把新档位推给在途 handle，回升同理", async () => {
@@ -1084,5 +1132,63 @@ describe("MCP 声明与探活", () => {
     const unavailable = await agentStore.probeMcpServer(config);
     expect(unavailable.error).toBeTruthy();
     expect(unavailable.report).toBeUndefined();
+  });
+});
+
+describe("ACP 后端图标（前端覆盖层）", () => {
+  /** node 环境注入内存 localStorage：图标 overlay 走 createJsonStorage 落盘。 */
+  function injectStorage(): void {
+    const backing: Record<string, string> = {};
+    const storage = {
+      getItem: (key: string) => backing[key] ?? null,
+      setItem: (key: string, value: string) => {
+        backing[key] = value;
+      },
+      removeItem: (key: string) => {
+        delete backing[key];
+      },
+      clear: () => {
+        for (const key of Object.keys(backing)) delete backing[key];
+      },
+      key: (index: number) => Object.keys(backing)[index] ?? null,
+      get length() {
+        return Object.keys(backing).length;
+      },
+    } as Storage;
+    vi.stubGlobal("localStorage", storage);
+    vi.stubGlobal("window", { localStorage: storage });
+  }
+
+  beforeEach(injectStorage);
+
+  it("预设后端也能改图标，且换 store（≈重启按真源重建目录）后仍在", () => {
+    const store = useAgentStore();
+    const preset = store.agentProviders[0]!;
+    expect(preset.icon).toBeUndefined();
+
+    store.setAgentProviderIcon(preset.id, "lightning");
+    expect(store.agentProviders.find((provider) => provider.id === preset.id)?.icon).toBe("lightning");
+
+    // SQLite 的 agent_providers 没有图标列：换 store 等于重跑一次 mergeProviders，靠 overlay 补回
+    setActivePinia(createPinia());
+    const restarted = useAgentStore();
+    expect(restarted.agentProviders.find((provider) => provider.id === preset.id)?.icon).toBe("lightning");
+  });
+
+  it("清空图标回落到兜底；自配后端删除时连同图标映射一起清", async () => {
+    const store = useAgentStore();
+    const preset = store.agentProviders[0]!;
+    store.setAgentProviderIcon(preset.id, "earth");
+    store.setAgentProviderIcon(preset.id, null);
+    expect(store.agentProviders.find((provider) => provider.id === preset.id)?.icon).toBeUndefined();
+
+    expect(store.addAgentProvider("My Agent", "my-agent acp", "magic")).toBeNull();
+    const custom = store.agentProviders.find((provider) => provider.name === "My Agent")!;
+    expect(custom.icon).toBe("magic");
+
+    await store.removeAgentProvider(custom.id);
+    setActivePinia(createPinia());
+    const restarted = useAgentStore();
+    expect(restarted.agentProviders.some((provider) => provider.icon === "magic")).toBe(false);
   });
 });

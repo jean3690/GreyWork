@@ -15,7 +15,10 @@
   --muted-foreground: var(--dim);
   /* --accent/--accent-ink 的唯一真源在 tokens.css（GreyWork 蓝）。
      这里不再重复声明 —— 曾经 shadcn 用 --accent 表达 hover 面（panel-2），
-     与 tokens.css 的主行动色撞名，胜负取决于 import 顺序。hover 面请用 --secondary。 */
+     与 tokens.css 的主行动色撞名，胜负取决于 import 顺序。hover 面请用 --secondary。
+     --accent-foreground 只是个转发：tailwind.css 的 @theme inline 会取它生成
+     text-accent-foreground，缺了它那条工具类会解析成空色。 */
+  --accent-foreground: var(--accent-ink);
   --destructive: var(--orange);
   --border: var(--line);
   --input: var(--line-2);

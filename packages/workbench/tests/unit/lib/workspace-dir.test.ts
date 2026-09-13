@@ -6,19 +6,21 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
-import type * as GreyWorkAcp from "@greywork/acp";
+import { isTauriRuntime } from "@greywork/core";
+import type * as GreyWorkCore from "@greywork/core";
 
 const h = vi.hoisted(() => ({
   conversationFolder: vi.fn<() => string | null>(),
   workspaceFolder: vi.fn<() => string | null>(),
-  homeDir: vi.fn<() => Promise<string | null>>(),
+  invoke: vi.fn(),
 }));
 
 vi.mock("@/lib/conversation-folder", () => ({ activeConversationFolder: () => h.conversationFolder() }));
 vi.mock("@/lib/artifact-dir", () => ({ activeWorkspaceFolder: () => h.workspaceFolder() }));
-vi.mock("@greywork/acp", async (importOriginal) => ({
-  ...(await importOriginal<typeof GreyWorkAcp>()),
-  desktopHomeDir: () => h.homeDir(),
+vi.mock("@tauri-apps/api/core", () => ({ invoke: (...args: unknown[]) => h.invoke(...args) }));
+vi.mock("@greywork/core", async (importOriginal) => ({
+  ...(await importOriginal<typeof GreyWorkCore>()),
+  isTauriRuntime: vi.fn(),
 }));
 
 import { resolveWorkspaceRoot } from "@/lib/workspace-dir";
@@ -29,7 +31,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   h.conversationFolder.mockReturnValue(null);
   h.workspaceFolder.mockReturnValue(null);
-  h.homeDir.mockResolvedValue("/home/jean");
+  h.invoke.mockResolvedValue("/home/jean/.greyWork");
+  vi.mocked(isTauriRuntime).mockReturnValue(true);
 });
 
 describe("resolveWorkspaceRoot", () => {
@@ -50,17 +53,17 @@ describe("resolveWorkspaceRoot", () => {
     useSettingsStore().workspaceDir = "/opt/configured";
 
     await expect(resolveWorkspaceRoot()).resolves.toEqual({ dir: "/opt/configured", bound: false });
-    // 兜底不该去问主目录：设置项已经给出答案
-    expect(h.homeDir).not.toHaveBeenCalled();
+    expect(h.invoke).not.toHaveBeenCalledWith("store_default_root");
   });
 
-  it("设置项也为空时回落桌面主目录，仍标记 bound=false", async () => {
-    await expect(resolveWorkspaceRoot()).resolves.toEqual({ dir: "/home/jean", bound: false });
+  it("都没绑定时回落宿主私有数据根，仍标记 bound=false", async () => {
+    await expect(resolveWorkspaceRoot()).resolves.toEqual({ dir: "/home/jean/.greyWork", bound: false });
+    expect(h.invoke).toHaveBeenCalledWith("store_default_root");
   });
 
-  it("主目录都解析不出来时抛错，而不是返回空路径", async () => {
-    h.homeDir.mockResolvedValue(null);
-
+  it("浏览器态没有本机工作区时抛错，而不是返回伪路径", async () => {
+    vi.mocked(isTauriRuntime).mockReturnValue(false);
     await expect(resolveWorkspaceRoot()).rejects.toThrow();
+    expect(h.invoke).not.toHaveBeenCalled();
   });
 });

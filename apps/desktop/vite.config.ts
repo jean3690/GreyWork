@@ -49,6 +49,11 @@ export default defineConfig(async () => ({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/market-api\/mcp/, ""),
       },
+      "/market-api/plugins": {
+        target: "https://raw.githubusercontent.com",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/market-api\/plugins/, "/jean3690/greywork-plugin-market/main"),
+      },
     },
     watch: {
       // 3. tell Vite to ignore watching `src-tauri`

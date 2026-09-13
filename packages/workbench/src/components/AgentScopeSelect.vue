@@ -78,7 +78,7 @@ function openFullConfirm(): void {
 }
 
 /** 面板估算高：每档一项约 60px（档位名 + 两行说明）+ 内边距与边框 12；实测 zh-CN 三档 ≈184。 */
-const { openUp, place: placePanel } = usePanelPlacement(rootEl, PERMISSION_TIERS.length * 60 + 12);
+const { openUp, alignLeft, place: placePanel } = usePanelPlacement(rootEl, PERMISSION_TIERS.length * 60 + 12, 200);
 
 /** Full Access 确认对话框（pendingFull 为 true 且值合法才提交）。 */
 const confirmingFull = ref(false);
@@ -140,7 +140,7 @@ function cancelFull(): void {
       @click="toggle"
     >
       <Icon name="shield" :size="11" class="text-dim" />
-      <span class="max-w-[110px] truncate whitespace-nowrap">{{ currentLabel }}</span>
+      <span class="max-w-[140px] truncate whitespace-nowrap">权限 · {{ currentLabel }}</span>
       <Icon name="down" :size="10" class="text-dim2" />
     </button>
 
@@ -148,8 +148,8 @@ function cancelFull(): void {
       v-if="open"
       ref="menuEl"
       role="menu"
-      class="absolute right-0 z-30 w-[200px] rounded-[10px] border border-line bg-popover p-1 shadow-lg"
-      :class="openUp ? 'bottom-full mb-1' : 'top-full mt-1'"
+      class="absolute z-40 w-[200px] rounded-[10px] border border-line bg-popover p-1 shadow-lg"
+      :class="[openUp ? 'bottom-full mb-1' : 'top-full mt-1', alignLeft ? 'left-0' : 'right-0']"
       @keydown="onMenuKeydown"
     >
       <button

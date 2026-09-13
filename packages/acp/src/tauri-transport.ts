@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AcpEventEnvelope,
+  AcpPromptUnit,
   AcpSandboxMode,
   AcpSessionConfigOption,
   AcpSessionInfo,
@@ -55,8 +56,8 @@ export class TauriIpcTransport implements AcpTransport {
     return response.configOptions ?? [];
   }
 
-  async prompt(handle: number, text: string): Promise<{ turnId: number }> {
-    return invoke<{ turnId: number }>("acp_send", { handle, text });
+  async prompt(handle: number, text: string, units: readonly AcpPromptUnit[] = []): Promise<{ turnId: number }> {
+    return invoke<{ turnId: number }>("acp_send", { handle, text, units });
   }
 
   async stop(handle: number, turnId?: number): Promise<void> {

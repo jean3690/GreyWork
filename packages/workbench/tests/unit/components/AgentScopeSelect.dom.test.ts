@@ -115,4 +115,25 @@ describe("AgentScopeSelect · 面板方向", () => {
     expect(panel.exists()).toBe(true);
     expect(panel.classes()).not.toContain("bottom-full");
   });
+
+  it("右对齐会越过主区左边界时改为向右展开，避免被侧栏裁掉", async () => {
+    const main = document.createElement("main");
+    document.body.appendChild(main);
+    const rect = (left: number, right: number, top = 400, bottom = 424): DOMRect =>
+      ({ left, right, top, bottom, width: right - left, height: bottom - top, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      return this.tagName === "MAIN" ? rect(248, 1000, 42, 820) : rect(260, 340);
+    });
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const wrapper = mount(AgentScopeSelect, { attachTo: main, global: { plugins: [pinia, i18n] } });
+
+    await trigger(wrapper).trigger("click");
+    const panel = wrapper.get('[role="menu"]');
+    expect(panel.classes()).toContain("left-0");
+    expect(panel.classes()).not.toContain("right-0");
+
+    wrapper.unmount();
+    main.remove();
+  });
 });

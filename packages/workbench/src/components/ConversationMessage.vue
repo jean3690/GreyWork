@@ -6,23 +6,44 @@
  * 每段思考各自折叠，工具批次就地展开细节。没有 segments 的消息（历史档 / 纯文本回复）
  * 退化为一段正文，不需要单独一套渲染路径。
  */
-import { computed } from "vue";
+import { computed, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import MarkdownText from "./MarkdownText.vue";
 import ArtifactCards from "./ArtifactCards.vue";
 import StreamText from "./chat/StreamText.vue";
 import ThinkingBlock from "./chat/ThinkingBlock.vue";
 import ToolTimeline from "./chat/ToolTimeline.vue";
 import PlanCard from "./chat/PlanCard.vue";
+import Icon from "./Icon.vue";
 import { useAgentStore } from "../stores/agent";
 import { useChatStore } from "../stores/chat";
-import type { MessageSegment, ThreadMessage, ToolActivity } from "../types";
+import { usePreviewStore } from "../stores/preview";
+import { useAttachmentThumbs } from "../lib/use-attachments";
+import type { Attachment, MessageSegment, ThreadMessage, ToolActivity } from "../types";
 
 const props = withDefaults(defineProps<{ message: ThreadMessage; threadId?: string }>(), { threadId: "" });
 
+const { t } = useI18n();
 const agent = useAgentStore();
 const chat = useChatStore();
+const preview = usePreviewStore();
 
 const message = computed(() => props.message);
+
+/** 附件缩略图（磁盘附件 → blob URL，模块级 LRU）；读不到时渲染占位。 */
+const attachmentList = computed<readonly Attachment[]>(() => message.value.attachments ?? []);
+const thumbs = useAttachmentThumbs(() => attachmentList.value);
+
+/** 浏览器态没有磁盘通道：图片点击退化为组件内灯箱（桌面态走预览面板）。 */
+const lightbox = ref<string | null>(null);
+
+function openAttachment(item: Attachment): void {
+  if (item.path) {
+    preview.open(item.path, item.name, "disk");
+    return;
+  }
+  if (item.kind === "image" && item.dataUrl) lightbox.value = item.dataUrl;
+}
 
 /** 流式中的消息走 StreamText 纯文本渲染，回合结束回落 Markdown（避免每 40ms 全量重解析）。 */
 const isStreaming = computed(() => chat.streamingMessageId === message.value.id || agent.acpStreamId === message.value.id);
@@ -65,7 +86,40 @@ function timeLabel(ts: number): string {
       v-if="message.role === 'user'"
       class="msg__bubble ml-auto max-w-[78%] rounded-tl-[16px] rounded-tr-[16px] rounded-br-[4px] rounded-bl-[16px] bg-bubble px-4 py-3"
     >
-      <p class="whitespace-pre-wrap text-[13.5px] leading-[1.7] text-foreground [overflow-wrap:anywhere]">{{ message.content }}</p>
+      <div class="flex flex-col gap-2">
+        <div v-if="attachmentList.length" data-testid="message-attachments" class="flex flex-wrap items-center gap-2">
+          <button
+            v-for="item in attachmentList"
+            :key="item.id"
+            type="button"
+            class="cursor-pointer overflow-hidden rounded-[8px] border border-line-2 text-left transition-opacity hover:opacity-90"
+            :title="item.name"
+            :aria-label="item.name"
+            :data-testid="item.kind === 'image' ? 'message-attachment-image' : 'message-attachment-file'"
+            @click="openAttachment(item)"
+          >
+            <img
+              v-if="item.kind === 'image' && thumbs[item.id]"
+              :src="thumbs[item.id] as string"
+              :alt="item.name"
+              class="max-h-[180px] max-w-[240px] object-cover"
+            />
+            <span
+              v-else-if="item.kind === 'image'"
+              class="grid h-[72px] w-[96px] place-items-center bg-panel-2 px-2 text-center text-[10px] leading-tight text-dim2"
+            >
+              {{ t("chat.attachUnavailable") }}
+            </span>
+            <span v-else class="flex max-w-[220px] items-center gap-1.5 bg-panel px-2 py-1.5">
+              <Icon name="file" :size="12" class="shrink-0 text-dim" />
+              <span class="truncate text-[11.5px] text-foreground">{{ item.name }}</span>
+            </span>
+          </button>
+        </div>
+        <p v-if="message.content" class="whitespace-pre-wrap text-[13.5px] leading-[1.7] text-foreground [overflow-wrap:anywhere]">
+          {{ message.content }}
+        </p>
+      </div>
     </div>
     <div v-else class="flex max-w-[92%] flex-col gap-2.5">
       <PlanCard v-if="message.planPending" :thread-id="threadId || chat.activeThreadId" :message="message" />
@@ -94,4 +148,15 @@ function timeLabel(ts: number): string {
       <span class="text-[10px] text-dim2">{{ timeLabel(message.ts) }}</span>
     </div>
   </article>
+  <!-- 浏览器态图片附件没有磁盘通道可开预览面板，用组件内灯箱兜底。 -->
+  <Teleport to="body">
+    <div
+      v-if="lightbox"
+      data-testid="attachment-lightbox"
+      class="fixed inset-0 z-50 grid cursor-zoom-out place-items-center bg-black/70 p-6"
+      @click="lightbox = null"
+    >
+      <img :src="lightbox" alt="" class="max-h-full max-w-full rounded-[10px] object-contain" />
+    </div>
+  </Teleport>
 </template>

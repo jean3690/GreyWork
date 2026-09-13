@@ -7,13 +7,14 @@ import { buildLlmHistory, selectLlmProvider } from "./chat-llm";
 import { appendXlsxRow, exportToXlsx } from "../lib/xlsx";
 import { exportToPptx, type PptxDeck } from "../lib/pptx";
 import { extractDashboardTitle, specToHtml } from "../lib/genui";
+import { isDarkMode } from "../lib/theme";
 import { createIdFactory } from "@greywork/core";
 import { defineStore } from "pinia";
 import { computed, ref, watch } from "vue";
 import { i18n } from "../i18n";
 import { notify } from "./notice";
 import { mergeToolActivities, formatDuration } from "../lib/tool-activity";
-import type { ChatStep, QueuedCommand, ThreadMessage, ToolActivity } from "../types";
+import type { Attachment, ChatStep, QueuedCommand, ThreadMessage, ToolActivity } from "../types";
 
 const t = i18n.global.t;
 
@@ -99,7 +100,7 @@ export const useChatStore = defineStore("chat", () => {
   const commandQueue = ref<QueuedCommand[]>([]);
   const commandQueueMode = ref<"auto" | "manual">("auto");
 
-  function enqueueCommand(input: string, attachments: string[] = []): void {
+  function enqueueCommand(input: string, attachments: Attachment[] = []): void {
     commandQueue.value.push({ id: quid(), input: input.trim(), attachments: [...attachments], ts: Date.now() });
   }
   function removeCommand(id: string): void {
@@ -244,7 +245,7 @@ export const useChatStore = defineStore("chat", () => {
     streamingMessageId.value = message.id;
     await ensureLlmListener();
     try {
-      const history = buildLlmHistory(ensure(activeThreadId.value).filter((item) => item.id !== message.id));
+      const history = await buildLlmHistory(ensure(activeThreadId.value).filter((item) => item.id !== message.id));
       llmRequestId = await llm.chat({
         baseUrl: provider.baseUrl ?? "",
         model: provider.model,
@@ -737,23 +738,26 @@ export const useChatStore = defineStore("chat", () => {
           }
           // 界面意图：GenUI 产出静态 HTML 可视化 → VFS → 预览面板（preview:request 联动）
           if (/界面|仪表盘|看板|dashboard|genui/i.test(intentText) || /界面|仪表盘|看板/.test(firstLabel)) {
-            const html = specToHtml({
-              title: `${extractDashboardTitle(intentText)} · GenUI`,
-              subtitle: `来源会话：${intentText.slice(0, 24)}…`,
-              kpis: [
-                { label: "总客流", value: "12,384" },
-                { label: "峰值日", value: "周六" },
-                { label: "环比", value: "+8.2%" },
-              ],
-              table: {
-                headers: ["站点", "客流", "占比"],
-                rows: [
-                  ["北京站", "4,281", "80%"],
-                  ["上海站", "3,650", "62%"],
-                  ["深圳站", "2,134", "40%"],
+            const html = specToHtml(
+              {
+                title: `${extractDashboardTitle(intentText)} · GenUI`,
+                subtitle: `来源会话：${intentText.slice(0, 24)}…`,
+                kpis: [
+                  { label: "总客流", value: "12,384" },
+                  { label: "峰值日", value: "周六" },
+                  { label: "环比", value: "+8.2%" },
                 ],
+                table: {
+                  headers: ["站点", "客流", "占比"],
+                  rows: [
+                    ["北京站", "4,281", "80%"],
+                    ["上海站", "3,650", "62%"],
+                    ["深圳站", "2,134", "40%"],
+                  ],
+                },
               },
-            });
+              /* 静态产物不带脚本，明暗只能在生成时定稿（见 genui.ts 说明） */ { dark: isDarkMode() },
+            );
             void artifactStore
               .deliverArtifact({
                 meta: "HTML · 可视化产物",
@@ -777,9 +781,10 @@ export const useChatStore = defineStore("chat", () => {
    * send→respond 管线（ChatView 共用）：
    * user 消息入流 → planMode 时挂起 plan 卡（inline）→ 确认后执行。
    */
-  function submitText(text: string, attachments: string[] = []): ThreadMessage | null {
+  function submitText(text: string, attachments: Attachment[] = []): ThreadMessage | null {
     const trimmed = text.trim();
-    if (!trimmed || busy.value) return null;
+    // 有附件时允许空正文（截图问答：图本身就是意图）。
+    if ((!trimmed && attachments.length === 0) || busy.value) return null;
     if (!activeThreadId.value) {
       activeThreadId.value = sessionStore.createSession(null).id;
     }
@@ -800,6 +805,8 @@ export const useChatStore = defineStore("chat", () => {
         steps: buildSteps(trimmed),
         planPending: true,
         planDraft: trimmed,
+        // 附件留在脚手架消息上：确认时才派发，取消则随卡片一起丢弃。
+        planAttachments: [...attachments],
       };
       push(activeThreadId.value, pending);
       return pending;
@@ -826,10 +833,10 @@ export const useChatStore = defineStore("chat", () => {
    * 返回 { threadId, message } 供 ACP 事件按线程流式续写（不依赖 activeThreadId）。
    * 与 submitText 的差异：无 planMode / mock 步骤时间线，内容完全由 ACP 宿主事件驱动。
    */
-  function startAcpTurn(text: string, providerName: string): { threadId: string; message: ThreadMessage } {
+  function startAcpTurn(text: string, providerName: string, attachments: Attachment[] = []): { threadId: string; message: ThreadMessage } {
     if (!activeThreadId.value) activeThreadId.value = sessionStore.createSession(null).id;
     const threadId = activeThreadId.value;
-    push(threadId, { id: uid(), role: "user", content: text, ts: Date.now(), attachments: [] });
+    push(threadId, { id: uid(), role: "user", content: text, ts: Date.now(), attachments: [...attachments] });
     const message: ThreadMessage = { id: uid(), role: "assistant", content: "", ts: Date.now(), acp: providerName };
     push(threadId, message);
     return { threadId, message };

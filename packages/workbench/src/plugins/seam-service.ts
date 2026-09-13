@@ -1,7 +1,7 @@
 // Cordis 贡献聚合服务：
 // 插件的 modes/uiRegions/capabilities 经 ctx.effect(() => seam.registerXxx(contribution)) 注册，
 // fork scope 卸载时 effect 自动调用注册函数返回的清理函数——无需手动摘除。
-// UI 侧（router/TopBar/ShellSidebar/ActivityPanel/WorkflowCanvas）在 computed 内调用 snapshot()，
+// UI 侧（Sider / PluginView / PluginsView / ActivityBand / SiderRegions）在 computed 内调用 snapshot()，
 // 读取 modes/uiRegions 两个 ref 建立响应式依赖。
 import { Service, type Context } from "@cordisjs/core";
 import { markRaw, ref, type Ref } from "vue";

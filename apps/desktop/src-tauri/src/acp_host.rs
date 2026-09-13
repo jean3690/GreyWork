@@ -20,9 +20,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use agent_client_protocol::schema::v1::{
-    CancelNotification, ContentBlock, InitializeRequest, LoadSessionRequest, McpCapabilities,
-    NewSessionRequest, PermissionOption, PermissionOptionId, PermissionOptionKind, PromptRequest,
-    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
+    CancelNotification, ContentBlock, ImageContent, InitializeRequest, LoadSessionRequest,
+    McpCapabilities, NewSessionRequest, PermissionOption, PermissionOptionId, PermissionOptionKind,
+    PromptRequest, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
     SelectedPermissionOutcome, SessionConfigOptionValue, SessionId, SessionNotification,
     SetSessionConfigOptionRequest, TextContent, ToolCallLocation, ToolKind,
 };
@@ -242,6 +242,9 @@ struct AcpSession {
     /// 本 handle 的 agent 是否支持 `session/load`（initialize 回包）。
     /// 不支持时前端回落 session/new，宿主也不发无谓请求。
     load_session: bool,
+    /// 本 handle 的 agent 是否接受图片 prompt（initialize 回包 `promptCapabilities.image`）。
+    /// 前端据此置灰图片入口；宿主侧再兜一层过滤，避免把图片发给只认文本的 agent。
+    image_prompts: bool,
 }
 
 /// 一条权限请求的宿主决策上下文快照：锁内取出、锁外使用，避免跨 await 持锁。
@@ -510,20 +513,21 @@ pub(crate) fn scan_turn_artifacts(root: &Path, since_ms: u64) -> Vec<PathBuf> {
 
 /// 启动外部 ACP agent 子进程并完成 initialize 握手，返回主机句柄 id。
 ///
-/// `tier` 取前端权限档位（"cautious" | "daily" | "auto"），缺省/未知按 cautious。
-/// `sandbox` 取沙盒档位（"off" | "fs" | "full"），非 off 时以 bwrap 包裹进程；
-/// `workspace` 为沙盒可写锚定目录（即会话工作区），仅在沙盒开启时必需。
+/// `sandbox` 取沙盒策略（"auto" | "off" | "fs" | "full"）：未知值拒绝；auto
+/// 在 bwrap 可用时启用 fs，不可用时记录明确告警后直启。
 #[tauri::command]
+// Tauri 将每个 IPC 字段与宿主 State 分别注入；合并为 DTO 会无收益地改写稳定命令协议。
+#[allow(clippy::too_many_arguments)]
 pub async fn acp_start(
     app: AppHandle,
     state: State<'_, AcpHost>,
     db: State<'_, crate::db::Db>,
+    access: State<'_, crate::workspace_fs::WorkspaceFsAccess>,
     agent_cmd: String,
     tier: Option<String>,
     sandbox: Option<String>,
     workspace: Option<String>,
 ) -> Result<u64, String> {
-    // 内置白名单 + 用户显式启用的自配后端：自定义 agent 与内置项同等信任，
     // 但仅限「用户已在目录里启用」的程序（目录真源归 Rust，渲染端不可自封）。
     // shell 元字符拒绝不受影响，仍是配置注入的最后防线。
     let mut allowed: Vec<&str> = ALLOWED_AGENT_PROGRAMS.to_vec();
@@ -532,20 +536,36 @@ pub async fn acp_start(
     let command = process_guard::validate_spawn_command(&agent_cmd, &allowed)?;
     let tier = PermissionTier::parse(tier.as_deref());
 
-    let mode = crate::sandbox::SandboxMode::parse(sandbox.as_deref());
+    let requested_mode = crate::sandbox::SandboxMode::parse(sandbox.as_deref())?;
+    let sandbox_available = crate::sandbox::sandbox_available();
+    let mode = requested_mode.resolve(sandbox_available);
+    if requested_mode == crate::sandbox::SandboxMode::Auto
+        && mode == crate::sandbox::SandboxMode::Off
+    {
+        crate::log::warn(
+            "sandbox",
+            "auto 模式未找到可用 bwrap，ACP agent 将在无 OS 沙箱状态下启动",
+        );
+    }
+    let cwd = workspace
+        .as_deref()
+        .map(|raw| {
+            access
+                .validate_existing(raw)
+                .and_then(|path| validate_cwd(&path.to_string_lossy()))
+        })
+        .transpose()?;
     let command = if mode == crate::sandbox::SandboxMode::Off {
         command
     } else {
-        if !crate::sandbox::sandbox_available() {
+        if !sandbox_available {
             return Err("sandbox: bwrap is not installed on this system".to_string());
         }
-        let cwd = workspace
+        let cwd = cwd
             .as_deref()
-            .map(validate_cwd)
-            .transpose()?
             .ok_or_else(|| "sandbox: workspace is required when sandbox is enabled".to_string())?;
         let home = std::env::var("HOME").ok().map(std::path::PathBuf::from);
-        crate::sandbox::wrap_command(mode, &cwd, home.as_deref(), &command)?
+        crate::sandbox::wrap_command(mode, cwd, home.as_deref(), &command)?
     };
 
     let handle_id = state.next_id.fetch_add(1, Ordering::SeqCst);
@@ -622,6 +642,7 @@ pub async fn acp_start(
     // 顺手记下是否支持 session/load：恢复会话时据此决定是否走 load 而非 new，
     // 避免对不支持的 agent 发无谓请求（协议只在声明过的会话上才返回 load_session）。
     let load_session = initialize.agent_capabilities.load_session;
+    let image_prompts = initialize.agent_capabilities.prompt_capabilities.image;
 
     state.sessions.lock().await.insert(
         handle_id,
@@ -635,6 +656,7 @@ pub async fn acp_start(
             workspace_root: None,
             mcp_capabilities,
             load_session,
+            image_prompts,
         },
     );
     emit(&app, "started", serde_json::json!({ "handle": handle_id }));
@@ -903,6 +925,7 @@ pub async fn acp_new_session(
             "sessionId": id_str,
             "mcpServers": declared,
             "skippedMcpServers": skipped,
+            "imagePrompts": session.image_prompts,
         }),
     );
     Ok(serde_json::json!({
@@ -910,6 +933,7 @@ pub async fn acp_new_session(
         "configOptions": config_options,
         "mcpServers": declared,
         "skippedMcpServers": skipped,
+        "imagePrompts": session.image_prompts,
     }))
 }
 
@@ -968,6 +992,7 @@ pub async fn acp_load_session(
             "sessionId": id_str,
             "mcpServers": declared,
             "skippedMcpServers": skipped,
+            "imagePrompts": session.image_prompts,
         }),
     );
     Ok(serde_json::json!({
@@ -976,6 +1001,7 @@ pub async fn acp_load_session(
         "configOptions": config_options,
         "mcpServers": declared,
         "skippedMcpServers": skipped,
+        "imagePrompts": session.image_prompts,
     }))
 }
 
@@ -1033,6 +1059,58 @@ pub async fn acp_set_permission_tier(
         .await
 }
 
+/// prompt 的附加内容单元（渲染端 `AcpPromptUnit` 的镜像）。
+///
+/// `rename_all` 只改变体名（Image → "image"），字段名要单独 rename ——
+/// 渲染端发的是 camelCase 的 `mimeType`，少这一行会因缺字段整轮派发失败。
+#[derive(serde::Deserialize, Debug)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum PromptUnit {
+    /// 图片：base64 载荷 + mime（协议原生 image 内容块）。
+    Image {
+        data: String,
+        #[serde(rename = "mimeType")]
+        mime_type: String,
+    },
+    /// 文本：文本附件的内联正文（正文之外的补充说明）。
+    Text { text: String },
+}
+
+/// 单轮 prompt 的内容块上限：单元数 10、base64 总量 14MB。
+/// 渲染端已有更严的采集限额，这里是宿主侧的兜底 —— IPC 与 JSON-RPC 都经不起
+/// 一次塞进几十兆的载荷，越界直接拒绝好过把 agent 连接打爆。
+const PROMPT_MAX_UNITS: usize = 10;
+const PROMPT_MAX_BASE64_BYTES: usize = 14 * 1024 * 1024;
+
+/// 组装 prompt 内容块：非空正文恒在最前，附件块依序追加。
+/// 正文为空（只发附件）时不补 text 块，也不允许整轮内容为空。
+fn prompt_blocks(text: String, units: Vec<PromptUnit>) -> Result<Vec<ContentBlock>, String> {
+    if units.len() > PROMPT_MAX_UNITS {
+        return Err(format!("附件过多：最多 {PROMPT_MAX_UNITS} 个"));
+    }
+    let mut blocks = Vec::new();
+    if !text.is_empty() {
+        blocks.push(ContentBlock::Text(TextContent::new(text)));
+    }
+    let mut total = 0usize;
+    for unit in units {
+        match unit {
+            PromptUnit::Image { data, mime_type } => {
+                total += data.len();
+                if total > PROMPT_MAX_BASE64_BYTES {
+                    return Err("附件总量超过 14MB 上限".to_string());
+                }
+                blocks.push(ContentBlock::Image(ImageContent::new(data, mime_type)));
+            }
+            PromptUnit::Text { text } => blocks.push(ContentBlock::Text(TextContent::new(text))),
+        }
+    }
+    if blocks.is_empty() {
+        return Err("prompt 内容为空".to_string());
+    }
+    Ok(blocks)
+}
+
 /// 发送一轮 prompt；立即返回 `{ turnId }`，回合结果经 `prompt-done` 事件
 /// （携带 handle/turnId/response）异步送达——对齐 GreyWork sendMessage 立即
 /// ack + message.stream 回流的模型。流式增量经 acp://event 通知。
@@ -1047,6 +1125,7 @@ pub async fn acp_send(
     state: State<'_, AcpHost>,
     handle: u64,
     text: String,
+    units: Option<Vec<PromptUnit>>,
 ) -> Result<serde_json::Value, String> {
     // 短临界区：登记回合后立即释放锁。sent 必须随块返回——SentRequest 的
     // Drop 会向对端发取消请求，块内丢弃等于立即取消本回合。
@@ -1060,10 +1139,11 @@ pub async fn acp_send(
             .session_id
             .clone()
             .ok_or_else(|| "session not created; call acp_new_session first".to_string())?;
-        let sent = session.conn.clone().send_request(PromptRequest::new(
-            session_id.clone(),
-            vec![ContentBlock::Text(TextContent::new(text))],
-        ));
+        let blocks = prompt_blocks(text, units.unwrap_or_default())?;
+        let sent = session
+            .conn
+            .clone()
+            .send_request(PromptRequest::new(session_id.clone(), blocks));
         let turn_id = state.next_turn_id.fetch_add(1, Ordering::SeqCst);
         session.turns.insert(turn_id, sent.id().clone());
         (sent, turn_id, session.workspace_root.clone(), now_ms())
@@ -1316,6 +1396,92 @@ mod tests {
     use agent_client_protocol::schema::v1::{
         PermissionOption, ToolCallLocation, ToolCallUpdate, ToolCallUpdateFields,
     };
+
+    #[test]
+    fn prompt_blocks_puts_text_first_and_maps_units() {
+        let blocks = prompt_blocks(
+            "看下这张图".to_string(),
+            vec![
+                PromptUnit::Image {
+                    data: "AAAA".to_string(),
+                    mime_type: "image/png".to_string(),
+                },
+                PromptUnit::Text {
+                    text: "---\n[附件：notes.md]\n```\nhi\n```\n".to_string(),
+                },
+            ],
+        )
+        .expect("组装成功");
+        assert_eq!(blocks.len(), 3);
+        match &blocks[0] {
+            ContentBlock::Text(text) => assert_eq!(text.text, "看下这张图"),
+            other => panic!("正文必须在最前，实际 {other:?}"),
+        }
+        match &blocks[1] {
+            ContentBlock::Image(image) => {
+                assert_eq!(image.data, "AAAA");
+                assert_eq!(image.mime_type, "image/png");
+            }
+            other => panic!("第二个应为 image 块，实际 {other:?}"),
+        }
+        match &blocks[2] {
+            ContentBlock::Text(text) => assert!(text.text.contains("notes.md")),
+            other => panic!("第三个应为 text 块，实际 {other:?}"),
+        }
+    }
+
+    /// 渲染端发的是 camelCase JSON（`{type:"image", data, mimeType}`）：字段名对不上会导致
+    /// 整轮带图 prompt 反序列化失败，且失败点在主机侧、现象是「派发没反应」——必须钉死。
+    #[test]
+    fn prompt_unit_deserializes_renderer_payload() {
+        let units: Vec<PromptUnit> = serde_json::from_value(serde_json::json!([
+            { "type": "image", "data": "QUJD", "mimeType": "image/png" },
+            { "type": "text", "text": "---\n[附件：a.md]\n" }
+        ]))
+        .expect("渲染端载荷应当能反序列化");
+        assert_eq!(units.len(), 2);
+        match &units[0] {
+            PromptUnit::Image { data, mime_type } => {
+                assert_eq!(data, "QUJD");
+                assert_eq!(mime_type, "image/png");
+            }
+            other => panic!("第一个应为 image 单元，实际 {other:?}"),
+        }
+    }
+
+    /// 只发附件（截图问答）：不补空 text 块；两者都空则直接拒绝，别发一个空 prompt 过去。
+    #[test]
+    fn prompt_blocks_allows_attachment_only_prompts() {
+        let blocks = prompt_blocks(
+            String::new(),
+            vec![PromptUnit::Image {
+                data: "QUJD".to_string(),
+                mime_type: "image/png".to_string(),
+            }],
+        )
+        .expect("只有图片也应当能组装");
+        assert_eq!(blocks.len(), 1);
+        assert!(matches!(&blocks[0], ContentBlock::Image(_)));
+
+        assert!(prompt_blocks(String::new(), Vec::new()).is_err());
+    }
+
+    #[test]
+    fn prompt_blocks_rejects_over_limit_payloads() {
+        // 单元数超限
+        let many: Vec<PromptUnit> = (0..PROMPT_MAX_UNITS + 1)
+            .map(|_| PromptUnit::Text {
+                text: "x".to_string(),
+            })
+            .collect();
+        assert!(prompt_blocks("t".to_string(), many).is_err());
+        // base64 总量超限
+        let huge = vec![PromptUnit::Image {
+            data: "A".repeat(PROMPT_MAX_BASE64_BYTES + 1),
+            mime_type: "image/png".to_string(),
+        }];
+        assert!(prompt_blocks("t".to_string(), huge).is_err());
+    }
 
     #[test]
     fn handshake_timeout_widens_for_registry_launchers() {

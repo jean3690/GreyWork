@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 1,
+  "manifest": {
+    "id": "demo.worker",
+    "name": "Worker 代码插件",
+    "version": "1.1.0",
+    "description": "下载独立 JavaScript，在隔离 Worker 中执行动作处理器；可经宿主 broker 受控调用 net.fetch 能力。",
+    "kind": "worker",
+    "runtime": {
+      "type": "worker",
+      "entry": "https://raw.githubusercontent.com/jean3690/greywork-plugin-market/main/packages/demo.worker.js",
+      "sha256": "67c09ccfc3bc225e4c37b4eb8604a30e0eeaa8ecd45494128145ec8a68978b2e"
+    },
+    "requires": [
+      {
+        "capability": "net.fetch",
+        "hosts": ["api.github.com"]
+      }
+    ],
+    "contributes": {
+      "modes": [
+        {
+          "id": "demo-worker",
+          "title": "Worker Demo",
+          "icon": "cpu",
+          "page": {
+            "eyebrow": "Isolated code plugin",
+            "heading": "独立代码插件",
+            "body": "按钮会向插件 Worker 发送当前状态；Worker 只能返回受校验的状态补丁。",
+            "fields": [
+              {
+                "key": "count",
+                "label": "进度",
+                "kind": "number",
+                "default": 0,
+                "min": 0,
+                "max": 100,
+                "step": 10
+              },
+              {
+                "key": "status",
+                "label": "状态",
+                "kind": "text",
+                "default": "等待执行",
+                "maxLength": 80
+              }
+            ],
+            "outputs": [
+              {
+                "label": "当前进度",
+                "valueKey": "count",
+                "suffix": "%"
+              },
+              {
+                "label": "Worker 状态",
+                "valueKey": "status"
+              }
+            ],
+            "actions": [
+              {
+                "id": "advance",
+                "label": "执行 +10",
+                "style": "primary",
+                "operation": {
+                  "type": "invoke",
+                  "handler": "advance"
+                }
+              },
+              {
+                "id": "fetch-ip",
+                "label": "能力调用示例",
+                "style": "secondary",
+                "operation": {
+                  "type": "invoke",
+                  "handler": "fetch-ip"
+                }
+              },
+              {
+                "id": "complete",
+                "label": "直接完成",
+                "style": "secondary",
+                "operation": {
+                  "type": "invoke",
+                  "handler": "complete"
+                }
+              },
+              {
+                "id": "reset",
+                "label": "重置",
+                "style": "danger",
+                "operation": {
+                  "type": "reset"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

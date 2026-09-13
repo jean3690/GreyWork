@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import "./theme/shadcn.css";
 import "./theme/tokens.css";
@@ -8,29 +8,50 @@ import { useSessionStore } from "./stores/session";
 import { useSettingsStore } from "./stores/settings";
 import { useWorkspaceStore } from "./stores/workspace";
 import { usePreviewStore } from "./stores/preview";
+import { useActivityStore } from "./stores/activity";
+import { applyAppearance as applyAppearanceToDom } from "./lib/theme";
 import { bootPlugins } from "./plugins/runtime";
 import Sider from "./components/Sider.vue";
+import SettingsDialog from "./components/SettingsDialog.vue";
 import PreviewSider from "./components/preview/PreviewSider.vue";
 import Titlebar from "./components/Titlebar.vue";
 import NoticeHost from "./components/NoticeHost.vue";
+import ActivityBand from "./components/activity/ActivityBand.vue";
+import WorkspaceOverlayRegions from "./components/WorkspaceOverlayRegions.vue";
 
 /**
  * GreyWork 风格外壳：标题栏 + 左侧栏 + 内容区（router-view）+ 右侧预览面板。
  *
- * 主题读 settings.theme（与旧工作台同一持久化来源，切换不丢用户偏好）。
+ * 主题配色、明暗模式和字号独立持久化。DOM 约定（由 lib/theme 的 applyAppearance 落地）：
+ * - data-palette：greywork / night-blue / night-green / github / fox；
+ * - data-theme：实际生效的 light / dark（system 在这里解析，供 CSS 与后挂载的组件判断）；
+ * - data-font-size：small / medium / large。
+ *
+ * 外观变化经 window 上的 APPEARANCE_EVENT 广播，消费方（Mermaid / Univer / 侧栏开关）
+ * 订阅事件而不是盯 DOM。
  */
 const settings = useSettingsStore();
 const route = useRoute();
 const router = useRouter();
+/** 裸路由（悬浮窗 #/plugin-window）：不渲染标题栏/侧栏等外壳 chrome。 */
+const bareWindow = computed(() => route.meta.bare === true);
 const sessionStore = useSessionStore();
 const workspaceStore = useWorkspaceStore();
 const preview = usePreviewStore();
+const activity = useActivityStore();
 
+const darkMedia =
+  typeof window !== "undefined" && typeof window.matchMedia === "function" ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+const systemDark = ref(darkMedia?.matches ?? false);
+const resolvedTheme = computed<"light" | "dark">(() =>
+  settings.colorMode === "system" ? (systemDark.value ? "dark" : "light") : settings.colorMode,
+);
+
+// 这里盯 resolvedTheme 而不是 settings.colorMode：跟随系统时系统翻了、colorMode 没变，
+// 只有 resolvedTheme 会动，而它是这次重算外观的唯一触发点。
 watch(
-  () => settings.theme,
-  (theme) => {
-    if (typeof document !== "undefined") document.documentElement.dataset.theme = theme;
-  },
+  [() => settings.theme, resolvedTheme, () => settings.fontSize],
+  ([palette, theme, fontSize]) => applyAppearanceToDom({ palette, colorMode: theme, fontSize }),
   { immediate: true },
 );
 
@@ -47,6 +68,8 @@ function syncViewport(): void {
   // 右栏在窄屏不渲染。这个判断只在这里做一次，Titlebar 的开关按钮读同一个 store 字段，
   // 不再各自写一个断点（那正是 640–768px 之间「按钮可见但面板不存在」的来源）。
   preview.setAvailable(!mobile);
+  // 底部活动面板与右栏同源同断点：产物点开进右栏预览，窄屏两条都没意义。
+  activity.setAvailable(!mobile);
 }
 
 /**
@@ -105,28 +128,34 @@ onMounted(() => {
   syncViewport();
   window.addEventListener("resize", syncViewport);
   window.addEventListener("keydown", onWindowKeydown);
+  darkMedia?.addEventListener("change", syncSystemTheme);
   observeMainRow();
   // 微内核接线：注册内置插件清单并激活（幂等，见 plugins/runtime）。
   void bootPlugins();
 });
+function syncSystemTheme(event: MediaQueryListEvent): void {
+  systemDark.value = event.matches;
+}
 onBeforeUnmount(() => {
   if (typeof window !== "undefined") {
     window.removeEventListener("resize", syncViewport);
     window.removeEventListener("keydown", onWindowKeydown);
   }
+  darkMedia?.removeEventListener("change", syncSystemTheme);
   rowObserver?.disconnect();
   rowObserver = null;
 });
 
-/** 设置页的「返回」目标：记住进入设置前停在哪。 */
-const lastNonSettingsPath = ref("/guid");
-watch(
-  () => route.fullPath,
-  (path) => {
-    if (!path.startsWith("/settings")) lastNonSettingsPath.value = path;
-  },
-  { immediate: true },
-);
+/**
+ * 设置弹窗状态落在 Shell：它是「调完即走」的瞬时 UI，不进路由（详见 SettingsDialog）。
+ * section 在会话内记住上次打开的分区——用户多半是在同一处反复调，不必每次从 Agent 页翻。
+ */
+const settingsOpen = ref(false);
+const settingsSection = ref("agent");
+
+function openSettings(): void {
+  settingsOpen.value = true;
+}
 
 function navigate(path: string): void {
   void router.push(path);
@@ -137,37 +166,39 @@ function handleNewChat(): void {
   const session = sessionStore.createSession(workspaceStore.activeWorkspaceId);
   navigate(`/conversation/${session.id}`);
 }
-
-/** 主题切换只在 dark/light 间来回；system 由设置页显式选。 */
-function toggleTheme(): void {
-  settings.theme = settings.theme === "dark" ? "light" : "dark";
-  settings.persist();
-}
 </script>
 
 <template>
-  <div class="flex size-full min-h-0 flex-col overflow-hidden bg-background" data-testid="shell">
+  <!-- 裸窗口（悬浮宠物等）：只有 router-view，无外壳 chrome。 -->
+  <router-view v-if="bareWindow" />
+  <div v-else class="flex size-full min-h-0 flex-col overflow-hidden bg-background" data-testid="shell">
     <Titlebar :collapsed="collapsed" @toggle-sider="collapsed = !collapsed" @navigate="navigate" />
     <div class="relative flex min-h-0 flex-1 overflow-hidden">
       <!-- 移动端展开的侧栏是抽屉：遮罩点击收起，侧栏悬浮于内容之上而非挤占宽度 -->
       <div v-if="isMobile && !collapsed" class="absolute inset-0 z-30 bg-black/30" aria-hidden="true" @click="collapsed = true" />
       <Sider
+        v-if="!isMobile || !collapsed"
         :collapsed="collapsed"
         :overlay="isMobile"
-        :theme="settings.theme"
-        :last-non-settings-path="lastNonSettingsPath"
+        @toggle-sider="collapsed = !collapsed"
         @new-chat="handleNewChat"
         @navigate="navigate"
-        @toggle-theme="toggleTheme"
+        @open-settings="openSettings"
       />
-      <!-- 内容区与右栏合成被观测的一行：mainRow 的宽度是右栏 clamp 的依据 -->
-      <div ref="mainRow" class="flex min-w-0 flex-1 overflow-hidden">
-        <main class="min-w-0 flex-1 overflow-hidden bg-panel">
-          <router-view />
-        </main>
-        <PreviewSider v-if="preview.available" />
+      <!-- [内容区 + 右栏] 组成一列：上行为被观测的 mainRow（宽度是右栏 clamp 的依据），
+           下行为底部活动面板通栏（ActivityBand 内部自管高度/折叠）。 -->
+      <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div ref="mainRow" class="flex min-w-0 flex-1 overflow-hidden">
+          <main class="min-w-0 flex-1 overflow-hidden bg-panel">
+            <router-view />
+          </main>
+          <PreviewSider v-if="preview.available" />
+        </div>
+        <ActivityBand v-if="activity.available" />
       </div>
     </div>
+    <WorkspaceOverlayRegions />
     <NoticeHost />
+    <SettingsDialog v-model:open="settingsOpen" v-model:section="settingsSection" />
   </div>
 </template>

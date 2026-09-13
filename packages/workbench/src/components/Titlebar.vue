@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { useRoute } from "vue-router";
 import { isTauriRuntime } from "@greywork/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { useWorkspaceStore } from "../stores/workspace";
 import { usePreviewStore } from "../stores/preview";
+import { useActivityStore } from "../stores/activity";
 import Icon from "./Icon.vue";
 
 /**
@@ -23,23 +23,13 @@ const props = defineProps<{ collapsed: boolean }>();
 
 const emit = defineEmits<{ toggleSider: []; navigate: [path: string] }>();
 
-const route = useRoute();
 const workspaceStore = useWorkspaceStore();
 const preview = usePreviewStore();
+const activity = useActivityStore();
 
 const activeWorkspace = computed(
   () => workspaceStore.workspaces.find((workspace) => workspace.id === workspaceStore.activeWorkspaceId) ?? null,
 );
-
-const navItems = [
-  { path: "/assistants", label: "助手", icon: "robot", prefix: "/assistants" },
-  { path: "/scheduled", label: "定时任务", icon: "alarm-clock", prefix: "/scheduled" },
-  { path: "/settings/agent", label: "设置", icon: "setting", prefix: "/settings" },
-] as const;
-
-function isActive(prefix: string): boolean {
-  return route.path.startsWith(prefix);
-}
 
 /** 浏览器态没有宿主窗口可控，整组控制键不渲染。 */
 const hasWindowControls = isTauriRuntime();
@@ -107,18 +97,6 @@ onBeforeUnmount(() => {
       <Icon :name="props.collapsed ? 'expand-right' : 'sidebar'" :size="16" />
     </button>
 
-    <button
-      v-for="item in navItems"
-      :key="item.path"
-      class="flex h-7 cursor-pointer items-center gap-1.5 rounded-[6px] px-2 text-[13px] transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
-      :class="isActive(item.prefix) ? 'bg-panel text-foreground' : 'text-dim hover:bg-panel hover:text-foreground'"
-      :aria-current="isActive(item.prefix) ? 'page' : undefined"
-      @click="emit('navigate', item.path)"
-    >
-      <Icon :name="item.icon" :size="15" />
-      <span class="hidden sm:inline">{{ item.label }}</span>
-    </button>
-
     <div class="ml-auto flex items-center gap-1.5 rounded-[6px] border border-line-2 bg-panel px-2 py-1 text-[12px] text-dim">
       <span class="size-1.5 rounded-full" :class="activeWorkspace ? 'bg-mint' : 'bg-dim2'" />
       <span class="max-w-[200px] truncate">{{ activeWorkspace?.name ?? "未绑定工作区" }}</span>
@@ -137,6 +115,19 @@ onBeforeUnmount(() => {
       @click="preview.toggle()"
     >
       <Icon :name="preview.collapsed ? 'expand-left' : 'sidebar'" :size="16" />
+    </button>
+
+    <!-- 底部活动面板开关。可用性与预览同源（Shell 按 768px 回灌 activity.available），
+         不再自己写断点；图标语义与预览开关一致：箭头指向面板运动方向 ——
+         收起时展开是自底部升起（up），展开时收起是落回底部（down）。 -->
+    <button
+      v-if="activity.available"
+      class="grid size-7 cursor-pointer place-items-center rounded-[6px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+      :aria-label="activity.open ? '收起活动面板' : '展开活动面板'"
+      data-testid="titlebar-activity-toggle"
+      @click="activity.toggle()"
+    >
+      <Icon :name="activity.open ? 'down' : 'up'" :size="16" />
     </button>
 
     <!-- Windows 式控制键：-mr-2 抵消 header 的 px-2 贴住右上角，self-stretch 吃满标题栏高度。
