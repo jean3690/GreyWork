@@ -17,6 +17,7 @@ import { computed, ref, watch } from "vue";
 import Icon from "../Icon.vue";
 import FileTree from "./FileTree.vue";
 import PreviewSurface from "./PreviewSurface.vue";
+import WebFetchDialog from "./WebFetchDialog.vue";
 import { DEFAULT_PREVIEW_PANEL_PX, MAX_PREVIEW_PANEL_PX, MIN_PREVIEW_PANEL_PX, PREVIEW_TAB_BAR_HEIGHT } from "../../lib/layout";
 import { usePreviewBridge } from "../../lib/preview-bridge";
 import { useResizableSplit } from "../../lib/resizable-split";
@@ -30,6 +31,7 @@ const preview = usePreviewStore();
 usePreviewBridge();
 
 const section = ref<Section>("preview");
+const fetchDialogOpen = ref(false);
 
 watch(
   () => preview.activeId,
@@ -125,6 +127,15 @@ const sectionClass = (active: boolean): string =>
 
       <div class="ms-auto flex shrink-0 items-center gap-0.5">
         <button
+          type="button"
+          data-testid="web-fetch-open"
+          class="grid size-6 cursor-pointer place-items-center rounded-[6px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          aria-label="抓取网页"
+          @click="fetchDialogOpen = true"
+        >
+          <Icon name="earth" :size="13" />
+        </button>
+        <button
           v-if="section === 'preview' && preview.activeTab"
           type="button"
           data-testid="preview-reload"
@@ -198,5 +209,7 @@ const sectionClass = (active: boolean): string =>
         </div>
       </div>
     </template>
+
+    <WebFetchDialog v-if="fetchDialogOpen" @close="fetchDialogOpen = false" />
   </aside>
 </template>

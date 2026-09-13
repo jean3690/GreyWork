@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   ATTACHMENT_LIMITS,
   attachmentKind,
+  buildTextAttachment,
   clipText,
   createAttachment,
   extOf,
@@ -13,6 +14,7 @@ import {
   inlineTextAttachment,
   mimeForFile,
   normalizeAttachments,
+  safeAttachmentName,
   textFence,
   validateAttachment,
 } from "../../../src/lib/attachments";
@@ -167,5 +169,47 @@ describe("formatBytes", () => {
     expect(formatBytes(512)).toBe("512 B");
     expect(formatBytes(2048)).toBe("2.0 KB");
     expect(formatBytes(3 * 1024 * 1024)).toBe("3.0 MB");
+  });
+});
+
+function fakeExisting(count: number): Attachment[] {
+  return Array.from({ length: count }, (_, i) =>
+    createAttachment({ kind: "text", name: `a${i}.md`, mime: "text/markdown", size: 1, text: "x" }),
+  );
+}
+
+describe("safeAttachmentName", () => {
+  it("去分隔符与控制字符、统一成 .md、空标题走兜底", () => {
+    expect(safeAttachmentName("A/B: C")).toBe("A B C.md");
+    expect(safeAttachmentName("Page.html")).toBe("Page.md");
+    expect(safeAttachmentName("   ")).toBe("web-article.md");
+  });
+});
+
+describe("buildTextAttachment", () => {
+  it("构造文本附件：内容与 .md 名、size 按 UTF-8 计", () => {
+    const result = buildTextAttachment("标题", "正文内容", [], true);
+    expect("attachment" in result).toBe(true);
+    if (!("attachment" in result)) return;
+    expect(result.attachment.kind).toBe("text");
+    expect(result.attachment.name).toBe("标题.md");
+    expect(result.attachment.text).toBe("正文内容");
+    expect(result.attachment.mime).toBe("text/markdown");
+    expect(result.attachment.size).toBe(new TextEncoder().encode("正文内容").length);
+  });
+
+  it("超内联上限时截断并标记 truncated", () => {
+    const long = "字".repeat(ATTACHMENT_LIMITS.maxInlineTextChars + 10);
+    const result = buildTextAttachment("长文", long, [], true);
+    if (!("attachment" in result)) throw new Error("应通过");
+    expect(result.attachment.text?.length).toBe(ATTACHMENT_LIMITS.maxInlineTextChars);
+    expect(result.attachment.truncated).toBe(true);
+  });
+
+  it("附件数已满时返回拒绝（不抛异常）", () => {
+    const result = buildTextAttachment("标题", "正文", fakeExisting(ATTACHMENT_LIMITS.maxCount), true);
+    expect("rejection" in result).toBe(true);
+    if (!("rejection" in result)) return;
+    expect(result.rejection.key).toBe("chat.attachTooMany");
   });
 });

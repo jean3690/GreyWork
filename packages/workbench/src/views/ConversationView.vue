@@ -19,6 +19,7 @@ import PermissionCard from "../components/chat/PermissionCard.vue";
 import AttachmentTray from "../components/chat/AttachmentTray.vue";
 import SlashCommandMenu from "../components/chat/SlashCommandMenu.vue";
 import { useAttachments } from "../lib/use-attachments";
+import { useChatTextAttachmentBridge } from "../lib/use-chat-text-attachment";
 import { useSlashCommands } from "../lib/use-slash-commands";
 import { materializeAttachments } from "../state/attachment-library";
 
@@ -154,6 +155,9 @@ const turnActive = computed(() => chat.busy || agent.acpBusy || agent.acpConnect
 
 /** 图片可用性：本地 LLM 无能力声明（交给供应商报错），ACP 以 agent 声明为准。 */
 const imagesAllowed = computed(() => !agent.routeToAcp || agent.acpImageSupport !== false);
+const attachments = useAttachments(() => sessionId.value || chat.activeThreadId, { imagesAllowed: () => imagesAllowed.value });
+// 网页正文「发送到对话」经事件总线进来，落到同一份附件草稿。
+useChatTextAttachmentBridge(attachments);
 const {
   items: attachmentItems,
   dragging: attachmentDragging,
@@ -166,7 +170,7 @@ const {
   onDrop: onComposerDrop,
   remove: removeAttachment,
   take: takeAttachments,
-} = useAttachments(() => sessionId.value || chat.activeThreadId, { imagesAllowed: () => imagesAllowed.value });
+} = attachments;
 
 /** 斜杠命令菜单：内置动作 + ACP 命令；发送复用既有 send() 语义（附件 / 计划模式 / 后端路由）。 */
 const textareaEl = ref<HTMLTextAreaElement | null>(null);

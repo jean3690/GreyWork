@@ -25,6 +25,17 @@ export const enUS: MessageSchema = {
   notice: {
     dismiss: "Dismiss notification",
   },
+  web: {
+    title: "Fetch web page",
+    urlPlaceholder: "Enter a URL, e.g. example.com/article",
+    fetch: "Fetch",
+    fetching: "Fetching…",
+    error: "Fetch failed: {detail}",
+    empty: "No readable content was extracted.",
+    sendToChat: "Send to chat",
+    sendToChatDone: "Added to the composer attachments — press Send to hand it to the agent.",
+    unsupportedRuntime: "Web fetch is only available in the desktop app.",
+  },
   chat: {
     placeholder: {
       hint: "Enter to send · Shift+Enter for newline",

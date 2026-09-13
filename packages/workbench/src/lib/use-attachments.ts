@@ -20,7 +20,7 @@ import {
   pickAttachments,
   releaseAttachmentObjectUrls,
 } from "../state/attachment-library";
-import { ATTACHMENT_LIMITS } from "./attachments";
+import { ATTACHMENT_LIMITS, buildTextAttachment } from "./attachments";
 import { i18n } from "../i18n";
 import { notify } from "../stores/notice";
 import type { Attachment } from "../types";
@@ -62,6 +62,8 @@ export interface AttachmentsController {
   pick(): Promise<void>;
   addPaths(paths: readonly string[]): Promise<void>;
   addFiles(files: readonly File[]): Promise<void>;
+  /** 加入一段现成文本（如网页正文）作为文本附件；超限就地提示。 */
+  addText(input: { name: string; text: string; mime?: string }): void;
   onPaste(event: ClipboardEvent): void;
   onDragOver(event: DragEvent): void;
   onDragLeave(): void;
@@ -142,6 +144,15 @@ export function useAttachments(sessionId: () => string, options: AttachmentsOpti
   async function addFiles(files: readonly File[]): Promise<void> {
     if (!files.length) return;
     append(await attachmentsFromFiles(files, items.value));
+  }
+
+  function addText(input: { name: string; text: string; mime?: string }): void {
+    const result = buildTextAttachment(input.name, input.text, items.value, isTauriRuntime());
+    if ("rejection" in result) {
+      notify({ kind: "warning", key: "attachment-text-rejected", title: t(result.rejection.key, result.rejection.params) });
+      return;
+    }
+    append([result.attachment]);
   }
 
   /**
@@ -240,6 +251,7 @@ export function useAttachments(sessionId: () => string, options: AttachmentsOpti
     pick,
     addPaths,
     addFiles,
+    addText,
     onPaste,
     onDragOver,
     onDragLeave,

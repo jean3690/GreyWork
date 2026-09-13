@@ -14,6 +14,7 @@ import AttachmentTray from "../components/chat/AttachmentTray.vue";
 import SlashCommandMenu from "../components/chat/SlashCommandMenu.vue";
 import Icon from "../components/Icon.vue";
 import { useAttachments } from "../lib/use-attachments";
+import { useChatTextAttachmentBridge } from "../lib/use-chat-text-attachment";
 import { useSlashCommands } from "../lib/use-slash-commands";
 import { materializeAttachments } from "../state/attachment-library";
 import type { Attachment } from "../types";
@@ -36,6 +37,9 @@ const draft = ref("");
 
 /** 图片可用性：本地 LLM 无能力声明（交给供应商报错），ACP 以 agent 声明为准。 */
 const imagesAllowed = computed(() => !agent.routeToAcp || agent.acpImageSupport !== false);
+const attachments = useAttachments(() => chat.activeThreadId, { imagesAllowed: () => imagesAllowed.value });
+// 网页正文「发送到对话」经事件总线进来，落到同一份附件草稿。
+useChatTextAttachmentBridge(attachments);
 const {
   items: attachmentItems,
   dragging: attachmentDragging,
@@ -48,7 +52,7 @@ const {
   onDrop: onComposerDrop,
   remove: removeAttachment,
   take: takeAttachments,
-} = useAttachments(() => chat.activeThreadId, { imagesAllowed: () => imagesAllowed.value });
+} = attachments;
 
 /** 斜杠命令菜单：发送复用 onSubmit（先建会话再派发），开关状态胶囊与对话页一致。 */
 const textareaEl = ref<HTMLTextAreaElement | null>(null);
