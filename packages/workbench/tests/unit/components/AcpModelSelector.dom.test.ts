@@ -5,6 +5,7 @@ import { mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import AcpModelSelector from "@/components/AcpModelSelector.vue";
 import { useAgentStore } from "@/stores/agent";
+import { useSettingsStore } from "@/stores/settings";
 
 const h = vi.hoisted(() => ({
   startAgent: vi.fn(),
@@ -49,6 +50,8 @@ function modelOptions(count: number, extra: { value: string; name: string }[] = 
 async function activateWith(options: { value: string; name: string }[]) {
   const pinia = createPinia();
   setActivePinia(pinia);
+  // ACP 建会话要解析工作区：happy-dom 非 Tauri 运行时，设置项为空则 resolveWorkspaceDir 抛错。
+  useSettingsStore().workspaceDir = "/home/test";
   h.startAgent.mockResolvedValue(7);
   h.openSession.mockResolvedValue({
     sessionId: "s1",

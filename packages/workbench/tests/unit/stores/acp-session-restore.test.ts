@@ -45,6 +45,7 @@ import { useAgentStore } from "@/stores/agent";
 import { useChatStore } from "@/stores/chat";
 import { useNoticeStore } from "@/stores/notice";
 import { useSessionStore } from "@/stores/session";
+import { useSettingsStore } from "@/stores/settings";
 
 const storageHolder = globalThis as { localStorage?: Storage };
 
@@ -76,6 +77,8 @@ function emit(event: AcpEventEnvelope): void {
 
 beforeEach(() => {
   setActivePinia(createPinia());
+  // ACP 建会话要解析工作区：node 环境非 Tauri 运行时，设置项为空则 resolveWorkspaceDir 抛错。
+  useSettingsStore().workspaceDir = "/home/test";
   vi.clearAllMocks();
   injectStorage();
   h.isAvailable.mockImplementation(() => true);
@@ -192,6 +195,7 @@ describe("ACP 会话惰性恢复", () => {
 
     // 模拟重启：同一 localStorage 上重建全部 store
     setActivePinia(createPinia());
+    useSettingsStore().workspaceDir = "/home/test";
     const reloadedAgent = useAgentStore();
     await reloadedAgent.dispatchToAcp("重启后的第二轮");
 
