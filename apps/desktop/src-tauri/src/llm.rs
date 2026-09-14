@@ -133,6 +133,11 @@ fn content_from_completion(body: &serde_json::Value) -> Option<String> {
 }
 
 /// 发起一轮流式对话；返回请求 id（用于 llm_chat_stop 中止）。
+///
+/// `client_token` 是调用方自带的轮次令牌，原样回灌进每条事件：`llm://event` 是全局广播
+/// （会话流与远程助手回复可能并行），消费方凭它过滤出属于自己那一笔。
+// 参数是 Tauri 命令的扁平入参（前端 invoke 按名传），拆成结构体会把 invoke 形状也改掉。
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn llm_chat_start(
     app: AppHandle,
@@ -142,6 +147,7 @@ pub async fn llm_chat_start(
     api_key_env: String,
     messages: Vec<LlmChatMessage>,
     reasoning_effort: String,
+    client_token: Option<String>,
 ) -> Result<u64, String> {
     let base_url = base_url.trim().to_string();
     if base_url.is_empty() || model.trim().is_empty() {
@@ -149,6 +155,7 @@ pub async fn llm_chat_start(
     }
     log::info("llm", format!("start model={model} base={base_url}"));
     let request_id = state.next_id.fetch_add(1, Ordering::SeqCst);
+    let turn_token = client_token.unwrap_or_default();
 
     let response = send_chat_request(
         &base_url,
@@ -161,7 +168,7 @@ pub async fn llm_chat_start(
 
     let app_task = app.clone();
     let task = tauri::async_runtime::spawn(async move {
-        stream_response(&app_task, response).await;
+        stream_response(&app_task, response, &turn_token).await;
     });
     state.streams.lock().await.insert(request_id, task);
     Ok(request_id)
@@ -259,8 +266,26 @@ fn truncate(value: &str, max_chars: usize) -> String {
     format!("{cut}…")
 }
 
+/// 发一条 LLM 事件；带上调用方令牌（空令牌 = 旧调用方，事件不带该字段）。
+fn emit_llm(
+    app: &AppHandle,
+    client_token: &str,
+    kind: &'static str,
+    mut payload: serde_json::Value,
+) {
+    if !client_token.is_empty() {
+        if let Some(object) = payload.as_object_mut() {
+            object.insert(
+                "clientToken".into(),
+                serde_json::Value::String(client_token.to_string()),
+            );
+        }
+    }
+    emit(app, kind, payload);
+}
+
 /// SSE / 整段 JSON 双路处理；所有出口都保证发出 llm-done 或 llm-error。
-async fn stream_response(app: &AppHandle, response: reqwest::Response) {
+async fn stream_response(app: &AppHandle, response: reqwest::Response, client_token: &str) {
     if !is_sse_response(&response) {
         match crate::http::read_json::<serde_json::Value>(
             response,
@@ -270,13 +295,19 @@ async fn stream_response(app: &AppHandle, response: reqwest::Response) {
         {
             Ok(body) => match content_from_completion(&body) {
                 Some(content) => {
-                    emit(app, "llm-delta", serde_json::json!({ "delta": content }));
-                    emit(app, "llm-done", serde_json::json!({}));
+                    emit_llm(
+                        app,
+                        client_token,
+                        "llm-delta",
+                        serde_json::json!({ "delta": content }),
+                    );
+                    emit_llm(app, client_token, "llm-done", serde_json::json!({}));
                 }
                 None => {
                     log::error("llm", "empty completion（非流式响应无内容）");
-                    emit(
+                    emit_llm(
                         app,
+                        client_token,
                         "llm-error",
                         serde_json::json!({ "message": "empty completion" }),
                     );
@@ -284,8 +315,9 @@ async fn stream_response(app: &AppHandle, response: reqwest::Response) {
             },
             Err(error) => {
                 log::error("llm", format!("非流式响应失败: {error}"));
-                emit(
+                emit_llm(
                     app,
+                    client_token,
                     "llm-error",
                     serde_json::json!({ "message": error.to_string() }),
                 );
@@ -302,21 +334,31 @@ async fn stream_response(app: &AppHandle, response: reqwest::Response) {
     for event in events {
         match event {
             SseEvent::Delta(delta) => {
-                emit(app, "llm-delta", serde_json::json!({ "delta": delta }));
+                emit_llm(
+                    app,
+                    client_token,
+                    "llm-delta",
+                    serde_json::json!({ "delta": delta }),
+                );
             }
             SseEvent::Done => {
-                emit(app, "llm-done", serde_json::json!({}));
+                emit_llm(app, client_token, "llm-done", serde_json::json!({}));
                 return;
             }
             SseEvent::Error(message) => {
                 log::error("llm", format!("流式失败: {message}"));
-                emit(app, "llm-error", serde_json::json!({ "message": message }));
+                emit_llm(
+                    app,
+                    client_token,
+                    "llm-error",
+                    serde_json::json!({ "message": message }),
+                );
                 return;
             }
         }
     }
     // 流在未发送 [DONE] 时关闭：仍视为结束，避免前端 busy 卡死。
-    emit(app, "llm-done", serde_json::json!({}));
+    emit_llm(app, client_token, "llm-done", serde_json::json!({}));
 }
 
 /// SSE 消费结果。
