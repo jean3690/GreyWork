@@ -56,6 +56,7 @@ export const zhCN = {
       },
       attachmentName: "选区",
       attachmentSource: "来源：{name} · {location}",
+      pageLocation: "第 {n} 页",
       addRange: "加入对话",
       noRange: "先在表格里选中一个区域",
       disabledNoReceiver: "当前页面没有可接收内容的对话输入框",

@@ -92,11 +92,12 @@ function capture(): void {
   }
 
   // 起止落在不同语义块里就无从归属单一单元，回落 block。
+  // 但 location 保留 startUnit 的 —— 跨段选择时页码/区块信息依然成立，丢掉就白给了。
   const startUnit = resolveSemanticUnit(range.startContainer, scope);
   const endUnit = resolveSemanticUnit(range.endContainer, scope);
   const unit: SemanticUnit =
     startUnit.element && endUnit.element && startUnit.element !== endUnit.element
-      ? { role: "block", level: null, listLevel: null, element: null }
+      ? { ...startUnit, role: "block", level: null, listLevel: null, element: null }
       : startUnit;
 
   snapshot.value = { text, unit, scope, rect };

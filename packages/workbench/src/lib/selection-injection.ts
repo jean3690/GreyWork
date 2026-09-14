@@ -72,7 +72,9 @@ export interface SelectionAttachment {
  */
 export function buildSelectionAttachment(source: SelectionSource): SelectionAttachment {
   const heading = findPrecedingHeading(source.unit.element, source.scope);
-  const location = source.location ?? (heading || selectionRoleLabel(source.unit.role));
+  // 位置优先级：调用方的显式覆盖（表格的范围标签）> DOM 自己声明的（PDF 的页码）
+  // > 向上找到的最近标题 > 角色名。层层退到「角色名」是为了来源行不留半个空位。
+  const location = source.location ?? source.unit.location ?? (heading || selectionRoleLabel(source.unit.role));
   return {
     name: `${i18n.global.t("preview.selection.attachmentName")} · ${source.sourceName}`,
     text: `> ${i18n.global.t("preview.selection.attachmentSource", { name: source.sourceName, location })}\n\n${source.selectionText}`,

@@ -56,6 +56,7 @@ export const enUS: MessageSchema = {
       },
       attachmentName: "Selection",
       attachmentSource: "Source: {name} · {location}",
+      pageLocation: "Page {n}",
       addRange: "Add to chat",
       noRange: "Select a range in the sheet first",
       disabledNoReceiver: "No chat input on this page can receive content",

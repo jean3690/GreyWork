@@ -24,17 +24,23 @@ export interface SemanticUnit {
   listLevel: number | null;
   /** 命中的语义元素；回落 `block` 时为 null。 */
   element: Element | null;
+  /**
+   * 最近祖先上的 `data-selection-location`，用作来源行里的位置描述。
+   * 给「DOM 里推不出位置」的渲染器用：PDF 的文本层没有标题结构，靠它标「第 N 页」。
+   */
+  location: string | null;
 }
 
 /**
  * 选区语义能否从 DOM 拿到。
  *
- * 排除的四种不是「偷懒」，是真的拿不到：
- * - `pdf` / `xlsx`：canvas 渲染，没有对应文本的 DOM 节点，`getSelection()` 看不见；
+ * 排除的三种不是「偷懒」，是真的拿不到：
+ * - `xlsx`：Univer 是 canvas 渲染，没有对应单元格的 DOM 节点（走它自己的选区服务，
+ *   入口在 SheetViewer 的表头按钮，不经过本模块）；
  * - `image` / `legacy-office`：本来就没有可选文本。
  */
 export function isTextSelectableKind(kind: string): boolean {
-  return kind !== "pdf" && kind !== "xlsx" && kind !== "image" && kind !== "legacy-office";
+  return kind !== "xlsx" && kind !== "image" && kind !== "legacy-office";
 }
 
 const ROLE_OVERRIDES: ReadonlySet<string> = new Set(["paragraph", "code", "block"]);
@@ -86,22 +92,41 @@ function listLevelOf(element: Element): number {
 /**
  * 从选区端点向上回溯到最近的语义单元。首个命中即返回（由内向外，所以嵌套表格取内层）。
  * 走到 scope 仍未命中即回落 `block` —— 跨多个语义块选择时也会落到这里。
+ *
+ * `location` 与语义角色**各自独立**地取最近值：角色按最近的命中算，位置按最近的
+ * `data-selection-location` 算，两者不一定落在同一个元素上（PDF 的文本层两层都标，
+ * 别的渲染器可能只在页面级标一次）。
  */
 export function resolveSemanticUnit(node: Node | null, scope: Element): SemanticUnit {
   let element = startElement(node);
+  let role: SelectionRole | null = null;
+  let matched: Element | null = null;
+  let location: string | null = null;
+
   while (element && element !== scope.parentElement) {
-    const role = roleOf(element);
-    if (role) {
-      return {
-        role,
-        level: role === "heading" ? headingLevelOf(element) : null,
-        listLevel: role === "list-item" ? listLevelOf(element) : null,
-        element,
-      };
+    if (!role) {
+      const found = roleOf(element);
+      if (found) {
+        role = found;
+        matched = element;
+      }
     }
+    if (location === null) {
+      const declared = element.getAttribute("data-selection-location");
+      if (declared) location = declared;
+    }
+    if (role && location !== null) break;
     element = element.parentElement;
   }
-  return { role: "block", level: null, listLevel: null, element: null };
+
+  if (!role || !matched) return { role: "block", level: null, listLevel: null, element: null, location };
+  return {
+    role,
+    level: role === "heading" ? headingLevelOf(matched) : null,
+    listLevel: role === "list-item" ? listLevelOf(matched) : null,
+    element: matched,
+    location,
+  };
 }
 
 /**
