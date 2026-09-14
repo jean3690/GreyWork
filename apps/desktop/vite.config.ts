@@ -1,6 +1,10 @@
 import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
 import tailwindcss from "@tailwindcss/vite";
+import { viteStaticCopy } from "vite-plugin-static-copy";
+import { createRequire } from "node:module";
+import { readdirSync } from "node:fs";
+import path from "node:path";
 import { fileURLToPath, URL } from "node:url";
 
 const host = process.env.TAURI_DEV_HOST;
@@ -10,9 +14,55 @@ const host = process.env.TAURI_DEV_HOST;
 // rxjs@7.8.2（dist/esm 完整导出），此处 alias 统一到该 ESM 构建。
 const rxjsEsm = fileURLToPath(new URL("../../node_modules/.pnpm/rxjs@7.8.2/node_modules/rxjs/dist/esm", import.meta.url));
 
+/**
+ * pdf.js 的运行时资源：CJK 的 CMap、非嵌入字体的标准字体表、JBIG2/JPEG2000/QCMS 的 wasm。
+ *
+ * 缺了它们 pdf.js **不报错**，只是字不见了或断字错乱 —— 中文/日文 PDF 尤其明显。
+ * 所以这几份资源必须随包发出，指向的 URL 见 PdfViewer.vue 的 getDocument。
+ *
+ * 解析起点是 workbench 的 package.json：pdfjs-dist 是 workbench 的依赖，从 apps/desktop
+ * 解析不到（pnpm 不做提升）。这样也不必把版本号写进路径。
+ */
+const workbenchRequire = createRequire(fileURLToPath(new URL("../../packages/workbench/package.json", import.meta.url)));
+const pdfjsDist = path.dirname(workbenchRequire.resolve("pdfjs-dist/package.json"));
+
+const PDFJS_ASSET_DIRS = ["cmaps", "standard_fonts", "wasm", "iccs"] as const;
+
+/**
+ * vite-plugin-static-copy 的相对路径以 vite root 为基准：pdfjs-dist 在 root 之外的
+ * node_modules，插件只会剥掉开头的 `../`，于是产出
+ * `dist/pdfjs/node_modules/.pnpm/pdfjs-dist@x/node_modules/pdfjs-dist/cmaps/...` ——
+ * 与代码请求的 `/pdfjs/cmaps/` 对不上。404 之后 pdf.js 只会静默缺字，构建期毫无提示。
+ *
+ * `rename: { stripBase: true }` 正是用来抵消这段路径的（它按目录层数回退，再落到 dest）。
+ * 代价是会把源目录**压平**，所以下面这几个目录必须没有子目录。
+ */
+for (const dir of PDFJS_ASSET_DIRS) {
+  const nested = readdirSync(path.join(pdfjsDist, dir), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name);
+  if (nested.length > 0) {
+    throw new Error(
+      `pdfjs-dist/${dir} 下出现了子目录：[${nested.join(", ")}]。` +
+        `stripBase: true 会把它们压平到 /pdfjs/${dir}/ 根下，子目录里的文件将请求不到。` +
+        `请改成按子目录分别配置 dest。`,
+    );
+  }
+}
+
 // https://vite.dev/config/
 export default defineConfig(async () => ({
-  plugins: [vue(), tailwindcss()],
+  plugins: [
+    vue(),
+    tailwindcss(),
+    viteStaticCopy({
+      targets: PDFJS_ASSET_DIRS.map((dir) => ({
+        src: `${pdfjsDist}/${dir}/**/*`,
+        dest: `pdfjs/${dir}`,
+        rename: { stripBase: true },
+      })),
+    }),
+  ],
   resolve: {
     alias: {
       rxjs: rxjsEsm,

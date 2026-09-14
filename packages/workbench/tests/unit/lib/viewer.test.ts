@@ -15,10 +15,15 @@ describe("kindOfPath", () => {
     ["src/index.ts", "code"],
     ["config.json", "code"],
     ["book.xlsx", "xlsx"],
-    ["legacy.xls", "xlsx"],
     ["brief.docx", "docx"],
     ["deck.pptx", "pptx"],
     ["manual.pdf", "pdf"],
+    // 老格式必须与各自的 OOXML 新格式分开：解析器读不了 OLE2，
+    // 混为一谈会让用户拿到一个「文件已损坏」的解析错误而不是明确提示。
+    ["legacy.doc", "legacy-office"],
+    ["template.dot", "legacy-office"],
+    ["legacy.xls", "legacy-office"],
+    ["legacy.ppt", "legacy-office"],
     ["fix.diff", "diff"],
     ["fix.patch", "diff"],
     ["logo.png", "image"],
@@ -40,12 +45,19 @@ describe("kindOfPath", () => {
 });
 
 describe("isBinaryKind", () => {
-  it.each<ViewerKind>(["xlsx", "docx", "pptx", "pdf", "image"])("%s 必须按二进制读", (kind) => {
+  it.each<ViewerKind>(["xlsx", "docx", "pptx", "pdf", "image", "legacy-office"])("%s 必须按二进制读", (kind) => {
     expect(isBinaryKind(kind)).toBe(true);
   });
 
   it.each<ViewerKind>(["md", "html", "csv", "code", "diff", "raw"])("%s 按文本读", (kind) => {
     expect(isBinaryKind(kind)).toBe(false);
+  });
+
+  it("老格式按二进制读是硬要求：走文本通道会被 utf-8 解码成乱码且不报错", () => {
+    // .doc / .xls / .ppt 都是 OLE2 二进制；曾经的 bug 就是它们落到 raw 走了文本通道。
+    for (const path of ["a.doc", "a.xls", "a.ppt"]) {
+      expect(isBinaryKind(kindOfPath(path))).toBe(true);
+    }
   });
 });
 

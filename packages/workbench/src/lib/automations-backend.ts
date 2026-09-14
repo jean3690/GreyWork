@@ -19,6 +19,8 @@ export interface AutomationTaskRow {
   schedule: string;
   /** 标准 cron 5 段表达式；null/缺省 = 手动触发。 */
   cron: string | null;
+  /** 执行后端：ACP 后端 id；null = 本机模型管线。 */
+  acpProviderId: string | null;
   target: string;
   intent: string;
   enabled: boolean;
@@ -41,6 +43,8 @@ export interface AutomationDueRow {
   name: string;
   target: string;
   intent: string;
+  /** 入队时刻的执行后端快照（与 intent 同源）；null = 本机模型管线。 */
+  acpProviderId: string | null;
   dueAt: number;
 }
 

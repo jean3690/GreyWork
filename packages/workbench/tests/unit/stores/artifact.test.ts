@@ -14,6 +14,7 @@ vi.mock("@/lib/artifact-dir", () => ({
 }));
 
 import { useArtifactStore } from "@/stores/artifact";
+import { appEvents } from "@/events";
 
 beforeEach(() => {
   setActivePinia(createPinia());
@@ -60,5 +61,24 @@ describe("deliverArtifact", () => {
     });
     expect(h.saveToDisk).not.toHaveBeenCalled();
     expect(store.byId(id)?.diskPath).toBe("/data/proj/artifacts/b.xlsx");
+  });
+
+  it("落盘路径随事件广播出去，预览面板据它提供「用系统应用打开」", async () => {
+    const store = useArtifactStore();
+    const payloads: Array<Record<string, unknown>> = [];
+    const dispose = appEvents.on("artifact:created", (payload) => payloads.push(payload));
+
+    await store.deliverArtifact({
+      path: "workspaces/w/report.md",
+      meta: "Markdown",
+      type: "report",
+      source: "assistant-pipeline",
+      data: "# 报告",
+    });
+    dispose();
+
+    expect(payloads).toEqual([
+      expect.objectContaining({ path: "workspaces/w/report.md", diskPath: "/home/u/.greyWork/artifacts/report.md" }),
+    ]);
   });
 });

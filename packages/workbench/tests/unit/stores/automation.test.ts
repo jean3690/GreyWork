@@ -1,7 +1,9 @@
-// 自动化任务存储契约：CRUD / 持久化往返 / 启用态。
-import { beforeEach, describe, expect, it } from "vitest";
+// 自动化任务存储契约：CRUD / 持久化往返 / 启用态 / Run Now 执行路由。
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import { useAutomationStore } from "@/stores/automation";
+import { useAgentStore } from "@/stores/agent";
+import { useChatStore } from "@/stores/chat";
 
 const storageHolder = globalThis as { localStorage?: Storage };
 
@@ -52,6 +54,76 @@ describe("自动化任务 CRUD", () => {
     expect(store.list[0]?.enabled).toBe(false);
     store.update(id, { name: "改名" });
     expect(store.list[0]?.name).toBe("改名");
+  });
+});
+
+describe("Run Now 执行路由", () => {
+  /** 已启用且已选中的 ACP 后端（避免走 activate 连接路径）。 */
+  function readyAgent() {
+    const agent = useAgentStore();
+    const provider = agent.agentProviders[0];
+    provider.enabled = true;
+    agent.selectedProviderId = provider.id;
+    agent.routeToAcp = true;
+    return { agent, provider };
+  }
+
+  it("绑定 ACP 后端：派发到该后端、不落本机模型管线，成功后回写 lastRun", async () => {
+    const { agent, provider } = readyAgent();
+    const store = useAutomationStore();
+    const task = store.add({ name: "带后端", intent: "生成日报", acpProviderId: provider.id });
+    const submit = vi.spyOn(useChatStore(), "submitText").mockImplementation(() => null);
+    const dispatch = vi.spyOn(agent, "dispatchToAcp").mockResolvedValue(undefined);
+
+    expect(store.runNow(task.id)).toBe("started");
+    expect(task.running).toBe(true);
+    await vi.waitFor(() => expect(task.lastRun).toBeGreaterThan(0));
+
+    expect(dispatch).toHaveBeenCalledWith("生成日报");
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it("绑定的后端未启用：运行态复位、lastRun 不写、绝不回落本机模型", async () => {
+    const agent = useAgentStore();
+    const provider = agent.agentProviders[0];
+    provider.enabled = false;
+    const store = useAutomationStore();
+    const task = store.add({ name: "停用后端", intent: "生成日报", acpProviderId: provider.id });
+    const submit = vi.spyOn(useChatStore(), "submitText").mockImplementation(() => null);
+    const dispatch = vi.spyOn(agent, "dispatchToAcp").mockResolvedValue(undefined);
+
+    expect(store.runNow(task.id)).toBe("started");
+    await vi.waitFor(() => expect(task.running).toBe(false));
+
+    expect(submit).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(task.lastRun).toBe(0);
+  });
+
+  it("绑定的后端已被删除：只报错，不改用本机模型", async () => {
+    const store = useAutomationStore();
+    const task = store.add({ name: "后端没了", intent: "生成日报", acpProviderId: "custom-gone" });
+    const submit = vi.spyOn(useChatStore(), "submitText").mockImplementation(() => null);
+    const dispatch = vi.spyOn(useAgentStore(), "dispatchToAcp").mockResolvedValue(undefined);
+
+    expect(store.runNow(task.id)).toBe("started");
+    await vi.waitFor(() => expect(task.running).toBe(false));
+
+    expect(submit).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(task.lastRun).toBe(0);
+  });
+
+  it("未绑定后端：走本机模型管线", async () => {
+    const store = useAutomationStore();
+    const task = store.add({ name: "本机", intent: "生成日报" });
+    const submit = vi.spyOn(useChatStore(), "submitText").mockImplementation(() => null);
+    const dispatch = vi.spyOn(useAgentStore(), "dispatchToAcp").mockResolvedValue(undefined);
+
+    expect(store.runNow(task.id)).toBe("started");
+    expect(submit).toHaveBeenCalledWith("生成日报");
+    expect(dispatch).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(task.lastRun).toBeGreaterThan(0));
   });
 });
 

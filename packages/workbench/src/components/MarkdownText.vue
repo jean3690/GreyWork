@@ -120,7 +120,11 @@ function alignOf(align: (string | null)[], column: number): Record<string, strin
           </button>
         </div>
         <div class="md-code__body flex overflow-x-auto font-mono text-xs leading-[1.6]">
+          <!-- data-selection-exclude：行号不是代码内容，划词采集时要剔掉。
+               刻意不靠 aria-hidden 表达这件事 —— docx 的列表符号也是 aria-hidden，
+               但那个是用户看得见的圆点，必须保留。 -->
           <div
+            data-selection-exclude
             class="md-code__lines flex flex-none flex-col py-2 pl-2.5 pr-2 border-r border-line text-dim2 text-right select-none"
             aria-hidden="true"
           >

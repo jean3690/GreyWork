@@ -14,7 +14,7 @@ import AttachmentTray from "../components/chat/AttachmentTray.vue";
 import SlashCommandMenu from "../components/chat/SlashCommandMenu.vue";
 import Icon from "../components/Icon.vue";
 import { useAttachments } from "../lib/use-attachments";
-import { useChatTextAttachmentBridge } from "../lib/use-chat-text-attachment";
+import { useChatReceiver } from "../lib/use-chat-receiver";
 import { useSlashCommands } from "../lib/use-slash-commands";
 import { materializeAttachments } from "../state/attachment-library";
 import type { Attachment } from "../types";
@@ -38,8 +38,6 @@ const draft = ref("");
 /** 图片可用性：本地 LLM 无能力声明（交给供应商报错），ACP 以 agent 声明为准。 */
 const imagesAllowed = computed(() => !agent.routeToAcp || agent.acpImageSupport !== false);
 const attachments = useAttachments(() => chat.activeThreadId, { imagesAllowed: () => imagesAllowed.value });
-// 网页正文「发送到对话」经事件总线进来，落到同一份附件草稿。
-useChatTextAttachmentBridge(attachments);
 const {
   items: attachmentItems,
   dragging: attachmentDragging,
@@ -73,6 +71,10 @@ const {
   },
   canSend: () => !agent.acpBusy && !chat.busy,
 });
+
+// 本视图能接收对话注入：注册接收方（预览划词工具条据此判断可用）+ 挂附件桥与预填桥。
+// 网页正文「发送到对话」与划词工具条都走这条线，落到同一份附件草稿。
+useChatReceiver({ draft, textarea: textareaEl, attachments });
 
 async function run(prompt: string, items: readonly Attachment[] = []): Promise<void> {
   const workspaceId = workspaceStore.activeWorkspaceId;

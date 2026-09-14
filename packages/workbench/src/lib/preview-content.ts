@@ -26,8 +26,12 @@ function usePreviewLoader<T>(tab: Ref<PreviewTab>, load: (path: string) => Promi
   const error = ref<string | null>(null);
   let token = 0;
 
+  // 源用**逐个 getter**而不是 `() => [path, revision]`：后者每次求值都是一个新数组，
+  // Object.is 永不相等，于是「tab 对象被换掉」也会触发重载 —— 而 store 里改 diskPath / dirty
+  // 就是换对象。重载会把 viewer 连同 Univer 实例、滚动位置和正在编辑的内容一起重建。
+  // 拆成两个 getter 后只按 path / revision 的**值**比较，换对象不再误伤。
   watch(
-    () => [tab.value.path, tab.value.revision] as const,
+    [() => tab.value.path, () => tab.value.revision],
     async ([path]) => {
       const current = ++token;
       loading.value = true;

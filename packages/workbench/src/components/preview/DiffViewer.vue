@@ -38,7 +38,7 @@ const MARKER: Record<DiffLineKind, string> = {
 </script>
 
 <template>
-  <div class="size-full overflow-auto font-mono text-[12px]">
+  <div data-selection-scope class="size-full overflow-auto font-mono text-[12px]">
     <p v-if="loading" class="px-4 py-3 text-dim2">读取中…</p>
     <p v-else-if="error" role="alert" class="px-4 py-3 text-orange">读取失败：{{ error }}</p>
     <p v-else-if="files.length === 0" class="px-4 py-3 text-dim2">没有可显示的变更</p>
@@ -50,9 +50,14 @@ const MARKER: Record<DiffLineKind, string> = {
           <span class="shrink-0 text-orange">-{{ file.removed }}</span>
         </header>
         <div v-for="(line, index) in file.lines.slice(0, LINE_LIMIT)" :key="index" class="flex items-start" :class="LINE_CLASS[line.kind]">
-          <span class="w-10 shrink-0 select-none px-1 text-right tabular-nums text-dim2">{{ line.oldNo ?? "" }}</span>
-          <span class="w-10 shrink-0 select-none px-1 text-right tabular-nums text-dim2">{{ line.newNo ?? "" }}</span>
-          <span class="w-3 shrink-0 select-none text-center">{{ MARKER[line.kind] }}</span>
+          <!-- 行号与标记列不计入划词采集：用户选中的是代码，不是行号 -->
+          <span data-selection-exclude class="w-10 shrink-0 select-none px-1 text-right tabular-nums text-dim2">{{
+            line.oldNo ?? ""
+          }}</span>
+          <span data-selection-exclude class="w-10 shrink-0 select-none px-1 text-right tabular-nums text-dim2">{{
+            line.newNo ?? ""
+          }}</span>
+          <span data-selection-exclude class="w-3 shrink-0 select-none text-center">{{ MARKER[line.kind] }}</span>
           <span class="min-w-0 flex-1 whitespace-pre-wrap break-all pe-3">{{ line.text }}</span>
         </div>
         <p v-if="file.lines.length > LINE_LIMIT" class="px-3 py-1.5 text-[11px] text-dim2">

@@ -27,7 +27,7 @@ const truncated = computed(() => table.value.body.length > ROW_LIMIT);
     <p v-else-if="error" role="alert" class="px-4 py-3 text-[12px] text-orange">读取失败：{{ error }}</p>
     <p v-else-if="table.header.length === 0" class="px-4 py-3 text-[12px] text-dim2">空文件</p>
     <template v-else>
-      <table data-testid="table-viewer" class="w-max border-collapse text-[12px]">
+      <table data-testid="table-viewer" data-selection-scope class="w-max border-collapse text-[12px]">
         <thead>
           <tr>
             <th

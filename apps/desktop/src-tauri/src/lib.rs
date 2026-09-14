@@ -1,5 +1,6 @@
 mod acp_host;
 mod channel_common;
+mod cron;
 mod db;
 pub mod dingtalk;
 pub mod feishu;
@@ -67,6 +68,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             sys::sys_info,
             sys::reveal_path,
+            sys::open_path,
             acp_host::acp_permission_respond,
             acp_host::acp_start,
             acp_host::acp_new_session,

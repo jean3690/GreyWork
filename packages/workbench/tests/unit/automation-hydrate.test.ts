@@ -15,6 +15,7 @@ const invokeMock = vi.mocked(invoke);
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn().mockResolvedValue(() => {}) }));
 
 import { useAutomationStore } from "../../src/stores/automation";
+import { useAgentStore } from "../../src/stores/agent";
 import { useChatStore } from "../../src/stores/chat";
 
 const storageHolder = globalThis as { localStorage?: Storage };
@@ -39,6 +40,7 @@ const dbTasks = [
     name: "库中任务",
     schedule: "每天 09:00",
     cron: "0 9 * * *",
+    acpProviderId: null,
     target: "主仓",
     intent: "生成日报",
     enabled: true,
@@ -49,6 +51,7 @@ const dbTasks = [
     name: "手动任务",
     schedule: "手动触发",
     cron: null,
+    acpProviderId: null,
     target: "未绑定",
     intent: "生成周报",
     enabled: false,
@@ -125,7 +128,15 @@ describe("automation store 桌面接管（SQLite 真源）", () => {
 
 describe("automation 到期队列消费（consumeDue）", () => {
   /** 模拟库侧 due 队列：finish 从队列移除（与真实 pending 语义一致）。 */
-  let queue: Array<{ id: number; taskId: string; name: string; target: string; intent: string; dueAt: number }>;
+  let queue: Array<{
+    id: number;
+    taskId: string;
+    name: string;
+    target: string;
+    intent: string;
+    acpProviderId: string | null;
+    dueAt: number;
+  }>;
 
   function dispatchInvoke(): void {
     invokeMock.mockImplementation((cmd: unknown, args?: unknown) => {
@@ -149,8 +160,24 @@ describe("automation 到期队列消费（consumeDue）", () => {
     invokeMock.mockReset();
     setActivePinia(createPinia());
     queue = [
-      { id: 1, taskId: "at-db-1", name: "库中任务", target: "主仓", intent: "生成日报", dueAt: Date.now() - 1_000 },
-      { id: 2, taskId: "at-db-2", name: "手动任务", target: "未绑定", intent: "生成周报", dueAt: Date.now() - 500 },
+      {
+        id: 1,
+        taskId: "at-db-1",
+        name: "库中任务",
+        target: "主仓",
+        intent: "生成日报",
+        acpProviderId: null,
+        dueAt: Date.now() - 1_000,
+      },
+      {
+        id: 2,
+        taskId: "at-db-2",
+        name: "手动任务",
+        target: "未绑定",
+        intent: "生成周报",
+        acpProviderId: null,
+        dueAt: Date.now() - 500,
+      },
     ];
   });
   afterEach(() => {
@@ -203,7 +230,9 @@ describe("automation 到期队列消费（consumeDue）", () => {
   });
 
   it("到期任务已不在清单 → 防御性 finish(failed) 不留死队列", async () => {
-    queue = [{ id: 9, taskId: "at-gone", name: "已删任务", target: "主仓", intent: "残留指令", dueAt: Date.now() - 1_000 }];
+    queue = [
+      { id: 9, taskId: "at-gone", name: "已删任务", target: "主仓", intent: "残留指令", acpProviderId: null, dueAt: Date.now() - 1_000 },
+    ];
     dispatchInvoke();
     const automation = useAutomationStore();
     const chat = useChatStore();
@@ -214,5 +243,67 @@ describe("automation 到期队列消费（consumeDue）", () => {
     expect(submit).not.toHaveBeenCalled();
     const finish = invokeMock.mock.calls.find(([cmd]) => cmd === "db_automations_due_finish");
     expect(finish?.[1]).toMatchObject({ id: 9, status: "failed" });
+  });
+
+  /** 队列快照里绑定 ACP 后端 → 走 ACP 派发；本机模型管线一次都不碰。 */
+  it("绑定 ACP 后端的到期任务走 ACP 派发", async () => {
+    const agent = useAgentStore();
+    const provider = agent.agentProviders[0];
+    provider.enabled = true;
+    agent.selectedProviderId = provider.id;
+    agent.routeToAcp = true;
+    queue = [
+      {
+        id: 3,
+        taskId: "at-db-1",
+        name: "库中任务",
+        target: "主仓",
+        intent: "生成日报",
+        acpProviderId: provider.id,
+        dueAt: Date.now() - 1_000,
+      },
+    ];
+    dispatchInvoke();
+    const automation = useAutomationStore();
+    const submit = vi.spyOn(useChatStore(), "submitText").mockImplementation(() => null);
+    const dispatch = vi.spyOn(agent, "dispatchToAcp").mockResolvedValue(undefined);
+
+    await automation.hydrated;
+    await vi.waitFor(() => expect(queue).toHaveLength(0));
+
+    expect(dispatch).toHaveBeenCalledWith("生成日报");
+    expect(submit).not.toHaveBeenCalled();
+    const finish = invokeMock.mock.calls.find(([cmd]) => cmd === "db_automations_due_finish");
+    expect(finish?.[1]).toMatchObject({ id: 3, status: "success" });
+    expect(automation.list.find((a) => a.id === "at-db-1")?.lastRun).toBeGreaterThan(1_700_000_000_000);
+  });
+
+  it("绑定的 ACP 后端已停用 → 不静默改用本机模型，队列标 failed", async () => {
+    const agent = useAgentStore();
+    const provider = agent.agentProviders[0];
+    provider.enabled = false;
+    queue = [
+      {
+        id: 4,
+        taskId: "at-db-1",
+        name: "库中任务",
+        target: "主仓",
+        intent: "生成日报",
+        acpProviderId: provider.id,
+        dueAt: Date.now() - 1_000,
+      },
+    ];
+    dispatchInvoke();
+    const automation = useAutomationStore();
+    const submit = vi.spyOn(useChatStore(), "submitText").mockImplementation(() => null);
+    const dispatch = vi.spyOn(agent, "dispatchToAcp").mockResolvedValue(undefined);
+
+    await automation.hydrated;
+    await vi.waitFor(() => expect(queue).toHaveLength(0));
+
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
+    const finish = invokeMock.mock.calls.find(([cmd]) => cmd === "db_automations_due_finish");
+    expect(finish?.[1]).toMatchObject({ id: 4, status: "failed" });
   });
 });

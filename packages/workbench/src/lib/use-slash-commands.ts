@@ -8,11 +8,12 @@
  * 键盘事件在视图的 Enter 发送之前调用 handleKeydown，返回 true 表示已消费。
  */
 
-import { computed, nextTick, ref, watch, type ComputedRef, type Ref } from "vue";
+import { computed, ref, watch, type ComputedRef, type Ref } from "vue";
 import { i18n } from "../i18n";
 import { useAgentStore } from "../stores/agent";
 import { useChatStore } from "../stores/chat";
 import { useSettingsStore } from "../stores/settings";
+import { fillDraft, focusTextarea as focusComposer } from "./composer-draft";
 import { buildSlashItems, filterSlashCommands, matchSlashQuery, slashOptionId, type SlashCommandItem } from "./slash-commands";
 
 export interface UseSlashCommandsOptions {
@@ -74,19 +75,13 @@ export function useSlashCommands(options: UseSlashCommandsOptions): UseSlashComm
     activeIndex.value = 0;
   });
 
+  // 聚焦 + 光标到末尾 / 写草稿这两件事与「划词预填」共用，实现在 composer-draft.ts。
   function focusTextarea(): void {
-    void nextTick(() => {
-      const el = options.textarea.value;
-      if (!el) return;
-      el.focus();
-      const end = el.value.length;
-      el.setSelectionRange(end, end);
-    });
+    focusComposer(options.textarea);
   }
 
   function fill(text: string): void {
-    options.draft.value = text;
-    focusTextarea();
+    fillDraft(options.draft, options.textarea, text, "replace");
   }
 
   function dismiss(): void {

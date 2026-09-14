@@ -23,6 +23,8 @@ export interface GreyWorkEventMap {
     path: string;
     format?: "md" | "csv" | "xlsx" | "pptx" | "html";
     source: string;
+    /** 落盘后的磁盘路径（未落盘/浏览器态省略）；预览据此提供「用系统应用打开」。 */
+    diskPath?: string;
   };
   /** 已有交付物被就地修改（如给 Excel 追加一行）；查看器需重新加载该 tab。 */
   "artifact:updated": {
@@ -30,6 +32,7 @@ export interface GreyWorkEventMap {
     path: string;
     format?: "md" | "csv" | "xlsx" | "pptx" | "html";
     source: string;
+    diskPath?: string;
   };
   /** 请求预览面板加载指定文件（GenUI 产物跨面板联动）。 */
   "preview:request": { path: string };
@@ -37,6 +40,9 @@ export interface GreyWorkEventMap {
   "editor:open": { path: string };
   /** 把一段现成文本（如网页正文）加进当前输入卡的附件草稿。 */
   "chat:attachText": { name: string; text: string; mime: string };
+  /** 预填输入框草稿并聚焦（预览划词 → 问 AI / 解释 / 改写）。
+   *  append 时空行分隔追加，且草稿为空时等同 replace —— 不覆盖用户已写的内容。 */
+  "chat:prefill": { text: string; mode?: "replace" | "append" };
   /** 请求打开设置弹窗（可指定分区）；远程助手页等「去设置配置」入口使用。 */
   "settings:open": { section?: string };
 }

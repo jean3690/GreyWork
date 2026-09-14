@@ -18,8 +18,14 @@ export function usePreviewBridge(): void {
   const preview = usePreviewStore();
 
   const disposers = [
-    appEvents.on("artifact:created", ({ path, name }) => preview.open(path, name)),
-    appEvents.on("artifact:updated", ({ path }) => preview.reload(path)),
+    appEvents.on("artifact:created", ({ path, name, diskPath }) => {
+      preview.open(path, name);
+      if (diskPath) preview.attachDiskPath(path, diskPath);
+    }),
+    appEvents.on("artifact:updated", ({ path, diskPath }) => {
+      preview.reload(path);
+      if (diskPath) preview.attachDiskPath(path, diskPath);
+    }),
     appEvents.on("preview:request", ({ path }) => preview.open(path)),
     appEvents.on("editor:open", ({ path }) => preview.open(path)),
   ];

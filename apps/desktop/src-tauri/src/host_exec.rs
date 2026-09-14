@@ -6,6 +6,8 @@
 //!
 //! 边界与安全：
 //! - **只走 LLM 直连**（无工具/无 ACP/无权限请求面）——无人值守不存在权限裁决问题。
+//!   绑定 ACP 后端的任务因此**不由宿主兜底**：换一个执行者跑用户明确指定的后端，
+//!   等于悄悄改了任务语义；这类行直接 finish failed，等下个 cron 由应用内执行。
 //! - **迟到认领**：只捡 due_at 早于 now-2min 的 pending 行（渲染端 30s 轮询
 //!   正常时不可能滞留 2min；2min 也覆盖渲染端短忙）。行级 finish 原子认领
 //!   兜底渲染端/宿主毫秒级竞态（重复执行同一 intent 至多一次，无害）。
@@ -96,6 +98,9 @@ fn preview(reply: &str) -> String {
 /// 执行单条：默认 LLM 配置 → 单轮 chat_complete → 新会话落库 → last_run 回写。
 /// 成功返回模型回复全文（供通知预览）。
 async fn run_one(db: &Db, item: &AutomationDueDto) -> Result<String, String> {
+    if item.acp_provider_id.is_some() {
+        return Err("任务绑定 ACP 后端：兜底执行只支持本机模型，需在应用内执行".to_string());
+    }
     let settings = db
         .load_settings()?
         .ok_or_else(|| "设置未初始化（无模型配置可执行）".to_string())?;

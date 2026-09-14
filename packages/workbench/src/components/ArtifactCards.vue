@@ -26,6 +26,16 @@ const failedId = ref<string | null>(null);
 async function open(id: string, diskPath: string): Promise<void> {
   failedId.value = (await revealInFolder(diskPath)) ? null : id;
 }
+
+/**
+ * 预览产物：打开 tab 后再把落盘路径挂上去，预览面板的「用系统应用打开」要用它定位。
+ * 两次调用不能合并 —— `open` 命中已开着的路径会早退，新参数带不进去。
+ */
+function openPreview(artifact: { path?: string; name: string; diskPath?: string }): void {
+  if (!artifact.path) return;
+  preview.open(artifact.path, artifact.name);
+  if (artifact.diskPath) preview.attachDiskPath(artifact.path, artifact.diskPath);
+}
 </script>
 
 <template>
@@ -44,7 +54,7 @@ async function open(id: string, diskPath: string): Promise<void> {
           :disabled="!artifact.path"
           :title="artifact.path ? `在预览面板打开 ${artifact.path}` : '该产物没有 VFS 路径，无法预览'"
           class="min-w-0 flex-1 cursor-pointer truncate text-start text-[12.5px] text-foreground transition-colors hover:text-cyan focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-default disabled:hover:text-foreground"
-          @click="artifact.path && preview.open(artifact.path, artifact.name)"
+          @click="openPreview(artifact)"
         >
           {{ artifact.name }}
         </button>
@@ -56,7 +66,7 @@ async function open(id: string, diskPath: string): Promise<void> {
           :title="artifact.path ? '在右侧预览面板打开' : '该产物没有 VFS 路径，无法预览'"
           aria-label="预览"
           class="flex h-6 shrink-0 cursor-pointer items-center gap-1 rounded-full border border-line bg-panel px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40"
-          @click="artifact.path && preview.open(artifact.path, artifact.name)"
+          @click="openPreview(artifact)"
         >
           <Icon name="magic" :size="11" />
           预览

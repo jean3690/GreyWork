@@ -75,7 +75,14 @@ function sendToChat(): void {
       <p v-if="loading" class="text-[12px] text-dim2">{{ t("web.fetching") }}</p>
       <p v-else-if="error" role="alert" class="text-[12px] text-orange">{{ t("web.error", { detail: error }) }}</p>
       <p v-else-if="!article?.text" class="text-[12px] text-dim2">{{ t("web.empty") }}</p>
-      <pre v-else class="whitespace-pre-wrap break-words font-sans text-[13px] leading-relaxed text-foreground">{{ article.text }}</pre>
+      <!-- data-selection-role 是必需的：正文装在 <pre> 里，不显式声明就会被划词解析当成代码 -->
+      <pre
+        v-else
+        data-selection-scope
+        data-selection-role="paragraph"
+        class="whitespace-pre-wrap break-words font-sans text-[13px] leading-relaxed text-foreground"
+        >{{ article.text }}</pre
+      >
     </div>
   </div>
 </template>

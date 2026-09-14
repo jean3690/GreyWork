@@ -5,12 +5,18 @@
  * `PreviewSurface` 被 stub 掉：它按 kind 动态 import 到 Univer / pdf.js，
  * 在 happy-dom 里既跑不起来也不是本用例要验的东西。
  */
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi, afterEach } from "vitest";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
+import { invoke } from "@tauri-apps/api/core";
+
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
 import PreviewSider from "@/components/preview/PreviewSider.vue";
+import { useNoticeStore } from "@/stores/notice";
 import { usePreviewStore } from "@/stores/preview";
+
+const invokeMock = vi.mocked(invoke);
 
 const stubs = { PreviewSurface: { template: "<div data-testid='surface-stub' />" } };
 
@@ -121,6 +127,146 @@ describe("PreviewSider", () => {
     await wrapper.vm.$nextTick();
     await wrapper.get('[data-testid="preview-close-all"]').trigger("click");
     expect(preview.tabs).toHaveLength(0);
+  });
+});
+
+describe("PreviewSider「用系统应用打开」", () => {
+  /** 桌面态标记：`isTauriRuntime()` 认 window 上的 `__TAURI_INTERNALS__`。 */
+  function stubTauriRuntime(): void {
+    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+  }
+
+  afterEach(() => {
+    delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+    invokeMock.mockReset();
+  });
+
+  it("浏览器态不显示：没有磁盘通道，按钮留着只会点了没反应", async () => {
+    const wrapper = mountSider();
+    usePreviewStore().open("/data/a.xlsx", "a.xlsx", "disk");
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('[data-testid="preview-open-external"]').exists()).toBe(false);
+  });
+
+  it("磁盘源 tab：出现按钮，点击以 open_path 调宿主", async () => {
+    stubTauriRuntime();
+    invokeMock.mockResolvedValue(undefined);
+    const wrapper = mountSider();
+    usePreviewStore().open("/data/a.xlsx", "a.xlsx", "disk");
+    await wrapper.vm.$nextTick();
+
+    await wrapper.get('[data-testid="preview-open-external"]').trigger("click");
+    await flushPromises();
+    expect(invokeMock).toHaveBeenCalledWith("open_path", { path: "/data/a.xlsx" });
+  });
+
+  it("vfs 产物：落盘路径挂上之前不显示，挂上之后就出现", async () => {
+    stubTauriRuntime();
+    const wrapper = mountSider();
+    const preview = usePreviewStore();
+    preview.open("artifacts/a.xlsx", "a.xlsx");
+    await wrapper.vm.$nextTick();
+    // 纯内存产物没有系统程序可开
+    expect(wrapper.find('[data-testid="preview-open-external"]').exists()).toBe(false);
+
+    preview.attachDiskPath("artifacts/a.xlsx", "/home/u/.greyWork/artifacts/a.xlsx");
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('[data-testid="preview-open-external"]').exists()).toBe(true);
+  });
+
+  it("宿主打开失败时弹提醒而不是静默", async () => {
+    stubTauriRuntime();
+    invokeMock.mockRejectedValue(new Error("路径不存在"));
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const wrapper = mountSider();
+    usePreviewStore().open("/data/a.xlsx", "a.xlsx", "disk");
+    await wrapper.vm.$nextTick();
+
+    await wrapper.get('[data-testid="preview-open-external"]').trigger("click");
+    await flushPromises();
+    expect(useNoticeStore().list.some((notice) => notice.title === "无法用系统应用打开")).toBe(true);
+  });
+});
+
+describe("PreviewSider 未保存改动的拦截", () => {
+  it("非脏 tab 直接关闭，不打扰用户", async () => {
+    const wrapper = mountSider();
+    const preview = usePreviewStore();
+    preview.open("reports/a.md");
+    await wrapper.vm.$nextTick();
+
+    await wrapper.get('[data-testid="preview-tab-close"]').trigger("click");
+    expect(preview.tabs).toHaveLength(0);
+    expect(wrapper.find('[data-testid="unsaved-sheet-dialog"]').exists()).toBe(false);
+  });
+
+  it("脏 tab 先弹确认；取消后 tab 还在", async () => {
+    const wrapper = mountSider();
+    const preview = usePreviewStore();
+    const id = preview.open("artifacts/a.xlsx", "a.xlsx");
+    preview.setDirty(id, true);
+    await wrapper.vm.$nextTick();
+
+    await wrapper.get('[data-testid="preview-tab-close"]').trigger("click");
+    expect(wrapper.find('[data-testid="unsaved-sheet-dialog"]').exists()).toBe(true);
+    expect(preview.tabs).toHaveLength(1);
+
+    await wrapper.get('[data-testid="unsaved-sheet-cancel"]').trigger("click");
+    expect(wrapper.find('[data-testid="unsaved-sheet-dialog"]').exists()).toBe(false);
+    expect(preview.tabs).toHaveLength(1);
+  });
+
+  it("确认放弃后按原意关掉该 tab", async () => {
+    const wrapper = mountSider();
+    const preview = usePreviewStore();
+    const id = preview.open("artifacts/a.xlsx", "a.xlsx");
+    preview.setDirty(id, true);
+    await wrapper.vm.$nextTick();
+
+    await wrapper.get('[data-testid="preview-tab-close"]').trigger("click");
+    await wrapper.get('[data-testid="unsaved-sheet-confirm"]').trigger("click");
+    expect(wrapper.find('[data-testid="unsaved-sheet-dialog"]').exists()).toBe(false);
+    expect(preview.tabs).toHaveLength(0);
+  });
+
+  it("脏 tab 在无障碍名里说明未保存（圆点本身是纯装饰）", async () => {
+    const wrapper = mountSider();
+    const preview = usePreviewStore();
+    const id = preview.open("artifacts/a.xlsx", "a.xlsx");
+    await wrapper.vm.$nextTick();
+    expect(wrapper.get('[data-testid="preview-tab"] button').attributes("aria-label")).toBe("查看 a.xlsx");
+
+    preview.setDirty(id, true);
+    await wrapper.vm.$nextTick();
+    expect(wrapper.get('[data-testid="preview-tab"] button').attributes("aria-label")).toBe("查看 a.xlsx（有未保存的改动）");
+  });
+
+  it("「关闭全部」只要沾到一个脏 tab 就得确认", async () => {
+    const wrapper = mountSider();
+    const preview = usePreviewStore();
+    preview.open("reports/a.md");
+    const dirtyId = preview.open("artifacts/b.xlsx", "b.xlsx");
+    preview.setDirty(dirtyId, true);
+    await wrapper.vm.$nextTick();
+
+    await wrapper.get('[data-testid="preview-close-all"]').trigger("click");
+    expect(preview.tabs).toHaveLength(2);
+    expect(wrapper.get('[data-testid="unsaved-sheet-dialog"]').text()).toContain("b.xlsx");
+
+    await wrapper.get('[data-testid="unsaved-sheet-confirm"]').trigger("click");
+    expect(preview.tabs).toHaveLength(0);
+  });
+
+  it("全是干净 tab 时「关闭全部」照旧直接清空", async () => {
+    const wrapper = mountSider();
+    const preview = usePreviewStore();
+    preview.open("reports/a.md");
+    preview.open("data/b.csv");
+    await wrapper.vm.$nextTick();
+
+    await wrapper.get('[data-testid="preview-close-all"]').trigger("click");
+    expect(preview.tabs).toHaveLength(0);
+    expect(wrapper.find('[data-testid="unsaved-sheet-dialog"]').exists()).toBe(false);
   });
 });
 
