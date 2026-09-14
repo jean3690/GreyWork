@@ -76,7 +76,9 @@ impl CronSpec {
         if minute > 59 || hour > 23 || day > 31 || month > 12 || cron_weekday > 6 {
             return false;
         }
-        if !self.minutes[minute as usize] || !self.hours[hour as usize] || !self.months[month as usize]
+        if !self.minutes[minute as usize]
+            || !self.hours[hour as usize]
+            || !self.months[month as usize]
         {
             return false;
         }
@@ -128,7 +130,14 @@ pub fn parse(expr: &str) -> Option<CronSpec> {
 }
 
 /// 便捷入口：解析 + 匹配（非法表达式 → false）。
-pub fn matches(expr: &str, month: u32, day: u32, cron_weekday: u32, hour: u32, minute: u32) -> bool {
+pub fn matches(
+    expr: &str,
+    month: u32,
+    day: u32,
+    cron_weekday: u32,
+    hour: u32,
+    minute: u32,
+) -> bool {
     parse(expr)
         .map(|spec| spec.matches(month, day, cron_weekday, hour, minute))
         .unwrap_or(false)
@@ -158,7 +167,10 @@ fn parse_field(raw: &str, min: u32, max: u32, names: &[(&str, u32)]) -> Option<V
         let (lo, hi) = if range_text == "*" {
             (min, max)
         } else if let Some((from, to)) = range_text.split_once('-') {
-            (field_value(from.trim(), names)?, field_value(to.trim(), names)?)
+            (
+                field_value(from.trim(), names)?,
+                field_value(to.trim(), names)?,
+            )
         } else {
             let value = field_value(range_text, names)?;
             (value, value)
