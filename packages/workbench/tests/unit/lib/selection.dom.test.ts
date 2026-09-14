@@ -5,7 +5,7 @@
  * 网页正文是一个 <pre>），所以逐条钉死，防止哪天给某个渲染器改 DOM 时悄悄退化。
  */
 import { beforeEach, describe, expect, it } from "vitest";
-import { collectUnitText, findPrecedingHeading, resolveSemanticUnit } from "@/lib/selection";
+import { collectUnitText, findPrecedingHeading, isTextSelectableKind, resolveSemanticUnit } from "@/lib/selection";
 
 function firstTextNode(element: Element): Text {
   for (const child of Array.from(element.childNodes)) {
@@ -91,6 +91,43 @@ describe("resolveSemanticUnit", () => {
     document.body.innerHTML = `<div data-selection-scope><span id="bare">裸文本</span></div>`;
 
     expect(unitAt("#bare")).toMatchObject({ role: "block", element: null });
+  });
+
+  it("拾取最近祖先的 data-selection-location（PDF 的页码靠它）", () => {
+    document.body.innerHTML = `<div data-selection-scope>
+      <div id="page" data-selection-location="第 3 页" data-selection-role="block"><span>正文</span></div>
+    </div>`;
+
+    expect(unitAt("#page span")).toMatchObject({ role: "block", location: "第 3 页" });
+  });
+
+  it("角色与位置各自取最近值，可以落在不同层", () => {
+    document.body.innerHTML = `<div data-selection-scope>
+      <div data-selection-location="第 7 页"><p id="p">正文</p></div>
+    </div>`;
+
+    expect(unitAt("#p")).toMatchObject({ role: "paragraph", location: "第 7 页" });
+  });
+
+  it("没有声明的渲染器 location 为 null，仍由标题或角色名兜底", () => {
+    document.body.innerHTML = `<div data-selection-scope><p id="p">正文</p></div>`;
+
+    expect(unitAt("#p").location).toBeNull();
+  });
+});
+
+describe("isTextSelectableKind", () => {
+  it("pdf 可选（已铺文本层），其余能拿到 DOM 文本的都放行", () => {
+    for (const kind of ["pdf", "md", "html", "docx", "pptx", "csv", "code", "raw", "diff", "web"]) {
+      expect(isTextSelectableKind(kind)).toBe(true);
+    }
+  });
+
+  it("canvas 类与无文本类仍排除", () => {
+    // xlsx 走 Univer 自己的选区服务（表头按钮），不经过 DOM 这条路
+    expect(isTextSelectableKind("xlsx")).toBe(false);
+    expect(isTextSelectableKind("image")).toBe(false);
+    expect(isTextSelectableKind("legacy-office")).toBe(false);
   });
 });
 

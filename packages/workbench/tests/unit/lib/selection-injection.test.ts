@@ -22,7 +22,7 @@ import type { SemanticUnit } from "@/lib/selection";
 
 /** 不带 element/scope：node 环境下没有 DOM，`findPrecedingHeading` 对 null 是安全的。 */
 function source(overrides: Partial<SelectionSource> = {}): SelectionSource {
-  const unit: SemanticUnit = { role: "paragraph", level: null, listLevel: null, element: null };
+  const unit: SemanticUnit = { role: "paragraph", level: null, listLevel: null, element: null, location: null };
   return {
     selectionText: "被选中的那句话",
     unit,
@@ -93,6 +93,22 @@ describe("buildSelectionAttachment", () => {
     const attachment = buildSelectionAttachment(source({ location: "Sheet1!A1:C3" }));
     expect(attachment.text).toContain("Sheet1!A1:C3");
     expect(attachment.text).not.toContain(selectionRoleLabel("paragraph"));
+  });
+
+  it("单元自带的 location 优先于角色名（PDF 的页码来自 data-selection-location）", () => {
+    const unit: SemanticUnit = { role: "block", level: null, listLevel: null, element: null, location: "第 3 页" };
+    const attachment = buildSelectionAttachment(source({ unit }));
+
+    expect(attachment.text).toContain("第 3 页");
+    expect(attachment.text).not.toContain(selectionRoleLabel("block"));
+  });
+
+  it("显式 location 胜过单元自带的（表格那条路两者都有）", () => {
+    const unit: SemanticUnit = { role: "table-cell", level: null, listLevel: null, element: null, location: "第 3 页" };
+    const attachment = buildSelectionAttachment(source({ unit, location: "Sheet1!A1:C3" }));
+
+    expect(attachment.text).toContain("Sheet1!A1:C3");
+    expect(attachment.text).not.toContain("第 3 页");
   });
 });
 

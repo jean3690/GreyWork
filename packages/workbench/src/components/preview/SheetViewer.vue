@@ -227,7 +227,7 @@ function sendSelectionToChat(): void {
   if (!selection) return;
   injectSelectionIntoChat(sheetSelectionPrompt(), {
     selectionText: formatSelectionTsv(selection),
-    unit: { role: "table-cell", level: null, listLevel: null, element: null },
+    unit: { role: "table-cell", level: null, listLevel: null, element: null, location: null },
     // 表格没有 DOM 作用域，也无从「向上找最近标题」——位置直接由范围标签给。
     scope: null,
     sourceName: props.tab.name,
