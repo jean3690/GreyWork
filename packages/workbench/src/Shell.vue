@@ -9,9 +9,11 @@ import { useSettingsStore } from "./stores/settings";
 import { useWorkspaceStore } from "./stores/workspace";
 import { usePreviewStore } from "./stores/preview";
 import { useActivityStore } from "./stores/activity";
+import { useLayoutStore } from "./stores/layout";
 import { useRemoteAssistantStore } from "./stores/remote-assistant";
 import { appEvents } from "./events";
 import { applyAppearance as applyAppearanceToDom } from "./lib/theme";
+import { modeOfShortcut, visibilityOf, type LayoutMode } from "./lib/layout-modes";
 import { bootPlugins } from "./plugins/runtime";
 import Sider from "./components/Sider.vue";
 import SettingsDialog from "./components/SettingsDialog.vue";
@@ -41,6 +43,7 @@ const sessionStore = useSessionStore();
 const workspaceStore = useWorkspaceStore();
 const preview = usePreviewStore();
 const activity = useActivityStore();
+const layout = useLayoutStore();
 
 const darkMedia =
   typeof window !== "undefined" && typeof window.matchMedia === "function" ? window.matchMedia("(prefers-color-scheme: dark)") : null;
@@ -58,15 +61,35 @@ watch(
 );
 
 const MOBILE_BREAKPOINT = 768;
-const collapsed = ref(false);
 const isMobile = ref(false);
+
+/**
+ * 左侧栏折叠态 = **有效态**，初值取自持久化偏好。
+ *
+ * 有效态与偏好必须分开：窄屏下左栏是抽屉，开关都是瞬态的，写回偏好会让用户
+ * 在窄屏开一次抽屉就把桌面的偏好改掉。所以只有桌面下才回写（见下面的 watch）。
+ */
+const collapsed = ref(layout.sidebarCollapsed);
+
+watch(collapsed, (value) => {
+  if (!isMobile.value) layout.sidebarCollapsed = value;
+});
+
+/** 把两个面板一起拨到目标布局；桌面下上面的 watch 会把左栏结果持久化。 */
+function applyLayoutMode(next: LayoutMode): void {
+  const target = visibilityOf(next);
+  collapsed.value = !target.sidebar;
+  // 窄屏不渲染右栏，别去展开一个不存在的东西
+  if (preview.available) preview.setCollapsed(!target.preview);
+}
 
 function syncViewport(): void {
   if (typeof window === "undefined") return;
   const mobile = window.innerWidth < MOBILE_BREAKPOINT;
   isMobile.value = mobile;
   // 窄屏默认收起，让内容区拿满宽度；用户手动展开后交给 toggle 决定。
-  if (mobile) collapsed.value = true;
+  // 从窄屏回到桌面时恢复偏好 —— 否则「我收起了左栏」这个偏好只在重启后才生效。
+  collapsed.value = mobile ? true : layout.sidebarCollapsed;
   // 右栏在窄屏不渲染。这个判断只在这里做一次，Titlebar 的开关按钮读同一个 store 字段，
   // 不再各自写一个断点（那正是 640–768px 之间「按钮可见但面板不存在」的来源）。
   preview.setAvailable(!mobile);
@@ -78,6 +101,8 @@ function syncViewport(): void {
  * 全局快捷键与抽屉的键盘退路。
  *
  * - Ctrl/Cmd+N 新对话 · Ctrl/Cmd+B 折叠/展开侧栏 · Ctrl/Cmd+\ 预览面板。
+ * - Ctrl/Cmd+1~4 布局模式（三栏 / 对话 / 文档 / 专注）—— 只是把上面两个开关一起拨到位，
+ *   所以不存在「模式与面板状态不一致」的可能。按 event.code 匹配，见 lib/layout-modes.ts。
  *   集中注册在这一个函数里：以后要上命令面板时，把这些 key 挪进面板注册表即可。
  * - Escape 关抽屉：遮罩是 aria-hidden 的装饰层，点它收起对鼠标够用，对键盘不够；
  *   挂在 window 上是因为抽屉打开时焦点可能在侧栏内的任意按钮上，
@@ -100,6 +125,12 @@ function onWindowKeydown(event: KeyboardEvent): void {
     if (key === "\\") {
       event.preventDefault();
       if (preview.available) preview.toggle();
+      return;
+    }
+    const layoutMode: LayoutMode | null = modeOfShortcut(event.code);
+    if (layoutMode) {
+      event.preventDefault();
+      applyLayoutMode(layoutMode);
       return;
     }
   }
