@@ -75,6 +75,15 @@ watch(collapsed, (value) => {
   if (!isMobile.value) layout.sidebarCollapsed = value;
 });
 
+// 偏好也可能被别的入口改（标题栏的布局指示器会同时拨两个面板），要回灌到有效态。
+// 两个 watch 都被 isMobile 挡住、且同值不会重复触发，所以不会互相追着跑。
+watch(
+  () => layout.sidebarCollapsed,
+  (value) => {
+    if (!isMobile.value) collapsed.value = value;
+  },
+);
+
 /** 把两个面板一起拨到目标布局；桌面下上面的 watch 会把左栏结果持久化。 */
 function applyLayoutMode(next: LayoutMode): void {
   const target = visibilityOf(next);

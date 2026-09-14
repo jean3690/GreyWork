@@ -34,6 +34,40 @@ export function visibilityOf(mode: LayoutMode): PanelVisibility {
   return VISIBILITY[mode];
 }
 
+/**
+ * 可见性 → 模式，供标题栏的布局指示器判断「当前是哪一档」。
+ *
+ * 四种组合都有名字，所以正常的组合总能推出来；返回 null 是给「将来加了面板、
+ * 组合数超过命名数」留的出口 —— 那时指示器不点亮任何一档，而不是错点亮一档。
+ */
+export function modeOf(visibility: PanelVisibility): LayoutMode | null {
+  for (const mode of LAYOUT_MODES) {
+    const target = VISIBILITY[mode];
+    if (target.sidebar === visibility.sidebar && target.preview === visibility.preview) return mode;
+  }
+  return null;
+}
+
+/**
+ * 三槽位：指示器把每个模式画成「哪几个槽位在场」。
+ *
+ * 用槽位而不是文字名，是因为它直接编码了真实信息（面板在不在场），一眼可读、跨语言可读；
+ * 四个模式恰好对应槽位的四种点亮组合，名称只作为 title / aria-label 存在。
+ */
+export interface SlotPresence {
+  /** 左槽 = 左栏（会话列表 / 文件树）。 */
+  left: boolean;
+  /** 中槽 = 内容区，**恒为真** —— 它永远是布局的一部分，用来给另外两槽定坐标。 */
+  center: boolean;
+  /** 右槽 = 右栏预览面板。 */
+  right: boolean;
+}
+
+export function slotsOf(mode: LayoutMode): SlotPresence {
+  const visibility = VISIBILITY[mode];
+  return { left: visibility.sidebar, center: true, right: visibility.preview };
+}
+
 /** `Ctrl+1..4` 的物理键位。 */
 const SHORTCUT_CODES: Readonly<Record<string, LayoutMode>> = {
   Digit1: "split",

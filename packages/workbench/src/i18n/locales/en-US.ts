@@ -23,6 +23,15 @@ export const enUS: MessageSchema = {
   notice: {
     dismiss: "Dismiss notification",
   },
+  layout: {
+    groupLabel: "Layout",
+    mode: {
+      split: "Three panes",
+      chat: "Conversation",
+      document: "Document",
+      focus: "Focus",
+    },
+  },
   web: {
     title: "Fetch web page",
     urlPlaceholder: "Enter a URL, e.g. example.com/article",

@@ -23,6 +23,15 @@ export const zhCN = {
   notice: {
     dismiss: "关闭通知",
   },
+  layout: {
+    groupLabel: "布局模式",
+    mode: {
+      split: "三栏",
+      chat: "对话",
+      document: "文档",
+      focus: "专注",
+    },
+  },
   web: {
     title: "抓取网页",
     urlPlaceholder: "输入网址，如 example.com/article",

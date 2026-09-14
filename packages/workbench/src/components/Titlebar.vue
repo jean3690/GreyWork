@@ -7,6 +7,7 @@ import { useWorkspaceStore } from "../stores/workspace";
 import { usePreviewStore } from "../stores/preview";
 import { useActivityStore } from "../stores/activity";
 import Icon from "./Icon.vue";
+import LayoutModeSwitch from "./LayoutModeSwitch.vue";
 
 /**
  * GreyWork 风格标题栏：侧栏开合 + 主导航 + 当前工作区指示 + 右上角窗口控制键。
@@ -96,6 +97,11 @@ onBeforeUnmount(() => {
     >
       <Icon :name="props.collapsed ? 'expand-right' : 'sidebar'" :size="16" />
     </button>
+
+    <!-- 布局模式：与上面的侧栏开关同属「面板可见性」这一族，所以排在它旁边而不是
+         右侧的控制键堆里。窄屏不渲染 —— 四种模式里两种依赖右栏，而右栏此时不存在，
+         给出按了也不生效的选项比不给更糟。 -->
+    <LayoutModeSwitch v-if="preview.available" class="ml-1.5" />
 
     <div class="ml-auto flex items-center gap-1.5 rounded-[6px] border border-line-2 bg-panel px-2 py-1 text-[12px] text-dim">
       <span class="size-1.5 rounded-full" :class="activeWorkspace ? 'bg-mint' : 'bg-dim2'" />
