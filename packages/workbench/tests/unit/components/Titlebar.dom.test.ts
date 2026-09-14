@@ -24,10 +24,12 @@ vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => h }));
 vi.mock("vue-router", () => ({ useRoute: () => ({ path: "/assistants" }) }));
 
 import Titlebar from "@/components/Titlebar.vue";
+import { i18n } from "@/i18n";
 import { usePreviewStore } from "@/stores/preview";
 
 async function mountTitlebar() {
-  const wrapper = mount(Titlebar, { props: { collapsed: false } });
+  // 布局指示器用 useI18n() 取模式名，所以要装 i18n 插件
+  const wrapper = mount(Titlebar, { props: { collapsed: false }, global: { plugins: [i18n] } });
   await flushPromises();
   return wrapper;
 }
