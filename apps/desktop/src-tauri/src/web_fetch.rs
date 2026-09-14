@@ -11,8 +11,10 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
 use futures_util::StreamExt;
-use reqwest::header::{ACCEPT, ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_TYPE, LOCATION, USER_AGENT};
-use reqwest::{StatusCode, Url};
+use reqwest::header::{
+    ACCEPT, ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_TYPE, LOCATION, USER_AGENT,
+};
+use reqwest::Url;
 use serde::{Deserialize, Serialize};
 
 /// 响应体上限：正文页一般远小于此，超限即拒（防被灌爆内存）。
@@ -60,14 +62,16 @@ fn validate_ip(ip: &IpAddr) -> Result<(), String> {
         IpAddr::V4(v4) => banned_v4(v4),
         IpAddr::V6(v6) => {
             // IPv4-mapped（::ffff:a.b.c.d）要按 v4 规则判，否则 127.0.0.1 能绕过
-            v6.to_ipv4_mapped().map(|v4| banned_v4(&v4)).unwrap_or_else(|| {
-                let segments = v6.segments();
-                v6.is_loopback()
+            v6.to_ipv4_mapped()
+                .map(|v4| banned_v4(&v4))
+                .unwrap_or_else(|| {
+                    let segments = v6.segments();
+                    v6.is_loopback()
                     || v6.is_unspecified()
                     || v6.is_multicast()
                     || (segments[0] & 0xfe00) == 0xfc00 // ULA fc00::/7
                     || (segments[0] & 0xffc0) == 0xfe80 // 链路本地 fe80::/10
-            })
+                })
         }
     };
     if banned {
@@ -78,10 +82,15 @@ fn validate_ip(ip: &IpAddr) -> Result<(), String> {
 
 /// 解析并校验起始 URL / 每跳重定向目标：绝对地址、仅 http/https、无内嵌凭据、有 host。
 fn parse_target(raw: &str) -> Result<Url, String> {
-    let url = Url::parse(raw.trim()).map_err(|_| format!("web fetch url is not absolute: {raw}"))?;
+    let url =
+        Url::parse(raw.trim()).map_err(|_| format!("web fetch url is not absolute: {raw}"))?;
     match url.scheme() {
         "http" | "https" => {}
-        other => return Err(format!("web fetch only allows http/https urls, got {other}")),
+        other => {
+            return Err(format!(
+                "web fetch only allows http/https urls, got {other}"
+            ))
+        }
     }
     if !url.username().is_empty() || url.password().is_some() {
         return Err("web fetch does not allow embedded credentials".to_string());
@@ -103,7 +112,9 @@ async fn resolve_and_validate(
         .map_err(|error| format!("web fetch dns resolve failed for {host}: {error}"))?
         .collect();
     if addrs.is_empty() {
-        return Err(format!("web fetch dns resolve returned no address for {host}"));
+        return Err(format!(
+            "web fetch dns resolve returned no address for {host}"
+        ));
     }
     if !allow_local {
         for addr in &addrs {
@@ -114,7 +125,11 @@ async fn resolve_and_validate(
 }
 
 /// 发一跳请求：客户端把 DNS 钉到已校验的 IP，关闭自动重定向（自己跟以便逐跳重校验）。
-async fn fetch_once(url: &Url, host: &str, addrs: &[SocketAddr]) -> Result<reqwest::Response, String> {
+async fn fetch_once(
+    url: &Url,
+    host: &str,
+    addrs: &[SocketAddr],
+) -> Result<reqwest::Response, String> {
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(10))
         .timeout(WEB_FETCH_TIMEOUT)
@@ -129,7 +144,10 @@ async fn fetch_once(url: &Url, host: &str, addrs: &[SocketAddr]) -> Result<reqwe
         .header(USER_AGENT, "GreyWork-WebFetch/1")
         // reqwest 未开 gzip feature：声明只收未压缩体，避免拿到压缩字节当文本
         .header(ACCEPT_ENCODING, "identity")
-        .header(ACCEPT, "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.1")
+        .header(
+            ACCEPT,
+            "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.1",
+        )
         .send()
         .await
         .map_err(|error| format!("web fetch request failed: {error}"))
@@ -147,7 +165,8 @@ async fn read_limited(response: reqwest::Response, max_bytes: usize) -> Result<V
     let read = async {
         let mut out = Vec::new();
         while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(|error| format!("web fetch response read failed: {error}"))?;
+            let chunk =
+                chunk.map_err(|error| format!("web fetch response read failed: {error}"))?;
             if out.len() + chunk.len() > max_bytes {
                 return Err(format!("web fetch response exceeds {max_bytes} bytes"));
             }
@@ -165,7 +184,13 @@ fn readable_content_type(raw: Option<&str>) -> bool {
     match raw {
         None => true, // 少数服务器不给 Content-Type，按文本试读
         Some(value) => matches!(
-            value.split(';').next().unwrap_or("").trim().to_ascii_lowercase().as_str(),
+            value
+                .split(';')
+                .next()
+                .unwrap_or("")
+                .trim()
+                .to_ascii_lowercase()
+                .as_str(),
             "text/html" | "application/xhtml+xml" | "text/plain"
         ),
     }
@@ -267,11 +292,7 @@ mod tests {
                     let mut buf = vec![0u8; 4096];
                     let read = stream.read(&mut buf).await.unwrap_or(0);
                     let request = String::from_utf8_lossy(&buf[..read]).to_string();
-                    let path = request
-                        .split_whitespace()
-                        .nth(1)
-                        .unwrap_or("/")
-                        .to_string();
+                    let path = request.split_whitespace().nth(1).unwrap_or("/").to_string();
                     let _ = stream.write_all(handler(&path).as_bytes()).await;
                     let _ = stream.shutdown().await;
                 });
@@ -323,7 +344,12 @@ mod tests {
     #[tokio::test]
     async fn fetches_html_body() {
         let base = serve_with(|_| {
-            http_response("200 OK", "text/html; charset=utf-8", "", "<html><body>你好</body></html>")
+            http_response(
+                "200 OK",
+                "text/html; charset=utf-8",
+                "",
+                "<html><body>你好</body></html>",
+            )
         })
         .await;
         let result = fetch_page_with(&base, true).await.expect("fetch ok");
@@ -343,7 +369,9 @@ mod tests {
             }
         })
         .await;
-        let result = fetch_page_with(&format!("{base}/"), true).await.expect("fetch ok");
+        let result = fetch_page_with(&format!("{base}/"), true)
+            .await
+            .expect("fetch ok");
         assert!(result.html.contains("final"));
         assert!(result.final_url.ends_with("/final"));
     }
