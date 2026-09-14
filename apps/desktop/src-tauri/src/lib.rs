@@ -1,5 +1,8 @@
 mod acp_host;
+mod channel_common;
 mod db;
+pub mod dingtalk;
+pub mod feishu;
 mod host_exec;
 mod http;
 mod llm;
@@ -16,6 +19,7 @@ mod skills_market;
 mod store_fs;
 mod sys;
 mod web_fetch;
+pub mod wechat;
 mod workspace_fs;
 
 use tauri::Manager;
@@ -30,6 +34,9 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .manage(acp_host::AcpHost::default())
         .manage(llm::LlmHost::default())
+        .manage(wechat::WechatHost::default())
+        .manage(dingtalk::DingTalkHost::default())
+        .manage(feishu::FeishuHost::default())
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) = event {
                 if let Some(access) = window.try_state::<workspace_fs::WorkspaceFsAccess>() {
@@ -87,6 +94,30 @@ pub fn run() {
             plugin_market::plugin_market_preview,
             mcp_registry::mcp_search,
             web_fetch::web_fetch,
+            wechat::wechat_status,
+            wechat::wechat_login_qr,
+            wechat::wechat_login_poll,
+            wechat::wechat_login_cancel,
+            wechat::wechat_connect,
+            wechat::wechat_disconnect,
+            wechat::wechat_logout,
+            wechat::wechat_send,
+            wechat::wechat_send_typing,
+            dingtalk::dingtalk_status,
+            dingtalk::dingtalk_save_credentials,
+            dingtalk::dingtalk_clear_credentials,
+            dingtalk::dingtalk_connect,
+            dingtalk::dingtalk_disconnect,
+            dingtalk::dingtalk_send,
+            feishu::feishu_status,
+            feishu::feishu_save_credentials,
+            feishu::feishu_clear_credentials,
+            feishu::feishu_register_begin,
+            feishu::feishu_register_poll,
+            feishu::feishu_register_cancel,
+            feishu::feishu_connect,
+            feishu::feishu_disconnect,
+            feishu::feishu_send,
             workspace_fs::fs_read_text_file,
             workspace_fs::fs_read_binary,
             workspace_fs::fs_write_text_file,
