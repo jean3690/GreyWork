@@ -197,12 +197,23 @@ export function base64ToBytes(base64: string): Uint8Array {
 }
 
 /**
- * 读取磁盘二进制文件（Rust fs_read_binary，base64 回传，≤20MB）。
+ * 读取磁盘二进制文件（Rust fs_read_binary，**原始字节**回传，≤20MB）。
+ *
+ * 走原始字节而不是 base64：base64 会把载荷撑大 33%，还要经 JSON 转义、由前端再解码一遍 ——
+ * 打开预览的每一次都付这份开销。Rust 侧用 `tauri::ipc::Response`，这里拿到的是 ArrayBuffer，
+ * 直接建视图，不做拷贝。
+ *
  * 与 `readTextFile` 分成两个函数而不是一个「读文件」：走错通道会让 xlsx/pdf
  * 经 utf-8 解码后不可逆损坏，所以通道由调用侧按 kind 明确选定。
  */
 export async function readBinaryFile(path: string): Promise<Uint8Array> {
-  return base64ToBytes(await invoke<string>("fs_read_binary", { path }));
+  const raw = await invoke<ArrayBuffer | Uint8Array>("fs_read_binary", { path });
+  // 视图直接复用（零拷贝）；ArrayBuffer 建视图。**其余形状直接报错而不是强转** ——
+  // 契约真被改坏时，一个空的/错位的缓冲区会让 docx/xlsx 报「文件已损坏」，
+  // 排查方向全在文件上，不如在这里就说清楚。
+  if (raw instanceof Uint8Array) return raw;
+  if (raw instanceof ArrayBuffer) return new Uint8Array(raw);
+  throw new Error(`fs_read_binary 返回了非二进制载荷：${Object.prototype.toString.call(raw)}`);
 }
 
 /** 浅层列目录（Rust fs_list_dir）。目录树按需逐层展开，不做递归扫描 —— 大仓库一次递归会卡死。 */

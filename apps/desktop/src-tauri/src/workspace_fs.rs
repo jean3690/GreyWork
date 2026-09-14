@@ -250,19 +250,24 @@ pub fn fs_read_text_file(
     std::fs::read_to_string(&path).map_err(|error| format!("读取文件失败: {error}"))
 }
 
-/// 读二进制文件（base64 回传，≤20MB），供右栏预览真实磁盘上的 xlsx / pdf / 图片等。
+/// 读二进制文件（**原始字节**回传，≤20MB），供右栏预览真实磁盘上的 xlsx / pdf / 图片等。
+///
+/// 用 `tauri::ipc::Response` 而不是 base64 字符串：base64 把载荷撑大 33%，还要经 JSON
+/// 转义、再由前端解码一遍 —— 每次打开预览都付这份开销。这里直接回字节，前端拿到 ArrayBuffer。
+///
+/// 超过上限是**报错**，不是静默截断 —— 前端会把这句错误原样显示给用户。
 #[tauri::command]
 pub fn fs_read_binary(
     access: tauri::State<'_, WorkspaceFsAccess>,
     path: String,
-) -> Result<String, String> {
+) -> Result<tauri::ipc::Response, String> {
     let path = access.resolve_existing(&path)?;
     let metadata = std::fs::metadata(&path).map_err(|error| format!("读取元数据失败: {error}"))?;
     if metadata.len() > MAX_BINARY_BYTES as u64 {
         return Err("文件超过 20MB 上限".into());
     }
     let bytes = std::fs::read(&path).map_err(|error| format!("读取文件失败: {error}"))?;
-    Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
+    Ok(tauri::ipc::Response::new(bytes))
 }
 
 /// 写回文本文件（单次 ≤10MB），供编辑器保存时同步到工作区存放文件夹。

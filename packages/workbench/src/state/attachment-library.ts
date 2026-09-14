@@ -405,7 +405,9 @@ export function readAttachmentBytes(item: Attachment): Promise<Uint8Array> {
 
 /** 图片附件 → base64（不含 data URL 前缀）。 */
 export async function readAttachmentBase64(item: Attachment): Promise<string> {
-  if (item.path && isTauriRuntime()) return invoke<string>("fs_read_binary", { path: item.path });
+  // 走 readBinaryFile 再在本地编码：fs_read_binary 现在回原始字节（预览那条高频路径
+  // 因此省掉 base64 的 33% 膨胀与解码）。发图片是低频动作，这里多一次 JS 编码可接受。
+  if (item.path && isTauriRuntime()) return bytesToBase64(await readBinaryFile(item.path));
   if (item.dataUrl) return dataUrlPayload(item.dataUrl);
   throw new Error(`附件「${item.name}」没有可读的图片数据`);
 }
