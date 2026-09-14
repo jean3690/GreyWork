@@ -19,6 +19,7 @@ export class TauriLlmTransport implements LlmClient {
       apiKeyEnv: params.apiKeyEnv ?? "",
       messages: params.messages,
       reasoningEffort: params.reasoningEffort ?? "",
+      clientToken: params.clientToken ?? "",
     });
   }
 

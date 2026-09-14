@@ -57,6 +57,7 @@
     "pdfjs-dist": "^6.3.289",
     "pinia": "^3.0.3",
     "pptxgenjs": "^4.0.1",
+    "qrcode-generator": "^2.0.4",
     "reka-ui": "^2.6.0",
     "rxjs": "7.8.2",
     "tailwind-merge": "^3.3.1",

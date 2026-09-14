@@ -34,7 +34,7 @@ const activeSessionId = computed<string | null>(() => {
 });
 
 const shortcuts = [
-  { path: "/assistants", label: "助手", icon: "robot" },
+  { path: "/assistants", label: "远程助手", icon: "robot" },
   { path: "/scheduled", label: "定时任务", icon: "alarm-clock" },
   { path: "/team", label: "团队", icon: "peoples" },
 ] as const;

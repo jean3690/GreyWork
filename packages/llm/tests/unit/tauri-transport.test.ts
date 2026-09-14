@@ -32,6 +32,8 @@ describe("TauriLlmTransport", () => {
       apiKeyEnv: "",
       messages: [{ role: "user", content: "hi" }],
       reasoningEffort: "high",
+      // 轮次令牌随请求上行，宿主原样回灌进每条事件（消费方据此过滤并行的流）
+      clientToken: "",
     });
     vi.unstubAllGlobals();
   });
@@ -47,7 +49,17 @@ describe("TauriLlmTransport", () => {
       apiKeyEnv: "",
       messages: [],
       reasoningEffort: "",
+      clientToken: "",
     });
+    vi.unstubAllGlobals();
+  });
+
+  it("clientToken 原样上行（并行流靠它分流）", async () => {
+    h.invoke.mockResolvedValue(2);
+    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
+    const transport = new TauriLlmTransport();
+    await transport.chat({ baseUrl: "https://x", model: "m", messages: [], clientToken: "turn-1" });
+    expect(h.invoke).toHaveBeenCalledWith("llm_chat_start", expect.objectContaining({ clientToken: "turn-1" }));
     vi.unstubAllGlobals();
   });
 });

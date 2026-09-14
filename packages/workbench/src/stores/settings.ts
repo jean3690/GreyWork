@@ -106,6 +106,56 @@ export const DEFAULT_MCP_SERVERS: readonly McpServerEntry[] = [
   { id: "deepwiki", name: "deepwiki", transport: "http", url: "https://mcp.deepwiki.com/mcp", enabled: false },
 ];
 
+/** 单条通道的行为开关（每个通道独立一份：自动连接 / 自动回复 / 是否放行其他联系人）。 */
+export interface ChannelPrefs {
+  /** 应用启动时自动连上收消息。 */
+  autoConnect: boolean;
+  /** 收到消息自动调用本机助手回复；关掉则只记录不回复。 */
+  autoReply: boolean;
+  /** 是否也答复「本人以外」的联系人（默认只认归属人）。 */
+  allowOtherSenders: boolean;
+}
+
+export const DEFAULT_CHANNEL_PREFS: ChannelPrefs = { autoConnect: true, autoReply: true, allowOtherSenders: false };
+
+/**
+ * 远程助手 · 通道与回复偏好。
+ *
+ * 回复后端是三个通道**共用**的一份设置（谁回答远程消息只有一个答案）；
+ * 凭证不在这里 —— 微信的 bot token 在宿主数据目录，钉钉的 AppSecret / sessionWebhook
+ * 同样只落宿主（设置快照会整份进 SQLite 与 localStorage，不适合放密钥）。
+ */
+/** 回复管线：本机模型供应商 / ACP 后端。 */
+export type RemoteReplyMode = "llm" | "acp";
+
+export interface RemoteAssistPrefs {
+  /** 自动回复走哪条管线：本机模型供应商（llm）或 ACP 后端（acp）。 */
+  replyMode: RemoteReplyMode;
+  /**
+   * ACP 模式下指定用哪个后端（agentProviders 里的 id）；null = 跟随对话页选中的后端。
+   * 与对话页共用同一个 ACP 会话：选定后对话页的后端选择也会跟着切。
+   */
+  replyProviderId: string | null;
+  channels: {
+    wechat: ChannelPrefs;
+    dingtalk: ChannelPrefs;
+    feishu: ChannelPrefs;
+  };
+}
+
+export const DEFAULT_REMOTE_ASSIST: RemoteAssistPrefs = {
+  replyMode: "llm",
+  replyProviderId: null,
+  channels: {
+    wechat: { ...DEFAULT_CHANNEL_PREFS },
+    dingtalk: { ...DEFAULT_CHANNEL_PREFS },
+    feishu: { ...DEFAULT_CHANNEL_PREFS },
+  },
+};
+
+/** 通道标识（宿主侧命令前缀 / 事件名前缀同名）。 */
+export type ChannelId = "wechat" | "dingtalk" | "feishu";
+
 /** 持久化设置外形（字段均可缺省；缺失项回落默认值）。 */
 export interface SavedSettings {
   /** 主题配色；旧快照可能是 dark/light/system，applySaved 会迁移到 colorMode。 */
@@ -121,6 +171,12 @@ export interface SavedSettings {
   mcpServers?: McpServerEntry[];
   /** 多智能体编排并发度（同时跑的回合上限）；1-8，越界静默回落 2。 */
   maxParallel?: number;
+  /** 远程助手 · 通道与回复偏好（旧快照缺失 = 默认值）。 */
+  remoteAssist?: Partial<RemoteAssistPrefs> & {
+    channels?: { wechat?: Partial<ChannelPrefs>; dingtalk?: Partial<ChannelPrefs>; feishu?: Partial<ChannelPrefs> };
+  };
+  /** 远程助手 · 遗留字段（v1 快照只存过微信通道开关）：读入时迁移进 remoteAssist。 */
+  wechatChannel?: Partial<ChannelPrefs> & { replyMode?: RemoteReplyMode; replyProviderId?: string | null };
 }
 
 const settingsStorage = createJsonStorage<SavedSettings>(
@@ -166,6 +222,16 @@ export const useSettingsStore = defineStore("settings", () => {
   );
   /** 已声明的 MCP 服务器（含未启用项）。 */
   const mcpServers = ref<McpServerEntry[]>(DEFAULT_MCP_SERVERS.map((server) => ({ ...server })));
+  /** 远程助手 · 微信通道开关（登录凭证在宿主，不在快照里）。 */
+  const remoteAssist = ref<RemoteAssistPrefs>({
+    replyMode: DEFAULT_REMOTE_ASSIST.replyMode,
+    replyProviderId: DEFAULT_REMOTE_ASSIST.replyProviderId,
+    channels: {
+      wechat: { ...DEFAULT_CHANNEL_PREFS },
+      dingtalk: { ...DEFAULT_CHANNEL_PREFS },
+      feishu: { ...DEFAULT_CHANNEL_PREFS },
+    },
+  });
   /** 下发给 agent 的那一批：只取启用项，并剥掉 id/enabled 这类纯本地字段。 */
   const enabledMcpServers = computed<McpServerConfig[]>(() =>
     mcpServers.value.filter((server) => server.enabled).map(({ id: _id, enabled: _enabled, ...config }) => config),
@@ -244,6 +310,29 @@ export const useSettingsStore = defineStore("settings", () => {
         .filter((server) => server && typeof server.id === "string" && typeof server.name === "string" && MCP_TRANSPORTS[server.transport])
         .map((server) => ({ ...server, enabled: server.enabled === true }));
     }
+    // 通道偏好：缺省即启用（「自动连接 / 自动回复」是通道常态），只有显式 false 才关；
+    // 「答复其他联系人」相反 —— 只有显式 true 才放行。
+    const normalizeChannel = (saved: Partial<ChannelPrefs> | undefined): ChannelPrefs => ({
+      autoConnect: saved?.autoConnect !== false,
+      autoReply: saved?.autoReply !== false,
+      allowOtherSenders: saved?.allowOtherSenders === true,
+    });
+    const remote = saved.remoteAssist;
+    // v1 快照把微信开关与回复后端平铺在 wechatChannel 下：读入时迁移进新结构。
+    const legacy = saved.wechatChannel;
+    if (remote || legacy) {
+      const replyMode = remote?.replyMode ?? legacy?.replyMode;
+      const replyProviderId = remote?.replyProviderId ?? legacy?.replyProviderId;
+      remoteAssist.value = {
+        replyMode: replyMode === "acp" ? "acp" : "llm",
+        replyProviderId: typeof replyProviderId === "string" ? replyProviderId : null,
+        channels: {
+          wechat: normalizeChannel(remote?.channels?.wechat ?? legacy),
+          dingtalk: normalizeChannel(remote?.channels?.dingtalk),
+          feishu: normalizeChannel(remote?.channels?.feishu),
+        },
+      };
+    }
     applyAppearance();
   }
 
@@ -260,6 +349,15 @@ export const useSettingsStore = defineStore("settings", () => {
       workspaceDir: workspaceDir.value,
       mcpServers: mcpServers.value,
       maxParallel: maxParallel.value,
+      remoteAssist: {
+        replyMode: remoteAssist.value.replyMode,
+        replyProviderId: remoteAssist.value.replyProviderId,
+        channels: {
+          wechat: { ...remoteAssist.value.channels.wechat },
+          dingtalk: { ...remoteAssist.value.channels.dingtalk },
+          feishu: { ...remoteAssist.value.channels.feishu },
+        },
+      },
     };
     settingsStorage.write(snapshot);
     if (settingsBackend.active()) {
@@ -350,6 +448,21 @@ export const useSettingsStore = defineStore("settings", () => {
     persist();
   }
 
+  /** 更新某条通道的行为开关（部分字段）；落盘一次。 */
+  function setChannelPrefs(channel: ChannelId, patch: Partial<ChannelPrefs>): void {
+    remoteAssist.value = {
+      ...remoteAssist.value,
+      channels: { ...remoteAssist.value.channels, [channel]: { ...remoteAssist.value.channels[channel], ...patch } },
+    };
+    persist();
+  }
+
+  /** 更新共用回复设置（后端档位与选定的 ACP 后端）。 */
+  function setRemoteAssist(patch: Partial<Pick<RemoteAssistPrefs, "replyMode" | "replyProviderId">>): void {
+    remoteAssist.value = { ...remoteAssist.value, ...patch };
+    persist();
+  }
+
   return {
     permissionTier,
     sandboxMode,
@@ -375,6 +488,9 @@ export const useSettingsStore = defineStore("settings", () => {
     removeMcpServer,
     setMcpServerEnabled,
     setAllMcpServersEnabled,
+    remoteAssist,
+    setChannelPrefs,
+    setRemoteAssist,
     selectModelProvider,
     upsertModelProvider,
     removeModelProvider,

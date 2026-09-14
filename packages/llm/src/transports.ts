@@ -6,7 +6,7 @@ export { isTauriRuntime };
 
 export interface LlmEventEnvelope {
   kind: "llm-delta" | "llm-done" | "llm-error";
-  payload: { delta?: string; message?: string };
+  payload: { delta?: string; message?: string; clientToken?: string };
 }
 
 /**
@@ -29,6 +29,13 @@ export interface LlmChatParams {
   messages: LlmChatMessage[];
   /** 推理等级（auto/low/medium/high/max）；宿主侧映射为供应商参数，auto/缺省不传 */
   reasoningEffort?: string;
+  /**
+   * 本轮流水的调用方令牌，宿主原样回灌进每条事件。
+   *
+   * `llm://event` 是全局广播：会话流与远程助手回复可能同时在跑，
+   * 消费方拿这个令牌过滤出属于自己那一笔（缺省 = 事件不带令牌，消费方按旧行为全收）。
+   */
+  clientToken?: string;
 }
 
 export interface LlmClient {

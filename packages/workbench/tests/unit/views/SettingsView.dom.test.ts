@@ -151,3 +151,15 @@ describe("SettingsView ACP 图标", () => {
     expect(agent.agentProviders.find((provider) => provider.name === "My Agent")?.icon).toBe("magic");
   });
 });
+
+describe("SettingsView 远程助手分区", () => {
+  it("通道配置与助手默认行为同区：微信面板 + 原有开关，浏览器态如实说明不可用", async () => {
+    const { wrapper } = await mountSettings("assistant");
+    expect(wrapper.get("h1").text()).toBe("远程助手");
+    expect(wrapper.find('[data-testid="remote-channels-pane"]').exists()).toBe(true);
+    expect(wrapper.text()).toContain("Plan 模式");
+    expect(wrapper.text()).toContain("速度加成");
+    // 浏览器态没有宿主：给出原因，而不是渲染点了没反应的按钮
+    expect(wrapper.text()).toContain("通道仅桌面端可用。");
+  });
+});

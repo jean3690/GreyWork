@@ -21,6 +21,8 @@ export function createAppRouter(): Router {
     { path: "/guid", component: () => import("../views/GuidView.vue") },
     { path: "/conversation/:conversationId?", component: () => import("../views/ConversationView.vue") },
     { path: "/assistants", component: () => import("../views/AssistantsView.vue") },
+    // 远程通道的单联系人会话页（微信那侧的对端在左、本机回复在右）
+    { path: "/remote/:peerId", component: () => import("../views/RemoteConversationView.vue") },
     { path: "/scheduled", component: () => import("../views/ScheduledView.vue") },
     { path: "/team", component: () => import("../views/TeamView.vue") },
     { path: "/plugin/:modeId", component: () => import("../views/PluginView.vue") },
