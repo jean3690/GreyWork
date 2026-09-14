@@ -30,6 +30,7 @@ function notifyArtifactFailure(error: unknown): void {
 
 const uid = createIdFactory("m");
 const quid = createIdFactory("q");
+const tid = createIdFactory("t");
 
 let simTimers: ReturnType<typeof setTimeout>[] = [];
 function clearSim(): void {
@@ -143,6 +144,8 @@ export const useChatStore = defineStore("chat", () => {
     () => llm.isAvailable() && !!selectLlmProvider(settingsStore.modelProviders, settingsStore.selectedModelProviderId),
   );
   let llmRequestId: number | null = null;
+  /** 本轮会话流的调用令牌：过滤 `llm://event` 广播里属于别的流（如远程助手回复）的事件。 */
+  let activeTurnToken: string | null = null;
   let streamingInto: ThreadMessage | null = null;
   let llmListening = false;
   /** 当前流式续写的消息 id（ChatView 据此切换 StreamText 纯文本渲染，流式结束回 Markdown）。 */
@@ -206,6 +209,7 @@ export const useChatStore = defineStore("chat", () => {
     busy.value = false;
     streamingInto = null;
     llmRequestId = null;
+    activeTurnToken = null;
     streamingMessageId.value = null;
   }
 
@@ -213,6 +217,9 @@ export const useChatStore = defineStore("chat", () => {
     if (llmListening) return;
     llmListening = true;
     await llm.onEvent((event) => {
+      // `llm://event` 是全局广播：远程助手的自动回复可能与本会话流同时在跑，
+      // 令牌不匹配的事件属于别人（缺令牌 = 旧宿主，按旧行为全收）。
+      if (event.payload.clientToken && event.payload.clientToken !== activeTurnToken) return;
       if (event.kind === "llm-delta") {
         if (streamingInto) {
           streamBuf += event.payload.delta ?? "";
@@ -246,12 +253,14 @@ export const useChatStore = defineStore("chat", () => {
     await ensureLlmListener();
     try {
       const history = await buildLlmHistory(ensure(activeThreadId.value).filter((item) => item.id !== message.id));
+      activeTurnToken = tid();
       llmRequestId = await llm.chat({
         baseUrl: provider.baseUrl ?? "",
         model: provider.model,
         apiKeyEnv: provider.apiKeyEnv,
         messages: history,
         reasoningEffort: provider.reasoningEffort ?? "auto",
+        clientToken: activeTurnToken,
       });
     } catch (error) {
       message.content = `[LLM 调用失败] ${error instanceof Error ? error.message : String(error)}`;

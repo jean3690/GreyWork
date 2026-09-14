@@ -9,6 +9,8 @@ import { useSettingsStore } from "./stores/settings";
 import { useWorkspaceStore } from "./stores/workspace";
 import { usePreviewStore } from "./stores/preview";
 import { useActivityStore } from "./stores/activity";
+import { useRemoteAssistantStore } from "./stores/remote-assistant";
+import { appEvents } from "./events";
 import { applyAppearance as applyAppearanceToDom } from "./lib/theme";
 import { bootPlugins } from "./plugins/runtime";
 import Sider from "./components/Sider.vue";
@@ -132,6 +134,8 @@ onMounted(() => {
   observeMainRow();
   // 微内核接线：注册内置插件清单并激活（幂等，见 plugins/runtime）。
   void bootPlugins();
+  // 远程助手：注册通道事件、按设置自动连接（幂等；浏览器态内部直接跳过）。
+  void useRemoteAssistantStore().init();
 });
 function syncSystemTheme(event: MediaQueryListEvent): void {
   systemDark.value = event.matches;
@@ -144,6 +148,7 @@ onBeforeUnmount(() => {
   darkMedia?.removeEventListener("change", syncSystemTheme);
   rowObserver?.disconnect();
   rowObserver = null;
+  unsubscribeSettingsOpen();
 });
 
 /**
@@ -156,6 +161,15 @@ const settingsSection = ref("agent");
 function openSettings(): void {
   settingsOpen.value = true;
 }
+
+/**
+ * 「去设置配置」入口（远程助手页等）经事件总线请求打开指定分区。
+ * 订阅挂在 Shell：设置弹窗的状态归它持有，别处只发意图。
+ */
+const unsubscribeSettingsOpen = appEvents.on("settings:open", (payload) => {
+  if (payload.section) settingsSection.value = payload.section;
+  settingsOpen.value = true;
+});
 
 function navigate(path: string): void {
   void router.push(path);

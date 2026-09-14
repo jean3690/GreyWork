@@ -18,6 +18,7 @@ import Icon from "../components/Icon.vue";
 import IconPicker from "../components/IconPicker.vue";
 import StorageSettings from "../components/StorageSettings.vue";
 import McpPane from "../components/settings/McpPane.vue";
+import RemoteChannelsPane from "../components/settings/RemoteChannelsPane.vue";
 import SettingsSkills from "../components/settings/SettingsSkills.vue";
 import { agentProviderIcon, agentProviderLobeIcon } from "@greywork/shell";
 import AgentProviderIcon from "../components/AgentProviderIcon.vue";
@@ -506,6 +507,8 @@ async function removeAgentDraft(): Promise<void> {
       </template>
 
       <template v-else-if="props.section === 'assistant'">
+        <RemoteChannelsPane />
+        <div class="mt-1 text-[11px] font-medium uppercase tracking-wide text-dim2">{{ t("remoteAssist.settings.defaults") }}</div>
         <div class="rounded-[14px] border border-line bg-panel p-4">
           <label class="flex cursor-pointer items-center justify-between gap-3">
             <span>
