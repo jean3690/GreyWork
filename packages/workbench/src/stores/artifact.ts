@@ -73,6 +73,8 @@ export const useArtifactStore = defineStore("artifact", () => {
       path: input.path,
       format: input.format,
       source: input.source,
+      // 磁盘路径一并广播：预览面板据此提供「用系统应用打开」（vfs 路径本身不是本机文件）。
+      diskPath: diskPath ?? undefined,
     });
     return id;
   }

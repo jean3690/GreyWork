@@ -109,7 +109,15 @@ function isDark(color: string): boolean {
 
 <template>
   <template v-for="(block, index) in blocks" :key="index">
-    <p v-if="block.kind === 'paragraph'" data-testid="docx-paragraph" :style="paragraphStyle(block)">
+    <!-- data-heading / data-list-level 供划词选区解析语义（见 lib/selection.ts）：
+         docx 的标题与正文都是 <p>，层级只存在于模型里，不写出来 DOM 就无从分辨。 -->
+    <p
+      v-if="block.kind === 'paragraph'"
+      data-testid="docx-paragraph"
+      :data-heading="block.heading ?? undefined"
+      :data-list-level="block.list ? block.list.level : undefined"
+      :style="paragraphStyle(block)"
+    >
       <!-- 列表符号用 span 而非 <ul>/<ol>：docx 的编号是段落属性，同一列表可能被普通段落打断 -->
       <span v-if="block.list" aria-hidden="true" class="me-[0.5em] inline-block">{{ block.list.marker }}</span>
       <template v-for="(run, runIndex) in block.runs" :key="runIndex">

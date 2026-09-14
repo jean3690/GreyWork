@@ -69,6 +69,8 @@ pub struct AutomationTaskDto {
     pub schedule: String,
     /// 标准 cron 5 段表达式（分 时 日 月 周）；None = 手动触发。
     pub cron: Option<String>,
+    /// 执行后端：ACP 后端 id；None = 本机模型管线。
+    pub acp_provider_id: Option<String>,
     pub target: String,
     pub intent: String,
     pub enabled: bool,
@@ -85,6 +87,8 @@ pub struct AutomationDueDto {
     pub name: String,
     pub target: String,
     pub intent: String,
+    /// 入队时刻的执行后端快照（与 intent 同源）。
+    pub acp_provider_id: Option<String>,
     pub due_at: i64,
 }
 
@@ -330,7 +334,7 @@ impl Db {
         }
         let mut stmt = conn
             .prepare(
-                "SELECT id, name, schedule, cron, target, intent, enabled, last_run
+                "SELECT id, name, schedule, cron, target, intent, enabled, last_run, acp_provider_id
                  FROM automation_tasks ORDER BY rowid",
             )
             .map_err(|e| format!("准备自动化查询失败: {e}"))?;
@@ -341,6 +345,7 @@ impl Db {
                     name: row.get(1)?,
                     schedule: row.get(2)?,
                     cron: row.get(3)?,
+                    acp_provider_id: row.get(8)?,
                     target: row.get(4)?,
                     intent: row.get(5)?,
                     enabled: row.get::<_, i64>(6)? != 0,
@@ -572,11 +577,11 @@ impl Db {
 
         for task in tasks {
             tx.execute(
-                "INSERT INTO automation_tasks (id, name, schedule, cron, target, intent, enabled, last_run)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                "INSERT INTO automation_tasks (id, name, schedule, cron, target, intent, enabled, last_run, acp_provider_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
                  ON CONFLICT(id) DO UPDATE SET
                    name = ?2, schedule = ?3, cron = ?4, target = ?5,
-                   intent = ?6, enabled = ?7, last_run = ?8",
+                   intent = ?6, enabled = ?7, last_run = ?8, acp_provider_id = ?9",
                 params![
                     task.id,
                     task.name,
@@ -584,8 +589,9 @@ impl Db {
                     task.cron,
                     task.target,
                     task.intent,
-                    task.enabled as i64,
-                    task.last_run
+                    task.enabled,
+                    task.last_run,
+                    task.acp_provider_id,
                 ],
             )
             .map_err(|e| format!("写入自动化失败: {e}"))?;
@@ -612,9 +618,16 @@ impl Db {
         let changed = conn
             .execute(
                 "INSERT OR IGNORE INTO automation_due
-                   (task_id, due_at, name, target, intent, status, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?2)",
-                params![task.id, due_at, task.name, task.target, task.intent],
+                   (task_id, due_at, name, target, intent, acp_provider_id, status, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending', ?2)",
+                params![
+                    task.id,
+                    due_at,
+                    task.name,
+                    task.target,
+                    task.intent,
+                    task.acp_provider_id
+                ],
             )
             .map_err(|e| format!("自动化到期入队失败: {e}"))?;
         Ok(changed > 0)
@@ -631,7 +644,7 @@ impl Db {
         let cutoff = now - PENDING_DUE_WINDOW_MS;
         let mut stmt = conn
             .prepare(
-                "SELECT id, task_id, name, target, intent, due_at FROM automation_due
+                "SELECT id, task_id, name, target, intent, acp_provider_id, due_at FROM automation_due
                  WHERE status = 'pending' AND due_at >= ?1 ORDER BY due_at, id",
             )
             .map_err(|e| format!("准备到期队列查询失败: {e}"))?;
@@ -643,7 +656,8 @@ impl Db {
                     name: row.get(2)?,
                     target: row.get(3)?,
                     intent: row.get(4)?,
-                    due_at: row.get(5)?,
+                    acp_provider_id: row.get(5)?,
+                    due_at: row.get(6)?,
                 })
             })
             .map_err(|e| format!("查询到期队列失败: {e}"))?;
@@ -665,7 +679,7 @@ impl Db {
         let cutoff = Self::now_ms() - stale_after_ms;
         let mut stmt = conn
             .prepare(
-                "SELECT id, task_id, name, target, intent, due_at FROM automation_due
+                "SELECT id, task_id, name, target, intent, acp_provider_id, due_at FROM automation_due
                  WHERE status = 'pending' AND due_at <= ?1 ORDER BY due_at, id LIMIT ?2",
             )
             .map_err(|e| format!("准备过期队列查询失败: {e}"))?;
@@ -677,7 +691,8 @@ impl Db {
                     name: row.get(2)?,
                     target: row.get(3)?,
                     intent: row.get(4)?,
-                    due_at: row.get(5)?,
+                    acp_provider_id: row.get(5)?,
+                    due_at: row.get(6)?,
                 })
             })
             .map_err(|e| format!("查询过期队列失败: {e}"))?;
@@ -789,7 +804,7 @@ fn load_messages(
 }
 
 /// 迁移链：下标 = 目标 user_version。只追加不修改历史项。
-const MIGRATIONS: [&str; 5] = [
+const MIGRATIONS: [&str; 6] = [
     "
 CREATE TABLE conversations (
     id          TEXT PRIMARY KEY,
@@ -849,6 +864,15 @@ CREATE TABLE automation_due (
 );
 CREATE UNIQUE INDEX idx_automation_due_once ON automation_due(task_id, due_at);
 CREATE INDEX idx_automation_due_pending ON automation_due(status, due_at);
+",
+    "
+ALTER TABLE automation_tasks ADD COLUMN acp_provider_id TEXT;
+ALTER TABLE automation_due ADD COLUMN acp_provider_id TEXT;
+-- 周字段语义修正：v5 及以前匹配器把周字段当「周一=0」用（非标准 cron）。
+-- 界面上此前没有 cron 输入，能落库的只有三个内置种子，其中仅「每周五 18:00」
+-- 带周字段（值 4 表示周五）。标准 cron 里周五是 5，故就地改写；其余种子
+-- 只用分/时，语义不受影响。
+UPDATE automation_tasks SET cron = '0 18 * * 5' WHERE cron = '0 18 * * 4';
 ",
 ];
 
@@ -1185,6 +1209,7 @@ mod tests {
             name: format!("任务 {id}"),
             schedule: "每天 09:00".to_string(),
             cron: cron.map(|c| c.to_string()),
+            acp_provider_id: None,
             target: "主仓".to_string(),
             intent: "生成日报".to_string(),
             enabled,
@@ -1426,7 +1451,7 @@ mod tests {
             let version: i64 = conn
                 .query_row("PRAGMA user_version", [], |row| row.get(0))
                 .unwrap();
-            assert_eq!(version, 5, "迁移链推进到 v5");
+            assert_eq!(version, MIGRATIONS.len() as i64, "迁移链推进到最新版本");
             let count: i64 = conn
                 .query_row(
                     "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='automation_due'",
@@ -1598,5 +1623,112 @@ mod tests {
         // 任务被用户删除（sync 全量替换移除）→ 队列行级联消失
         db.sync_automations(&[]).unwrap();
         assert!(db.automation_due_list().unwrap().is_empty());
+    }
+
+    #[test]
+    fn acp_provider_binding_roundtrips_task_and_due_queue() {
+        let db = Db::open_in_memory().expect("open");
+        let mut bound = task("at-acp", Some("0 9 * * 1-5"), true);
+        bound.acp_provider_id = Some("opencode".to_string());
+        db.sync_automations(&[bound.clone(), task("at-llm", None, true)])
+            .unwrap();
+
+        let loaded = db.load_automations().unwrap().expect("some");
+        assert_eq!(
+            loaded
+                .iter()
+                .find(|t| t.id == "at-acp")
+                .unwrap()
+                .acp_provider_id
+                .as_deref(),
+            Some("opencode")
+        );
+        assert!(
+            loaded
+                .iter()
+                .find(|t| t.id == "at-llm")
+                .unwrap()
+                .acp_provider_id
+                .is_none(),
+            "未绑定后端 = None（本机模型管线）"
+        );
+
+        // 队列快照把执行后端一起带走：入队后不再依赖任务行当前的绑定值
+        db.automation_due_push(&bound, Db::now_ms()).unwrap();
+        let due = db.automation_due_list().unwrap();
+        assert_eq!(due.len(), 1);
+        assert_eq!(due[0].acp_provider_id.as_deref(), Some("opencode"));
+    }
+
+    #[test]
+    fn migration_v6_adds_acp_column_and_rewrites_legacy_weekday() {
+        // 先铺到 v5（旧周字段语义），再跑 v6 迁移
+        let mut conn = Connection::open_in_memory().expect("open");
+        for (index, sql) in MIGRATIONS.iter().take(5).enumerate() {
+            conn.execute_batch(sql).unwrap();
+            conn.execute_batch(&format!("PRAGMA user_version = {}", index + 1))
+                .unwrap();
+        }
+        conn.execute(
+            "INSERT INTO automation_tasks (id, name, schedule, cron, target, intent, enabled, last_run)
+             VALUES ('at-legacy', '自动生成周报', '每周五 18:00', '0 18 * * 4', '主仓', '生成周报', 1, 0)",
+            [],
+        )
+        .unwrap();
+
+        migrate(&mut conn).expect("迁移到最新版本");
+
+        let cron: String = conn
+            .query_row(
+                "SELECT cron FROM automation_tasks WHERE id = 'at-legacy'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(cron, "0 18 * * 5", "旧「周一=0」的周五改写为标准 cron 的 5");
+        let acp: Option<String> = conn
+            .query_row(
+                "SELECT acp_provider_id FROM automation_tasks WHERE id = 'at-legacy'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(acp.is_none(), "旧行升级后未绑定后端");
+        // 两张表都补上了列（automation_due 此时为空，能 prepare 即说明列存在）
+        assert!(conn
+            .prepare("SELECT acp_provider_id FROM automation_due")
+            .is_ok());
+    }
+
+    #[tokio::test]
+    async fn host_exec_skips_acp_bound_rows() {
+        // 绑定 ACP 的任务不换执行者：宿主兜底只跑本机模型，这类行 finish failed
+        // （等下个 cron 由应用内执行），而不是被悄悄改用 LLM 跑一遍。
+        let db = Db::open_in_memory().expect("open");
+        let mut bound = task("at-acp-host", Some("0 9 * * *"), true);
+        bound.acp_provider_id = Some("opencode".to_string());
+        db.sync_automations(std::slice::from_ref(&bound)).unwrap();
+        db.automation_due_push(&bound, chrono::Utc::now().timestamp_millis() - 180_000)
+            .unwrap();
+
+        let outcomes = crate::host_exec::claim_and_run(&db).await;
+
+        assert_eq!(outcomes.len(), 1);
+        assert!(!outcomes[0].ok);
+        assert!(
+            outcomes[0].detail.contains("ACP"),
+            "失败原因要说清是绑定后端导致：{}",
+            outcomes[0].detail
+        );
+        assert!(db.automation_due_list().unwrap().is_empty(), "行已认领");
+        let conn = db.conn.lock();
+        let status: String = conn
+            .query_row(
+                "SELECT status FROM automation_due WHERE task_id = 'at-acp-host'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(status, "failed");
     }
 }

@@ -16,7 +16,18 @@ vi.stubGlobal("localStorage", localStorageStub);
 vi.stubGlobal("window", { localStorage: localStorageStub });
 
 import { DEFAULT_PREVIEW_PANEL_PX, MAX_PREVIEW_TABS, MIN_CONTENT_PX, MIN_PREVIEW_PANEL_PX } from "@/lib/layout";
+import { hasSheetDraft, stashSheetDraft } from "@/lib/sheet-draft";
 import { usePreviewStore } from "@/stores/preview";
+import type { IWorkbookData } from "@univerjs/core";
+
+/** 草稿只被登记处的键值语义用到，内容是什么无关紧要。 */
+function stash(tabId: string): void {
+  stashSheetDraft(tabId, {
+    base: { id: "b" } as IWorkbookData,
+    current: { id: "c" } as IWorkbookData,
+    source: new Uint8Array(),
+  });
+}
 
 beforeEach(() => {
   storage.clear();
@@ -85,6 +96,103 @@ describe("reload", () => {
     preview.reload("never-opened.md");
     expect(preview.tabs).toHaveLength(0);
     expect(preview.collapsed).toBe(true);
+  });
+});
+
+describe("attachDiskPath", () => {
+  it("给已打开的 tab 记上落盘路径，供「用系统应用打开」定位", () => {
+    const preview = usePreviewStore();
+    preview.open("artifacts/a.xlsx", "a.xlsx");
+    preview.attachDiskPath("artifacts/a.xlsx", "/home/u/.greyWork/artifacts/a.xlsx");
+    expect(preview.activeTab?.diskPath).toBe("/home/u/.greyWork/artifacts/a.xlsx");
+  });
+
+  it("tab 已经开着时才回来的落盘路径能补上（open 的同路径早退分支带不进新参数，故另设此 action）", () => {
+    const preview = usePreviewStore();
+    preview.open("artifacts/a.xlsx", "a.xlsx");
+    // 先开 tab、后落盘：attach 必须仍然生效
+    preview.attachDiskPath("artifacts/a.xlsx", "/disk/a.xlsx");
+    expect(preview.tabs[0]?.diskPath).toBe("/disk/a.xlsx");
+  });
+
+  it("已有落盘路径不覆盖（卡片认的那份才是对的），空路径是空操作", () => {
+    const preview = usePreviewStore();
+    preview.open("artifacts/a.xlsx", "a.xlsx");
+    preview.attachDiskPath("artifacts/a.xlsx", "/first/a.xlsx");
+    preview.attachDiskPath("artifacts/a.xlsx", "/second/a.xlsx");
+    preview.attachDiskPath("artifacts/a.xlsx", "");
+    expect(preview.activeTab?.diskPath).toBe("/first/a.xlsx");
+  });
+
+  it("未打开的路径不产生 tab，也不改 revision（只是给工具栏按钮定位，内容没变）", () => {
+    const preview = usePreviewStore();
+    preview.attachDiskPath("never-opened.xlsx", "/disk/a.xlsx");
+    expect(preview.tabs).toHaveLength(0);
+
+    preview.open("artifacts/a.xlsx", "a.xlsx");
+    preview.attachDiskPath("artifacts/a.xlsx", "/disk/a.xlsx");
+    expect(preview.activeTab?.revision).toBe(0);
+  });
+});
+
+describe("setDirty 与未保存草稿的清理", () => {
+  it("置起与清除脏标记；重复置同一个值不换对象（换对象会牵动下游 watch）", () => {
+    const preview = usePreviewStore();
+    const id = preview.open("artifacts/a.xlsx", "a.xlsx");
+
+    preview.setDirty(id, true);
+    expect(preview.activeTab?.dirty).toBe(true);
+    const marked = preview.tabs[0];
+    preview.setDirty(id, true);
+    expect(preview.tabs[0]).toBe(marked);
+
+    preview.setDirty(id, false);
+    expect(preview.activeTab?.dirty).toBe(false);
+  });
+
+  it("对不存在的 id 是空操作", () => {
+    const preview = usePreviewStore();
+    preview.open("a.md");
+    const before = preview.tabs[0];
+    preview.setDirty("pv-nope", true);
+    expect(preview.tabs[0]).toBe(before);
+  });
+
+  it("关 tab 丢掉它的草稿，别的 tab 不受影响", () => {
+    const preview = usePreviewStore();
+    const a = preview.open("artifacts/a.xlsx", "a.xlsx");
+    const b = preview.open("artifacts/b.xlsx", "b.xlsx");
+    stash(a);
+    stash(b);
+
+    preview.close(a);
+    expect(hasSheetDraft(a)).toBe(false);
+    expect(hasSheetDraft(b)).toBe(true);
+  });
+
+  it("关全部丢掉所有草稿", () => {
+    const preview = usePreviewStore();
+    const a = preview.open("artifacts/a.xlsx", "a.xlsx");
+    const b = preview.open("artifacts/b.xlsx", "b.xlsx");
+    stash(a);
+    stash(b);
+
+    preview.closeAll();
+    expect(hasSheetDraft(a)).toBe(false);
+    expect(hasSheetDraft(b)).toBe(false);
+  });
+
+  it("超过 tab 上限被淘汰的那个也要丢草稿（否则草稿永久漏内存）", () => {
+    const preview = usePreviewStore();
+    const ids = Array.from({ length: MAX_PREVIEW_TABS }, (_, i) => preview.open(`artifacts/${i}.xlsx`));
+    for (const id of ids) stash(id);
+
+    const newest = preview.open("artifacts/last.xlsx");
+    expect(preview.tabs).toHaveLength(MAX_PREVIEW_TABS);
+    // 最旧的非激活 tab 被丢弃
+    expect(hasSheetDraft(ids[0])).toBe(false);
+    expect(hasSheetDraft(newest)).toBe(false);
+    expect(hasSheetDraft(ids[1])).toBe(true);
   });
 });
 

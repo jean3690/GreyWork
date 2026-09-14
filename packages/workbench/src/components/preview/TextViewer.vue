@@ -144,9 +144,12 @@ onUnmounted(destroyEditor);
   <div class="flex size-full min-h-0 flex-col overflow-hidden">
     <p v-if="loading" class="px-4 py-3 text-[12px] text-dim2">读取中…</p>
     <p v-else-if="error" role="alert" class="px-4 py-3 text-[12px] text-orange">读取失败：{{ error }}</p>
-    <pre v-else-if="degraded" class="min-h-0 flex-1 overflow-auto whitespace-pre-wrap px-4 py-3 font-mono text-[12px] text-foreground">{{
-      data
-    }}</pre>
-    <div v-else ref="host" data-testid="text-viewer" class="min-h-0 flex-1 overflow-hidden" />
+    <pre
+      v-else-if="degraded"
+      data-selection-scope
+      class="min-h-0 flex-1 overflow-auto whitespace-pre-wrap px-4 py-3 font-mono text-[12px] text-foreground"
+      >{{ data }}</pre
+    >
+    <div v-else ref="host" data-testid="text-viewer" data-selection-scope class="min-h-0 flex-1 overflow-hidden" />
   </div>
 </template>

@@ -2,6 +2,7 @@ import { createIdFactory, createJsonStorage } from "@greywork/core";
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { DEFAULT_PREVIEW_PANEL_PX, MAX_PREVIEW_TABS, clampPreviewWidth, shouldAutoCollapse } from "../lib/layout";
+import { dropSheetDraft } from "../lib/sheet-draft";
 import { basename, kindOfPath, type ViewerKind } from "../lib/viewer";
 
 const nextTabId = createIdFactory("pv");
@@ -34,6 +35,18 @@ export interface PreviewTab {
   source: PreviewSource;
   /** artifact:updated 每次到达自增；viewer 据此重载。 */
   revision: number;
+  /**
+   * 磁盘孪生路径：`vfs` 产物由 deliverArtifact 落盘后带回，预览据此提供
+   * 「用系统应用打开」。`disk` 源的 path 本身就是磁盘路径，此项恒为空。
+   */
+  diskPath?: string;
+  /**
+   * 有未保存的改动（当前只有可编辑的 xlsx 会置起）。
+   *
+   * 只镜像一个布尔值、不镜像内容：内容留在 `lib/sheet-draft.ts` 的模块级 Map 里。
+   * 与挂载状态解耦是刻意的 —— 切 tab 会销毁 viewer，但「有未保存改动」这件事不随之消失。
+   */
+  dirty?: boolean;
 }
 
 interface PreviewPrefs {
@@ -108,6 +121,7 @@ export const usePreviewStore = defineStore("preview", () => {
     while (tabs.value.length > MAX_PREVIEW_TABS) {
       const victim = tabs.value.find((candidate) => candidate.id !== tab.id);
       if (!victim) break;
+      dropSheetDraft(victim.id);
       tabs.value = tabs.value.filter((candidate) => candidate.id !== victim.id);
     }
     activeId.value = tab.id;
@@ -120,14 +134,39 @@ export const usePreviewStore = defineStore("preview", () => {
     tabs.value = tabs.value.map((tab) => (tab.path === path ? { ...tab, revision: tab.revision + 1 } : tab));
   }
 
+  /**
+   * 给已打开的 tab 记上磁盘孪生路径（产物落盘后到达）。
+   *
+   * 不复用 `open()`：它命中同路径就走早退分支，新参数会被静默丢掉 —— 而
+   * `attachDiskPath` 恰恰要处理「tab 已经开着、落盘路径才回来」这种时序。
+   * 已有值不覆盖（首次落盘的那份才是卡片认的路径），也不动 revision：
+   * 这只是给工具栏按钮定位，内容没变，不该触发 viewer 重载。
+   */
+  function attachDiskPath(path: string, diskPath: string): void {
+    if (!diskPath) return;
+    tabs.value = tabs.value.map((tab) => (tab.path === path && !tab.diskPath ? { ...tab, diskPath } : tab));
+  }
+
   function activate(id: string): void {
     if (tabs.value.some((tab) => tab.id === id)) activeId.value = id;
   }
 
-  /** 关闭 tab；关掉的是激活项时把焦点交给右邻（没有则左邻），空了则折叠面板。 */
+  /** 记录某 tab 是否有未保存改动（可编辑的 viewer 自己上报）。 */
+  function setDirty(id: string, value: boolean): void {
+    tabs.value = tabs.value.map((tab) => (tab.id === id && tab.dirty !== value ? { ...tab, dirty: value } : tab));
+  }
+
+  /**
+   * 关闭 tab；关掉的是激活项时把焦点交给右邻（没有则左邻），空了则折叠面板。
+   *
+   * 未保存草稿的清理放在这里（以及 closeAll / 上限淘汰）而不是调用方：tab 消失是它们的
+   * 唯一共同点，任何新增的关闭入口都会经过这三处；散在调用方就会漏一个、漏一个就永久漏内存。
+   * 注意这里**不负责问用户** —— 该不该在关之前确认由界面决定。
+   */
   function close(id: string): void {
     const index = tabs.value.findIndex((tab) => tab.id === id);
     if (index === -1) return;
+    dropSheetDraft(id);
     const remaining = tabs.value.filter((tab) => tab.id !== id);
     tabs.value = remaining;
     if (activeId.value !== id) return;
@@ -137,6 +176,7 @@ export const usePreviewStore = defineStore("preview", () => {
   }
 
   function closeAll(): void {
+    for (const tab of tabs.value) dropSheetDraft(tab.id);
     tabs.value = [];
     activeId.value = null;
     setCollapsed(true);
@@ -182,6 +222,8 @@ export const usePreviewStore = defineStore("preview", () => {
     effectiveWidthPx,
     open,
     reload,
+    attachDiskPath,
+    setDirty,
     activate,
     close,
     closeAll,

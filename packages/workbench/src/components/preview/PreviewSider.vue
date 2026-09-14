@@ -14,14 +14,18 @@
  * 不改 activeId，所以后台就地更新不会把人从文件树里拽走。
  */
 import { computed, ref, watch } from "vue";
+import { isTauriRuntime } from "@greywork/core";
 import Icon from "../Icon.vue";
 import FileTree from "./FileTree.vue";
 import PreviewSurface from "./PreviewSurface.vue";
+import UnsavedChangesDialog from "./UnsavedChangesDialog.vue";
 import WebFetchDialog from "./WebFetchDialog.vue";
 import { DEFAULT_PREVIEW_PANEL_PX, MAX_PREVIEW_PANEL_PX, MIN_PREVIEW_PANEL_PX, PREVIEW_TAB_BAR_HEIGHT } from "../../lib/layout";
+import { openWithSystemApp, resolveTabDiskPath } from "../../lib/open-external";
 import { usePreviewBridge } from "../../lib/preview-bridge";
 import { useResizableSplit } from "../../lib/resizable-split";
 import { usePreviewStore } from "../../stores/preview";
+import { notify } from "../../stores/notice";
 
 type Section = "files" | "preview";
 
@@ -32,6 +36,43 @@ usePreviewBridge();
 
 const section = ref<Section>("preview");
 const fetchDialogOpen = ref(false);
+
+/**
+ * 关 tab 前的确认状态。
+ *
+ * 只拦「关」不拦「切」：切换 tab / 切到文件区同样会销毁 viewer，但那条路径由草稿兜底
+ * （见 `lib/sheet-draft.ts`），每次切走都弹一次窗比丢改动更烦人。关掉 tab 就没得兜了，才必须问。
+ */
+type PendingClose = { mode: "tab"; tabId: string; names: string[] } | { mode: "all"; names: string[] };
+
+const pendingClose = ref<PendingClose | null>(null);
+
+function requestClose(tabId: string): void {
+  const tab = preview.tabs.find((candidate) => candidate.id === tabId);
+  if (!tab) return;
+  if (!tab.dirty) {
+    preview.close(tabId);
+    return;
+  }
+  pendingClose.value = { mode: "tab", tabId, names: [tab.name] };
+}
+
+function requestCloseAll(): void {
+  const dirty = preview.tabs.filter((tab) => tab.dirty);
+  if (dirty.length === 0) {
+    preview.closeAll();
+    return;
+  }
+  pendingClose.value = { mode: "all", names: dirty.map((tab) => tab.name) };
+}
+
+function confirmClose(): void {
+  const pending = pendingClose.value;
+  pendingClose.value = null;
+  if (!pending) return;
+  if (pending.mode === "all") preview.closeAll();
+  else preview.close(pending.tabId);
+}
 
 watch(
   () => preview.activeId,
@@ -47,6 +88,29 @@ const { dragging, onPointerDown } = useResizableSplit({
 });
 
 const widthStyle = computed(() => ({ width: `${preview.effectiveWidthPx}px` }));
+
+/**
+ * 当前 tab 的磁盘孪生路径，没有则 null（按钮不出现）。
+ * 浏览器态恒为 null：没有磁盘通道，按钮留着只会点了没反应。
+ */
+const externalPath = computed(() => {
+  const tab = preview.activeTab;
+  if (!tab || !isTauriRuntime()) return null;
+  return resolveTabDiskPath(tab);
+});
+
+async function openExternal(): Promise<void> {
+  const path = externalPath.value;
+  if (!path) return;
+  if (!(await openWithSystemApp(path))) {
+    notify({
+      kind: "warning",
+      key: "preview-open-external",
+      title: "无法用系统应用打开",
+      detail: `${path} 可能已被移动或删除，也可能是系统里没有能打开它的程序。`,
+    });
+  }
+}
 
 /** 双击把手复位到默认宽度：比「拖回大概位置」可靠，也是常见的分隔条约定。 */
 function resetWidth(): void {
@@ -146,12 +210,23 @@ const sectionClass = (active: boolean): string =>
           <Icon name="refresh" :size="13" />
         </button>
         <button
+          v-if="externalPath"
+          type="button"
+          data-testid="preview-open-external"
+          class="grid size-6 cursor-pointer place-items-center rounded-[6px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          aria-label="用系统应用打开"
+          :title="`用系统应用打开 ${externalPath}`"
+          @click="openExternal()"
+        >
+          <Icon name="external" :size="13" />
+        </button>
+        <button
           v-if="section === 'preview' && preview.tabs.length > 1"
           type="button"
           data-testid="preview-close-all"
           class="grid size-6 cursor-pointer place-items-center rounded-[6px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
           aria-label="关闭全部预览"
-          @click="preview.closeAll()"
+          @click="requestCloseAll()"
         >
           <Icon name="close-one" :size="13" />
         </button>
@@ -183,18 +258,20 @@ const sectionClass = (active: boolean): string =>
             type="button"
             class="max-w-[160px] cursor-pointer truncate focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
             :title="tab.path"
-            :aria-label="`查看 ${tab.name}`"
+            :aria-label="tab.dirty ? `查看 ${tab.name}（有未保存的改动）` : `查看 ${tab.name}`"
             :aria-current="tab.id === preview.activeId ? 'true' : undefined"
             @click="preview.activate(tab.id)"
           >
             {{ tab.name }}
           </button>
+          <!-- 未保存圆点：关 tab 会问、切 tab 有草稿兜底，用户得先看得见哪些表还没存 -->
+          <span v-if="tab.dirty" aria-hidden="true" class="size-1.5 shrink-0 rounded-full bg-cyan" />
           <button
             type="button"
             data-testid="preview-tab-close"
             class="grid size-4 cursor-pointer place-items-center rounded-[4px] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
             :aria-label="`关闭 ${tab.name}`"
-            @click.stop="preview.close(tab.id)"
+            @click.stop="requestClose(tab.id)"
           >
             <Icon name="close" :size="10" />
           </button>
@@ -211,5 +288,6 @@ const sectionClass = (active: boolean): string =>
     </template>
 
     <WebFetchDialog v-if="fetchDialogOpen" @close="fetchDialogOpen = false" />
+    <UnsavedChangesDialog v-if="pendingClose" :names="pendingClose.names" @close="pendingClose = null" @confirm="confirmClose()" />
   </aside>
 </template>

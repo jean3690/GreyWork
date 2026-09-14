@@ -2,7 +2,7 @@ import { createRequire } from "node:module";
 import { describe, expect, it } from "vitest";
 import ExcelJS from "exceljs";
 import JSZip from "jszip";
-import { sanitizeXlsxGraphics } from "@/lib/xlsx-sanitize";
+import { sanitizeXlsxGraphics, hasGraphicsParts } from "@/lib/xlsx-sanitize";
 
 /**
  * 预览跑在 Tauri 的 webview 里，`exceljs` 走 package 的 `browser` 字段 → dist 预打包产物，
@@ -71,5 +71,20 @@ describe("sanitizeXlsxGraphics", () => {
   it("不是 zip 时原样返回，把报错权留给 exceljs", async () => {
     const junk = new TextEncoder().encode("not a zip at all");
     expect(new Uint8Array(await sanitizeXlsxGraphics(junk))).toEqual(junk);
+  });
+});
+
+describe("hasGraphicsParts", () => {
+  it("带图纸的表格判为 true（保存会丢掉这些部件，需要提前告知用户）", async () => {
+    expect(await hasGraphicsParts(await workbookWithDrawing())).toBe(true);
+  });
+
+  it("自家写入器产出的无图纸表格判为 false", async () => {
+    const plain = new Uint8Array(await new ExcelJS.Workbook().xlsx.writeBuffer());
+    expect(await hasGraphicsParts(plain)).toBe(false);
+  });
+
+  it("不是 zip 时回 false，不抢 exceljs 的报错语义", async () => {
+    expect(await hasGraphicsParts(new TextEncoder().encode("junk"))).toBe(false);
   });
 });

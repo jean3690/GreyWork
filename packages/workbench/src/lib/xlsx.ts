@@ -73,7 +73,8 @@ export async function appendXlsxRow(data: Uint8Array | null, sheetName: string, 
   return new Uint8Array(buffer as ArrayBuffer);
 }
 
-function sanitizeSheetName(name: string): string {
+/** 工作表名净化；导出与回写共用（回写时改名同样不能带非法字符或超 31 字）。 */
+export function sanitizeSheetName(name: string): string {
   const cleaned = name.replace(/[\\/?*[\]:]/g, "").slice(0, EXCEL_SHEET_MAX);
   return cleaned.length > 0 ? cleaned : "Sheet";
 }

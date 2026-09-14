@@ -5,7 +5,20 @@
  * 未知扩展一律归 `raw`（CodeMirror 纯文本兜底），永远不会「打不开」。
  */
 
-export type ViewerKind = "md" | "html" | "csv" | "code" | "xlsx" | "docx" | "pptx" | "pdf" | "diff" | "image" | "web" | "raw";
+export type ViewerKind =
+  | "md"
+  | "html"
+  | "csv"
+  | "code"
+  | "xlsx"
+  | "docx"
+  | "pptx"
+  | "pdf"
+  | "diff"
+  | "image"
+  | "web"
+  | "raw"
+  | "legacy-office";
 
 const EXT_KIND: Record<string, ViewerKind> = {
   md: "md",
@@ -14,12 +27,21 @@ const EXT_KIND: Record<string, ViewerKind> = {
   htm: "html",
   csv: "csv",
   xlsx: "xlsx",
-  xls: "xlsx",
   docx: "docx",
   pptx: "pptx",
   pdf: "pdf",
   diff: "diff",
   patch: "diff",
+  // 老格式（OLE2 复合文档）：现有解析器全部读不了 —— docx-parse / pptx-parse 读的是
+  // OOXML 的 ZIP，Univer/exceljs 只认 xlsx。归到 legacy-office 明确提示，
+  // 而不是落到 raw 被当文本读（二进制经 utf-8 解码就是满屏乱码，且不报错）。
+  doc: "legacy-office",
+  dot: "legacy-office",
+  xls: "legacy-office",
+  xlt: "legacy-office",
+  ppt: "legacy-office",
+  pot: "legacy-office",
+  pps: "legacy-office",
   png: "image",
   jpg: "image",
   jpeg: "image",
@@ -57,7 +79,7 @@ const EXT_KIND: Record<string, ViewerKind> = {
  * 走错通道的代价不对称：二进制被当文本读会经 utf-8 解码后**不可逆地损坏**
  * （xlsx 读回即报「文件损坏」），所以这张表是白名单而非启发式判断。
  */
-const BINARY_KINDS: ReadonlySet<ViewerKind> = new Set<ViewerKind>(["xlsx", "docx", "pptx", "pdf", "image"]);
+const BINARY_KINDS: ReadonlySet<ViewerKind> = new Set<ViewerKind>(["xlsx", "docx", "pptx", "pdf", "image", "legacy-office"]);
 
 /** 按扩展名推断产物查看类型；未知归 raw（文本兜底）。 */
 export function kindOfPath(path: string): ViewerKind {

@@ -61,7 +61,7 @@ const tableCount = computed(() => doc.value?.blocks.filter((block) => block.kind
     <p v-if="loading" class="px-4 py-3 text-[12px] text-dim2">读取中…</p>
     <p v-else-if="error" role="alert" class="px-4 py-3 text-[12px] text-red-400">读取失败：{{ error }}</p>
     <p v-else-if="parseError" role="alert" class="px-4 py-3 text-[12px] text-red-400">
-      无法解析该文档：{{ parseError }}。可在文件夹中打开原文件。
+      无法解析该文档：{{ parseError }}。可点上方工具栏的「用系统应用打开」看原文件。
     </p>
     <p v-else-if="doc && blockCount === 0" class="px-4 py-3 text-[12px] text-dim2">这份文档没有正文内容。</p>
 
@@ -70,6 +70,7 @@ const tableCount = computed(() => doc.value?.blocks.filter((block) => block.kind
            纸色走 --paper（暗态压暗一档），不用画布色 —— 正文色来自文件本身。 -->
       <article
         v-if="doc"
+        data-selection-scope
         class="mx-auto rounded-[6px] border border-line-2 bg-paper px-6 py-7 text-[14px] text-paper-ink shadow-sm"
         :style="{ maxWidth: `${doc.contentWidth}px` }"
       >

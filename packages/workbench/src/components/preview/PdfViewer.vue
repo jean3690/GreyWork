@@ -108,7 +108,19 @@ async function load(bytes: Uint8Array): Promise<void> {
     const pdfjs = await import("pdfjs-dist");
     pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
     // pdf.js 会接管并转移这块 buffer，传副本以免 vfs 缓存里的数据被清空。
-    const loadingTask = pdfjs.getDocument({ data: bytes.slice() });
+    //
+    // 这几行资源 URL 不是可选项：缺 CMap 时 CJK 文本用内置编码回退，断字错误或整页缺字；
+    // 缺 standard_fonts 时未嵌入字体的页面是空白。两种情况 pdf.js 都**静默降级**、不抛错，
+    // 所以只能靠这里配对（资源由 vite-plugin-static-copy 从 pdfjs-dist 复制到 /pdfjs/，
+    // 见 apps/desktop/vite.config.ts）。路径以 / 开头走 WebView 自身，不受 CSP 的 connect-src 影响。
+    const loadingTask = pdfjs.getDocument({
+      data: bytes.slice(),
+      cMapUrl: "/pdfjs/cmaps/",
+      cMapPacked: true,
+      standardFontDataUrl: "/pdfjs/standard_fonts/",
+      wasmUrl: "/pdfjs/wasm/",
+      iccUrl: "/pdfjs/iccs/",
+    });
     const opened = (await loadingTask.promise) as unknown as PdfDocument;
     if (mine !== generation) {
       await opened.destroy().catch(() => undefined);
@@ -157,7 +169,7 @@ onUnmounted(() => {
     <p v-if="loading" class="px-4 py-3 text-[12px] text-dim2">读取中…</p>
     <p v-else-if="error" role="alert" class="px-4 py-3 text-[12px] text-orange">读取失败：{{ error }}</p>
     <p v-else-if="renderError" role="alert" class="px-4 py-3 text-[12px] text-orange">
-      无法渲染该 PDF：{{ renderError }}。可在文件夹中打开原文件。
+      无法渲染该 PDF：{{ renderError }}。可点上方工具栏的「用系统应用打开」看原文件。
     </p>
     <div
       v-show="!loading && !error && !renderError"

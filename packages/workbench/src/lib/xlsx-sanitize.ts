@@ -55,6 +55,24 @@ function viewOf(data: Uint8Array): ArrayBuffer {
 }
 
 /**
+ * 这份 xlsx 里是否含图纸 / 图表 / 媒体部件。
+ *
+ * 供预览内编辑的「保存」前告警：exceljs 的 load→writeBuffer 循环不会把这几类部件写回，
+ * 一份带图表的工作簿在预览里改一格再保存，图表就没了 —— 与其静默丢掉，不如提前说清。
+ * 只扫条目名，不重新打包。
+ */
+export async function hasGraphicsParts(data: Uint8Array): Promise<boolean> {
+  const { default: JSZip } = await import("jszip");
+  try {
+    const zip = await JSZip.loadAsync(data);
+    return Object.values(zip.files).some((entry) => !entry.dir && GRAPHICS_PART.test(entry.name));
+  } catch {
+    // 不是合法 zip：由后续 exceljs 报错，这里不抢语义
+    return false;
+  }
+}
+
+/**
  * 剥掉 xlsx 里的图纸/图表/媒体部件,返回可直接交给 exceljs 的 buffer。
  * 无命中(或不是合法 zip)时原样返回,不让这里的失败替换 exceljs 的报错语义。
  */

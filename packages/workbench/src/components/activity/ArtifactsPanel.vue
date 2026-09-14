@@ -13,6 +13,16 @@ import Icon from "../Icon.vue";
 
 const artifactStore = useArtifactStore();
 const preview = usePreviewStore();
+
+/**
+ * 在右栏打开产物，并把落盘路径一并挂到 tab 上（预览的「用系统应用打开」据此定位）。
+ * 不能塞进 `open` 的参数里：命中已打开的路径时它会早退，新参数带不进去。
+ */
+function openPreview(path: string | undefined, name: string, diskPath: string | undefined): void {
+  if (!path) return;
+  preview.open(path, name);
+  if (diskPath) preview.attachDiskPath(path, diskPath);
+}
 </script>
 
 <template>
@@ -31,7 +41,7 @@ const preview = usePreviewStore();
           :disabled="!artifact.path"
           :title="artifact.path ? `在预览面板打开 ${artifact.path}` : '该产物没有 VFS 路径，无法预览'"
           class="min-w-0 flex-1 cursor-pointer truncate text-start text-[12.5px] text-foreground transition-colors hover:text-cyan focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-default disabled:hover:text-foreground"
-          @click="artifact.path && preview.open(artifact.path, artifact.name)"
+          @click="openPreview(artifact.path, artifact.name, artifact.diskPath)"
         >
           {{ artifact.name }}
         </button>

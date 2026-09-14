@@ -11,12 +11,12 @@
 //!   仍由渲染端独占回写。WAL 多连接并发写安全（busy_timeout 兜底）。
 //! - **防重**：unique(task_id, due_at) 库约束幂等（宿主重启后同分钟重推被挡）；
 //!   内存记 (task_id, minute_key) 只作快路径（多数 tick 免一次 INSERT OR IGNORE）。
-//! - **cron 语义**：5 段（分 时 日 月 周），支持 `*`、`a`、`a-b`、`*/n`、`a-b/n`、
-//!   逗号列表。日与月同时受限时按 AND 简化（标准 cron 的 OR 语义不实现——
-//!   当前用例只用分/时/周）。
-//! - 匹配器为纯组件函数（weekday/hour/minute），不带时区——时区拆分在调用方
-//!   （tick 取 Local::now() 组件），单测不依赖运行机器时区。
+//! - **cron 语义**：交给 `cron` 模块（标准 5 段 + 日/周 OR + 宏；非法表达式永不触发）。
+//!   本模块只负责「取当前本地时刻组件 → 判定 → 持久化入队 → 广播」。
+//! - 时刻组件带时区语义（tick 取 Local::now()），匹配器本身是纯函数，单测不依赖
+//!   运行机器时区。
 
+use crate::cron;
 use crate::host_exec;
 use crate::log;
 use chrono::{Datelike, Local, Timelike};
@@ -77,9 +77,11 @@ pub fn spawn_ticker(app: tauri::AppHandle, db_path: PathBuf) {
                 let Some(expr) = task.cron.as_deref() else {
                     continue; // 手动触发：永不自动到期
                 };
-                if !cron_matches(
+                if !cron::matches(
                     expr,
-                    now.weekday().num_days_from_monday(),
+                    now.month(),
+                    now.day(),
+                    now.weekday().num_days_from_sunday(),
                     now.hour(),
                     now.minute(),
                 ) {
@@ -130,153 +132,4 @@ pub fn spawn_ticker(app: tauri::AppHandle, db_path: PathBuf) {
             }
         }
     });
-}
-
-/// 标准 cron 5 段表达式匹配（分 时 日 月 周）。
-/// weekday：0-6（周一为 0，周日为 6——本项目内部约定，换算在调用方）；
-/// 注意标准 cron 周字段 0/7=周日、1=周一，本函数收到的是已换算组件。
-pub fn cron_matches(expr: &str, weekday: u32, hour: u32, minute: u32) -> bool {
-    let fields: Vec<&str> = expr.split_whitespace().collect();
-    if fields.len() != 5 {
-        return false; // 非法表达式永不匹配（安全降级为手动）
-    }
-    field_matches(fields[0], minute, 0, 59)
-        && field_matches(fields[1], hour, 0, 23)
-        && field_matches_day_month(fields[2], fields[3])
-        && field_matches(fields[4], weekday, 0, 6)
-}
-
-/// 日/月字段：签名无日期组件——字段含 `*` 项才恒真；受限表达式安全不触发
-/// （宁可错过，不误触发）。当前用例（分/时/周）不受影响。
-fn field_matches_day_month(day: &str, month: &str) -> bool {
-    let day_free = day.split(',').any(|p| p.trim() == "*");
-    let month_free = month.split(',').any(|p| p.trim() == "*");
-    day_free && month_free
-}
-
-/// 单字段匹配：支持 `*`、`*/n`、`a`、`a-b`、`a-b/n`、逗号列表。
-/// day/month 无组件可用时传 value=1 占位——配合字段 `*` 恒真；
-/// 若表达式限制日月而调用方无日期组件，将按 1 日/1 月判定（见 cron_matches 调用）。
-fn field_matches(field: &str, value: u32, min: u32, max: u32) -> bool {
-    for part in field.split(',') {
-        let part = part.trim();
-        if part.is_empty() {
-            continue;
-        }
-        // 步进解析：`*/n` 或 `a-b/n`
-        let (range, step) = match part.split_once('/') {
-            Some((range, step)) => (
-                range,
-                step.parse::<u32>().ok().filter(|s| *s > 0).unwrap_or(1),
-            ),
-            None => (part, 1),
-        };
-        let (lo, hi) = if range == "*" {
-            (min, max)
-        } else {
-            match range.split_once('-') {
-                Some((a, b)) => {
-                    let Ok(a) = a.trim().parse::<u32>() else {
-                        continue;
-                    };
-                    let Ok(b) = b.trim().parse::<u32>() else {
-                        continue;
-                    };
-                    (a, b)
-                }
-                None => {
-                    let Ok(v) = range.trim().parse::<u32>() else {
-                        continue;
-                    };
-                    (v, v)
-                }
-            }
-        };
-        let Ok(lo) = normalize_range(lo, min, max) else {
-            continue;
-        };
-        let Ok(hi) = normalize_range(hi, min, max) else {
-            continue;
-        };
-        if value >= lo && value <= hi && (value - lo).is_multiple_of(step) {
-            return true;
-        }
-    }
-    false
-}
-
-/// 越界值拒绝（宽容：仅合法区间参与匹配，非法项整项忽略）。
-fn normalize_range(v: u32, min: u32, max: u32) -> Result<u32, ()> {
-    if v < min || v > max {
-        return Err(());
-    }
-    Ok(v)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn every_minute_wildcard() {
-        assert!(cron_matches("* * * * *", 3, 10, 30));
-        assert!(cron_matches("* * * * *", 6, 0, 0));
-    }
-
-    #[test]
-    fn exact_hour_minute_daily() {
-        // 每天 09:00
-        assert!(cron_matches("0 9 * * *", 2, 9, 0));
-        assert!(!cron_matches("0 9 * * *", 2, 8, 59));
-        assert!(!cron_matches("0 9 * * *", 2, 9, 1));
-        assert!(cron_matches("0 9 * * *", 6, 9, 0), "每日不限周几");
-    }
-
-    #[test]
-    fn weekly_weekday_and_time() {
-        // 每周五 18:00（内部约定周五 weekday=4：周一 0 … 周日 6）
-        assert!(cron_matches("0 18 * * 4", 4, 18, 0));
-        assert!(!cron_matches("0 18 * * 4", 3, 18, 0), "周四不触发");
-        assert!(!cron_matches("0 18 * * 4", 4, 17, 0));
-    }
-
-    #[test]
-    fn step_minutes() {
-        // 每 15 分钟
-        assert!(cron_matches("*/15 * * * *", 0, 12, 0));
-        assert!(cron_matches("*/15 * * * *", 0, 12, 15));
-        assert!(cron_matches("*/15 * * * *", 0, 12, 45));
-        assert!(!cron_matches("*/15 * * * *", 0, 12, 20));
-    }
-
-    #[test]
-    fn range_and_list() {
-        assert!(cron_matches("0 9-11 * * *", 0, 10, 0));
-        assert!(!cron_matches("0 9-11 * * *", 0, 12, 0));
-        assert!(cron_matches("0 9,18 * * *", 0, 18, 0));
-        assert!(cron_matches("0 9,18 * * *", 0, 9, 0));
-        assert!(!cron_matches("0 9,18 * * *", 0, 12, 0));
-        // 跨列表步进：0-30/15
-        assert!(cron_matches("0-30/15 * * * *", 0, 0, 30));
-        assert!(!cron_matches("0-30/15 * * * *", 0, 0, 45));
-    }
-
-    #[test]
-    fn invalid_expression_never_matches() {
-        assert!(!cron_matches("", 0, 0, 0));
-        assert!(!cron_matches("0 9 * *", 0, 9, 0), "四段非法");
-        assert!(!cron_matches("x x x x x", 0, 9, 0));
-        assert!(!cron_matches("0 25 * * *", 0, 9, 0), "越界时字段");
-    }
-
-    #[test]
-    fn weekday_convention_monday_is_zero() {
-        // 种子任务「每周五 18:00」在 2026-09-04（周五）的组件应为 weekday=4
-        // 此处直接验证匹配器对周五组件的判定；组件换算（周一=0）由调用方负责。
-        assert!(cron_matches("0 18 * * 4", 4, 18, 0));
-        assert!(
-            !cron_matches("0 18 * * 0", 4, 18, 0),
-            "周日表达式不该命中周五"
-        );
-    }
 }

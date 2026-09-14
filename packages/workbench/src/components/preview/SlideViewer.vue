@@ -203,7 +203,7 @@ const slideCount = computed(() => deck.value?.slides.length ?? 0);
     <p v-if="loading" class="px-4 py-3 text-[12px] text-dim2">读取中…</p>
     <p v-else-if="error" role="alert" class="px-4 py-3 text-[12px] text-orange">读取失败：{{ error }}</p>
     <p v-else-if="parseError" role="alert" class="px-4 py-3 text-[12px] text-orange">
-      无法解析该演示文稿：{{ parseError }}。可在文件夹中打开原文件。
+      无法解析该演示文稿：{{ parseError }}。可点上方工具栏的「用系统应用打开」看原文件。
     </p>
     <p v-else-if="deck && slideCount === 0" class="px-4 py-3 text-[12px] text-dim2">这份演示文稿没有幻灯片。</p>
 
@@ -211,6 +211,7 @@ const slideCount = computed(() => deck.value?.slides.length ?? 0);
       v-show="!loading && !error && !parseError"
       ref="scroller"
       data-testid="slide-viewer"
+      data-selection-scope
       class="min-h-0 flex-1 overflow-y-auto bg-background"
       :style="{ padding: `${GUTTER}px` }"
     >

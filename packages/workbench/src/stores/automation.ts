@@ -4,6 +4,7 @@ import { ref, watch } from "vue";
 import { listen } from "@tauri-apps/api/event";
 import { automationsBackend, type AutomationDuePayload, type AutomationDueRow, type AutomationTaskRow } from "../lib/automations-backend";
 import { useChatStore } from "./chat";
+import { useAgentStore } from "./agent";
 import { useSessionStore } from "./session";
 import { notify } from "./notice";
 import { i18n } from "../i18n";
@@ -18,6 +19,8 @@ export interface AutomationTask {
   schedule: string;
   /** 标准 cron 5 段表达式（分 时 日 月 周）；null/缺省 = 手动触发（仅 Run Now）。 */
   cron?: string | null;
+  /** 执行后端：ACP 后端 id（带工具跑）；null/缺省 = 本机模型管线。 */
+  acpProviderId?: string | null;
   /** 目标工作区/项目。 */
   target: string;
   /** 实际下发的指令文本（复跑 mock/真实管线）。 */
@@ -60,7 +63,7 @@ const DEFAULT_AUTOMATIONS: AutomationTask[] = [
     id: "at-seed-2",
     name: "自动生成周报",
     schedule: "每周五 18:00",
-    cron: "0 18 * * 4",
+    cron: "0 18 * * 5",
     target: "普通对话",
     intent: "生成一份周报，包含数据表，并导出 Excel 和 PPT 简报",
     enabled: false,
@@ -86,6 +89,7 @@ function toRow(task: AutomationTask): AutomationTaskRow {
     name: task.name,
     schedule: task.schedule,
     cron: task.cron ?? null,
+    acpProviderId: task.acpProviderId ?? null,
     target: task.target,
     intent: task.intent,
     enabled: task.enabled,
@@ -138,8 +142,9 @@ export const useAutomationStore = defineStore("automation", () => {
     const item: AutomationTask = {
       id: uid(),
       name: "新建自动化任务",
-      schedule: "手动触发",
+      schedule: t("automation.manualTrigger"),
       cron: null,
+      acpProviderId: null,
       target: "未绑定工作区",
       intent: "生成一份周报",
       enabled: false,
@@ -173,12 +178,45 @@ export const useAutomationStore = defineStore("automation", () => {
     }
   }
 
+  /* ===== 执行路由：本机模型管线 vs 指定 ACP 后端 =====
+   * 任务绑定 acpProviderId 时走 ACP（带工具、按所选后端执行）；否则走既有 chat 管线。
+   * ACP 在本应用是全局单会话（与对话页共用），到期执行会切换当前后端——这是既有
+   * 架构约束，编辑器里已明示；换成按任务建会话是另一个量级的改造。 */
+  type RunMode = "llm" | "acp";
+
+  /** 任一条管线是否有回合在跑：两条管线共用同一会话视图，故调度上互斥。 */
+  function turnActive(): boolean {
+    const agent = useAgentStore();
+    return useChatStore().busy || agent.acpBusy || agent.acpConnecting;
+  }
+
+  /**
+   * 把指令交给执行后端：本机模型走 chat 管线（同步入流），ACP 先切后端再派发。
+   * 返回失败文案（null = 已成功下发）；后端被删 / 未启用 / 连不上都在这里落地。
+   */
+  async function dispatchIntent(acpProviderId: string | null, intent: string): Promise<string | null> {
+    if (!acpProviderId) {
+      useChatStore().submitText(intent);
+      return null;
+    }
+    const agent = useAgentStore();
+    const provider = agent.agentProviders.find((candidate) => candidate.id === acpProviderId);
+    if (!provider) return t("errors.acpNotSelected");
+    if (!provider.enabled) return t("errors.providerNotEnabled", { name: provider.name });
+    if (agent.selectedProviderId !== provider.id || !agent.routeToAcp) {
+      const failure = await agent.activateAcpProvider(provider.id);
+      if (failure) return failure;
+    }
+    await agent.dispatchToAcp(intent);
+    return null;
+  }
+
   /* ===== Run Now 在途跟踪 =====
-   * 管线没有「本任务完成」回执，只有全局 chat.busy —— 所以用翻转检测近似：
-   * 下发后 busy 从 true → false 的一次翻转视为本次运行结束；另有 10 分钟保险丝
-   * 兜底（防 busy 观察错位把任务永远钉在「运行中」）。一次只跑一个。 */
+   * 管线没有「本任务完成」回执，只有全局忙态 —— 所以用翻转检测近似：
+   * 下发后忙态从 true → false 的一次翻转视为本次运行结束；另有 10 分钟保险丝兜底
+   * （防忙态观察错位把任务永远钉在「运行中」）。一次只跑一个。 */
   const RUN_FUSE_MS = 10 * 60_000;
-  let inflight: { id: string; sawBusy: boolean } | null = null;
+  let inflight: { id: string; mode: RunMode; sawBusy: boolean } | null = null;
   let fuseTimer: ReturnType<typeof setTimeout> | null = null;
   /** 最近一次 Run Now 下发的会话 id（视图「查看会话」入口）。 */
   const lastRunSessionId = ref<string | null>(null);
@@ -195,43 +233,66 @@ export const useAutomationStore = defineStore("automation", () => {
     }
   }
 
+  // 两条管线各自观察：本次运行只看自己那条的信号，别把另一条管线的忙碌当成自己的结束。
+  watch(
+    () => useChatStore().busy,
+    (busy, wasBusy) => {
+      const current = inflight;
+      if (!current || current.mode !== "llm") return;
+      if (busy) current.sawBusy = true;
+      else if (wasBusy && current.sawBusy) clearInflight();
+    },
+  );
+
   watch(
     () => {
-      const chat = useChatStore();
-      return chat.busy;
+      const agent = useAgentStore();
+      return agent.acpBusy || agent.acpConnecting;
     },
-    (busy, wasBusy) => {
-      if (!inflight) return;
-      if (busy) {
-        inflight.sawBusy = true;
-      } else if (wasBusy && inflight.sawBusy) {
-        clearInflight();
-      }
+    (active, wasActive) => {
+      const current = inflight;
+      if (!current || current.mode !== "acp") return;
+      if (active) current.sawBusy = true;
+      else if (wasActive && current.sawBusy) clearInflight();
     },
   );
 
   /**
-   * Run Now：把任务指令下发到 chat 管线，返回结果码供视图给即时反馈
-   * （started / busy / missing）。running 置真直到管线忙完一轮或保险丝到期。 */
+   * Run Now：把任务指令下发到它的执行后端，返回结果码供视图给即时反馈
+   * （started / busy / missing）。running 置真直到管线忙完一轮或保险丝到期；
+   * lastRun 在真正下发成功后回写（ACP 后端连不上不算跑过）。
+   */
   function runNow(id: string): "started" | "busy" | "missing" {
     const task = list.value.find((a) => a.id === id);
     if (!task) return "missing";
     const chat = useChatStore();
-    if (chat.busy || inflight !== null) return "busy";
+    if (turnActive() || inflight !== null) return "busy";
     if (!chat.activeThreadId) {
       const session = useSessionStore().createSession(null);
       chat.activeThreadId = session.id;
     }
     task.enabled = true;
     task.running = true;
-    task.lastRun = Date.now();
     lastRunSessionId.value = chat.activeThreadId;
-    inflight = { id, sawBusy: false };
+    inflight = { id, mode: task.acpProviderId ? "acp" : "llm", sawBusy: false };
     fuseTimer = setTimeout(() => {
       fuseTimer = null;
       clearInflight();
     }, RUN_FUSE_MS);
-    chat.submitText(task.intent);
+    void dispatchIntent(task.acpProviderId ?? null, task.intent).then((failure) => {
+      if (!failure) {
+        task.lastRun = Date.now();
+      } else {
+        clearInflight();
+        notify({
+          kind: "error",
+          key: "automation-run-failed",
+          title: t("errors.automationRunFailed"),
+          detail: `${task.name}：${failure}`,
+        });
+      }
+      persist();
+    });
     persist();
     return "started";
   }
@@ -247,21 +308,29 @@ export const useAutomationStore = defineStore("automation", () => {
   /** 消费循环互斥（防重入双跑）。 */
   let consuming = false;
 
-  type DueExecResult = "done" | "busy" | "missing";
+  type DueExecResult = "done" | "busy" | "missing" | "failed";
 
   /**
-   * 执行一条到期任务：chat 管线忙 → busy（任务保留队列下轮重试）；
-   * 任务已不在清单 → missing（防御分支，正常由库级联删除）。成功提交
-   * 时乐观记 last_run。
+   * 执行一条到期任务：任一条管线忙 → busy（任务保留队列下轮重试）；任务已不在
+   * 清单 → missing（防御分支，正常由库级联删除）；执行后端不可用 → failed。
+   * 执行后端取自队列快照（入队时刻的选择），与 intent 同源。
    */
-  function executeDue(row: AutomationDueRow): DueExecResult {
-    const chat = useChatStore();
-    if (chat.busy) return "busy";
+  async function executeDue(row: AutomationDueRow): Promise<DueExecResult> {
+    if (turnActive()) return "busy";
     const task = list.value.find((a) => a.id === row.taskId);
     if (!task) return "missing";
+    const failure = await dispatchIntent(row.acpProviderId, row.intent);
+    if (failure) {
+      notify({
+        kind: "error",
+        key: "automation-run-failed",
+        title: t("errors.automationRunFailed"),
+        detail: `${row.name}：${failure}`,
+      });
+      return "failed";
+    }
     task.enabled = true;
     task.lastRun = Date.now();
-    chat.submitText(row.intent);
     persist();
     return "done";
   }
@@ -277,9 +346,9 @@ export const useAutomationStore = defineStore("automation", () => {
       for (;;) {
         const due = await automationsBackend.dueList();
         if (!due || due.length === 0) break;
-        const result = executeDue(due[0]);
+        const result = await executeDue(due[0]);
         if (result !== "busy") {
-          // done/missing 都收尾（missing 无 task 可跑，标 failed 不留死队列）
+          // done/missing/failed 都收尾（missing 无 task 可跑，标 failed 不留死队列）
           await automationsBackend.dueFinish(due[0].id, result === "done" ? "success" : "failed");
         }
         if (result !== "done") break;
