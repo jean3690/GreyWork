@@ -1544,7 +1544,7 @@ mod tests {
         // 渲染端恢复后不残留死队列（下个 cron 重新到期）。
         let db = Db::open_in_memory().expect("open");
         let task = task("at-host-1", Some("0 9 * * *"), true);
-        db.sync_automations(&[task.clone()]).unwrap();
+        db.sync_automations(std::slice::from_ref(&task)).unwrap();
         let stale_due_at = chrono::Utc::now().timestamp_millis() - 180_000;
         db.automation_due_push(&task, stale_due_at).unwrap();
 
@@ -1578,7 +1578,7 @@ mod tests {
         // 渲染端正常消费窗口内的行宿主不抢（避免双跑）。
         let db = Db::open_in_memory().expect("open");
         let task = task("at-host-2", None, true);
-        db.sync_automations(&[task.clone()]).unwrap();
+        db.sync_automations(std::slice::from_ref(&task)).unwrap();
         db.automation_due_push(&task, chrono::Utc::now().timestamp_millis())
             .unwrap();
 

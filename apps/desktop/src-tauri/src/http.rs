@@ -87,7 +87,7 @@ mod tests {
         });
         let client = reqwest::Client::new();
         let response = client
-            .get(&format!("http://{addr}"))
+            .get(format!("http://{addr}"))
             .send()
             .await
             .expect("request ok");

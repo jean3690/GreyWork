@@ -3,6 +3,7 @@
 //! 1. initialize → session/new → prompt（Ling 3.0 Flash Fin Free）
 //! 2. thinking 流（agent_thought_chunk）与 usage 事件分类转发
 //! 3. turn 语义：$/cancel_request 精确取消单回合，agent 进程保留
+//!
 //! 需要本机安装 pi 且已配置 opencode provider；未安装/模型不可用时跳过。
 use agent_client_protocol::schema::v1::{
     ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest, SessionNotification,
