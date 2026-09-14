@@ -72,6 +72,18 @@ export default defineConfigWithVueTs(
       "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
       "@typescript-eslint/consistent-type-imports": ["error", { prefer: "type-imports" }],
       "no-console": "off",
+      // 剪贴板只走插件：本仓三平台的 WebView（WKWebView / WebKitGTK）上 Web Clipboard API
+      // 会静默 resolve 但不写入系统剪贴板，唯一可靠的是 tauri-plugin-clipboard-manager。
+      // 真要在测试里 stub 它，用 eslint-disable-next-line 并写明原因。
+      "no-restricted-properties": [
+        "error",
+        {
+          object: "navigator",
+          property: "clipboard",
+          message:
+            "剪贴板一律走 @tauri-apps/plugin-clipboard-manager：WKWebView / WebKitGTK 上 Web Clipboard API 会静默 resolve 但不写入系统剪贴板。",
+        },
+      ],
     },
   },
   {

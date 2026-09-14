@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { Check, Copy } from "lucide-vue-next";
+import { copyText } from "../lib/clipboard";
 import { parseBlocks } from "../lib/markdown";
 import MarkdownInline from "./MarkdownInline.vue";
 import MarkdownList from "./MarkdownList.vue";
@@ -23,7 +24,8 @@ let copyTimer: ReturnType<typeof setTimeout> | null = null;
 async function copy(index: number): Promise<void> {
   const block = blocks.value[index];
   if (block?.type !== "code") return;
-  await navigator.clipboard?.writeText(block.codeLines.join("\n"));
+  // copyText 失败会 reject，这里不 catch —— 写不进剪贴板就不该亮「已复制」
+  await copyText(block.codeLines.join("\n"));
   copiedIndex.value = index;
   if (copyTimer) clearTimeout(copyTimer);
   copyTimer = setTimeout(() => (copiedIndex.value = -1), 1500);
