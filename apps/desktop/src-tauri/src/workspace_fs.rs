@@ -139,7 +139,8 @@ impl WorkspaceFsAccess {
             .map_err(|error| format!("提交路径授权失败: {error}"))
     }
 
-    fn resolve_existing(&self, raw: &str) -> Result<PathBuf, String> {
+    /// 解析已存在的授权路径（git.rs 等兄弟模块也要用：它们必须跑在授权根内）。
+    pub(crate) fn resolve_existing(&self, raw: &str) -> Result<PathBuf, String> {
         let canonical = canonical_existing(Path::new(raw))?;
         self.require_authorized(&canonical)?;
         Ok(canonical)

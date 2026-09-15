@@ -17,6 +17,7 @@ import { computed, ref, watch } from "vue";
 import { isTauriRuntime } from "@greywork/core";
 import Icon from "../Icon.vue";
 import FileTree from "./FileTree.vue";
+import GitChangePanel from "./GitChangePanel.vue";
 import PreviewSurface from "./PreviewSurface.vue";
 import UnsavedChangesDialog from "./UnsavedChangesDialog.vue";
 import WebFetchDialog from "./WebFetchDialog.vue";
@@ -27,7 +28,7 @@ import { useResizableSplit } from "../../lib/resizable-split";
 import { usePreviewStore } from "../../stores/preview";
 import { notify } from "../../stores/notice";
 
-type Section = "files" | "preview";
+type Section = "files" | "preview" | "git";
 
 const preview = usePreviewStore();
 
@@ -188,6 +189,15 @@ const sectionClass = (active: boolean): string =>
       >
         预览<span v-if="preview.tabs.length" class="ms-1 text-dim2">{{ preview.tabs.length }}</span>
       </button>
+      <button
+        type="button"
+        data-testid="preview-section-git"
+        :class="sectionClass(section === 'git')"
+        :aria-current="section === 'git' ? 'true' : undefined"
+        @click="section = 'git'"
+      >
+        变更
+      </button>
 
       <div class="ms-auto flex shrink-0 items-center gap-0.5">
         <button
@@ -243,6 +253,8 @@ const sectionClass = (active: boolean): string =>
     </div>
 
     <FileTree v-if="section === 'files'" class="min-h-0 flex-1" />
+
+    <GitChangePanel v-else-if="section === 'git'" class="min-h-0 flex-1" />
 
     <template v-else>
       <!-- tab 条：左侧 tab 溢出横向滚动 -->
