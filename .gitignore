@@ -18,7 +18,6 @@ logs/
 greyWork*.png
 .omo/
 coverage/
-logs/
 
 # 产物渲染自测生成的样本文件（docx/pptx 预览联调输出，非源码）
 sample-preview.docx
