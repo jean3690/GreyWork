@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { flushPromises, mount } from "@vue/test-utils";
+import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import WorkspaceOverlayRegions from "@/components/WorkspaceOverlayRegions.vue";
 import PluginRegionHost from "@/components/PluginRegionHost.vue";
 import { createCapabilityLoader } from "@/plugins/loader";
@@ -78,6 +78,9 @@ function createFakeRuntime() {
   };
 }
 
+/** 已挂载的组件：必须在 afterEach 卸载 —— 见 afterEach 里的说明。 */
+let mounted: VueWrapper | undefined;
+
 beforeEach(async () => {
   window.localStorage.clear();
   setCapabilityLoaderForTest(createCapabilityLoader());
@@ -87,6 +90,11 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  // 显式卸载：PluginRenderLoop 的轮询靠组件卸载清掉（onBeforeUnmount 里 clearInterval）。
+  // 不卸载的话定时器会活到 happy-dom 环境拆掉之后，回调读 `document.hidden` 抛
+  // ReferenceError —— vitest 会把它报成「test environment torn down 之后的 unhandled error」。
+  mounted?.unmount();
+  mounted = undefined;
   setCapabilityLoaderForTest(null);
   resetPluginRuntime();
   window.localStorage.clear();
@@ -121,6 +129,7 @@ describe("市场包 uiRegion 贡献", () => {
     await flushPromises();
 
     const wrapper = mount(WorkspaceOverlayRegions);
+    mounted = wrapper;
     // 区域标题出现；壳组件挂载。
     expect(wrapper.text()).toContain("宠物");
     expect(wrapper.findComponent(PluginRegionHost).exists()).toBe(true);
