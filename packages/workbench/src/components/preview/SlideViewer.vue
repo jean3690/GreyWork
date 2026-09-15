@@ -212,6 +212,7 @@ const slideCount = computed(() => deck.value?.slides.length ?? 0);
       ref="scroller"
       data-testid="slide-viewer"
       data-selection-scope
+      data-scroll-root
       class="min-h-0 flex-1 overflow-y-auto bg-background"
       :style="{ padding: `${GUTTER}px` }"
     >

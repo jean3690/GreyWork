@@ -15,7 +15,7 @@ const { data, loading, error } = usePreviewText(toRef(props, "tab"));
 </script>
 
 <template>
-  <div class="size-full overflow-y-auto px-4 py-3">
+  <div data-scroll-root class="size-full overflow-y-auto px-4 py-3">
     <p v-if="loading" class="text-[12px] text-dim2">读取中…</p>
     <p v-else-if="error" role="alert" class="text-[12px] text-orange">读取失败：{{ error }}</p>
     <!-- 正文宽度与 ConversationView 的 860px 对齐，避免同一份 md 在两处折行位置不同 -->

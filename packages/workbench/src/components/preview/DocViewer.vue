@@ -65,7 +65,7 @@ const tableCount = computed(() => doc.value?.blocks.filter((block) => block.kind
     </p>
     <p v-else-if="doc && blockCount === 0" class="px-4 py-3 text-[12px] text-dim2">这份文档没有正文内容。</p>
 
-    <div v-show="!loading && !error && !parseError" data-testid="doc-viewer" class="min-h-0 flex-1 overflow-y-auto p-3">
+    <div v-show="!loading && !error && !parseError" data-testid="doc-viewer" data-scroll-root class="min-h-0 flex-1 overflow-y-auto p-3">
       <!-- 纸张：文档是深色底上的浅色页，和 Word 的观感一致；正文颜色交给 run 自己的 color。
            纸色走 --paper（暗态压暗一档），不用画布色 —— 正文色来自文件本身。 -->
       <article

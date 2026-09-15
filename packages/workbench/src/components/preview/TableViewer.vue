@@ -22,7 +22,7 @@ const truncated = computed(() => table.value.body.length > ROW_LIMIT);
 </script>
 
 <template>
-  <div class="size-full overflow-auto">
+  <div data-scroll-root class="size-full overflow-auto">
     <p v-if="loading" class="px-4 py-3 text-[12px] text-dim2">读取中…</p>
     <p v-else-if="error" role="alert" class="px-4 py-3 text-[12px] text-orange">读取失败：{{ error }}</p>
     <p v-else-if="table.header.length === 0" class="px-4 py-3 text-[12px] text-dim2">空文件</p>
