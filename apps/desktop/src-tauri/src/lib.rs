@@ -4,6 +4,7 @@ mod cron;
 mod db;
 pub mod dingtalk;
 pub mod feishu;
+mod git;
 mod host_exec;
 mod http;
 mod llm;
@@ -127,6 +128,12 @@ pub fn run() {
             workspace_fs::fs_ensure_dir,
             workspace_fs::fs_list_dir,
             workspace_fs::fs_pick_files,
+            git::git_status,
+            git::git_changes,
+            git::git_diff,
+            git::git_commit,
+            git::git_current_branch,
+            git::git_branch_list,
             store_fs::store_sessions_load,
             store_fs::store_sessions_sync,
             store_fs::store_default_root,
