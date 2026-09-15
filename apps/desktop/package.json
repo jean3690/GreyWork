@@ -9,7 +9,10 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:wayland": "GDK_BACKEND=wayland WAYLAND_DISPLAY=wayland-0 WEBKIT_DISABLE_DMABUF_RENDERER=1 tauri",
-    "typecheck": "vue-tsc --noEmit"
+    "typecheck": "vue-tsc --noEmit",
+    "test": "vitest run --coverage",
+    "test:unit": "vitest run --project node",
+    "test:dom": "vitest run --project dom"
   },
   "dependencies": {
     "@greywork/workbench": "workspace:*",
@@ -22,11 +25,15 @@
     "@tailwindcss/vite": "^4.0.0",
     "@tauri-apps/cli": "^2",
     "@vitejs/plugin-vue": "^5.2.1",
+    "@vitest/coverage-v8": "^3.2.7",
+    "@vue/test-utils": "^2.5.0",
+    "happy-dom": "^20.11.12",
     "playwright-core": "^1.62.1",
     "tailwindcss": "^4.0.0",
     "typescript": "~5.6.2",
     "vite": "^6.0.3",
     "vite-plugin-static-copy": "^4.1.1",
+    "vitest": "^3.2.4",
     "vue-tsc": "^2.1.10"
   }
 }
