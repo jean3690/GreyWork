@@ -11,13 +11,14 @@
  * 结果是 404 或退化成 "Setting up fake worker failed"。用 Vite 的 `?url` 让 worker
  * 作为独立资源产出，再把地址交给 pdf.js。
  */
-import { onUnmounted, ref, toRef, watch } from "vue";
+import { onBeforeUnmount, onUnmounted, ref, toRef, watch } from "vue";
 import { useI18n } from "vue-i18n";
 // 只取 URL 字符串，Vite 会把 worker 作为资源单独产出（v6 是 ESM worker）。
 // 用预压缩的 *.min.mjs：worker 是 ?url 原样拷贝的资产，不走 Vite minify，
 // 非 min 版 2.2MB 会原封不动躺进安装包。
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { buildTextLayer, layoutTextItems, type MeasureText } from "../../lib/pdf-text-layer";
+import { recallPdfProgress, rememberPdfProgress } from "../../lib/preview-scroll";
 import { usePreviewBinary } from "../../lib/preview-content";
 import type { PreviewTab } from "../../stores/preview";
 
@@ -71,6 +72,8 @@ let doc: PdfDocument | null = null;
 let activeTasks: PdfRenderTask[] = [];
 /** 渲染代次：内容切换时自增，旧的异步渲染据此自我放弃。 */
 let generation = 0;
+/** 本次挂载是否已还原过阅读位置 —— 只还原一次；同 tab 的内容更新（revision 变化）不重复还原。 */
+let restored = false;
 
 /** 量宽用的共享上下文；拿不到（无 2d 上下文）就退化为不拉伸。 */
 const measureCanvas = document.createElement("canvas");
@@ -175,6 +178,42 @@ async function renderNextBatch(mine: number): Promise<void> {
   }
 }
 
+/**
+ * 还原上次的阅读位置。
+ *
+ * PDF 是本仓唯一「内容渐进存在」的渲染器：只存像素偏移没有意义 —— 内容补齐之前那个位置
+ * 根本滚不到（滚不到就会被浏览器按当前内容高度收敛掉）。所以存的是「已渲染页数 + 偏移」，
+ * 回来先把页数补渲染出来，再套偏移。这条路径刻意不走 `data-scroll-root`（那是给一次性
+ * 渲染出全部内容的 DOM 类 viewer 用的，见 lib/preview-scroll.ts）。
+ */
+async function restoreProgress(mine: number): Promise<void> {
+  const progress = recallPdfProgress(props.tab.id);
+  if (!progress) return;
+  // 上次就停在顶部（滚下去又滚回来）：位置本来就是对的，不必为了还它去补渲染。
+  if (progress.top === 0) return;
+
+  // 补渲染到上次的页数。renderNextBatch 一批只画 PAGE_BATCH 页，所以要循环；
+  // 页数不再增长（到末尾或渲染失败）就停，避免空转。
+  while (renderedPages.value < progress.pages && renderedPages.value < totalPages.value) {
+    const before = renderedPages.value;
+    await renderNextBatch(mine);
+    if (mine !== generation) return; // 内容已换，这轮作废
+    if (renderedPages.value === before) break;
+  }
+  if (mine !== generation) return;
+
+  // 容器此刻未必可滚（异步组件 + 布局未落定），轮询到「真能滚」再写 scrollTop，有界放弃。
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    if (mine !== generation) return;
+    const element = scroller.value;
+    if (element && element.scrollHeight > element.clientHeight) {
+      element.scrollTop = progress.top;
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 30));
+  }
+}
+
 async function load(bytes: Uint8Array): Promise<void> {
   await teardown();
   const mine = ++generation;
@@ -204,6 +243,12 @@ async function load(bytes: Uint8Array): Promise<void> {
     doc = opened;
     totalPages.value = opened.numPages;
     await renderNextBatch(mine);
+    // 只在首次挂载还原：同 tab 的内容更新（revision 变化）不该把用户拽回旧位置。
+    // 还原失败不该影响预览本身 —— 顶多回到顶部。
+    if (!restored) {
+      restored = true;
+      await restoreProgress(mine).catch(() => undefined);
+    }
   } catch (cause: unknown) {
     if (mine !== generation) return;
     renderError.value = cause instanceof Error ? cause.message : String(cause);
@@ -229,6 +274,15 @@ watch(
   },
   { immediate: true },
 );
+
+onBeforeUnmount(() => {
+  // 保存要在 teardown 之前：teardown 会把 renderedPages 归零、清空容器。
+  // 一页都没渲染出来时不记（没有还原意义）。
+  const element = scroller.value;
+  if (element && renderedPages.value > 0) {
+    rememberPdfProgress(props.tab.id, { pages: renderedPages.value, top: element.scrollTop });
+  }
+});
 
 onUnmounted(() => {
   generation += 1;

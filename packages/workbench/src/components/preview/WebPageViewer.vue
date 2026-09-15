@@ -71,7 +71,7 @@ function sendToChat(): void {
       </button>
     </div>
 
-    <div class="min-h-0 flex-1 overflow-auto px-4 py-3">
+    <div data-scroll-root class="min-h-0 flex-1 overflow-auto px-4 py-3">
       <p v-if="loading" class="text-[12px] text-dim2">{{ t("web.fetching") }}</p>
       <p v-else-if="error" role="alert" class="text-[12px] text-orange">{{ t("web.error", { detail: error }) }}</p>
       <p v-else-if="!article?.text" class="text-[12px] text-dim2">{{ t("web.empty") }}</p>

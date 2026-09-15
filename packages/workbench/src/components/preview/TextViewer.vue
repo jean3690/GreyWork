@@ -24,7 +24,12 @@ const host = ref<HTMLElement | null>(null);
 /** CodeMirror 建不起来时（happy-dom 无完整 DOM API）降级为 <pre>，不白屏。 */
 const degraded = ref(false);
 
-type EditorViewInstance = { destroy: () => void; state: { doc: { length: number } }; dispatch: (tr: unknown) => void };
+type EditorViewInstance = {
+  destroy: () => void;
+  scrollDOM: HTMLElement;
+  state: { doc: { length: number } };
+  dispatch: (tr: unknown) => void;
+};
 let view: EditorViewInstance | null = null;
 
 async function languageExtension(language: CodeLanguage | null): Promise<unknown[]> {
@@ -104,6 +109,9 @@ async function mountEditor(doc: string): Promise<void> {
       ],
     });
     view = new EditorView({ state, parent: container }) as unknown as EditorViewInstance;
+    // 滚动发生在 CodeMirror 自己的 .cm-scrollDOM 里（外层容器是 overflow-hidden），
+    // 给它打上滚动契约标记，PreviewSurface 才找得到该还位置的地方
+    (view.scrollDOM as HTMLElement).dataset.scrollRoot = "";
     degraded.value = false;
   } catch (cause: unknown) {
     // 这里失败不该让整个面板挂掉：降级渲染纯文本，同时留下线索。
@@ -147,6 +155,7 @@ onUnmounted(destroyEditor);
     <pre
       v-else-if="degraded"
       data-selection-scope
+      data-scroll-root
       class="min-h-0 flex-1 overflow-auto whitespace-pre-wrap px-4 py-3 font-mono text-[12px] text-foreground"
       >{{ data }}</pre
     >

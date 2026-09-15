@@ -38,7 +38,7 @@ const MARKER: Record<DiffLineKind, string> = {
 </script>
 
 <template>
-  <div data-selection-scope class="size-full overflow-auto font-mono text-[12px]">
+  <div data-selection-scope data-scroll-root class="size-full overflow-auto font-mono text-[12px]">
     <p v-if="loading" class="px-4 py-3 text-dim2">读取中…</p>
     <p v-else-if="error" role="alert" class="px-4 py-3 text-orange">读取失败：{{ error }}</p>
     <p v-else-if="files.length === 0" class="px-4 py-3 text-dim2">没有可显示的变更</p>
