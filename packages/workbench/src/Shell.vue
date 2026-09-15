@@ -8,6 +8,7 @@ import { useSessionStore } from "./stores/session";
 import { useSettingsStore } from "./stores/settings";
 import { useWorkspaceStore } from "./stores/workspace";
 import { usePreviewStore } from "./stores/preview";
+import { useWorkspacePanelStore } from "./stores/workspacePanel";
 import { useActivityStore } from "./stores/activity";
 import { useLayoutStore } from "./stores/layout";
 import { useRemoteAssistantStore } from "./stores/remote-assistant";
@@ -18,6 +19,7 @@ import { bootPlugins } from "./plugins/runtime";
 import Sider from "./components/Sider.vue";
 import SettingsDialog from "./components/SettingsDialog.vue";
 import PreviewSider from "./components/preview/PreviewSider.vue";
+import WorkspacePanel from "./components/WorkspacePanel.vue";
 import Titlebar from "./components/Titlebar.vue";
 import NoticeHost from "./components/NoticeHost.vue";
 import ActivityBand from "./components/activity/ActivityBand.vue";
@@ -42,6 +44,7 @@ const bareWindow = computed(() => route.meta.bare === true);
 const sessionStore = useSessionStore();
 const workspaceStore = useWorkspaceStore();
 const preview = usePreviewStore();
+const workspace = useWorkspacePanelStore();
 const activity = useActivityStore();
 const layout = useLayoutStore();
 
@@ -102,6 +105,7 @@ function syncViewport(): void {
   // 右栏在窄屏不渲染。这个判断只在这里做一次，Titlebar 的开关按钮读同一个 store 字段，
   // 不再各自写一个断点（那正是 640–768px 之间「按钮可见但面板不存在」的来源）。
   preview.setAvailable(!mobile);
+  workspace.setAvailable(!mobile);
   // 底部活动面板与右栏同源同断点：产物点开进右栏预览，窄屏两条都没意义。
   activity.setAvailable(!mobile);
 }
@@ -109,7 +113,7 @@ function syncViewport(): void {
 /**
  * 全局快捷键与抽屉的键盘退路。
  *
- * - Ctrl/Cmd+N 新对话 · Ctrl/Cmd+B 折叠/展开侧栏 · Ctrl/Cmd+\ 预览面板。
+ * - Ctrl/Cmd+N 新对话 · Ctrl/Cmd+B 折叠/展开侧栏 · Ctrl/Cmd+E 工作区栏 · Ctrl/Cmd+\ 预览面板。
  * - Ctrl/Cmd+1~4 布局模式（三栏 / 对话 / 文档 / 专注）—— 只是把上面两个开关一起拨到位，
  *   所以不存在「模式与面板状态不一致」的可能。按 event.code 匹配，见 lib/layout-modes.ts。
  *   集中注册在这一个函数里：以后要上命令面板时，把这些 key 挪进面板注册表即可。
@@ -131,6 +135,11 @@ function onWindowKeydown(event: KeyboardEvent): void {
       collapsed.value = !collapsed.value;
       return;
     }
+    if (key === "e") {
+      event.preventDefault();
+      if (workspace.available) workspace.toggle();
+      return;
+    }
     if (key === "\\") {
       event.preventDefault();
       if (preview.available) preview.toggle();
@@ -149,22 +158,38 @@ function onWindowKeydown(event: KeyboardEvent): void {
 }
 
 /**
- * [内容区 + 右栏] 这一行的实测宽度回灌给 preview store，用于把右栏宽度收进
+ * [会话区 + 工作区栏 + 右栏] 这一行的实测宽度回灌给两个面板 store，用于把面板宽度收进
  * 「不挤破会话区」的范围。用这一行而不是整个窗口：左栏宽度会变（折叠/拖拽），
  * 拿窗口宽度算会在左栏展开时高估可用空间。
  */
 const mainRow = ref<HTMLElement | null>(null);
 let rowObserver: ResizeObserver | null = null;
 
+/**
+ * 伙伴预留转发：每个面板的 clamp 都要按「另一个面板现在的偏好宽」来留空间。
+ * 面板之间不直接互读 store（setup 时会形成实例依赖），统一经 Shell 单向转发。
+ * 只按偏好宽（非实测）转发 —— 偏好不依赖容器，不会形成循环。
+ */
+function syncReserves(): void {
+  preview.setReserved(workspace.collapsed ? 0 : workspace.widthPx);
+  workspace.setReserved(preview.collapsed ? 0 : preview.widthPx);
+}
+
 function observeMainRow(): void {
   // happy-dom 等环境没有 ResizeObserver：跳过即可，宽度约束退化为只按 MIN/MAX 收敛。
   if (typeof ResizeObserver === "undefined" || !mainRow.value) return;
   rowObserver = new ResizeObserver((entries) => {
     const width = entries[0]?.contentRect.width;
-    if (typeof width === "number") preview.setAvailableWidth(width);
+    if (typeof width !== "number") return;
+    syncReserves();
+    preview.setAvailableWidth(width);
+    workspace.setAvailableWidth(width);
   });
   rowObserver.observe(mainRow.value);
 }
+
+// 折叠态或宽度偏好变了 → 预留立刻重算（不用等下一次测宽），生效宽度随之收敛。
+watch([() => workspace.collapsed, () => workspace.widthPx, () => preview.collapsed, () => preview.widthPx], () => syncReserves());
 
 onMounted(() => {
   syncViewport();
@@ -239,7 +264,9 @@ function handleNewChat(): void {
         @navigate="navigate"
         @open-settings="openSettings"
       />
-      <!-- [内容区 + 右栏] 组成一列：上行为被观测的 mainRow（宽度是右栏 clamp 的依据），
+      <!-- [内容区 + 预览 + 工作区] 组成一列：上行为被观测的 mainRow（宽度是两个面板 clamp 的依据）。
+           顺序 = 会话 | 预览 | 工作区：预览紧挨会话（看产物的心智最近），工作区（文件树）在最右。
+           工作区栏默认折叠（回旧单右栏布局），展开与否由 workspace store 的持久化开关决定。
            下行为底部活动面板通栏（ActivityBand 内部自管高度/折叠）。 -->
       <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
         <div ref="mainRow" class="flex min-w-0 flex-1 overflow-hidden">
@@ -247,6 +274,7 @@ function handleNewChat(): void {
             <router-view />
           </main>
           <PreviewSider v-if="preview.available" />
+          <WorkspacePanel v-if="workspace.available" />
         </div>
         <ActivityBand v-if="activity.available" />
       </div>

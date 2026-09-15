@@ -52,12 +52,18 @@ export interface PreviewTab {
 interface PreviewPrefs {
   collapsed: boolean;
   widthPx: number;
+  /** 上次拖拽提交时面板占 [会话区 + 右栏] 行的比例；窗口缩放时按它重算宽度。 */
+  ratio: number | null;
 }
 
 function isPrefs(value: unknown): value is PreviewPrefs {
   if (typeof value !== "object" || value === null) return false;
   const record = value as Record<string, unknown>;
-  return typeof record.collapsed === "boolean" && typeof record.widthPx === "number";
+  return (
+    typeof record.collapsed === "boolean" &&
+    typeof record.widthPx === "number" &&
+    (record.ratio === undefined || record.ratio === null || typeof record.ratio === "number")
+  );
 }
 
 const prefsStorage = createJsonStorage<PreviewPrefs>("greywork.preview.panel", isPrefs);
@@ -76,6 +82,12 @@ export const usePreviewStore = defineStore("preview", () => {
   /** 默认折叠：没有产物时右栏纯属占地方，第一个 tab 打开时自动展开。 */
   const collapsed = ref(savedPrefs?.collapsed ?? true);
   const widthPx = ref(clampPreviewWidth(savedPrefs?.widthPx ?? DEFAULT_PREVIEW_PANEL_PX));
+  const ratio = ref<number | null>(savedPrefs?.ratio ?? null);
+  /**
+   * 伙伴面板（工作区栏）当前占用的宽度：由 Shell 回灌，0 = 伙伴折叠。
+   * 面板间不互相读 store（那会形成 setup 时的实例依赖），只经 Shell 单向转发。
+   */
+  const reservedPx = ref(0);
   /** [会话区 + 右栏] 行的实测宽度，由 Shell 的 ResizeObserver 回灌；0 = 未测量。 */
   const availableWidth = ref(0);
   /**
@@ -88,11 +100,11 @@ export const usePreviewStore = defineStore("preview", () => {
   const available = ref(true);
 
   const activeTab = computed(() => tabs.value.find((tab) => tab.id === activeId.value) ?? null);
-  /** 生效宽度：折叠为 0，否则按实测容器宽度收敛偏好值。 */
-  const effectiveWidthPx = computed(() => (collapsed.value ? 0 : clampPreviewWidth(widthPx.value, availableWidth.value)));
+  /** 生效宽度：折叠为 0，否则按实测容器宽度与伙伴预留收敛偏好值。 */
+  const effectiveWidthPx = computed(() => (collapsed.value ? 0 : clampPreviewWidth(widthPx.value, availableWidth.value, reservedPx.value)));
 
   function persist(): void {
-    prefsStorage.write({ collapsed: collapsed.value, widthPx: widthPx.value });
+    prefsStorage.write({ collapsed: collapsed.value, widthPx: widthPx.value, ratio: ratio.value });
   }
 
   /**
@@ -193,14 +205,29 @@ export const usePreviewStore = defineStore("preview", () => {
 
   /** 拖拽提交宽度；`commit` 为 false 时只更新视图不写盘（拖拽过程中每帧都写盘毫无意义）。 */
   function setWidth(px: number, commit = true): void {
-    widthPx.value = clampPreviewWidth(px, availableWidth.value);
-    if (commit) persist();
+    widthPx.value = clampPreviewWidth(px, availableWidth.value, reservedPx.value);
+    if (!commit) return;
+    // 记下占容器比例：窗口缩放时按比例重算，px 才不会被「固定宽聊胜于无」的旧策略拉偏。
+    if (availableWidth.value > 0) ratio.value = widthPx.value / availableWidth.value;
+    persist();
   }
 
-  /** 容器实测宽度回灌；窄到装不下时自动折叠（用户仍可手动展开，只是会很挤）。 */
+  /**
+   * 容器实测宽度回灌。
+   * 若有记录的比例（上次拖拽提交时定下），先按 比例 × 新宽 重算 px 并收敛到
+   * MIN/MAX，再窄到装不下时自动折叠（用户仍可手动展开，只是会很挤）。
+   */
   function setAvailableWidth(px: number): void {
+    if (px > 0 && ratio.value && ratio.value > 0 && !collapsed.value) {
+      widthPx.value = clampPreviewWidth(Math.round(ratio.value * px), px, reservedPx.value);
+    }
     availableWidth.value = px;
-    if (!collapsed.value && shouldAutoCollapse(px)) setCollapsed(true);
+    if (!collapsed.value && shouldAutoCollapse(px, reservedPx.value)) setCollapsed(true);
+  }
+
+  /** 伙伴面板（工作区栏）当前占用宽度回灌；改它只影响生效宽度，不动偏好。 */
+  function setReserved(px: number): void {
+    reservedPx.value = px;
   }
 
   /**
@@ -217,6 +244,8 @@ export const usePreviewStore = defineStore("preview", () => {
     activeTab,
     collapsed,
     widthPx,
+    ratio,
+    reservedPx,
     availableWidth,
     available,
     effectiveWidthPx,
@@ -231,6 +260,7 @@ export const usePreviewStore = defineStore("preview", () => {
     toggle,
     setWidth,
     setAvailableWidth,
+    setReserved,
     setAvailable,
   };
 });

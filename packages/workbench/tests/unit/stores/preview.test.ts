@@ -15,7 +15,7 @@ const localStorageStub = {
 vi.stubGlobal("localStorage", localStorageStub);
 vi.stubGlobal("window", { localStorage: localStorageStub });
 
-import { DEFAULT_PREVIEW_PANEL_PX, MAX_PREVIEW_TABS, MIN_CONTENT_PX, MIN_PREVIEW_PANEL_PX } from "@/lib/layout";
+import { DEFAULT_PREVIEW_PANEL_PX, MAX_PREVIEW_TABS, MIN_CONTENT_PX, MIN_PREVIEW_PANEL_PX, MIN_WORKSPACE_PANEL_PX } from "@/lib/layout";
 import { hasSheetDraft, stashSheetDraft } from "@/lib/sheet-draft";
 import { usePreviewStore } from "@/stores/preview";
 import type { IWorkbookData } from "@univerjs/core";
@@ -317,9 +317,81 @@ describe("setAvailable（视口是否渲染右栏）", () => {
     preview.setAvailable(false);
     expect(preview.available).toBe(false);
     expect(preview.collapsed).toBe(false);
-    expect(storage.get("greywork.preview.panel")).toBe(JSON.stringify({ collapsed: false, widthPx: preview.widthPx }));
+    expect(storage.get("greywork.preview.panel")).toBe(JSON.stringify({ collapsed: false, widthPx: preview.widthPx, ratio: null }));
 
     preview.setAvailable(true);
     expect(preview.collapsed).toBe(false);
+  });
+});
+
+describe("px + 比例双存储（拖拽提交记比例，窗口缩放按比例重算）", () => {
+  it("未测宽（availableWidth=0）时提交宽度不记比例", () => {
+    const preview = usePreviewStore();
+    preview.open("a.md");
+    preview.setWidth(520, true);
+    expect(preview.ratio).toBeNull();
+  });
+
+  it("拖拽提交时按实测宽记下比例；再次回灌宽时按比例重算 px", () => {
+    const preview = usePreviewStore();
+    preview.open("a.md");
+    preview.setAvailableWidth(1000);
+    preview.setWidth(400, true);
+    expect(preview.ratio).toBeCloseTo(0.4);
+
+    preview.setAvailableWidth(1200);
+    expect(preview.widthPx).toBe(480);
+    expect(preview.effectiveWidthPx).toBe(480);
+  });
+
+  it("比例重算后仍收敛进合法区间（窄窗口不会跟手缩到废）", () => {
+    const preview = usePreviewStore();
+    preview.open("a.md");
+    preview.setAvailableWidth(1000);
+    // 700 超出容器上限（1000-360=640），提交时先收敛到 640 → ratio 0.64
+    preview.setWidth(700, true);
+    expect(preview.ratio).toBeCloseTo(0.64);
+
+    preview.setAvailableWidth(500);
+    expect(preview.widthPx).toBe(MIN_PREVIEW_PANEL_PX);
+  });
+
+  it("重算后比例保持不变（重算只改 px，比例是上次拖拽定下的）", () => {
+    const preview = usePreviewStore();
+    preview.open("a.md");
+    preview.setAvailableWidth(1000);
+    preview.setWidth(400, true);
+    preview.setAvailableWidth(1200);
+    expect(preview.ratio).toBeCloseTo(0.4);
+  });
+
+  it("折叠状态下不按比例重算（面板不参与布局，重算宽度没有意义）", () => {
+    const preview = usePreviewStore();
+    preview.setAvailableWidth(1000);
+    preview.setWidth(400, true);
+    preview.setCollapsed(true);
+    preview.setAvailableWidth(1500);
+    expect(preview.widthPx).toBe(400);
+  });
+});
+
+describe("伙伴面板预留（reservedPx）", () => {
+  it("预留会挤压生效宽度，但不改偏好宽", () => {
+    const preview = usePreviewStore();
+    preview.open("a.md");
+    preview.setAvailableWidth(1000);
+    preview.setWidth(420, true);
+    preview.setReserved(260);
+    // 容器上限 = 1000 - MIN_CONTENT - 260 = 380
+    expect(preview.effectiveWidthPx).toBe(380);
+    expect(preview.widthPx).toBe(420);
+  });
+
+  it("伙伴展开让自动折叠阈值变宽：伙伴拿掉后就装不下了", () => {
+    const preview = usePreviewStore();
+    preview.open("a.md");
+    preview.setReserved(MIN_WORKSPACE_PANEL_PX);
+    preview.setAvailableWidth(MIN_CONTENT_PX + MIN_PREVIEW_PANEL_PX + MIN_WORKSPACE_PANEL_PX - 1);
+    expect(preview.collapsed).toBe(true);
   });
 });

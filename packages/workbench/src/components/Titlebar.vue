@@ -5,6 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { useWorkspaceStore } from "../stores/workspace";
 import { usePreviewStore } from "../stores/preview";
+import { useWorkspacePanelStore } from "../stores/workspacePanel";
 import { useActivityStore } from "../stores/activity";
 import Icon from "./Icon.vue";
 import LayoutModeSwitch from "./LayoutModeSwitch.vue";
@@ -26,6 +27,7 @@ const emit = defineEmits<{ toggleSider: []; navigate: [path: string] }>();
 
 const workspaceStore = useWorkspaceStore();
 const preview = usePreviewStore();
+const workspace = useWorkspacePanelStore();
 const activity = useActivityStore();
 
 const activeWorkspace = computed(
@@ -121,6 +123,20 @@ onBeforeUnmount(() => {
       @click="preview.toggle()"
     >
       <Icon :name="preview.collapsed ? 'expand-left' : 'sidebar'" :size="16" />
+    </button>
+
+    <!-- 工作区栏开关（三栏 会话|预览|工作区 的最右栏）：近右栏开关，因为它是同一族
+         「面板可见性」。默认折叠（回到旧单右栏布局），这里就是那个显式开关。
+         图标固定用文件夹 —— 它就是文件工作区；开合状态靠 aria-label 与按钮显隐表达。
+         显隐同样读 store 的 available（Shell 回灌），不另写断点。 -->
+    <button
+      v-if="workspace.available"
+      class="grid size-7 cursor-pointer place-items-center rounded-[6px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+      :aria-label="workspace.collapsed ? '展开工作区面板' : '折叠工作区面板'"
+      data-testid="titlebar-workspace-toggle"
+      @click="workspace.toggle()"
+    >
+      <Icon name="folder" :size="16" />
     </button>
 
     <!-- 底部活动面板开关。可用性与预览同源（Shell 按 768px 回灌 activity.available），

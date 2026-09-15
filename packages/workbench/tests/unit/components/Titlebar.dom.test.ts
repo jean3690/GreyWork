@@ -128,6 +128,43 @@ describe("标题栏右栏开关", () => {
   });
 });
 
+describe("标题栏工作区栏开关", () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.stubGlobal("__TAURI_INTERNALS__", {});
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("视口支持时渲染这个显式开关；默认折叠（旧单右栏布局），点击展开再点折叠", async () => {
+    const wrapper = await mountTitlebar();
+    const { useWorkspacePanelStore } = await import("@/stores/workspacePanel");
+    const workspace = useWorkspacePanelStore();
+
+    const button = wrapper.get('[data-testid="titlebar-workspace-toggle"]');
+    expect(button.attributes("aria-label")).toBe("展开工作区面板");
+    expect(workspace.collapsed).toBe(true);
+
+    await button.trigger("click");
+    expect(workspace.collapsed).toBe(false);
+    expect(wrapper.get('[data-testid="titlebar-workspace-toggle"]').attributes("aria-label")).toBe("折叠工作区面板");
+
+    await wrapper.get('[data-testid="titlebar-workspace-toggle"]').trigger("click");
+    expect(workspace.collapsed).toBe(true);
+  });
+
+  it("窄屏（工作区栏不渲染）时开关一并消失", async () => {
+    const wrapper = await mountTitlebar();
+    const { useWorkspacePanelStore } = await import("@/stores/workspacePanel");
+    useWorkspacePanelStore().setAvailable(false);
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.find('[data-testid="titlebar-workspace-toggle"]').exists()).toBe(false);
+  });
+});
+
 describe("标题栏活动面板开关", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
