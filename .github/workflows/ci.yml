@@ -42,12 +42,26 @@ jobs:
         run: pnpm build
 
   desktop:
-    name: Tauri Bundle (deb)
-    runs-on: ubuntu-latest
+    name: Tauri Bundle (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: deb
+            bundle: deb
+          - os: windows-latest
+            platform: nsis
+            bundle: nsis
+          - os: macos-latest
+            platform: dmg
+            bundle: dmg
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Tauri system dependencies
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf
@@ -70,9 +84,10 @@ jobs:
 
       # tauri build 会先跑 beforeBuildCommand（pnpm build 编 renderer），
       # 再编译 Rust 并打整包 —— 这是 web/rust 两个 job 都覆盖不到的「整包能否出来」。
-      # 只打 deb：AppImage 需要 linuxdeploy 现场下载，CI 里不稳定且没必要。
+      # 每平台只打一个 bundle，验证该平台 SDK/链接/打包管线齐全：
+      # Linux 走 deb（AppImage 需现场下载 linuxdeploy，CI 不稳定），Windows 走 nsis，macOS 走 dmg。
       - name: Build (tauri bundle)
-        run: pnpm --filter @greywork/desktop tauri build --bundles deb
+        run: pnpm --filter @greywork/desktop tauri build --bundles ${{ matrix.bundle }}
 
   rust:
     name: Cargo Test (src-tauri)
