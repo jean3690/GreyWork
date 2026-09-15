@@ -98,15 +98,15 @@ onBeforeUnmount(() => {
       <Icon :name="props.collapsed ? 'expand-right' : 'sidebar'" :size="16" />
     </button>
 
-    <!-- 布局模式：与上面的侧栏开关同属「面板可见性」这一族，所以排在它旁边而不是
-         右侧的控制键堆里。窄屏不渲染 —— 四种模式里两种依赖右栏，而右栏此时不存在，
-         给出按了也不生效的选项比不给更糟。 -->
-    <LayoutModeSwitch v-if="preview.available" class="ml-1.5" />
-
     <div class="ml-auto flex items-center gap-1.5 rounded-[6px] border border-line-2 bg-panel px-2 py-1 text-[12px] text-dim">
       <span class="size-1.5 rounded-full" :class="activeWorkspace ? 'bg-mint' : 'bg-dim2'" />
       <span class="max-w-[200px] truncate">{{ activeWorkspace?.name ?? "未绑定工作区" }}</span>
     </div>
+
+    <!-- 布局模式：与右栏开关同属「面板可见性」这一族，所以排在工作区标识之后、紧挨它。
+         窄屏不渲染 —— 四种模式里两种依赖右栏，而右栏此时不存在，
+         给出按了也不生效的选项比不给更糟。 -->
+    <LayoutModeSwitch v-if="preview.available" class="ml-1.5" />
 
     <!-- 右栏开关。左栏 toggle 走 emit 是因为其状态在 Shell 里；右栏状态在 store 里，
          再绕一层 emit 没有收益。
