@@ -13,7 +13,7 @@ pnpm dev            # 桌面端开发（Tauri + 渲染层热更）
 pnpm lint           # 全仓 ESLint
 pnpm format         # Prettier 写入（format:check 仅校验）
 pnpm typecheck      # 全 workspace vue-tsc
-pnpm -r test        # 全部测试（acp + workbench）
+pnpm -r test        # 全部测试（带 test 脚本的 package 各自跑 vitest）
 pnpm build          # 桌面端渲染层构建
 ```
 
