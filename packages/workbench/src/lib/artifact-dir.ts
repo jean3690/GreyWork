@@ -29,7 +29,9 @@ export function activeWorkspaceFolder(): string | null {
 export async function resolveArtifactsDir(): Promise<string | null> {
   if (!isTauriRuntime()) return null;
   const bound = activeWorkspaceFolder();
-  const dir = `${bound ?? (await defaultArtifactsRoot())}/artifacts`;
+  const root = bound ?? (await defaultArtifactsRoot());
+  if (!root) return null;
+  const dir = `${root}/artifacts`;
   await ensureDir(dir);
   return dir;
 }
