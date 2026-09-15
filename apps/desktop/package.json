@@ -12,7 +12,8 @@
     "typecheck": "vue-tsc --noEmit",
     "test": "vitest run --coverage",
     "test:unit": "vitest run --project node",
-    "test:dom": "vitest run --project dom"
+    "test:dom": "vitest run --project dom",
+    "e2e": "node e2e/smoke.e2e.mjs"
   },
   "dependencies": {
     "@greywork/workbench": "workspace:*",
