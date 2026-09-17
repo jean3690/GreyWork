@@ -60,6 +60,19 @@ Each palette has `light` and `dark` variants.
 
 Font size: 15px base.
 
+## 徽标（logo）
+
+三个落点各用各的派生版，别互相顶替：
+
+| 场合                       | 资源                                     | 说明                                                                                                                                                           |
+| -------------------------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 侧栏 + 引导页              | `packages/workbench/src/assets/logo.svg` | 去白底、色相不变地把明度压进中间调窄带（相对亮度 ≈0.15–0.25）：同一张图在深色面（`--panel-2` #141414）与浅色面（#f2f3f5）上都 ≥3:1，所以不需要按主题切两份资源 |
+| favicon                    | `apps/desktop/public/logo.svg`           | 原白底版——页签底色不可控，白底更稳                                                                                                                             |
+| 窗口 / 任务栏 / 安装包图标 | `apps/desktop/src-tauri/icons/*`         | 由白底版生成：`magick public/logo.svg -resize 1024x1024 /tmp/app.png` → `pnpm --filter @greywork/desktop exec tauri icon /tmp/app.png`                         |
+
+原图（VTracer 描摹，2048²）是仓库根目录的 `phoenixLogo.svg`（未入库）。改图只走上面两条派生链，
+别直接编辑生成物。
+
 ## Component Conventions
 
 - Use **shadcn-vue components** as the foundation. They live in `packages/workbench/src/components/ui/`
