@@ -6,6 +6,7 @@ import type { AcpEventEnvelope } from "@greywork/acp";
 const h = vi.hoisted(() => ({
   startAgent: vi.fn(),
   openSession: vi.fn(),
+  setSessionConfig: vi.fn(),
   prompt: vi.fn(),
   stop: vi.fn(),
   isAvailable: vi.fn(() => true),
@@ -19,7 +20,7 @@ vi.mock("@greywork/acp", () => ({
       isAvailable: () => h.isAvailable(),
       startAgent: (cmd: string, tier: string, sandbox?: string, workspace?: string | null) => h.startAgent(cmd, tier, sandbox, workspace),
       openSession: (handle: number, cwd: string, mcpServers?: unknown) => h.openSession(handle, cwd, mcpServers),
-      setSessionConfig: vi.fn(),
+      setSessionConfig: (handle: number, configId: string, value: string | boolean) => h.setSessionConfig(handle, configId, value),
       setPermissionTier: vi.fn(),
       probeMcp: vi.fn(),
       prompt: (handle: number, text: string) => h.prompt(handle, text),
@@ -87,6 +88,59 @@ async function startPair() {
 }
 
 const fence = (ops: unknown): string => `\`\`\`cowork\n${JSON.stringify(ops)}\n\`\`\``;
+
+describe("成员级会话配置（configValues）", () => {
+  it("startRun 对带 configValues 的成员在其会话打开后下发 setSessionConfig", async () => {
+    let handleSeq = 0;
+    h.startAgent.mockImplementation(() => {
+      handleSeq += 1;
+      return Promise.resolve(handleSeq);
+    });
+    h.openSession.mockImplementation((handle: number) =>
+      Promise.resolve({
+        sessionId: `s-${handle}`,
+        configOptions: [
+          { id: "model", name: "Model", category: "model", type: "select", currentValue: "a/b", options: [{ value: "a/b", name: "b" }] },
+        ],
+      }),
+    );
+    h.setSessionConfig.mockResolvedValue([]);
+    h.prompt.mockResolvedValue({ turnId: 1 });
+    const cowork = useCoworkStore();
+    const failure = await cowork.startRun("定制模型协作", [
+      { name: "Leader", role: "leader" },
+      { name: "Builder", role: "teammate", providerId: "opencode", configValues: { model: "a/b", effort: "high" } },
+    ]);
+    expect(failure).toBeNull();
+    // model 在后端上报里存在 → 下发；effort 不在 → 静默跳过
+    expect(h.setSessionConfig).toHaveBeenCalledTimes(1);
+    expect(h.setSessionConfig).toHaveBeenCalledWith(2, "model", "a/b");
+  });
+
+  it("单条配置下发失败不中断起跑，成员位照常就位", async () => {
+    let handleSeq = 0;
+    h.startAgent.mockImplementation(() => {
+      handleSeq += 1;
+      return Promise.resolve(handleSeq);
+    });
+    h.openSession.mockImplementation((handle: number) =>
+      Promise.resolve({
+        sessionId: `s-${handle}`,
+        configOptions: [{ id: "model", name: "Model", category: "model", type: "select", currentValue: "a/b" }],
+      }),
+    );
+    h.setSessionConfig.mockRejectedValue(new Error("backend refused"));
+    h.prompt.mockResolvedValue({ turnId: 1 });
+    const cowork = useCoworkStore();
+    const failure = await cowork.startRun("容错协作", [
+      { name: "Leader", role: "leader" },
+      { name: "Builder", role: "teammate", configValues: { model: "a/b" } },
+    ]);
+    expect(failure).toBeNull();
+    expect(cowork.status).toBe("running");
+    expect(cowork.slots).toHaveLength(2);
+  });
+});
 
 beforeEach(() => {
   setActivePinia(createPinia());

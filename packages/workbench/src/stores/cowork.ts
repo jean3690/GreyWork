@@ -1,4 +1,4 @@
-import { createAcpClient } from "@greywork/acp";
+import { createAcpClient, type AcpSessionConfigOption } from "@greywork/acp";
 import type { AgentProviderConfig } from "@greywork/shell";
 import {
   createCoworkEngine,
@@ -21,6 +21,7 @@ import { activeConversationFolder } from "../lib/conversation-folder";
 import { parseToolActivityPayload } from "../lib/tool-activity";
 import { resolveWorkspaceDir } from "../lib/workspace-dir";
 import type { ThreadMessage } from "../types";
+import { notify } from "./notice";
 import { useAgentStore } from "./agent";
 import { useRunsStore } from "./runs";
 import { useChatStore } from "./chat";
@@ -56,6 +57,12 @@ export interface CoworkMemberInit {
   specialty?: CoworkSpecialty;
   /** 该成员位专用的 ACP 后端 id；空 = 跟随全局选中的后端。 */
   providerId?: string;
+  /**
+   * 该成员位的会话配置（configId → 值；键来自该后端 session/new 上报的 configOptions，
+   * UI 从「成员配置」探测下拉中选择）。startRun 打开成员会话后经 setSessionConfig 应用；
+   * 后端未暴露的键静默跳过，旧数据无此字段 = 完全跟随后端默认。
+   */
+  configValues?: Record<string, string>;
 }
 
 export interface CoworkSlotView {
@@ -384,6 +391,48 @@ export const useCoworkStore = defineStore("cowork", () => {
     return agentStore.agentProviders.find((item) => item.id === wanted);
   }
 
+  /* ===== 成员级会话配置：选项探测与应用 ===== */
+
+  /** 各后端上报的会话配置选项（configId 下拉的数据源）；空数组 = 探测失败（防抖）。 */
+  const providerOptions = ref<Record<string, AcpSessionConfigOption[]>>({});
+  const probingProviders = ref<Record<string, boolean>>({});
+
+  function optionsOf(providerId: string): AcpSessionConfigOption[] {
+    return providerOptions.value[providerId] ?? [];
+  }
+
+  /**
+   * 探测某后端暴露的会话配置（模型 / 思考强度…）：临时起一个会话拿 configOptions 再释放。
+   *
+   * 协作运行中直接跳过（复用本 store 的 ACP 客户端会互踩 handle）；结果按 providerId
+   * 缓存，失败也缓存空数组防抖（CLI 缺失等情况不该每次展开下拉都重连一遍）。
+   */
+  async function probeProviderOptions(providerId: string): Promise<void> {
+    if (providerOptions.value[providerId] || probingProviders.value[providerId]) return;
+    if (active.value) return;
+    const provider = agentStore.agentProviders.find((item) => item.id === providerId);
+    if (!provider) return;
+    probingProviders.value = { ...probingProviders.value, [providerId]: true };
+    let handle: number | null = null;
+    try {
+      const workspace = activeConversationFolder() ?? (await resolveWorkspaceDir());
+      handle = await acp.startAgent(provider.command, settings.effectivePermissionTier, settings.sandboxMode, workspace);
+      const opened = await acp.openSession(handle, workspace);
+      providerOptions.value = { ...providerOptions.value, [providerId]: opened.configOptions ?? [] };
+    } catch {
+      providerOptions.value = { ...providerOptions.value, [providerId]: [] };
+    } finally {
+      if (handle !== null) {
+        try {
+          await acp.stop(handle);
+        } catch {
+          // 探测用的临时进程释放失败无碍主流程
+        }
+      }
+      probingProviders.value = { ...probingProviders.value, [providerId]: false };
+    }
+  }
+
   /**
    * 起一次协作运行：每个成员位一个独立会话 + 独立 ACP 进程/会话。
    * 返回错误文案（null = 成功），与既有 store 的错误约定一致。
@@ -415,6 +464,24 @@ export const useCoworkStore = defineStore("cowork", () => {
         const handle = await acp.startAgent(provider.command, settings.effectivePermissionTier, settings.sandboxMode, workspace);
         // 每个成员位都拿到同一批启用的 MCP 服务器：协作里各人的工具面应当一致。
         const opened = await acp.openSession(handle, workspace, settings.enabledMcpServers);
+        // 应用成员级会话配置（模型 / 思考强度等）：只对该后端暴露的 select 型项下发。
+        // 单条失败不中断起跑——该成员位仍以后端默认跑，不值得让整次协作失败。
+        if (member.configValues) {
+          for (const [configId, value] of Object.entries(member.configValues)) {
+            const option = opened.configOptions?.find((candidate) => candidate.id === configId && candidate.type === "select");
+            if (!option) continue;
+            try {
+              await acp.setSessionConfig(handle, configId, value);
+            } catch (error) {
+              notify({
+                kind: "warning",
+                key: `cowork-config-${member.name}-${configId}`,
+                title: t("cowork.memberConfig.applyFailed", { name: member.name }),
+                detail: String(error),
+              });
+            }
+          }
+        }
         created.push({
           init: {
             id: `slot-${index}`,
@@ -500,6 +567,10 @@ export const useCoworkStore = defineStore("cowork", () => {
     starting,
     lastError,
     coworkAvailable: acp.isAvailable(),
+    providerOptions,
+    probingProviders,
+    optionsOf,
+    probeProviderOptions,
     startRun,
     sendUser,
     pauseRun,
