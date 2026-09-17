@@ -46,7 +46,8 @@ export default defineConfigWithVueTs(
   {
     languageOptions: {
       parserOptions: {
-        projectService: { allowDefaultProject: ["packages/*/vitest.config.ts"] },
+        // 这两个 glob 下的文件不属于任何包的 tsconfig，但仍是本仓代码，要走 lint 而不是 ignore。
+        projectService: { allowDefaultProject: ["packages/*/vitest.config.ts", "scripts/*.mjs"] },
       },
     },
   },

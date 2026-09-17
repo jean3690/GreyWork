@@ -1,4 +1,6 @@
 @import "tailwindcss";
+/* shadcn-vue 组件的弹层动效（animate-in/out、fade-in-0、zoom-in-95、slide-in-*）。 */
+@import "tw-animate-css";
 
 /* Tailwind v4 entry for @omniforge/desktop (Tauri webview).
    Preflight intentionally omitted (theme + utilities only) to avoid resetting
@@ -6,6 +8,12 @@
    inside shared packages too. */
 @source "../../../packages/*/src/**/*.{vue,ts,js}";
 @source "./**/*.{vue,ts,js}";
+
+/* shadcn 组件里的 dark: 变体对齐本项目的外观机制。
+   Tailwind v4 默认把 dark: 解析成 prefers-color-scheme，而本项目的明暗由
+   lib/theme.ts 写在 <html data-theme> 上（system 已展开为实际 light/dark）。
+   不覆盖的话，「系统深色 + 应用浅色」的用户会拿到 dark:bg-input/30 这类深色控件样式。 */
+@custom-variant dark (&:is([data-theme="dark"] *));
 
 /* ===== shadcn/ui 工具类映射（@greywork/workbench components/ui） ===== */
 @theme inline {
@@ -30,6 +38,7 @@
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);
+  --radius-xl: calc(var(--radius) + 4px);
 
   /* 字族对齐 tokens.css（Archivo Variable + JetBrains Mono） */
   --font-sans: var(--font-ui);
@@ -56,25 +65,6 @@
   --color-console: var(--console);
   --color-orange: var(--orange);
   --color-brand-2: var(--brand-2);
-
-  /* GreyWork 风格入场/退场动画（供 kit 组件 data-[state=open/closed] 使用） */
-  --animate-in: enter 150ms ease-out;
-  --animate-out: exit 150ms ease-out;
-}
-
-@keyframes enter {
-  from {
-    opacity: var(--tw-enter-opacity, 1);
-    transform: translate3d(var(--tw-enter-translate-x, 0), var(--tw-enter-translate-y, 0), 0)
-      scale3d(var(--tw-enter-scale, 1), var(--tw-enter-scale, 1), 1) rotate(var(--tw-enter-rotate, 0));
-  }
-}
-@keyframes exit {
-  to {
-    opacity: var(--tw-exit-opacity, 1);
-    transform: translate3d(var(--tw-exit-translate-x, 0), var(--tw-exit-translate-y, 0), 0)
-      scale3d(var(--tw-exit-scale, 1), var(--tw-exit-scale, 1), 1) rotate(var(--tw-exit-rotate, 0));
-  }
 }
 
 /* GreyWork tool-activity shimmer：时间线「当前正在做什么」扫光文本 */

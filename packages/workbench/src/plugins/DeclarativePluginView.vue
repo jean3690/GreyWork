@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import PluginRenderLoop from "../components/PluginRenderLoop.vue";
+import PluginRenderLoop from "@/features/plugins/PluginRenderLoop.vue";
 import { runDeclarativeAction, setDeclarativePluginValue, useDeclarativePluginState } from "./declarative-state";
 import type { DeclarativeAction, DeclarativeField, DeclarativePage, DeclarativeValue } from "./market-types";
 

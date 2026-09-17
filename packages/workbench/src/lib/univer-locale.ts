@@ -43,6 +43,9 @@ export async function loadUniverZhLocales(): Promise<UniverLocaleMap> {
     import("@univerjs/sheets/locale/zh-CN") as Promise<LocaleModule>,
     import("@univerjs/sheets-ui/locale/zh-CN") as Promise<LocaleModule>,
     import("@univerjs/sheets-numfmt-ui/locale/zh-CN") as Promise<LocaleModule>,
+    // 公式引擎的 zh-CN 文案在 `sheets-formula`（原 export 下方还有个不提供单独 langue 文件的 engine-formula 层）。
+    import("@univerjs/sheets-formula/locale/zh-CN") as Promise<LocaleModule>,
+    import("@univerjs/sheets-formula-ui/locale/zh-CN") as Promise<LocaleModule>,
   ]);
   return deepMerge({}, ...modules.map((m) => m.default));
 }

@@ -1,7 +1,16 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { isTauriRuntime } from "@greywork/core";
-import { createSkillsShSource, createSkillsTransport, type MarketSkillEntry, type SkillsMarketTransport } from "@greywork/plugins";
+import {
+  createSkillsShSource,
+  createSkillsTransport,
+  parseSnapshot,
+  SKILLS_SH_DEFAULT_ORIGIN,
+  type MarketSkillEntry,
+  type SkillSourceAdapter,
+  type SkillsMarketTransport,
+} from "@greywork/plugins";
+import { useSettingsStore } from "./settings";
 import { resolveWorkspaceRoot, type WorkspaceRootResolution } from "../lib/workspace-dir";
 import { listDir, readTextFile } from "../state/workspaceFiles";
 
@@ -96,10 +105,29 @@ function upsertRecord(records: SkillInstallRecord[], record: SkillInstallRecord)
   return [...rest, record];
 }
 
+/** 根据设置中的技能源条目构建适配器（内置 skills.sh + 自定义 API 源）。
+ * 默认 skills.sh 不传 origin（宿主走默认端点），自定义端点才带 origin。 */
+function buildSourceAdapters(settings: ReturnType<typeof useSettingsStore>, transport: SkillsMarketTransport): SkillSourceAdapter[] {
+  return settings.skillSources
+    .filter((source) => source.enabled)
+    .map((entry) =>
+      createSkillsShSource(transport, {
+        id: entry.id,
+        label: entry.label,
+        description: entry.type === "api" ? (entry.url ?? entry.id) : `GitHub 仓库：${entry.repo ?? entry.id}`,
+        origin: entry.type === "api" && entry.url && entry.url !== SKILLS_SH_DEFAULT_ORIGIN ? entry.url : undefined,
+        scopeSource: entry.type === "github" && entry.repo ? entry.repo : undefined,
+      }),
+    );
+}
+
 export const useSkillsStore = defineStore("skills", () => {
   /** 运行时自适应的市场传输（桌面 = 宿主 IPC；浏览器 = Web 直连/仅浏览）。 */
   const transport: SkillsMarketTransport = createSkillsTransport();
-  const market = createSkillsShSource(transport, {
+  const settings = useSettingsStore();
+
+  /** 内置默认源（兼容旧单源调用）。 */
+  const builtInMarket = createSkillsShSource(transport, {
     id: "skills-sh",
     label: "Skills Directory",
     description: "skills.sh 全量聚合索引",
@@ -186,7 +214,7 @@ export const useSkillsStore = defineStore("skills", () => {
     }
   }
 
-  /** 市场搜索（Web/宿主共用，宿主态搜索经 skills.sh 宿主命令转发）。 */
+  /** 市场搜索（跨所有启用源并行搜索，结果合并去重）。 */
   async function searchDiscover(query: string): Promise<void> {
     const trimmed = query.trim();
     discoverError.value = "";
@@ -196,7 +224,24 @@ export const useSkillsStore = defineStore("skills", () => {
     }
     searching.value = true;
     try {
-      discoverResults.value = await market.search(trimmed);
+      const adapters = buildSourceAdapters(settings, transport);
+      if (adapters.length === 0) {
+        // 没有启用的源 → 回退内置默认
+        discoverResults.value = await builtInMarket.search(trimmed);
+        return;
+      }
+      const batches = await Promise.allSettled(adapters.map((adapter) => adapter.search(trimmed)));
+      const seen = new Set<string>();
+      const merged: MarketSkillEntry[] = [];
+      for (const batch of batches) {
+        if (batch.status !== "fulfilled") continue;
+        for (const entry of batch.value) {
+          if (seen.has(entry.ref)) continue;
+          seen.add(entry.ref);
+          merged.push(entry);
+        }
+      }
+      discoverResults.value = merged;
     } catch (error) {
       discoverResults.value = [];
       discoverError.value = String(error);
@@ -205,12 +250,13 @@ export const useSkillsStore = defineStore("skills", () => {
     }
   }
 
-  /** 安装（skillId 已存在 = 覆盖更新）。浏览器态直接拒绝。 */
+  /** 安装（skillId 已存在 = 覆盖更新；按 entry.origin 路由到对应源下载）。 */
   async function installFromMarket(entry: MarketSkillEntry): Promise<void> {
     const ws = await requireHostWorkspace();
     busyId.value = entry.skillId;
     try {
-      const snapshot = await market.download(entry);
+      // 直接走 transport 下载（origin 由条目携带，走对应源端点）
+      const snapshot = parseSnapshot(await transport.download(entry.ref, entry.origin));
       await transport.install(ws.root.dir, entry.skillId, snapshot.files);
       records.value = upsertRecord(records.value, {
         ref: entry.ref,
@@ -265,7 +311,7 @@ export const useSkillsStore = defineStore("skills", () => {
 
   return {
     transport,
-    market,
+    builtInMarket,
     hostAvailable,
     workspace,
     workspaceResolved,

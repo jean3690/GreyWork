@@ -66,6 +66,9 @@ export default defineConfig(async () => ({
   resolve: {
     alias: {
       rxjs: rxjsEsm,
+      // workbench 以源码方式消费（main 指向 packages/workbench/src/index.ts），其内部统一
+      // 使用 @/ 别名指向本包 src 根；desktop 自身源码不用 @/，故直接映射到 workbench 根。
+      "@": fileURLToPath(new URL("../../packages/workbench/src", import.meta.url)),
     },
   },
 

@@ -2,7 +2,6 @@ import { createIdFactory, createJsonStorage } from "@greywork/core";
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { DEFAULT_PREVIEW_PANEL_PX, MAX_PREVIEW_TABS, clampPreviewWidth, shouldAutoCollapse } from "../lib/layout";
-import { dropSheetDraft } from "../lib/sheet-draft";
 import { basename, kindOfPath, type ViewerKind } from "../lib/viewer";
 
 const nextTabId = createIdFactory("pv");
@@ -40,13 +39,6 @@ export interface PreviewTab {
    * 「用系统应用打开」。`disk` 源的 path 本身就是磁盘路径，此项恒为空。
    */
   diskPath?: string;
-  /**
-   * 有未保存的改动（当前只有可编辑的 xlsx 会置起）。
-   *
-   * 只镜像一个布尔值、不镜像内容：内容留在 `lib/sheet-draft.ts` 的模块级 Map 里。
-   * 与挂载状态解耦是刻意的 —— 切 tab 会销毁 viewer，但「有未保存改动」这件事不随之消失。
-   */
-  dirty?: boolean;
 }
 
 interface PreviewPrefs {
@@ -133,7 +125,6 @@ export const usePreviewStore = defineStore("preview", () => {
     while (tabs.value.length > MAX_PREVIEW_TABS) {
       const victim = tabs.value.find((candidate) => candidate.id !== tab.id);
       if (!victim) break;
-      dropSheetDraft(victim.id);
       tabs.value = tabs.value.filter((candidate) => candidate.id !== victim.id);
     }
     activeId.value = tab.id;
@@ -163,22 +154,13 @@ export const usePreviewStore = defineStore("preview", () => {
     if (tabs.value.some((tab) => tab.id === id)) activeId.value = id;
   }
 
-  /** 记录某 tab 是否有未保存改动（可编辑的 viewer 自己上报）。 */
-  function setDirty(id: string, value: boolean): void {
-    tabs.value = tabs.value.map((tab) => (tab.id === id && tab.dirty !== value ? { ...tab, dirty: value } : tab));
-  }
-
   /**
    * 关闭 tab；关掉的是激活项时把焦点交给右邻（没有则左邻），空了则折叠面板。
-   *
-   * 未保存草稿的清理放在这里（以及 closeAll / 上限淘汰）而不是调用方：tab 消失是它们的
-   * 唯一共同点，任何新增的关闭入口都会经过这三处；散在调用方就会漏一个、漏一个就永久漏内存。
    * 注意这里**不负责问用户** —— 该不该在关之前确认由界面决定。
    */
   function close(id: string): void {
     const index = tabs.value.findIndex((tab) => tab.id === id);
     if (index === -1) return;
-    dropSheetDraft(id);
     const remaining = tabs.value.filter((tab) => tab.id !== id);
     tabs.value = remaining;
     if (activeId.value !== id) return;
@@ -188,7 +170,6 @@ export const usePreviewStore = defineStore("preview", () => {
   }
 
   function closeAll(): void {
-    for (const tab of tabs.value) dropSheetDraft(tab.id);
     tabs.value = [];
     activeId.value = null;
     setCollapsed(true);
@@ -252,7 +233,6 @@ export const usePreviewStore = defineStore("preview", () => {
     open,
     reload,
     attachDiskPath,
-    setDirty,
     activate,
     close,
     closeAll,

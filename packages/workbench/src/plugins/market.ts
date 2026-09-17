@@ -108,7 +108,13 @@ export function setCodePluginRuntimeFactoryForTest(factory: CodePluginRuntimeFac
   runtimeFactory = factory ?? createWorkerCodePluginRuntime;
 }
 
-/** Shell 启动前调用：桌面态扫描 app_data/plugins，并把已安装包接入同一 loader。 */
+/**
+ * 桌面态扫描 app_data/plugins，并把已安装包接入同一 loader。
+ *
+ * **不必等它落地再挂载**：注册是纯追加（重复 id 由 pluginManifests 去重跳过），
+ * 插件贡献的导航项走响应式快照，晚一帧到会自己补上。调用方（main.ts）因此与
+ * mount 并发发起、不 await —— 别把这次读盘 IPC 重新串回首帧前面。
+ */
 export async function bootInstalledMarketPlugins(): Promise<void> {
   if (!isTauriRuntime()) return;
   installedMarketPlugins.value = await invoke<InstalledPluginPackage[]>("plugin_market_list_installed");
