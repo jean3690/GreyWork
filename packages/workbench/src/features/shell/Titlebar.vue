@@ -9,7 +9,6 @@ import { useWorkspacePanelStore } from "@/stores/workspacePanel";
 import { useActivityStore } from "@/stores/activity";
 import Icon from "@/features/shared/Icon.vue";
 import Hint from "@/features/shared/Hint.vue";
-import LayoutModeSwitch from "@/features/shell/LayoutModeSwitch.vue";
 import SearchPanel from "@/features/workspace/SearchPanel.vue";
 import { Popover, PopoverTrigger } from "@/components/ui/popover";
 
@@ -144,12 +143,6 @@ onBeforeUnmount(() => {
       <span class="size-1.5 rounded-full" :class="activeWorkspace ? 'bg-mint' : 'bg-dim2'" />
       <span class="max-w-[200px] truncate">{{ activeWorkspace?.name ?? "未绑定工作区" }}</span>
     </div>
-
-    <!-- 布局模式：与右栏开关同属「面板可见性」这一族，所以排在工作区标识之后、紧挨它。
-         窄屏不渲染 —— 四种模式里两种依赖右栏，而右栏此时不存在，
-         给出按了也不生效的选项比不给更糟。 -->
-    <LayoutModeSwitch v-if="preview.available" class="ml-1.5" />
-
     <!-- 右栏开关。左栏 toggle 走 emit 是因为其状态在 Shell 里；右栏状态在 store 里，
          再绕一层 emit 没有收益。
          显隐读 `preview.available`（Shell 按 768px 回灌），不用 Tailwind 断点自己判一次 ——
