@@ -17,7 +17,7 @@ export const BUILTIN_PLUGINS: PluginManifest[] = [
       modes: [
         {
           id: "plugins",
-          title: "插件",
+          title: "市场",
           icon: "magic",
           component: defineAsyncComponent(() => import("@/features/plugins/PluginsView.vue")),
         },
