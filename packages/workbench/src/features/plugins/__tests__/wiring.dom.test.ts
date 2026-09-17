@@ -63,7 +63,7 @@ describe("PluginsView（插件中心自身）", () => {
     const toggle = wrapper.get('[data-testid="plugin-toggle-core.plugins"]');
     expect(toggle.text()).toBe("停用");
     expect(toggle.attributes("aria-pressed")).toBe("true");
-    expect(wrapper.get('[data-testid="mode-chip-plugins"]').text()).toBe("插件");
+    expect(wrapper.get('[data-testid="mode-chip-plugins"]').text()).toBe("市场");
     expect(wrapper.get('[data-testid="market-tab-installed"]').attributes("aria-pressed")).toBe("true");
     expect(wrapper.get('[data-testid="plugin-card-core.plugins"]').text()).toContain("内置");
   });
@@ -215,14 +215,14 @@ describe("Sider 快捷入口", () => {
       global: { plugins: [router, i18n] },
     });
 
-    const pluginButtons = wrapper.findAll("button").filter((button) => button.text().trim() === "插件");
+    const pluginButtons = wrapper.findAll("button").filter((button) => button.text().trim() === "市场");
     expect(pluginButtons.length).toBe(1);
 
     // 停用内置插件 → seam modes 清空 → 入口消失
     const { setPluginEnabled } = await import("@/plugins/runtime");
     await setPluginEnabled("core.plugins", false);
     await flushPromises();
-    const after = wrapper.findAll("button").filter((button) => button.text().trim() === "插件");
+    const after = wrapper.findAll("button").filter((button) => button.text().trim() === "市场");
     expect(after.length).toBe(0);
   });
 });
