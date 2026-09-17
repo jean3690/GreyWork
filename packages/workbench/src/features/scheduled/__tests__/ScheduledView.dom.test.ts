@@ -1,7 +1,7 @@
 // 定时任务契约：默认种子任务全量渲染；「新建任务」置顶插入一条并持久化；
 // 行内编辑器把触发时间 / 执行后端写回任务。
-import { beforeEach, describe, expect, it } from "vitest";
-import { mount } from "@vue/test-utils";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { DOMWrapper, flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import ScheduledView from "@/features/scheduled/ScheduledView.vue";
 import { createAppRouter } from "@/router";
@@ -14,6 +14,21 @@ beforeEach(() => {
   setActivePinia(createPinia());
   setLocale("zh-CN");
 });
+
+afterEach(() => {
+  document.body.innerHTML = "";
+});
+
+/** 时间选择器弹层在 body 上：开弹层 → 点时 / 分。 */
+async function pickTime(wrapper: ReturnType<typeof mount>, hour: number, minute: number): Promise<void> {
+  await wrapper.find('[data-testid="schedule-time"]').trigger("click");
+  await flushPromises();
+  const popover = document.body.querySelector('[data-testid="schedule-time-popover"]');
+  if (!popover) throw new Error("未渲染出时间弹层");
+  const panel = new DOMWrapper(popover);
+  await panel.find(`[data-testid="schedule-time-hour-${hour}"]`).trigger("click");
+  await panel.find(`[data-testid="schedule-time-minute-${minute}"]`).trigger("click");
+}
 
 async function mountView() {
   const router = createAppRouter();
@@ -54,7 +69,7 @@ describe("ScheduledView", () => {
 
     await wrapper.find('[data-testid="automation-edit"]').trigger("click");
     await wrapper.find('[data-testid="schedule-mode-weekly"]').trigger("click");
-    await wrapper.find('[data-testid="schedule-time"]').setValue("18:00");
+    await pickTime(wrapper, 18, 0);
     await wrapper.find('[data-testid="schedule-weekday-1"]').trigger("click");
     await wrapper.find('[data-testid="schedule-weekday-5"]').trigger("click");
     await wrapper.find('[data-testid="schedule-acp"]').setValue(provider.id);
@@ -77,7 +92,7 @@ describe("ScheduledView", () => {
 
     await wrapper.find('[data-testid="automation-edit"]').trigger("click");
     await wrapper.find('[data-testid="schedule-mode-daily"]').trigger("click");
-    await wrapper.find('[data-testid="schedule-time"]').setValue("23:59");
+    await pickTime(wrapper, 23, 59);
     await wrapper.find('[data-testid="schedule-cancel"]').trigger("click");
 
     expect(first.cron).toBe(before.cron);

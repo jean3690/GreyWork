@@ -45,6 +45,7 @@ const dbTasks = [
     intent: "生成日报",
     enabled: true,
     lastRun: 1_700_000_000_000,
+    onceAt: null,
   },
   {
     id: "at-db-2",
@@ -56,6 +57,20 @@ const dbTasks = [
     intent: "生成周报",
     enabled: false,
     lastRun: 0,
+    onceAt: null,
+  },
+  {
+    // 一次性任务：宿主已在入队时占住 last_run（应用当时不在场）
+    id: "at-db-once",
+    name: "一次性任务",
+    schedule: "2026/09/20 09:30（仅一次）",
+    cron: null,
+    acpProviderId: null,
+    target: "主仓",
+    intent: "发一封提醒",
+    enabled: true,
+    lastRun: 1_750_000_000_000,
+    onceAt: 1_750_000_000_000,
   },
 ];
 
@@ -76,7 +91,7 @@ describe("automation store 桌面接管（SQLite 真源）", () => {
     const automation = useAutomationStore();
     await automation.hydrated;
 
-    expect(automation.list).toHaveLength(2);
+    expect(automation.list).toHaveLength(3);
     expect(automation.list[0]).toMatchObject({
       id: "at-db-1",
       cron: "0 9 * * *",
@@ -84,6 +99,8 @@ describe("automation store 桌面接管（SQLite 真源）", () => {
       running: false,
     });
     expect(automation.list[1].cron).toBeNull();
+    // 一次性任务：库里 last_run 已写（宿主占位）→ 启停收拢为停用，不会二次触发
+    expect(automation.list[2]).toMatchObject({ id: "at-db-once", onceAt: 1_750_000_000_000, enabled: false });
   });
 
   it("库未接管：load=null → 种子清单首落库（含 cron 字段）", async () => {
@@ -227,6 +244,35 @@ describe("automation 到期队列消费（consumeDue）", () => {
     await automation.consumeDue();
     await vi.waitFor(() => expect(queue).toHaveLength(0));
     expect(submit).toHaveBeenCalledTimes(2);
+  });
+
+  it("一次性任务到期执行后自动停用（不会二次触发），并回写 lastRun", async () => {
+    queue = [
+      {
+        id: 7,
+        taskId: "at-db-once",
+        name: "一次性任务",
+        target: "主仓",
+        intent: "发一封提醒",
+        acpProviderId: null,
+        dueAt: Date.now() - 1_000,
+      },
+    ];
+    dispatchInvoke();
+    const automation = useAutomationStore();
+    const submit = vi.spyOn(useChatStore(), "submitText").mockImplementation(() => null);
+    // 待跑状态：库里 lastRun 尚未回写（渲染端在场，由本进程执行）
+    automation.update("at-db-once", { lastRun: 0, enabled: true });
+
+    await automation.hydrated;
+    await vi.waitFor(() => expect(queue).toHaveLength(0));
+
+    expect(submit).toHaveBeenCalledWith("发一封提醒");
+    const task = automation.list.find((a) => a.id === "at-db-once");
+    expect(task?.enabled).toBe(false);
+    expect(task?.lastRun).toBeGreaterThan(0);
+    const finish = invokeMock.mock.calls.find(([cmd]) => cmd === "db_automations_due_finish");
+    expect(finish?.[1]).toMatchObject({ id: 7, status: "success" });
   });
 
   it("到期任务已不在清单 → 防御性 finish(failed) 不留死队列", async () => {

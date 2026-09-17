@@ -19,6 +19,8 @@ export interface AutomationTaskRow {
   schedule: string;
   /** 标准 cron 5 段表达式；null/缺省 = 手动触发。 */
   cron: string | null;
+  /** 一次性任务的触发时刻（epoch ms）；null/缺省 = 按 cron 循环。 */
+  onceAt: number | null;
   /** 执行后端：ACP 后端 id；null = 本机模型管线。 */
   acpProviderId: string | null;
   target: string;

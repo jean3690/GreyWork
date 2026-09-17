@@ -69,6 +69,8 @@ pub struct AutomationTaskDto {
     pub schedule: String,
     /// 标准 cron 5 段表达式（分 时 日 月 周）；None = 手动触发。
     pub cron: Option<String>,
+    /// 一次性任务的触发时刻（epoch ms）；None = 按 cron 循环。
+    pub once_at: Option<i64>,
     /// 执行后端：ACP 后端 id；None = 本机模型管线。
     pub acp_provider_id: Option<String>,
     pub target: String,
@@ -334,7 +336,7 @@ impl Db {
         }
         let mut stmt = conn
             .prepare(
-                "SELECT id, name, schedule, cron, target, intent, enabled, last_run, acp_provider_id
+                "SELECT id, name, schedule, cron, target, intent, enabled, last_run, acp_provider_id, once_at
                  FROM automation_tasks ORDER BY rowid",
             )
             .map_err(|e| format!("准备自动化查询失败: {e}"))?;
@@ -346,6 +348,7 @@ impl Db {
                     schedule: row.get(2)?,
                     cron: row.get(3)?,
                     acp_provider_id: row.get(8)?,
+                    once_at: row.get(9)?,
                     target: row.get(4)?,
                     intent: row.get(5)?,
                     enabled: row.get::<_, i64>(6)? != 0,
@@ -577,11 +580,11 @@ impl Db {
 
         for task in tasks {
             tx.execute(
-                "INSERT INTO automation_tasks (id, name, schedule, cron, target, intent, enabled, last_run, acp_provider_id)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                "INSERT INTO automation_tasks (id, name, schedule, cron, target, intent, enabled, last_run, acp_provider_id, once_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
                  ON CONFLICT(id) DO UPDATE SET
                    name = ?2, schedule = ?3, cron = ?4, target = ?5,
-                   intent = ?6, enabled = ?7, last_run = ?8, acp_provider_id = ?9",
+                   intent = ?6, enabled = ?7, last_run = ?8, acp_provider_id = ?9, once_at = ?10",
                 params![
                     task.id,
                     task.name,
@@ -592,6 +595,7 @@ impl Db {
                     task.enabled,
                     task.last_run,
                     task.acp_provider_id,
+                    task.once_at,
                 ],
             )
             .map_err(|e| format!("写入自动化失败: {e}"))?;
@@ -804,7 +808,7 @@ fn load_messages(
 }
 
 /// 迁移链：下标 = 目标 user_version。只追加不修改历史项。
-const MIGRATIONS: [&str; 6] = [
+const MIGRATIONS: [&str; 8] = [
     "
 CREATE TABLE conversations (
     id          TEXT PRIMARY KEY,
@@ -873,6 +877,16 @@ ALTER TABLE automation_due ADD COLUMN acp_provider_id TEXT;
 -- 带周字段（值 4 表示周五）。标准 cron 里周五是 5，故就地改写；其余种子
 -- 只用分/时，语义不受影响。
 UPDATE automation_tasks SET cron = '0 18 * * 5' WHERE cron = '0 18 * * 4';
+",
+    // 一次性任务（「指定日期时间跑一次」）：cron 没有年份字段，表达不了单次触发，
+    // 因此单开一列存触发时刻（epoch ms）；宿主调度器据 (once_at, last_run) 判定。
+    "
+ALTER TABLE automation_tasks ADD COLUMN once_at INTEGER;
+",
+    // ACP 后端的启动环境变量（如各家 API key）：与 command 同属启动契约，进列而不是
+    // 留在渲染端。JSON 对象文本；旧行为 NULL = 继承宿主环境。
+    "
+ALTER TABLE agent_providers ADD COLUMN env TEXT;
 ",
 ];
 
@@ -1209,6 +1223,7 @@ mod tests {
             name: format!("任务 {id}"),
             schedule: "每天 09:00".to_string(),
             cron: cron.map(|c| c.to_string()),
+            once_at: None,
             acp_provider_id: None,
             target: "主仓".to_string(),
             intent: "生成日报".to_string(),
@@ -1243,6 +1258,29 @@ mod tests {
         let at2 = loaded.iter().find(|t| t.id == "at-2").unwrap();
         assert!(at2.cron.is_none());
         assert!(!at2.enabled);
+    }
+
+    #[test]
+    fn automations_roundtrip_preserves_once_at_without_cron() {
+        // 一次性任务：只有 once_at，没有 cron（cron 没有年份字段，表达不了单次触发）
+        let db = Db::open_in_memory().expect("open");
+        let mut once = task("at-once", None, true);
+        once.once_at = Some(1_800_000_000_000);
+        db.sync_automations(std::slice::from_ref(&once)).unwrap();
+        let loaded = db.load_automations().unwrap().expect("some");
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].once_at, Some(1_800_000_000_000));
+        assert!(loaded[0].cron.is_none());
+        // 循环任务仍是 cron 路径：once_at 留空
+        let recurring = task("at-daily", Some("0 9 * * *"), true);
+        db.sync_automations(&[once, recurring]).unwrap();
+        let loaded = db.load_automations().unwrap().expect("some");
+        assert!(loaded
+            .iter()
+            .find(|t| t.id == "at-daily")
+            .unwrap()
+            .once_at
+            .is_none());
     }
 
     #[test]
@@ -1698,6 +1736,24 @@ mod tests {
         assert!(conn
             .prepare("SELECT acp_provider_id FROM automation_due")
             .is_ok());
+    }
+
+    #[test]
+    fn migration_v7_adds_once_at_column_and_bumps_version() {
+        let db = Db::open_in_memory().expect("open");
+        let conn = db.conn.lock();
+        let has_once: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM pragma_table_info('automation_tasks') WHERE name = 'once_at'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(has_once, 1, "一次性任务的触发时刻列已就位");
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, MIGRATIONS.len() as i64);
     }
 
     #[tokio::test]

@@ -21,6 +21,10 @@ export interface SubmitApi {
   confirmPlan(_threadId: string, message: ThreadMessage): void;
   cancelPlan(threadId: string, message: ThreadMessage): void;
   markAskAnswered(threadId: string, message: ThreadMessage, answers: AskAnswer[]): void;
+  /** 定时任务提案已创建：写回 createdId，卡片转只读（回放不重复建）。 */
+  markScheduleCreated(threadId: string, message: ThreadMessage, createdId: string): void;
+  /** 用户不需要这条定时任务提案：从消息上摘掉草稿。 */
+  clearScheduleDraft(threadId: string, message: ThreadMessage): void;
   startAcpTurn(text: string, providerName: string, attachments?: Attachment[]): { threadId: string; message: ThreadMessage };
 }
 
@@ -88,6 +92,20 @@ export function createSubmitSlice({ state, getSession, getStream }: SubmitDeps):
     sessionStore.markDirty();
   }
 
+  function markScheduleCreated(threadId: string, message: ThreadMessage, createdId: string): void {
+    if (!message.scheduleDraft) return;
+    message.scheduleDraft = { ...message.scheduleDraft, createdId };
+    sessionStore.touch(threadId);
+    sessionStore.markDirty();
+  }
+
+  function clearScheduleDraft(threadId: string, message: ThreadMessage): void {
+    if (!message.scheduleDraft) return;
+    delete message.scheduleDraft;
+    sessionStore.touch(threadId);
+    sessionStore.markDirty();
+  }
+
   /**
    * ACP 回合（agent store 派发）：user 消息入流 + assistant 支架，
    * 返回 { threadId, message } 供 ACP 事件按线程流式续写（不依赖 activeThreadId）。
@@ -102,5 +120,5 @@ export function createSubmitSlice({ state, getSession, getStream }: SubmitDeps):
     return { threadId, message };
   }
 
-  return { submitText, confirmPlan, cancelPlan, markAskAnswered, startAcpTurn };
+  return { submitText, confirmPlan, cancelPlan, markAskAnswered, markScheduleCreated, clearScheduleDraft, startAcpTurn };
 }

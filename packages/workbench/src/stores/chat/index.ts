@@ -70,6 +70,8 @@ export const useChatStore = defineStore("chat", () => {
     confirmPlan: submit.confirmPlan,
     cancelPlan: submit.cancelPlan,
     markAskAnswered: submit.markAskAnswered,
+    markScheduleCreated: submit.markScheduleCreated,
+    clearScheduleDraft: submit.clearScheduleDraft,
     startAcpTurn: submit.startAcpTurn,
     appendMessageContent: stream.appendMessageContent,
     setMessageContent: stream.setMessageContent,

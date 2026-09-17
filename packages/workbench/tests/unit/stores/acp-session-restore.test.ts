@@ -114,7 +114,7 @@ describe("ACP 会话惰性恢复", () => {
 
     expect(h.loadSession).toHaveBeenCalledWith(7, "/home/test", "acp-old-1", []);
     expect(h.openSession).not.toHaveBeenCalled();
-    expect(h.prompt).toHaveBeenCalledWith(7, "接着上一轮干");
+    expect(h.prompt).toHaveBeenCalledWith(7, expect.stringContaining("接着上一轮干"));
     // 恢复出的会话已接管（connected：configOptions 为空不升 session_active）
     expect(agentStore.acpConnected).toBe(true);
     expect(agentStore.acpStatus).toBe("connected");
@@ -141,7 +141,7 @@ describe("ACP 会话惰性恢复", () => {
 
     expect(h.loadSession).not.toHaveBeenCalled();
     expect(h.openSession).toHaveBeenCalledWith(7, "/home/test", []);
-    expect(h.prompt).toHaveBeenCalledWith(7, "从头开始");
+    expect(h.prompt).toHaveBeenCalledWith(7, expect.stringContaining("从头开始"));
   });
 
   it("cwd 不一致（工作区换了）→ 回落 openSession", async () => {
@@ -181,7 +181,7 @@ describe("ACP 会话惰性恢复", () => {
     await agentStore.dispatchToAcp("继续");
 
     expect(h.openSession).toHaveBeenCalledWith(7, "/home/test", []);
-    expect(h.prompt).toHaveBeenCalledWith(7, "继续");
+    expect(h.prompt).toHaveBeenCalledWith(7, expect.stringContaining("继续"));
     expect(noticeStore.list.some((notice) => notice.kind === "error")).toBe(false);
     const list = useChatStore().threads[useChatStore().activeThreadId] ?? [];
     expect(list[1]?.content ?? "").not.toContain("启动失败");
@@ -202,7 +202,7 @@ describe("ACP 会话惰性恢复", () => {
     expect(h.loadSession).toHaveBeenCalledWith(7, "/home/test", "acp-old-1", []);
     expect(h.loadSession).toHaveBeenCalledTimes(2);
     expect(h.openSession).not.toHaveBeenCalled();
-    expect(h.prompt).toHaveBeenCalledWith(7, "重启后的第二轮");
+    expect(h.prompt).toHaveBeenCalledWith(7, expect.stringContaining("重启后的第二轮"));
   });
 });
 

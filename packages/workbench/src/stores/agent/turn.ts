@@ -17,6 +17,18 @@ export interface TurnDeps {
   getRuntime: () => RuntimeApi;
 }
 
+/**
+ * 发给模型的宿主能力提示（schedule 围栏协议）：模型据此知道「可以提议定时任务」。
+ * 与 cowork 的协作协议提示同构——中文字面量直发，不进 i18n；刻意不告诉模型当前时间
+ * （onceAt 由模型估必错），时刻准确性由确认卡与定时任务页的编辑兜住。
+ */
+const SCHEDULE_HINT = [
+  "【宿主能力提示 · 定时任务】如果用户在本条消息里明确要求创建定时/周期/提醒类任务，请在回复的**最末尾**输出一个 ```schedule 代码围栏，内容为一个 JSON 对象：",
+  '- 周期任务：{"name":"任务名","intent":"每次触发时要执行的指令","cron":"分 时 日 月 周"}',
+  '- 一次性任务：{"name":"任务名","intent":"…","onceAt":<触发时刻的 epoch 毫秒>}',
+  "规则：只输出一个围栏；cron 必须是标准 5 段表达式（分 时 日 月 周）；intent 要写成独立可执行的完整指令。用户没有要求定时任务时，绝对不要输出该围栏。最终是否创建由用户在确认卡上决定。",
+].join("\n");
+
 export interface TurnApi {
   writeTurnError(messageId: string, detail: string, threadId: string): void;
   sendGlobalTurn(text: string, providerName: string, options?: GlobalTurnOptions): Promise<void>;
@@ -94,7 +106,16 @@ export function createTurnSlice({ state, getRuntime }: TurnDeps): TurnApi {
     if (options.hooks) locals.turnHooks = options.hooks;
     try {
       const units = await toAcpUnits(options.attachments ?? [], state.acpImageSupport.value !== false);
-      const { turnId } = await acp.prompt(state.acpHandle.value as number, text, units);
+      // schedule 围栏说明每会话只注入一次（ACP 会话跨回合保留上下文，每回合都注入
+      // 纯属浪费且提高幻觉概率）。编排回合（planner 输出会被 parsePlan 整体解析）
+      // 不注入：往结构化输出里混围栏会污染解析。
+      let promptText = text;
+      const sessionId = state.acpSessionId.value;
+      if (!options.hooks && sessionId && locals.scheduleHintInjectedFor !== sessionId) {
+        locals.scheduleHintInjectedFor = sessionId;
+        promptText = `${SCHEDULE_HINT}\n\n${text}`;
+      }
+      const { turnId } = await acp.prompt(state.acpHandle.value as number, promptText, units);
       state.activeTurnId.value = turnId;
       // 注意：成功后不清 acpStream —— prompt 只是 ack，回合增量经事件异步回流，支架必须活到 prompt-done / stopped。
     } catch (error) {

@@ -19,6 +19,13 @@ export interface AutomationTask {
   schedule: string;
   /** 标准 cron 5 段表达式（分 时 日 月 周）；null/缺省 = 手动触发（仅 Run Now）。 */
   cron?: string | null;
+  /**
+   * 一次性任务的触发时刻（epoch ms）；null/缺省 = 按 cron 循环。
+   *
+   * 与 `cron` 互斥：cron 没有年份字段，表达不了「就跑这一次」，所以一次性任务
+   * 只写 `onceAt`（宿主按时间戳判定 + 跑过即不再触发），并在跑完后自动停用。
+   */
+  onceAt?: number | null;
   /** 执行后端：ACP 后端 id（带工具跑）；null/缺省 = 本机模型管线。 */
   acpProviderId?: string | null;
   /** 目标工作区/项目。 */
@@ -89,12 +96,24 @@ function toRow(task: AutomationTask): AutomationTaskRow {
     name: task.name,
     schedule: task.schedule,
     cron: task.cron ?? null,
+    onceAt: task.onceAt ?? null,
     acpProviderId: task.acpProviderId ?? null,
     target: task.target,
     intent: task.intent,
     enabled: task.enabled,
     lastRun: task.lastRun,
   };
+}
+
+/**
+ * 一次性任务的收尾判定：跑过（lastRun > 0）就不再启用。
+ *
+ * 宿主在入队时就会写 last_run（应用不在场时接着由 host_exec 兜底执行），所以从库里
+ * 读回来时通常是「跑过但 enabled 仍为 1」——只看本会话是否执行过会漏掉这条路径。
+ */
+function settleOnceTask(task: AutomationTask): AutomationTask {
+  if (!task.onceAt || task.lastRun <= 0) return task;
+  return { ...task, enabled: false };
 }
 
 /** 自动化：任务清单持久化（桌面真源 SQLite + localStorage 缓存）+ Run Now 下发 chat 管线。 */
@@ -116,7 +135,7 @@ export const useAutomationStore = defineStore("automation", () => {
       .then((tasks) => {
         if (tasks) {
           // 库真源优先：running 瞬时态不落库，统一置 false
-          list.value = tasks.map((task) => ({ ...task, running: false }));
+          list.value = tasks.map((task) => ({ ...task, running: false })).map(settleOnceTask);
         } else {
           persist(); // 首启：种子/缓存成为库真源
         }
@@ -144,6 +163,7 @@ export const useAutomationStore = defineStore("automation", () => {
       name: "新建自动化任务",
       schedule: t("automation.manualTrigger"),
       cron: null,
+      onceAt: null,
       acpProviderId: null,
       target: "未绑定工作区",
       intent: "生成一份周报",
@@ -331,6 +351,9 @@ export const useAutomationStore = defineStore("automation", () => {
     }
     task.enabled = true;
     task.lastRun = Date.now();
+    // 一次性任务跑完即停用：宿主调度器只按 (onceAt, last_run) 判定，留 enabled=1
+    // 会让界面继续显示「已启用」，下次改这条任务时也容易误以为还会再跑。
+    if (task.onceAt) task.enabled = false;
     persist();
     return "done";
   }

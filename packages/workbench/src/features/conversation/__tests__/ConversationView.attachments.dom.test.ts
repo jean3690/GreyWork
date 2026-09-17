@@ -156,11 +156,12 @@ describe("ConversationView · 输入卡附件", () => {
     await wrapper.get('[data-testid="composer-send"]').trigger("click");
 
     // prompt(handle, text, units)：正文之外的图片单元由 agent store 读字节后组装
+    // （首回合 prompt 前置了 schedule 围栏说明，text 断言用包含而非相等）
     await vi.waitFor(() => {
       expect(h.prompt).toHaveBeenCalled();
     });
     const [, text, units] = h.prompt.mock.calls.at(-1) as unknown as [number, string, { type: string }[]];
-    expect(text).toBe("交给 agent");
+    expect(text).toContain("交给 agent");
     expect(units).toEqual([{ type: "image", data: "QUJD", mimeType: "image/png" }]);
     agent.stopAcp();
     useChatStore().clearSim();
@@ -190,7 +191,8 @@ describe("ConversationView · 输入卡附件", () => {
     await wrapper.get('[data-testid="plan-confirm"]').trigger("click");
     await vi.waitFor(() => expect(h.prompt).toHaveBeenCalled());
     const [, text, units] = h.prompt.mock.calls.at(-1) as unknown as [number, string, { type: string }[]];
-    expect(text).toBe("");
+    // planDraft 为空 → 派发的正文为空（schedule 说明前置在 hint 注入的场景才存在）
+    expect(text ?? "").not.toContain("交给 agent");
     expect(units).toEqual([{ type: "image", data: "QUJD", mimeType: "image/png" }]);
     agent.stopAcp();
     useChatStore().clearSim();

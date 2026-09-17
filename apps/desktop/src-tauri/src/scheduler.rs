@@ -70,29 +70,54 @@ pub fn spawn_ticker(app: tauri::AppHandle, db_path: PathBuf) {
                 }
             };
             let minute_key = now.timestamp() / 60;
+            let now_ms = now.timestamp_millis();
             for task in tasks {
                 if !task.enabled {
                     continue;
                 }
-                let Some(expr) = task.cron.as_deref() else {
-                    continue; // 手动触发：永不自动到期
+                // 一次性任务：按时间戳判定，跑过（last_run != 0）即永不再触发。
+                // 它不写 cron（cron 没有年份字段），所以两条排期路径在这里分岔。
+                let due_at = match task.once_at {
+                    Some(once_at) => {
+                        if task.last_run != 0 || now_ms < once_at {
+                            continue;
+                        }
+                        once_at
+                    }
+                    None => {
+                        let Some(expr) = task.cron.as_deref() else {
+                            continue; // 手动触发：永不自动到期
+                        };
+                        if !cron::matches(
+                            expr,
+                            now.month(),
+                            now.day(),
+                            now.weekday().num_days_from_sunday(),
+                            now.hour(),
+                            now.minute(),
+                        ) {
+                            continue;
+                        }
+                        if last_broadcast_minute.get(&task.id) == Some(&minute_key) {
+                            continue; // 本分钟内已入队（快路径：免重复 INSERT OR IGNORE）
+                        }
+                        last_broadcast_minute.insert(task.id.clone(), minute_key);
+                        now_ms
+                    }
                 };
-                if !cron::matches(
-                    expr,
-                    now.month(),
-                    now.day(),
-                    now.weekday().num_days_from_sunday(),
-                    now.hour(),
-                    now.minute(),
-                ) {
-                    continue;
-                }
-                if last_broadcast_minute.get(&task.id) == Some(&minute_key) {
-                    continue; // 本分钟内已入队（快路径：免重复 INSERT OR IGNORE）
-                }
-                last_broadcast_minute.insert(task.id.clone(), minute_key);
-                match db.automation_due_push(&task, now.timestamp_millis()) {
+                match db.automation_due_push(&task, due_at) {
                     Ok(true) => {
+                        // 一次性任务在入队时就把 last_run 占住：应用不在场时由 host_exec
+                        // 兜底执行，若不占住，重启后渲染端还会把 last_run 同步回 0，下个
+                        // tick 就再推一次——「只跑一次」的语义随之破掉。
+                        if task.once_at.is_some() {
+                            if let Err(error) = db.automation_mark_last_run(&task.id, now_ms) {
+                                log::error(
+                                    "scheduler",
+                                    format!("一次性任务标记 last_run 失败: {error}"),
+                                );
+                            }
+                        }
                         let _ = app.emit(
                             "automation://due",
                             AutomationDuePayload {

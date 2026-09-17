@@ -51,7 +51,14 @@ function createTask(): void {
 
 function commitEdit(
   id: string,
-  patch: { name: string; intent: string; acpProviderId: string | null; cron: string | null; schedule: string },
+  patch: {
+    name: string;
+    intent: string;
+    acpProviderId: string | null;
+    cron: string | null;
+    onceAt: number | null;
+    schedule: string;
+  },
 ): void {
   automation.update(id, patch);
   editingId.value = null;
@@ -113,6 +120,13 @@ function runNow(id: string, name: string): void {
                 {{ task.schedule || (task.cron ?? t("automation.manualTrigger")) }}
               </span>
               <span
+                v-if="task.onceAt"
+                class="shrink-0 rounded-full border border-cyan/40 bg-cyan/10 px-2 py-0.5 text-[10px] text-cyan"
+                data-testid="automation-once-badge"
+              >
+                {{ t("automation.onceBadge") }}
+              </span>
+              <span
                 v-if="acpName(task.acpProviderId)"
                 class="flex shrink-0 items-center gap-1 rounded-full border border-line px-2 py-0.5 text-[10px] text-dim2"
                 data-testid="automation-acp-badge"
@@ -123,7 +137,8 @@ function runNow(id: string, name: string): void {
             </div>
             <div class="mt-0.5 truncate text-[11px] text-dim2">{{ task.intent }}</div>
             <div class="mt-0.5 font-mono text-[10px] text-dim2">
-              {{ task.cron ?? "—" }} · {{ t("automation.lastRun", { last: fmtLastRun(task.lastRun) }) }}
+              {{ task.onceAt ? t("automation.onceBadge") : (task.cron ?? "—") }} ·
+              {{ t("automation.lastRun", { last: fmtLastRun(task.lastRun) }) }}
             </div>
             <p v-if="IS_SEED.has(task.id)" class="mt-1 text-[10px] text-amber">{{ t("automation.seedHint") }}</p>
           </div>
@@ -190,6 +205,7 @@ function runNow(id: string, name: string): void {
           :intent="task.intent"
           :acp-provider-id="task.acpProviderId ?? null"
           :cron="task.cron ?? null"
+          :once-at="task.onceAt ?? null"
           @save="(patch) => commitEdit(task.id, patch)"
           @cancel="editingId = null"
         />

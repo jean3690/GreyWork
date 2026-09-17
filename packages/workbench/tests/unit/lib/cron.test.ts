@@ -132,6 +132,9 @@ describe("composeCron / decomposeCron", () => {
     expect(composeCron({ kind: "weekly", days: [5, 1], hour: 18, minute: 30 })).toBe("30 18 * * 1,5");
     expect(composeCron({ kind: "weekly", days: [], hour: 18, minute: 0 })).toBeNull();
     expect(composeCron({ kind: "monthly", day: 1, hour: 8, minute: 30 })).toBe("30 8 1 * *");
+    expect(composeCron({ kind: "yearly", month: 1, day: 20, hour: 9, minute: 0 })).toBe("0 9 20 1 *");
+    // 一次性任务不折算成 cron：cron 没有年份字段，「每年这天」不是「只跑一次」
+    expect(composeCron({ kind: "once", at: 1_800_000_000_000 })).toBeNull();
     expect(composeCron({ kind: "interval", unit: "minute", every: 15 })).toBe("*/15 * * * *");
     expect(composeCron({ kind: "interval", unit: "hour", every: 2 })).toBe("0 */2 * * *");
     expect(composeCron({ kind: "cron", expr: " 0 9 * * 1,3 " })).toBe("0 9 * * 1,3");
@@ -143,6 +146,10 @@ describe("composeCron / decomposeCron", () => {
     expect(decomposeCron("0 9 * * *")).toEqual({ kind: "daily", hour: 9, minute: 0 });
     expect(decomposeCron("30 18 * * 5,1")).toEqual({ kind: "weekly", days: [1, 5], hour: 18, minute: 30 });
     expect(decomposeCron("30 8 1 * *")).toEqual({ kind: "monthly", day: 1, hour: 8, minute: 30 });
+    expect(decomposeCron("0 9 20 1 *")).toEqual({ kind: "yearly", month: 1, day: 20, hour: 9, minute: 0 });
+    // 一次性任务由 onceAt 承载：即便 cron 脏了也不排成循环任务
+    expect(decomposeCron(null, 1_800_000_000_000)).toEqual({ kind: "once", at: 1_800_000_000_000 });
+    expect(decomposeCron("0 9 * * *", 0)).toEqual({ kind: "daily", hour: 9, minute: 0 });
     expect(decomposeCron("*/15 * * * *")).toEqual({ kind: "interval", unit: "minute", every: 15 });
     expect(decomposeCron("0 */2 * * *")).toEqual({ kind: "interval", unit: "hour", every: 2 });
     expect(decomposeCron("@daily")).toEqual({ kind: "daily", hour: 0, minute: 0 });
