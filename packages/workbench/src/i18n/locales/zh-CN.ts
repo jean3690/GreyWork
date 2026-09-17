@@ -195,6 +195,13 @@ export const zhCN = {
     members: "成员",
     addMember: "加一位成员",
     memberNamePlaceholder: "成员名（如 实现、评审）",
+    memberConfig: {
+      label: "会话配置",
+      probing: "探测可选配置…",
+      probeFailed: "无法探测该后端的可配置项",
+      followBackend: "跟随后端默认",
+      applyFailed: "{name} 的会话配置应用失败",
+    },
     pause: "暂停",
     resume: "抬高预算并继续",
     stop: "结束协作",

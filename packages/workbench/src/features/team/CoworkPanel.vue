@@ -8,6 +8,7 @@ import { useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import Icon from "@/features/shared/Icon.vue";
 import Hint from "@/features/shared/Hint.vue";
+import { configOptionLabel } from "@/lib/acp-config-options";
 import { useAgentStore } from "@/stores/agent";
 import { useChatStore } from "@/stores/chat";
 import { useCoworkStore, type CoworkMemberInit } from "@/stores/cowork";
@@ -22,6 +23,37 @@ const router = useRouter();
 
 /** 可选的 ACP 后端：成员位各自挑一个，不选则跟随全局。 */
 const acpProviders = computed(() => agentStore.agentProviders);
+
+/** 成员位实际会用到的后端 id：显式指定优先，跟随全局。 */
+function memberProviderIdOf(member: CoworkMemberInit): string | undefined {
+  return member.providerId ?? agentStore.selectedProviderId;
+}
+
+/** 该成员位后端暴露的 select 型会话配置（未探测 / 探测失败时为空）。 */
+function memberConfigOptions(member: CoworkMemberInit) {
+  const providerId = memberProviderIdOf(member);
+  return providerId ? cowork.optionsOf(providerId).filter((option) => option.type === "select") : [];
+}
+
+/** 展开成员配置编辑区的行（一次只开一行）。 */
+const configTarget = ref<number | null>(null);
+
+function toggleMemberConfig(index: number): void {
+  if (configTarget.value === index) {
+    configTarget.value = null;
+    return;
+  }
+  configTarget.value = index;
+  const member = memberDrafts.value[index];
+  const providerId = memberProviderIdOf(member);
+  if (providerId) void cowork.probeProviderOptions(providerId);
+}
+
+function setMemberConfig(member: CoworkMemberInit, configId: string, value: string): void {
+  if (!member.configValues) member.configValues = {};
+  if (value === "") delete member.configValues[configId];
+  else member.configValues[configId] = value;
+}
 
 const goalDraft = ref("");
 const memberDrafts = ref<CoworkMemberInit[]>([
@@ -145,6 +177,17 @@ function openSlot(threadId: string): void {
             <option :value="undefined">{{ t("cowork.provider.followGlobal") }}</option>
             <option v-for="provider in acpProviders" :key="provider.id" :value="provider.id">{{ provider.name }}</option>
           </select>
+          <!-- 成员级会话配置（模型 / 思考强度…）：展开后按该后端上报项逐个选择 -->
+          <button
+            type="button"
+            data-testid="member-config-toggle"
+            class="rounded-[8px] border px-2 py-1.5 text-[11.5px] transition-colors"
+            :class="configTarget === index ? 'border-accent/50 text-foreground' : 'border-line text-dim hover:text-foreground'"
+            :aria-expanded="configTarget === index"
+            @click="toggleMemberConfig(index)"
+          >
+            {{ t("cowork.memberConfig.label") }}
+          </button>
           <button
             type="button"
             class="grid size-7 place-items-center rounded-[8px] border border-line text-dim transition-colors hover:text-foreground"
@@ -154,6 +197,27 @@ function openSlot(threadId: string): void {
           >
             <Icon name="close" :size="12" />
           </button>
+          <div v-if="configTarget === index" data-testid="member-config-area" class="flex w-full flex-wrap items-center gap-1.5 ps-1">
+            <span v-if="cowork.probingProviders[memberProviderIdOf(member) ?? '']" class="text-[11px] text-dim2">
+              {{ t("cowork.memberConfig.probing") }}
+            </span>
+            <p v-else-if="memberConfigOptions(member).length === 0" class="text-[11px] text-dim2">
+              {{ t("cowork.memberConfig.probeFailed") }}
+            </p>
+            <label v-for="option in memberConfigOptions(member)" :key="option.id" class="flex items-center gap-1">
+              <span class="text-[11px] text-dim2">{{ configOptionLabel(option) }}</span>
+              <select
+                class="max-w-[140px] rounded-[8px] border border-line bg-panel-2 px-2 py-1 text-[11.5px] text-foreground outline-none focus:border-accent"
+                :data-testid="`member-config-${option.id}`"
+                :aria-label="configOptionLabel(option)"
+                :value="member.configValues?.[option.id] ?? ''"
+                @change="setMemberConfig(member, option.id, ($event.target as HTMLSelectElement).value)"
+              >
+                <option value="">{{ t("cowork.memberConfig.followBackend") }}</option>
+                <option v-for="choice in option.options" :key="choice.value" :value="choice.value">{{ choice.name }}</option>
+              </select>
+            </label>
+          </div>
         </div>
       </div>
       <div class="mt-2.5 flex items-center gap-2">

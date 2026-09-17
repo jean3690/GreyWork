@@ -204,6 +204,13 @@ export const enUS: MessageSchema = {
     members: "Members",
     addMember: "Add a member",
     memberNamePlaceholder: "Member name (e.g. Builder, Reviewer)",
+    memberConfig: {
+      label: "Session config",
+      probing: "Probing options…",
+      probeFailed: "Could not probe this backend's options",
+      followBackend: "Follow backend default",
+      applyFailed: "Failed to apply session config for {name}",
+    },
     pause: "Pause",
     resume: "Raise budget and resume",
     stop: "End cowork",
