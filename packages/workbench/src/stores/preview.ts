@@ -155,6 +155,23 @@ export const usePreviewStore = defineStore("preview", () => {
   }
 
   /**
+   * 把 tab 拖拽重排到目标下标（tab 条拖放排序用）。
+   *
+   * **不改 activeId**：拖拽只是整理顺序，不该抢走用户正看着的 tab —— 与各编辑器
+   * 的通行约定一致。越界下标收敛到有效区间；id 不存在时是 no-op。
+   */
+  function moveTab(id: string, toIndex: number): void {
+    const from = tabs.value.findIndex((tab) => tab.id === id);
+    if (from === -1) return;
+    const target = Math.max(0, Math.min(toIndex, tabs.value.length - 1));
+    if (target === from) return;
+    const next = [...tabs.value];
+    const [moved] = next.splice(from, 1);
+    next.splice(target, 0, moved);
+    tabs.value = next;
+  }
+
+  /**
    * 关闭 tab；关掉的是激活项时把焦点交给右邻（没有则左邻），空了则折叠面板。
    * 注意这里**不负责问用户** —— 该不该在关之前确认由界面决定。
    */
@@ -234,6 +251,7 @@ export const usePreviewStore = defineStore("preview", () => {
     reload,
     attachDiskPath,
     activate,
+    moveTab,
     close,
     closeAll,
     setCollapsed,

@@ -14,10 +14,11 @@ import { usePreviewStore } from "../stores/preview";
  * - `artifact:updated` → 只在**已打开**该路径时自增 revision 重载，不弹面板
  *   （后台给某张表追加一行不该抢走用户正在看的东西）
  */
-export function usePreviewBridge(): void {
-  const preview = usePreviewStore();
+type PreviewStore = ReturnType<typeof usePreviewStore>;
 
-  const disposers = [
+/** 挂上全部事件监听，返回解绑函数列表。供组件作用域与 store 级测试共用同一份映射。 */
+export function wirePreviewBridge(preview: PreviewStore): Array<() => void> {
+  return [
     appEvents.on("artifact:created", ({ path, name, diskPath }) => {
       preview.open(path, name);
       if (diskPath) preview.attachDiskPath(path, diskPath);
@@ -26,9 +27,16 @@ export function usePreviewBridge(): void {
       preview.reload(path);
       if (diskPath) preview.attachDiskPath(path, diskPath);
     }),
-    appEvents.on("preview:request", ({ path }) => preview.open(path)),
+    appEvents.on("preview:request", ({ path, name, source, diskPath }) => {
+      preview.open(path, name, source ?? "vfs");
+      if (diskPath) preview.attachDiskPath(path, diskPath);
+    }),
     appEvents.on("editor:open", ({ path }) => preview.open(path)),
   ];
+}
+
+export function usePreviewBridge(): void {
+  const disposers = wirePreviewBridge(usePreviewStore());
 
   onUnmounted(() => {
     for (const dispose of disposers) dispose();

@@ -18,7 +18,11 @@ import { usePreviewStore } from "@/stores/preview";
 
 const invokeMock = vi.mocked(invoke);
 
-const stubs = { PreviewSurface: { template: "<div data-testid='surface-stub' />" } };
+const stubs = {
+  PreviewSurface: { template: "<div data-testid='surface-stub' />" },
+  // 空态「抓取网页」用例只验入口接通，reka-ui 弹层在 happy-dom 里不是要验的东西
+  WebFetchDialog: { template: "<div data-testid='web-fetch-dialog-stub' />" },
+};
 
 function mountSider(): VueWrapper {
   return mount(PreviewSider, { global: { stubs } });
@@ -127,6 +131,62 @@ describe("PreviewSider", () => {
     await wrapper.vm.$nextTick();
     await wrapper.get('[data-testid="preview-close-all"]').trigger("click");
     expect(preview.tabs).toHaveLength(0);
+  });
+});
+
+describe("PreviewSider tab 交互（中键关闭 / 拖拽排序）", () => {
+  it("中键（auxclick button=1）关闭 tab", async () => {
+    const wrapper = mountSider();
+    const preview = usePreviewStore();
+    preview.open("reports/a.md");
+    preview.open("data/b.csv");
+    await wrapper.vm.$nextTick();
+
+    await wrapper.findAll('[data-testid="preview-tab"]')[0].trigger("auxclick", { button: 1 });
+    expect(preview.tabs.map((tab) => tab.path)).toEqual(["data/b.csv"]);
+  });
+
+  it("左键 auxclick 不误关（只有中键语义）", async () => {
+    const wrapper = mountSider();
+    const preview = usePreviewStore();
+    preview.open("reports/a.md");
+    await wrapper.vm.$nextTick();
+
+    await wrapper.get('[data-testid="preview-tab"]').trigger("auxclick", { button: 0 });
+    expect(preview.tabs).toHaveLength(1);
+  });
+
+  it("drop 到目标 tab 的下标触发重排", async () => {
+    const wrapper = mountSider();
+    const preview = usePreviewStore();
+    preview.open("reports/a.md");
+    preview.open("data/b.csv");
+    await wrapper.vm.$nextTick();
+
+    // 模拟拖拽：dragstart 记下被拖 tab，drop 落在下标 1
+    const tabs = wrapper.findAll('[data-testid="preview-tab"]');
+    await tabs[0].trigger("dragstart", { dataTransfer: { setData: vi.fn(), effectAllowed: "" } });
+    await tabs[1].trigger("drop", { dataTransfer: {} });
+    expect(preview.tabs.map((tab) => tab.path)).toEqual(["data/b.csv", "reports/a.md"]);
+    // 重排不抢焦点
+    expect(preview.activeTab?.path).toBe("data/b.csv");
+  });
+});
+
+describe("PreviewSider 空态引导", () => {
+  it("「打开文件树」切到文件区", async () => {
+    const wrapper = mountSider();
+    await wrapper.get('[data-testid="preview-empty-files"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.find('[data-testid="file-tree"]').exists()).toBe(true);
+  });
+
+  it("「抓取网页」拉起抓取对话框", async () => {
+    const wrapper = mountSider();
+    expect(wrapper.find('[data-testid="web-fetch-dialog-stub"]').exists()).toBe(false);
+    await wrapper.get('[data-testid="preview-empty-fetch"]').trigger("click");
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('[data-testid="web-fetch-dialog-stub"]').exists()).toBe(true);
   });
 });
 

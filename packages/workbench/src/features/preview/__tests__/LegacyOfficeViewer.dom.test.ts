@@ -5,13 +5,18 @@
  * 且没有任何错误提示，用户只能以为文件坏了。所以每条用例都同时断言
  * 「提示出现」和「原始字节没有出现在界面上」。
  */
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
+import { invoke } from "@tauri-apps/api/core";
 import LegacyOfficeViewer from "@/features/preview/LegacyOfficeViewer.vue";
 import { usePreviewStore } from "@/stores/preview";
 import { useVfsStore } from "@/stores/vfs";
 import type { PreviewTab } from "@/stores/preview";
+
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+
+const invokeMock = vi.mocked(invoke);
 
 /** 出现在字节里、绝不该被渲染出来的哨兵串。 */
 const MARKER = "SHOULD_NEVER_RENDER";
@@ -94,5 +99,69 @@ describe("LegacyOfficeViewer", () => {
     const alert = wrapper.find('[role="alert"]');
     expect(alert.exists()).toBe(true);
     expect(alert.text()).toContain("读取失败");
+  });
+});
+
+describe("LegacyOfficeViewer 降级体验", () => {
+  /** 桌面态标记：`isTauriRuntime()` 认 window 上的 `__TAURI_INTERNALS__`。 */
+  function stubTauriRuntime(): void {
+    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+  }
+
+  afterEach(() => {
+    delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+    invokeMock.mockReset();
+  });
+
+  it("摘要条显示文件体积（byteLength 换算，无需宿主 stat）", async () => {
+    const vfs = useVfsStore();
+    await vfs.writeBinary("docs/legacy.doc", bytes(OLE2_HEAD, MARKER));
+    const id = usePreviewStore().open("docs/legacy.doc");
+
+    const wrapper = mount(LegacyOfficeViewer, { props: { tab: tabOf(id) } });
+    await flushPromises();
+
+    // OLE2 头 8 字节 + 哨兵串 19 字节 = 27 B
+    expect(wrapper.text()).toContain("27 B");
+  });
+
+  it("桌面态且有磁盘孪生路径：正文里出现「用系统应用打开」按钮，点击调 open_path", async () => {
+    stubTauriRuntime();
+    invokeMock.mockResolvedValue(undefined);
+    const preview = usePreviewStore();
+    const id = preview.open("docs/legacy.doc");
+    preview.attachDiskPath("docs/legacy.doc", "/home/u/docs/legacy.doc");
+
+    const wrapper = mount(LegacyOfficeViewer, { props: { tab: tabOf(id) } });
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="legacy-office-open-external"]').exists()).toBe(true);
+    await wrapper.get('[data-testid="legacy-office-open-external"]').trigger("click");
+    await flushPromises();
+    expect(invokeMock).toHaveBeenCalledWith("open_path", { path: "/home/u/docs/legacy.doc" });
+  });
+
+  it("浏览器态没有磁盘通道：按钮不出现", async () => {
+    const vfs = useVfsStore();
+    await vfs.writeBinary("docs/legacy.doc", bytes(OLE2_HEAD));
+    const id = usePreviewStore().open("docs/legacy.doc");
+
+    const wrapper = mount(LegacyOfficeViewer, { props: { tab: tabOf(id) } });
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="legacy-office-open-external"]').exists()).toBe(false);
+    // 提示文案还在，只是不再指向一个不存在的按钮
+    expect(wrapper.text()).toContain("用系统应用打开");
+  });
+
+  it("OLE2 老格式给出另存为新格式的转换提示", async () => {
+    const vfs = useVfsStore();
+    await vfs.writeBinary("docs/legacy.xls", bytes(OLE2_HEAD));
+    const id = usePreviewStore().open("docs/legacy.xls");
+
+    const wrapper = mount(LegacyOfficeViewer, { props: { tab: tabOf(id) } });
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("另存为对应的 .docx / .xlsx / .pptx 新格式");
   });
 });
