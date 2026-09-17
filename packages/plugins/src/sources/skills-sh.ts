@@ -18,8 +18,9 @@ function numAt(record: Record<string, unknown>, key: string): number {
 }
 
 /** 归一化 skills.sh 搜索响应；缺 skillId 的脏数据丢弃。
- * scopeSource 给定时只保留该仓库源（如 "larksuite/cli"）。 */
-export function mapSearchResponse(raw: unknown, scopeSource?: string): MarketSkillEntry[] {
+ * scopeSource 给定时只保留该仓库源（如 "larksuite/cli"）。
+ * origin 给定时写入条目，供下载路由到对应源。 */
+export function mapSearchResponse(raw: unknown, options?: { scopeSource?: string; origin?: string }): MarketSkillEntry[] {
   if (!isRecord(raw) || !Array.isArray(raw.skills)) return [];
   const out: MarketSkillEntry[] = [];
   for (const item of raw.skills) {
@@ -28,7 +29,7 @@ export function mapSearchResponse(raw: unknown, scopeSource?: string): MarketSki
     const skillId = strAt(item, "skillId");
     if (!ref || !skillId) continue;
     const source = strAt(item, "source") ?? "";
-    if (scopeSource && source !== scopeSource) continue;
+    if (options?.scopeSource && source !== options.scopeSource) continue;
     out.push({
       ref,
       skillId,
@@ -36,6 +37,7 @@ export function mapSearchResponse(raw: unknown, scopeSource?: string): MarketSki
       installs: numAt(item, "installs"),
       source,
       downloadable: ref.split("/").length === 3,
+      origin: options?.origin,
     });
   }
   return out;
@@ -54,22 +56,23 @@ export function parseSnapshot(raw: unknown): SkillSnapshot {
   return { files, hash: typeof raw.hash === "string" ? raw.hash : "" };
 }
 
-/** 基于 skills.sh 聚合索引的源。scopeSource 用于派生子源（如飞书 larksuite/cli）。 */
+/** 基于 skills.sh 协议（search/download 同源）的源。
+ * origin 给定时走自定义端点而非默认 skills.sh；scopeSource 用于派生子源（如飞书 larksuite/cli）。 */
 export function createSkillsShSource(
   transport: SkillsMarketTransport,
-  options: { id: string; label: string; description: string; scopeSource?: string },
+  options: { id: string; label: string; description: string; scopeSource?: string; origin?: string },
 ): SkillSourceAdapter {
   return {
     id: options.id,
     label: options.label,
     description: options.description,
     async search(query: string): Promise<MarketSkillEntry[]> {
-      const raw = await transport.search(query);
-      return mapSearchResponse(raw, options.scopeSource);
+      const raw = await transport.search(query, options.origin);
+      return mapSearchResponse(raw, { scopeSource: options.scopeSource, origin: options.origin });
     },
     async download(entry: MarketSkillEntry): Promise<SkillSnapshot> {
       if (!entry.downloadable) throw new Error(`site source is not downloadable: ${entry.ref}`);
-      return parseSnapshot(await transport.download(entry.ref));
+      return parseSnapshot(await transport.download(entry.ref, entry.origin ?? options.origin));
     },
   };
 }

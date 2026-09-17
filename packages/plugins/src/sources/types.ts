@@ -9,6 +9,8 @@ export interface MarketSkillEntry {
   installs: number;
   source: string;
   downloadable: boolean;
+  /** 条目所属源的自定义 origin（覆盖默认 skills.sh 时设置；下载走该源）。 */
+  origin?: string;
 }
 
 export interface SkillSnapshotFile {
@@ -26,8 +28,10 @@ export interface SkillsMarketTransport {
   available(): boolean;
   /** 安装/卸载是否可用（Web 预览无宿主文件写入通道）。 */
   installable(): boolean;
-  search(query: string): Promise<unknown>;
-  download(entryRef: string): Promise<unknown>;
+  /** origin 为空时走默认市场（skills.sh）。 */
+  search(query: string, origin?: string): Promise<unknown>;
+  /** origin 为空时走默认市场（skills.sh）。 */
+  download(entryRef: string, origin?: string): Promise<unknown>;
   install(workspaceRoot: string, skillId: string, files: SkillSnapshotFile[]): Promise<{ dir: string; filesWritten: number }>;
   uninstall(workspaceRoot: string, skillId: string): Promise<void>;
 }
