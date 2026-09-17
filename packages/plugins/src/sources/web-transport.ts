@@ -21,14 +21,20 @@ export class WebSkillsTransport implements SkillsMarketTransport {
     return false;
   }
 
-  async search(query: string): Promise<unknown> {
-    return fetchJson(`${MARKET_API_BASE}/skills/api/search?q=${encodeURIComponent(query)}`, "skills market");
+  async search(query: string, origin?: string): Promise<unknown> {
+    const base = origin ? origin.replace(/\/+$/, "") : MARKET_API_BASE;
+    const prefix = origin ? "" : "/skills";
+    return fetchJson(`${base}${prefix}/api/search?q=${encodeURIComponent(query)}`, "skills market");
   }
 
-  async download(entryRef: string): Promise<unknown> {
+  async download(entryRef: string, origin?: string): Promise<unknown> {
     const parts = entryRef.split("/");
     if (parts.length !== 3) throw new Error(`ref is not a downloadable repo skill (expect owner/repo/skill): ${entryRef}`);
-    return fetchJson(`${MARKET_API_BASE}/skills/api/download/${parts.map((part) => encodeURIComponent(part)).join("/")}`, "skills market");
+    const encoded = parts.map((part) => encodeURIComponent(part)).join("/");
+    if (origin) {
+      return fetchJson(`${origin.replace(/\/+$/, "")}/api/download/${encoded}`, "skills market");
+    }
+    return fetchJson(`${MARKET_API_BASE}/skills/api/download/${encoded}`, "skills market");
   }
 
   install(workspaceRoot: string, skillId: string, _files: SkillSnapshotFile[]): Promise<{ dir: string; filesWritten: number }> {

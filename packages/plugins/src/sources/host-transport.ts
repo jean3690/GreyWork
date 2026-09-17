@@ -49,13 +49,13 @@ export class HostSkillsTransport implements SkillsMarketTransport {
     return true;
   }
 
-  async search(query: string): Promise<unknown> {
-    const items = await invoke<HostSkillEntry[]>("skills_search", { query });
+  async search(query: string, origin?: string): Promise<unknown> {
+    const items = await invoke<HostSkillEntry[]>("skills_search", origin ? { origin, query } : { query });
     return wrapHostSearch(items);
   }
 
-  async download(entryRef: string): Promise<unknown> {
-    return invoke<HostSkillSnapshot>("skills_download", { entryRef });
+  async download(entryRef: string, origin?: string): Promise<unknown> {
+    return invoke<HostSkillSnapshot>("skills_download", origin ? { origin, entryRef } : { entryRef });
   }
 
   async install(workspaceRoot: string, skillId: string, files: SkillSnapshotFile[]): Promise<{ dir: string; filesWritten: number }> {

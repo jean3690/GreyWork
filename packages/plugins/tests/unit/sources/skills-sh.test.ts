@@ -21,7 +21,7 @@ describe("mapSearchResponse", () => {
   });
 
   it("scopeSource filters to a single upstream repository", () => {
-    const entries = mapSearchResponse(SEARCH_RAW, "larksuite/cli");
+    const entries = mapSearchResponse(SEARCH_RAW, { scopeSource: "larksuite/cli" });
     expect(entries.map((entry) => entry.source)).toEqual(["larksuite/cli"]);
   });
 
