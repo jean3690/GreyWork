@@ -131,7 +131,8 @@ Rust side (run inside `apps/desktop/src-tauri`): `cargo fmt`, `cargo clippy -- -
 - `.github/workflows/ci.yml` mirrors the local hooks: ESLint → Prettier check → typecheck → tests →
   build, plus `cargo fmt` → `cargo clippy` → `cargo test`.
 - Tagging `v*` runs `.github/workflows/release.yml`, which builds deb / NSIS / dmg bundles and opens
-  a draft GitHub Release.
+  a draft GitHub Release. The release body is taken from the matching entry in
+  [CHANGELOG.md](CHANGELOG.md); un-draft it once all three platforms are green.
 - A pre-push hook runs `pnpm lint && pnpm -r test`, so a broken push fails locally first.
 
 ## Security Model

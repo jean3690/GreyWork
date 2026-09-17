@@ -1,0 +1,82 @@
+# 更新日志
+
+本文件记录 GreyWork 每个版本的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
+版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
+
+发版流程：新增条目补进对应版本标题下 → 打 `v*` 标签 → `.github/workflows/release.yml` 会自动从本文件
+抽取该版本条目作为 Release 说明。**不要手改 Release 正文**，改这里。
+
+## [Unreleased]
+
+## [0.1.0] - 2026-09-17
+
+首个公开版本：Tauri 2 桌面外壳 + Rust 宿主 + Vue 3 渲染层，三平台安装包（deb / NSIS / dmg）。
+
+### 新增
+
+**Agent 运行时**
+
+- 接入 ACP（Agent Client Protocol）外部智能体：内置主流 agent 预设与本机安装探测，会话按对话隔离，
+  可向 agent 声明 MCP 服务器。
+- 会话配置项（模型 / 思考强度 / 会话模式）由后端探测得出，支持逐项覆盖；团队成员可各持一套配置。
+- 本机模型管线：OpenAI 兼容流式供应商，自定义请求头支持 `{{ENV}}` 占位，可调思考强度。
+- 权限模型三档（只读 / 工作区 / 完全访问）：宿主拦截越界路径与只读档下的写与执行；「始终允许」
+  按工具类别在单次会话内记忆；每次裁决在消息流里留一条只读权限留痕，说明批了什么、谁批的、为什么没问。
+
+**工作区**
+
+- 授权工作区根目录：文件、Git、进程操作全部限定在解析出的根目录内，另配工作区 checkpoint。
+- 真实 Git 面板：状态 / diff / 提交，一律经宿主 CLI，边界同上。
+- 文件预览：文本（CodeMirror 6 多语言高亮）、Markdown、CSV、图片、PDF（带文本层，可划词复制并送进对话）、
+  Office 文档（Univer 渲染 xlsx / docx / pptx）。
+- 产物查看器支持多 tab；预览面板支持标签拖拽排序、中键关闭、滚动位置保持与异步骨架屏。
+- 网页抓取 `web_fetch`：宿主侧安全抓取 + 前端正文提取，右栏预览可直接「发送到对话」。
+- 选区注入：划词与表格选区都能带上下文送进对话。
+
+**可扩展性**
+
+- 基于 Cordis 微内核的插件运行时与声明式插件包（只含受限 JSON，不执行远端 JavaScript），能力需显式授权。
+- 插件悬浮窗：透明底、无装饰、置顶、不占任务栏的宠物形态窗口，由声明了 render loop 的插件开启。
+- 活动面板汇总会话中产生的产物。
+- 市场收在一处：官方插件注册表（带签名 —— GitHub 账号失陷也无法投毒目录）、MCP Registry
+  （npm / pypi 包一键登记）与 skills.sh 等技能源。
+- Agent 技能放在 `.agents/skills/`，由 `skills-lock.json` 记录哈希锁定。
+
+**对话之外**
+
+- 定时任务：cron 或一次性触发；AI 可在回复里用 `schedule` 围栏提议任务，确认后才真正创建。
+- 远程助手七条通道：微信（ClawBot / iLink）、钉钉、飞书、Telegram、QQ、Discord、企业微信 ——
+  手机上也能使唤本机助手，凭证只存本机应用数据目录（`0600`），不进设置快照。
+- 团队协作会话：多个成员跑同一任务。
+- 多模态附件、斜杠命令与通知系统。
+- 中英双语界面（zh-CN / en-US）；界面跑在浏览器里时宿主能力自动降级为只读提示。
+- 壳层布局模式与左栏偏好持久化，`Ctrl+1~4` 一键切换。
+
+### 修复
+
+- ACP 会话串上下文：新建对话不再接着上一轮的上下文；同时修复 npx 型 agent 冷启动握手超时与超时进程回收。
+- Markdown 代码块复制在 WKWebView / WebKitGTK 上静默失效 —— 补 ESLint 门禁挡住整类问题。
+- 带图纸的 xlsx 预览失败 —— exceljs 补丁纳入版本控制。
+- 修掉 ui-region 用例漏卸载导致的渲染循环定时器泄漏。
+
+### 性能
+
+- 磁盘二进制读取改走 `tauri::ipc::Response`，去掉 base64 的 33% 膨胀。
+- pdf.js worker 换预压缩版，安装包 -1 MB。
+- 路由视图懒加载 + 文档写入器延迟加载，启动解析量 -80%。
+- 会话历史大列表切虚拟窗口；会话持久化弃用 deep watch，文件树改为线性构造。
+- 启动打点基线：插件清单与挂载并发，不占关键路径。
+
+### 工程
+
+- 三平台打包矩阵（deb / nsis / dmg）与 `.github/workflows/ci.yml` 的 Rust 侧 fmt → clippy → test 门禁。
+- 打 `v*` 标签触发发布工作流，产出三平台安装包并开一个 draft Release。
+- Vitest 覆盖率纳入门禁；桌面端 renderer 全链路冒烟 e2e。
+- 修掉一批只在 CI 或非 Linux 平台暴露的问题：依赖跑测机器全局 git 身份、glob 模式用原生分隔符导致
+  Windows 构建失败、macOS 缺 `macos-private-api` 编译不过、构建脚本里 POSIX 风格的环境变量前缀。
+
+**安装包**：Linux 用 `.deb`（`sudo dpkg -i` 或 `apt install ./`），Windows 用 NSIS 安装器，macOS 用 `.dmg`。
+产物当前未做代码签名：macOS 首次打开需右键「打开」，Windows 可能提示 SmartScreen。
+
+[Unreleased]: https://github.com/jean3690/GreyWork/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/jean3690/GreyWork/releases/tag/v0.1.0

@@ -123,7 +123,8 @@ Rust 侧（在 `apps/desktop/src-tauri` 下执行）：`cargo fmt`、`cargo clip
 - Vitest 分 `node`（纯逻辑）与 `dom`（组件行为）两个 project，覆盖率阈值按包配置。
 - `.github/workflows/ci.yml` 与本地钩子同构：ESLint → Prettier 校验 → typecheck → 测试 → 构建，
   Rust 侧再跑 `cargo fmt` → `cargo clippy` → `cargo test`。
-- 打 `v*` 标签触发 `.github/workflows/release.yml`，产出 deb / NSIS / dmg 并开一个 draft Release。
+- 打 `v*` 标签触发 `.github/workflows/release.yml`，产出 deb / NSIS / dmg 并开一个 draft Release；
+  Release 正文自动取自 [CHANGELOG.md](CHANGELOG.md) 里该版本的条目，三个平台都成功后取消 draft 即发布。
 - pre-push 钩子会跑 `pnpm lint && pnpm -r test`，问题在本地就拦住。
 
 ## 安全模型

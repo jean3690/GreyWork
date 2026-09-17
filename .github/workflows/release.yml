@@ -51,6 +51,12 @@ jobs:
           node-version: 24
           cache: pnpm
 
+      # Release 正文的唯一来源是 CHANGELOG.md 里对应版本的条目：改文案改那里，
+      # 不要手改 Release。缺条目会在这里直接失败，避免发出没有说明的版本。
+      - name: 从 CHANGELOG 抽取发布说明
+        id: notes
+        run: node scripts/changelog-section.mjs "${{ github.ref_name }}" --github-output body
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -65,8 +71,8 @@ jobs:
         with:
           projectPath: apps/desktop
           tagName: ${{ github.ref_name }}
-          releaseName: "Greywork ${{ github.ref_name }}"
-          releaseBody: "See the assets to download and install this version."
+          releaseName: "GreyWork ${{ github.ref_name }}"
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: true
           prerelease: false
           args: --bundles ${{ matrix.bundle }}
