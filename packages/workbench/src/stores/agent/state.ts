@@ -29,6 +29,8 @@ export interface AgentStoreLocals {
   acpSessionThreadId: string | null;
   /** 回放工作区记忆配置期间置真，抑制 setAcpConfig 的自反写入。 */
   replayingConfig: boolean;
+  /** 已注入 schedule 围栏说明的 ACP 会话 id（每会话一次；adoptOpenedSession 重置）。 */
+  scheduleHintInjectedFor: string | null;
   /** runs 编排域注册的事件消费桥（子任务会话/句柄归属只存在编排侧，会话域不静态依赖编排域）。 */
   runBridge: RunEventBridge | null;
   /** 在途全局回合的收尾钩子（sendGlobalTurn 置入；prompt-done/异常清空，stopped 不清）。 */
@@ -94,6 +96,7 @@ export function createAgentStoreState(): AgentStoreState {
       acpThreadId: null,
       acpSessionThreadId: null,
       replayingConfig: false,
+      scheduleHintInjectedFor: null,
       runBridge: null,
       turnHooks: null,
     },

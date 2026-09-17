@@ -151,6 +151,46 @@ export interface Attachment {
   truncated?: boolean;
 }
 
+/**
+ * 待确认的定时任务提案（AI 回复中的 ```schedule 围栏解析产物）。
+ * 随会话整条持久化：回合结束/重启后仍可确认；`createdId` 非空 = 已收口
+ * （卡片转只读，回放渲染也不会重复建任务）。
+ */
+export interface ScheduleDraft {
+  name: string;
+  /** 每次触发时下发给模型的指令文本。 */
+  intent: string;
+  /** 标准 cron 5 段表达式；与 onceAt 二选一。 */
+  cron?: string;
+  /** 一次性触发时刻（epoch ms）。 */
+  onceAt?: number;
+  /** 创建成功后的任务 id（automation store）。 */
+  createdId?: string;
+}
+
+/**
+ * 一次权限请求的裁决留痕（ACP session/request_permission）。
+ *
+ * 活跃态卡片挂在输入框上方（那是「等你点」的位置，对 120s 超时窗口最友好）；
+ * 一旦裁决就转成本结构随消息落盘，在消息流里留一条只读记录 —— 与 AskQuestionCard /
+ * ScheduleConfirmCard 的 settled 态同一约定：事后回看能知道「当时批了什么」。
+ */
+export interface PermissionTrace {
+  toolCallId: string;
+  title: string | null;
+  /** 宿主 label 化的工具类别（read / edit / execute / …）。 */
+  kind: string;
+  /** 本请求涉及的路径（协议 locations）；execute 类通常为空。 */
+  paths: string[];
+  /** 命令正文（从 agent 的 rawInput 机会性提取，见 lib/permission-detail）；取不到为 null。 */
+  command: string | null;
+  /** 用户看到的选项名（或拒绝文案）；null = 拒绝 / 取消。 */
+  choice: string | null;
+  /** 谁做的决定：用户点选 / 宿主按档位自动 / 超时兜底取消。 */
+  source: "user" | "auto" | "timeout";
+  decidedAt: number;
+}
+
 export interface ThreadMessage {
   id: string;
   role: "user" | "assistant" | "system";
@@ -169,6 +209,15 @@ export interface ThreadMessage {
   tools?: ToolActivity[];
   /** 待用户作答的提问（AskUserQuestion）；作答后 answers 非空，卡片转只读。 */
   ask?: AskRequest;
+  /** 待确认的定时任务提案（```schedule 围栏）；确认后 createdId 非空，取消则移除。 */
+  scheduleDraft?: ScheduleDraft;
+  /**
+   * 本条消息内发生的权限裁决留痕，按发生顺序排列。
+   *
+   * 用数组而非单值：一个 ACP 回合里 agent 可能连续请求多次权限（每个 bash 命令一次），
+   * 单值字段后一次会把前一次冲掉，用户回看就只剩最后一条。
+   */
+  permissions?: PermissionTrace[];
   /** ACP 后端派发消息的来源提供方名（内部 LLM 管线无此字段） */
   acp?: string;
   /**

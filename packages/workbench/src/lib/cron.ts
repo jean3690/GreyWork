@@ -303,16 +303,26 @@ export function describeCron(expr: string): string | null {
 
 export type ScheduleSpec =
   | { kind: "manual" }
+  /**
+   * 指定日期时间跑一次（`at` = epoch ms）。
+   *
+   * **刻意不折算成 cron**：cron 没有年份字段，`m h d mon *` 是「每年这一天」，
+   * 表达不了「就跑这一次」。一次性语义由任务上的 `onceAt` 承载（宿主调度器按
+   * 时间戳判定 + 跑过即不再触发），所以这里 compose 出 null。
+   */
+  | { kind: "once"; at: number }
   | { kind: "daily"; hour: number; minute: number }
   | { kind: "weekly"; days: number[]; hour: number; minute: number }
   | { kind: "monthly"; day: number; hour: number; minute: number }
+  | { kind: "yearly"; month: number; day: number; hour: number; minute: number }
   | { kind: "interval"; unit: "minute" | "hour"; every: number }
   | { kind: "cron"; expr: string };
 
-/** 结构化输入 → cron；null = 手动触发（不排期）。 */
+/** 结构化输入 → cron；null = 手动触发（不排期）或一次性任务（走 `onceAt`）。 */
 export function composeCron(spec: ScheduleSpec): string | null {
   switch (spec.kind) {
     case "manual":
+    case "once":
       return null;
     case "daily":
       return `${spec.minute} ${spec.hour} * * *`;
@@ -323,6 +333,8 @@ export function composeCron(spec: ScheduleSpec): string | null {
     }
     case "monthly":
       return `${spec.minute} ${spec.hour} ${spec.day} * *`;
+    case "yearly":
+      return `${spec.minute} ${spec.hour} ${spec.day} ${spec.month} *`;
     case "interval":
       return spec.unit === "minute" ? `*/${spec.every} * * * *` : `0 */${spec.every} * * *`;
     case "cron":
@@ -331,7 +343,9 @@ export function composeCron(spec: ScheduleSpec): string | null {
 }
 
 /** cron → 结构化输入；解不出结构时原样保留为 `cron` 形态（不改写）。 */
-export function decomposeCron(cron: string | null | undefined): ScheduleSpec {
+export function decomposeCron(cron: string | null | undefined, onceAt?: number | null): ScheduleSpec {
+  // 一次性任务优先：它的 cron 恒为 null，但即便被写脏也不该被排成循环任务。
+  if (typeof onceAt === "number" && Number.isFinite(onceAt) && onceAt > 0) return { kind: "once", at: onceAt };
   const text = (cron ?? "").trim();
   if (text === "") return { kind: "manual" };
   const spec = parseCron(text);
@@ -354,8 +368,10 @@ export function decomposeCron(cron: string | null | undefined): ScheduleSpec {
   if (minute === null || hour === null) return { kind: "cron", expr: text };
   if (freeDays && weekdayText === "*") return { kind: "daily", hour, minute };
   if (freeDays && /^\d+(,\d+)*$/.test(weekdayText)) return { kind: "weekly", days: spec.weekdays, hour, minute };
-  if (monthText === "*" && weekdayText === "*" && /^\d+$/.test(dayText)) {
-    return { kind: "monthly", day: Number(dayText), hour, minute };
+  if (weekdayText === "*" && /^\d+$/.test(dayText)) {
+    const month = single(monthText, 1, 12);
+    if (month !== null) return { kind: "yearly", month, day: Number(dayText), hour, minute };
+    if (monthText === "*") return { kind: "monthly", day: Number(dayText), hour, minute };
   }
   return { kind: "cron", expr: text };
 }
