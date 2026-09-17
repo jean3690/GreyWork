@@ -9,15 +9,23 @@ import { createLlmClient } from "@greywork/llm";
 import { ref, type Ref } from "vue";
 import type { DingTalkStatus } from "../../lib/dingtalk-backend";
 import type { FeishuStatus } from "../../lib/feishu-backend";
+import type { DiscordStatus } from "../../lib/discord-backend";
+import type { QqStatus } from "../../lib/qq-backend";
+import type { TelegramBotLink, TelegramStatus } from "../../lib/telegram-backend";
+import type { WecomStatus } from "../../lib/wecom-backend";
 import { wechatBackend, type WechatStatus } from "../../lib/wechat-backend";
 import { useSessionStore } from "../session";
 import { useSettingsStore } from "../settings";
 import { useWorkspaceStore } from "../workspace";
 import {
+  IDLE_DISCORD_STATUS,
   IDLE_DINGTALK_STATUS,
   IDLE_FEISHU_REGISTER,
   IDLE_FEISHU_STATUS,
+  IDLE_QQ_STATUS,
   IDLE_STATUS,
+  IDLE_TELEGRAM_STATUS,
+  IDLE_WECOM_STATUS,
   readPeerArchive,
   type FeishuRegisterView,
   type RemoteActivity,
@@ -39,6 +47,16 @@ export interface RemoteAssistantState {
   dingtalkStatus: Ref<DingTalkStatus>;
   /** 飞书通道状态（宿主直出形状）。 */
   feishuStatus: Ref<FeishuStatus>;
+  /** Telegram 通道状态（宿主直出形状）。 */
+  telegramStatus: Ref<TelegramStatus>;
+  /** QQ 通道状态（宿主直出形状）。 */
+  qqStatus: Ref<QqStatus>;
+  /** Discord 通道状态（宿主直出形状）。 */
+  discordStatus: Ref<DiscordStatus>;
+  /** 企业微信通道状态（宿主直出形状）。 */
+  wecomStatus: Ref<WecomStatus>;
+  /** Telegram 机器人扫码链接（未取到时为 null，error 说明原因）。 */
+  telegramBotLink: Ref<{ link: TelegramBotLink | null; error: string | null }>;
   /** 飞书扫码创建应用的界面状态。 */
   feishuRegister: Ref<FeishuRegisterView>;
   qr: Ref<WechatQrView | null>;
@@ -59,6 +77,11 @@ export function createRemoteAssistantState(): RemoteAssistantState {
     status: ref<WechatStatus>({ ...IDLE_STATUS }),
     dingtalkStatus: ref<DingTalkStatus>({ ...IDLE_DINGTALK_STATUS }),
     feishuStatus: ref<FeishuStatus>({ ...IDLE_FEISHU_STATUS }),
+    telegramStatus: ref<TelegramStatus>({ ...IDLE_TELEGRAM_STATUS }),
+    qqStatus: ref<QqStatus>({ ...IDLE_QQ_STATUS }),
+    discordStatus: ref<DiscordStatus>({ ...IDLE_DISCORD_STATUS }),
+    wecomStatus: ref<WecomStatus>({ ...IDLE_WECOM_STATUS }),
+    telegramBotLink: ref<{ link: TelegramBotLink | null; error: string | null }>({ link: null, error: null }),
     feishuRegister: ref<FeishuRegisterView>({ ...IDLE_FEISHU_REGISTER }),
     qr: ref<WechatQrView | null>(null),
     qrError: ref<string | null>(null),

@@ -43,9 +43,13 @@ const CHANNEL_HINT_KEYS: Record<RemoteChannel, string> = {
   wechat: "remoteAssist.wechat.scanFirst",
   dingtalk: "remoteAssist.dingtalk.credentialsFirst",
   feishu: "remoteAssist.feishu.credentialsFirst",
+  telegram: "remoteAssist.telegram.credentialsFirst",
+  qq: "remoteAssist.qq.credentialsFirst",
+  discord: "remoteAssist.discord.credentialsFirst",
+  wecom: "remoteAssist.wecom.credentialsFirst",
 };
 
-/** 未就绪时的原因：微信要扫码，钉钉 / 飞书要先填应用凭证。 */
+/** 未就绪时的原因：微信要扫码，其余通道要先填凭证。 */
 const blockedHint = computed(() => (status.value.ready ? "" : t(CHANNEL_HINT_KEYS[props.channel])));
 
 const buttonClass =
@@ -54,19 +58,31 @@ const buttonClass =
 function connect(): void {
   if (props.channel === "wechat") void store.connect();
   else if (props.channel === "dingtalk") void store.connectDingTalk();
-  else void store.connectFeishu();
+  else if (props.channel === "feishu") void store.connectFeishu();
+  else if (props.channel === "telegram") void store.connectTelegram();
+  else if (props.channel === "qq") void store.connectQq();
+  else if (props.channel === "discord") void store.connectDiscord();
+  else void store.connectWecom();
 }
 
 function disconnect(): void {
   if (props.channel === "wechat") void store.disconnect();
   else if (props.channel === "dingtalk") void store.disconnectDingTalk();
-  else void store.disconnectFeishu();
+  else if (props.channel === "feishu") void store.disconnectFeishu();
+  else if (props.channel === "telegram") void store.disconnectTelegram();
+  else if (props.channel === "qq") void store.disconnectQq();
+  else if (props.channel === "discord") void store.disconnectDiscord();
+  else void store.disconnectWecom();
 }
 
 function forget(): void {
   if (props.channel === "wechat") void store.logout();
   else if (props.channel === "dingtalk") void store.clearDingTalkCredentials();
-  else void store.clearFeishuCredentials();
+  else if (props.channel === "feishu") void store.clearFeishuCredentials();
+  else if (props.channel === "telegram") void store.clearTelegramCredentials();
+  else if (props.channel === "qq") void store.clearQqCredentials();
+  else if (props.channel === "discord") void store.clearDiscordCredentials();
+  else void store.clearWecomCredentials();
 }
 </script>
 
@@ -118,7 +134,7 @@ function forget(): void {
           {{ t("remoteAssist.wechat.connectAction") }}
         </button>
         <button type="button" :class="buttonClass" :data-testid="`${props.channel}-forget`" @click="forget">
-          {{ props.channel === "wechat" ? t("remoteAssist.wechat.logout") : t("remoteAssist.dingtalk.clear") }}
+          {{ props.channel === "wechat" ? t("remoteAssist.wechat.logout") : t(`remoteAssist.${props.channel}.clear`) }}
         </button>
       </template>
     </div>

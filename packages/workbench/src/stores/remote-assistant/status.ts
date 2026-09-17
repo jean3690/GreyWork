@@ -7,12 +7,21 @@ import type { DingTalkStatus } from "../../lib/dingtalk-backend";
 import { dingtalkBackend } from "../../lib/dingtalk-backend";
 import type { FeishuStatus } from "../../lib/feishu-backend";
 import { feishuBackend } from "../../lib/feishu-backend";
+import { discordBackend, type DiscordStatus } from "../../lib/discord-backend";
+import { qqBackend, type QqStatus } from "../../lib/qq-backend";
+import { telegramBackend, type TelegramBotLink, type TelegramStatus } from "../../lib/telegram-backend";
+import { wecomBackend, type WecomStatus } from "../../lib/wecom-backend";
 import { wechatBackend, type WechatStatus } from "../../lib/wechat-backend";
 import {
   ACTIVITY_LIMIT,
   aid,
+  describeError,
   dingtalkChannelStatus,
   feishuChannelStatus,
+  discordChannelStatus,
+  qqChannelStatus,
+  telegramChannelStatus,
+  wecomChannelStatus,
   wechatChannelStatus,
   type ChannelStatus,
   type RemoteActivity,
@@ -28,6 +37,11 @@ export interface StatusApi {
   refreshStatus(): Promise<WechatStatus>;
   refreshDingTalkStatus(): Promise<DingTalkStatus>;
   refreshFeishuStatus(): Promise<FeishuStatus>;
+  refreshTelegramStatus(): Promise<TelegramStatus>;
+  refreshQqStatus(): Promise<QqStatus>;
+  refreshDiscordStatus(): Promise<DiscordStatus>;
+  refreshWecomStatus(): Promise<WecomStatus>;
+  refreshTelegramBotLink(): Promise<TelegramBotLink | null>;
   recordActivity(entry: Omit<RemoteActivity, "id" | "at">): void;
 }
 
@@ -36,7 +50,11 @@ export function createStatusSlice({ state }: { state: RemoteAssistantState }): S
   function statusOf(channel: RemoteChannel): ChannelStatus {
     if (channel === "wechat") return wechatChannelStatus(state.status.value);
     if (channel === "dingtalk") return dingtalkChannelStatus(state.dingtalkStatus.value);
-    return feishuChannelStatus(state.feishuStatus.value);
+    if (channel === "feishu") return feishuChannelStatus(state.feishuStatus.value);
+    if (channel === "telegram") return telegramChannelStatus(state.telegramStatus.value);
+    if (channel === "qq") return qqChannelStatus(state.qqStatus.value);
+    if (channel === "discord") return discordChannelStatus(state.discordStatus.value);
+    return wecomChannelStatus(state.wecomStatus.value);
   }
 
   /** 该通道是否在收消息（微信长轮询 / 钉钉长连接在跑）。 */
@@ -68,6 +86,53 @@ export function createStatusSlice({ state }: { state: RemoteAssistantState }): S
     return state.feishuStatus.value;
   }
 
+  async function refreshTelegramStatus(): Promise<TelegramStatus> {
+    if (!state.available.value) return state.telegramStatus.value;
+    const next = await telegramBackend.status();
+    if (next) state.telegramStatus.value = next;
+    return state.telegramStatus.value;
+  }
+
+  async function refreshQqStatus(): Promise<QqStatus> {
+    if (!state.available.value) return state.qqStatus.value;
+    const next = await qqBackend.status();
+    if (next) state.qqStatus.value = next;
+    return state.qqStatus.value;
+  }
+
+  async function refreshDiscordStatus(): Promise<DiscordStatus> {
+    if (!state.available.value) return state.discordStatus.value;
+    const next = await discordBackend.status();
+    if (next) state.discordStatus.value = next;
+    return state.discordStatus.value;
+  }
+
+  async function refreshWecomStatus(): Promise<WecomStatus> {
+    if (!state.available.value) return state.wecomStatus.value;
+    const next = await wecomBackend.status();
+    if (next) state.wecomStatus.value = next;
+    return state.wecomStatus.value;
+  }
+
+  /**
+   * 取机器人扫码链接（宿主 getMe）。
+   *
+   * 放在 status 切片：它是「当前通道长什么样」的一部分，且渲染端只读、可重复取。
+   * 未配置 token / 网络失败时返回 null 并给出 detail——码摆不出来要说清为什么，
+   * 而不是留一片空白。
+   */
+  async function refreshTelegramBotLink(): Promise<TelegramBotLink | null> {
+    if (!state.available.value) return null;
+    try {
+      const link = await telegramBackend.botLink();
+      state.telegramBotLink.value = { link, error: null };
+      return link;
+    } catch (error) {
+      state.telegramBotLink.value = { link: null, error: describeError(error) };
+      return null;
+    }
+  }
+
   /** 活动流只保留最近一屏，越新的排越前。 */
   function recordActivity(entry: Omit<RemoteActivity, "id" | "at">): void {
     state.activity.value.unshift({ id: aid(), at: Date.now(), ...entry });
@@ -81,6 +146,11 @@ export function createStatusSlice({ state }: { state: RemoteAssistantState }): S
     refreshStatus,
     refreshDingTalkStatus,
     refreshFeishuStatus,
+    refreshTelegramStatus,
+    refreshTelegramBotLink,
+    refreshQqStatus,
+    refreshDiscordStatus,
+    refreshWecomStatus,
     recordActivity,
   };
 }

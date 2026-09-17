@@ -13,6 +13,10 @@ import type { AgentProviderConfig } from "@greywork/shell";
 import type { ThreadMessage } from "../../types";
 import { dingtalkBackend, type DingTalkInbound } from "../../lib/dingtalk-backend";
 import { feishuBackend, type FeishuInbound } from "../../lib/feishu-backend";
+import { discordBackend, type DiscordInbound } from "../../lib/discord-backend";
+import { qqBackend, type QqInbound } from "../../lib/qq-backend";
+import { telegramBackend, type TelegramInbound } from "../../lib/telegram-backend";
+import { wecomBackend, type WecomInbound } from "../../lib/wecom-backend";
 import { wechatBackend, type WechatInbound } from "../../lib/wechat-backend";
 import { markdownToPlainText } from "../../lib/wechat-text";
 import { useAgentStore } from "../agent";
@@ -32,6 +36,10 @@ export interface PipelineApi {
   onWechatInbound(message: WechatInbound): void;
   onDingTalkInbound(message: DingTalkInbound): void;
   onFeishuInbound(message: FeishuInbound): void;
+  onTelegramInbound(message: TelegramInbound): void;
+  onQqInbound(message: QqInbound): void;
+  onDiscordInbound(message: DiscordInbound): void;
+  onWecomInbound(message: WecomInbound): void;
   sendFromDesktop(key: string, text: string): Promise<{ ok: boolean; error?: string }>;
 }
 
@@ -137,6 +145,56 @@ export function createPipelineSlice({ state, getStatus, getPeers }: PipelineDeps
     });
   }
 
+  function onTelegramInbound(message: TelegramInbound): void {
+    // 同钉钉 / 飞书：非文本消息（照片、贴纸）也走同一路径，只是文本为空 → 回一句只认文字。
+    handleInbound({
+      channel: "telegram",
+      peerId: message.peerId,
+      nick: message.nick,
+      text: message.text,
+      contextToken: null,
+      unsupportedLabel: "non-text",
+      at: message.at,
+    });
+  }
+
+  function onDiscordInbound(message: DiscordInbound): void {
+    handleInbound({
+      channel: "discord",
+      peerId: message.peerId,
+      nick: message.nick,
+      text: message.text,
+      contextToken: null,
+      unsupportedLabel: "non-text",
+      at: message.at,
+    });
+  }
+
+  function onQqInbound(message: QqInbound): void {
+    handleInbound({
+      channel: "qq",
+      peerId: message.peerId,
+      nick: message.nick,
+      text: message.text,
+      contextToken: null,
+      unsupportedLabel: "non-text",
+      at: message.at,
+    });
+  }
+
+  function onWecomInbound(message: WecomInbound): void {
+    // 非文本消息（图片 / 语音）也走同一路径，只是文本为空 → 回一句只认文字。
+    handleInbound({
+      channel: "wecom",
+      peerId: message.peerId,
+      nick: message.nick,
+      text: message.text,
+      contextToken: null,
+      unsupportedLabel: message.unsupported || "non-text",
+      at: message.at,
+    });
+  }
+
   /* ===== LLM 管线（replyMode = llm） ===== */
 
   /** 一轮回复的产物：正文 + 失败说明；ACP 回合附支架（正文已流进支架，会话里无需再追加一条）。 */
@@ -211,6 +269,24 @@ export function createPipelineSlice({ state, getStatus, getPeers }: PipelineDeps
   }
 
   /**
+   * 把远程助手自己的细粒度配置覆盖（模型 / 思考强度 / 会话模式）应用到当前 ACP 会话。
+   *
+   * 只下发 agent 此刻真的暴露了的选项：换了后端或换了模型，旧键自然失效，
+   * 不猜测、不报错——「配了一个这个后端没有的模型」不该让整轮回复失败。
+   */
+  async function applyRemoteAcpConfig(): Promise<string | null> {
+    const agent = useAgentStore();
+    const overrides = settings.remoteAssist.acpConfigValues;
+    for (const [configId, value] of Object.entries(overrides)) {
+      const option = agent.acpConfigOptions.find((entry) => entry.id === configId && entry.type === "select");
+      if (!option || String(option.currentValue ?? "") === value) continue;
+      const failure = await agent.setAcpConfig(configId, value);
+      if (failure) return failure;
+    }
+    return null;
+  }
+
+  /**
    * 跑一轮 ACP 回合：把用户消息与支架入到联系人会话里，
    * 回合结束（prompt-done / prompt 层异常）后读支架正文为终稿。
    */
@@ -251,7 +327,7 @@ export function createPipelineSlice({ state, getStatus, getPeers }: PipelineDeps
 
   /* ===== 回发 ===== */
 
-  /** 按通道回发一条文本：微信带 context_token；钉钉由宿主用自己记的 sessionWebhook 发送。 */
+  /** 按通道回发一条文本：微信带 context_token；其余由宿主用自己记的凭据发送。 */
   async function sendViaChannel(peer: RemotePeer, text: string): Promise<void> {
     if (peer.channel === "wechat") {
       const token = peer.contextToken;
@@ -259,8 +335,16 @@ export function createPipelineSlice({ state, getStatus, getPeers }: PipelineDeps
       await wechatBackend.send(peer.id, token, text);
     } else if (peer.channel === "dingtalk") {
       await dingtalkBackend.send(peer.id, text);
-    } else {
+    } else if (peer.channel === "feishu") {
       await feishuBackend.send(peer.id, text);
+    } else if (peer.channel === "telegram") {
+      await telegramBackend.send(peer.id, text);
+    } else if (peer.channel === "qq") {
+      await qqBackend.send(peer.id, text);
+    } else if (peer.channel === "discord") {
+      await discordBackend.send(peer.id, text);
+    } else {
+      await wecomBackend.send(peer.id, text);
     }
     getStatus().recordActivity({ direction: "out", peer: peer.nick, channel: peer.channel, text, kind: "text" });
   }
@@ -290,7 +374,7 @@ export function createPipelineSlice({ state, getStatus, getPeers }: PipelineDeps
     return { ok: true };
   }
 
-  /** 「正在输入」只有微信协议支持；钉钉没有对应能力，静默跳过。 */
+  /** 「正在输入」只有微信协议支持；其余通道没有对应能力，静默跳过。 */
   async function signalTyping(peer: RemotePeer, typing: boolean): Promise<void> {
     if (peer.channel !== "wechat" || !peer.contextToken) return;
     await wechatBackend.sendTyping(peer.id, peer.contextToken, typing).catch(() => undefined);
@@ -350,6 +434,13 @@ export function createPipelineSlice({ state, getStatus, getPeers }: PipelineDeps
         await deliver(peer, sessionId, { text: "", error: t("remoteAssist.wechat.acpBusy") });
         return;
       }
+      // 细粒度覆盖（模型 / 思考强度 / 会话模式）在本轮开始前落定：远程消息的答复
+      // 不该被对话页临时切过的模型影响——那是「这台机器怎么回消息」的固定设置。
+      const configFailure = await applyRemoteAcpConfig();
+      if (configFailure) {
+        await deliver(peer, sessionId, { text: "", error: configFailure });
+        return;
+      }
       const turn = await runAcpTurn(sessionId, message.text, provider.name);
       await deliver(peer, sessionId, turn);
       return;
@@ -372,6 +463,7 @@ export function createPipelineSlice({ state, getStatus, getPeers }: PipelineDeps
       apiKeyEnv: provider.apiKeyEnv,
       messages: history,
       reasoningEffort: provider.reasoningEffort ?? "auto",
+      headers: provider.headers,
     });
     await deliver(peer, sessionId, turn);
   }
@@ -380,6 +472,10 @@ export function createPipelineSlice({ state, getStatus, getPeers }: PipelineDeps
     onWechatInbound,
     onDingTalkInbound,
     onFeishuInbound,
+    onTelegramInbound,
+    onQqInbound,
+    onDiscordInbound,
+    onWecomInbound,
     sendFromDesktop,
   };
 }

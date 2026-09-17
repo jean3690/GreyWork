@@ -172,25 +172,52 @@ export interface RemoteAssistPrefs {
    * 与对话页共用同一个 ACP 会话：选定后对话页的后端选择也会跟着切。
    */
   replyProviderId: string | null;
+  /**
+   * ACP 回合的细粒度配置覆盖：`{ [configOptionId]: value }`（如 model / effort / mode）。
+   *
+   * 只在选项真的存在于 `acpConfigOptions` 时才下发，且每次远程 ACP 回合前应用一次——
+   * agent 换模型会重发整份 config options，这里存的是「这台机器的远程助手习惯」，
+   * 与对话页按工作区记忆的选择互不覆盖（键不同：那份记在 workspace.agentConfig）。
+   */
+  acpConfigValues: Record<string, string>;
   channels: {
     wechat: ChannelPrefs;
     dingtalk: ChannelPrefs;
     feishu: ChannelPrefs;
+    telegram: ChannelPrefs;
+    qq: ChannelPrefs;
+    discord: ChannelPrefs;
+    wecom: ChannelPrefs;
   };
 }
 
 export const DEFAULT_REMOTE_ASSIST: RemoteAssistPrefs = {
   replyMode: "llm",
   replyProviderId: null,
+  acpConfigValues: {},
   channels: {
     wechat: { ...DEFAULT_CHANNEL_PREFS },
     dingtalk: { ...DEFAULT_CHANNEL_PREFS },
     feishu: { ...DEFAULT_CHANNEL_PREFS },
+    telegram: { ...DEFAULT_CHANNEL_PREFS },
+    qq: { ...DEFAULT_CHANNEL_PREFS },
+    discord: { ...DEFAULT_CHANNEL_PREFS },
+    wecom: { ...DEFAULT_CHANNEL_PREFS },
   },
 };
 
+/** 细粒度 ACP 配置覆盖的读入归一：只接受 `string -> string` 的键值对。 */
+function normalizeAcpConfigValues(raw: unknown): Record<string, string> {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (typeof key === "string" && typeof value === "string" && value !== "") out[key] = value;
+  }
+  return out;
+}
+
 /** 通道标识（宿主侧命令前缀 / 事件名前缀同名）。 */
-export type ChannelId = "wechat" | "dingtalk" | "feishu";
+export type ChannelId = "wechat" | "dingtalk" | "feishu" | "telegram" | "qq" | "discord" | "wecom";
 
 /** 持久化设置外形（字段均可缺省；缺失项回落默认值）。 */
 export interface SavedSettings {
@@ -210,8 +237,16 @@ export interface SavedSettings {
   /** 多智能体编排并发度（同时跑的回合上限）；1-8，越界静默回落 2。 */
   maxParallel?: number;
   /** 远程助手 · 通道与回复偏好（旧快照缺失 = 默认值）。 */
-  remoteAssist?: Partial<RemoteAssistPrefs> & {
-    channels?: { wechat?: Partial<ChannelPrefs>; dingtalk?: Partial<ChannelPrefs>; feishu?: Partial<ChannelPrefs> };
+  remoteAssist?: Partial<Omit<RemoteAssistPrefs, "channels">> & {
+    channels?: {
+      wechat?: Partial<ChannelPrefs>;
+      dingtalk?: Partial<ChannelPrefs>;
+      feishu?: Partial<ChannelPrefs>;
+      telegram?: Partial<ChannelPrefs>;
+      qq?: Partial<ChannelPrefs>;
+      discord?: Partial<ChannelPrefs>;
+      wecom?: Partial<ChannelPrefs>;
+    };
   };
   /** 远程助手 · 遗留字段（v1 快照只存过微信通道开关）：读入时迁移进 remoteAssist。 */
   wechatChannel?: Partial<ChannelPrefs> & { replyMode?: RemoteReplyMode; replyProviderId?: string | null };
@@ -262,14 +297,19 @@ export const useSettingsStore = defineStore("settings", () => {
   const mcpServers = ref<McpServerEntry[]>(DEFAULT_MCP_SERVERS.map((server) => ({ ...server })));
   /** 用户自定义技能市场源。 */
   const skillSources = ref<SkillSourceEntry[]>(DEFAULT_SKILL_SOURCES.map((source) => ({ ...source })));
-  /** 远程助手 · 微信通道开关（登录凭证在宿主，不在快照里）。 */
+  /** 远程助手 · 各通道开关（登录凭证在宿主，不在快照里）。 */
   const remoteAssist = ref<RemoteAssistPrefs>({
     replyMode: DEFAULT_REMOTE_ASSIST.replyMode,
     replyProviderId: DEFAULT_REMOTE_ASSIST.replyProviderId,
+    acpConfigValues: {},
     channels: {
       wechat: { ...DEFAULT_CHANNEL_PREFS },
       dingtalk: { ...DEFAULT_CHANNEL_PREFS },
       feishu: { ...DEFAULT_CHANNEL_PREFS },
+      telegram: { ...DEFAULT_CHANNEL_PREFS },
+      qq: { ...DEFAULT_CHANNEL_PREFS },
+      discord: { ...DEFAULT_CHANNEL_PREFS },
+      wecom: { ...DEFAULT_CHANNEL_PREFS },
     },
   });
   /** 下发给 agent 的那一批：只取启用项，并剥掉 id/enabled 这类纯本地字段。 */
@@ -373,10 +413,15 @@ export const useSettingsStore = defineStore("settings", () => {
       remoteAssist.value = {
         replyMode: replyMode === "acp" ? "acp" : "llm",
         replyProviderId: typeof replyProviderId === "string" ? replyProviderId : null,
+        acpConfigValues: normalizeAcpConfigValues(remote?.acpConfigValues),
         channels: {
           wechat: normalizeChannel(remote?.channels?.wechat ?? legacy),
           dingtalk: normalizeChannel(remote?.channels?.dingtalk),
           feishu: normalizeChannel(remote?.channels?.feishu),
+          telegram: normalizeChannel(remote?.channels?.telegram),
+          qq: normalizeChannel(remote?.channels?.qq),
+          discord: normalizeChannel(remote?.channels?.discord),
+          wecom: normalizeChannel(remote?.channels?.wecom),
         },
       };
     }
@@ -400,10 +445,15 @@ export const useSettingsStore = defineStore("settings", () => {
       remoteAssist: {
         replyMode: remoteAssist.value.replyMode,
         replyProviderId: remoteAssist.value.replyProviderId,
+        acpConfigValues: { ...remoteAssist.value.acpConfigValues },
         channels: {
           wechat: { ...remoteAssist.value.channels.wechat },
           dingtalk: { ...remoteAssist.value.channels.dingtalk },
           feishu: { ...remoteAssist.value.channels.feishu },
+          telegram: { ...remoteAssist.value.channels.telegram },
+          qq: { ...remoteAssist.value.channels.qq },
+          discord: { ...remoteAssist.value.channels.discord },
+          wecom: { ...remoteAssist.value.channels.wecom },
         },
       },
     };
@@ -546,10 +596,18 @@ export const useSettingsStore = defineStore("settings", () => {
     persist();
   }
 
-  /** 更新共用回复设置（后端档位与选定的 ACP 后端）。 */
-  function setRemoteAssist(patch: Partial<Pick<RemoteAssistPrefs, "replyMode" | "replyProviderId">>): void {
+  /** 更新共用回复设置（后端档位、选定的 ACP 后端与细粒度配置覆盖）。 */
+  function setRemoteAssist(patch: Partial<Pick<RemoteAssistPrefs, "replyMode" | "replyProviderId" | "acpConfigValues">>): void {
     remoteAssist.value = { ...remoteAssist.value, ...patch };
     persist();
+  }
+
+  /** 单个细粒度配置项的写入/清除（value 传空串 = 删掉覆盖，回到「跟随当前会话」）。 */
+  function setRemoteAcpConfigValue(configId: string, value: string): void {
+    const next = { ...remoteAssist.value.acpConfigValues };
+    if (value === "") delete next[configId];
+    else next[configId] = value;
+    setRemoteAssist({ acpConfigValues: next });
   }
 
   return {
@@ -587,6 +645,7 @@ export const useSettingsStore = defineStore("settings", () => {
     remoteAssist,
     setChannelPrefs,
     setRemoteAssist,
+    setRemoteAcpConfigValue,
     selectModelProvider,
     upsertModelProvider,
     removeModelProvider,
