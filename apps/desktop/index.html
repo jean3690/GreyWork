@@ -37,6 +37,17 @@
           /* 存储被禁用 / 快照损坏：保持下面的默认深色，不阻塞启动。 */
         }
       })();
+
+      /*
+       * 启动基线起点：这一句在入口模块脚本**解析求值之前**执行，所以 `gw:entry`
+       * 到 `gw:shown` 覆盖了真实的「导航起点 → 窗口 show()」全过程。
+       * main.ts 的启动日志读这两个 mark；打点失败不影响任何事。
+       */
+      try {
+        performance.mark("gw:entry");
+      } catch (error) {
+        /* 无 Performance API：main.ts 会退化为「—」，不阻塞启动。 */
+      }
     </script>
     <style>
       /* CSS 加载前的兜底底色，随上面脚本解析出的 data-theme 分支（令牌此时还没到）。
