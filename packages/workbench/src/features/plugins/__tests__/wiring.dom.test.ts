@@ -54,8 +54,11 @@ describe("PluginsView（插件中心自身）", () => {
     await bootWithFreshLoader();
     const wrapper = mount(PluginsView);
 
-    expect(wrapper.text()).toContain("插件中心");
-    expect(wrapper.get('[data-testid="plugin-market"]').text()).toContain("插件中心");
+    // 页头说明已移除：页面身份由页签行承担（发现 / MCP / 技能 / 已安装 / 能力审计）
+    const market = wrapper.get('[data-testid="plugin-market"]');
+    expect(market.find('[data-testid="market-tab-discover"]').exists()).toBe(true);
+    expect(market.find('[data-testid="market-tab-mcp"]').exists()).toBe(true);
+    expect(market.find('[data-testid="market-tab-skills"]').exists()).toBe(true);
     expect(wrapper.get('[data-testid="market-tab-discover"]').attributes("aria-pressed")).toBe("true");
 
     await wrapper.get('[data-testid="market-tab-installed"]').trigger("click");
@@ -131,7 +134,7 @@ describe("PluginView（/plugin/:id 宿主）", () => {
     await router.isReady();
     await flushPromises();
     await flushPromises();
-    expect(wrapper.text()).toContain("插件中心");
+    expect(wrapper.find('[data-testid="plugin-market"]').exists()).toBe(true);
 
     await router.push("/plugin/does-not-exist");
     await flushPromises();
@@ -228,12 +231,12 @@ describe("Sider 快捷入口", () => {
 });
 
 describe("PluginsView 已贡献面板 chips", () => {
-  it("内置 core.artifacts 激活时展示 region chip；停用消失、重开回来，插件中心不受影响", async () => {
+  it("内置 core.artifacts 激活时展示 region chip；停用消失、重开回来，插件页不受影响", async () => {
     await bootWithFreshLoader();
     const wrapper = mount(PluginsView);
 
     // core.artifacts 默认激活 → chip 出现（region 原文 + 产物标题）
-    expect(wrapper.text()).toContain("插件中心");
+    expect(wrapper.find('[data-testid="plugin-market"]').exists()).toBe(true);
     const chip = wrapper.get('[data-testid="region-chip-activityPanel-activity.artifacts"]');
     expect(chip.text()).toBe("activityPanel · 产物");
 
