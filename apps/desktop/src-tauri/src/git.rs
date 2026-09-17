@@ -368,6 +368,20 @@ mod tests {
             .args(["init", "-q", "-b", "main"])
             .status()
             .expect("git init");
+        // 提交需要作者身份。这里写**仓库级**配置，而不是给单条命令挂 GIT_AUTHOR_* 环境变量：
+        // 被测的 commit() 是独立进程调用，拿不到测试进程的 env；而 CI runner 没有全局
+        // user.name/user.email，只在个别命令上设环境变量会让 commit() 报
+        // "Author identity unknown"（本机能过只是因为跑测的人配过全局身份）。
+        for (key, value) in [
+            ("user.name", "GreyWork Test"),
+            ("user.email", "test@greywork.local"),
+        ] {
+            Command::new("git")
+                .current_dir(&root)
+                .args(["config", key, value])
+                .status()
+                .expect("git config");
+        }
         std::fs::write(root.join(".gitignore"), "*.log\n").expect("写 gitignore");
         std::fs::write(root.join("a.txt"), "one\n").expect("写 a");
         std::fs::write(root.join("b.txt"), "hello\n").expect("写 b");
@@ -378,10 +392,6 @@ mod tests {
             .expect("git add");
         Command::new("git")
             .current_dir(&root)
-            .env("GIT_AUTHOR_NAME", "test")
-            .env("GIT_AUTHOR_EMAIL", "test@test")
-            .env("GIT_COMMITTER_NAME", "test")
-            .env("GIT_COMMITTER_EMAIL", "test@test")
             .args(["commit", "-m", "init"])
             .status()
             .expect("git commit");
