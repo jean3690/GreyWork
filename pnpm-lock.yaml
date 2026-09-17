@@ -85,6 +85,9 @@ importers:
       tailwindcss:
         specifier: ^4.0.0
         version: 4.3.3
+      tw-animate-css:
+        specifier: ^1.4.0
+        version: 1.4.0
       typescript:
         specifier: ~5.6.2
         version: 5.6.2
@@ -343,6 +346,12 @@ importers:
       '@univerjs/sheets':
         specifier: ^0.25.1
         version: 0.25.1(react@19.2.8)(rxjs@7.8.2)
+      '@univerjs/sheets-formula':
+        specifier: ^0.25.1
+        version: 0.25.1(react@19.2.8)(rxjs@7.8.2)
+      '@univerjs/sheets-formula-ui':
+        specifier: ^0.25.1
+        version: 0.25.1(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2)
       '@univerjs/sheets-numfmt':
         specifier: ^0.25.1
         version: 0.25.1(react@19.2.8)(rxjs@7.8.2)
@@ -355,6 +364,9 @@ importers:
       '@univerjs/ui':
         specifier: ^0.25.1
         version: 0.25.1(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2)
+      '@vueuse/core':
+        specifier: ^14.4.0
+        version: 14.4.0(vue@3.5.41(typescript@5.6.2))
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1
@@ -392,7 +404,7 @@ importers:
         specifier: ^2.0.4
         version: 2.0.4
       reka-ui:
-        specifier: ^2.6.0
+        specifier: ^2.10.3
         version: 2.10.3(vue@3.5.41(typescript@5.6.2))
       rxjs:
         specifier: 7.8.2
@@ -400,6 +412,9 @@ importers:
       tailwind-merge:
         specifier: ^3.3.1
         version: 3.6.0
+      vscode-icons-js:
+        specifier: ^11.6.1
+        version: 11.6.1
       vue:
         specifier: ^3.5.13
         version: 3.5.41(typescript@5.6.2)
@@ -2418,6 +2433,9 @@ packages:
   '@types/hast@3.0.5':
     resolution: {integrity: sha512-rp/ezSWaD1m44dPKICGhiskI13nVr7qTloFwDa/IYkhhf5nzwP+zIQcIJh3WIFSBOy/H1PzB40jPjMDksN4F+g==}
 
+  '@types/jasmine@3.10.19':
+    resolution: {integrity: sha512-Bz6P2XoeIN13AhvVe0nS7+m2RfxVllETDjFQ/s6lyEwEfIVpPCc1Q8vPdFopFAOU5mzrU1zypXJ1xGDl5EVU9Q==}
+
   '@types/json-schema@7.0.15':
     resolution: {integrity: sha512-5+fP8P8MFNC+AyZCDxrB2pkZFPGzqQWUzpSeuuVLvm8VMcorNYavBqoFcxK8bQz4Qsbn4oUEEem4wDLfcysGHA==}
 
@@ -2573,6 +2591,17 @@ packages:
 
   '@univerjs/rpc@0.25.1':
     resolution: {integrity: sha512-cwQJ+faKb983QRAGG/hkisASzb3HgjlWm4JMf6w1gVO/oYbLm6ObACu7zVHU+xhw8EKRFN3Kxl6SH0KTqFLOVQ==}
+    peerDependencies:
+      rxjs: '>=7.0.0'
+
+  '@univerjs/sheets-formula-ui@0.25.1':
+    resolution: {integrity: sha512-iMDZZutB5mcwBGn1kL2QfsQoiOJKJhyLtzp3oRv0bEhbScGDPyoADuAoOCQjDnnUKTp3cTAvc0ACn3Gj3vOvRQ==}
+    peerDependencies:
+      react: ^16.9.0 || ^17.0.0 || ^18.0.0 || ^19.0.0 || ^19.0.0-rc
+      rxjs: '>=7.0.0'
+
+  '@univerjs/sheets-formula@0.25.1':
+    resolution: {integrity: sha512-5zDcLfzAhO0H1gwYeCY0JYgZIxcKAhA02jS0wXRpOa+dVWs2/zcKy4CjDCbINIsA/aLrICAd9O8Q3VbU/G3rEg==}
     peerDependencies:
       rxjs: '>=7.0.0'
 
@@ -5449,6 +5478,9 @@ packages:
   tslib@2.8.1:
     resolution: {integrity: sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w==}
 
+  tw-animate-css@1.4.0:
+    resolution: {integrity: sha512-7bziOlRqH0hJx80h/3mbicLW7o8qLsH5+RaLR2t+OHM3D0JlWGODQKQ4cxbK7WlvmUxpcj6Kgu6EKqjrGFe3QQ==}
+
   type-check@0.4.0:
     resolution: {integrity: sha512-XleUoc9uwGXqjWwXaUTZAmzMcFZ5858QA2vvx1Ur5xIcixXIP+8LnFDgRplU30us6teqdlskFfu+ae4K79Ooew==}
     engines: {node: '>= 0.8.0'}
@@ -5666,6 +5698,9 @@ packages:
         optional: true
       jsdom:
         optional: true
+
+  vscode-icons-js@11.6.1:
+    resolution: {integrity: sha512-rht18IFYv117UlqBn6o9j258SOtwhDBmtVrGwdoLPpSj6Z5LKQIzarQDd/tCRWneU68KEX25+nsh48tAoknKNw==}
 
   vscode-uri@3.1.0:
     resolution: {integrity: sha512-/BpdSx+yCQGnCvecbyXdxHDkuk55/G3xwnC0GqY4gmQ3j+A+g8kzzgB4Nk/SINjqn6+waqw3EgbVF2QKExkRxQ==}
@@ -7934,6 +7969,8 @@ snapshots:
     dependencies:
       '@types/unist': 3.0.3
 
+  '@types/jasmine@3.10.19': {}
+
   '@types/json-schema@7.0.15': {}
 
   '@types/katex@0.16.8': {}
@@ -8169,6 +8206,36 @@ snapshots:
   '@univerjs/rpc@0.25.1(react@19.2.8)(rxjs@7.8.2)':
     dependencies:
       '@univerjs/core': 0.25.1(react@19.2.8)(rxjs@7.8.2)
+      rxjs: 7.8.2
+    transitivePeerDependencies:
+      - react
+
+  '@univerjs/sheets-formula-ui@0.25.1(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2)':
+    dependencies:
+      '@univerjs/core': 0.25.1(react@19.2.8)(rxjs@7.8.2)
+      '@univerjs/design': 0.25.1(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@univerjs/docs': 0.25.1(react@19.2.8)(rxjs@7.8.2)
+      '@univerjs/docs-ui': 0.25.1(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2)
+      '@univerjs/engine-formula': 0.25.1(react@19.2.8)(rxjs@7.8.2)
+      '@univerjs/engine-render': 0.25.1(patch_hash=ef56c7cf160648542d4ad4ca7d248d9591061cd5557ae4f05aba7043070dba2e)(react@19.2.8)(rxjs@7.8.2)
+      '@univerjs/icons': 1.4.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@univerjs/sheets': 0.25.1(react@19.2.8)(rxjs@7.8.2)
+      '@univerjs/sheets-formula': 0.25.1(react@19.2.8)(rxjs@7.8.2)
+      '@univerjs/sheets-ui': 0.25.1(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2)
+      '@univerjs/ui': 0.25.1(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2)
+      react: 19.2.8
+      rxjs: 7.8.2
+    transitivePeerDependencies:
+      - '@types/react'
+      - '@types/react-dom'
+      - react-dom
+
+  '@univerjs/sheets-formula@0.25.1(react@19.2.8)(rxjs@7.8.2)':
+    dependencies:
+      '@univerjs/core': 0.25.1(react@19.2.8)(rxjs@7.8.2)
+      '@univerjs/engine-formula': 0.25.1(react@19.2.8)(rxjs@7.8.2)
+      '@univerjs/rpc': 0.25.1(react@19.2.8)(rxjs@7.8.2)
+      '@univerjs/sheets': 0.25.1(react@19.2.8)(rxjs@7.8.2)
       rxjs: 7.8.2
     transitivePeerDependencies:
       - react
@@ -11723,6 +11790,8 @@ snapshots:
 
   tslib@2.8.1: {}
 
+  tw-animate-css@1.4.0: {}
+
   type-check@0.4.0:
     dependencies:
       prelude-ls: 1.2.1
@@ -11956,6 +12025,10 @@ snapshots:
       - terser
       - tsx
       - yaml
+
+  vscode-icons-js@11.6.1:
+    dependencies:
+      '@types/jasmine': 3.10.19
 
   vscode-uri@3.1.0: {}
 

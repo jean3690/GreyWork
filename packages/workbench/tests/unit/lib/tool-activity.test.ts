@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  aggregateDiffStat,
   aggregateLifecycle,
   aggregateSummary,
   buildActivityRows,
+  diffStatOf,
   durationOf,
   mergeToolActivities,
   parseToolActivityPayload,
@@ -475,5 +477,84 @@ describe("工具调用细节", () => {
     const merged = mergeToolActivities([first as ToolActivity], [done as ToolActivity]);
     expect(merged[0]?.detail?.diff?.newText).toBe("写入");
     expect(merged[0]?.status).toBe("completed");
+  });
+});
+
+describe("diffStatOf / aggregateDiffStat", () => {
+  it("改动类调用按旧/新文本算出行级增删；read 不算", () => {
+    expect(
+      diffStatOf(
+        act({
+          toolCallId: "e1",
+          kind: "edit",
+          path: "a.ts",
+          detail: { diff: { path: "a.ts", oldText: "old\ntail", newText: "new\ntail\nmore" } },
+        }),
+      ),
+    ).toEqual({ added: 2, removed: 1 });
+    expect(
+      diffStatOf(act({ toolCallId: "r1", kind: "read", path: "a.ts", detail: { diff: { path: "a.ts", oldText: null, newText: "x" } } })),
+    ).toBeNull();
+    expect(diffStatOf(act({ toolCallId: "n1", kind: "edit", path: "a.ts" }))).toBeNull();
+  });
+
+  it("整文件写入（oldText 为 null）只计新增", () => {
+    expect(
+      diffStatOf(act({ toolCallId: "w1", kind: "edit", detail: { diff: { path: "a.ts", oldText: null, newText: "a\nb\nc" } } })),
+    ).toEqual({ added: 3, removed: 0 });
+  });
+
+  it("汇总多条调用的改动量；一条 diff 都没有时为 null", () => {
+    const edited = act({
+      toolCallId: "e1",
+      kind: "edit",
+      detail: { diff: { path: "a.ts", oldText: "a", newText: "b\nc" } },
+    });
+    const removed = act({ toolCallId: "d1", kind: "delete", detail: { diff: { path: "b.ts", oldText: "x\ny", newText: "" } } });
+    expect(aggregateDiffStat([edited, removed])).toEqual({ added: 2, removed: 3 });
+    expect(aggregateDiffStat([act({ toolCallId: "r1", kind: "read", path: "a.ts" })])).toBeNull();
+  });
+});
+
+describe("AskUserQuestion 识别", () => {
+  it("名为 AskUserQuestion 的调用挂上归一化后的 questions", () => {
+    const a = parseToolCallUpdate(
+      {
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "ask1",
+          title: "AskUserQuestion",
+          status: "in_progress",
+          rawInput: { questions: [{ question: "继续吗", options: [{ label: "继续" }, { label: "停" }] }] },
+        },
+      },
+      T,
+    );
+    expect(a?.ask?.questions).toHaveLength(1);
+    expect(a?.ask?.questions[0]?.question).toBe("继续吗");
+    expect(a?.ask?.questions[0]?.options.map((option) => option.label)).toEqual(["继续", "停"]);
+  });
+
+  it("普通工具不带 ask 载荷", () => {
+    const a = parseToolCallUpdate({ update: { sessionUpdate: "tool_call", toolCallId: "r1", title: "Read", status: "completed" } }, T);
+    expect(a?.ask).toBeUndefined();
+  });
+
+  it("ask 载荷在生命周期续写时保留", () => {
+    const first = parseToolCallUpdate(
+      {
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "ask2",
+          title: "AskUserQuestion",
+          status: "in_progress",
+          rawInput: { questions: [{ question: "q", options: [{ label: "a" }] }] },
+        },
+      },
+      T,
+    );
+    const done = parseToolCallUpdate({ update: { sessionUpdate: "tool_call_update", toolCallId: "ask2", status: "completed" } }, T + 500);
+    const merged = mergeToolActivities([first as ToolActivity], [done as ToolActivity]);
+    expect(merged[0]?.ask?.questions).toHaveLength(1);
   });
 });

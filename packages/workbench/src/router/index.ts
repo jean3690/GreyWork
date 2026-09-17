@@ -18,16 +18,16 @@ import { createRouter, createWebHashHistory, type Router, type RouteRecordRaw } 
 export function createAppRouter(): Router {
   const routes: RouteRecordRaw[] = [
     { path: "/", redirect: "/guid" },
-    { path: "/guid", component: () => import("../views/GuidView.vue") },
-    { path: "/conversation/:conversationId?", component: () => import("../views/ConversationView.vue") },
-    { path: "/assistants", component: () => import("../views/AssistantsView.vue") },
+    { path: "/guid", component: () => import("@/features/guid/GuidView.vue") },
+    { path: "/conversation/:conversationId?", component: () => import("@/features/conversation/ConversationView.vue") },
+    { path: "/assistants", component: () => import("@/features/assistants/AssistantsView.vue") },
     // 远程通道的单联系人会话页（微信那侧的对端在左、本机回复在右）
-    { path: "/remote/:peerId", component: () => import("../views/RemoteConversationView.vue") },
-    { path: "/scheduled", component: () => import("../views/ScheduledView.vue") },
-    { path: "/team", component: () => import("../views/TeamView.vue") },
-    { path: "/plugin/:modeId", component: () => import("../views/PluginView.vue") },
+    { path: "/remote/:peerId", component: () => import("@/features/channels/RemoteConversationView.vue") },
+    { path: "/scheduled", component: () => import("@/features/scheduled/ScheduledView.vue") },
+    { path: "/team", component: () => import("@/features/team/TeamView.vue") },
+    { path: "/plugin/:modeId", component: () => import("@/features/plugins/PluginView.vue") },
     // 插件悬浮窗口内容（透明置顶小窗加载 #/plugin-window；Shell 按 meta.bare 只出 router-view）。
-    { path: "/plugin-window", component: () => import("../views/PluginWindowView.vue"), meta: { bare: true } },
+    { path: "/plugin-window", component: () => import("@/features/plugins/PluginWindowView.vue"), meta: { bare: true } },
     { path: "/:pathMatch(.*)*", redirect: "/guid" },
   ];
 

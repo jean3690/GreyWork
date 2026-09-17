@@ -162,3 +162,103 @@ export function parseUnifiedDiff(text: string): DiffFile[] {
 export function countDiffLines(files: DiffFile[]): number {
   return files.reduce((total, file) => total + file.lines.length, 0);
 }
+
+/* ===== 两版文本的行级差分（工具调用的改动可视化） ===== */
+
+export interface TextDiff {
+  lines: DiffLine[];
+  added: number;
+  removed: number;
+}
+
+/**
+ * 行级差分的内存护栏。
+ *
+ * LCS 是 O(n·m) 时间 + 空间。工具细节在写侧已按 MAX_DETAIL_CHARS（8k 字符）截断，
+ * 正常只有几百行；但两条各 5000 行的输入会要 2500 万个 cell，足以让渲染线程卡死。
+ * 超过阈值就退化成「整段删除 + 整段新增」——不好看，但绝不会把界面拖死。
+ */
+const MAX_DIFF_CELLS = 4_000_000;
+
+/** 拆行：吃掉结尾换行，否则 `"a\n"` 会多出一条空行，差分出来凭空多一个改动。 */
+function splitLines(text: string): string[] {
+  if (text === "") return [];
+  const lines = text.split("\n");
+  if (lines[lines.length - 1] === "") lines.pop();
+  return lines;
+}
+
+/** 退化路径：不做对齐，旧文全删、新文全增。 */
+function fallbackDiff(oldLines: string[], newLines: string[]): TextDiff {
+  const lines: DiffLine[] = [];
+  let oldNo = 1;
+  let newNo = 1;
+  for (const text of oldLines) lines.push({ kind: "del", text, oldNo: oldNo++, newNo: null });
+  for (const text of newLines) lines.push({ kind: "add", text, oldNo: null, newNo: newNo++ });
+  return { lines, added: newLines.length, removed: oldLines.length };
+}
+
+/**
+ * 计算两版文本的行级差分（LCS 对齐），产出与 `parseUnifiedDiff` 同形的行流。
+ *
+ * `oldText === null` 表示整文件新建（没有旧版可比），此时每一行都是新增 —— 与
+ * 工具调用语义里「write 未给 oldText」一致。空输入返回空结果。
+ *
+ * 与 `parseUnifiedDiff` 的分工：那个解析**已成型**的 patch 文本，这个对**两份原文**
+ * 现算差分。工具调用只带 oldText/newText，没有 patch，所以必须走这条。
+ */
+export function diffTexts(oldText: string | null, newText: string): TextDiff {
+  const oldLines = oldText === null ? [] : splitLines(oldText);
+  const newLines = splitLines(newText);
+  const removed = oldLines.length;
+  const added = newLines.length;
+
+  if (oldText === null) {
+    // 整文件写入：没有旧版，全部按新增呈现（含行号，便于对照）。
+    const lines: DiffLine[] = newLines.map((text, index) => ({ kind: "add" as const, text, oldNo: null, newNo: index + 1 }));
+    return { lines, added, removed: 0 };
+  }
+  if (removed === 0 && added === 0) return { lines: [], added: 0, removed: 0 };
+  if (removed * added > MAX_DIFF_CELLS) return fallbackDiff(oldLines, newLines);
+
+  // LCS 长度表：table[i][j] = oldLines[i..] 与 newLines[j..] 的最长公共子序列长度。
+  const table: number[][] = Array.from({ length: removed + 1 }, () => new Array<number>(added + 1).fill(0));
+  for (let i = removed - 1; i >= 0; i -= 1) {
+    for (let j = added - 1; j >= 0; j -= 1) {
+      table[i][j] = oldLines[i] === newLines[j] ? table[i + 1][j + 1] + 1 : Math.max(table[i + 1][j], table[i][j + 1]);
+    }
+  }
+
+  const lines: DiffLine[] = [];
+  let addedCount = 0;
+  let removedCount = 0;
+  let i = 0;
+  let j = 0;
+  let oldNo = 1;
+  let newNo = 1;
+  while (i < removed && j < added) {
+    if (oldLines[i] === newLines[j]) {
+      lines.push({ kind: "context", text: oldLines[i], oldNo: oldNo++, newNo: newNo++ });
+      i += 1;
+      j += 1;
+    } else if (table[i + 1][j] >= table[i][j + 1]) {
+      lines.push({ kind: "del", text: oldLines[i], oldNo: oldNo++, newNo: null });
+      removedCount += 1;
+      i += 1;
+    } else {
+      lines.push({ kind: "add", text: newLines[j], oldNo: null, newNo: newNo++ });
+      addedCount += 1;
+      j += 1;
+    }
+  }
+  for (; i < removed; i += 1) {
+    lines.push({ kind: "del", text: oldLines[i], oldNo: oldNo++, newNo: null });
+    removedCount += 1;
+  }
+  for (; j < added; j += 1) {
+    lines.push({ kind: "add", text: newLines[j], oldNo: null, newNo: newNo++ });
+    addedCount += 1;
+  }
+
+  return { lines, added: addedCount, removed: removedCount };
+}

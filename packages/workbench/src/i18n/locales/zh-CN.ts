@@ -23,6 +23,28 @@ export const zhCN = {
   notice: {
     dismiss: "关闭通知",
   },
+  sessionStatus: {
+    idle: "未开始",
+    running: "运行",
+    waiting: "等待中",
+    done: "结束",
+  },
+  search: {
+    title: "搜索",
+    placeholder: "搜索会话、功能…",
+    clear: "清空",
+    results: "搜索结果",
+    filterType: "类型",
+    filterStatus: "状态",
+    filterWorkspace: "工作区",
+    type: { all: "全部", session: "会话", feature: "功能" },
+    kind: { nav: "功能", settings: "设置" },
+    workspaceAll: "全部工作区",
+    workspaceGeneral: "普通对话",
+    empty: "没有匹配的结果",
+    hint: "↑↓ 选择 · Enter 打开 · Esc 关闭",
+    count: "{n} 项",
+  },
   layout: {
     groupLabel: "布局模式",
     mode: {
@@ -34,6 +56,7 @@ export const zhCN = {
   },
   web: {
     title: "抓取网页",
+    description: "输入网址抓取正文，在预览面板打开阅读版。",
     urlPlaceholder: "输入网址，如 example.com/article",
     fetch: "抓取",
     fetching: "抓取中…",
@@ -111,6 +134,7 @@ export const zhCN = {
     configThoughtLevel: "思考强度",
     configMode: "会话模式",
     planMode: "计划模式",
+    imagePreviewClose: "点击任意处或按 Esc 关闭。",
     stop: "停止生成",
     send: "发送",
     uploadFile: "上传文件 / 图片",
@@ -372,6 +396,14 @@ export const zhCN = {
       hint: "agent 请求执行下面的操作；{s} 秒内未确认将自动取消。",
       deny: "拒绝",
       paths: "涉及路径",
+    },
+    ask: {
+      title: "等待你的选择",
+      answered: "已作答",
+      multiHint: "可多选",
+      submit: "提交",
+      incomplete: "请先作答",
+      otherPlaceholder: "其他（自行填写）",
     },
   },
   market: {

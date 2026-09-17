@@ -2,8 +2,8 @@
  * 预览内容加载的触发条件：只有 path / revision 的**值**变了才重载。
  *
  * 这条回归守的是一个很隐蔽的坑：`watch` 的源若写成 `() => [path, revision]`，每次求值都是
- * 新数组、Object.is 永不相等，于是「tab 对象被换掉」也会触发重载 —— 而 store 里改 diskPath /
- * dirty 恰恰就是换对象。后果是 viewer 连同 Univer 实例、滚动位置与正在编辑的内容一起被重建。
+ * 新数组、Object.is 永不相等，于是「tab 对象被换掉」也会触发重载 —— 而 store 里改 diskPath
+ * 恰恰就是换对象。后果是 viewer 连同 Univer 实例、滚动位置与正在编辑的内容一起被重建。
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { defineComponent, h, ref, type Ref } from "vue";
@@ -48,14 +48,12 @@ describe("usePreviewText 的重载触发条件", () => {
     expect(h2.readFile).toHaveBeenCalledWith("reports/a.md");
   });
 
-  it("tab 对象被换掉但 path/revision 不变时不重载（store 改 diskPath / dirty 就是这种情况）", async () => {
+  it("tab 对象被换掉但 path/revision 不变时不重载（store 改 diskPath / 增删字段就是这种情况）", async () => {
     const source = ref(tab());
     mountLoader(source);
     await flushPromises();
 
     source.value = { ...source.value, diskPath: "/disk/a.md" };
-    await flushPromises();
-    source.value = { ...source.value, dirty: true };
     await flushPromises();
 
     expect(h2.readFile).toHaveBeenCalledTimes(1);

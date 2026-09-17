@@ -97,6 +97,32 @@ export interface McpServerEntry extends McpServerConfig {
 const MCP_TRANSPORTS: Record<McpServerEntry["transport"], true> = { http: true, sse: true, stdio: true };
 
 /**
+ * 用户自定义的技能市场源。
+ *
+ * 每个源指向一个兼容 skills.sh API 的端点（搜索 / 下载），
+ * 或者是一个 GitHub 仓库 owner/repo 格式的直接引用。
+ */
+export interface SkillSourceEntry {
+  id: string;
+  /** 显示名称。 */
+  label: string;
+  /** 源类型：api = 兼容 skills.sh 的 HTTP API；github = GitHub 仓库直引。 */
+  type: "api" | "github";
+  /** API 端点 URL（type=api 时必填）。 */
+  url?: string;
+  /** GitHub owner/repo（type=github 时必填）。 */
+  repo?: string;
+  enabled: boolean;
+}
+
+const SKILL_SOURCE_TYPES: Record<SkillSourceEntry["type"], true> = { api: true, github: true };
+
+/** 内置默认技能源（skills.sh 聚合索引）。 */
+export const DEFAULT_SKILL_SOURCES: readonly SkillSourceEntry[] = [
+  { id: "skills-sh", label: "Skills Directory", type: "api", url: "https://www.skills.sh", enabled: true },
+];
+
+/**
  * 内置示例：DeepWiki 官方远程 MCP（streamable HTTP，无需鉴权）。
  *
  * 默认**不启用**：往每个 agent 会话里塞一个远程端点应当是用户的明确选择，
@@ -169,6 +195,8 @@ export interface SavedSettings {
   sandboxMode?: SandboxMode;
   workspaceDir?: string;
   mcpServers?: McpServerEntry[];
+  /** 用户自定义技能市场源。 */
+  skillSources?: SkillSourceEntry[];
   /** 多智能体编排并发度（同时跑的回合上限）；1-8，越界静默回落 2。 */
   maxParallel?: number;
   /** 远程助手 · 通道与回复偏好（旧快照缺失 = 默认值）。 */
@@ -222,6 +250,8 @@ export const useSettingsStore = defineStore("settings", () => {
   );
   /** 已声明的 MCP 服务器（含未启用项）。 */
   const mcpServers = ref<McpServerEntry[]>(DEFAULT_MCP_SERVERS.map((server) => ({ ...server })));
+  /** 用户自定义技能市场源。 */
+  const skillSources = ref<SkillSourceEntry[]>(DEFAULT_SKILL_SOURCES.map((source) => ({ ...source })));
   /** 远程助手 · 微信通道开关（登录凭证在宿主，不在快照里）。 */
   const remoteAssist = ref<RemoteAssistPrefs>({
     replyMode: DEFAULT_REMOTE_ASSIST.replyMode,
@@ -310,6 +340,12 @@ export const useSettingsStore = defineStore("settings", () => {
         .filter((server) => server && typeof server.id === "string" && typeof server.name === "string" && MCP_TRANSPORTS[server.transport])
         .map((server) => ({ ...server, enabled: server.enabled === true }));
     }
+    if (Array.isArray(saved.skillSources)) {
+      skillSources.value = saved.skillSources
+        .filter((source) => source && typeof source.id === "string" && typeof source.label === "string" && SKILL_SOURCE_TYPES[source.type])
+        .map((source) => ({ ...source, enabled: source.enabled === true }));
+      if (skillSources.value.length === 0) skillSources.value = DEFAULT_SKILL_SOURCES.map((source) => ({ ...source }));
+    }
     // 通道偏好：缺省即启用（「自动连接 / 自动回复」是通道常态），只有显式 false 才关；
     // 「答复其他联系人」相反 —— 只有显式 true 才放行。
     const normalizeChannel = (saved: Partial<ChannelPrefs> | undefined): ChannelPrefs => ({
@@ -348,6 +384,7 @@ export const useSettingsStore = defineStore("settings", () => {
       sandboxMode: sandboxMode.value,
       workspaceDir: workspaceDir.value,
       mcpServers: mcpServers.value,
+      skillSources: skillSources.value,
       maxParallel: maxParallel.value,
       remoteAssist: {
         replyMode: remoteAssist.value.replyMode,
@@ -403,6 +440,12 @@ export const useSettingsStore = defineStore("settings", () => {
     persist();
   }
 
+  /** 整表覆盖（JSON 导入）：外部快照 → 归一化后整体替换。 */
+  function replaceMcpServers(entries: McpServerEntry[]): void {
+    mcpServers.value = entries.map((server) => ({ ...server, enabled: server.enabled === true }));
+    persist();
+  }
+
   /* ===== 模型供应商管理（设置页编辑面） ===== */
   /** 选中即持久化（此前点选直接写 ref，重启即丢）。 */
   function selectModelProvider(id: string | null): void {
@@ -448,6 +491,41 @@ export const useSettingsStore = defineStore("settings", () => {
     persist();
   }
 
+  /** 恢复出厂默认 MCP 服务器（误删/改坏后的逃生门）。 */
+  function resetMcpServers(): void {
+    mcpServers.value = DEFAULT_MCP_SERVERS.map((server) => ({ ...server }));
+    persist();
+  }
+
+  /* ===== 技能市场源管理 ===== */
+
+  /** 新增或按 id 覆盖一个技能市场源。 */
+  function upsertSkillSource(entry: SkillSourceEntry): void {
+    const index = skillSources.value.findIndex((source) => source.id === entry.id);
+    if (index >= 0) skillSources.value[index] = { ...entry };
+    else skillSources.value.push({ ...entry });
+    persist();
+  }
+
+  function removeSkillSource(id: string): void {
+    skillSources.value = skillSources.value.filter((source) => source.id !== id);
+    persist();
+  }
+
+  /** 启用/停用一个技能市场源（停用后搜索不再包含该源）。 */
+  function setSkillSourceEnabled(id: string, enabled: boolean): void {
+    const source = skillSources.value.find((candidate) => candidate.id === id);
+    if (!source) return;
+    source.enabled = enabled;
+    persist();
+  }
+
+  /** 恢复内置默认技能源（去掉用户自定义源）。 */
+  function resetSkillSources(): void {
+    skillSources.value = DEFAULT_SKILL_SOURCES.map((source) => ({ ...source }));
+    persist();
+  }
+
   /** 更新某条通道的行为开关（部分字段）；落盘一次。 */
   function setChannelPrefs(channel: ChannelId, patch: Partial<ChannelPrefs>): void {
     remoteAssist.value = {
@@ -486,8 +564,15 @@ export const useSettingsStore = defineStore("settings", () => {
     enabledMcpServers,
     upsertMcpServer,
     removeMcpServer,
+    replaceMcpServers,
     setMcpServerEnabled,
     setAllMcpServersEnabled,
+    resetMcpServers,
+    skillSources,
+    upsertSkillSource,
+    removeSkillSource,
+    setSkillSourceEnabled,
+    resetSkillSources,
     remoteAssist,
     setChannelPrefs,
     setRemoteAssist,

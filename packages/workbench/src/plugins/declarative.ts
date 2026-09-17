@@ -1,6 +1,6 @@
 import { h, markRaw } from "vue";
 import DeclarativePluginView from "./DeclarativePluginView.vue";
-import PluginRegionHost from "../components/PluginRegionHost.vue";
+import PluginRegionHost from "@/features/plugins/PluginRegionHost.vue";
 import type { DeclarativeValue, InstalledPluginPackage } from "./market-types";
 import type { PluginManifest, UiRegionContribution } from "./types";
 import type { CodePluginRuntime } from "./code-runtime";

@@ -23,6 +23,28 @@ export const enUS: MessageSchema = {
   notice: {
     dismiss: "Dismiss notification",
   },
+  sessionStatus: {
+    idle: "Not started",
+    running: "Running",
+    waiting: "Waiting",
+    done: "Done",
+  },
+  search: {
+    title: "Search",
+    placeholder: "Search sessions and features…",
+    clear: "Clear",
+    results: "Search results",
+    filterType: "Type",
+    filterStatus: "Status",
+    filterWorkspace: "Workspace",
+    type: { all: "All", session: "Sessions", feature: "Features" },
+    kind: { nav: "Feature", settings: "Settings" },
+    workspaceAll: "All workspaces",
+    workspaceGeneral: "General",
+    empty: "No matching results",
+    hint: "↑↓ select · Enter open · Esc close",
+    count: "{n} items",
+  },
   layout: {
     groupLabel: "Layout",
     mode: {
@@ -34,6 +56,7 @@ export const enUS: MessageSchema = {
   },
   web: {
     title: "Fetch web page",
+    description: "Enter a URL to fetch the article and open a reader view in the preview panel.",
     urlPlaceholder: "Enter a URL, e.g. example.com/article",
     fetch: "Fetch",
     fetching: "Fetching…",
@@ -111,6 +134,7 @@ export const enUS: MessageSchema = {
     configThoughtLevel: "Reasoning",
     configMode: "Session mode",
     planMode: "Plan mode",
+    imagePreviewClose: "Click anywhere or press Esc to close.",
     stop: "Stop generating",
     send: "Send",
     uploadFile: "Upload file / image",
@@ -388,6 +412,14 @@ export const enUS: MessageSchema = {
       hint: "The agent wants to run the operation below; it is cancelled automatically if you do not answer within {s}s.",
       deny: "Deny",
       paths: "Paths involved",
+    },
+    ask: {
+      title: "Waiting for your choice",
+      answered: "Answered",
+      multiHint: "Multi-select",
+      submit: "Submit",
+      incomplete: "Answer all questions first",
+      otherPlaceholder: "Other (type your own)",
     },
   },
   market: {

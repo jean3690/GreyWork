@@ -7,7 +7,9 @@
  * 纯数据函数，便于单测；不依赖 Vue / Pinia。
  */
 import type { ToolActivity, ToolActivityKind, ToolActivityStatus, ToolDetail } from "../types";
+import { isAskToolName, normalizeAskRequest } from "./ask-question";
 import { isRecord } from "./guards";
+import { diffTexts } from "./unified-diff";
 
 /* ===== ACP session-update 负载解析 ===== */
 
@@ -131,6 +133,7 @@ export function toToolActivity(part: AcpToolPartLike, now = Date.now(), seq = 0)
   let status: ToolActivityStatus;
   let error: string | undefined;
   let rawName: string | undefined;
+  let askInput: Record<string, unknown> | undefined;
 
   if (tool) {
     id = tool.id ?? part.id ?? `tc-${now}-${seq}`;
@@ -139,6 +142,7 @@ export function toToolActivity(part: AcpToolPartLike, now = Date.now(), seq = 0)
     command = commandFromToolInput(tool.input);
     path = pathFromToolInput(tool.input);
     rawName = tool.name;
+    askInput = tool.input;
     description = (typeof tool.input?.description === "string" && tool.input.description) || tool.name;
     if (tool.status === "failed") error = String(tool.input?.error ?? "tool failed");
   } else if (part.tool_call_result) {
@@ -158,6 +162,7 @@ export function toToolActivity(part: AcpToolPartLike, now = Date.now(), seq = 0)
     command = commandFromToolInput(part.input);
     path = pathFromToolInput(part.input);
     rawName = part.name;
+    askInput = part.input;
     description = typeof part.input.description === "string" ? part.input.description : part.name;
   } else if (part.thought !== undefined || part.type === "thinking" || part.type === "reasoning") {
     // 思考 / 推理块：有独立 id 时记录，否则丢弃（避免一坨仅 presentation 的记录）
@@ -172,6 +177,7 @@ export function toToolActivity(part: AcpToolPartLike, now = Date.now(), seq = 0)
   const mcp = parseMcpToolName(rawName);
   // 原始名当描述没有可读性（`mcp__deepwiki__ask_question`）→ 收敛为纯工具名，服务器名单列
   if (mcp && description === rawName) description = mcp.tool;
+  const ask = isAskToolName(rawName) ? normalizeAskRequest(askInput) : null;
 
   return {
     toolCallId: id,
@@ -185,6 +191,7 @@ export function toToolActivity(part: AcpToolPartLike, now = Date.now(), seq = 0)
     name: mcp?.tool ?? rawName,
     mcpServer: mcp?.server,
     error,
+    ask: ask ?? undefined,
   };
 }
 
@@ -389,6 +396,9 @@ export function parseToolCallUpdate(payload: unknown, now = Date.now()): ToolAct
     ? mcpFromTitle.tool
     : (title ?? (rawInput && typeof rawInput.description === "string" ? rawInput.description : undefined));
   const detail = detailFromToolUpdate(update, path, command);
+  // 提问型工具：把 questions 归一化挂上，消息侧据此渲染选择菜单。
+  const askName = title ?? (typeof rawInput?.name === "string" ? rawInput.name : undefined);
+  const ask = isAskToolName(askName) ? normalizeAskRequest(rawInput) : null;
 
   return {
     toolCallId,
@@ -402,6 +412,7 @@ export function parseToolCallUpdate(payload: unknown, now = Date.now()): ToolAct
     name: mcp?.tool,
     mcpServer: mcp?.server,
     detail,
+    ask: ask ?? undefined,
   };
 }
 
@@ -595,6 +606,35 @@ export function settledCount(activities: ToolActivity[]): number {
 }
 
 /**
+ * 单条工具的改动规模（+N/-N）。
+ *
+ * 只在 write/edit/delete/move 这类会改文件的调用上有意义；无 diff 细节返回 null，
+ * 免得给每个 read 都白算一遍 LCS。
+ */
+export function diffStatOf(activity: ToolActivity): { added: number; removed: number } | null {
+  const diff = activity.detail?.diff;
+  if (!diff) return null;
+  if (activity.kind !== "edit" && activity.kind !== "delete" && activity.kind !== "move") return null;
+  const { added, removed } = diffTexts(diff.oldText, diff.newText);
+  return { added, removed };
+}
+
+/** 一批工具调用的改动总量（时间线头部汇总）；一条 diff 都没有时返回 null。 */
+export function aggregateDiffStat(activities: ToolActivity[]): { added: number; removed: number } | null {
+  let added = 0;
+  let removed = 0;
+  let seen = false;
+  for (const activity of activities) {
+    const stat = diffStatOf(activity);
+    if (!stat) continue;
+    seen = true;
+    added += stat.added;
+    removed += stat.removed;
+  }
+  return seen ? { added, removed } : null;
+}
+
+/**
  * 把一批工具活动增量合并进已有时间线（就地变更数组，保持响应式）。
  * 生命周期续写规则：以 toolCallId 定位，同一活动再次出现（如 pending → in_progress →
  * completed）时原地升级状态 / finishedAt，而不是新增一条；新 id 追加到末尾。
@@ -613,6 +653,7 @@ export function mergeToolActivities(existing: ToolActivity[] | undefined, incomi
       if (activity.error) prev.error = activity.error;
       if (activity.name) prev.name = activity.name;
       if (activity.mcpServer) prev.mcpServer = activity.mcpServer;
+      if (activity.ask) prev.ask = activity.ask;
       // 细节按字段合并：ACP 的 content 是整体替换，但省略 content 的 update 不该把已收到的内容清空
       if (activity.detail) prev.detail = { ...prev.detail, ...activity.detail };
     } else {

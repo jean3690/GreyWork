@@ -19,6 +19,8 @@
     "lint": "eslint .",
     "test": "pnpm -r --if-present run test",
     "check": "pnpm typecheck && pnpm build",
+    "shadcn:add": "pnpm dlx --yes shadcn-vue@2.8.2 add --cwd packages/workbench -y -o && node scripts/shadcn-sync.mjs",
+    "shadcn:sync": "node scripts/shadcn-sync.mjs",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

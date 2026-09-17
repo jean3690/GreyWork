@@ -40,6 +40,41 @@ export interface ToolDetail {
 }
 
 /**
+ * AskUserQuestion（agent 向用户提问）的选择菜单载荷。
+ *
+ * 数据源是 ACP 工具调用里名为 `AskUserQuestion` 的那一次调用：`rawInput.questions`
+ * 带题干与选项。宿主没有 client→agent 的工具结果通道，所以用户的选择以一条普通
+ * 用户消息回传同一会话（见 AskQuestionCard）。
+ */
+export interface AskOption {
+  label: string;
+  description?: string;
+}
+
+export interface AskQuestion {
+  question: string;
+  /** 短标题（工具语义里的 header），渲染成选项组上方的小标签。 */
+  header?: string;
+  options: AskOption[];
+  /** 多选：渲染复选框 + 确认；单选即点即提交。 */
+  multiSelect?: boolean;
+}
+
+/** 单题的作答：选中的选项 label，外加可选的自由文本补充。 */
+export interface AskAnswer {
+  question: string;
+  labels: string[];
+  custom?: string;
+}
+
+export interface AskRequest {
+  questions: AskQuestion[];
+  /** 已作答题目的答案；非空即表示卡片已收口为只读态。 */
+  answers?: AskAnswer[];
+  answeredAt?: number;
+}
+
+/**
  * 一条 Agent 工具活动记录（前端「工具聚合时间线」的最小数据单元）。
  * 由 ACP agent_message 的 tool_call / tool_call_result 内容解析而来，
  * 也可由 mock 管线直接构造。
@@ -67,6 +102,8 @@ export interface ToolActivity {
   error?: string;
   /** 可展开细节（写入内容 / 输出 / 入参）。 */
   detail?: ToolDetail;
+  /** 提问载荷：这次调用是 AskUserQuestion 时非空（消息侧渲染选择菜单）。 */
+  ask?: AskRequest;
 }
 
 /**
@@ -130,6 +167,8 @@ export interface ThreadMessage {
   artifacts?: string[];
   /** 本条消息内的工具调用时间线（会话消息中嵌入；沿用 ACP 同款生命周期）。 */
   tools?: ToolActivity[];
+  /** 待用户作答的提问（AskUserQuestion）；作答后 answers 非空，卡片转只读。 */
+  ask?: AskRequest;
   /** ACP 后端派发消息的来源提供方名（内部 LLM 管线无此字段） */
   acp?: string;
   /**

@@ -3,7 +3,7 @@
  * 错了表现为整个文件头被染成一行新增，且后续行号全偏。
  */
 import { describe, expect, it } from "vitest";
-import { countDiffLines, parseUnifiedDiff } from "@/lib/unified-diff";
+import { countDiffLines, diffTexts, parseUnifiedDiff } from "@/lib/unified-diff";
 
 const SINGLE = [
   "diff --git a/src/a.ts b/src/a.ts",
@@ -95,5 +95,71 @@ describe("countDiffLines", () => {
   it("跨文件累加行数（供超大 patch 截断判断）", () => {
     const files = parseUnifiedDiff(SINGLE);
     expect(countDiffLines(files)).toBe(files[0].lines.length);
+  });
+});
+
+describe("diffTexts", () => {
+  it("空输入返回空结果", () => {
+    expect(diffTexts("", "")).toEqual({ lines: [], added: 0, removed: 0 });
+  });
+
+  it("oldText 为 null（整文件写入）：全部按新增，带新侧行号", () => {
+    const result = diffTexts(null, "a\nb");
+    expect(result.added).toBe(2);
+    expect(result.removed).toBe(0);
+    expect(result.lines.map((line) => [line.kind, line.oldNo, line.newNo, line.text])).toEqual([
+      ["add", null, 1, "a"],
+      ["add", null, 2, "b"],
+    ]);
+  });
+
+  it("中间改一行：只标该行的增删，未变行按上下文保留", () => {
+    const result = diffTexts("keep\nold\ntail", "keep\nnew\ntail");
+    expect(result.added).toBe(1);
+    expect(result.removed).toBe(1);
+    expect(result.lines.map((line) => line.kind)).toEqual(["context", "del", "add", "context"]);
+    expect(result.lines.map((line) => [line.oldNo, line.newNo])).toEqual([
+      [1, 1],
+      [2, null],
+      [null, 2],
+      [3, 3],
+    ]);
+  });
+
+  it("纯新增：旧文是前缀，只在尾部补增", () => {
+    const result = diffTexts("a\nb", "a\nb\nc");
+    expect(result.added).toBe(1);
+    expect(result.removed).toBe(0);
+    expect(result.lines.at(-1)).toEqual({ kind: "add", text: "c", oldNo: null, newNo: 3 });
+  });
+
+  it("纯删除：新文是前缀，只在尾部删减", () => {
+    const result = diffTexts("a\nb\nc", "a\nb");
+    expect(result.added).toBe(0);
+    expect(result.removed).toBe(1);
+    expect(result.lines.at(-1)).toEqual({ kind: "del", text: "c", oldNo: 3, newNo: null });
+  });
+
+  it("结尾换行不会凭空多出一条空行的改动", () => {
+    const result = diffTexts("a\n", "a\n");
+    expect(result).toEqual({ lines: [{ kind: "context", text: "a", oldNo: 1, newNo: 1 }], added: 0, removed: 0 });
+  });
+
+  it("行号连续推进：改一处后后续上下文行两侧行号都跟着走", () => {
+    const result = diffTexts("a\nb\nc\nd", "a\nX\nc\nd");
+    const body = result.lines.filter((line) => line.kind !== "context");
+    expect(body).toEqual([
+      { kind: "del", text: "b", oldNo: 2, newNo: null },
+      { kind: "add", text: "X", oldNo: null, newNo: 2 },
+    ]);
+    expect(result.lines.at(-1)).toEqual({ kind: "context", text: "d", oldNo: 4, newNo: 4 });
+  });
+
+  it("超大输入走退化路径（不做 O(n·m) 对齐），仍给出正确增删计数", () => {
+    const big = Array.from({ length: 3000 }, (_, index) => `line-${index}`).join("\n");
+    const result = diffTexts(big, big);
+    // 退化路径：旧文全删 + 新文全增
+    expect(result.added).toBe(3000);
+    expect(result.removed).toBe(3000);
   });
 });

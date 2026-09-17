@@ -5,6 +5,8 @@ import vue from "@vitejs/plugin-vue";
 // 对齐 GreyWork 的 tests/ 集中布局：
 //   tests/unit/**/*.test.ts       纯逻辑单测（node 环境）
 //   tests/unit/**/*.dom.test.ts   组件/hook 测试（happy-dom 环境，.dom 后缀分流）
+//   src/features/**/__tests__/*.test.ts        附加节点逻辑单测（随 feature 目录存放）
+//   src/features/**/__tests__/*.dom.test.ts    附加组件测试（随 feature 目录存放）
 //   tests/vitest.setup.ts / tests/vitest.dom.setup.ts  各环境共享 setup
 // 环境不再用 `// @vitest-environment` 文件头注释，而是按文件后缀 + projects 配置分流。
 const srcRoot = path.resolve(__dirname, "src");
@@ -24,8 +26,8 @@ export default defineConfig({
         test: {
           name: "node",
           environment: "node",
-          include: ["tests/unit/**/*.test.ts"],
-          exclude: ["tests/unit/**/*.dom.test.ts", "tests/unit/**/*.dom.test.tsx"],
+          include: ["tests/unit/**/*.test.ts", "src/features/**/__tests__/*.test.ts"],
+          exclude: ["tests/unit/**/*.dom.test.ts", "tests/unit/**/*.dom.test.tsx", "src/features/**/__tests__/*.dom.test.ts"],
           setupFiles: ["./tests/vitest.setup.ts"],
         },
       },
@@ -35,7 +37,7 @@ export default defineConfig({
         test: {
           name: "dom",
           environment: "happy-dom",
-          include: ["tests/unit/**/*.dom.test.ts", "tests/unit/**/*.dom.test.tsx"],
+          include: ["tests/unit/**/*.dom.test.ts", "tests/unit/**/*.dom.test.tsx", "src/features/**/__tests__/*.dom.test.ts"],
           setupFiles: ["./tests/vitest.dom.setup.ts"],
         },
       },
