@@ -380,6 +380,36 @@ fn classify_notification(app: &AppHandle, notification: SessionNotification) {
     }
 }
 
+/// 权限请求涉及的路径（协议标准字段，跨 agent 通用）。前端卡片据此告诉用户
+/// 「这条请求要动哪些文件」——edit 类请求里这比标题有用得多。
+fn permission_locations(request: &RequestPermissionRequest) -> Vec<String> {
+    request
+        .tool_call
+        .fields
+        .locations
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .map(|location| location.path.to_string_lossy().into_owned())
+        .collect()
+}
+
+/// rawInput 的透传上限：agent 习惯把整份 diff / 文件正文塞进 rawInput，
+/// 无上限地经 IPC + JSON-RPC 各拷一份会拖慢权限卡片。超限直接置 null——
+/// 路径有 `locations` 兜底，命令正文丢失只是少一行明细，不值得为它撑大载荷。
+const PERMISSION_RAW_INPUT_MAX_BYTES: usize = 8 * 1024;
+
+/// 透传 agent 的原始入参（不解析键名：各家 agent 用 `command` / `filepath` /
+/// `diff` 都不一致，硬编码等于把宿主绑死在某一个后端上）。超限返回 None。
+fn permission_raw_input(request: &RequestPermissionRequest) -> Option<serde_json::Value> {
+    let raw = request.tool_call.fields.raw_input.as_ref()?;
+    let encoded = serde_json::to_string(raw).ok()?;
+    if encoded.len() > PERMISSION_RAW_INPUT_MAX_BYTES {
+        return None;
+    }
+    Some(raw.clone())
+}
+
 /// 组装给前端的权限请求载荷；auto=true 表示宿主已代为决策（仅通知流）。
 fn permission_payload(
     request_id: u64,
@@ -394,6 +424,8 @@ fn permission_payload(
         "toolCallId": request.tool_call.tool_call_id.to_string(),
         "title": request.tool_call.fields.title,
         "kind": kind_label(request.tool_call.fields.kind),
+        "locations": permission_locations(request),
+        "rawInput": permission_raw_input(request),
         "options": request.options.iter().map(|option| serde_json::json!({
             "optionId": option.option_id.to_string(),
             "name": option.name,
@@ -511,10 +543,59 @@ pub(crate) fn scan_turn_artifacts(root: &Path, since_ms: u64) -> Vec<PathBuf> {
     found
 }
 
+/// 单个后端的启动环境变量条数 / 单值长度上限。
+const MAX_PROVIDER_ENV_VARS: usize = 32;
+const MAX_PROVIDER_ENV_VALUE_CHARS: usize = 4096;
+
+/// 环境变量名必须是 POSIX 标识符（首字符字母或 `_`，其余字母数字下划线，≤64）。
+fn is_valid_env_name(name: &str) -> bool {
+    if name.is_empty() || name.len() > 64 {
+        return false;
+    }
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(first) if first.is_ascii_alphabetic() || first == '_' => {}
+        _ => return false,
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// 净化前端给的后端环境变量：整批拒绝而不是静默丢弃（少注入一个 API key 会变成
+/// 「agent 莫名其妙没权限」，比明确报错难查得多）。
+fn sanitize_env(
+    raw: Option<std::collections::HashMap<String, String>>,
+) -> Result<Vec<(String, String)>, String> {
+    let Some(map) = raw else {
+        return Ok(Vec::new());
+    };
+    if map.len() > MAX_PROVIDER_ENV_VARS {
+        return Err(format!("环境变量过多（最多 {MAX_PROVIDER_ENV_VARS} 条）"));
+    }
+    let mut vars = Vec::with_capacity(map.len());
+    for (key, value) in map {
+        let name = key.trim().to_string();
+        if !is_valid_env_name(&name) {
+            return Err(format!("非法环境变量名: {key:?}"));
+        }
+        if value.contains('\0') {
+            return Err(format!("环境变量 {name} 的值含 NUL 字符"));
+        }
+        if value.chars().count() > MAX_PROVIDER_ENV_VALUE_CHARS {
+            return Err(format!(
+                "环境变量 {name} 的值过长（最多 {MAX_PROVIDER_ENV_VALUE_CHARS} 字符）"
+            ));
+        }
+        vars.push((name, value));
+    }
+    Ok(vars)
+}
+
 /// 启动外部 ACP agent 子进程并完成 initialize 握手，返回主机句柄 id。
 ///
 /// `sandbox` 取沙盒策略（"auto" | "off" | "fs" | "full"）：未知值拒绝；auto
 /// 在 bwrap 可用时启用 fs，不可用时记录明确告警后直启。
+/// `env` 是该后端的启动环境变量（设置里配的 API key 之类），净化后注入子进程；
+/// 沙盒开启时同样生效（bwrap 不清空环境，只覆盖 HOME）。
 #[tauri::command]
 // Tauri 将每个 IPC 字段与宿主 State 分别注入；合并为 DTO 会无收益地改写稳定命令协议。
 #[allow(clippy::too_many_arguments)]
@@ -527,6 +608,7 @@ pub async fn acp_start(
     tier: Option<String>,
     sandbox: Option<String>,
     workspace: Option<String>,
+    env: Option<std::collections::HashMap<String, String>>,
 ) -> Result<u64, String> {
     // 但仅限「用户已在目录里启用」的程序（目录真源归 Rust，渲染端不可自封）。
     // shell 元字符拒绝不受影响，仍是配置注入的最后防线。
@@ -569,8 +651,14 @@ pub async fn acp_start(
     };
 
     let handle_id = state.next_id.fetch_add(1, Ordering::SeqCst);
+    let env_vars = sanitize_env(env)?;
     let agent =
         AcpAgent::from_str(&command).map_err(|error| format!("invalid agent command: {error}"))?;
+    let agent = if env_vars.is_empty() {
+        agent
+    } else {
+        AcpAgent::new(agent.into_config().envs(env_vars))
+    };
 
     let (ready_tx, mut ready_rx) = tokio::sync::mpsc::channel::<ConnectionTo<AgentRole>>(1);
     let app_task = app.clone();
@@ -768,7 +856,7 @@ async fn resolve_permission(
                     "title": request.tool_call.fields.title,
                     "kind": kind_label(request.tool_call.fields.kind),
                     "reason": "read-only",
-                    "paths": [],
+                    "locations": [],
                 }),
             );
             return RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled);
@@ -784,7 +872,7 @@ async fn resolve_permission(
                     "title": request.tool_call.fields.title,
                     "kind": kind_label(request.tool_call.fields.kind),
                     "reason": "outside-workspace",
-                    "paths": outside.iter().map(|path| path.to_string_lossy()).collect::<Vec<_>>(),
+                    "locations": outside.iter().map(|path| path.to_string_lossy().into_owned()).collect::<Vec<_>>(),
                 }),
             );
             return RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled);
@@ -1638,6 +1726,38 @@ mod tests {
     }
 
     #[test]
+    fn provider_env_sanitizer_rejects_bad_names_and_oversize_batches() {
+        let mut good = std::collections::HashMap::new();
+        good.insert("ANTHROPIC_API_KEY".to_string(), "sk-test".to_string());
+        good.insert("_DEBUG".to_string(), "1".to_string());
+        let vars = sanitize_env(Some(good)).unwrap();
+        assert_eq!(vars.len(), 2);
+        assert!(sanitize_env(None).unwrap().is_empty());
+
+        for bad in ["1KEY", "KEY-DASH", "KEY DOT", "", "ключ"] {
+            let mut map = std::collections::HashMap::new();
+            map.insert(bad.to_string(), "v".to_string());
+            assert!(sanitize_env(Some(map)).is_err(), "非法名 {bad:?} 应被拒绝");
+        }
+
+        let mut nul = std::collections::HashMap::new();
+        nul.insert("KEY".to_string(), "a\0b".to_string());
+        assert!(sanitize_env(Some(nul)).is_err(), "值含 NUL 应被拒绝");
+
+        let mut oversized = std::collections::HashMap::new();
+        oversized.insert(
+            "KEY".to_string(),
+            "x".repeat(MAX_PROVIDER_ENV_VALUE_CHARS + 1),
+        );
+        assert!(sanitize_env(Some(oversized)).is_err());
+
+        let too_many: std::collections::HashMap<String, String> = (0..=MAX_PROVIDER_ENV_VARS)
+            .map(|index| (format!("KEY_{index}"), "v".to_string()))
+            .collect();
+        assert!(sanitize_env(Some(too_many)).is_err(), "超量整批拒绝");
+    }
+
+    #[test]
     fn cwd_rejects_roots_relative_and_missing() {
         assert!(validate_cwd("/").is_err());
         assert!(validate_cwd("C:/").is_err());
@@ -1838,6 +1958,78 @@ mod tests {
         );
     }
 
+    /// 带 raw_input 的权限请求（execute 类：命令正文）。
+    fn permission_request_with_raw(raw: serde_json::Value) -> RequestPermissionRequest {
+        let fields = ToolCallUpdateFields::default()
+            .kind(Some(ToolKind::Execute))
+            .raw_input(Some(raw));
+        RequestPermissionRequest::new(
+            SessionId::new("sess-1"),
+            ToolCallUpdate::new("call-raw", fields),
+            vec![PermissionOption::new(
+                "opt-1",
+                "Allow",
+                PermissionOptionKind::AllowOnce,
+            )],
+        )
+    }
+
+    /// 卡片要靠这两个字段说清「动哪些文件、跑什么命令」。丢掉它们，用户就只能
+    /// 对着一行标题盲批——这正是之前的行为。
+    #[test]
+    fn permission_payload_carries_locations_and_raw_input() {
+        let request = permission_request_at(
+            Some(ToolKind::Edit),
+            true,
+            &["/home/user/proj/a.ts", "/home/user/proj/b.ts"],
+        );
+
+        let payload = permission_payload(7, false, None, &request);
+        assert_eq!(payload["requestId"], 7);
+        assert_eq!(payload["auto"], false);
+        assert_eq!(payload["toolCallId"], "call-1");
+        assert_eq!(payload["kind"], "edit");
+        assert_eq!(
+            payload["locations"],
+            serde_json::json!(["/home/user/proj/a.ts", "/home/user/proj/b.ts"])
+        );
+
+        // auto 路径与前端确认路径共用本函数：chosen 必须一起透出，否则留痕写不出「批准了什么」。
+        let auto = permission_payload(u64::MAX, true, Some("opt-1"), &request);
+        assert_eq!(auto["auto"], true);
+        assert_eq!(auto["chosen"], "opt-1");
+
+        // 无 locations 的请求（execute / think）→ 空数组，前端不必做 null 兜底。
+        let bare = permission_request(Some(ToolKind::Think), true);
+        assert_eq!(
+            permission_payload(8, false, None, &bare)["locations"],
+            serde_json::json!([])
+        );
+    }
+
+    /// rawInput 是 agent 自定形状：小载荷原样透传（前端自己找 command），
+    /// 超限整块丢弃——路径有 locations 兜底，不值得为一行明细撑大 IPC 载荷。
+    #[test]
+    fn permission_payload_forwards_small_raw_input_and_drops_oversize() {
+        let small = permission_payload(
+            1,
+            false,
+            None,
+            &permission_request_with_raw(serde_json::json!({ "command": "echo hi" })),
+        );
+        assert_eq!(small["rawInput"]["command"], "echo hi");
+
+        let oversize = permission_payload(
+            2,
+            false,
+            None,
+            &permission_request_with_raw(serde_json::json!({
+                "diff": "x".repeat(PERMISSION_RAW_INPUT_MAX_BYTES + 1)
+            })),
+        );
+        assert!(oversize["rawInput"].is_null(), "超限 rawInput 应被丢弃");
+    }
+
     #[test]
     fn session_policy_default_fails_closed() {
         // 未登记 handle 的兜底：ReadOnly（fail-closed）、无锚定基准
@@ -1969,6 +2161,7 @@ mod tests {
                 kind: "acp".to_string(),
                 command: "my-agent acp".to_string(),
                 enabled: true,
+                env: None,
             },
             crate::db::AgentProviderDto {
                 id: "custom-off".to_string(),
@@ -1976,6 +2169,7 @@ mod tests {
                 kind: "acp".to_string(),
                 command: "disabled-agent acp".to_string(),
                 enabled: false,
+                env: None,
             },
         ])
         .unwrap();

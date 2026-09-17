@@ -2,6 +2,13 @@
 // 模板/组件用 t("...") 引用；新增 key 时同步补充 en-US.ts,保证两语言 key 集合对等。
 // 注意：不使用 as const——MessageSchema 需要字段为 string 宽类型，en-US 才能以同型结构赋值。
 export const zhCN = {
+  reasoning: {
+    auto: { label: "自动", description: "跟随模型与服务端默认，不强制传推理参数" },
+    low: { label: "低", description: "快速响应，适合简单问答与改写" },
+    medium: { label: "中", description: "均衡档，日常任务的主力选择" },
+    high: { label: "高", description: "更长的思考预算，适合复杂推理与代码" },
+    max: { label: "极高", description: "尽可能深的推理（部分供应商收敛为 high）" },
+  },
   common: {
     ok: "确定",
     cancel: "取消",
@@ -393,9 +400,15 @@ export const zhCN = {
     },
     permission: {
       title: "等待你确认",
-      hint: "agent 请求执行下面的操作；{s} 秒内未确认将自动取消。",
+      hint: "agent 请求执行下面的操作；剩余 {s}，超时未确认将自动取消。",
       deny: "拒绝",
       paths: "涉及路径",
+      toolCallId: "调用",
+      kinds: { execute: "执行命令", edit: "修改文件", read: "读取", fetch: "网络请求", tool: "工具调用" },
+      decidedAllow: "已允许 · {choice}",
+      decidedDeny: "已拒绝",
+      decidedTimeout: "超时已取消",
+      decidedAuto: "按你的「始终允许」放行 · {choice}",
     },
     ask: {
       title: "等待你的选择",
@@ -703,7 +716,6 @@ export const zhCN = {
     permissionFailed: "[权限回传失败] {detail}",
     autoApproved: "\n\n> 宿主自动批准 · {title} → {choice}",
     permissionDenied: "拒绝",
-    permissionLog: "[权限] {choice} · {title}",
     blockedOutsideWorkspace: "\n\n> 宿主拦截 · {title}：目标路径在工作区之外，已拒绝（{paths}）",
     readOnlyBlocked: "\n\n> 宿主拦截 · {title}：当前为只读权限，已拒绝写/执行操作",
     sessionSyncFailed: "会话未能保存到磁盘",
@@ -722,6 +734,9 @@ export const zhCN = {
     agentProviderNameRequired: "后端名称不能为空",
     agentProviderCommandRequired: "启动命令不能为空",
     agentProviderNotEditable: "仅用户自配的后端可编辑 / 删除",
+    agentProviderEnvLine: "环境变量行格式应为 KEY=VALUE：{line}",
+    agentProviderEnvName: "环境变量名只能是字母、数字、下划线，且不能以数字开头：{key}",
+    agentProviderHeaderLine: "请求头行格式应为 Key: Value：{line}",
   },
 };
 

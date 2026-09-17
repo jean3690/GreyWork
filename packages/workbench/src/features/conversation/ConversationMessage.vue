@@ -15,11 +15,13 @@ import ThinkingBlock from "@/features/conversation/ThinkingBlock.vue";
 import ToolTimeline from "@/features/conversation/ToolTimeline.vue";
 import PlanCard from "@/features/conversation/PlanCard.vue";
 import AskQuestionCard from "@/features/conversation/AskQuestionCard.vue";
+import ScheduleConfirmCard from "@/features/conversation/ScheduleConfirmCard.vue";
+import PermissionCard from "@/features/conversation/PermissionCard.vue";
 import Icon from "@/features/shared/Icon.vue";
 import Hint from "@/features/shared/Hint.vue";
+import { appEvents } from "@/events";
 import { useAgentStore } from "@/stores/agent";
 import { useChatStore } from "@/stores/chat";
-import { usePreviewStore } from "@/stores/preview";
 import { useAttachmentThumbs } from "@/lib/use-attachments";
 import { useTurnActive } from "@/lib/turn-activity";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
@@ -30,7 +32,6 @@ const props = withDefaults(defineProps<{ message: ThreadMessage; threadId?: stri
 const { t } = useI18n();
 const agent = useAgentStore();
 const chat = useChatStore();
-const preview = usePreviewStore();
 
 const message = computed(() => props.message);
 
@@ -44,7 +45,8 @@ const lightbox = ref<{ src: string; name: string } | null>(null);
 
 function openAttachment(item: Attachment): void {
   if (item.path) {
-    preview.open(item.path, item.name, "disk");
+    // 跨面板「请求预览」语义，走事件而不是直调 preview store（桥接见 preview-bridge.ts）
+    appEvents.emit("preview:request", { path: item.path, name: item.name, source: "disk" });
     return;
   }
   if (item.kind === "image" && item.dataUrl) lightbox.value = { src: item.dataUrl, name: item.name };
@@ -133,6 +135,7 @@ function timeLabel(ts: number): string {
     <div v-else class="flex max-w-[92%] flex-col gap-2.5">
       <PlanCard v-if="message.planPending" :thread-id="threadId || chat.activeThreadId" :message="message" />
       <AskQuestionCard v-if="message.ask" :thread-id="threadId || chat.activeThreadId" :message="message" />
+      <ScheduleConfirmCard v-if="message.scheduleDraft" :thread-id="threadId || chat.activeThreadId" :message="message" />
       <div
         v-if="awaitingOutput"
         class="flex h-9 items-center gap-2.5 rounded-[12px] border border-line bg-panel-2 px-3.5 text-[12px] text-dim"
@@ -155,6 +158,9 @@ function timeLabel(ts: number): string {
         <MarkdownText v-else :content="textOf(segment)" />
       </template>
       <ArtifactCards v-if="message.artifacts?.length" :ids="message.artifacts" />
+      <!-- 权限裁决留痕：活跃卡片在输入框上方（那里才是「等你点」的位置），
+           裁决后卡片消失，但记录留在消息流里，回看能知道当时批了什么。 -->
+      <PermissionCard v-for="trace in message.permissions ?? []" :key="trace.toolCallId" :trace="trace" />
       <span class="text-[10px] text-dim2">{{ timeLabel(message.ts) }}</span>
     </div>
   </article>

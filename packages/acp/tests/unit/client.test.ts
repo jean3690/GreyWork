@@ -202,7 +202,13 @@ class FakeWebSocket {
         method: "session/request_permission",
         params: {
           sessionId: "remote-session",
-          toolCall: { toolCallId: "call-1", kind: "read", title: "Read file" },
+          toolCall: {
+            toolCallId: "call-1",
+            kind: "read",
+            title: "Read file",
+            locations: [{ path: "/tmp/notes.md" }],
+            rawInput: { filepath: "/tmp/notes.md" },
+          },
           options: [{ optionId: "allow", name: "Allow", kind: "allow_once" }],
         },
       }),
@@ -259,6 +265,13 @@ describe("WebSocketTransport ACP JSON-RPC", () => {
     await flushMicrotasks();
     expect(JSON.parse(socket.sent.at(-1)!).result.outcome.optionId).toBe("allow");
     expect(events.map((event) => event.kind)).toEqual(["started", "session-update", "permission-request"]);
+    // 远程传输与桌面宿主走两条代码路径，但载荷形状必须一致：卡片靠 locations 列路径、
+    // 靠 rawInput 取命令正文，少一处就会退化成「只有一行标题」。
+    expect(events.at(-1)!.payload).toMatchObject({
+      toolCallId: "call-1",
+      locations: ["/tmp/notes.md"],
+      rawInput: { filepath: "/tmp/notes.md" },
+    });
   });
 
   it("转发真实 ACP tool_call_update 负载（content 走 ToolCallUpdate，非 v2 专有帧）", async () => {

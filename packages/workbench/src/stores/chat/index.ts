@@ -76,6 +76,7 @@ export const useChatStore = defineStore("chat", () => {
     appendMessageContent: stream.appendMessageContent,
     setMessageContent: stream.setMessageContent,
     appendTools: stream.appendTools,
+    setPermissionTrace: stream.setPermissionTrace,
     appendMessageThinking: stream.appendMessageThinking,
     flushPendingContent: stream.flushPendingContent,
     streamingMessageId: state.streamingMessageId,

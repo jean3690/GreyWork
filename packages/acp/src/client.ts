@@ -33,6 +33,7 @@ import type {
   McpToolInfo,
 } from "./transports";
 import type { PermissionTier } from "./permissions";
+import { boundedPermissionRawInput } from "./permissions";
 import { isTauriRuntime } from "./transports";
 import { TauriIpcTransport } from "./tauri-transport";
 export class RemoteAcpUnsupportedError extends Error {
@@ -130,7 +131,13 @@ export class WebSocketTransport implements AcpTransport {
     this.available = Boolean(options?.url);
   }
 
-  async startAgent(_agentCmd: string, _tier: PermissionTier): Promise<number> {
+  async startAgent(
+    _agentCmd: string,
+    _tier: PermissionTier,
+    _sandbox?: AcpSandboxMode,
+    _workspace?: string | null,
+    _env?: Record<string, string>,
+  ): Promise<number> {
     const ctx = await this.ensureConnected();
     await ctx.request(AGENT_METHODS.initialize, {
       protocolVersion: 1,
@@ -300,6 +307,8 @@ export class WebSocketTransport implements AcpTransport {
         toolCallId: params.toolCall.toolCallId,
         title: params.toolCall.title ?? null,
         kind: params.toolCall.kind ?? "other",
+        locations: (params.toolCall.locations ?? []).map((location) => location.path),
+        rawInput: boundedPermissionRawInput(params.toolCall.rawInput),
         options: (params.options ?? []).map((option) => ({
           optionId: option.optionId,
           name: option.name,
@@ -343,7 +352,13 @@ export interface AcpClient {
   readonly transportId: "tauri-ipc" | "websocket";
   isAvailable(): boolean;
   /** sandbox 非 off 时宿主以 OS 沙盒包裹 agent；workspace 为沙盒可写锚定目录。 */
-  startAgent(agentCmd: string, tier: PermissionTier, sandbox?: AcpSandboxMode, workspace?: string | null): Promise<number>;
+  startAgent(
+    agentCmd: string,
+    tier: PermissionTier,
+    sandbox?: AcpSandboxMode,
+    workspace?: string | null,
+    env?: Record<string, string>,
+  ): Promise<number>;
   /** 建会话；`mcpServers` 随 session/new 声明给 agent，由 agent 连接并合并工具面。 */
   openSession(handle: number, cwd: string, mcpServers?: readonly McpServerConfig[]): Promise<AcpSessionOpened>;
   /** 恢复已存在会话（session/load）；agent 不支持时由调用方回落 openSession。 */

@@ -30,6 +30,11 @@ export interface LlmChatParams {
   /** 推理等级（auto/low/medium/high/max）；宿主侧映射为供应商参数，auto/缺省不传 */
   reasoningEffort?: string;
   /**
+   * 附加请求头；值支持 `{{ENV_VAR}}` 占位符，由宿主在发请求时从环境变量解析。
+   * 解析失败（环境变量未设置）该笔请求整体报错，不静默丢头。
+   */
+  headers?: Record<string, string>;
+  /**
    * 本轮流水的调用方令牌，宿主原样回灌进每条事件。
    *
    * `llm://event` 是全局广播：会话流与远程助手回复可能同时在跑，

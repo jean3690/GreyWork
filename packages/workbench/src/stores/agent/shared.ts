@@ -7,6 +7,7 @@
 import type { AcpPromptUnit } from "@greywork/acp";
 import { createJsonStorage } from "@greywork/core";
 import type { AgentProviderConfig } from "@greywork/shell";
+import { ref } from "vue";
 import { i18n } from "../../i18n";
 import { inlineTextAttachment } from "../../lib/attachments";
 import { readAttachmentBase64, readAttachmentText } from "../../state/attachment-library";
@@ -34,6 +35,92 @@ export function isCustomAgentProvider(id: string): boolean {
 /** 自配后端 id：时间戳 + 随机后缀，跨重启唯一。 */
 export function newCustomProviderId(): string {
   return `${CUSTOM_AGENT_PROVIDER_ID_PREFIX}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/** 环境变量名：POSIX 标识符（与宿主 acp_host::is_valid_env_name 同一规则）。 */
+const ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/**
+ * 环境变量文本（每行 `KEY=VALUE`，`#` 开头与空行忽略）→ 映射。
+ * 非法行**整体拒绝**而不是跳过：少注入一个 API key 会变成「agent 莫名其妙没权限」，
+ * 比当场报错难查得多。
+ */
+export function parseEnvText(text: string): { env: Record<string, string>; error: string | null } {
+  const env: Record<string, string> = {};
+  for (const rawLine of text.split("\n")) {
+    const line = rawLine.trim();
+    if (line === "" || line.startsWith("#")) continue;
+    const separator = line.indexOf("=");
+    if (separator <= 0) return { env: {}, error: t("errors.agentProviderEnvLine", { line }) };
+    const key = line.slice(0, separator).trim();
+    const value = line.slice(separator + 1).trim();
+    if (!ENV_NAME_PATTERN.test(key)) return { env: {}, error: t("errors.agentProviderEnvName", { key }) };
+    env[key] = value;
+  }
+  return { env, error: null };
+}
+
+/** 映射 → 编辑用文本（每行 `KEY=VALUE`；空映射 → 空串）。 */
+export function formatEnvText(env: Record<string, string> | undefined): string {
+  return Object.entries(env ?? {})
+    .map(([key, value]) => `${key}=${value}`)
+    .join("\n");
+}
+
+/**
+ * 请求头文本（每行 `Key: Value`，`#` 开头与空行忽略）→ 映射。
+ * 与 parseEnvText 同款「非法行整体拒绝」语义：少带一个鉴权头会变成
+ * 「网关莫名 401」，比当场报错难查得多。值可含冒号（只在首个 `:` 处切分）。
+ */
+export function parseHeaderText(text: string): { headers: Record<string, string>; error: string | null } {
+  const headers: Record<string, string> = {};
+  for (const rawLine of text.split("\n")) {
+    const line = rawLine.trim();
+    if (line === "" || line.startsWith("#")) continue;
+    const separator = line.indexOf(":");
+    if (separator <= 0) return { headers: {}, error: t("errors.agentProviderHeaderLine", { line }) };
+    const key = line.slice(0, separator).trim();
+    const value = line.slice(separator + 1).trim();
+    if (!key || !value) return { headers: {}, error: t("errors.agentProviderHeaderLine", { line }) };
+    headers[key] = value;
+  }
+  return { headers, error: null };
+}
+
+/** 映射 → 编辑用文本（每行 `Key: Value`；空映射 → 空串）。 */
+export function formatHeaderText(headers: Record<string, string> | undefined): string {
+  return Object.entries(headers ?? {})
+    .map(([key, value]) => `${key}: ${value}`)
+    .join("\n");
+}
+
+/**
+ * 持久化形状 → 映射：库行是 JSON 对象文本、本地缓存是对象本身，两种都认；
+ * 形状不合法一律按「没有环境变量」处理（脏数据不该拦住启动）。
+ */
+export function parseProviderEnv(raw: unknown): Record<string, string> | undefined {
+  const source = typeof raw === "string" ? safeJsonObject(raw) : raw;
+  if (typeof source !== "object" || source === null || Array.isArray(source)) return undefined;
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(source)) {
+    if (typeof value === "string" && value !== "") env[key] = value;
+  }
+  return Object.keys(env).length > 0 ? env : undefined;
+}
+
+function safeJsonObject(raw: string): unknown {
+  if (raw.trim() === "") return undefined;
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+/** 映射 → 库字段（JSON 对象文本）；空映射 → null（表示继承宿主环境）。 */
+export function serializeProviderEnv(env: Record<string, string> | undefined): string | null {
+  const entries = Object.entries(env ?? {});
+  return entries.length > 0 ? JSON.stringify(Object.fromEntries(entries)) : null;
 }
 
 /** 从命令首 token 派生探测程序（自配后端无预设 detect 元数据，仍能显示安装状态）。 */
@@ -72,6 +159,43 @@ export const providerPrefStorage = createJsonStorage<ProviderPreference>(
   "greywork.acp-provider",
   (value): value is ProviderPreference => typeof value === "object" && value !== null && "providerId" in value,
 );
+
+/** ACP 全局默认会话配置的持久化形状。 */
+export interface AcpDefaultConfig {
+  configValues: Record<string, string>;
+}
+const acpDefaultConfigStorage = createJsonStorage<AcpDefaultConfig>(
+  "greywork.acp-default-config",
+  (value): value is AcpDefaultConfig =>
+    typeof value === "object" && value !== null && typeof (value as { configValues?: unknown }).configValues === "object",
+);
+
+/**
+ * ACP 全局默认会话配置（configId → 值；模块级 ref，独立于 pinia 实例）。
+ *
+ * 层级：工作区记忆 > 全局默认 > 后端出厂值。工作区记忆是「这个项目的干活方式」，
+ * 默认是「我没表态时的兜底」——两者分开存，切新工作区不至于完全裸奔。
+ * 旧数据无该键 = 无默认，天然兼容。
+ */
+export const acpDefaultConfigValues = ref<Record<string, string>>(acpDefaultConfigStorage.read()?.configValues ?? {});
+
+function persistAcpDefaultConfig(): void {
+  const values = acpDefaultConfigValues.value;
+  if (Object.keys(values).length > 0) acpDefaultConfigStorage.write({ configValues: { ...values } });
+  else acpDefaultConfigStorage.write({ configValues: {} });
+}
+
+/** 整体覆写全局默认（AcpSessionConfig 的「设为全局默认」收集当前 select 型 currentValue）。 */
+export function setAcpDefaultConfig(values: Record<string, string>): void {
+  acpDefaultConfigValues.value = { ...values };
+  persistAcpDefaultConfig();
+}
+
+/** 清空全局默认（回到「完全跟随后端出厂值」）。 */
+export function clearAcpDefaultConfig(): void {
+  acpDefaultConfigValues.value = {};
+  persistAcpDefaultConfig();
+}
 
 /** 编排域（runs store）经此桥消费 ACP 事件：子任务 chunk/完成按 sessionId/handle 归属路由。 */
 export interface RunEventBridge {

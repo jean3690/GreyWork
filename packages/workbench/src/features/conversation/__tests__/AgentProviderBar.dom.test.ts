@@ -8,6 +8,7 @@ import { createPinia, setActivePinia } from "pinia";
 import AcpSessionConfig from "@/features/conversation/AcpSessionConfig.vue";
 import { i18n } from "@/i18n";
 import AgentProviderBar from "@/features/conversation/AgentProviderBar.vue";
+import { localReasoningOverride } from "@/stores/chat-llm";
 import { useAgentStore } from "@/stores/agent";
 import { useSettingsStore } from "@/stores/settings";
 
@@ -140,6 +141,67 @@ beforeEach(() => {
   h.isAvailable.mockImplementation(() => true);
   h.homeDir.mockImplementation(() => Promise.resolve("/home/test"));
   h.listener = null;
+  // 模块级会话覆盖是全局单例：用例间必须复位，否则上一用例的覆盖会漏进下一用例
+  localReasoningOverride.value = null;
+  // settings 会持久化 selectedModelProviderId 等：不清理会跨用例水合出前置状态
+  localStorage.clear();
+});
+
+describe("AgentProviderBar · Local 模型 / 思考强度选择器", () => {
+  it("点 Local 展开选择区：模型下拉与思考强度胶囊出现；ACP 展开时不出现", async () => {
+    const { wrapper } = mountBar();
+    expect(wrapper.find('[data-testid="local-selector"]').exists()).toBe(false);
+
+    await wrapper.get('[data-testid="local-provider-button"]').trigger("click");
+    await flushPromises();
+    const selector = wrapper.find('[data-testid="local-selector"]');
+    expect(selector.exists()).toBe(true);
+    // 默认供应商的模型名出现在触发按钮上
+    expect(selector.text()).toContain(useSettingsStore().modelProviders[0].model);
+
+    // 切到 ACP 后 Local 选择区收起
+    h.startAgent.mockResolvedValue(7);
+    h.openSession.mockResolvedValue(options(true));
+    await openCodeButton(wrapper).trigger("click");
+    await vi.waitFor(() => expect(useAgentStore().acpConnected).toBe(true));
+    expect(wrapper.find('[data-testid="local-selector"]').exists()).toBe(false);
+  });
+
+  it("模型下拉选择即切换全局默认供应商", async () => {
+    const { wrapper } = mountBar();
+    const settings = useSettingsStore();
+    const second = settings.modelProviders[1] ?? settings.modelProviders[0];
+    await wrapper.get('[data-testid="local-provider-button"]').trigger("click");
+    await flushPromises();
+
+    await wrapper.get('[data-testid="local-model-button"]').trigger("click");
+    await flushPromises();
+    const items = [...document.body.querySelectorAll('[data-testid="local-model-item"]')].map((element) => new DOMWrapper(element));
+    expect(items.length).toBeGreaterThan(0);
+    await items.at(-1)!.trigger("click");
+    await flushPromises();
+    expect(settings.selectedModelProviderId).toBe(second.id);
+  });
+
+  it("思考强度胶囊写会话覆盖并影响生效档；设为默认写回供应商并清覆盖", async () => {
+    const { wrapper } = mountBar();
+    const settings = useSettingsStore();
+    // 镜像组件的实际选择：选中项（若可用）优先，否则第一个可用
+    const available = settings.modelProviders.filter(
+      (candidate) => candidate.enabled && !!candidate.baseUrl?.trim() && !!candidate.model.trim(),
+    );
+    const target = available.find((candidate) => candidate.id === settings.selectedModelProviderId) ?? available[0];
+    await wrapper.get('[data-testid="local-provider-button"]').trigger("click");
+    await flushPromises();
+
+    const high = wrapper.get('[data-testid="local-effort-chip"][data-effort="high"]');
+    await high.trigger("click");
+    expect(localReasoningOverride.value).toBe("high");
+
+    await wrapper.get('[data-testid="local-effort-default"]').trigger("click");
+    expect(localReasoningOverride.value).toBeNull();
+    expect(settings.modelProviders.find((candidate) => candidate.id === target.id)?.reasoningEffort).toBe("high");
+  });
 });
 
 describe("AgentProviderBar · ACP 会话配置选择器", () => {

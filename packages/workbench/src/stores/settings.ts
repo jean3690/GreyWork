@@ -20,6 +20,16 @@ function normalizeReasoningEffort(value: unknown): ReasoningEffort {
   return typeof value === "string" && REASONING_EFFORT_VALUES[value] ? (value as ReasoningEffort) : "auto";
 }
 
+/** 自定义请求头归一化：只留 string→string 非空项；形状不合法按「无附加头」处理（脏数据不拦启动）。 */
+function normalizeHeaders(value: unknown): Record<string, string> | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const headers: Record<string, string> = {};
+  for (const [key, headerValue] of Object.entries(value)) {
+    if (typeof headerValue === "string" && headerValue !== "" && key.trim() !== "") headers[key] = headerValue;
+  }
+  return Object.keys(headers).length > 0 ? headers : undefined;
+}
+
 /** 权限三档（Read Only / Workspace / Full Access）。label/desc 为 i18n key，渲染处 t() 转译。 */
 export const PERMISSION_TIERS = [
   { value: "read-only", label: "settings.permissions.readOnly.label", desc: "settings.permissions.readOnly.desc" },
@@ -332,6 +342,7 @@ export const useSettingsStore = defineStore("settings", () => {
         modelProviders.value = valid.map((provider) => ({
           ...provider,
           reasoningEffort: normalizeReasoningEffort(provider.reasoningEffort),
+          headers: normalizeHeaders(provider.headers),
         }));
       }
     }

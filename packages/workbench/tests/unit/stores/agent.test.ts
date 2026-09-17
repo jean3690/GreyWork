@@ -45,6 +45,7 @@ vi.mock("@/lib/workspace-dir", () => ({
   },
 }));
 
+import { acpDefaultConfigValues, setAcpDefaultConfig } from "@/stores/agent/shared";
 import { useAgentStore } from "@/stores/agent";
 import { useSettingsStore } from "@/stores/settings";
 import { useWorkspaceStore } from "@/stores/workspace";
@@ -72,6 +73,85 @@ beforeEach(() => {
   h.isAvailable.mockImplementation(() => true);
   h.homeDir.mockImplementation(() => Promise.resolve("/home/test"));
   h.listener = null;
+  // 全局默认配置是模块级单例：用例间复位，防止跨用例泄漏
+  acpDefaultConfigValues.value = {};
+});
+
+describe("schedule 围栏（AI 提议定时任务）", () => {
+  /** 单回合派发并立即以 prompt-done 收尾；返回支架消息。 */
+  async function runTurnWithOutput(): Promise<ReturnType<typeof useChatStore>["threads"][string][number]> {
+    h.startAgent.mockResolvedValue(7);
+    h.openSession.mockResolvedValue({ sessionId: "s1", configOptions: [] });
+    h.prompt.mockResolvedValue({ turnId: 1 });
+    const agentStore = useAgentStore();
+    const chat = useChatStore();
+    useSessionStore().createSession(null, "围栏测试");
+    chat.activeThreadId = useSessionStore().activeSessionId!;
+    await agentStore.dispatchToAcp("帮我建个定时任务");
+    const threadId = chat.activeThreadId;
+    emit({
+      kind: "prompt-done",
+      payload: { turnId: 1, response: {} },
+    });
+    await flushTurn();
+    const list = chat.threads[threadId];
+    return list[list.length - 1];
+  }
+
+  async function flushTurn(): Promise<void> {
+    await vi.waitFor(() => {
+      expect(useAgentStore().acpBusy).toBe(false);
+    });
+  }
+
+  it("成功回合输出 schedule 围栏 → 支架挂上 scheduleDraft（且只保留正文里的第一份）", async () => {
+    const fence = (entry: Record<string, unknown>): string => `\`\`\`schedule\n${JSON.stringify(entry)}\n\`\`\``;
+    const output = [
+      "好的，已准备。",
+      fence({ name: "a", intent: "ia", cron: "0 9 * * *" }),
+      fence({ name: "b", intent: "ib", cron: "0 10 * * *" }),
+    ].join("\n");
+    const agentStore = useAgentStore();
+    // 让 agent 输出围栏：chunk 流式写入
+    h.startAgent.mockResolvedValue(7);
+    h.openSession.mockResolvedValue({ sessionId: "s1", configOptions: [] });
+    h.prompt.mockResolvedValue({ turnId: 1 });
+    const chat = useChatStore();
+    useSessionStore().createSession(null, "围栏测试2");
+    chat.activeThreadId = useSessionStore().activeSessionId!;
+    await agentStore.dispatchToAcp("建任务");
+    const list = chat.threads[chat.activeThreadId];
+    const scaffold = list[list.length - 1];
+    emit({ kind: "session-update", payload: { update: { sessionUpdate: "agent_message_chunk", content: { text: output } } } });
+    chat.flushPendingContent();
+    emit({ kind: "prompt-done", payload: { turnId: 1, response: {} } });
+    await flushTurn();
+
+    expect(scaffold.scheduleDraft).toEqual({ name: "a", intent: "ia", cron: "0 9 * * *" });
+  });
+
+  it("错误回合不解析围栏；无围栏的回合不挂草稿；重复 prompt-done 不覆盖", async () => {
+    const message = await runTurnWithOutput();
+    expect(message.scheduleDraft).toBeUndefined();
+  });
+
+  it("首回合 prompt 注入 schedule 说明，同一会话第二回合不再注入", async () => {
+    h.startAgent.mockResolvedValue(7);
+    h.openSession.mockResolvedValue({ sessionId: "s1", configOptions: [] });
+    h.prompt.mockResolvedValue({ turnId: 1 });
+    const agentStore = useAgentStore();
+    const chat = useChatStore();
+    useSessionStore().createSession(null, "注入测试");
+    chat.activeThreadId = useSessionStore().activeSessionId!;
+
+    await agentStore.dispatchToAcp("第一轮");
+    expect(h.prompt).toHaveBeenNthCalledWith(1, 7, expect.stringContaining("宿主能力提示"));
+    emit({ kind: "prompt-done", payload: { turnId: 1, response: {} } });
+    await flushTurn();
+
+    await agentStore.dispatchToAcp("第二轮");
+    expect(h.prompt).toHaveBeenNthCalledWith(2, 7, "第二轮");
+  });
 });
 
 describe("dispatchToAcp 写入对话流", () => {
@@ -106,7 +186,7 @@ describe("dispatchToAcp 写入对话流", () => {
       expect(h.startAgent).toHaveBeenCalledTimes(1);
       // 第三参是 MCP 声明清单：默认没启用任何服务器 → 空数组
       expect(h.openSession).toHaveBeenCalledWith(7, "/home/test", []);
-      expect(h.prompt).toHaveBeenCalledWith(7, "整理本周改动");
+      expect(h.prompt).toHaveBeenCalledWith(7, expect.stringContaining("整理本周改动"));
       expect(agentStore.acpBusy).toBe(true);
     });
 
@@ -566,6 +646,179 @@ describe("权限请求与裁决", () => {
     await pending;
   });
 
+  it("裁决在消息流里留一条只读痕（类别 / 命令 / 路径 / 选择）", async () => {
+    h.startAgent.mockResolvedValue(7);
+    h.openSession.mockResolvedValue({ sessionId: "session-1", configOptions: [] });
+    h.prompt.mockResolvedValue({ turnId: 99 });
+    const agentStore = useAgentStore();
+    const chat = useChatStore();
+    await agentStore.dispatchToAcp("跑个命令");
+
+    emit({
+      kind: "permission-request",
+      payload: {
+        requestId: 7,
+        auto: false,
+        chosen: null,
+        toolCallId: "tc-7",
+        title: "rm -rf build",
+        kind: "execute",
+        locations: [],
+        rawInput: { command: "rm -rf build" },
+        options: [{ optionId: "allow", name: "允许", kind: "allow_once" }],
+      },
+    });
+    await agentStore.respondPermission("allow");
+
+    const trace = chat.threads[chat.activeThreadId]?.at(-1)?.permissions?.[0];
+    expect(trace).toMatchObject({
+      toolCallId: "tc-7",
+      title: "rm -rf build",
+      kind: "execute",
+      choice: "允许",
+      source: "user",
+      command: "rm -rf build",
+    });
+    expect(trace?.decidedAt).toBeGreaterThan(0);
+  });
+
+  it("拒绝（optionId 为 null）留痕不带 choice", async () => {
+    h.startAgent.mockResolvedValue(7);
+    h.openSession.mockResolvedValue({ sessionId: "session-1", configOptions: [] });
+    h.prompt.mockResolvedValue({ turnId: 99 });
+    const agentStore = useAgentStore();
+    const chat = useChatStore();
+    await agentStore.dispatchToAcp("写文件");
+
+    emit({
+      kind: "permission-request",
+      payload: {
+        requestId: 8,
+        auto: false,
+        chosen: null,
+        toolCallId: "tc-8",
+        title: "/etc/passwd",
+        kind: "edit",
+        locations: ["/etc/passwd"],
+        options: [{ optionId: "allow", name: "允许", kind: "allow_once" }],
+      },
+    });
+    await agentStore.respondPermission(null);
+
+    const trace = chat.threads[chat.activeThreadId]?.at(-1)?.permissions?.[0];
+    expect(trace).toMatchObject({ choice: null, source: "user", paths: ["/etc/passwd"] });
+    expect(h.respondPermission).toHaveBeenCalledWith(8, null);
+  });
+
+  it("选过「始终允许」后同类请求免问：直接放行并留一条 auto 痕", async () => {
+    h.startAgent.mockResolvedValue(7);
+    h.openSession.mockResolvedValue({ sessionId: "session-1", configOptions: [] });
+    h.prompt.mockResolvedValue({ turnId: 99 });
+    const agentStore = useAgentStore();
+    const chat = useChatStore();
+    await agentStore.dispatchToAcp("跑个命令");
+
+    emit({
+      kind: "permission-request",
+      payload: {
+        requestId: 11,
+        auto: false,
+        chosen: null,
+        toolCallId: "tc-10",
+        kind: "execute",
+        options: [
+          { optionId: "once", name: "允许一次", kind: "allow_once" },
+          { optionId: "always", name: "始终允许", kind: "allow_always" },
+        ],
+      },
+    });
+    await agentStore.respondPermission("always");
+
+    // 第二个同类请求：不弹卡，直接按 allow_once 放行（比 allow_always 更窄）
+    emit({
+      kind: "permission-request",
+      payload: {
+        requestId: 12,
+        auto: false,
+        chosen: null,
+        toolCallId: "tc-11",
+        kind: "execute",
+        options: [
+          { optionId: "once", name: "允许一次", kind: "allow_once" },
+          { optionId: "always", name: "始终允许", kind: "allow_always" },
+        ],
+      },
+    });
+    expect(agentStore.pendingPermission).toBeNull();
+    await vi.waitFor(() => expect(h.respondPermission).toHaveBeenCalledWith(12, "once"));
+    expect((chat.threads[chat.activeThreadId]?.at(-1)?.permissions ?? []).map((trace) => trace.source)).toEqual(["user", "auto"]);
+  });
+
+  it("会话重来后「始终允许」记忆清空（会话内有效，不跨会话）", async () => {
+    h.startAgent.mockResolvedValue(7);
+    h.openSession.mockResolvedValue({ sessionId: "session-1", configOptions: [] });
+    h.prompt.mockResolvedValue({ turnId: 99 });
+    const agentStore = useAgentStore();
+    await agentStore.dispatchToAcp("跑个命令");
+
+    const request = (requestId: number, toolCallId: string) => ({
+      kind: "permission-request" as const,
+      payload: {
+        requestId,
+        auto: false,
+        chosen: null,
+        toolCallId,
+        kind: "execute",
+        options: [{ optionId: "always", name: "始终允许", kind: "allow_always" }],
+      },
+    });
+    emit(request(21, "tc-20"));
+    await agentStore.respondPermission("always");
+
+    // 宿主断开 → acpSessionId 置空 → 记忆随之作废
+    emit({ kind: "stopped", payload: {} });
+    await agentStore.dispatchToAcp("再来一轮");
+    emit(request(22, "tc-21"));
+
+    expect(agentStore.pendingPermission?.requestId).toBe(22);
+  });
+
+  it("120s 未裁决：收卡并留一条 timeout 痕", async () => {
+    h.startAgent.mockResolvedValue(7);
+    h.openSession.mockResolvedValue({ sessionId: "session-1", configOptions: [] });
+    h.prompt.mockResolvedValue({ turnId: 99 });
+    const agentStore = useAgentStore();
+    const chat = useChatStore();
+    await agentStore.dispatchToAcp("跑个命令");
+
+    vi.useFakeTimers();
+    try {
+      emit({
+        kind: "permission-request",
+        payload: {
+          requestId: 31,
+          auto: false,
+          chosen: null,
+          toolCallId: "tc-30",
+          kind: "execute",
+          options: [{ optionId: "once", name: "允许一次", kind: "allow_once" }],
+        },
+      });
+      expect(agentStore.pendingPermission).not.toBeNull();
+
+      vi.advanceTimersByTime(120_000);
+      expect(agentStore.pendingPermission).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(chat.threads[chat.activeThreadId]?.at(-1)?.permissions?.[0]).toMatchObject({
+      toolCallId: "tc-30",
+      source: "timeout",
+      choice: null,
+    });
+  });
+
   it("permission-blocked（宿主锚定拦截）向流内追加通知，不打断流", async () => {
     h.startAgent.mockResolvedValue(7);
     h.openSession.mockResolvedValue({ sessionId: "session-1", configOptions: [] });
@@ -585,7 +838,7 @@ describe("权限请求与裁决", () => {
         title: "编辑 /etc/passwd",
         kind: "edit",
         reason: "outside-workspace",
-        paths: ["/etc/passwd"],
+        locations: ["/etc/passwd"],
       },
     });
     chat.flushPendingContent();
@@ -985,6 +1238,61 @@ describe("权限临时降级与每工作区配置记忆", () => {
     expect(agentStore.routeToAcp).toBe(before);
     expect(h.startAgent).not.toHaveBeenCalled();
   });
+
+  it("全局默认兜底：工作区无记忆的会话应用默认值，且不自反写入工作区", async () => {
+    setAcpDefaultConfig({ effort: "high" });
+    h.startAgent.mockResolvedValue(7);
+    h.openSession.mockResolvedValue({
+      sessionId: "s1",
+      configOptions: [{ id: "effort", name: "Effort", category: "thought_level", type: "select", currentValue: "low" }],
+    });
+    const workspaceStore = useWorkspaceStore();
+    const workspace = workspaceStore.createWorkspace("无记忆项目");
+    const agentStore = useAgentStore();
+    await agentStore.activateAcpProvider("opencode");
+
+    await agentStore.applyWorkspaceAgentConfig(workspace.id);
+    expect(h.setSessionConfig).toHaveBeenCalledWith(7, "effort", "high");
+    // 兜底是「默认」不是「表态」：不该写进工作区记忆
+    expect(workspaceStore.agentConfigOf(workspace.id)?.configValues ?? {}).toEqual({});
+  });
+
+  it("层级：工作区记忆的键不被全局默认覆盖，记忆之外的键才兜底", async () => {
+    setAcpDefaultConfig({ effort: "high", mode: "plan" });
+    h.startAgent.mockResolvedValue(7);
+    h.openSession.mockResolvedValue({
+      sessionId: "s1",
+      configOptions: [
+        { id: "effort", name: "Effort", category: "thought_level", type: "select", currentValue: "low" },
+        { id: "mode", name: "Mode", category: "mode", type: "select", currentValue: "build" },
+      ],
+    });
+    h.setSessionConfig.mockResolvedValue([]);
+    const workspaceStore = useWorkspaceStore();
+    const workspace = workspaceStore.createWorkspace("部分记忆项目");
+    workspaceStore.setAgentConfig(workspace.id, { configValues: { effort: "low" } });
+    const agentStore = useAgentStore();
+    await agentStore.activateAcpProvider("opencode");
+
+    h.setSessionConfig.mockClear();
+    await agentStore.applyWorkspaceAgentConfig(workspace.id);
+    // effort 随工作区记忆回放；mode 无记忆 → 全局默认兜底（两次都是记忆/默认语义，不写入工作区）
+    expect(h.setSessionConfig).toHaveBeenCalledTimes(2);
+    expect(h.setSessionConfig).toHaveBeenCalledWith(7, "effort", "low");
+    expect(h.setSessionConfig).toHaveBeenCalledWith(7, "mode", "plan");
+  });
+
+  it("全局默认里的 configId 后端不暴露时跳过，不报错", async () => {
+    setAcpDefaultConfig({ nonexistent: "x" });
+    h.startAgent.mockResolvedValue(7);
+    h.openSession.mockResolvedValue({ sessionId: "s1", configOptions: [] });
+    const agentStore = useAgentStore();
+    await agentStore.activateAcpProvider("opencode");
+
+    h.setSessionConfig.mockClear();
+    await agentStore.applyWorkspaceAgentConfig(null);
+    expect(h.setSessionConfig).not.toHaveBeenCalled();
+  });
 });
 
 describe("计划模式 · ACP 门", () => {
@@ -1030,7 +1338,7 @@ describe("计划模式 · ACP 门", () => {
     expect(chat.threads[chat.activeThreadId].map((m) => m.role)).toEqual(["user", "assistant"]);
     await vi.waitFor(() => {
       expect(h.startAgent).toHaveBeenCalledTimes(1);
-      expect(h.prompt).toHaveBeenCalledWith(7, "重构模块 A");
+      expect(h.prompt).toHaveBeenCalledWith(7, expect.stringContaining("重构模块 A"));
       expect(agentStore.acpBusy).toBe(true);
     });
 

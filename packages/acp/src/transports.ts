@@ -133,6 +133,14 @@ export interface AcpPermissionRequestPayload {
   toolCallId: string;
   title?: string | null;
   kind: string;
+  /** 本请求涉及的路径（协议标准 locations）；execute/think 类为空数组。 */
+  locations?: string[];
+  /**
+   * agent 的原始入参，形状各家自定（opencode 的 bash 给 `command`、edit 给
+   * `filepath`+`diff`）。宿主只在超过 8KB 时置 null，前端按需要机会性取值，
+   * 不要假定某个键一定存在。
+   */
+  rawInput?: unknown;
   options: AcpPermissionOptionInfo[];
 }
 
@@ -141,7 +149,17 @@ export interface AcpTransport {
   /** Web transports are available only after an endpoint is configured. */
   readonly available?: boolean;
   /** sandbox 非 off 时宿主以 OS 沙盒包裹 agent；workspace 为沙盒可写锚定目录（桌面端必需）。 */
-  startAgent(agentCmd: string, tier: PermissionTier, sandbox?: AcpSandboxMode, workspace?: string | null): Promise<number>;
+  /**
+   * 启动 agent 进程。`env` 是该后端的启动环境变量（设置里配的 API key 之类）：
+   * 桌面宿主净化后注入子进程；远程传输没有本地进程可注入，参数被忽略。
+   */
+  startAgent(
+    agentCmd: string,
+    tier: PermissionTier,
+    sandbox?: AcpSandboxMode,
+    workspace?: string | null,
+    env?: Record<string, string>,
+  ): Promise<number>;
   /**
    * 改写在途会话的权限档位（临时降级/回升）。桌面宿主按 handle 存档位并在每条
    * 权限请求上重新读取，因此改档立即生效、不必重启 agent 进程。

@@ -19,8 +19,14 @@ const EVENT_NAME = "acp://event";
 export class TauriIpcTransport implements AcpTransport {
   readonly id = "tauri-ipc" as const;
 
-  async startAgent(agentCmd: string, tier: PermissionTier, sandbox?: AcpSandboxMode, workspace?: string | null): Promise<number> {
-    return invoke<number>("acp_start", { agentCmd, tier, sandbox, workspace });
+  async startAgent(
+    agentCmd: string,
+    tier: PermissionTier,
+    sandbox?: AcpSandboxMode,
+    workspace?: string | null,
+    env?: Record<string, string>,
+  ): Promise<number> {
+    return invoke<number>("acp_start", { agentCmd, tier, sandbox, workspace, env });
   }
 
   async setPermissionTier(handle: number, tier: PermissionTier): Promise<void> {
