@@ -220,6 +220,51 @@ describe("宽度与折叠持久化", () => {
   });
 });
 
+describe("moveTab（拖拽排序）", () => {
+  it("重排到目标下标，不改激活项（拖拽只是整理顺序，不抢焦点）", () => {
+    const preview = usePreviewStore();
+    const a = preview.open("a.md");
+    const b = preview.open("b.md");
+    const c = preview.open("c.md");
+    preview.activate(a);
+
+    preview.moveTab(a, 2);
+    expect(preview.tabs.map((tab) => tab.id)).toEqual([b, c, a]);
+    expect(preview.activeId).toBe(a);
+  });
+
+  it("向后移动等价于取出再插入（下标按取出前的位置理解）", () => {
+    const preview = usePreviewStore();
+    const a = preview.open("a.md");
+    preview.open("b.md");
+    preview.open("c.md");
+
+    preview.moveTab(a, 1);
+    expect(preview.tabs.map((tab) => tab.path)).toEqual(["b.md", "a.md", "c.md"]);
+  });
+
+  it("越界下标收敛到有效区间", () => {
+    const preview = usePreviewStore();
+    const a = preview.open("a.md");
+    preview.open("b.md");
+
+    preview.moveTab(a, 99);
+    expect(preview.tabs[1]?.path).toBe("a.md");
+    preview.moveTab(a, -5);
+    expect(preview.tabs[0]?.path).toBe("a.md");
+  });
+
+  it("不存在的 id 与原地放置都是空操作", () => {
+    const preview = usePreviewStore();
+    const a = preview.open("a.md");
+    preview.open("b.md");
+
+    preview.moveTab("pv-nope", 0);
+    preview.moveTab(a, 0);
+    expect(preview.tabs.map((tab) => tab.path)).toEqual(["a.md", "b.md"]);
+  });
+});
+
 describe("closeAll", () => {
   it("清空 tab 并折叠", () => {
     const preview = usePreviewStore();

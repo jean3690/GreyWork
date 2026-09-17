@@ -10,12 +10,16 @@
  * 而不是「不支持这种格式」。本组件的职责就是把这件事说清楚，并指向系统里的 Office。
  *
  * 仍然走二进制读取 —— 走文本通道会把内容不可逆地解码损坏，而本组件存在的意义就是
- * 不再发生这件事。字节只用于嗅探容器类型。
+ * 不再发生这件事。字节用于嗅探容器类型与展示文件体积（byteLength，无需额外 stat）。
  */
 import { computed, ref, toRef, watch } from "vue";
+import { isTauriRuntime } from "@greywork/core";
 import { sniffOfficeContainer, type OfficeContainer } from "@/lib/legacy-office";
+import { formatBytes } from "@/lib/attachments";
+import { openWithSystemApp, resolveTabDiskPath } from "@/lib/open-external";
 import { usePreviewBinary } from "@/lib/preview-content";
 import type { PreviewTab } from "@/stores/preview";
+import { notify } from "@/stores/notice";
 
 const props = defineProps<{ tab: PreviewTab }>();
 
@@ -64,19 +68,45 @@ const detail = computed(() => {
     return `扩展名被改成了 .${extension.value}，内容却是 .${actualFormat.value}。把文件改名成 .${actualFormat.value} 就能在预览里打开。`;
   }
   if (container.value?.kind === "ole2") {
-    return `.${extension.value} 是 OLE2 复合文档，需要在 Word / Excel / PowerPoint 或 LibreOffice 里打开。`;
+    return `.${extension.value} 是 OLE2 复合文档，需要在 Word / Excel / PowerPoint 或 LibreOffice 里打开。如需在预览中查看，可先将其另存为对应的 .docx / .xlsx / .pptx 新格式。`;
   }
   return "文件内容与扩展名对不上，无法判断格式。";
 });
 
+/** 字节已加载后的人类可读体积；web 源不存在老格式文档，大小照常显示无妨。 */
+const sizeText = computed(() => (data.value ? formatBytes(data.value.byteLength) : null));
+
 /** 工具条摘要：内容其实是可渲染的 OOXML 时不能说「不支持预览」，否则与正文自相矛盾。 */
 const summary = computed(() => {
   const label = extension.value ? `.${extension.value}` : "老格式文档";
-  return actualFormat.value ? `${label} · 实为 .${actualFormat.value}` : `${label} · 不支持预览`;
+  const status = actualFormat.value ? `实为 .${actualFormat.value}` : "不支持预览";
+  return sizeText.value ? `${label} · ${status} · ${sizeText.value}` : `${label} · ${status}`;
 });
 
 /** 「用系统应用打开」只对真的渲染不了的情况才有意义；改名就能看的不必绕道系统应用。 */
 const showSystemAppHint = computed(() => actualFormat.value === null);
+
+/**
+ * 磁盘孪生路径，没有则 null（按钮不出现）。与 PreviewSider 工具栏同一套判定：
+ * 浏览器态恒为 null，没有磁盘通道，按钮留着只会点了没反应。
+ */
+const externalPath = computed(() => {
+  if (!isTauriRuntime()) return null;
+  return resolveTabDiskPath(props.tab);
+});
+
+async function openExternal(): Promise<void> {
+  const path = externalPath.value;
+  if (!path) return;
+  if (!(await openWithSystemApp(path))) {
+    notify({
+      kind: "warning",
+      key: "legacy-office-open-external",
+      title: "无法用系统应用打开",
+      detail: `${path} 可能已被移动或删除，也可能是系统里没有能打开它的程序。`,
+    });
+  }
+}
 </script>
 
 <template>
@@ -92,9 +122,18 @@ const showSystemAppHint = computed(() => actualFormat.value === null);
       <div class="rounded-[8px] border border-line-2 bg-panel-2 p-4">
         <p class="text-[13px] text-foreground">{{ headline }}</p>
         <p class="mt-1.5 text-[12px] leading-relaxed text-dim2">{{ detail }}</p>
-        <p v-if="showSystemAppHint" class="mt-2.5 text-[12px] leading-relaxed text-dim2">
-          可以点上方工具栏的「用系统应用打开」用本机的 Office 查看原文件。
-        </p>
+        <template v-if="showSystemAppHint">
+          <p class="mt-2.5 text-[12px] leading-relaxed text-dim2">可以点下面的「用系统应用打开」用本机的 Office 查看原文件。</p>
+          <button
+            v-if="externalPath"
+            type="button"
+            data-testid="legacy-office-open-external"
+            class="mt-3 cursor-pointer rounded-[8px] border border-line bg-panel px-3 py-1.5 text-[12px] text-dim transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+            @click="openExternal()"
+          >
+            用系统应用打开
+          </button>
+        </template>
       </div>
     </div>
   </div>

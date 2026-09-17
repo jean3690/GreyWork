@@ -25,7 +25,7 @@ import { DEFAULT_PREVIEW_PANEL_PX, MAX_PREVIEW_PANEL_PX, MIN_PREVIEW_PANEL_PX, P
 import { openWithSystemApp, resolveTabDiskPath } from "@/lib/open-external";
 import { usePreviewBridge } from "@/lib/preview-bridge";
 import { useResizableSplit } from "@/lib/resizable-split";
-import { usePreviewStore } from "@/stores/preview";
+import { usePreviewStore, type PreviewTab } from "@/stores/preview";
 import { notify } from "@/stores/notice";
 
 type Section = "files" | "preview" | "git";
@@ -79,6 +79,33 @@ async function openExternal(): Promise<void> {
 /** 双击把手复位到默认宽度：比「拖回大概位置」可靠，也是常见的分隔条约定。 */
 function resetWidth(): void {
   preview.setWidth(DEFAULT_PREVIEW_PANEL_PX, true);
+}
+
+/** 中键关闭 tab：`button === 1` 是中键；preventDefault 拦掉浏览器默认的自动滚动。 */
+function onTabAuxclick(event: MouseEvent, id: string): void {
+  if (event.button !== 1) return;
+  event.preventDefault();
+  preview.close(id);
+}
+
+/**
+ * tab 拖拽排序：dragstart 记下被拖的 tab，dragover 只是允许放置，
+ * drop 时按落点下标提交 store（重排不动 activeId，不抢焦点）。
+ * dataTransfer 里塞 path 只是让拖拽影像合法（Firefox 要求非空 dataTransfer 才触发 dragstart）。
+ */
+const draggingTabId = ref<string | null>(null);
+
+function onTabDragStart(event: DragEvent, tab: PreviewTab): void {
+  draggingTabId.value = tab.id;
+  event.dataTransfer?.setData("text/plain", tab.path);
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+}
+
+function onTabDrop(event: DragEvent, index: number): void {
+  event.preventDefault();
+  const id = draggingTabId.value;
+  draggingTabId.value = null;
+  if (id) preview.moveTab(id, index);
 }
 
 /** 键盘调宽：方向键 ±8px（Shift 步进 40），Home/End 到上下限。 */
@@ -220,14 +247,23 @@ const sectionClass = (active: boolean): string =>
     <GitChangePanel v-else-if="section === 'git'" class="min-h-0 flex-1" />
 
     <template v-else>
-      <!-- tab 条：左侧 tab 溢出横向滚动 -->
+      <!-- tab 条：左侧 tab 溢出横向滚动；支持中键关闭与拖拽重排 -->
       <div v-if="preview.tabs.length" class="flex h-7 shrink-0 items-center gap-1 overflow-x-auto border-b border-line ps-4 pe-1">
         <div
-          v-for="tab in preview.tabs"
+          v-for="(tab, index) in preview.tabs"
           :key="tab.id"
           data-testid="preview-tab"
+          draggable="true"
           class="flex h-6 shrink-0 items-center gap-1 rounded-[6px] px-1.5 text-[11.5px] transition-colors"
-          :class="tab.id === preview.activeId ? 'bg-panel text-foreground' : 'text-dim hover:text-foreground'"
+          :class="[
+            tab.id === preview.activeId ? 'bg-panel text-foreground' : 'text-dim hover:text-foreground',
+            draggingTabId && draggingTabId !== tab.id ? 'opacity-60' : '',
+          ]"
+          @dragstart="onTabDragStart($event, tab)"
+          @dragover.prevent
+          @drop="onTabDrop($event, index)"
+          @dragend="draggingTabId = null"
+          @auxclick="onTabAuxclick($event, tab.id)"
         >
           <Hint :text="tab.path" multiline>
             <button
@@ -254,9 +290,27 @@ const sectionClass = (active: boolean): string =>
 
       <div class="min-h-0 flex-1 overflow-hidden">
         <PreviewSurface v-if="preview.activeTab" :tab="preview.activeTab" />
-        <div v-else class="flex size-full flex-col items-center justify-center gap-1 px-4 text-center">
+        <div v-else class="flex size-full flex-col items-center justify-center gap-2 px-4 text-center">
           <span class="text-[12px] text-dim2">暂无预览内容</span>
           <span class="text-[11px] text-dim2">从「文件」里点一个文件，或等产物生成后自动打开</span>
+          <div class="mt-1 flex items-center gap-2">
+            <button
+              type="button"
+              data-testid="preview-empty-files"
+              class="cursor-pointer rounded-[6px] border border-line-2 bg-panel px-2.5 py-1 text-[11.5px] text-dim transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+              @click="section = 'files'"
+            >
+              打开文件树
+            </button>
+            <button
+              type="button"
+              data-testid="preview-empty-fetch"
+              class="cursor-pointer rounded-[6px] border border-line-2 bg-panel px-2.5 py-1 text-[11.5px] text-dim transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+              @click="fetchDialogOpen = true"
+            >
+              抓取网页
+            </button>
+          </div>
         </div>
       </div>
     </template>

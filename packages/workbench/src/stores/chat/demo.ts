@@ -260,7 +260,9 @@ export function createDemoSlice({ state, getSession, getStream }: DemoDeps): Dem
               .then(record)
               .catch(notifyArtifactFailure);
           }
-          // 界面意图：GenUI 产出静态 HTML 可视化 → VFS → 预览面板（preview:request 联动）
+          // 界面意图：GenUI 产出静态 HTML 可视化 → VFS → deliverArtifact 广播
+          // artifact:created，preview-bridge 收到后自动开预览（preview:request 是
+          // 给非产物来源的跨面板请求用的，这里不需要再发一份）。
           if (/界面|仪表盘|看板|dashboard|genui/i.test(intentText) || /界面|仪表盘|看板/.test(firstLabel)) {
             const html = specToHtml(
               {

@@ -7,6 +7,7 @@
  * 分派表在这里集中，viewer 只需实现 `{ tab }` 一个 prop。
  */
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch, type Component } from "vue";
+import PreviewSkeleton from "@/features/preview/PreviewSkeleton.vue";
 import SelectionLayer from "@/features/preview/SelectionLayer.vue";
 import { isTextSelectableKind } from "@/lib/selection";
 import { recallPixelScroll, rememberPixelScroll } from "@/lib/preview-scroll";
@@ -15,20 +16,28 @@ import type { PreviewTab } from "@/stores/preview";
 
 const props = defineProps<{ tab: PreviewTab }>();
 
+/**
+ * 带骨架屏的异步 viewer：chunk 下载期间显示 PreviewSkeleton（200ms 内 resolve
+ * 不显示，避免快速切 tab 时骨架闪烁）。每个 lang/渲染包仍是独立 chunk，重包
+ * 不进主包的分包策略不变。
+ */
+const makeViewer = (loader: () => Promise<Component>): Component =>
+  defineAsyncComponent({ loader, loadingComponent: PreviewSkeleton, delay: 200 });
+
 const VIEWERS: Record<ViewerKind, Component> = {
-  md: defineAsyncComponent(() => import("@/features/preview/MarkdownViewer.vue")),
-  html: defineAsyncComponent(() => import("@/features/preview/HtmlViewer.vue")),
-  csv: defineAsyncComponent(() => import("@/features/preview/TableViewer.vue")),
-  code: defineAsyncComponent(() => import("@/features/preview/TextViewer.vue")),
-  raw: defineAsyncComponent(() => import("@/features/preview/TextViewer.vue")),
-  image: defineAsyncComponent(() => import("@/features/preview/ImageViewer.vue")),
-  xlsx: defineAsyncComponent(() => import("@/features/preview/SheetViewer.vue")),
-  docx: defineAsyncComponent(() => import("@/features/preview/DocViewer.vue")),
-  pptx: defineAsyncComponent(() => import("@/features/preview/SlideViewer.vue")),
-  pdf: defineAsyncComponent(() => import("@/features/preview/PdfViewer.vue")),
-  "legacy-office": defineAsyncComponent(() => import("@/features/preview/LegacyOfficeViewer.vue")),
-  diff: defineAsyncComponent(() => import("@/features/preview/DiffViewer.vue")),
-  web: defineAsyncComponent(() => import("@/features/preview/WebPageViewer.vue")),
+  md: makeViewer(() => import("@/features/preview/MarkdownViewer.vue")),
+  html: makeViewer(() => import("@/features/preview/HtmlViewer.vue")),
+  csv: makeViewer(() => import("@/features/preview/TableViewer.vue")),
+  code: makeViewer(() => import("@/features/preview/TextViewer.vue")),
+  raw: makeViewer(() => import("@/features/preview/TextViewer.vue")),
+  image: makeViewer(() => import("@/features/preview/ImageViewer.vue")),
+  xlsx: makeViewer(() => import("@/features/preview/SheetViewer.vue")),
+  docx: makeViewer(() => import("@/features/preview/DocViewer.vue")),
+  pptx: makeViewer(() => import("@/features/preview/SlideViewer.vue")),
+  pdf: makeViewer(() => import("@/features/preview/PdfViewer.vue")),
+  "legacy-office": makeViewer(() => import("@/features/preview/LegacyOfficeViewer.vue")),
+  diff: makeViewer(() => import("@/features/preview/DiffViewer.vue")),
+  web: makeViewer(() => import("@/features/preview/WebPageViewer.vue")),
 };
 
 const viewer = computed(() => VIEWERS[props.tab.kind]);

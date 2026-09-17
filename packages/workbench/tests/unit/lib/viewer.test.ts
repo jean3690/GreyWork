@@ -73,17 +73,36 @@ describe("basename", () => {
 });
 
 describe("codeLanguageOfPath", () => {
-  it("只映射到已安装的四个 lang 包", () => {
+  it("映射到已安装的 lang 包（每个语言抽一个代表扩展）", () => {
     expect(codeLanguageOfPath("a.ts")).toBe("javascript");
-    expect(codeLanguageOfPath("a.vue")).toBe("javascript");
+    expect(codeLanguageOfPath("a.tsx")).toBe("javascript");
     expect(codeLanguageOfPath("a.json")).toBe("json");
     expect(codeLanguageOfPath("a.md")).toBe("markdown");
     expect(codeLanguageOfPath("a.html")).toBe("html");
+    expect(codeLanguageOfPath("main.py")).toBe("python");
+    expect(codeLanguageOfPath("lib.rs")).toBe("rust");
+    expect(codeLanguageOfPath("main.go")).toBe("go");
+    expect(codeLanguageOfPath("App.java")).toBe("java");
+    expect(codeLanguageOfPath("a.cpp")).toBe("cpp");
+    expect(codeLanguageOfPath("a.hpp")).toBe("cpp");
+    expect(codeLanguageOfPath("style.css")).toBe("css");
+    expect(codeLanguageOfPath("style.scss")).toBe("sass");
+    expect(codeLanguageOfPath("style.less")).toBe("less");
+    expect(codeLanguageOfPath("ci.yml")).toBe("yaml");
+    expect(codeLanguageOfPath("query.sql")).toBe("sql");
+    expect(codeLanguageOfPath("config.xml")).toBe("xml");
+    expect(codeLanguageOfPath("Cargo.toml")).toBe("toml");
+    expect(codeLanguageOfPath("build.sh")).toBe("shell");
+    expect(codeLanguageOfPath("App.vue")).toBe("vue");
   });
 
-  it("没装对应 lang 包的语言返回 null，交给纯文本渲染", () => {
-    expect(codeLanguageOfPath("a.py")).toBeNull();
-    expect(codeLanguageOfPath("a.rs")).toBeNull();
+  it("扩展名大小写不敏感", () => {
+    expect(codeLanguageOfPath("MAIN.PY")).toBe("python");
+    expect(codeLanguageOfPath("App.VUE")).toBe("vue");
+  });
+
+  it("没有语言映射的扩展返回 null，交给纯文本渲染", () => {
     expect(codeLanguageOfPath("Makefile")).toBeNull();
+    expect(codeLanguageOfPath("a.rb")).toBeNull();
   });
 });

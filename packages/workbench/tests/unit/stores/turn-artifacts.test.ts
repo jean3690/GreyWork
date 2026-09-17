@@ -1,5 +1,5 @@
 // 成功回合的磁盘产物自动开右栏预览：宿主把工作区内本回合修改过的文档类文件
-// 随 prompt-done 的 files 带回，agent store 逐个 preview.open(disk)；
+// 随 prompt-done 的 files 带回，agent store 发 preview:request 事件；
 // 失败回合（带 error）不弹；重复产物只聚焦不重复开 tab。
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
@@ -42,6 +42,7 @@ vi.mock("@greywork/acp", () => ({
   desktopHomeDir: () => h.homeDir(),
 }));
 
+import { wirePreviewBridge } from "@/lib/preview-bridge";
 import { useAgentStore } from "@/stores/agent";
 import { usePreviewStore } from "@/stores/preview";
 import { useSessionStore } from "@/stores/session";
@@ -79,6 +80,8 @@ beforeEach(() => {
   setActivePinia(createPinia());
   // ACP 建会话要解析工作区：node 环境非 Tauri 运行时，设置项为空则 resolveWorkspaceDir 抛错。
   useSettingsStore().workspaceDir = "/home/test";
+  // agent store 发的是 preview:request 事件，这里挂上真实桥接（与 PreviewSider 同一份映射）
+  wirePreviewBridge(usePreviewStore());
   vi.clearAllMocks();
   injectStorage();
   h.isAvailable.mockImplementation(() => true);

@@ -99,10 +99,29 @@ export function basename(path: string): string {
 
 /**
  * CodeMirror 语言扩展键。
- * 只返回 workbench 已安装的四个 lang 包能覆盖的值 —— 返回一个没装的语言名
+ * 只返回 workbench 已安装的 lang 包能覆盖的值 —— 返回一个没装的语言名
  * 会让 TextViewer 走进动态 import 失败的分支，不如老实降级为纯文本（null）。
+ * toml / shell 没有官方 lang 包，由 TextViewer 经 @codemirror/legacy-modes 桥接。
  */
-export type CodeLanguage = "javascript" | "json" | "markdown" | "html";
+export type CodeLanguage =
+  | "javascript"
+  | "json"
+  | "markdown"
+  | "html"
+  | "python"
+  | "rust"
+  | "go"
+  | "java"
+  | "cpp"
+  | "css"
+  | "sass"
+  | "less"
+  | "yaml"
+  | "sql"
+  | "xml"
+  | "toml"
+  | "shell"
+  | "vue";
 
 const EXT_LANGUAGE: Record<string, CodeLanguage> = {
   ts: "javascript",
@@ -111,12 +130,33 @@ const EXT_LANGUAGE: Record<string, CodeLanguage> = {
   jsx: "javascript",
   mjs: "javascript",
   cjs: "javascript",
-  vue: "javascript",
+  vue: "vue",
   json: "json",
   md: "markdown",
   markdown: "markdown",
   html: "html",
   htm: "html",
+  py: "python",
+  rs: "rust",
+  go: "go",
+  java: "java",
+  c: "cpp",
+  h: "cpp",
+  cpp: "cpp",
+  hpp: "cpp",
+  cc: "cpp",
+  cxx: "cpp",
+  css: "css",
+  scss: "sass",
+  sass: "sass",
+  less: "less",
+  yaml: "yaml",
+  yml: "yaml",
+  sql: "sql",
+  xml: "xml",
+  toml: "toml",
+  sh: "shell",
+  bash: "shell",
 };
 
 export function codeLanguageOfPath(path: string): CodeLanguage | null {
