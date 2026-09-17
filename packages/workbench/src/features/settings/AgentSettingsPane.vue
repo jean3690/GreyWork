@@ -4,13 +4,19 @@
  * 字段直接写 settings/agent store，变更即持久化。
  */
 import { computed, ref, watch } from "vue";
-import { agentProviderIcon, agentProviderLobeIcon } from "@greywork/shell";
+import { agentProviderIcon, agentProviderLobeIcon, REASONING_EFFORTS, type AgentProviderConfig } from "@greywork/shell";
 import AgentProviderIcon from "@/features/conversation/AgentProviderIcon.vue";
 import Icon from "@/features/shared/Icon.vue";
 import Hint from "@/features/shared/Hint.vue";
 import IconPicker from "@/features/shared/IconPicker.vue";
+import AgentProviderFormDialog, { type AgentProviderDraftPayload } from "@/features/settings/AgentProviderFormDialog.vue";
+import ModelProviderFormDialog, { type ModelProviderDraftPayload } from "@/features/settings/ModelProviderFormDialog.vue";
+import { formatHeaderText, parseHeaderText } from "@/stores/agent/shared";
 import { useAgentStore } from "@/stores/agent";
 import { useSettingsStore } from "@/stores/settings";
+import { i18n } from "@/i18n";
+
+const t = i18n.global.t;
 
 const settings = useSettingsStore();
 const agent = useAgentStore();
@@ -21,9 +27,11 @@ const activeProvider = computed(() => settings.modelProviders.find((provider) =>
 
 /** 当前编辑中的供应商 id（跟随选中项）与字段草稿。 */
 const providerDraftId = ref<string | null>(null);
-const providerDraft = ref({ name: "", baseUrl: "", model: "", apiKeyEnv: "" });
+const providerDraft = ref({ name: "", baseUrl: "", model: "", apiKeyEnv: "", headersText: "" });
 /** 草稿相对 store 有未保存改动时置真（简单脏检查，切走即丢——字段少，不做自动保存）。 */
 const providerDraftDirty = ref(false);
+/** Headers 文本解析错误（保存前就地拦截，不写进库）。 */
+const providerDraftError = ref<string | null>(null);
 
 function syncProviderDraft(): void {
   const provider = settings.modelProviders.find((candidate) => candidate.id === providerDraftId.value);
@@ -33,8 +41,10 @@ function syncProviderDraft(): void {
     baseUrl: provider.baseUrl ?? "",
     model: provider.model ?? "",
     apiKeyEnv: provider.apiKeyEnv ?? "",
+    headersText: formatHeaderText(provider.headers),
   };
   providerDraftDirty.value = false;
+  providerDraftError.value = null;
 }
 
 watch(
@@ -50,28 +60,50 @@ watch(
 function saveProviderDraft(): void {
   const current = settings.modelProviders.find((provider) => provider.id === providerDraftId.value);
   if (!current) return;
+  // 请求头在保存前解析：非法行就地报错，不写进库（宿主发请求时还会解析一次占位符）。
+  const parsed = parseHeaderText(providerDraft.value.headersText);
+  if (parsed.error) {
+    providerDraftError.value = parsed.error;
+    return;
+  }
   settings.upsertModelProvider({
     ...current,
     name: providerDraft.value.name.trim() || current.name,
     baseUrl: providerDraft.value.baseUrl.trim(),
     model: providerDraft.value.model.trim(),
     apiKeyEnv: providerDraft.value.apiKeyEnv.trim(),
+    headers: Object.keys(parsed.headers).length > 0 ? parsed.headers : undefined,
   });
   providerDraftDirty.value = false;
+  providerDraftError.value = null;
 }
 
-function addCustomProvider(): void {
+/** 推理等级即时落盘（不入草稿脏检查：下拉改动即生效，与图标改动同一风格）。 */
+function setProviderEffort(effort: string): void {
+  const current = activeProvider.value;
+  if (!current) return;
+  settings.upsertModelProvider({ ...current, reasoningEffort: effort as (typeof REASONING_EFFORTS)[number]["value"] });
+}
+
+/** 新增供应商走弹窗：字段齐了再落库，避免「先建一条空供应商再补」的中间态。 */
+const addProviderOpen = ref(false);
+/** 同名供应商在列表里分不清，保存前在弹窗里就地拒绝。 */
+const providerNames = computed(() => settings.modelProviders.map((provider) => provider.name));
+
+function onAddProviderSave(payload: ModelProviderDraftPayload): void {
   const id = `custom-${Date.now().toString(36)}`;
   settings.upsertModelProvider({
     id,
-    name: "自定义供应商",
+    name: payload.name,
     kind: "custom",
-    baseUrl: "",
-    model: "",
-    apiKeyEnv: "CUSTOM_LLM_API_KEY",
+    baseUrl: payload.baseUrl,
+    model: payload.model,
+    apiKeyEnv: payload.apiKeyEnv,
+    headers: payload.headers,
     enabled: true,
   });
   settings.selectModelProvider(id);
+  addProviderOpen.value = false;
 }
 
 function removeActiveProvider(): void {
@@ -83,11 +115,11 @@ function removeActiveProvider(): void {
 
 // ---------- ACP 后端编辑（用户自配） ----------
 
-/** 自配后端草稿：agentDraftOpen 打开编辑器；agentDraftId = null 表示新增，否则编辑该项。 */
-const agentDraftOpen = ref(false);
-const agentDraftId = ref<string | null>(null);
-const agentDraft = ref({ name: "", command: "", icon: "" });
-const agentDraftError = ref<string | null>(null);
+/** 自配后端弹窗：agentDialogEntry = null 表示新增，否则编辑该项。 */
+const agentDialogOpen = ref(false);
+const agentDialogEntry = ref<AgentProviderConfig | null>(null);
+/** 落库失败（宿主校验等）回填到弹窗里，不关弹窗、不丢用户输入。 */
+const agentDialogError = ref<string | null>(null);
 
 /** 展开图标选择器的后端行（一次只开一个）。 */
 const providerIconTarget = ref<string | null>(null);
@@ -102,51 +134,46 @@ function pickProviderIcon(id: string, icon: string): void {
 }
 
 function startAgentAdd(): void {
-  agentDraftId.value = null;
-  agentDraftOpen.value = true;
-  agentDraft.value = { name: "", command: "", icon: "" };
-  agentDraftError.value = null;
+  agentDialogEntry.value = null;
+  agentDialogError.value = null;
+  agentDialogOpen.value = true;
 }
 
 function startAgentEdit(id: string): void {
   const provider = agent.agentProviders.find((candidate) => candidate.id === id);
   if (!provider) return;
-  agentDraftId.value = provider.id;
-  agentDraftOpen.value = true;
-  agentDraft.value = { name: provider.name, command: provider.command, icon: provider.icon ?? "" };
-  agentDraftError.value = null;
+  agentDialogEntry.value = provider;
+  agentDialogError.value = null;
+  agentDialogOpen.value = true;
 }
 
-function cancelAgentDraft(): void {
-  agentDraftId.value = null;
-  agentDraftOpen.value = false;
-  agentDraftError.value = null;
+function closeAgentDialog(): void {
+  agentDialogEntry.value = null;
+  agentDialogError.value = null;
+  agentDialogOpen.value = false;
 }
 
-function saveAgentDraft(): void {
-  const failure =
-    agentDraftId.value === null
-      ? agent.addAgentProvider(agentDraft.value.name, agentDraft.value.command, agentDraft.value.icon || undefined)
-      : agent.updateAgentProvider(agentDraftId.value, agentDraft.value.name, agentDraft.value.command, agentDraft.value.icon || undefined);
+function saveAgentDraft(payload: AgentProviderDraftPayload): void {
+  const entry = agentDialogEntry.value;
+  const failure = entry
+    ? agent.updateAgentProvider(entry.id, payload.name, payload.command, payload.icon, payload.env)
+    : agent.addAgentProvider(payload.name, payload.command, payload.icon, payload.env);
   if (failure) {
-    agentDraftError.value = failure;
+    agentDialogError.value = failure;
     return;
   }
-  agentDraftId.value = null;
-  agentDraftOpen.value = false;
-  agentDraftError.value = null;
+  closeAgentDialog();
 }
 
 async function removeAgentDraft(): Promise<void> {
-  if (agentDraftId.value === null) return;
-  const failure = await agent.removeAgentProvider(agentDraftId.value);
+  const entry = agentDialogEntry.value;
+  if (!entry) return;
+  const failure = await agent.removeAgentProvider(entry.id);
   if (failure) {
-    agentDraftError.value = failure;
+    agentDialogError.value = failure;
     return;
   }
-  agentDraftId.value = null;
-  agentDraftOpen.value = false;
-  agentDraftError.value = null;
+  closeAgentDialog();
 }
 </script>
 
@@ -159,7 +186,7 @@ async function removeAgentDraft(): Promise<void> {
           <button
             type="button"
             class="h-6 cursor-pointer rounded-[6px] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
-            @click="addCustomProvider"
+            @click="addProviderOpen = true"
           >
             ＋ 新增供应商
           </button>
@@ -234,6 +261,24 @@ async function removeAgentDraft(): Promise<void> {
           <code class="font-mono">export {{ providerDraft.apiKeyEnv || "OPENAI_API_KEY" }}=…</code> 再从同一终端启动
           GreyWork。浏览器/演示模式不读环境变量。
         </p>
+        <label class="flex gap-2">
+          <span class="w-20 shrink-0 pt-1.5 text-[11.5px] text-dim2">自定义 Headers</span>
+          <textarea
+            v-model="providerDraft.headersText"
+            rows="3"
+            spellcheck="false"
+            class="min-w-0 flex-1 resize-y rounded-[8px] border border-line bg-panel-2 px-2 py-1.5 font-mono text-[11.5px] text-foreground outline-none placeholder:text-dim2 focus:border-line-2"
+            placeholder="每行一条 Key: Value，如 X-Custom-Auth: {{MY_TOKEN}}"
+            data-testid="provider-draft-headers"
+            @input="providerDraftDirty = true"
+          />
+        </label>
+        <p class="text-[10.5px] leading-relaxed text-dim2">
+          附加到每次模型请求的 HTTP 头（自定义网关的鉴权 / 标记头）。敏感值写
+          <code v-pre class="font-mono">{{ ENV_VAR }}</code> 占位符，发送时由宿主从环境变量解析，绝不明文落盘；空行与
+          <code class="font-mono">#</code> 开头的行忽略。
+        </p>
+        <p v-if="providerDraftError" class="text-[11px] text-destructive">{{ providerDraftError }}</p>
         <div class="flex items-center justify-between gap-2">
           <button
             type="button"
@@ -264,7 +309,18 @@ async function removeAgentDraft(): Promise<void> {
     </div>
     <div class="rounded-[14px] border border-line bg-panel p-4">
       <div class="mb-1.5 text-[13px] font-medium text-foreground">推理等级</div>
-      <div class="text-[11px] text-dim2">当前 {{ activeProvider?.reasoningEffort ?? "auto" }}</div>
+      <select
+        data-testid="provider-effort-select"
+        class="cursor-pointer rounded-[8px] border border-line bg-panel-2 px-2 py-1.5 text-[12px] text-foreground outline-none focus:border-line-2"
+        :value="activeProvider?.reasoningEffort ?? 'auto'"
+        :aria-label="`设置 ${activeProvider?.name ?? ''} 的推理等级`"
+        @change="setProviderEffort(($event.target as HTMLSelectElement).value)"
+      >
+        <option v-for="effort in REASONING_EFFORTS" :key="effort.value" :value="effort.value">{{ t(effort.label) }}</option>
+      </select>
+      <div class="mt-1.5 text-[11px] text-dim2">
+        {{ t(REASONING_EFFORTS.find((effort) => effort.value === (activeProvider?.reasoningEffort ?? "auto"))?.description ?? "") }}
+      </div>
     </div>
     <div class="rounded-[14px] border border-line bg-panel p-4">
       <div class="mb-3 flex items-center justify-between gap-2">
@@ -349,60 +405,21 @@ async function removeAgentDraft(): Promise<void> {
         ）；自配后端仅限本机已安装的程序，含 shell 元字符的命令会被宿主拒绝。每行的图标可随时点开更换（预设后端也可换），图标只影响展示。
       </p>
     </div>
-    <!-- 自配后端编辑表单（新增 / 编辑共用；仅 custom-* 项可编辑删除） -->
-    <div v-if="agentDraftOpen" class="rounded-[14px] border border-line bg-panel p-4">
-      <div class="mb-3 text-[13px] font-medium text-foreground">
-        {{ agentDraftId === null ? "新增 ACP 后端" : "编辑 ACP 后端" }}
-      </div>
-      <div class="flex flex-col gap-2.5">
-        <label class="flex items-center gap-2">
-          <span class="w-20 shrink-0 text-[11.5px] text-dim2">名称</span>
-          <input
-            v-model="agentDraft.name"
-            class="min-w-0 flex-1 rounded-[8px] border border-line bg-panel-2 px-2 py-1.5 text-[12.5px] text-foreground outline-none focus:border-line-2"
-            placeholder="如 My Agent"
-          />
-        </label>
-        <label class="flex items-center gap-2">
-          <span class="w-20 shrink-0 text-[11.5px] text-dim2">启动命令</span>
-          <input
-            v-model="agentDraft.command"
-            class="min-w-0 flex-1 rounded-[8px] border border-line bg-panel-2 px-2 py-1.5 font-mono text-[12px] text-foreground outline-none focus:border-line-2"
-            placeholder="如 my-agent acp / npx -y @scope/pkg-acp"
-          />
-        </label>
-        <div class="flex gap-2">
-          <span class="w-20 shrink-0 pt-1.5 text-[11.5px] text-dim2">图标</span>
-          <IconPicker v-model="agentDraft.icon" class="min-w-0 flex-1" :columns="12" clearable clear-label="默认" />
-        </div>
-        <p v-if="agentDraftError" class="text-[11px] text-destructive">{{ agentDraftError }}</p>
-        <div class="flex items-center justify-between gap-2">
-          <button
-            v-if="agentDraftId !== null"
-            type="button"
-            class="h-7 cursor-pointer rounded-[7px] border border-line bg-panel-2 px-2.5 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
-            @click="void removeAgentDraft()"
-          >
-            删除
-          </button>
-          <div class="ml-auto flex gap-1.5">
-            <button
-              type="button"
-              class="h-7 cursor-pointer rounded-[7px] border border-line bg-panel px-2.5 text-[11px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground"
-              @click="cancelAgentDraft"
-            >
-              撤销
-            </button>
-            <button
-              type="button"
-              class="h-7 cursor-pointer rounded-[7px] bg-accent px-3 text-[11.5px] font-medium text-accent-ink transition-opacity hover:opacity-90"
-              @click="saveAgentDraft"
-            >
-              保存
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
+    <ModelProviderFormDialog
+      :open="addProviderOpen"
+      :existing-names="providerNames"
+      @save="onAddProviderSave"
+      @cancel="addProviderOpen = false"
+    />
+
+    <!-- 自配后端弹窗（新增 / 编辑共用；仅 custom-* 项有编辑入口） -->
+    <AgentProviderFormDialog
+      :open="agentDialogOpen"
+      :entry="agentDialogEntry"
+      :error="agentDialogError"
+      @save="saveAgentDraft"
+      @remove="void removeAgentDraft()"
+      @cancel="closeAgentDialog"
+    />
   </div>
 </template>

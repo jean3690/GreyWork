@@ -12,11 +12,11 @@
  * 流式上下文（llmRequestId / activeTurnToken / streamingInto / llmListening /
  * 缓冲）是本切片的闭包私有，不入 state（与 runtime 切片的策略一致）。
  */
-import { buildLlmHistory, selectLlmProvider } from "../chat-llm";
+import { buildLlmHistory, localReasoningOverride, resolveLocalEffort, selectLlmProvider } from "../chat-llm";
 import { isAskSettled } from "../../lib/ask-question";
 import { mergeToolActivities } from "../../lib/tool-activity";
 import { t, tid, uid, clearSim } from "./shared";
-import type { ThreadMessage, ToolActivity } from "../../types";
+import type { PermissionTrace, ThreadMessage, ToolActivity } from "../../types";
 import type { ChatStoreState } from "./state";
 import type { SessionApi } from "./session";
 import type { DemoApi } from "./demo";
@@ -33,6 +33,7 @@ export interface StreamApi {
   appendMessageContent(messageId: string, content: string, threadId?: string): void;
   setMessageContent(messageId: string, content: string, threadId?: string): void;
   appendTools(activities: ToolActivity[], messageId: string, threadId?: string): void;
+  setPermissionTrace(trace: PermissionTrace, messageId: string, threadId?: string): void;
   appendMessageThinking(messageId: string, delta: string, threadId?: string): void;
   flushPendingContent(): void;
 }
@@ -158,7 +159,8 @@ export function createStreamSlice({ state, getSession, getDemo }: StreamDeps): S
         model: provider.model,
         apiKeyEnv: provider.apiKeyEnv,
         messages: history,
-        reasoningEffort: provider.reasoningEffort ?? "auto",
+        reasoningEffort: resolveLocalEffort(localReasoningOverride.value, provider),
+        headers: provider.headers,
         clientToken: activeTurnToken,
       });
     } catch (error) {
@@ -265,12 +267,28 @@ export function createStreamSlice({ state, getSession, getDemo }: StreamDeps): S
     sessionStore.markDirty();
   }
 
+  /**
+   * 追加一次权限裁决留痕，把卡片从「待确认」转成消息流里的只读记录。
+   *
+   * 按 toolCallId 去重而不是「只留最新」：一个回合可能连续问多次（每条 bash 一次），
+   * 全都要留；而同一 toolCallId 的重复写入（超时兜底与迟到应答抢跑）只算一次。
+   */
+  function setPermissionTrace(trace: PermissionTrace, messageId: string, threadId = session.activeThreadId.value): void {
+    const message = session.ensure(threadId).find((candidate) => candidate.id === messageId);
+    if (!message) return;
+    const traces = (message.permissions ??= []);
+    if (traces.some((existing) => existing.toolCallId === trace.toolCallId)) return;
+    traces.push(trace);
+    sessionStore.markDirty();
+  }
+
   return {
     dispatchAssistant,
     abortGeneration,
     appendMessageContent,
     setMessageContent,
     appendTools,
+    setPermissionTrace,
     appendMessageThinking,
     flushPendingContent,
   };

@@ -13,7 +13,7 @@ vi.mock("@/state/attachment-library", () => ({
   readAttachmentText: (item: Attachment) => h.readAttachmentText(item),
 }));
 
-import { buildLlmHistory, selectLlmProvider, LLM_SYSTEM_PROMPT } from "@/stores/chat-llm";
+import { buildLlmHistory, localReasoningOverride, resolveLocalEffort, selectLlmProvider, LLM_SYSTEM_PROMPT } from "@/stores/chat-llm";
 
 function provider(overrides: Partial<ModelProviderConfig> = {}): ModelProviderConfig {
   return {
@@ -59,6 +59,22 @@ describe("selectLlmProvider", () => {
       provider({ id: "second-ok" }),
     ]);
     expect(picked?.id).toBe("first-ok");
+  });
+});
+
+describe("resolveLocalEffort（Local 路由思考强度层级）", () => {
+  it("会话覆盖 > 供应商配置 > auto", () => {
+    expect(resolveLocalEffort("high", provider({ reasoningEffort: "low" }))).toBe("high");
+    expect(resolveLocalEffort(null, provider({ reasoningEffort: "low" }))).toBe("low");
+    expect(resolveLocalEffort(null, provider())).toBe("auto");
+    expect(resolveLocalEffort(null, null)).toBe("auto");
+  });
+
+  it("模块级覆盖默认 null（跟随供应商），可写可复位", () => {
+    expect(localReasoningOverride.value).toBeNull();
+    localReasoningOverride.value = "medium";
+    expect(localReasoningOverride.value).toBe("medium");
+    localReasoningOverride.value = null;
   });
 });
 

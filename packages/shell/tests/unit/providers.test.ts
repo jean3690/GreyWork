@@ -72,6 +72,17 @@ describe("DEFAULT_AGENT_PROVIDERS 结构不变量", () => {
     expect(enabled.map((provider) => provider.id)).toEqual(["opencode"]);
   });
 
+  it("opencode 预设把权限拉回宿主裁决——它默认全放行，不问就轮不到宿主拦", () => {
+    const opencode = DEFAULT_AGENT_PROVIDERS.find((provider) => provider.id === "opencode");
+    const content = opencode?.env?.OPENCODE_CONFIG_CONTENT;
+    expect(content).toBeTruthy();
+    // 必须同时满足「合法 JSON」且「四个键都是 ask」：opencode 对非法配置是整体拒绝，
+    // 少写一个键就等于静默退回全放行，权限卡片再也不会弹。
+    expect(JSON.parse(content as string)).toEqual({
+      permission: { edit: "ask", bash: "ask", webfetch: "ask", websearch: "ask" },
+    });
+  });
+
   it("开着的预设必须被 detect 探针覆盖到——不然开了也无法确认本机可用", () => {
     for (const provider of DEFAULT_AGENT_PROVIDERS.filter((p) => p.enabled)) {
       expect(provider.detect?.length ?? 0).toBeGreaterThan(0);

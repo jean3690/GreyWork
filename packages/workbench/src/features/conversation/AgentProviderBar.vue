@@ -4,9 +4,11 @@
  * 宽度不足时当前展开项始终留在主轨道，其他项收进「…」菜单。
  */
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { type AgentProviderConfig } from "@greywork/shell";
+import { useI18n } from "vue-i18n";
+import { type AgentProviderConfig, REASONING_EFFORTS, type ReasoningEffort } from "@greywork/shell";
 import { useAgentStore } from "@/stores/agent";
 import { useSettingsStore } from "@/stores/settings";
+import { localReasoningOverride, resolveLocalEffort } from "@/stores/chat-llm";
 import AgentProviderIcon from "@/features/conversation/AgentProviderIcon.vue";
 import Icon from "@/features/shared/Icon.vue";
 import Hint from "@/features/shared/Hint.vue";
@@ -14,6 +16,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 
 const agent = useAgentStore();
 const settings = useSettingsStore();
+const { t } = useI18n();
 
 const acpOptions = computed<AgentProviderConfig[]>(() => agent.agentProviders);
 const selected = computed(() => (agent.routeToAcp ? agent.selectedProviderId : null));
@@ -83,6 +86,33 @@ async function selectAcp(id: string): Promise<void> {
 
 async function toggleTempReadOnly(on: boolean): Promise<void> {
   connectError.value = await agent.setTempReadOnly(on);
+}
+
+// ---------- Local 路由的模型 / 思考强度选择器 ----------
+
+/** 可选的 Local 供应商：启用且 baseUrl/model 齐全（与 chat-llm 的可用判据一致）。 */
+const localProviders = computed(() =>
+  settings.modelProviders.filter((provider) => provider.enabled && !!provider.baseUrl?.trim() && !!provider.model.trim()),
+);
+
+/** 实际会用的供应商：选中项优先，未选过回落第一个可用（镜像 selectLlmProvider 的兜底）。 */
+const activeLocalProvider = computed(
+  () => localProviders.value.find((provider) => provider.id === settings.selectedModelProviderId) ?? localProviders.value[0] ?? null,
+);
+
+/** 当前生效档：会话覆盖 > 供应商配置 > auto（与 stream.ts 的实际调用同一来源）。 */
+const activeEffort = computed<ReasoningEffort>(() => resolveLocalEffort(localReasoningOverride.value, activeLocalProvider.value));
+
+function setLocalEffort(effort: ReasoningEffort): void {
+  localReasoningOverride.value = effort;
+}
+
+/** 把当前生效档写回供应商配置（成为所有新会话的默认），并清掉会话覆盖。 */
+function setDefaultEffort(): void {
+  const provider = activeLocalProvider.value;
+  if (!provider) return;
+  settings.upsertModelProvider({ ...provider, reasoningEffort: activeEffort.value });
+  localReasoningOverride.value = null;
 }
 
 /** 「…」菜单的 Esc / 点外部收回与键盘漫游都交给 DropdownMenu。 */
@@ -230,6 +260,63 @@ onBeforeUnmount(() => {
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+    </div>
+
+    <!-- Local 路由展开区：模型选择（即全局默认供应商）+ 会话级思考强度覆盖 -->
+    <div v-if="expandedChoice === 'local'" data-testid="local-selector" class="flex flex-wrap items-center gap-1.5 pl-1">
+      <DropdownMenu>
+        <DropdownMenuTrigger as-child>
+          <button
+            type="button"
+            data-testid="local-model-button"
+            class="flex h-6 cursor-pointer items-center gap-1.5 rounded-full border border-line-2 bg-panel px-2 text-[11px] text-dim transition-colors hover:border-cyan/50 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+            aria-label="选择模型供应商"
+          >
+            <Icon name="terminal" :size="11" />
+            <span class="max-w-[180px] truncate font-mono">{{ activeLocalProvider?.model || "选择模型" }}</span>
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side="top" align="start" class="w-[240px] border-line-2">
+          <DropdownMenuItem
+            v-for="provider in localProviders"
+            :key="provider.id"
+            data-testid="local-model-item"
+            :data-provider-id="provider.id"
+            class="h-8 cursor-pointer gap-2 rounded-[7px] px-2 text-[11.5px]"
+            :class="provider.id === settings.selectedModelProviderId ? 'text-foreground' : 'text-dim'"
+            @select="settings.selectModelProvider(provider.id)"
+          >
+            <span class="min-w-0 flex-1 truncate">{{ provider.name }}</span>
+            <span class="max-w-[45%] truncate font-mono text-[10.5px] text-dim2">{{ provider.model }}</span>
+          </DropdownMenuItem>
+          <p v-if="localProviders.length === 0" class="px-2 py-1.5 text-[11px] text-dim2">未配置可用模型，去设置页添加</p>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <button
+        v-for="effort in REASONING_EFFORTS"
+        :key="effort.value"
+        type="button"
+        data-testid="local-effort-chip"
+        :data-effort="effort.value"
+        :class="[
+          'flex h-6 cursor-pointer items-center rounded-full px-2 text-[10.5px] transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan',
+          activeEffort === effort.value ? 'bg-cyan/15 text-cyan' : 'text-dim2 hover:bg-panel hover:text-foreground',
+        ]"
+        :aria-pressed="activeEffort === effort.value"
+        @click="setLocalEffort(effort.value)"
+      >
+        {{ t(effort.label) }}
+      </button>
+      <Hint text="把当前思考强度写回该供应商，成为所有新会话的默认">
+        <button
+          type="button"
+          data-testid="local-effort-default"
+          class="flex h-6 cursor-pointer items-center rounded-full border border-line-2 bg-panel px-2 text-[10.5px] text-dim transition-colors hover:border-cyan/50 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          @click="setDefaultEffort"
+        >
+          设为默认
+        </button>
+      </Hint>
     </div>
 
     <p v-if="settings.tempReadOnly" class="flex items-center gap-1.5 pl-1 text-[11px] text-dim">

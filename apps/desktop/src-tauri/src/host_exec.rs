@@ -17,6 +17,7 @@
 use crate::db::{AutomationDueDto, Db};
 use crate::llm;
 use serde_json::{json, Value};
+use std::collections::HashMap;
 
 /// 宿主认领阈值：due 后超过该时长仍未消费视为渲染端缺席。
 const STALE_AFTER_MS: i64 = 120_000;
@@ -104,7 +105,7 @@ async fn run_one(db: &Db, item: &AutomationDueDto) -> Result<String, String> {
     let settings = db
         .load_settings()?
         .ok_or_else(|| "设置未初始化（无模型配置可执行）".to_string())?;
-    let (base_url, model, api_key_env) = default_llm_config(&settings)
+    let (base_url, model, api_key_env, headers) = default_llm_config(&settings)
         .ok_or_else(|| "默认模型供应商缺 baseUrl/model 配置".to_string())?;
 
     let now = chrono::Utc::now().timestamp_millis();
@@ -117,6 +118,7 @@ async fn run_one(db: &Db, item: &AutomationDueDto) -> Result<String, String> {
             content: serde_json::json!(item.intent.clone()),
         }],
         "auto",
+        &headers,
     )
     .await?;
 
@@ -147,8 +149,8 @@ async fn run_one(db: &Db, item: &AutomationDueDto) -> Result<String, String> {
 }
 
 /// 从 settings 快照解析默认 LLM 端点：selectedModelProviderId 优先，
-/// 回落第一个带 baseUrl+model 的供应商。返回 (base_url, model, api_key_env)。
-fn default_llm_config(settings: &Value) -> Option<(String, String, String)> {
+/// 回落第一个带 baseUrl+model 的供应商。返回 (base_url, model, api_key_env, headers)。
+fn default_llm_config(settings: &Value) -> Option<(String, String, String, HashMap<String, String>)> {
     let providers = settings.get("modelProviders")?.as_array()?;
     let selected = settings
         .get("selectedModelProviderId")
@@ -179,7 +181,20 @@ fn default_llm_config(settings: &Value) -> Option<(String, String, String)> {
         .and_then(|value| value.as_str())
         .unwrap_or_default()
         .to_string();
-    Some((base_url, model, api_key_env))
+    // 自定义请求头：值里的 {{ENV_VAR}} 占位符由 send_chat_request 解析，这里原样透传
+    let headers = pick
+        .get("headers")
+        .and_then(|value| value.as_object())
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|(key, value)| {
+                    value.as_str().map(|value| (key.clone(), value.to_string()))
+                })
+                .collect::<HashMap<String, String>>()
+        })
+        .unwrap_or_default();
+    Some((base_url, model, api_key_env, headers))
 }
 
 #[cfg(test)]
@@ -214,18 +229,36 @@ mod tests {
     #[test]
     fn default_llm_picks_selected_provider() {
         let settings = settings_with(Some("local"));
-        let (base_url, model, api_key_env) = default_llm_config(&settings).expect("config");
+        let (base_url, model, api_key_env, headers) = default_llm_config(&settings).expect("config");
         assert_eq!(base_url, "http://127.0.0.1:11434/v1");
         assert_eq!(model, "qwen3");
         assert_eq!(api_key_env, "");
+        assert!(headers.is_empty(), "无自定义 headers 时为空表");
     }
 
     #[test]
     fn default_llm_falls_back_to_enabled_when_selection_missing() {
         let settings = settings_with(None);
-        let (_, model, api_key_env) = default_llm_config(&settings).expect("config");
+        let (_, model, api_key_env, _) = default_llm_config(&settings).expect("config");
         assert_eq!(model, "gpt-x", "回落 enabled 供应商");
         assert_eq!(api_key_env, "EXAMPLE_KEY");
+    }
+
+    #[test]
+    fn default_llm_carries_custom_headers() {
+        let settings = json!({
+            "selectedModelProviderId": "gw",
+            "modelProviders": [{
+                "id": "gw",
+                "baseUrl": "https://gw.example.com/v1",
+                "model": "m1",
+                "headers": { "X-Org": "acme", "X-Bad": 42 }
+            }]
+        });
+        let (_, _, _, headers) = default_llm_config(&settings).expect("config");
+        assert_eq!(headers.get("X-Org").map(String::as_str), Some("acme"));
+        // 非 string 值被过滤
+        assert!(!headers.contains_key("X-Bad"));
     }
 
     #[test]

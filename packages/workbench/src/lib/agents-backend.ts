@@ -16,6 +16,8 @@ export interface AgentProviderRow {
   kind: "acp";
   command: string;
   enabled: boolean;
+  /** 启动环境变量（JSON 对象文本）；null = 继承宿主环境。 */
+  env: string | null;
 }
 
 /** 单个入口程序的 PATH 探测结果。 */

@@ -2,6 +2,13 @@
 import type { MessageSchema } from "./zh-CN";
 
 export const enUS: MessageSchema = {
+  reasoning: {
+    auto: { label: "Auto", description: "Follow model/server defaults; no reasoning parameter sent" },
+    low: { label: "Low", description: "Fast responses for simple Q&A and rewrites" },
+    medium: { label: "Medium", description: "Balanced tier for everyday tasks" },
+    high: { label: "High", description: "Longer thinking budget for complex reasoning and code" },
+    max: { label: "Max", description: "Deepest reasoning available (some providers clamp to high)" },
+  },
   common: {
     ok: "OK",
     cancel: "Cancel",
@@ -409,9 +416,15 @@ export const enUS: MessageSchema = {
     },
     permission: {
       title: "Waiting for your confirmation",
-      hint: "The agent wants to run the operation below; it is cancelled automatically if you do not answer within {s}s.",
+      hint: "The agent wants to run the operation below; cancelled automatically if unanswered — {s} left.",
       deny: "Deny",
       paths: "Paths involved",
+      toolCallId: "Call",
+      kinds: { execute: "Run command", edit: "Edit file", read: "Read", fetch: "Network", tool: "Tool call" },
+      decidedAllow: "Allowed · {choice}",
+      decidedDeny: "Denied",
+      decidedTimeout: "Timed out, cancelled",
+      decidedAuto: "Allowed by your “always allow” · {choice}",
     },
     ask: {
       title: "Waiting for your choice",
@@ -739,7 +752,6 @@ export const enUS: MessageSchema = {
     permissionFailed: "[Permission report failed] {detail}",
     autoApproved: "\n\n> Auto-approved by host · {title} → {choice}",
     permissionDenied: "Deny",
-    permissionLog: "[Permission] {choice} · {title}",
     blockedOutsideWorkspace: "\n\n> Blocked by host · {title}: target path is outside the workspace, rejected ({paths})",
     readOnlyBlocked: "\n\n> Blocked by host · {title}: read-only permission, write/execute rejected",
     sessionSyncFailed: "Conversations could not be saved to disk",
@@ -758,5 +770,8 @@ export const enUS: MessageSchema = {
     agentProviderNameRequired: "Backend name is required",
     agentProviderCommandRequired: "Spawn command is required",
     agentProviderNotEditable: "Only user-defined backends can be edited / removed",
+    agentProviderEnvLine: "Environment lines must be KEY=VALUE: {line}",
+    agentProviderEnvName: "Environment names allow letters, digits and underscore only, and cannot start with a digit: {key}",
+    agentProviderHeaderLine: "Header lines must be Key: Value: {line}",
   },
 };

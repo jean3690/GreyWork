@@ -132,6 +132,39 @@ fn content_from_completion(body: &serde_json::Value) -> Option<String> {
     (!joined.is_empty()).then_some(joined)
 }
 
+/// 解析请求头值中的 `{{ENV_VAR}}` 占位符为环境变量实际值。
+/// 变量未设置/为空 → Err（指路用户补环境变量），绝不静默丢头——带占位符原样发出
+/// 等于把密钥模板发给远端。
+fn resolve_header_placeholders(value: &str) -> Result<String, String> {
+    let mut out = String::with_capacity(value.len());
+    let mut rest = value;
+    while let Some(start) = rest.find("{{") {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 2..];
+        match after.find("}}") {
+            Some(end) => {
+                let name = after[..end].trim();
+                match std::env::var(name) {
+                    Ok(resolved) if !resolved.is_empty() => out.push_str(&resolved),
+                    _ => {
+                        return Err(format!(
+                            "未设置环境变量 {name}：请求头占位符 {{{{{name}}}}} 无法解析，请先 export 后从同一终端启动 GreyWork（或到设置页修改该请求头）"
+                        ));
+                    }
+                }
+                rest = &after[end + 2..];
+            }
+            None => {
+                // 只有 {{ 没有 }}：按字面量保留，交给 reqwest/服务端判定合法性
+                out.push_str(&rest[start..]);
+                rest = "";
+            }
+        }
+    }
+    out.push_str(rest);
+    Ok(out)
+}
+
 /// 发起一轮流式对话；返回请求 id（用于 llm_chat_stop 中止）。
 ///
 /// `client_token` 是调用方自带的轮次令牌，原样回灌进每条事件：`llm://event` 是全局广播
@@ -147,6 +180,7 @@ pub async fn llm_chat_start(
     api_key_env: String,
     messages: Vec<LlmChatMessage>,
     reasoning_effort: String,
+    headers: Option<HashMap<String, String>>,
     client_token: Option<String>,
 ) -> Result<u64, String> {
     let base_url = base_url.trim().to_string();
@@ -163,6 +197,7 @@ pub async fn llm_chat_start(
         &api_key_env,
         &messages,
         &reasoning_effort,
+        &headers.unwrap_or_default(),
     )
     .await?;
 
@@ -182,6 +217,7 @@ async fn send_chat_request(
     api_key_env: &str,
     messages: &[LlmChatMessage],
     reasoning_effort: &str,
+    headers: &HashMap<String, String>,
 ) -> Result<reqwest::Response, String> {
     let env_name = api_key_env.trim();
     let api_key = std::env::var(env_name).unwrap_or_default();
@@ -198,6 +234,10 @@ async fn send_chat_request(
         .json(&chat_request_body(model.trim(), messages, reasoning_effort));
     if !api_key.is_empty() {
         request = request.bearer_auth(api_key);
+    }
+    for (key, value) in headers {
+        let resolved = resolve_header_placeholders(value)?;
+        request = request.header(key, resolved);
     }
     let response = request
         .send()
@@ -233,9 +273,17 @@ pub async fn chat_complete(
     api_key_env: &str,
     messages: Vec<LlmChatMessage>,
     reasoning_effort: &str,
+    headers: &HashMap<String, String>,
 ) -> Result<String, String> {
-    let response =
-        send_chat_request(base_url, model, api_key_env, &messages, reasoning_effort).await?;
+    let response = send_chat_request(
+        base_url,
+        model,
+        api_key_env,
+        &messages,
+        reasoning_effort,
+        headers,
+    )
+    .await?;
     if !is_sse_response(&response) {
         // 非流式：整包 JSON（服务端忽略 stream 时）
         let body: serde_json::Value =
@@ -654,6 +702,7 @@ mod tests {
                 content: serde_json::json!("hi"),
             }],
             "auto",
+            &HashMap::new(),
         )
         .await
         .expect("aggregated");
@@ -672,10 +721,44 @@ mod tests {
                 content: serde_json::json!("hi"),
             }],
             "auto",
+            &HashMap::new(),
         )
         .await
         .expect("parsed");
         assert_eq!(reply, "整包回复");
+    }
+
+    #[test]
+    fn header_placeholders_resolve_env_vars() {
+        std::env::set_var("GREYWORK_TEST_HEADER_TOKEN", "secret-123");
+        assert_eq!(
+            resolve_header_placeholders("Bearer {{GREYWORK_TEST_HEADER_TOKEN}}").unwrap(),
+            "Bearer secret-123"
+        );
+        // 多占位符 + 相邻文本
+        std::env::set_var("GREYWORK_TEST_HEADER_ORG", "acme");
+        assert_eq!(
+            resolve_header_placeholders("{{GREYWORK_TEST_HEADER_ORG}}:{{GREYWORK_TEST_HEADER_TOKEN}}").unwrap(),
+            "acme:secret-123"
+        );
+        // 无占位符原样返回；占位符名容忍空白
+        assert_eq!(resolve_header_placeholders("plain-value").unwrap(), "plain-value");
+        assert_eq!(
+            resolve_header_placeholders("{{ GREYWORK_TEST_HEADER_ORG }}").unwrap(),
+            "acme"
+        );
+    }
+
+    #[test]
+    fn header_placeholders_error_on_missing_env() {
+        let error = resolve_header_placeholders("{{GREYWORK_TEST_HEADER_MISSING}}").unwrap_err();
+        assert!(error.contains("GREYWORK_TEST_HEADER_MISSING"));
+        assert!(error.contains("未设置环境变量"));
+        // 未闭合的 {{ 按字面量保留（交由 reqwest/服务端判定合法性）
+        assert_eq!(
+            resolve_header_placeholders("literal {{ open").unwrap(),
+            "literal {{ open"
+        );
     }
 
     #[tokio::test]

@@ -73,3 +73,17 @@ export function toPermissionPanelOptions(options: { optionId: string; name: stri
     intent: classifyAcpPermission(option.kind),
   }));
 }
+
+/**
+ * tool-call 原始入参的透传上限，与宿主 `PERMISSION_RAW_INPUT_MAX_BYTES` 对齐。
+ * agent 习惯把整份 diff 塞进 rawInput，一个 100KB 的载荷经 IPC / WebSocket 各拷一份
+ * 会拖慢权限卡片；超限整块丢弃——路径有 `locations` 兜底，少一行明细不值得撑大载荷。
+ */
+export const PERMISSION_RAW_INPUT_MAX_BYTES = 8 * 1024;
+
+/** 超过上限返回 null（前端一律按「无明细」渲染），否则原样透传。 */
+export function boundedPermissionRawInput(raw: unknown): unknown {
+  if (raw === undefined || raw === null) return null;
+  const encoded = JSON.stringify(raw);
+  return encoded !== undefined && encoded.length > PERMISSION_RAW_INPUT_MAX_BYTES ? null : raw;
+}

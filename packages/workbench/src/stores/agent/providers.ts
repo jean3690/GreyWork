@@ -11,12 +11,15 @@ import { acp } from "../../lib/acp-client";
 import { agentsBackend, type AgentProviderRow } from "../../lib/agents-backend";
 import { notify } from "../notice";
 import {
+  acpDefaultConfigValues,
   detectProgramOf,
   isCustomAgentProvider,
   newCustomProviderId,
+  parseProviderEnv,
   providerIconsStorage,
   providerPrefStorage,
   providersStorage,
+  serializeProviderEnv,
   t,
 } from "./shared";
 import type { AgentStoreState } from "./state";
@@ -33,8 +36,8 @@ export interface ProvidersApi {
   providerInstallLabel(provider: AgentProviderConfig): string;
   setAgentProviderEnabled(id: string, enabled: boolean): Promise<void>;
   setAgentProviderIcon(id: string, icon: string | null): void;
-  addAgentProvider(name: string, command: string, icon?: string): string | null;
-  updateAgentProvider(id: string, name: string, command: string, icon?: string): string | null;
+  addAgentProvider(name: string, command: string, icon?: string, env?: Record<string, string>): string | null;
+  updateAgentProvider(id: string, name: string, command: string, icon?: string, env?: Record<string, string>): string | null;
   removeAgentProvider(id: string): Promise<string | null>;
   activateAcpProvider(id: string): Promise<string | null>;
   applyWorkspaceAgentConfig(workspaceId: string | null): Promise<void>;
@@ -77,13 +80,28 @@ export function createProvidersSlice({ state, getRuntime }: ProvidersDeps): Prov
    * 用户自配的后端（`custom-*` 前缀）不在注册表里，但**必须保留**——预设合并丢弃的
    * 只是「注册表已移除的残留项」，自配项是用户资产，按持久化顺序接在预设后面。
    */
-  function mergeProviders(persisted: AgentProviderConfig[] | undefined): AgentProviderConfig[] {
-    const byId = new Map((persisted ?? []).map((provider) => [provider.id, provider]));
+  /**
+   * 持久化行 → 内存配置。
+   *
+   * 来源两种形状：本地缓存（AgentProviderConfig，env 已是对象）与 SQLite 行
+   * （AgentProviderRow，env 是 JSON 文本或 null）。除 env 外两者字段一致，这里按
+   * 「unknown」入口归一，避免为一次归一引入两个重载。
+   */
+  function toProviderConfig(row: AgentProviderConfig | AgentProviderRow): AgentProviderConfig {
+    const { env, ...rest } = row as { env?: unknown };
+    return { ...(rest as Omit<AgentProviderConfig, "env">), env: parseProviderEnv(env) };
+  }
+
+  function mergeProviders(persisted: (AgentProviderConfig | AgentProviderRow)[] | undefined): AgentProviderConfig[] {
+    const normalized = (persisted ?? []).map(toProviderConfig);
+    const byId = new Map(normalized.map((provider) => [provider.id, provider]));
+    // 预设项：注册表决定「有哪些 / 顺序 / detect 等元数据」，持久化只覆盖 enabled 与 env
+    //（env 是启动契约，用户改了必须活过升级；预设没有 env 时用注册表值）。
     const presets = state.registry.list().map((preset) => {
       const saved = byId.get(preset.id);
-      return saved ? { ...preset, enabled: saved.enabled } : preset;
+      return saved ? { ...preset, enabled: saved.enabled, env: saved.env ?? preset.env } : preset;
     });
-    const custom = (persisted ?? []).filter((provider) => isCustomAgentProvider(provider.id));
+    const custom = normalized.filter((provider) => isCustomAgentProvider(provider.id));
     return [...presets, ...custom];
   }
 
@@ -110,12 +128,13 @@ export function createProvidersSlice({ state, getRuntime }: ProvidersDeps): Prov
     providersStorage.write({ providers: state.agentProviders.value });
     if (agentsBackend.active()) {
       // 显式取字段：detect/installHint 只属于前端预设，不落库
-      const rows: AgentProviderRow[] = state.agentProviders.value.map(({ id, name, kind, command, enabled }) => ({
+      const rows: AgentProviderRow[] = state.agentProviders.value.map(({ id, name, kind, command, enabled, env }) => ({
         id,
         name,
         kind,
         command,
         enabled,
+        env: serializeProviderEnv(env),
       }));
       void agentsBackend.save(rows).catch((error: unknown) => {
         console.error("[agent] 后端目录同步失败，将下次重试", error);
@@ -207,8 +226,8 @@ export function createProvidersSlice({ state, getRuntime }: ProvidersDeps): Prov
     writeProviderIcons({ ...state.providerIcons.value, [id]: icon });
   }
 
-  /** 新增用户自配 ACP 后端（名称 + 启动命令 + 可选图标）；返回错误文案（null = 成功）。 */
-  function addAgentProvider(name: string, command: string, icon?: string): string | null {
+  /** 新增用户自配 ACP 后端（名称 + 启动命令 + 可选图标 + 启动环境变量）；返回错误文案（null = 成功）。 */
+  function addAgentProvider(name: string, command: string, icon?: string, env?: Record<string, string>): string | null {
     const trimmedName = name.trim();
     const trimmedCommand = command.trim();
     if (!trimmedName) return t("errors.agentProviderNameRequired");
@@ -221,6 +240,7 @@ export function createProvidersSlice({ state, getRuntime }: ProvidersDeps): Prov
       command: trimmedCommand,
       enabled: true,
       detect: detectProgramOf(trimmedCommand),
+      ...(env && Object.keys(env).length > 0 ? { env } : {}),
     });
     recordProviderIcon(id, icon);
     persistProviders();
@@ -232,7 +252,7 @@ export function createProvidersSlice({ state, getRuntime }: ProvidersDeps): Prov
    * 编辑用户自配 ACP 后端（名称 / 命令 / 图标）。预设项不可改：合并流程会用注册表元数据
    * 覆盖回去，改了也不持久，故直接拒绝（图标单独经 setAgentProviderIcon 改）。
    */
-  function updateAgentProvider(id: string, name: string, command: string, icon?: string): string | null {
+  function updateAgentProvider(id: string, name: string, command: string, icon?: string, env?: Record<string, string>): string | null {
     const provider = state.agentProviders.value.find((candidate) => candidate.id === id);
     if (!provider || !isCustomAgentProvider(id)) return t("errors.agentProviderNotEditable");
     const trimmedName = name.trim();
@@ -242,6 +262,7 @@ export function createProvidersSlice({ state, getRuntime }: ProvidersDeps): Prov
     provider.name = trimmedName;
     provider.command = trimmedCommand;
     provider.detect = detectProgramOf(trimmedCommand);
+    provider.env = env && Object.keys(env).length > 0 ? env : undefined;
     recordProviderIcon(id, icon);
     persistProviders();
     void refreshAgentDetection();
@@ -302,26 +323,34 @@ export function createProvidersSlice({ state, getRuntime }: ProvidersDeps): Prov
   const replayingConfig = state.locals;
 
   /**
-   * 应用某工作区记住的 ACP 后端与会话配置。
+   * 应用某工作区记住的 ACP 后端与会话配置，再以全局默认兜底。
    *
-   * 无记录时**不动当前状态**（用户可能刚在别处选好后端，切个工作区不该被重置）。
+   * 层级：工作区记忆 > 全局默认 > 后端出厂值。工作区**完全无记录**且存在全局默认时，
+   * 默认仍然生效（新工作区不至于裸奔）；两者都为空才真正「不动当前状态」。
    */
   async function applyWorkspaceAgentConfig(workspaceId: string | null): Promise<void> {
     const remembered = state.workspace.agentConfigOf(workspaceId);
-    if (!remembered) return;
-    if (remembered.providerId === null) {
+    if (remembered?.providerId === null) {
       if (state.routeToAcp.value) await switchToLocalLlm();
       return;
     }
-    if (remembered.providerId && (remembered.providerId !== state.selectedProviderId.value || !state.routeToAcp.value)) {
+    if (remembered?.providerId && (remembered.providerId !== state.selectedProviderId.value || !state.routeToAcp.value)) {
       const failure = await activateAcpProvider(remembered.providerId);
       if (failure) return; // 连不上就停在错误态，别再拿旧 handle 回放配置
     }
-    const values = remembered.configValues;
-    if (!values || state.acpHandle.value === null) return;
+    if (state.acpHandle.value === null) return;
+    const values = remembered?.configValues ?? {};
+    const defaults = acpDefaultConfigValues.value;
+    if (Object.keys(values).length === 0 && Object.keys(defaults).length === 0) return;
     replayingConfig.replayingConfig = true;
     try {
       for (const [configId, value] of Object.entries(values)) {
+        const option = state.acpConfigOptions.value.find((candidate) => candidate.id === configId && candidate.type === "select");
+        if (option) await runtime().setAcpConfig(configId, value);
+      }
+      // 全局默认兜底：只补工作区记忆没表态的键（记忆 > 默认 > 出厂值）
+      for (const [configId, value] of Object.entries(defaults)) {
+        if (configId in values) continue;
         const option = state.acpConfigOptions.value.find((candidate) => candidate.id === configId && candidate.type === "select");
         if (option) await runtime().setAcpConfig(configId, value);
       }

@@ -77,6 +77,54 @@ describe("settings 持久化", () => {
   });
 });
 
+describe("模型供应商自定义 headers", () => {
+  it("headers 随 persist 往返保留，旧快照缺失时为 undefined", () => {
+    const settings = useSettingsStore();
+    const provider = settings.modelProviders[0];
+    settings.upsertModelProvider({ ...provider, headers: { "X-Org": "acme", "X-Auth": "{{MY_TOKEN}}" } });
+    settings.persist();
+
+    setActivePinia(createPinia());
+    const reloaded = useSettingsStore();
+    expect(reloaded.modelProviders[0].headers).toEqual({ "X-Org": "acme", "X-Auth": "{{MY_TOKEN}}" });
+
+    // 旧快照没有 headers 字段 → undefined（无附加头），不报错
+    storage.set("greywork.settings", JSON.stringify({ modelProviders: [{ id: "x", name: "X", model: "m", enabled: true }] }));
+    setActivePinia(createPinia());
+    expect(useSettingsStore().modelProviders[0].headers).toBeUndefined();
+  });
+
+  it("脏 headers 被归一化：非 string 值与空 key 过滤，全空时整体 undefined", () => {
+    storage.set(
+      "greywork.settings",
+      JSON.stringify({
+        modelProviders: [{ id: "x", name: "X", model: "m", enabled: true, headers: { ok: "v", bad: 42, empty: "", " ": "v" } }],
+      }),
+    );
+    setActivePinia(createPinia());
+    expect(useSettingsStore().modelProviders[0].headers).toEqual({ ok: "v" });
+
+    storage.set(
+      "greywork.settings",
+      JSON.stringify({
+        modelProviders: [{ id: "x", name: "X", model: "m", enabled: true, headers: { bad: 42 } }],
+      }),
+    );
+    setActivePinia(createPinia());
+    expect(useSettingsStore().modelProviders[0].headers).toBeUndefined();
+  });
+
+  it("思考等级经 upsertModelProvider 即时更新并持久化", () => {
+    const settings = useSettingsStore();
+    const provider = settings.modelProviders[0];
+    settings.upsertModelProvider({ ...provider, reasoningEffort: "medium" });
+    expect(settings.modelProviders[0].reasoningEffort).toBe("medium");
+
+    setActivePinia(createPinia());
+    expect(useSettingsStore().modelProviders[0].reasoningEffort).toBe("medium");
+  });
+});
+
 describe("权限档位与沙盒联动", () => {
   it("effectivePermissionTier 在临时降级期间为只读，关掉即回基线", () => {
     const settings = useSettingsStore();

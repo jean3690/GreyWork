@@ -1,4 +1,5 @@
-import type { ModelProviderConfig } from "@greywork/shell";
+import type { ModelProviderConfig, ReasoningEffort } from "@greywork/shell";
+import { ref } from "vue";
 import type { LlmChatMessage, LlmContentPart } from "@greywork/llm";
 import { inlineTextAttachment } from "../lib/attachments";
 import { readAttachmentBase64, readAttachmentText } from "../state/attachment-library";
@@ -7,6 +8,22 @@ import { notify } from "../stores/notice";
 import type { Attachment } from "../types";
 
 const t = i18n.global.t;
+
+/**
+ * Local 路由的会话级思考强度覆盖（对话输入区选择器写入，不持久化）。
+ *
+ * 放在纯模块而不是 agent store：stream.ts 已依赖本模块，若反过来读 agent store
+ * 会成环（agent/state.ts 已引用 chat store）。null = 跟随供应商配置。
+ */
+export const localReasoningOverride = ref<ReasoningEffort | null>(null);
+
+/** 生效思考强度：会话覆盖 > 供应商配置 > auto。纯函数便于单测。 */
+export function resolveLocalEffort(
+  override: ReasoningEffort | null,
+  provider: Pick<ModelProviderConfig, "reasoningEffort"> | null,
+): ReasoningEffort {
+  return override ?? provider?.reasoningEffort ?? "auto";
+}
 
 /** Phase 1 统一 openai-compatible 线格式：anthropic / ollama 均提供兼容端点，
  * kind 不作为路由条件，只要求启用且 baseUrl/model 已配置。 */

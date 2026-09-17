@@ -16,8 +16,10 @@ vi.mock("@/state/attachment-library", () => ({
 }));
 
 import ConversationMessage from "@/features/conversation/ConversationMessage.vue";
+import { appEvents } from "@/events";
 import { i18n } from "@/i18n";
-import { usePreviewStore } from "@/stores/preview";
+
+type PreviewRequestPayload = { path: string; name?: string; source?: "vfs" | "disk"; diskPath?: string };
 
 const image: Attachment = { id: "a1", kind: "image", name: "shot.png", mime: "image/png", size: 4, path: "/tmp/shot.png" };
 const textFile: Attachment = { id: "a2", kind: "text", name: "notes.md", mime: "text/markdown", size: 12, path: "/tmp/notes.md" };
@@ -29,10 +31,11 @@ function userMessage(attachments: Attachment[]): ThreadMessage {
 function mountMessage(message: ThreadMessage) {
   const pinia = createPinia();
   setActivePinia(pinia);
-  const preview = usePreviewStore();
-  const open = vi.spyOn(preview, "open");
+  // 组件现在发 preview:request 事件（不再直调 preview store），这里收下载荷做断言
+  const requests: PreviewRequestPayload[] = [];
+  const off = appEvents.on("preview:request", (payload) => requests.push(payload));
   const wrapper = mount(ConversationMessage, { props: { message }, global: { plugins: [pinia, i18n] } });
-  return { wrapper, open };
+  return { wrapper, requests, off };
 }
 
 beforeEach(() => {
@@ -51,15 +54,15 @@ describe("ConversationMessage · 附件", () => {
     expect(wrapper.find('[data-testid="message-attachments"]').exists()).toBe(true);
   });
 
-  it("点附件按磁盘源开预览面板（桌面态）", async () => {
-    const { wrapper, open } = mountMessage(userMessage([image, textFile]));
+  it("点附件发 preview:request 事件（磁盘源，跨面板联动）", async () => {
+    const { wrapper, requests } = mountMessage(userMessage([image, textFile]));
     await vi.waitFor(() => expect(wrapper.find('[data-testid="message-attachment-image"]').exists()).toBe(true));
 
     await wrapper.get('[data-testid="message-attachment-image"]').trigger("click");
-    expect(open).toHaveBeenCalledWith("/tmp/shot.png", "shot.png", "disk");
+    expect(requests).toContainEqual({ path: "/tmp/shot.png", name: "shot.png", source: "disk" });
 
     await wrapper.get('[data-testid="message-attachment-file"]').trigger("click");
-    expect(open).toHaveBeenCalledWith("/tmp/notes.md", "notes.md", "disk");
+    expect(requests).toContainEqual({ path: "/tmp/notes.md", name: "notes.md", source: "disk" });
   });
 
   it("缩略图读不到（文件被移走）时退化为占位，不抛错", async () => {

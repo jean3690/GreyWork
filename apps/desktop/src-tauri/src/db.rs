@@ -56,6 +56,10 @@ pub struct AgentProviderDto {
     pub kind: String,
     pub command: String,
     pub enabled: bool,
+    /// 启动环境变量（JSON 对象文本：`{"KEY":"VALUE"}`）；None = 继承宿主环境。
+    /// 与 command 同属「能被启动的契约」，因此进库而不是留在渲染端的展示覆盖层。
+    #[serde(default)]
+    pub env: Option<String>,
 }
 
 /// 自动化任务行（与前端 AutomationTask 对齐；cron 空 = 手动触发，永不自动到期）。
@@ -458,7 +462,9 @@ impl Db {
             return Ok(None);
         }
         let mut stmt = conn
-            .prepare("SELECT id, name, kind, command, enabled FROM agent_providers ORDER BY rowid")
+            .prepare(
+                "SELECT id, name, kind, command, enabled, env FROM agent_providers ORDER BY rowid",
+            )
             .map_err(|e| format!("准备后端目录查询失败: {e}"))?;
         let rows = stmt
             .query_map([], |row| {
@@ -468,6 +474,7 @@ impl Db {
                     kind: row.get(2)?,
                     command: row.get(3)?,
                     enabled: row.get::<_, i64>(4)? != 0,
+                    env: row.get(5)?,
                 })
             })
             .map_err(|e| format!("查询后端目录失败: {e}"))?;
@@ -510,15 +517,16 @@ impl Db {
 
         for provider in providers {
             tx.execute(
-                "INSERT INTO agent_providers (id, name, kind, command, enabled)
-                 VALUES (?1, ?2, ?3, ?4, ?5)
-                 ON CONFLICT(id) DO UPDATE SET name = ?2, kind = ?3, command = ?4, enabled = ?5",
+                "INSERT INTO agent_providers (id, name, kind, command, enabled, env)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 ON CONFLICT(id) DO UPDATE SET name = ?2, kind = ?3, command = ?4, enabled = ?5, env = ?6",
                 params![
                     provider.id,
                     provider.name,
                     provider.kind,
                     provider.command,
-                    provider.enabled as i64
+                    provider.enabled as i64,
+                    provider.env
                 ],
             )
             .map_err(|e| format!("写入后端失败: {e}"))?;
@@ -1377,6 +1385,7 @@ mod tests {
             kind: "acp".to_string(),
             command: format!("{id} acp"),
             enabled,
+            env: None,
         }
     }
 
@@ -1445,6 +1454,7 @@ mod tests {
                 kind: "acp".to_string(),
                 command: "/usr/bin/my-agent --acp".to_string(),
                 enabled: true, // 绝对路径 → 取 basename
+                env: None,
             },
             AgentProviderDto {
                 id: "custom-2".to_string(),
@@ -1452,6 +1462,7 @@ mod tests {
                 kind: "acp".to_string(),
                 command: "npx -y @acp/whatever".to_string(),
                 enabled: true,
+                env: None,
             },
         ])
         .unwrap();
