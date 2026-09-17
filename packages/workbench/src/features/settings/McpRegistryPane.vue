@@ -28,8 +28,16 @@ const searched = ref(false);
 
 let timer: ReturnType<typeof setTimeout> | null = null;
 
-/** 同名（或同 name）已登记过的服务器名集合：登记按钮变「已登记」。 */
+/** 已登记过的服务器名集合：登记按钮变「已登记」。 */
 const registeredNames = computed(() => new Set(settings.mcpServers.map((server) => server.name)));
+
+/**
+ * 已登记判定：登记时默认用条目标题当服务器名（用户可在弹窗里改），标题与注册表名都比一遍。
+ * 可改名意味着这只是启发式，但比「明明登记过却显示未登记」更不容易误导。
+ */
+function isRegistered(entry: McpRegistryEntry): boolean {
+  return registeredNames.value.has(entry.name) || (entry.title ? registeredNames.value.has(entry.title) : false);
+}
 
 interface RegistryRow {
   entry: McpRegistryEntry;
@@ -42,7 +50,7 @@ const rows = computed<RegistryRow[]>(() =>
   results.value.map((entry) => ({
     entry,
     draft: registryEntryToDraft(entry),
-    registered: registeredNames.value.has(entry.name),
+    registered: isRegistered(entry),
   })),
 );
 

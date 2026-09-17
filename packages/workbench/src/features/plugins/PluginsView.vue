@@ -40,6 +40,10 @@ import {
   setPluginEnabled,
 } from "@/plugins/runtime";
 import { useCapabilityLoader } from "@/plugins/current";
+import { useSettingsStore } from "@/stores/settings";
+import { useSkillsStore } from "@/stores/skills";
+import McpMarketSection from "@/features/plugins/McpMarketSection.vue";
+import SkillsMarketSection from "@/features/plugins/SkillsMarketSection.vue";
 import { Skeleton } from "@/components/ui/skeleton";
 
 /**
@@ -51,6 +55,8 @@ import { Skeleton } from "@/components/ui/skeleton";
  */
 const t = i18n.global.t;
 const loader = useCapabilityLoader();
+const settings = useSettingsStore();
+const skills = useSkillsStore();
 
 /** seam 当前快照（响应式）：模式页贡献实时反映启停结果。 */
 const contributedModes = computed(() => loader.snapshot().modes.map((mode) => ({ id: mode.id, title: mode.title })));
@@ -64,7 +70,7 @@ const busyId = ref<string | null>(null);
 const confirmDisableId = ref<string | null>(null);
 const notice = ref<{ kind: "ok" | "error"; text: string } | null>(null);
 const registryDraft = ref(pluginRegistryUrl.value);
-const activeSection = ref<"discover" | "installed" | "audit">("discover");
+const activeSection = ref<"discover" | "mcp" | "skills" | "installed" | "audit">("discover");
 const searchQuery = ref("");
 const registryOpen = ref(false);
 const uninstallTarget = ref<{ id: string; name: string } | null>(null);
@@ -263,16 +269,26 @@ function toggleLabel(manifestId: string): string {
   return isPluginEnabled(manifestId) ? t("market.disable") : t("market.enable");
 }
 
-/** 页签定义：发现 / 已装 / 能力审计，各自带计数。 */
+type MarketSection = "discover" | "mcp" | "skills" | "installed" | "audit";
+
+/**
+ * 页签定义：插件 / MCP / 技能 / 已装 / 能力审计，各自带计数。
+ *
+ * 三个市场页签是三种不同形态的「安装」：插件是声明式包落盘，MCP 是登记服务器声明，
+ * 技能是往工作区写技能目录——所以各给一个专区，而不是塞进同一张卡片网格。
+ */
 const sectionTabs = computed(() => [
   { key: "discover" as const, label: t("market.discoverPlugins"), count: marketCatalog.value.length },
+  { key: "mcp" as const, label: t("market.tabMcp"), count: settings.mcpServers.length },
+  { key: "skills" as const, label: t("market.tabSkills"), count: skills.installed.length },
   { key: "installed" as const, label: t("market.installedPlugins"), count: installedMarketIds.value.size },
-  { key: "audit" as const, label: "能力审计", count: auditEntries.value.length },
+  { key: "audit" as const, label: t("market.tabAudit"), count: auditEntries.value.length },
 ]);
 
-function selectSection(section: "discover" | "installed" | "audit"): void {
+function selectSection(section: MarketSection): void {
   activeSection.value = section;
   if (section === "audit") syncAudit();
+  if (section === "skills") void skills.refreshInstalled();
 }
 
 function toggleGrant(capability: string): void {
@@ -321,47 +337,16 @@ async function confirmUninstall(): Promise<void> {
     class="mx-auto flex h-full min-h-0 w-full max-w-[1120px] flex-col overflow-y-auto px-4 py-4 sm:px-6 sm:py-6"
     data-testid="plugin-market"
   >
-    <header class="relative overflow-hidden rounded-[18px] border border-line bg-panel px-5 py-5 sm:px-6">
-      <div class="pointer-events-none absolute inset-y-0 right-0 w-[44%] opacity-70" aria-hidden="true">
-        <div class="absolute right-[-36px] top-[-72px] size-56 rounded-full border border-brand-hover/25"></div>
-        <div class="absolute right-[42px] top-[-18px] size-32 rounded-full border border-accent/25"></div>
-        <div
-          class="absolute right-[96px] top-[62px] h-px w-52 rotate-[-16deg] bg-gradient-to-r from-transparent via-accent/50 to-transparent"
-        ></div>
-      </div>
-
-      <div class="relative flex items-start gap-4">
-        <span class="grid size-11 shrink-0 place-items-center rounded-[12px] border border-accent/25 bg-accent/10 text-accent">
-          <Icon name="magic" :size="20" />
-        </span>
-        <div class="min-w-0 flex-1">
-          <div class="flex flex-wrap items-center gap-2">
-            <h1 class="text-[20px] font-semibold tracking-[-0.02em] text-foreground">{{ t("market.pluginMarketTitle") }}</h1>
-            <span class="rounded-full border border-mint/30 bg-mint/10 px-2 py-0.5 text-[10px] font-medium text-mint">
-              {{ t("market.declarativeOnly") }}
-            </span>
-          </div>
-          <p class="mt-1.5 max-w-[650px] text-[12.5px] leading-5 text-dim">{{ t("market.pluginMarketHint") }}</p>
-          <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[10px] text-dim2">
-            <span>{{ marketCatalog.length }} {{ t("market.catalogCount") }}</span>
-            <span>{{ installedMarketIds.size }} {{ t("market.installedCount") }}</span>
-            <span class="inline-flex items-center gap-1.5"><i class="size-1.5 rounded-full bg-mint"></i> SHA-256</span>
-            <span class="inline-flex items-center gap-1.5"><i class="size-1.5 rounded-full bg-accent"></i> GitHub HTTPS</span>
-          </div>
-        </div>
-      </div>
-    </header>
-
     <p
       v-if="notice"
       role="status"
-      class="mt-3 rounded-[10px] border px-3 py-2 text-[12px]"
+      class="mb-3 rounded-[10px] border px-3 py-2 text-[12px]"
       :class="notice.kind === 'error' ? 'border-orange/35 bg-orange/10 text-orange' : 'border-mint/25 bg-mint/10 text-mint'"
     >
       {{ notice.text }}
     </p>
 
-    <nav class="mt-5 flex items-center border-b border-line" :aria-label="t('market.pluginMarketTitle')">
+    <nav class="flex items-center border-b border-line" :aria-label="t('market.pluginMarketTitle')">
       <button
         v-for="section in sectionTabs"
         :key="section.key"
@@ -445,6 +430,14 @@ async function confirmUninstall(): Promise<void> {
         >
       </div>
 
+      <!-- 原先挂在页头的那段说明与信任标记：挪到真正发生安装的地方 -->
+      <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] text-dim2">
+        <span class="rounded-full border border-mint/30 px-2 py-0.5 text-[10px] text-mint">{{ t("market.declarativeOnly") }}</span>
+        <span class="min-w-0 flex-1">{{ t("market.pluginMarketHint") }}</span>
+        <span class="inline-flex items-center gap-1.5 font-mono"><i class="size-1.5 rounded-full bg-mint"></i> SHA-256</span>
+        <span class="inline-flex items-center gap-1.5 font-mono"><i class="size-1.5 rounded-full bg-accent"></i> GitHub HTTPS</span>
+      </div>
+
       <div v-if="marketLoading && marketCatalog.length === 0" class="mt-3 grid gap-3 md:grid-cols-2">
         <Skeleton v-for="index in 4" :key="index" class="h-40 rounded-[14px] border border-line bg-panel" />
       </div>
@@ -514,6 +507,14 @@ async function confirmUninstall(): Promise<void> {
       </div>
 
       <p v-if="!pluginMarketHostAvailable" class="mt-3 text-center text-[10.5px] text-dim2">{{ t("market.desktopInstallOnly") }}</p>
+    </section>
+
+    <section v-else-if="activeSection === 'mcp'" class="mt-4">
+      <McpMarketSection />
+    </section>
+
+    <section v-else-if="activeSection === 'skills'" class="mt-4">
+      <SkillsMarketSection />
     </section>
 
     <section v-else-if="activeSection === 'installed'" class="mt-4">
