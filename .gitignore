@@ -2,12 +2,14 @@ node_modules/
 dist/
 apps/desktop/src-tauri/target/
 .playwright*
+.agents/
+AGENTS.md
+AGENT.md
 *.log
 # 日志轮转目录：*.log 盖不住同目录的 .<hash>-audit.json（winston-daily-rotate-file 的轮转元数据）
 logs/
 # WSL 从 Windows 拷文件时留下的 NTFS 备用数据流（<文件名>:Zone.Identifier），与源码无关
 *:Zone.Identifier
-*.png
 # 例外：应用图标是构建输入（tauri.conf.json 的 bundle.icon 直接引用），
 # 被 *.png 挡住的话新克隆的仓库压根构建不起来。
 !apps/desktop/src-tauri/icons/*.png
