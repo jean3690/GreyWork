@@ -738,11 +738,17 @@ mod tests {
         // 多占位符 + 相邻文本
         std::env::set_var("GREYWORK_TEST_HEADER_ORG", "acme");
         assert_eq!(
-            resolve_header_placeholders("{{GREYWORK_TEST_HEADER_ORG}}:{{GREYWORK_TEST_HEADER_TOKEN}}").unwrap(),
+            resolve_header_placeholders(
+                "{{GREYWORK_TEST_HEADER_ORG}}:{{GREYWORK_TEST_HEADER_TOKEN}}"
+            )
+            .unwrap(),
             "acme:secret-123"
         );
         // 无占位符原样返回；占位符名容忍空白
-        assert_eq!(resolve_header_placeholders("plain-value").unwrap(), "plain-value");
+        assert_eq!(
+            resolve_header_placeholders("plain-value").unwrap(),
+            "plain-value"
+        );
         assert_eq!(
             resolve_header_placeholders("{{ GREYWORK_TEST_HEADER_ORG }}").unwrap(),
             "acme"

@@ -37,9 +37,14 @@ fn opencode_available() -> bool {
 /// 模型层故障（凭据失效 / 限流 / 模型被禁用）会让回合走不到工具调用，
 /// 此时「没有权限请求」不代表权限链路坏了——降级为跳过语义。
 fn looks_like_model_failure(detail: &str) -> bool {
-    ["Model is disabled", "APIError", "rate limit", "not authenticated"]
-        .iter()
-        .any(|needle| detail.contains(needle))
+    [
+        "Model is disabled",
+        "APIError",
+        "rate limit",
+        "not authenticated",
+    ]
+    .iter()
+    .any(|needle| detail.contains(needle))
 }
 
 #[tokio::test]

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc --noEmit && NODE_OPTIONS=--max-old-space-size=6144 vite build",
+    "build": "vue-tsc --noEmit && cross-env NODE_OPTIONS=--max-old-space-size=6144 vite build",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:wayland": "GDK_BACKEND=wayland WAYLAND_DISPLAY=wayland-0 WEBKIT_DISABLE_DMABUF_RENDERER=1 tauri",
@@ -28,6 +28,7 @@
     "@vitejs/plugin-vue": "^5.2.1",
     "@vitest/coverage-v8": "^3.2.7",
     "@vue/test-utils": "^2.5.0",
+    "cross-env": "^10.1.0",
     "happy-dom": "^20.11.12",
     "playwright-core": "^1.62.1",
     "tailwindcss": "^4.0.0",

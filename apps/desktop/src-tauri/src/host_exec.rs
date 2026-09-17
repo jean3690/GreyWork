@@ -150,7 +150,9 @@ async fn run_one(db: &Db, item: &AutomationDueDto) -> Result<String, String> {
 
 /// 从 settings 快照解析默认 LLM 端点：selectedModelProviderId 优先，
 /// 回落第一个带 baseUrl+model 的供应商。返回 (base_url, model, api_key_env, headers)。
-fn default_llm_config(settings: &Value) -> Option<(String, String, String, HashMap<String, String>)> {
+fn default_llm_config(
+    settings: &Value,
+) -> Option<(String, String, String, HashMap<String, String>)> {
     let providers = settings.get("modelProviders")?.as_array()?;
     let selected = settings
         .get("selectedModelProviderId")
@@ -229,7 +231,8 @@ mod tests {
     #[test]
     fn default_llm_picks_selected_provider() {
         let settings = settings_with(Some("local"));
-        let (base_url, model, api_key_env, headers) = default_llm_config(&settings).expect("config");
+        let (base_url, model, api_key_env, headers) =
+            default_llm_config(&settings).expect("config");
         assert_eq!(base_url, "http://127.0.0.1:11434/v1");
         assert_eq!(model, "qwen3");
         assert_eq!(api_key_env, "");

@@ -941,7 +941,7 @@ async fn run_gateway(
                 return;
             }
         };
-        let token = match { inner.lock().await.token() } {
+        let token = match inner.lock().await.token() {
             Ok(token) => token,
             Err(error) => {
                 set_state(&inner, &deps, "error", Some(error)).await;
