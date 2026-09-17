@@ -29,6 +29,13 @@ const pdfjsDist = path.dirname(workbenchRequire.resolve("pdfjs-dist/package.json
 const PDFJS_ASSET_DIRS = ["cmaps", "standard_fonts", "wasm", "iccs"] as const;
 
 /**
+ * glob 模式必须是 POSIX 分隔符：tinyglobby 对绝对模式做 `posix.relative(cwd, pattern)`
+ * （cwd 已归一成 `/`，模式没有），Windows 原生路径会被当成单段字符串算出乱码，
+ * 结果是 "No file was found to copy" 直接构建失败。只在拼模式时归一，其余仍用原生路径。
+ */
+const pdfjsDistPosix = pdfjsDist.split(path.sep).join("/");
+
+/**
  * vite-plugin-static-copy 的相对路径以 vite root 为基准：pdfjs-dist 在 root 之外的
  * node_modules，插件只会剥掉开头的 `../`，于是产出
  * `dist/pdfjs/node_modules/.pnpm/pdfjs-dist@x/node_modules/pdfjs-dist/cmaps/...` ——
@@ -57,7 +64,7 @@ export default defineConfig(async () => ({
     tailwindcss(),
     viteStaticCopy({
       targets: PDFJS_ASSET_DIRS.map((dir) => ({
-        src: `${pdfjsDist}/${dir}/**/*`,
+        src: `${pdfjsDistPosix}/${dir}/**/*`,
         dest: `pdfjs/${dir}`,
         rename: { stripBase: true },
       })),
