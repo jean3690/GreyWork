@@ -68,6 +68,14 @@ const RULES = [
     },
   },
   {
+    id: "slots-any",
+    describe: "defineSlots 的 `=> any` → `=> unknown`（eslint no-explicit-any）",
+    apply(source) {
+      const pattern = /=> any;/g;
+      return { text: source.replace(pattern, "=> unknown;"), count: countMatches(source, pattern) };
+    },
+  },
+  {
     id: "tooltip-skin",
     only: /tooltip\/TooltipContent\.vue$/,
     describe: "TooltipContent 收成项目紧凑规格（popover 底 + line-2 边 + 去箭头）",

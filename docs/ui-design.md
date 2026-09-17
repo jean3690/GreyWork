@@ -66,11 +66,14 @@ Font size: 15px base.
   (vendored source — the project owns and edits them).
 - **Add components only via `pnpm shadcn:add <names>`**. It runs the CLI against
   `packages/workbench` (so aliases resolve to `@/components/ui`) and then `scripts/shadcn-sync.mjs`.
-  Calling `pnpm dlx shadcn-vue` directly skips the three required localizations and will produce
+  Calling `pnpm dlx shadcn-vue` directly skips the required localizations and will produce
   components that fight this project's theme:
   1. `@lucide/vue` → `lucide-vue-next` (avoids a second, duplicate icon package).
   2. `-accent` → `-secondary` — see the note below.
   3. Overlay `bg-black/80` → `bg-black/40` (matches the pre-existing hand-rolled dialogs).
+  4. `defineSlots` 里的 `=> any` → `=> unknown`（ESLint 禁 `any`）；`TooltipContent` 的紧凑皮肤
+     也在同一条规则表里收口。新增冲突时改 `scripts/shadcn-sync.mjs` 的规则表而不是手改组件——
+     下次 `shadcn:add` 会把上游原文再写回来。
 - **`--accent` means GreyWork blue, not a hover surface.** `tokens.css` defines `--accent` as the
   brand action color (~110 call sites). shadcn uses `accent` for hover/selected states, so vendored
   components are rewritten to use `--secondary` (= `--panel-2`), which is the correct hover-surface
