@@ -30,7 +30,7 @@ jobs:
             platform: dmg
             bundle: dmg
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Tauri system dependencies
         if: runner.os == 'Linux'

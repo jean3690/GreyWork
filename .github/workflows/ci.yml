@@ -14,7 +14,7 @@ jobs:
     name: Lint · Test · Build (web)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: pnpm/action-setup@v4
 
@@ -58,7 +58,7 @@ jobs:
             platform: dmg
             bundle: dmg
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Tauri system dependencies
         if: runner.os == 'Linux'
@@ -93,7 +93,7 @@ jobs:
     name: Cargo Test (src-tauri)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Tauri system dependencies
         run: |
