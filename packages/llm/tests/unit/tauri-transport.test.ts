@@ -32,6 +32,8 @@ describe("TauriLlmTransport", () => {
       apiKeyEnv: "",
       messages: [{ role: "user", content: "hi" }],
       reasoningEffort: "high",
+      // 附加请求头随请求上行；未配置时传空对象 = 不加头
+      headers: {},
       // 轮次令牌随请求上行，宿主原样回灌进每条事件（消费方据此过滤并行的流）
       clientToken: "",
     });
@@ -49,8 +51,26 @@ describe("TauriLlmTransport", () => {
       apiKeyEnv: "",
       messages: [],
       reasoningEffort: "",
+      headers: {},
       clientToken: "",
     });
+    vi.unstubAllGlobals();
+  });
+
+  it("自定义请求头原样上行（{{ENV}} 占位由宿主解析）", async () => {
+    h.invoke.mockResolvedValue(3);
+    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
+    const transport = new TauriLlmTransport();
+    await transport.chat({
+      baseUrl: "https://x",
+      model: "m",
+      messages: [],
+      headers: { "X-Tenant": "acme", Authorization: "Bearer {{OPENAI_KEY}}" },
+    });
+    expect(h.invoke).toHaveBeenCalledWith(
+      "llm_chat_start",
+      expect.objectContaining({ headers: { "X-Tenant": "acme", Authorization: "Bearer {{OPENAI_KEY}}" } }),
+    );
     vi.unstubAllGlobals();
   });
 
