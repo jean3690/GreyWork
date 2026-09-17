@@ -12,7 +12,9 @@ async function navigate(path: string): Promise<string> {
   return router.currentRoute.value.path;
 }
 
-describe("grey router", () => {
+// 每次 navigate 都建一个真 router（懒加载路由会拉起整个应用图），单例就要 4-5s；
+// 默认 5s 超时在并行 + coverage 负载下会翻车，这里显式放宽。
+describe("grey router", { timeout: 20_000 }, () => {
   beforeEach(() => window.history.replaceState({}, "", "/"));
 
   it("根路径重定向到 /guid", async () => {
