@@ -5,6 +5,10 @@
 import { createIdFactory, createJsonStorage } from "@greywork/core";
 import type { DingTalkStatus } from "../../lib/dingtalk-backend";
 import type { FeishuRegisterStart, FeishuStatus } from "../../lib/feishu-backend";
+import type { DiscordStatus } from "../../lib/discord-backend";
+import type { QqStatus } from "../../lib/qq-backend";
+import type { TelegramStatus } from "../../lib/telegram-backend";
+import type { WecomStatus } from "../../lib/wecom-backend";
 import type { WechatStatus } from "../../lib/wechat-backend";
 import { i18n } from "../../i18n";
 
@@ -30,7 +34,13 @@ export interface WechatQrView {
 }
 
 /** 消息通道标识（与宿主命令 / 事件名前缀同名）。 */
-export type RemoteChannel = "wechat" | "dingtalk" | "feishu";
+export const REMOTE_CHANNELS = ["wechat", "dingtalk", "feishu", "telegram", "qq", "discord", "wecom"] as const;
+export type RemoteChannel = (typeof REMOTE_CHANNELS)[number];
+
+/** 档案读入时的通道校验：旧记录可能只存过微信，未知值一律回落微信。 */
+export function asRemoteChannel(value: unknown): RemoteChannel {
+  return typeof value === "string" && (REMOTE_CHANNELS as readonly string[]).includes(value) ? (value as RemoteChannel) : "wechat";
+}
 
 /**
  * 通道状态的统一形状：微信（扫码登录态）与钉钉（应用凭证 + 长连接）各自映射进来，
@@ -69,6 +79,53 @@ export function feishuChannelStatus(status: FeishuStatus | undefined): ChannelSt
     detail: status.detail,
     lastMessageAt: status.lastMessageAt,
     account: status.appId,
+  };
+}
+
+export function qqChannelStatus(status: QqStatus | undefined): ChannelStatus {
+  if (!status) return idleChannelStatus();
+  return {
+    ready: status.configured,
+    state: status.state,
+    detail: status.detail,
+    lastMessageAt: status.lastMessageAt,
+    // AppID 不是秘密（官方按 AppID 标识机器人），展示出来便于确认填对了。
+    account: status.appId,
+  };
+}
+
+export function discordChannelStatus(status: DiscordStatus | undefined): ChannelStatus {
+  if (!status) return idleChannelStatus();
+  return {
+    ready: status.configured,
+    state: status.state,
+    detail: status.detail,
+    lastMessageAt: status.lastMessageAt,
+    // bot token 是秘密，不进状态；bot 用户名是公开身份，展示出来便于确认填对了。
+    account: status.botUsername,
+  };
+}
+
+export function wecomChannelStatus(status: WecomStatus | undefined): ChannelStatus {
+  if (!status) return idleChannelStatus();
+  return {
+    ready: status.configured,
+    state: status.state,
+    detail: status.detail,
+    lastMessageAt: status.lastMessageAt,
+    account: status.botId,
+  };
+}
+
+export function telegramChannelStatus(status: TelegramStatus | undefined): ChannelStatus {
+  if (!status) return idleChannelStatus();
+  return {
+    ready: status.configured,
+    state: status.state,
+    detail: status.detail,
+    lastMessageAt: status.lastMessageAt,
+    // bot token 不是展示项：Telegram 侧没有「账号 id」可显示，凭证存在即就绪。
+    account: null,
   };
 }
 
@@ -132,6 +189,41 @@ export const IDLE_FEISHU_REGISTER: FeishuRegisterView = {
   detail: null,
 };
 
+export const IDLE_QQ_STATUS: QqStatus = {
+  configured: false,
+  appId: null,
+  state: "stopped",
+  detail: null,
+  lastMessageAt: null,
+  peerCount: 0,
+};
+
+export const IDLE_DISCORD_STATUS: DiscordStatus = {
+  configured: false,
+  botUsername: null,
+  state: "stopped",
+  detail: null,
+  lastMessageAt: null,
+  peerCount: 0,
+};
+
+export const IDLE_WECOM_STATUS: WecomStatus = {
+  configured: false,
+  botId: null,
+  state: "stopped",
+  detail: null,
+  lastMessageAt: null,
+  peerCount: 0,
+};
+
+export const IDLE_TELEGRAM_STATUS: TelegramStatus = {
+  configured: false,
+  state: "stopped",
+  detail: null,
+  lastMessageAt: null,
+  peerCount: 0,
+};
+
 export const IDLE_DINGTALK_STATUS: DingTalkStatus = {
   configured: false,
   clientId: null,
@@ -183,7 +275,7 @@ export function readPeerArchive(): RemotePeer[] {
   const stored = peerArchiveStorage.read()?.peers ?? [];
   return stored.map((peer) => ({
     ...peer,
-    channel: peer.channel === "dingtalk" ? "dingtalk" : "wechat",
+    channel: asRemoteChannel(peer.channel),
     nick: typeof peer.nick === "string" && peer.nick ? peer.nick : peerLabel(peer.id),
   }));
 }

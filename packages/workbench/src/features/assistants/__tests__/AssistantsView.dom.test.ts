@@ -112,7 +112,7 @@ beforeEach(() => {
 });
 
 describe("AssistantsView（远程助手）", () => {
-  it("三条通道各一张卡：状态徽章、账号、设置入口；配置控件不在本页", async () => {
+  it("七条通道各一张卡：状态徽章、账号、设置入口；配置控件不在本页", async () => {
     const { wrapper } = await mountPage();
     await vi.waitFor(() => expect(wrapper.get('[data-testid="wechat-status-badge"]').text()).toContain("在线"));
     expect(wrapper.text()).toContain("远程助手");
@@ -128,6 +128,12 @@ describe("AssistantsView（远程助手）", () => {
     await vi.waitFor(() => expect(feishuCard.get('[data-testid="feishu-status-badge"]').text()).toContain("在线"));
     expect(feishuCard.text()).toContain("cli-xyz");
     expect(wrapper.get('[data-testid="feishu-open-settings"]').text()).toContain("去设置配置");
+
+    // 通道清单由 CHANNELS 驱动：漏加一条通道会在这里露出来（本页是「现状 + 入口」的唯一入口）
+    for (const channel of ["wechat", "dingtalk", "feishu", "telegram", "qq", "discord", "wecom"]) {
+      expect(wrapper.find(`[data-testid="channel-${channel}"]`).exists()).toBe(true);
+      expect(wrapper.find(`[data-testid="${channel}-open-settings"]`).exists()).toBe(true);
+    }
 
     // 配置类控件一律不在本页（在设置里）
     expect(wrapper.find('[data-testid="wechat-qr-panel"]').exists()).toBe(false);

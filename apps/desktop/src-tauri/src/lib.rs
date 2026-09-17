@@ -3,6 +3,7 @@ mod channel_common;
 mod cron;
 mod db;
 pub mod dingtalk;
+pub mod discord;
 pub mod feishu;
 mod git;
 mod host_exec;
@@ -15,13 +16,16 @@ mod notify;
 mod plugin_market;
 mod plugin_window;
 mod process_guard;
+pub mod qq;
 mod sandbox;
 mod scheduler;
 mod skills_market;
 mod store_fs;
 mod sys;
+pub mod telegram;
 mod web_fetch;
 pub mod wechat;
+pub mod wecom;
 mod workspace_fs;
 
 use tauri::Manager;
@@ -39,6 +43,10 @@ pub fn run() {
         .manage(wechat::WechatHost::default())
         .manage(dingtalk::DingTalkHost::default())
         .manage(feishu::FeishuHost::default())
+        .manage(telegram::TelegramHost::default())
+        .manage(discord::DiscordHost::default())
+        .manage(qq::QqHost::default())
+        .manage(wecom::WecomHost::default())
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) = event {
                 if let Some(access) = window.try_state::<workspace_fs::WorkspaceFsAccess>() {
@@ -121,6 +129,31 @@ pub fn run() {
             feishu::feishu_connect,
             feishu::feishu_disconnect,
             feishu::feishu_send,
+            telegram::telegram_status,
+            telegram::telegram_save_credentials,
+            telegram::telegram_clear_credentials,
+            telegram::telegram_connect,
+            telegram::telegram_disconnect,
+            telegram::telegram_send,
+            telegram::telegram_bot_link,
+            discord::discord_status,
+            discord::discord_save_credentials,
+            discord::discord_clear_credentials,
+            discord::discord_connect,
+            discord::discord_disconnect,
+            discord::discord_send,
+            qq::qq_status,
+            qq::qq_save_credentials,
+            qq::qq_clear_credentials,
+            qq::qq_connect,
+            qq::qq_disconnect,
+            qq::qq_send,
+            wecom::wecom_status,
+            wecom::wecom_save_credentials,
+            wecom::wecom_clear_credentials,
+            wecom::wecom_connect,
+            wecom::wecom_disconnect,
+            wecom::wecom_send,
             workspace_fs::fs_read_text_file,
             workspace_fs::fs_read_binary,
             workspace_fs::fs_write_text_file,

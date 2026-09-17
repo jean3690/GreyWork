@@ -19,7 +19,7 @@ const store = useRemoteAssistantStore();
 const settings = useSettingsStore();
 
 /** 已接入的通道（页面按这个清单出卡片）。 */
-const CHANNELS: RemoteChannel[] = ["wechat", "dingtalk", "feishu"];
+const CHANNELS: RemoteChannel[] = ["wechat", "dingtalk", "feishu", "telegram", "qq", "discord", "wecom"];
 
 /** 回复后端展示名：模型供应商取名字，ACP 取后端名（跟随对话页时另标）。 */
 const replyBackendLabel = computed(() => {

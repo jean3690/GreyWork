@@ -1,13 +1,17 @@
 /**
- * 生命周期切片：注册三条通道的状态 / 入站事件监听，并按各自设置自动连接。
+ * 生命周期切片：注册六条通道的状态 / 入站事件监听，并按各自设置自动连接。
  * Shell 挂载时只调 init() 一次。
  *
  * 依赖 status / connect / pipeline 切片（经 getStatus / getConnect / getPipeline
- * 惰性访问），注册顺序与手性保持原实现的既定顺序（微信 → 钉钉 → 飞书）。
+ * 惰性访问），注册顺序保持既定的「微信 → 钉钉 → 飞书 → Telegram → QQ → 企业微信」。
  */
 import { wechatBackend } from "../../lib/wechat-backend";
 import { dingtalkBackend } from "../../lib/dingtalk-backend";
 import { feishuBackend } from "../../lib/feishu-backend";
+import { discordBackend } from "../../lib/discord-backend";
+import { qqBackend } from "../../lib/qq-backend";
+import { telegramBackend } from "../../lib/telegram-backend";
+import { wecomBackend } from "../../lib/wecom-backend";
 import { t } from "./shared";
 import type { RemoteAssistantState } from "./state";
 import type { StatusApi } from "./status";
@@ -78,9 +82,69 @@ export function createLifecycleSlice({ state, getStatus, getConnect, getPipeline
       }
     });
     await feishuBackend.onInbound(getPipeline().onFeishuInbound);
+
+    await telegramBackend.onState((next) => {
+      const wasConnected = state.telegramStatus.value.state === "connected";
+      state.telegramStatus.value = next;
+      if (wasConnected && next.state !== "connected" && next.detail) {
+        getStatus().recordActivity({
+          direction: "in",
+          peer: t("remoteAssist.channels.telegram"),
+          channel: "telegram",
+          text: next.detail,
+          kind: "error",
+        });
+      }
+    });
+    await telegramBackend.onInbound(getPipeline().onTelegramInbound);
+
+    await qqBackend.onState((next) => {
+      const wasConnected = state.qqStatus.value.state === "connected";
+      state.qqStatus.value = next;
+      if (wasConnected && next.state !== "connected" && next.detail) {
+        getStatus().recordActivity({
+          direction: "in",
+          peer: t("remoteAssist.channels.qq"),
+          channel: "qq",
+          text: next.detail,
+          kind: "error",
+        });
+      }
+    });
+    await qqBackend.onInbound(getPipeline().onQqInbound);
+
+    await discordBackend.onState((next) => {
+      const wasConnected = state.discordStatus.value.state === "connected";
+      state.discordStatus.value = next;
+      if (wasConnected && next.state !== "connected" && next.detail) {
+        getStatus().recordActivity({
+          direction: "in",
+          peer: t("remoteAssist.channels.discord"),
+          channel: "discord",
+          text: next.detail,
+          kind: "error",
+        });
+      }
+    });
+    await discordBackend.onInbound(getPipeline().onDiscordInbound);
+
+    await wecomBackend.onState((next) => {
+      const wasConnected = state.wecomStatus.value.state === "connected";
+      state.wecomStatus.value = next;
+      if (wasConnected && next.state !== "connected" && next.detail) {
+        getStatus().recordActivity({
+          direction: "in",
+          peer: t("remoteAssist.channels.wecom"),
+          channel: "wecom",
+          text: next.detail,
+          kind: "error",
+        });
+      }
+    });
+    await wecomBackend.onInbound(getPipeline().onWecomInbound);
   }
 
-  /** 幂等启动：注册三条通道的事件、拉状态、按各自设置自动连接（由 Shell 挂载时调用）。 */
+  /** 幂等启动：注册六条通道的事件、拉状态、按各自设置自动连接（由 Shell 挂载时调用）。 */
   async function init(): Promise<void> {
     if (state.initialized.value) return;
     state.initialized.value = true;
@@ -95,6 +159,18 @@ export function createLifecycleSlice({ state, getStatus, getConnect, getPipeline
         .catch(() => undefined);
       await getStatus()
         .refreshFeishuStatus()
+        .catch(() => undefined);
+      await getStatus()
+        .refreshTelegramStatus()
+        .catch(() => undefined);
+      await getStatus()
+        .refreshQqStatus()
+        .catch(() => undefined);
+      await getStatus()
+        .refreshDiscordStatus()
+        .catch(() => undefined);
+      await getStatus()
+        .refreshWecomStatus()
         .catch(() => undefined);
     } catch (error) {
       console.error("[remote-assistant] 初始化失败", error);
@@ -116,6 +192,30 @@ export function createLifecycleSlice({ state, getStatus, getConnect, getPipeline
       state.feishuStatus.value.state !== "connected"
     ) {
       await getConnect().connectFeishu();
+    }
+    if (
+      settings.remoteAssist.channels.telegram.autoConnect &&
+      state.telegramStatus.value.configured &&
+      state.telegramStatus.value.state !== "connected"
+    ) {
+      await getConnect().connectTelegram();
+    }
+    if (settings.remoteAssist.channels.qq.autoConnect && state.qqStatus.value.configured && state.qqStatus.value.state !== "connected") {
+      await getConnect().connectQq();
+    }
+    if (
+      settings.remoteAssist.channels.discord.autoConnect &&
+      state.discordStatus.value.configured &&
+      state.discordStatus.value.state !== "connected"
+    ) {
+      await getConnect().connectDiscord();
+    }
+    if (
+      settings.remoteAssist.channels.wecom.autoConnect &&
+      state.wecomStatus.value.configured &&
+      state.wecomStatus.value.state !== "connected"
+    ) {
+      await getConnect().connectWecom();
     }
   }
 
