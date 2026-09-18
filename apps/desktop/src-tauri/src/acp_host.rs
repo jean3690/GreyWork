@@ -1,7 +1,7 @@
 //! ACP 主机：spawn 外部 agent（stdio JSON-RPC）、会话生命周期、Tauri 命令桥。
 //!
-//! 传输由 agent-client-protocol 2.0.0 crate 托管（AcpAgent 进程组守卫负责回收），
-//! 本模块只持有连接句柄与生命周期。安全模型（宿主强制，前端档位仅作选择入口）：
+//! 传输由 `acp_process` 托管（宿主自己 spawn，进程树守卫负责回收），本模块只持有
+//! 连接句柄与生命周期。安全模型（宿主强制，前端档位仅作选择入口）：
 //! - 权限档位在 `acp_start` 传入，**按 handle 存放**并在宿主执行：
 //!   `cautious` → 全部转发前端逐条确认；`daily` → 仅只读类工具
 //!   （read / search / fetch / think）自动放行，其余转发前端；`auto` → 直通首个
@@ -134,11 +134,31 @@ fn normalize_lexical(path: &Path) -> PathBuf {
     out
 }
 
+/// 锚定比较用的归一化路径。
+///
+/// Windows 上 `canonicalize` 会给路径加 `\\?\`（verbatim）前缀，而 agent 在工具调用里
+/// 报的路径没有；大小写与分隔符也不保证与锚定基准一致。不抹平这些差异，`starts_with`
+/// 会把工作区内的写入误判成越界 —— 现象是「工作区档位下 agent 改不了自己目录里的文件」。
+/// POSIX 路径大小写敏感，不能做同样处理。
+fn comparable_path(path: &Path) -> PathBuf {
+    let normalized = normalize_lexical(path);
+    if cfg!(windows) {
+        PathBuf::from(windows_comparable_text(&normalized.to_string_lossy()))
+    } else {
+        normalized
+    }
+}
+
+/// `comparable_path` 的 Windows 分支：抹掉 verbatim 前缀、统一分隔符、折成小写。
+/// 抽成独立函数是为了能在任意平台单测（规则本身与平台无关）。
+fn windows_comparable_text(raw: &str) -> String {
+    let stripped = raw.strip_prefix(r"\\?\").unwrap_or(raw);
+    stripped.replace('\\', "/").to_lowercase()
+}
+
 /// candidate 是否位于 base 目录树内（组件级前缀匹配，杜绝 `proj` vs `proj2` 误判）。
 fn is_within(base: &Path, candidate: &Path) -> bool {
-    let base = normalize_lexical(base);
-    let candidate = normalize_lexical(candidate);
-    candidate.starts_with(&base)
+    comparable_path(candidate).starts_with(comparable_path(base))
 }
 
 /// 写类工具中越出 workspace 锚定的路径清单（空 = 全部合法）。
@@ -206,6 +226,18 @@ fn validate_cwd(raw: &str) -> Result<PathBuf, String> {
         ));
     }
     Ok(path)
+}
+
+/// 把 agent stderr 尾部拼进失败串，让「起不来」有原因可看（best-effort：agent 可能
+/// 还什么都没吐，或输出尚在管道里没读出来）。
+fn stderr_hint(tail: &crate::acp_process::StderrTail) -> String {
+    let text = tail.lock();
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        String::new()
+    } else {
+        format!("\n--- agent stderr (tail) ---\n{trimmed}")
+    }
 }
 
 /// 前端对一条权限请求的裁决。
@@ -616,17 +648,23 @@ pub async fn acp_start(
     let custom_programs = db.enabled_agent_programs();
     allowed.extend(custom_programs.iter().map(String::as_str));
     let command = process_guard::validate_spawn_command(&agent_cmd, &allowed)?;
+    // 冷启动窗口按「用户原始命令」判断：npx 型后端首次运行要下载包，需放宽到 120s。
+    // 之后的包装会把首 token 换掉（沙盒是 bwrap、Windows 是 cmd），拿包装后的串判断会失准。
+    let handshake_secs = handshake_timeout_secs(&command);
     let tier = PermissionTier::parse(tier.as_deref());
 
     let requested_mode = crate::sandbox::SandboxMode::parse(sandbox.as_deref())?;
     let sandbox_available = crate::sandbox::sandbox_available();
-    let mode = requested_mode.resolve(sandbox_available);
-    if requested_mode == crate::sandbox::SandboxMode::Auto
-        && mode == crate::sandbox::SandboxMode::Off
-    {
+    let (mode, degraded) = requested_mode.resolve(sandbox_available);
+    if degraded {
+        // bwrap 只有 Linux 有：Windows/macOS（或没装 bwrap 的 Linux）上显式选了 fs/full
+        // 也不能让 agent 起不来 —— 设置可能是从别的机器同步过来的。降级但留痕。
         crate::log::warn(
             "sandbox",
-            "auto 模式未找到可用 bwrap，ACP agent 将在无 OS 沙箱状态下启动",
+            format!(
+                "沙盒档位 {requested_mode:?} 在本机不可用（bwrap 仅 Linux）：降级为 off，\
+                 ACP agent 将以无 OS 隔离状态启动（权限档位仍然生效）"
+            ),
         );
     }
     let cwd = workspace
@@ -640,9 +678,7 @@ pub async fn acp_start(
     let command = if mode == crate::sandbox::SandboxMode::Off {
         command
     } else {
-        if !sandbox_available {
-            return Err("sandbox: bwrap is not installed on this system".to_string());
-        }
+        // mode != Off 只可能来自 resolve 的「bwrap 可用」分支，无需再查可用性。
         let cwd = cwd
             .as_deref()
             .ok_or_else(|| "sandbox: workspace is required when sandbox is enabled".to_string())?;
@@ -652,13 +688,30 @@ pub async fn acp_start(
 
     let handle_id = state.next_id.fetch_add(1, Ordering::SeqCst);
     let env_vars = sanitize_env(env)?;
-    let agent =
-        AcpAgent::from_str(&command).map_err(|error| format!("invalid agent command: {error}"))?;
+    // Windows 上 npx/npm 等是 .cmd 垫片，CreateProcess 起不来：这里归一成 `cmd /C ...`。
+    // 其他平台恒等返回（见 process_guard::shell_command）。
+    let spawn_command = process_guard::shell_command(&command);
+    let agent = AcpAgent::from_str(&spawn_command)
+        .map_err(|error| format!("invalid agent command: {error}"))?;
     let agent = if env_vars.is_empty() {
         agent
     } else {
         AcpAgent::new(agent.into_config().envs(env_vars))
     };
+
+    // 自己 spawn，而不是让 crate 的 `AcpAgent::connect_to` 代劳：进程所有权留在宿主手里，
+    // 停止时才能按**进程树**回收 —— Windows 上直接子进程是 cmd.exe（`.cmd` 垫片包装），
+    // 真正干活的 agent 是它的孙子，crate 的 ChildGuard 只 TerminateProcess 直接子进程。
+    let (child_stdin, child_stdout, child_stderr, child) = agent
+        .spawn_process()
+        .map_err(|error| format!("failed to start agent '{command}': {error}"))?;
+    // 只取 pid：drop 掉 Child 不会杀进程（async-process 的全局 reaper 负责收尸），
+    // 回收交给传输层的进程树守卫。
+    let pid = child.id();
+    drop(child);
+    // stderr 必须排空，否则管道写满会卡死 agent；尾部留作失败诊断。
+    let stderr_tail = crate::acp_process::drain_stderr(child_stderr);
+    let transport = crate::acp_process::AgentStdio::new(child_stdin, child_stdout, pid);
 
     let (ready_tx, mut ready_rx) = tokio::sync::mpsc::channel::<ConnectionTo<AgentRole>>(1);
     let app_task = app.clone();
@@ -689,7 +742,7 @@ pub async fn acp_start(
                 },
                 agent_client_protocol::on_receive_request!(),
             )
-            .connect_with(agent, |conn: ConnectionTo<AgentRole>| async move {
+            .connect_with(transport, |conn: ConnectionTo<AgentRole>| async move {
                 let _ = ready_tx.send(conn).await;
                 // 保持连接事件循环存活直至 acp_stop abort；闭包契约要求返回 Result
                 let never: Result<(), AcpError> = std::future::pending().await;
@@ -698,20 +751,22 @@ pub async fn acp_start(
             .await;
     });
 
-    let handshake_secs = handshake_timeout_secs(&command);
     let ready = tokio::time::timeout(Duration::from_secs(handshake_secs), ready_rx.recv())
         .await
         .map_err(|_| {
-            // 超时回收：npx 冷启动可能仍在下游拉包，不 abort 会留孤儿进程。
+            // 超时回收：npx 冷启动可能仍在下游拉包，不 abort 会留孤儿进程
+            // （abort → 传输层 future drop → 进程树守卫回收）。
+            let hint = stderr_hint(&stderr_tail);
             task.abort();
             format!(
                 "agent handshake timeout after {handshake_secs}s: '{command}' did not become \
-                 ready (npx/npm 首次运行需下载，可再试一次)"
+                 ready (npx/npm 首次运行需下载，可再试一次){hint}"
             )
         })?
         .ok_or_else(|| {
+            let hint = stderr_hint(&stderr_tail);
             task.abort();
-            "agent connection closed before ready".to_string()
+            format!("agent connection closed before ready{hint}")
         })?;
     let conn = ready;
 
@@ -723,8 +778,9 @@ pub async fn acp_start(
         .block_task()
         .await
         .map_err(|error| {
+            let hint = stderr_hint(&stderr_tail);
             task.abort();
-            format!("initialize failed: {error}")
+            format!("initialize failed: {error}{hint}")
         })?;
     let mcp_capabilities = initialize.agent_capabilities.mcp_capabilities.clone();
     // 顺手记下是否支持 session/load：恢复会话时据此决定是否走 load 而非 new，
@@ -1359,6 +1415,9 @@ pub async fn acp_stop(
     }
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(GRACEFUL_STOP_FLUSH).await;
+        // abort 让连接 future 落地，`acp_process::AgentStdio` 的进程树守卫随之析构，
+        // 整棵树一并回收（Windows `taskkill /T`、Unix `killpg`）—— `cmd → npx → node`
+        // 的孙子进程不会残留。
         session.task.abort();
         drop(session);
     });
@@ -1405,57 +1464,6 @@ pub struct AgentProgramProbe {
     path: Option<String>,
 }
 
-/// 在给定 PATH 值里找可执行文件；纯文件系统命中，不起进程。
-fn probe_program(
-    program: &str,
-    path_value: Option<&std::ffi::OsStr>,
-) -> Option<std::path::PathBuf> {
-    let value = path_value
-        .map(|v| v.to_os_string())
-        .or_else(|| std::env::var_os("PATH"))?;
-    let candidates = program_candidates(program);
-    for dir in std::env::split_paths(&value) {
-        for candidate in &candidates {
-            let full = dir.join(candidate);
-            if full.is_file() && is_executable(&full) {
-                return Some(full);
-            }
-        }
-    }
-    None
-}
-
-/// Windows 上程序名不带扩展名时按 PATHEXT 展开；其他平台只有原名。
-fn program_candidates(program: &str) -> Vec<String> {
-    if !cfg!(windows) || std::path::Path::new(program).extension().is_some() {
-        return vec![program.to_string()];
-    }
-    let pathext = std::env::var("PATHEXT").unwrap_or_else(|_| ".EXE;.CMD;.BAT".to_string());
-    let expanded: Vec<String> = pathext
-        .split(';')
-        .filter(|ext| !ext.is_empty())
-        .map(|ext| format!("{program}{ext}"))
-        .collect();
-    if expanded.is_empty() {
-        vec![program.to_string()]
-    } else {
-        expanded
-    }
-}
-
-#[cfg(unix)]
-fn is_executable(path: &std::path::Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::metadata(path)
-        .map(|meta| meta.permissions().mode() & 0o111 != 0)
-        .unwrap_or(false)
-}
-
-#[cfg(not(unix))]
-fn is_executable(_path: &std::path::Path) -> bool {
-    true
-}
-
 /// 批量探测 ACP agent 入口程序是否在本机 PATH 上（只读，不启动任何进程）。
 ///
 /// 探测失败（命令缺失等）不该让用户以为「没装」，故返回空数组由前端按未知处理。
@@ -1467,7 +1475,7 @@ pub fn acp_detect_programs(programs: Vec<String>) -> Vec<AgentProgramProbe> {
         .filter(|program| !program.trim().is_empty())
         .take(MAX_PROGRAMS)
         .map(|program| {
-            let found = probe_program(&program, None);
+            let found = process_guard::probe_program(&program, None);
             AgentProgramProbe {
                 installed: found.is_some(),
                 path: found.map(|p| p.to_string_lossy().into_owned()),
@@ -1484,6 +1492,36 @@ mod tests {
     use agent_client_protocol::schema::v1::{
         PermissionOption, ToolCallLocation, ToolCallUpdate, ToolCallUpdateFields,
     };
+
+    /// Windows 上 `.cmd` 垫片会被包成 `cmd /C <原命令>`（process_guard::shell_command）。
+    /// 这条断言把包装串喂给 crate **自己的**拆词器（shell_words），钉死它还原成
+    /// 「cmd + /C + 原参数」—— 包装若引入了会被拆词吃掉的引号/反斜杠，这里立刻暴露，
+    /// 不必等到 Windows 上手动试。
+    #[test]
+    fn wrapped_windows_command_survives_agent_parsing() {
+        let agent = AcpAgent::from_str("cmd /C npx -y @agentclientprotocol/codex-acp")
+            .expect("包装串应当能解析");
+        let config = serde_json::to_value(agent.into_config()).expect("序列化配置");
+        assert_eq!(config["command"], "cmd");
+        assert_eq!(
+            config["args"],
+            serde_json::json!(["/C", "npx", "-y", "@agentclientprotocol/codex-acp"])
+        );
+    }
+
+    /// 反面钉死：**不要把解析出的绝对路径写进启动串**。
+    /// crate 的拆词是 POSIX 规则，`\` 是转义符 —— `C:\nodejs\npx.cmd` 会被吃成
+    /// `C:nodejsnpx.cmd`，路径直接失效。shell_command 因此只包 `cmd /C` 并保留裸程序名。
+    #[test]
+    fn backslash_paths_are_mangled_by_agent_parsing() {
+        let agent = AcpAgent::from_str(r"cmd /C C:\nodejs\npx.cmd -y pkg").expect("仍能解析");
+        let config = serde_json::to_value(agent.into_config()).expect("序列化配置");
+        assert_eq!(
+            config["args"],
+            serde_json::json!(["/C", "C:nodejsnpx.cmd", "-y", "pkg"]),
+            "反斜杠被拆词吃掉：正因如此 shell_command 不把路径写进命令串"
+        );
+    }
 
     #[test]
     fn prompt_blocks_puts_text_first_and_maps_units() {
@@ -1680,8 +1718,8 @@ mod tests {
         let path_string = dir.to_string_lossy().into_owned();
         let path_value = std::ffi::OsStr::new(&path_string);
 
-        assert!(probe_program("gw-fake-agent", Some(path_value)).is_some());
-        assert!(probe_program("gw-no-such-agent", Some(path_value)).is_none());
+        assert!(process_guard::probe_program("gw-fake-agent", Some(path_value)).is_some());
+        assert!(process_guard::probe_program("gw-no-such-agent", Some(path_value)).is_none());
 
         let _ = std::fs::remove_file(&exe);
         let _ = std::fs::remove_dir(&dir);
@@ -2121,6 +2159,38 @@ mod tests {
         assert!(!is_within(base, Path::new("/home/user/other/file.ts")));
         assert!(!is_within(base, Path::new("/etc/passwd")));
         assert!(!is_within(base, Path::new("/home/user/proj/../secret.ts")));
+    }
+
+    /// Windows 归一化规则本身与平台无关，所以在 Linux 上也能钉住它。
+    /// 不这么做的话，verbatim 前缀 / 分隔符 / 大小写任一差异都会让工作区档位误判越界。
+    #[test]
+    fn windows_comparable_text_flattens_prefix_separators_and_case() {
+        assert_eq!(
+            windows_comparable_text(r"\\?\C:\Users\Me\Proj\a.ts"),
+            "c:/users/me/proj/a.ts"
+        );
+        assert_eq!(
+            windows_comparable_text(r"C:/Users/Me/Proj/a.ts"),
+            "c:/users/me/proj/a.ts"
+        );
+        assert_eq!(
+            windows_comparable_text(r"C:\Users\Me\Proj"),
+            "c:/users/me/proj"
+        );
+    }
+
+    /// 非 Windows 上 comparable_path 保持 POSIX 语义：大小写敏感。
+    #[cfg(not(windows))]
+    #[test]
+    fn comparable_path_keeps_posix_case_sensitivity_off_windows() {
+        assert_eq!(
+            comparable_path(Path::new("/home/user/proj/../file.ts")),
+            PathBuf::from("/home/user/file.ts")
+        );
+        assert_ne!(
+            comparable_path(Path::new("/Home/User")),
+            comparable_path(Path::new("/home/user"))
+        );
     }
 
     #[test]

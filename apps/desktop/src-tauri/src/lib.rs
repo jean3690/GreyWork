@@ -1,4 +1,5 @@
 mod acp_host;
+mod acp_process;
 mod channel_common;
 mod cron;
 mod db;

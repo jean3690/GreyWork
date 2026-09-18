@@ -480,7 +480,20 @@ async fn probe_stdio_inner(
 ) -> Result<(Option<String>, Option<String>, Vec<McpToolInfo>), String> {
     use tokio::io::{AsyncWriteExt, BufReader};
 
-    let child = tokio::process::Command::new(command)
+    // Windows 上 npx/bunx 是 .cmd 垫片，CreateProcess 起不来：改由 cmd.exe 承载
+    // （解析到的绝对路径由 batch_program 给出，其余平台恒为 None）。
+    let mut spawn = match crate::process_guard::batch_program(command) {
+        Some(path) => {
+            let mut cmd = tokio::process::Command::new("cmd");
+            cmd.arg("/C").arg(path);
+            cmd
+        }
+        None => tokio::process::Command::new(command),
+    };
+    // 自成进程组组长：kill_process_tree 靠进程组整组回收，不设的话它找不到同名组
+    // （ESRCH）而静默失效 —— npx → node 的孙子进程会残留。见 process_guard 的契约。
+    crate::process_guard::isolate_process_group(&mut spawn);
+    let child = spawn
         .args(args)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -489,10 +502,14 @@ async fn probe_stdio_inner(
         .spawn()
         .map_err(|error| format!("failed to spawn mcp server: {error}"))?;
 
-    // 守卫：无论哪条路径返回都回收子进程。
+    // 守卫：无论哪条路径返回都回收整棵进程树（Windows `taskkill /T`、Unix `killpg`；
+    // 后者依赖上面设的独立进程组）。`start_kill` 是兜底，防止进程组已不存在时漏掉直接子进程。
     struct KillGuard(tokio::process::Child);
     impl Drop for KillGuard {
         fn drop(&mut self) {
+            if let Some(pid) = self.0.id() {
+                crate::process_guard::kill_process_tree(pid);
+            }
             let _ = self.0.start_kill();
         }
     }
