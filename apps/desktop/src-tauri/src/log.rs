@@ -69,7 +69,12 @@ fn write(target: &LogTarget, line: &str) {
     if fs::metadata(&path).map(|meta| meta.len()).unwrap_or(0) > MAX_LOG_BYTES {
         let rotated = target.dir.join(format!("{}.1", target.file_name));
         let _ = fs::remove_file(&rotated);
-        let _ = fs::rename(&path, &rotated);
+        // 轮转失败必须留痕：Windows 上日志文件被别的进程/杀软占着时 rename 会一直失败，
+        // 不记的话现象是「日志无限增长」而没人知道为什么。这里用 eprintln 而不是递归
+        // 记日志 —— 本函数就是日志实现本身。
+        if let Err(error) = fs::rename(&path, &rotated) {
+            eprintln!("[greywork] 日志轮转失败（{}）: {error}", path.display());
+        }
     }
     let Ok(mut file) = OpenOptions::new().append(true).create(true).open(&path) else {
         return;

@@ -773,10 +773,8 @@ fn install_package_at(root: &Path, package: &PluginPackage) -> Result<PathBuf, S
     let bytes = serde_json::to_vec_pretty(package)
         .map_err(|error| format!("serialize plugin failed: {error}"))?;
     std::fs::write(&temp_path, bytes).map_err(|error| format!("write plugin failed: {error}"))?;
-    if final_path.exists() {
-        std::fs::remove_file(&final_path)
-            .map_err(|error| format!("replace plugin failed: {error}"))?;
-    }
+    // 直接 rename 覆盖：Windows 上 `std::fs::rename` 走 MoveFileEx(REPLACE_EXISTING)，
+    // 本来就能替换；先 remove_file 只是多一个会失败的步骤。
     std::fs::rename(&temp_path, &final_path)
         .map_err(|error| format!("commit plugin failed: {error}"))?;
     Ok(final_path)

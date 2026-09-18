@@ -142,21 +142,12 @@ fn normalize_lexical(path: &Path) -> PathBuf {
 ///
 /// macOS 默认文件系统（APFS / HFS+）同样大小写不敏感，也一并折：agent 回一个大小写
 /// 不同的路径会被 `is_within` 误拒（fail-closed，不是安全洞，但是 macOS 上的假阴性）。
-/// Linux 才是真正大小写敏感的 POSIX 语义，不能折。
+/// 平台规则与阈值都收在 `path_safety::comparable_text`，这里只补一层词法归一。
 fn comparable_path(path: &Path) -> PathBuf {
     let normalized = normalize_lexical(path);
-    if cfg!(any(windows, target_os = "macos")) {
-        PathBuf::from(flattened_comparable_text(&normalized.to_string_lossy()))
-    } else {
-        normalized
-    }
-}
-
-/// `comparable_path` 的「抹平」分支：去掉 verbatim 前缀、统一分隔符、折成小写。
-/// 抽成独立函数是为了能在任意平台单测（规则本身与平台无关）。
-fn flattened_comparable_text(raw: &str) -> String {
-    let stripped = raw.strip_prefix(r"\\?\").unwrap_or(raw);
-    stripped.replace('\\', "/").to_lowercase()
+    PathBuf::from(crate::path_safety::comparable_text(
+        &normalized.to_string_lossy(),
+    ))
 }
 
 /// candidate 是否位于 base 目录树内（组件级前缀匹配，杜绝 `proj` vs `proj2` 误判）。
@@ -2167,24 +2158,6 @@ mod tests {
         assert!(!is_within(base, Path::new("/home/user/other/file.ts")));
         assert!(!is_within(base, Path::new("/etc/passwd")));
         assert!(!is_within(base, Path::new("/home/user/proj/../secret.ts")));
-    }
-
-    /// 归一化规则本身与平台无关，所以在 Linux 上也能钉住它。
-    /// 不这么做的话，verbatim 前缀 / 分隔符 / 大小写任一差异都会让工作区档位误判越界。
-    #[test]
-    fn flattened_comparable_text_drops_prefix_separators_and_case() {
-        assert_eq!(
-            flattened_comparable_text(r"\\?\C:\Users\Me\Proj\a.ts"),
-            "c:/users/me/proj/a.ts"
-        );
-        assert_eq!(
-            flattened_comparable_text(r"C:/Users/Me/Proj/a.ts"),
-            "c:/users/me/proj/a.ts"
-        );
-        assert_eq!(
-            flattened_comparable_text(r"C:\Users\Me\Proj"),
-            "c:/users/me/proj"
-        );
     }
 
     /// 词法归一化（消掉 `.` / `..`）在所有平台都要做 —— 否则 `/a/../b` 与 `/b`

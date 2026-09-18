@@ -96,35 +96,50 @@ fn letter_to_status(letter: char) -> Option<String> {
     )
 }
 
-/// 解析 `git status --porcelain` 的一行（非 -z：重命名显示为 `R  old -> new`）。
+/// 解析 `git status --porcelain -z` 的一条记录头（`XY <路径>`）。
+///
 /// 返回 (路径, 状态, 是否 staged)；无法识别的情况返回 None。
-fn parse_status_line(line: &str) -> Option<(String, String, bool)> {
-    let line = line.as_bytes();
-    if line.len() < 3 || line[2] != b' ' {
+///
+/// 用 `-z` 形态而不是默认的行形态：`-z` 下路径**原样输出**（不引号、不转义），
+/// 重命名/复制的两条路径以 NUL 分隔而不是 ` -> ` 拼接。这样既省掉一整套 C 风格解转义
+/// （`core.quotepath=false` 只关掉非 ASCII 的八进制转义，含 `"` / `\` 的路径仍会被
+/// 引号包裹），也不会被文件名里恰好含 ` -> ` 的情况骗到。
+fn parse_status_record(record: &str) -> Option<(String, String, bool)> {
+    let bytes = record.as_bytes();
+    if bytes.len() < 3 || bytes[2] != b' ' {
         return None;
     }
-    let index = line[0] as char;
-    let worktree = line[1] as char;
-    let rest = std::str::from_utf8(&line[3..]).ok()?;
-    let staged = !matches!(index, ' ' | '?' | '!');
-    let status = letter_to_status(index).or_else(|| letter_to_status(worktree))?;
-    // 重命名/复制：`R  old -> new`，当前路径取箭头后（工作区的真实位置）。
-    let path = match rest.split_once(" -> ") {
-        Some((_, new)) => new.trim().to_string(),
-        None => rest.to_string(),
-    };
+    let index = bytes[0] as char;
+    let worktree = bytes[1] as char;
+    let path = record[3..].to_string();
     if path.is_empty() {
         return None;
     }
+    let staged = !matches!(index, ' ' | '?' | '!');
+    let status = letter_to_status(index).or_else(|| letter_to_status(worktree))?;
     Some((path, status, staged))
+}
+
+/// `-z` 下重命名/复制的 index 字母：后面还会跟一条「旧路径」记录，必须跳过。
+fn record_carries_old_path(record: &str) -> bool {
+    matches!(record.as_bytes().first(), Some(b'R' | b'C'))
 }
 
 /// `git status --porcelain` 全部条目的类型化列表。
 fn collect_status(root: &Path) -> Result<Vec<GitStatusDto>, String> {
-    let out = run_git(root, &["status", "--porcelain"])?;
+    let out = run_git(root, &["status", "--porcelain", "-z"])?;
+    let mut records = out.split('\0');
     let mut entries = Vec::new();
-    for line in out.lines() {
-        if let Some((path, status, staged)) = parse_status_line(line) {
+    while let Some(record) = records.next() {
+        if record.is_empty() {
+            continue;
+        }
+        // 先决定要不要吃掉下一条（旧路径），再做状态校验 —— 校验失败时也不能让
+        // 旧路径被当成一条独立记录（那样会凭空多出一个文件）。
+        if record_carries_old_path(record) {
+            let _ = records.next();
+        }
+        if let Some((path, status, staged)) = parse_status_record(record) {
             entries.push(GitStatusDto {
                 path,
                 status,
@@ -402,17 +417,81 @@ mod tests {
     }
 
     #[test]
-    fn status_parses_letters_and_unstaged_renames() {
-        assert_eq!(parse_status_line("M  a.txt").unwrap().1, "modified");
-        assert_eq!(parse_status_line(" M a.txt").unwrap().1, "modified");
-        assert_eq!(parse_status_line("A  a.txt").unwrap().1, "added");
-        assert_eq!(parse_status_line("?? a.txt").unwrap().1, "untracked");
-        assert_eq!(parse_status_line("R  old -> new.txt").unwrap().0, "new.txt");
-        let (_, _, staged) = parse_status_line("M  a.txt").unwrap();
+    fn status_parses_letters_and_staged_flag() {
+        assert_eq!(parse_status_record("M  a.txt").unwrap().1, "modified");
+        assert_eq!(parse_status_record(" M a.txt").unwrap().1, "modified");
+        assert_eq!(parse_status_record("A  a.txt").unwrap().1, "added");
+        assert_eq!(parse_status_record("?? a.txt").unwrap().1, "untracked");
+        // 重命名记录在 -z 形态下就是 `R  <新路径>`，旧路径是下一条记录
+        assert_eq!(parse_status_record("R  new.txt").unwrap().0, "new.txt");
+        assert_eq!(parse_status_record("RM new.txt").unwrap().0, "new.txt");
+        let (_, _, staged) = parse_status_record("M  a.txt").unwrap();
         assert!(staged);
-        let (_, _, staged) = parse_status_line(" M a.txt").unwrap();
+        let (_, _, staged) = parse_status_record(" M a.txt").unwrap();
         assert!(!staged);
-        assert!(parse_status_line("not a status").is_none());
+        assert!(parse_status_record("not a status").is_none());
+    }
+
+    /// 路径含引号/反斜杠时 `-z` 原样输出，不该被当成转义序列吃掉。
+    #[test]
+    fn status_keeps_paths_verbatim_without_unescaping() {
+        assert_eq!(
+            parse_status_record(" M with\"quote.txt").unwrap().0,
+            "with\"quote.txt"
+        );
+        assert_eq!(
+            parse_status_record(" M with\\back.txt").unwrap().0,
+            "with\\back.txt"
+        );
+        // 文件名里含 ` -> ` 也不会被切错（旧实现按 ` -> ` 切）
+        assert_eq!(
+            parse_status_record(" M a -> b.txt").unwrap().0,
+            "a -> b.txt"
+        );
+    }
+
+    /// 重命名/复制要连旧路径那条记录一起吃掉，否则会凭空多出一个文件。
+    #[test]
+    fn rename_records_consume_the_following_old_path() {
+        assert!(record_carries_old_path("R  new.txt"));
+        assert!(record_carries_old_path("C  copy.txt"));
+        assert!(record_carries_old_path("RM new.txt"));
+        assert!(!record_carries_old_path(" M a.txt"));
+        assert!(!record_carries_old_path("?? a.txt"));
+        assert!(!record_carries_old_path(""));
+    }
+
+    /// 端到端：真实仓库里的重命名与含引号的文件名都要解析对。
+    ///
+    /// 这两条正是旧实现（按行 + 按 ` -> ` 切）会错的地方：重命名会把旧路径多报成一个文件，
+    /// 含引号的名字会带着引号与转义符返回。
+    #[test]
+    fn status_reports_rename_target_and_quoted_name_in_real_repo() {
+        let root = init_repo("status-z");
+        let access = access(&root);
+        std::fs::write(root.join("a.txt"), "one\ntwo\n").expect("改 a");
+        Command::new("git")
+            .current_dir(&root)
+            .args(["mv", "a.txt", "renamed.txt"])
+            .status()
+            .expect("git mv");
+        std::fs::write(root.join("with\"quote.txt"), "q\n").expect("写含引号的文件");
+
+        let entries = status(&access, &root.to_string_lossy()).expect("采集状态");
+        let paths: Vec<&str> = entries.iter().map(|entry| entry.path.as_str()).collect();
+        assert!(
+            paths.contains(&"renamed.txt"),
+            "重命名后的新路径要在: {paths:?}"
+        );
+        assert!(
+            !paths.contains(&"a.txt"),
+            "旧路径不该被当成独立条目: {paths:?}"
+        );
+        assert!(
+            paths.contains(&"with\"quote.txt"),
+            "含引号的文件名要原样返回: {paths:?}"
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

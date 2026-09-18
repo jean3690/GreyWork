@@ -110,6 +110,37 @@ pub fn strip_verbatim_prefix(raw: &str) -> String {
     raw.strip_prefix(r"\\?\").unwrap_or(raw).to_string()
 }
 
+/// 抹平形态：去 verbatim 前缀、`\` → `/`、折成小写。
+///
+/// **平台门控在调用方** —— Linux 大小写敏感，不能折（见 `comparable_text`）。
+fn flatten_path_text(raw: &str) -> String {
+    raw.strip_prefix(r"\\?\")
+        .unwrap_or(raw)
+        .replace('\\', "/")
+        .to_lowercase()
+}
+
+/// 平台相关的路径比较形态。
+///
+/// Windows 上 `canonicalize` 会加 `\\?\` 前缀、分隔符可能是 `\`，大小写也不保证一致；
+/// macOS 默认文件系统（APFS / HFS+）同样大小写不敏感。Linux 是真正大小写敏感的 POSIX
+/// 语义，原样返回。
+pub fn comparable_text(raw: &str) -> String {
+    if cfg!(any(windows, target_os = "macos")) {
+        flatten_path_text(raw)
+    } else {
+        raw.to_string()
+    }
+}
+
+/// 两个路径是否指向同一位置（分隔符 + 平台大小写语义）。
+///
+/// 用于「同一目录被算两次」这类比较：输入可能是用户手输或历史记录里的写法
+/// （`C:\ws` 与 `c:/ws`），直接 `==` 会把同一目录当成两个。
+pub fn same_path(left: &Path, right: &Path) -> bool {
+    comparable_text(&left.to_string_lossy()) == comparable_text(&right.to_string_lossy())
+}
+
 /// 首段（第一个 `.` 之前）是否是 Win32 保留设备名。
 fn is_reserved_device_name(segment: &str) -> bool {
     let base = segment.split('.').next().unwrap_or(segment);
@@ -208,6 +239,41 @@ mod tests {
         assert!(!is_safe_session_id("foo."));
         assert!(!is_safe_session_id(&"x".repeat(SESSION_ID_MAX_CHARS + 1)));
         assert!(is_safe_session_id(&"x".repeat(SESSION_ID_MAX_CHARS)));
+    }
+
+    #[test]
+    fn flatten_path_text_drops_prefix_separators_and_case() {
+        assert_eq!(
+            flatten_path_text(r"\\?\C:\Users\Me\Proj\a.ts"),
+            "c:/users/me/proj/a.ts"
+        );
+        assert_eq!(
+            flatten_path_text(r"C:/Users/Me/Proj/a.ts"),
+            "c:/users/me/proj/a.ts"
+        );
+        assert_eq!(flatten_path_text(r"C:\Users\Me\Proj"), "c:/users/me/proj");
+        // 普通 UNC 不带 verbatim 前缀，原样处理
+        assert_eq!(flatten_path_text(r"\\server\Share\A"), "//server/share/a");
+    }
+
+    /// `same_path` 的平台相关部分：Linux 只抹分隔符外的原样比较。
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn same_path_is_case_sensitive_on_linux() {
+        assert!(same_path(Path::new("/a/b"), Path::new("/a/b")));
+        assert!(!same_path(Path::new("/a/b"), Path::new("/a/c")));
+        assert!(!same_path(Path::new("/A/B"), Path::new("/a/b")));
+    }
+
+    /// Windows / macOS 上分隔符与大小写都要抹平，否则同一目录会被当成两个。
+    #[cfg(any(windows, target_os = "macos"))]
+    #[test]
+    fn same_path_folds_separators_and_case_off_linux() {
+        assert!(same_path(
+            Path::new(r"C:\ws\.greyWork\sessions"),
+            Path::new("c:/ws/.greywork/sessions")
+        ));
+        assert!(!same_path(Path::new(r"C:\ws\a"), Path::new(r"C:\ws\b")));
     }
 
     #[test]

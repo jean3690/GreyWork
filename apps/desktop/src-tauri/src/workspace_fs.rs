@@ -34,7 +34,9 @@ impl WorkspaceFsAccess {
         let default_root = canonical_existing(default_root)?;
         let mut paths = AuthorizedPathSet::default();
         paths.roots.insert(default_root);
-        if let Ok(raw) = std::fs::read(&ledger_path) {
+        // BOM 容错：账本被编辑器存成「UTF-8 with BOM」时 from_slice 会解析失败，
+        // 表现是「授权记录被静默清空」（见 text::read_bytes_without_bom）。
+        if let Ok(raw) = crate::text::read_bytes_without_bom(&ledger_path) {
             if let Ok(saved) = serde_json::from_slice::<AuthorizedPathLedger>(&raw) {
                 for root in saved.roots {
                     if root.is_dir() {
@@ -137,7 +139,9 @@ impl WorkspaceFsAccess {
             .map_err(|error| format!("序列化路径授权失败: {error}"))?;
         let temp = self.ledger_path.with_extension("json.tmp");
         std::fs::write(&temp, bytes).map_err(|error| format!("写入路径授权失败: {error}"))?;
-        std::fs::rename(&temp, &self.ledger_path)
+        // 短暂重试：Windows 上目标文件可能被编辑器/杀软占用一瞬，rename 会 EBUSY/EPERM。
+        // 授权保存失败会让用户刚选的目录下次启动就失效，值得多试两次。
+        rename_with_retry(&temp, &self.ledger_path)
             .map_err(|error| format!("提交路径授权失败: {error}"))
     }
 
@@ -197,6 +201,23 @@ fn validate_absolute(path: &Path) -> Result<PathBuf, String> {
         return Err("路径不得包含 ..".into());
     }
     Ok(path.to_path_buf())
+}
+
+/// 短暂重试的 `rename`：Windows 上目标文件被编辑器/杀软占用一瞬会让它失败。
+///
+/// 只重试几次、每次间隔很短 —— 授权账本落盘在命令路径上，不能在这里长时间阻塞。
+fn rename_with_retry(from: &Path, to: &Path) -> std::io::Result<()> {
+    const ATTEMPTS: u32 = 3;
+    const DELAY: std::time::Duration = std::time::Duration::from_millis(20);
+    let mut result = std::fs::rename(from, to);
+    for _ in 1..ATTEMPTS {
+        if result.is_ok() {
+            break;
+        }
+        std::thread::sleep(DELAY);
+        result = std::fs::rename(from, to);
+    }
+    result
 }
 
 fn canonical_existing(path: &Path) -> Result<PathBuf, String> {

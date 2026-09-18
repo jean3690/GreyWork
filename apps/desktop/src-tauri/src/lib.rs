@@ -25,6 +25,7 @@ mod skills_market;
 mod store_fs;
 mod sys;
 pub mod telegram;
+mod text;
 mod web_fetch;
 pub mod wechat;
 pub mod wecom;

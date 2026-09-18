@@ -269,7 +269,12 @@ fn all_session_dirs(root: &Path, workspaces: &[WorkspaceDirDto]) -> Result<Vec<P
         }
         // 目录失效（被删/改名）：跳过，不阻塞整次操作
         if let Ok(dir) = session_dir_for(root, workspaces, Some(&workspace.id)) {
-            if !dirs.iter().any(|seen| seen == &dir) {
+            // 归一化比较：folder 来自用户输入/历史记录，`C:\ws` 与 `c:/ws` 是同一目录，
+            // 直接 `==` 会让它被算两次（同一批会话写两遍）。
+            if !dirs
+                .iter()
+                .any(|seen| crate::path_safety::same_path(seen, &dir))
+            {
                 dirs.push(dir);
             }
         }
@@ -352,10 +357,12 @@ pub fn read_snapshot(
     let mut sessions = Vec::new();
     for dir in all_session_dirs(root, workspaces)? {
         for (id, path) in list_session_files(&dir)? {
-            let raw =
-                std::fs::read_to_string(&path).map_err(|e| format!("读取会话 {id} 失败: {e}"))?;
+            // BOM 容错：会话文件被编辑器存成「UTF-8 with BOM」时 from_str 会解析失败，
+            // 表现是「整个会话突然读不出来」（见 text::read_bytes_without_bom）。
+            let raw = crate::text::read_bytes_without_bom(&path)
+                .map_err(|e| format!("读取会话 {id} 失败: {e}"))?;
             let session: ConversationDto =
-                serde_json::from_str(&raw).map_err(|e| format!("解析会话 {id} 失败: {e}"))?;
+                serde_json::from_slice(&raw).map_err(|e| format!("解析会话 {id} 失败: {e}"))?;
             sessions.push(session);
         }
     }
@@ -410,7 +417,12 @@ pub fn write_snapshot(
                 match std::fs::remove_file(&path) {
                     Ok(()) => report.deleted += 1,
                     Err(err) if err.kind() == ErrorKind::NotFound => {}
-                    Err(err) => return Err(format!("删除会话文件失败: {err}")),
+                    // 单个文件删不掉（Windows 上被编辑器/杀软占着）不该让整轮同步失败：
+                    // 报错会让前端以为「什么都没写」，而降级成警告后其余删除照常完成。
+                    Err(err) => crate::log::warn(
+                        "store_fs",
+                        format!("删除会话文件失败（已跳过）{}: {err}", path.display()),
+                    ),
                 }
             }
         }
@@ -433,7 +445,9 @@ pub fn relocate_sessions(
     let from = session_dir_for_folder(root, request.from_folder.as_deref())?;
     let to = session_dir_for_folder(root, request.to_folder.as_deref())?;
     let mut report = RelocateReportDto::default();
-    if from == to {
+    // 归一化比较：同一目录的不同写法（大小写/分隔符）不该被当成一次搬迁，
+    // 否则会把文件在同一个目录里「搬」成自己。
+    if crate::path_safety::same_path(&from, &to) {
         return Ok(report);
     }
     for id in &request.session_ids {
@@ -460,7 +474,13 @@ pub fn relocate_sessions(
         // 同分区走 rename（原子且省一次拷贝）；跨设备回落读写 + 删源
         if std::fs::rename(&source, &target).is_err() {
             std::fs::write(&target, &payload).map_err(|e| format!("搬迁会话 {id} 失败: {e}"))?;
-            std::fs::remove_file(&source).map_err(|e| format!("清理旧会话文件 {id} 失败: {e}"))?;
+            // 目标已写好，源文件删不掉只是留一份冗余 —— 不该把这次搬迁判为失败
+            if let Err(error) = std::fs::remove_file(&source) {
+                crate::log::warn(
+                    "store_fs",
+                    format!("清理旧会话文件失败（已保留）{id}: {error}"),
+                );
+            }
         }
         report.moved += 1;
     }

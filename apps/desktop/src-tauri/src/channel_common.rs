@@ -39,9 +39,12 @@ pub fn write_private(path: &Path, contents: &[u8]) -> Result<(), String> {
 }
 
 /// 读 JSON 文件；缺失 / 损坏 / 形状不符一律当作「没有」（调用方回落到默认状态）。
+///
+/// 走 `read_bytes_without_bom` + `from_slice`：Windows 编辑器存成「UTF-8 with BOM」时
+/// `from_str` 会直接解析失败，凭据被静默重置。
 pub fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Option<T> {
-    let raw = std::fs::read_to_string(path).ok()?;
-    serde_json::from_str(&raw).ok()
+    let raw = crate::text::read_bytes_without_bom(path).ok()?;
+    serde_json::from_slice(&raw).ok()
 }
 
 pub fn now_ms() -> i64 {
