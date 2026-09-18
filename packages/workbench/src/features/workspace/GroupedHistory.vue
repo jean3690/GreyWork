@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
+import { joinPath } from "@greywork/core";
 import { useSessionStore } from "@/stores/session";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { groupSessions, type HistoryGroup } from "@/lib/grouped";
@@ -118,7 +119,7 @@ const UNBOUND_HINT = "未绑定文件夹：会话存 ~/.greyWork/sessions";
 
 function rowHint(group: HistoryGroup): string {
   const folder = folderOf(group);
-  return folder ? `会话存 ${folder}/.greyWork/sessions` : UNBOUND_HINT;
+  return folder ? `会话存 ${joinPath(folder, ".greyWork", "sessions")}` : UNBOUND_HINT;
 }
 
 function folderName(folder: string): string {

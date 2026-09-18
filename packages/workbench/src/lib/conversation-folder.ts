@@ -1,3 +1,4 @@
+import { isAbsolutePath } from "@greywork/core";
 import { useSessionStore } from "../stores/session";
 import { useWorkspaceStore } from "../stores/workspace";
 import { useChatStore } from "../stores/chat";
@@ -12,5 +13,5 @@ export function activeConversationFolder(): string | null {
   if (!threadId) return null;
   const record = useSessionStore().getSession(threadId);
   const folder = record?.workspaceId ? useWorkspaceStore().workspaceById(record.workspaceId)?.folder : undefined;
-  return folder && /^[/\\]/.test(folder) ? folder : null;
+  return folder && isAbsolutePath(folder) ? folder : null;
 }

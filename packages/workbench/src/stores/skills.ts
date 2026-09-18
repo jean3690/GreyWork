@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
-import { isTauriRuntime } from "@greywork/core";
+import { isTauriRuntime, joinPath } from "@greywork/core";
 import {
   createSkillsShSource,
   createSkillsTransport,
@@ -53,7 +53,7 @@ const RECORDS_KEY = "greywork.skills.installed";
 /** 解析技能目录所在工作区（未绑定则回落设置项/主目录，bound=false 由 UI 提示）。 */
 export async function resolveSkillsRoot(): Promise<SkillsWorkspace> {
   const root = await resolveWorkspaceRoot();
-  return { root, dir: `${root.dir}/.agents/skills` };
+  return { root, dir: joinPath(root.dir, ".agents", "skills") };
 }
 
 /** 解析 SKILL.md 的 YAML frontmatter（宽松单行提取；带 BOM/无 frontmatter 均容错）。 */
@@ -207,7 +207,7 @@ export const useSkillsStore = defineStore("skills", () => {
 
   async function readSkillMeta(skillDir: string): Promise<{ name?: string; description?: string }> {
     try {
-      const text = await readTextFile(`${skillDir}/SKILL.md`);
+      const text = await readTextFile(joinPath(skillDir, "SKILL.md"));
       return parseSkillFrontmatter(text.slice(0, 32 * 1024));
     } catch {
       return {};

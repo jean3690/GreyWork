@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { isTauriRuntime } from "@greywork/core";
+import { isAbsolutePath, isTauriRuntime, joinPath } from "@greywork/core";
 import { useWorkspaceStore } from "../stores/workspace";
 import { ensureDir, writeBinaryFile, writeTextFile } from "../state/workspaceFiles";
 
@@ -22,7 +22,7 @@ function defaultArtifactsRoot(): Promise<string | null> {
 export function activeWorkspaceFolder(): string | null {
   const id = useWorkspaceStore().activeWorkspaceId;
   const folder = id ? useWorkspaceStore().workspaceById(id)?.folder : undefined;
-  return folder && /^[/\\]/.test(folder) ? folder : null;
+  return folder && isAbsolutePath(folder) ? folder : null;
 }
 
 /** 产物目标目录（不存在则创建）；浏览器态返回 null。 */
@@ -31,7 +31,7 @@ export async function resolveArtifactsDir(): Promise<string | null> {
   const bound = activeWorkspaceFolder();
   const root = bound ?? (await defaultArtifactsRoot());
   if (!root) return null;
-  const dir = `${root}/artifacts`;
+  const dir = joinPath(root, "artifacts");
   await ensureDir(dir);
   return dir;
 }
@@ -59,7 +59,7 @@ export async function saveArtifactToDisk(fileName: string, data: string | Uint8A
   try {
     const dir = await resolveArtifactsDir();
     if (!dir) return null;
-    const path = `${dir}/${safeFileName(fileName)}`;
+    const path = joinPath(dir, safeFileName(fileName));
     if (typeof data === "string") await writeTextFile(path, data);
     else await writeBinaryFile(path, data);
     return path;

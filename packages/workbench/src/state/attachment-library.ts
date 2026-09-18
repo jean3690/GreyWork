@@ -11,7 +11,7 @@
  * 浏览器态没有文件系统，只能保留内联副本（限额由 attachments.ts 单独收紧）。
  */
 import { invoke } from "@tauri-apps/api/core";
-import { isTauriRuntime } from "@greywork/core";
+import { isTauriRuntime, joinPath } from "@greywork/core";
 
 import { readImage } from "@tauri-apps/plugin-clipboard-manager";
 import {
@@ -59,7 +59,7 @@ export async function ensureAttachmentLibrary(sessionId: string): Promise<string
   if (!isTauriRuntime() || !sessionId) return null;
   const root = await defaultRoot();
   if (!root) return null;
-  const dir = `${root}/attachments/${sessionId}`;
+  const dir = joinPath(root, "attachments", sessionId);
   try {
     await ensureDir(dir);
     return dir;
@@ -363,7 +363,7 @@ export async function materializeAttachments(sessionId: string, items: readonly 
     try {
       const bytes = await attachmentBytes(item);
       const ext = extOfName(item);
-      const path = `${dir}/${item.id}.${ext}`;
+      const path = joinPath(dir, `${item.id}.${ext}`);
       await writeBinaryFile(path, bytes);
       out.push({ id: item.id, kind: item.kind, name: item.name, mime: item.mime, size: bytes.length, path });
     } catch (error) {

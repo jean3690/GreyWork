@@ -16,7 +16,7 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
-import { isTauriRuntime } from "@greywork/core";
+import { isAbsolutePath, isTauriRuntime } from "@greywork/core";
 import { isRemoteStoreEnabled, readRemoteStoreConfig } from "./remote-store-config";
 import { createWebdavClient } from "./webdav";
 
@@ -61,7 +61,7 @@ const EMPTY_REPORT: SyncReport = { written: 0, skipped: 0, deleted: 0, conflicts
 /** 只有真正绑定磁盘路径的工作区才参与文件分目录（folder 为空串/非路径态忽略）。 */
 export function toWorkspaceDirRefs(workspaces: { id: string; folder?: string }[]): WorkspaceDirRef[] {
   return workspaces
-    .filter((workspace) => workspace.folder && /^[/\\]/.test(workspace.folder))
+    .filter((workspace) => workspace.folder && isAbsolutePath(workspace.folder))
     .map((workspace) => ({ id: workspace.id, folder: workspace.folder }));
 }
 

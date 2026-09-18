@@ -5,6 +5,7 @@ export * from "./id";
 export * from "./storage";
 export * from "./pubsub";
 export * from "./http";
+export * from "./paths";
 
 export const CORE_VERSION = "0.1.0";
 

@@ -8,6 +8,7 @@
  * 宿主不注入会话上下文。
  */
 import { onMounted, ref } from "vue";
+import { joinPath } from "@greywork/core";
 import type { MarketSkillEntry } from "@greywork/plugins";
 import { useSkillsStore, type InstalledSkill } from "@/stores/skills";
 import { useSettingsStore, type SkillSourceEntry } from "@/stores/settings";
@@ -305,7 +306,7 @@ function confirmResetSources(): void {
     <ConfirmDialog
       v-if="confirm?.kind === 'install'"
       title="安装技能？"
-      :message="`将下载「${confirm.entry.name}」并写入 ${skills.workspace?.root.dir ?? '工作区'}/.agents/skills/${confirm.entry.skillId}/。${installedOf(confirm.entry) ? '该技能已安装，本次将覆盖为市场最新版本。' : ''}新建 / 重启 agent 会话后生效。`"
+      :message="`将下载「${confirm.entry.name}」并写入 ${joinPath(skills.workspace?.root.dir ?? '工作区', '.agents', 'skills', confirm.entry.skillId)}/。${installedOf(confirm.entry) ? '该技能已安装，本次将覆盖为市场最新版本。' : ''}新建 / 重启 agent 会话后生效。`"
       confirm-label="安装"
       @confirm="performInstall"
       @cancel="confirm = null"
