@@ -17,6 +17,13 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+# 依赖的调试信息是 target/debug 体积与重编时间的大头：本机同一棵依赖树，release（debug=0）
+# 的 target 是 3.6GB，dev（默认 debug=2）是 66GB。依赖里的变量几乎不会用调试器去看，
+# 但**回溯还需要文件和行号**，所以降到 1（limited，保留行表）而不是 0。
+# 自己的 crate 不受影响（这里只匹配依赖），本地开发照旧能单步。
+[profile.dev.package."*"]
+debug = 1
+
 [dependencies]
 # macos-private-api: 悬浮宠物窗用 WebviewWindowBuilder::transparent，该方法在 macOS 上
 # 被 #[cfg(any(not(target_os = "macos"), feature = "macos-private-api"))] 门控，
