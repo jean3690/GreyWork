@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** 设置 · system 分区：关于宿主诊断 + 沙盒档位。 */
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import Icon from "@/features/shared/Icon.vue";
 import { systemBackend, type SysInfo } from "@/lib/system-backend";
 import { SANDBOX_MODES, useSettingsStore } from "@/stores/settings";
@@ -12,6 +12,15 @@ const { suggestedSandbox, applySandboxMode } = usePermissionSandbox();
 /** 系统诊断快照（桌面态从 Rust 拉取；浏览器态 null）。 */
 const sysInfo = ref<SysInfo | null>(null);
 const sysInfoFailed = ref(false);
+
+/**
+ * 本机是否没有可用的 OS 沙盒。
+ *
+ * bwrap 只有 Linux 有：Windows/macOS 上任何档位都会被宿主降级为「关闭」（只记日志），
+ * 这里必须把这件事说出来 —— 否则用户会以为自己处在隔离里。浏览器预览态（sysInfo 为
+ * null）不判断，避免误报。
+ */
+const sandboxUnavailable = computed(() => sysInfo.value !== null && sysInfo.value.os !== "linux");
 
 onMounted(() => {
   if (!systemBackend.active()) return;
@@ -76,6 +85,14 @@ onMounted(() => {
           <Icon :name="settings.sandboxMode === mode.value ? 'check-one' : 'close-one'" :size="14" class="mt-0.5 shrink-0 text-dim" />
         </button>
       </div>
+      <p
+        v-if="sandboxUnavailable"
+        class="mt-3 border-t border-line-2 pt-3 text-[11px] leading-[1.6] text-dim"
+        data-testid="sandbox-unavailable"
+      >
+        OS 沙盒依赖 Linux 的 bwrap，当前宿主（{{ sysInfo?.os }}）不可用：任何档位都会在启动 agent 时降级为「关闭」。
+        权限档位仍然生效，但进程不再有 OS 级隔离。
+      </p>
       <div v-if="settings.sandboxMode !== suggestedSandbox" class="mt-3 flex items-center gap-2 border-t border-line-2 pt-3">
         <span class="min-w-0 flex-1 text-[11px] text-dim">
           当前权限档位「{{ PERM_TIER_LABELS[settings.permissionTier] }}」建议沙盒「{{ SANDBOX_LABELS[suggestedSandbox] }}」

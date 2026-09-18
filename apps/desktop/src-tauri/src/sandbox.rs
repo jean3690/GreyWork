@@ -2,7 +2,9 @@
 //!
 //! - 系统路径只读，工作区读写，`/tmp` 独立；
 //! - `fs` 关闭网络，`full` 放行网络；
-//! - `auto` 在 bwrap 可用时等价于 `fs`，否则显式记录未沙箱告警；
+//! - `auto` 在 bwrap 可用时等价于 `fs`，否则降级为 `off` 并记录告警；
+//! - **bwrap 只有 Linux 有**，所以 Windows/macOS 上任何档位都会降级为 `off`（同样告警），
+//!   而不是让 agent 直接起不来 —— 设置可能是从别的机器同步过来的；
 //! - 不挂载完整 HOME，只把已存在的 Agent 配置目录/文件只读映射到隔离 HOME。
 //!
 //! 包裹命令以 JSON 交给 `AcpAgent::from_str`，避免命令路径再经 shell 解释。
@@ -30,11 +32,21 @@ impl SandboxMode {
         }
     }
 
-    pub fn resolve(self, available: bool) -> Self {
+    /// 解析出真正可用的档位，并告知是否发生了降级（调用方据此记录告警）。
+    ///
+    /// `available` = 本机有 bwrap（仅 Linux）。不可用时连显式的 `fs`/`full` 也降级为
+    /// `off`：宁可无隔离地跑起来，也不要让 Windows 用户因为一个同步过来的设置而完全
+    /// 用不了 agent。降级是显式的返回值，不是静默吞掉。
+    pub fn resolve(self, available: bool) -> (Self, bool) {
+        if available {
+            return match self {
+                SandboxMode::Auto => (SandboxMode::Filesystem, false),
+                mode => (mode, false),
+            };
+        }
         match self {
-            SandboxMode::Auto if available => SandboxMode::Filesystem,
-            SandboxMode::Auto => SandboxMode::Off,
-            mode => mode,
+            SandboxMode::Off => (SandboxMode::Off, false),
+            _ => (SandboxMode::Off, true),
         }
     }
 }
@@ -176,8 +188,30 @@ mod tests {
         assert_eq!(SandboxMode::parse(Some("full")).unwrap(), SandboxMode::Full);
         assert!(SandboxMode::parse(Some("yolo")).is_err());
         assert!(SandboxMode::parse(Some("FS")).is_err());
-        assert_eq!(SandboxMode::Auto.resolve(true), SandboxMode::Filesystem);
-        assert_eq!(SandboxMode::Auto.resolve(false), SandboxMode::Off);
+        assert_eq!(
+            SandboxMode::Auto.resolve(true),
+            (SandboxMode::Filesystem, false)
+        );
+        assert_eq!(SandboxMode::Auto.resolve(false), (SandboxMode::Off, true));
+    }
+
+    /// 非 Linux（无 bwrap）上显式选 fs/full 也要降级为 off：让 agent 起得来，
+    /// 而不是因为一个同步过来的设置直接报错。
+    #[test]
+    fn explicit_modes_degrade_when_sandbox_is_unavailable() {
+        assert_eq!(
+            SandboxMode::Filesystem.resolve(false),
+            (SandboxMode::Off, true)
+        );
+        assert_eq!(SandboxMode::Full.resolve(false), (SandboxMode::Off, true));
+        // 本来就是 off：不算降级，也不该告警
+        assert_eq!(SandboxMode::Off.resolve(false), (SandboxMode::Off, false));
+        // bwrap 可用时显式档位原样保留
+        assert_eq!(
+            SandboxMode::Filesystem.resolve(true),
+            (SandboxMode::Filesystem, false)
+        );
+        assert_eq!(SandboxMode::Full.resolve(true), (SandboxMode::Full, false));
     }
 
     #[test]
