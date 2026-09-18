@@ -49,7 +49,6 @@
     "@greywork/shell": "workspace:*",
     "@internationalized/date": "3.12.3",
     "@lezer/highlight": "^1.2.3",
-    "@lobehub/icons": "5.18.0",
     "@tanstack/vue-virtual": "^3.13.36",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-clipboard-manager": "^2.3.3",

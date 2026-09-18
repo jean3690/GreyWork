@@ -222,7 +222,7 @@ describe("AgentProviderBar · ACP 会话配置选择器", () => {
     expect(openCodeButton(wrapper).text()).not.toContain("OpenCode");
   });
 
-  it("收起图标提供名称提示（已换成 Hint），并只请求 Lobe 实际提供的图标变体", async () => {
+  it("收起图标提供名称提示（已换成 Hint），并只引用随包发出的 mono 变体", async () => {
     const { wrapper } = mountBar();
     const openCode = openCodeButton(wrapper);
 
@@ -235,8 +235,12 @@ describe("AgentProviderBar · ACP 会话配置选择器", () => {
     expect(tooltipText()).not.toContain("·");
 
     const brand = openCode.get('[data-testid="agent-brand-icon"]');
-    expect(brand.attributes("src")).toContain("@lobehub/icons-static-svg@latest/icons/opencode.svg");
-    expect(brand.attributes("src")).not.toContain("opencode-color.svg");
+    // 品牌图标是仓内资源：打包版 CSP 只放行 'self'，外链图会被拦成空白。
+    // 小 SVG 由 vite 内联成 data: URI（data: 在 CSP 白名单里），大文件才落成同源路径。
+    const src = brand.attributes("src") ?? "";
+    expect(src).not.toMatch(/^https?:\/\//);
+    expect(src).toContain("opencode");
+    expect(src).not.toContain("opencode-color");
   });
   it("模型暴露 effort：底栏（发送按钮旁）渲染模型 / 思考强度 / 会话模式三组选择器", async () => {
     h.startAgent.mockResolvedValue(7);

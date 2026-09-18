@@ -344,7 +344,7 @@ async function removeAgentDraft(): Promise<void> {
                 provider.icon
                   ? `当前自定义图标：${agentProviderIcon(provider)}（点击换一个）`
                   : agentProviderLobeIcon(provider)
-                    ? `当前品牌图标：@lobehub/icons/${agentProviderLobeIcon(provider)?.slug}（点击可自定义）`
+                    ? `当前品牌图标：${agentProviderLobeIcon(provider)?.slug}（点击可自定义）`
                     : `当前图标：${agentProviderIcon(provider)}（点击换一个）`
               "
               multiline

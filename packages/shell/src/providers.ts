@@ -29,10 +29,16 @@ export function agentProviderIcon(provider: { icon?: string }): string {
   return provider.icon ?? DEFAULT_AGENT_PROVIDER_ICON;
 }
 
-/** ACP 预设后端对应的 @lobehub/icons 静态资源配置。 */
+/**
+ * ACP 预设后端对应的品牌图标配置。
+ *
+ * 只声明「上游 lobe-icons 里的 slug + 变体」，实际文件由 workbench 随包发出
+ * （`src/assets/agent-icons/`，见 AgentProviderIcon.vue）—— 不走 CDN，打包版 CSP
+ * 才能放行，离线/国内网络也不会裂图。
+ */
 export interface AgentProviderLobeIcon {
   slug: string;
-  /** 仅在 Lobe toc 声明 hasColor 时请求 color；否则必须请求 mono，避免 CDN 404。 */
+  /** 仅在上游声明 hasColor 时用 color；否则用 mono，避免指向不存在的文件。 */
   type: "color" | "mono";
 }
 
