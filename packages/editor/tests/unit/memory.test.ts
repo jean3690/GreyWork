@@ -93,6 +93,27 @@ describe("内存 git · diff 正文封顶", () => {
   });
 });
 
+describe("内存 git · 行尾", () => {
+  it("只把行尾换成 CRLF 不该被判成整篇改动", async () => {
+    const fs = createMemoryFileSystem({ "a.ts": "one\ntwo\n" });
+    const git = createMemoryGitService(fs);
+    // 内容逐字相同，只有行尾从 LF 变 CRLF
+    await fs.writeFile("a.ts", "one\r\ntwo\r\n");
+
+    // status 比的是原始字符串，所以仍是 modified —— 这是已知取舍
+    expect(await git.status()).toEqual([{ path: "a.ts", status: "modified" }]);
+    // 但行差集必须为 0：按 `\n` 拆会让每行多一个尾随 `\r`，整篇变成 2 增 2 删
+    expect(await git.diff("a.ts")).toBe("无变更。");
+  });
+
+  it("孤立 CR 也算换行（旧 Mac 风格）", async () => {
+    const fs = createMemoryFileSystem({ "a.ts": "one\rtwo\r" });
+    const git = createMemoryGitService(fs);
+    await fs.writeFile("a.ts", "one\ntwo\n");
+    expect(await git.diff("a.ts")).toBe("无变更。");
+  });
+});
+
 describe("内存 git · commit", () => {
   it("commit 把当前快照设为新基线，并让序号递增", async () => {
     const fs = createMemoryFileSystem();

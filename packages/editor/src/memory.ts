@@ -83,12 +83,17 @@ export function createMemoryFileSystem(initialFiles: Record<string, string> = {}
   };
 }
 
-/** 多重集行差集：统计 baseline → current 的增删行（O(n+m)，够用于内存 git 面板）。 */
+/**
+ * 多重集行差集：统计 baseline → current 的增删行（O(n+m)，够用于内存 git 面板）。
+ *
+ * 按 `\r\n|\n|\r` 拆行：Windows 上写出的内容（CRLF）与基线（LF）如果只按 `\n` 拆，
+ * 每一行都会多一个尾随 `\r`，于是「只改了行尾」被判成整篇改动。
+ */
 function diffLines(baseline: string, current: string): { add: number; del: number; added: string[]; deleted: string[] } {
   const counts = new Map<string, number>();
-  for (const line of baseline.split("\n")) counts.set(line, (counts.get(line) ?? 0) + 1);
+  for (const line of baseline.split(/\r\n|\n|\r/)) counts.set(line, (counts.get(line) ?? 0) + 1);
   const added: string[] = [];
-  for (const line of current.split("\n")) {
+  for (const line of current.split(/\r\n|\n|\r/)) {
     const left = counts.get(line) ?? 0;
     if (left > 0) counts.set(line, left - 1);
     else added.push(line);

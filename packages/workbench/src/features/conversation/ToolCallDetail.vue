@@ -28,8 +28,10 @@ const diff = computed(() => {
 });
 
 const diffLines = computed<DiffLine[]>(() => diff.value?.lines ?? []);
-const textLines = computed(() => (props.detail.text ? props.detail.text.split("\n") : []));
-const argLines = computed(() => (props.detail.args ? props.detail.args.split("\n") : []));
+// 按 `\r\n|\n|\r` 拆行：Windows 上工具输出常是 CRLF，只按 `\n` 拆会在每行尾留一个 `\r`
+// （渲染上看不见，但复制出去就是脏字符）。
+const textLines = computed(() => (props.detail.text ? props.detail.text.split(/\r\n|\n|\r/) : []));
+const argLines = computed(() => (props.detail.args ? props.detail.args.split(/\r\n|\n|\r/) : []));
 
 /** 折叠时每块各留 maxLines 行；三块共用一个展开开关，不要一块一个按钮。 */
 function visible<T>(rows: T[]): T[] {
