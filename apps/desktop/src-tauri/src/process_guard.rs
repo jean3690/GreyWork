@@ -11,10 +11,9 @@
 //! 最后是进程树回收（`kill_process_tree` / `isolate_process_group`）：agent 与 MCP
 //! 服务几乎都经垫片启动，只杀直接子进程等于把它们过继给系统继续跑。
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-#[cfg(unix)]
-use std::ffi::OsString;
 #[cfg(unix)]
 use std::sync::OnceLock;
 
