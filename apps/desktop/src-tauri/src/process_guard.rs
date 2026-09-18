@@ -13,6 +13,11 @@
 
 use std::path::{Path, PathBuf};
 
+#[cfg(unix)]
+use std::ffi::OsString;
+#[cfg(unix)]
+use std::sync::OnceLock;
+
 /// 这些字符出现在启动串里即拒绝。
 pub const SHELL_META_CHARS: &[char] = &['|', '&', ';', '<', '>', '$', '`', '(', ')', '\n', '\r'];
 
@@ -47,7 +52,7 @@ pub fn validate_spawn_command(raw: &str, allowed_programs: &[&str]) -> Result<St
 pub fn probe_program(program: &str, path_value: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
     let value = path_value
         .map(|v| v.to_os_string())
-        .or_else(|| std::env::var_os("PATH"))?;
+        .or_else(effective_path)?;
     let candidates = program_candidates(program);
     for dir in std::env::split_paths(&value) {
         for candidate in &candidates {
@@ -201,6 +206,188 @@ pub fn isolate_process_group(command: &mut tokio::process::Command) {
     let _ = command;
 }
 
+/* ===== GUI 启动时的 PATH 兜底（Unix） ===== */
+
+/// 登录 shell 解析出的 PATH；`init_login_path` 里设一次，之后只读。
+///
+/// 刻意**不用** `std::env::set_var`：Tauri 运行时已经起了线程，Unix 上 `setenv` 与
+/// 子进程的 `getenv` 并发是数据竞争（Rust 也已把 `set_var` 标成 unsafe）。需要的地方
+/// 显式取用 —— `effective_path()`（探测）或 `path_env()`（spawn 时注入）。
+#[cfg(unix)]
+static LOGIN_PATH: OnceLock<OsString> = OnceLock::new();
+
+/// 解析登录 shell 的超时上限；到点强杀，绝不拖住启动。
+#[cfg(unix)]
+const LOGIN_PATH_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1500);
+/// 包住 PATH 输出的标记，用来忽略 rc 文件的横幅（横幅在标记之前）。
+#[cfg(unix)]
+const PATH_MARKER_BEGIN: &str = "__GREYWORK_PATH_BEGIN__";
+#[cfg(unix)]
+const PATH_MARKER_END: &str = "__GREYWORK_PATH_END__";
+
+/// 解析登录 shell 的 PATH 并缓存（`lib.rs` 的 setup 里调一次，**立即返回**）。
+///
+/// 打包版从 Finder/Dock 或 `.desktop` 启动时继承的是极简 PATH（macOS 上是 launchd 的
+/// `/usr/bin:/bin:/usr/sbin:/sbin`），Homebrew / nvm 装的 `npx`、`node`、`opencode`
+/// 全都探测不到 —— 设置页显示「未安装」，agent 起不来。
+///
+/// 解析结果 = 登录 shell 的 PATH **+** 继承的 PATH（按顺序去重），所以不可能丢掉继承值。
+/// 解析失败（无 shell / 超时 / 输出里没有标记）就保持未初始化，
+/// `effective_path()` 退回继承的 PATH —— 功能退化到本函数存在之前的行为。
+///
+/// 跑在后台线程上：解析要起一次登录 shell（实测 ~1.2s，rc 里装了 nvm 之类更慢），而
+/// `setup` 发生在 webview 加载与窗口 `show()` 之前 —— 同步等会让**每一次**启动都变慢。
+/// 代价是启动后约 1s 内 `effective_path()` 仍返回继承的 PATH，此时立刻点「启动 agent」
+/// 会失败一次（可重试），换来的是启动路径零阻塞。
+pub fn init_login_path() {
+    // drop 掉 JoinHandle 即分离线程：解析完自己填 OnceLock，没人需要 join。
+    #[cfg(unix)]
+    let _ = std::thread::spawn(|| {
+        let inherited = std::env::var_os("PATH").unwrap_or_default();
+        let merged = match resolve_login_path() {
+            Some(login) => merge_paths(&login, &inherited.to_string_lossy()),
+            None => inherited.to_string_lossy().into_owned(),
+        };
+        if !merged.is_empty() {
+            let _ = LOGIN_PATH.set(OsString::from(merged));
+        }
+    });
+}
+
+/// 探测/启动子进程时该用的 PATH：登录 shell 解析结果优先，否则继承的 PATH。
+pub fn effective_path() -> Option<OsString> {
+    #[cfg(unix)]
+    {
+        if let Some(value) = LOGIN_PATH.get() {
+            return Some(value.clone());
+        }
+    }
+    std::env::var_os("PATH")
+}
+
+/// 需要把 PATH **显式注入**子进程环境时返回 `("PATH", value)`；无需注入则 `None`。
+///
+/// 只覆盖 GUI 启动那种「继承的 PATH 是残缺的」情形：只改探测不够，`npx`/`node` 自己
+/// 也要按 PATH 找下一跳。Windows 的 PATH 来自注册表、本来就完整，故恒为 `None`。
+pub fn path_env() -> Option<(String, String)> {
+    #[cfg(unix)]
+    {
+        LOGIN_PATH
+            .get()
+            .map(|value| ("PATH".to_string(), value.to_string_lossy().into_owned()))
+    }
+    #[cfg(not(unix))]
+    {
+        None
+    }
+}
+
+/// 该用哪个 shell 跑登录脚本：`$SHELL` 可用则用，否则按常见路径兜底。
+#[cfg(unix)]
+fn login_shell() -> String {
+    if let Some(shell) = std::env::var_os("SHELL").filter(|value| !value.is_empty()) {
+        if Path::new(&shell).is_file() {
+            return shell.to_string_lossy().into_owned();
+        }
+    }
+    for candidate in ["/bin/zsh", "/bin/bash", "/bin/sh"] {
+        if Path::new(candidate).is_file() {
+            return candidate.to_string();
+        }
+    }
+    "/bin/sh".to_string()
+}
+
+/// 取 shell 的可执行文件名（`/bin/zsh` → `zsh`），决定用哪种 PATH 拼接语法。
+#[cfg(unix)]
+fn shell_basename(shell: &str) -> &str {
+    shell.rsplit('/').next().unwrap_or(shell)
+}
+
+/// 登录 shell 里要跑的那行：用标记包住 PATH，好忽略 rc 的横幅输出。
+///
+/// fish 的 `$PATH` 是列表，得先 `string join :` 拼成冒号串。
+#[cfg(unix)]
+fn login_shell_script(basename: &str) -> String {
+    let path_expr = if basename.eq_ignore_ascii_case("fish") {
+        "(string join : $PATH)"
+    } else {
+        "\"$PATH\""
+    };
+    format!("printf '{PATH_MARKER_BEGIN}%s{PATH_MARKER_END}' {path_expr}")
+}
+
+/// 从登录 shell 的输出里取标记之间的 PATH。
+///
+/// 取**最后一次**出现的起始标记：rc 的横幅在真正的输出之前，即使横幅里恰好含标记
+/// 字样也不会取错。缺标记或中间为空 → `None`（调用方退回继承的 PATH）。
+#[cfg(unix)]
+fn parse_marked_path(bytes: &[u8]) -> Option<String> {
+    let text = String::from_utf8_lossy(bytes);
+    let start = text.rfind(PATH_MARKER_BEGIN)? + PATH_MARKER_BEGIN.len();
+    let rest = &text[start..];
+    let end = rest.find(PATH_MARKER_END)?;
+    let value = rest[..end].trim_matches(['\r', '\n', ' ', '\t']);
+    (!value.is_empty()).then(|| value.to_string())
+}
+
+/// 合并登录 shell 与继承的 PATH，按 `:` 去重（登录的优先，保持顺序）。
+///
+/// 跳过空段：POSIX 里空段等价于「当前目录」，不该被带进子进程。
+#[cfg(unix)]
+fn merge_paths(login: &str, inherited: &str) -> String {
+    let mut seen = std::collections::HashSet::new();
+    let mut out: Vec<&str> = Vec::new();
+    for dir in login.split(':').chain(inherited.split(':')) {
+        if !dir.is_empty() && seen.insert(dir) {
+            out.push(dir);
+        }
+    }
+    out.join(":")
+}
+
+/// 起一次 `$SHELL -ilc` 取 PATH；超时或失败返回 `None`。
+///
+/// `-i` 是为了让 `.zshrc` / `.bashrc` 里的 PATH 设置生效（`.zprofile` 由 `-l` 覆盖），
+/// 代价是与 PATH 无关的 job control 噪音 —— stderr 直接丢空。
+#[cfg(unix)]
+fn resolve_login_path() -> Option<String> {
+    use std::io::Read as _;
+
+    let shell = login_shell();
+    let script = login_shell_script(shell_basename(&shell));
+    let mut child = std::process::Command::new(&shell)
+        .arg("-ilc")
+        .arg(script)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .ok()?;
+
+    let deadline = std::time::Instant::now() + LOGIN_PATH_TIMEOUT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            // 到点仍在跑（rc 卡住）或 wait 出错：强杀后放弃，绝不拖住启动
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    }
+
+    let mut buf = Vec::new();
+    if let Some(mut stdout) = child.stdout.take() {
+        let _ = stdout.read_to_end(&mut buf);
+    }
+    parse_marked_path(&buf)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -255,7 +442,6 @@ mod tests {
         assert_eq!(shell_command("npx -y pkg"), "npx -y pkg");
         assert_eq!(shell_command("opencode acp"), "opencode acp");
     }
-
     /// 包装规则本身与平台无关，所以能在 Linux 上把 Windows 的行为钉死。
     #[test]
     fn shell_command_wraps_only_batch_programs() {
@@ -277,6 +463,98 @@ mod tests {
             shell_command_with("\"C:\\nodejs\\npx.cmd\" -y pkg", |program| program
                 .ends_with("npx.cmd")),
             "cmd /C \"C:\\nodejs\\npx.cmd\" -y pkg"
+        );
+    }
+
+    /// fish 的 `$PATH` 是列表，必须走 `string join :`；其余 shell 用 `"$PATH"`。
+    #[cfg(unix)]
+    #[test]
+    fn login_shell_script_picks_fish_and_posix_path_syntax() {
+        let expected =
+            |expr: &str| format!("printf '{PATH_MARKER_BEGIN}%s{PATH_MARKER_END}' {expr}");
+        assert_eq!(login_shell_script("zsh"), expected("\"$PATH\""));
+        assert_eq!(login_shell_script("bash"), expected("\"$PATH\""));
+        assert_eq!(login_shell_script("sh"), expected("\"$PATH\""));
+        assert_eq!(
+            login_shell_script("FISH"),
+            expected("(string join : $PATH)")
+        );
+    }
+
+    /// 合成输入覆盖三种现实情况：rc 横幅在前、CRLF 行尾、缺标记。
+    #[cfg(unix)]
+    #[test]
+    fn parse_marked_path_ignores_rc_banner_and_tolerates_crlf() {
+        let banner_first = format!(
+            "Welcome to zsh!\r\n{PATH_MARKER_BEGIN}/opt/homebrew/bin:/usr/bin{PATH_MARKER_END}\r\n"
+        );
+        assert_eq!(
+            parse_marked_path(banner_first.as_bytes()).as_deref(),
+            Some("/opt/homebrew/bin:/usr/bin")
+        );
+
+        // 横幅里恰好含标记字样：取最后一次出现（真正的输出在最后）
+        let noisy = format!(
+            "{PATH_MARKER_BEGIN}banner junk{PATH_MARKER_END}\n\
+             {PATH_MARKER_BEGIN}/real/bin{PATH_MARKER_END}"
+        );
+        assert_eq!(
+            parse_marked_path(noisy.as_bytes()).as_deref(),
+            Some("/real/bin")
+        );
+
+        // 缺标记 / 标记之间为空 / 完全没有输出 → None，调用方退回继承 PATH
+        assert_eq!(parse_marked_path(b"just a banner"), None);
+        assert_eq!(
+            parse_marked_path(format!("{PATH_MARKER_BEGIN}{PATH_MARKER_END}").as_bytes()),
+            None
+        );
+        assert_eq!(parse_marked_path(b""), None);
+    }
+
+    /// 合并结果必须是「登录优先 + 继承不丢」，且跳过空段（POSIX 里等价于 CWD）。
+    #[cfg(unix)]
+    #[test]
+    fn merge_paths_prefers_login_and_keeps_inherited() {
+        assert_eq!(
+            merge_paths("/opt/homebrew/bin:/usr/bin", "/usr/bin:/bin"),
+            "/opt/homebrew/bin:/usr/bin:/bin"
+        );
+        assert_eq!(merge_paths("/a::/b", ":/b:/c"), "/a:/b:/c");
+        assert_eq!(merge_paths("", "/bin"), "/bin");
+        assert_eq!(merge_paths("/bin", ""), "/bin");
+        assert_eq!(merge_paths("", ""), "");
+    }
+
+    /// 端到端跑一次真实登录 shell：shell 选择 → 脚本 → 超时 → 解析。
+    ///
+    /// 环境里没有可用 shell 时允许返回 `None`（那正是「不拖住启动」的退化路径），
+    /// 但只要有结果就必须是像样的 PATH 且标记没泄漏进去。
+    #[cfg(unix)]
+    #[test]
+    fn resolve_login_path_returns_plausible_value_or_none() {
+        if let Some(value) = resolve_login_path() {
+            assert!(!value.is_empty());
+            assert!(value.contains('/'), "PATH 应由绝对目录组成，得到 {value:?}");
+            assert!(
+                !value.contains(PATH_MARKER_BEGIN) && !value.contains(PATH_MARKER_END),
+                "标记不能泄漏进结果: {value:?}"
+            );
+            assert!(
+                !value.split(':').any(|dir| dir.is_empty()),
+                "空段（等价 CWD）不该被带出来: {value:?}"
+            );
+        }
+    }
+
+    /// `effective_path` 在未初始化时必须等于继承的 PATH（功能退化为旧行为）。
+    #[cfg(unix)]
+    #[test]
+    fn effective_path_falls_back_to_inherited_env() {
+        assert_eq!(
+            effective_path(),
+            std::env::var_os("PATH"),
+            "LOGIN_PATH 未设置时应原样返回继承的 PATH"
         );
     }
 

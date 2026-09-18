@@ -687,7 +687,14 @@ pub async fn acp_start(
     };
 
     let handle_id = state.next_id.fetch_add(1, Ordering::SeqCst);
-    let env_vars = sanitize_env(env)?;
+    let mut env_vars = sanitize_env(env)?;
+    // 只改探测不够：agent 自己也要按 PATH 找 `npx`/`node`。用户没显式指定 PATH 时注入
+    // 解析到的登录 shell PATH（见 process_guard::init_login_path；Windows 恒为 None）。
+    if !env_vars.iter().any(|(name, _)| name == "PATH") {
+        if let Some(pair) = process_guard::path_env() {
+            env_vars.push(pair);
+        }
+    }
     // Windows 上 npx/npm 等是 .cmd 垫片，CreateProcess 起不来：这里归一成 `cmd /C ...`。
     // 其他平台恒等返回（见 process_guard::shell_command）。
     let spawn_command = process_guard::shell_command(&command);

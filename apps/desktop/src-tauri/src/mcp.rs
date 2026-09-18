@@ -493,12 +493,20 @@ async fn probe_stdio_inner(
     // 自成进程组组长：kill_process_tree 靠进程组整组回收，不设的话它找不到同名组
     // （ESRCH）而静默失效 —— npx → node 的孙子进程会残留。见 process_guard 的契约。
     crate::process_guard::isolate_process_group(&mut spawn);
+    // 只改探测不够：MCP server 自己也要按 PATH 找 `npx`/`node`。用户没显式指定 PATH 时
+    // 注入解析到的登录 shell PATH（见 process_guard::init_login_path；Windows 恒为 None）。
+    let mut envs = env.unwrap_or_default();
+    if !envs.contains_key("PATH") {
+        if let Some((key, value)) = crate::process_guard::path_env() {
+            envs.insert(key, value);
+        }
+    }
     let child = spawn
         .args(args)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
-        .envs(env.unwrap_or_default())
+        .envs(envs)
         .spawn()
         .map_err(|error| format!("failed to spawn mcp server: {error}"))?;
 

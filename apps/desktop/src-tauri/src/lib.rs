@@ -70,6 +70,9 @@ pub fn run() {
             .map_err(|err| -> Box<dyn std::error::Error> { err.into() })?;
             app.manage(workspace_access);
             log::init(data_dir.join("logs"));
+            // GUI 启动（Finder/Dock、.desktop）继承的 PATH 是极简的，这里补一次登录
+            // shell 解析，供程序探测与子进程注入使用。后台线程跑，失败即退回继承 PATH。
+            process_guard::init_login_path();
             let database = db::Db::open_at(&data_dir.join("greywork.db"))
                 .map_err(|err| -> Box<dyn std::error::Error> { err.into() })?;
             app.manage(database);
