@@ -12,6 +12,7 @@
     "opener:default",
     "dialog:default",
     "notification:default",
-    "clipboard-manager:allow-read-image"
+    "clipboard-manager:allow-read-image",
+    "clipboard-manager:allow-write-text"
   ]
 }
