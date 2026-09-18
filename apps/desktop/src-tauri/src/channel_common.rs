@@ -26,7 +26,15 @@ pub fn channel_dir(app: &AppHandle, channel: &str) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-/// 写私有文件：内容敏感（bot token / 会话 webhook），unix 下收紧到 0600。
+/// 写私有文件：内容敏感（bot token / 会话 webhook）。
+///
+/// unix 下收紧到 0600。
+///
+/// Windows 下不额外收紧，靠 `app_data_dir()`（`%APPDATA%\<identifier>`）继承的 profile
+/// ACL：默认只授本用户 / SYSTEM / Administrators，本机其他非管理员用户读不到，与 0600 的
+/// 威胁模型一致；Administrators 和 SYSTEM 仍可读，这是 0600 语义在 Windows 上表达不了的
+/// 那部分。显式收紧得走 SetNamedSecurityInfo（或 icacls），本轮按决定不做 —— 需要更强隔离
+/// 时应当整体迁到系统凭据库，而不是逐个文件打补丁。
 pub fn write_private(path: &Path, contents: &[u8]) -> Result<(), String> {
     std::fs::write(path, contents)
         .map_err(|error| format!("写 {} 失败: {error}", path.display()))?;
