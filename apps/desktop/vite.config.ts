@@ -9,11 +9,6 @@ import { fileURLToPath, URL } from "node:url";
 
 const host = process.env.TAURI_DEV_HOST;
 
-// rxjs 7.0 的 exports 默认指向 dist/esm5（且 dist/esm 入口缺失操作符导出），
-// @univerjs/core 引入 rxjs 时构建报 "filter is not exported"。workbench 显式依赖
-// rxjs@7.8.2（dist/esm 完整导出），此处 alias 统一到该 ESM 构建。
-const rxjsEsm = fileURLToPath(new URL("../../node_modules/.pnpm/rxjs@7.8.2/node_modules/rxjs/dist/esm", import.meta.url));
-
 /**
  * pdf.js 的运行时资源：CJK 的 CMap、非嵌入字体的标准字体表、JBIG2/JPEG2000/QCMS 的 wasm。
  *
@@ -25,6 +20,14 @@ const rxjsEsm = fileURLToPath(new URL("../../node_modules/.pnpm/rxjs@7.8.2/node_
  */
 const workbenchRequire = createRequire(fileURLToPath(new URL("../../packages/workbench/package.json", import.meta.url)));
 const pdfjsDist = path.dirname(workbenchRequire.resolve("pdfjs-dist/package.json"));
+
+// rxjs 7 的 exports 里 default 指向 dist/esm5（只有 es2015 条件才指 dist/esm），而 esm5 那份的
+// 入口缺操作符导出 —— @univerjs/core 引入 rxjs 时构建报 "filter is not exported"。
+// workbench 显式依赖 rxjs，其 dist/esm 导出完整，所以把 rxjs 统一 alias 过去。
+//
+// 路径同样从 workbench 解析，不写死 `node_modules/.pnpm/rxjs@7.8.2/...`：pnpm 的目录名带版本号，
+// rxjs 一升级 alias 就指到不存在的目录（构建报模块找不到，与上面 pdfjs 同一个取法）。
+const rxjsEsm = path.join(path.dirname(workbenchRequire.resolve("rxjs/package.json")), "dist", "esm");
 
 const PDFJS_ASSET_DIRS = ["cmaps", "standard_fonts", "wasm", "iccs"] as const;
 
