@@ -6,6 +6,10 @@ inputs:
     description: 额外 rustup 组件（逗号分隔），如 clippy,rustfmt
     required: false
     default: ""
+  targets:
+    description: 额外 rustup target（逗号分隔），如 aarch64-apple-darwin,x86_64-apple-darwin
+    required: false
+    default: ""
   shared-key:
     description: 覆盖缓存键里的 job 名，让不同 workflow / job 共用同一份依赖产物（留空 = 按 job 名隔离）
     required: false
@@ -22,9 +26,13 @@ runs:
         sudo apt-get update
         sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
 
+    # targets：macOS 出通用二进制需要 aarch64 与 x86_64 两套 std（宿主只有一套）。
+    # 这个 action 是按输入拼 `rustup toolchain install ... --target <t>`，空串只是
+    # 少拼几个标志，不会变成「rustup target add」那种无参数的失败调用。
     - uses: dtolnay/rust-toolchain@stable
       with:
         components: ${{ inputs.components }}
+        targets: ${{ inputs.targets }}
 
     # 缓存策略集中在这里。rust-cache 只缓存依赖产物，自身 crate 不进缓存 ——
     # 所以「依赖缓存命中」决定了这个 job 是 2 分钟还是 10 分钟。

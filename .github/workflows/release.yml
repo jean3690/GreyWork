@@ -23,16 +23,23 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # args 直接写整串而不是拼 bundle/target 两列：macOS 需要 --target，
+        # 另两个平台不需要，拆成两列后就得在 args 里写 `${{ ... && ... || '' }}` 那种
+        # 三元表达式，可读性反而更差。
         include:
           - os: ubuntu-latest
             platform: deb
-            bundle: deb
+            args: --bundles deb
           - os: windows-latest
             platform: nsis
-            bundle: nsis
+            args: --bundles nsis
+          # macos-latest 是 arm64 宿主，只出 arm64 的话 Intel Mac 装不了。
+          # universal-apple-darwin 让 tauri 分别编两个 arch 再 lipo 成一个包，
+          # 代价是 Rust 编译时间翻倍（两个 target 目录）。
           - os: macos-latest
             platform: dmg
-            bundle: dmg
+            args: --bundles dmg --target universal-apple-darwin
+            rustTargets: aarch64-apple-darwin,x86_64-apple-darwin
     steps:
       - uses: actions/checkout@v4
 
@@ -47,6 +54,9 @@ jobs:
         with:
           # 与 ci.yml 的 desktop job 同一个缓存键，tag run 因此能命中 master 上的依赖缓存。
           shared-key: tauri
+          # 只有 macOS 那行给了值；空串时不追加任何 --target 标志（dtolnay 的
+          # action 是按输入拼 rustup 参数，不是条件执行）。
+          targets: ${{ matrix.rustTargets }}
       - uses: ./.github/actions/setup-node
 
       # tauri-action 内部执行 tauri build：
@@ -64,4 +74,4 @@ jobs:
           releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: true
           prerelease: false
-          args: --bundles ${{ matrix.bundle }}
+          args: ${{ matrix.args }}

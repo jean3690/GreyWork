@@ -118,15 +118,20 @@ Wayland 环境下用 `pnpm tauri:wayland`，它会带上必要的环境变量。
 Rust 侧（在 `apps/desktop/src-tauri` 下执行）：`cargo fmt`、`cargo clippy --all-targets -- -D warnings`、
 `cargo test` —— 带 `--all-targets` 才会连 `tests/`、`examples/` 一起 lint。
 
+各平台出什么包、Windows 安装包怎么处理 WebView2、代码签名还差什么，见
+[docs/packaging.md](docs/packaging.md)。
+
 ## 测试与 CI
 
 - Vitest 分 `node`（纯逻辑）与 `dom`（组件行为）两个 project，覆盖率阈值按包配置。
 - `.github/workflows/ci.yml` 与本地钩子同构，但 web 侧的检查拆成 4 个并行 job（lint / typecheck /
   测试 / 渲染层构建），墙钟取最慢的一个而不是各步之和；另有 Rust job（`cargo fmt` →
-  `cargo clippy --locked` → `cargo test --locked`）和三平台打包矩阵（deb / NSIS / dmg）。
+  `cargo clippy --locked` → `cargo test --locked`）、Windows job（`cargo test --locked` + vitest，
+  唯一会编译并运行 `#[cfg(windows)]` 代码的地方）和三平台打包矩阵（deb / NSIS / dmg）。
 - 打 `v*` 标签触发 `.github/workflows/release.yml`，产出 deb / NSIS / dmg 并开一个 draft Release；
-  Release 正文自动取自 [CHANGELOG.md](CHANGELOG.md) 里该版本的条目，三个平台都成功后取消 draft 即发布。
-  打包与 CI 共用 `tauri` 这份 Rust 缓存键，因此 tag 构建直接复用 master 上已编译好的依赖产物。
+  macOS 走通用二进制，Intel Mac 也能装。Release 正文自动取自 [CHANGELOG.md](CHANGELOG.md) 里该版本的
+  条目，三个平台都成功后取消 draft 即发布。打包与 CI 共用 `tauri` 这份 Rust 缓存键，因此 tag 构建直接
+  复用 master 上已编译好的依赖产物。
 - pre-push 钩子会跑 `pnpm lint && pnpm -r test`，问题在本地就拦住。
 
 ## 安全模型

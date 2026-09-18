@@ -127,3 +127,30 @@ jobs:
       - name: Tests
         working-directory: apps/desktop/src-tauri
         run: cargo test --locked
+
+  # Windows 专属代码在 ubuntu 的 rust job 里根本编不到（taskkill 的创建标志、cmd /C
+  # 垫片、盘符相对路径与保留设备名、逐字前缀）。cargo test 会把 cfg(windows) 的分支
+  # 全编一遍，也能真正跑起 #[cfg(windows)] 的用例，所以这一个 job 同时覆盖编译与行为。
+  windows:
+    name: Windows (cargo test · vitest)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      # 不传 shared-key：desktop job 的 windows 行打的是 release 包，这里是 debug 的
+      # 测试构建，两者共用同一个键只会互相覆盖对方的 profile 产物。用 job 名做默认键，
+      # 各自稳定。缓存额度已接近仓库上限，这一点在 setup-rust 里有说明。
+      - uses: ./.github/actions/setup-rust
+      - uses: ./.github/actions/setup-node
+
+      # 与 rust job 相同的 --locked：Cargo.lock 与 Cargo.toml 不一致时立刻失败。
+      # tests/ 下 7 个集成测试里有 4 个会真的拉起 mock agent（node 脚本），
+      # 走的就是「宿主拼命令行 → 交 shell 执行」这条路径，Windows 上最容易踩坑。
+      - name: Cargo Test (src-tauri)
+        working-directory: apps/desktop/src-tauri
+        run: cargo test --locked
+
+      # 前端跑与 ubuntu 的 test job 同一套（core 的盘符路径工具、workbench 的标题栏
+      # 适配都在里面）。在此之前没有任何 JS 测试跑在 Windows 上。
+      - name: Tests (vitest)
+        run: pnpm -r test
