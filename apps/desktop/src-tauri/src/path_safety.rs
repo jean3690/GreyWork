@@ -1,0 +1,176 @@
+//! 路径段安全校验（Windows 优先）。
+//!
+//! 单段路径在 Windows 上有两类不靠 `..` 就能逃逸的写法，必须显式拒绝：
+//!
+//! 1. **盘符相对路径**：`C:evil` 有前缀无根，`base.join("C:evil")` 会**整段替换**基准
+//!    目录，落到 `C:` 的当前目录下 —— 于是「往 `<root>/<id>` 写/删」变成往根外操作。
+//!    同一个冒号还开 NTFS 数据流（`a.txt:hidden`）。因此冒号一律拒绝，不做「仅盘符
+//!    前缀」的例外：会话 id、技能相对路径、插件 id 都不需要它。
+//! 2. **保留设备名**：`CON` / `NUL` / `COM1` 之类在 Win32 层被解释成设备，带扩展名
+//!    （`CON.txt`）也算；`foo.` / `foo ` 结尾会被静默剥掉，与 `foo` 撞名。
+//!
+//! 纯字符串逻辑，三个平台行为一致，测试在 Linux CI 上即可跑。
+
+use std::path::PathBuf;
+
+/// 相对路径的最大层级（远端技能快照用，防止超深目录）。
+const MAX_REL_DEPTH: usize = 16;
+/// 会话 id 最大长度（与历史实现保持一致）。
+const SESSION_ID_MAX_CHARS: usize = 128;
+
+/// 单个路径段是否可安全地 `join` 到基准目录之下。
+///
+/// 拒绝：空 / `.` / `..` / 含 `/`、`\`、控制字符（含 NUL）、`<>"|?*`、`:` /
+/// 以 `.` 或空格结尾 / 首段是保留设备名（大小写不敏感，带扩展名也算）。
+pub fn is_safe_path_segment(segment: &str) -> bool {
+    if segment.is_empty() || segment == "." || segment == ".." {
+        return false;
+    }
+    // Windows 会静默剥掉结尾的 `.` 与空格，`foo.` 与 `foo` 落同一文件。
+    if segment.ends_with('.') || segment.ends_with(' ') {
+        return false;
+    }
+    // `is_control()` 覆盖 NUL 与 DEL/C1，不需要单独列 `\0`。
+    if segment.chars().any(|ch| {
+        ch.is_control() || matches!(ch, '/' | '\\' | '<' | '>' | '"' | '|' | '?' | '*' | ':')
+    }) {
+        return false;
+    }
+    !is_reserved_device_name(segment)
+}
+
+/// 净化远端声明的相对路径：仅允许正斜杠分隔的非空普通段。
+///
+/// 拒绝绝对路径（前导 `/`、反斜杠、含冒号的盘符前缀）、`..`、超深层级，
+/// 以及任何 `is_safe_path_segment` 不接受的段。
+pub fn sanitize_rel_path(raw: &str) -> Option<PathBuf> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed.starts_with('/') || trimmed.contains('\\') {
+        return None;
+    }
+    let mut out = PathBuf::new();
+    let mut depth = 0usize;
+    for segment in trimmed.split('/') {
+        if segment.is_empty() || segment == "." {
+            continue;
+        }
+        depth += 1;
+        if depth > MAX_REL_DEPTH || !is_safe_path_segment(segment) {
+            return None;
+        }
+        out.push(segment);
+    }
+    (!out.as_os_str().is_empty()).then_some(out)
+}
+
+/// 会话 id 是否可安全用作 `attachments/<id>/` 的目录名。
+///
+/// 在 `is_safe_path_segment` 之上额外要求：非空、≤128 字符、不以 `.` 开头
+/// （`.` 开头是宿主自己的元数据文件，不该被会话占用）。
+pub fn is_safe_session_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= SESSION_ID_MAX_CHARS
+        && !id.starts_with('.')
+        && is_safe_path_segment(id)
+}
+
+/// 首段（第一个 `.` 之前）是否是 Win32 保留设备名。
+fn is_reserved_device_name(segment: &str) -> bool {
+    let base = segment.split('.').next().unwrap_or(segment);
+    let upper = base.to_ascii_uppercase();
+    match upper.as_str() {
+        "CON" | "PRN" | "AUX" | "NUL" => true,
+        _ => match upper
+            .strip_prefix("COM")
+            .or_else(|| upper.strip_prefix("LPT"))
+        {
+            Some(rest) => rest.len() == 1 && rest.as_bytes()[0].is_ascii_digit(),
+            None => false,
+        },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn path_segment_rejects_windows_escapes() {
+        // 正常名字
+        assert!(is_safe_path_segment("SKILL.md"));
+        assert!(is_safe_path_segment("ses-a"));
+        assert!(is_safe_path_segment("a b"));
+        assert!(is_safe_path_segment(".hidden"));
+
+        // 盘符相对 / ADS
+        assert!(!is_safe_path_segment("c:evil"));
+        assert!(!is_safe_path_segment("C:"));
+        assert!(!is_safe_path_segment("a.txt:hidden"));
+
+        // 保留设备名（大小写不敏感，带扩展名也算）
+        for name in ["CON", "con", "Con.txt", "NUL", "aux", "COM1", "lpt9", "PRN"] {
+            assert!(!is_safe_path_segment(name), "{name:?} 应被拒绝");
+        }
+        // 不是保留名的近似写法要放行
+        assert!(is_safe_path_segment("COM10"));
+        assert!(is_safe_path_segment("COMx"));
+        assert!(is_safe_path_segment("CONSOLE"));
+
+        // 结尾的 `.` 与空格会被 Win32 静默剥掉
+        assert!(!is_safe_path_segment("foo."));
+        assert!(!is_safe_path_segment("foo "));
+
+        // 分隔符、通配符、控制字符
+        for bad in [
+            "", ".", "..", "...", "a/b", "a\\b", "a<b", "a>b", "a\"b", "a|b", "a?b", "a*b", "a\nb",
+            "a\0b",
+        ] {
+            assert!(!is_safe_path_segment(bad), "{bad:?} 应被拒绝");
+        }
+    }
+
+    #[test]
+    fn sanitize_rel_path_blocks_traversal_and_absolutes() {
+        assert_eq!(
+            sanitize_rel_path("SKILL.md"),
+            Some(PathBuf::from("SKILL.md"))
+        );
+        assert_eq!(
+            sanitize_rel_path("references/a.md"),
+            Some(PathBuf::from("references").join("a.md"))
+        );
+        assert_eq!(sanitize_rel_path("../evil"), None);
+        assert_eq!(sanitize_rel_path("/etc/passwd"), None);
+        assert_eq!(sanitize_rel_path("a\\b.md"), None);
+        assert_eq!(sanitize_rel_path(""), None);
+        // 盘符前缀 / 保留设备名 / 结尾点空格
+        assert_eq!(sanitize_rel_path("c:evil"), None);
+        assert_eq!(sanitize_rel_path("a/c:evil"), None);
+        assert_eq!(sanitize_rel_path("CON"), None);
+        assert_eq!(sanitize_rel_path("sub/con.txt"), None);
+        assert_eq!(sanitize_rel_path("foo."), None);
+        // 结尾空格只在中间段可测（整串会被 trim 掉尾部空白）
+        assert_eq!(sanitize_rel_path("foo /bar"), None);
+        assert_eq!(sanitize_rel_path("a<b"), None);
+        let deep = (0..20).map(|_| "x").collect::<Vec<_>>().join("/");
+        assert_eq!(sanitize_rel_path(&deep), None);
+    }
+
+    #[test]
+    fn session_id_rejects_drive_relative_and_reserved_names() {
+        assert!(is_safe_session_id("ses-a"));
+        assert!(is_safe_session_id("0d5b1f2e-aaaa"));
+
+        assert!(!is_safe_session_id(""));
+        assert!(!is_safe_session_id("C:evil"));
+        assert!(!is_safe_session_id("c:"));
+        assert!(!is_safe_session_id(".."));
+        assert!(!is_safe_session_id(".hidden"));
+        assert!(!is_safe_session_id("a/b"));
+        assert!(!is_safe_session_id("a\\b"));
+        assert!(!is_safe_session_id("CON"));
+        assert!(!is_safe_session_id("foo."));
+        assert!(!is_safe_session_id(&"x".repeat(SESSION_ID_MAX_CHARS + 1)));
+        assert!(is_safe_session_id(&"x".repeat(SESSION_ID_MAX_CHARS)));
+    }
+}

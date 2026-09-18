@@ -14,6 +14,7 @@ mod log;
 pub mod mcp;
 mod mcp_registry;
 mod notify;
+mod path_safety;
 mod plugin_market;
 mod plugin_window;
 mod process_guard;

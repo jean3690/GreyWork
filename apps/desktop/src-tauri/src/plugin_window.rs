@@ -29,7 +29,7 @@ fn plugins_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 
 /// 读取并校验某插件的落盘包；窗口资格判定。
 fn load_window_plugin(app: &tauri::AppHandle, plugin_id: &str) -> Result<PluginPackage, String> {
-    crate::plugin_market::validate_key(plugin_id, "plugin id")?;
+    crate::plugin_market::validate_dir_key(plugin_id, "plugin id")?;
     let root = plugins_root(app)?.join(plugin_id);
     let bytes = std::fs::read(root.join("plugin.json"))
         .map_err(|_| format!("plugin not installed: {plugin_id}"))?;

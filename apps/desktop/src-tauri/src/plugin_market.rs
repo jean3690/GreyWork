@@ -267,6 +267,20 @@ pub fn validate_key(raw: &str, label: &str) -> Result<(), String> {
     }
 }
 
+/// 会被当作**目录名**使用的 key（插件 id）。
+///
+/// `validate_key` 放行冒号（能力名形如 `demo:run`，见随包 registry），但插件 id 会经
+/// `root.join(id)` 落到文件系统上，必须再按路径段规则挡一层：盘符相对路径 `c:evil`
+/// 会让 `join` 整段替换基准目录，另外还有 Win32 保留设备名与结尾点/空格。
+pub fn validate_dir_key(raw: &str, label: &str) -> Result<(), String> {
+    validate_key(raw, label)?;
+    if crate::path_safety::is_safe_path_segment(raw) {
+        Ok(())
+    } else {
+        Err(format!("invalid {label}: {raw:?}"))
+    }
+}
+
 fn validate_version(raw: &str) -> Result<(), String> {
     let parts: Vec<&str> = raw.split('.').collect();
     if parts.len() == 3
@@ -547,7 +561,7 @@ fn validate_package(package: &PluginPackage) -> Result<(), String> {
         ));
     }
     let manifest = &package.manifest;
-    validate_key(&manifest.id, "plugin id")?;
+    validate_dir_key(&manifest.id, "plugin id")?;
     if manifest.id.starts_with("core.") {
         return Err("plugin id prefix core. is reserved for built-in plugins".to_string());
     }
@@ -884,7 +898,7 @@ pub fn plugin_market_list_installed(app: tauri::AppHandle) -> Result<Vec<PluginP
 
 #[tauri::command]
 pub fn plugin_market_uninstall(app: tauri::AppHandle, plugin_id: String) -> Result<(), String> {
-    validate_key(&plugin_id, "plugin id")?;
+    validate_dir_key(&plugin_id, "plugin id")?;
     let target = plugins_root(&app)?.join(&plugin_id);
     if !target.exists() {
         return Err(format!("plugin not installed: {plugin_id}"));
@@ -1106,6 +1120,24 @@ mod tests {
         let mut package = demo_package();
         package.manifest.contributes.modes[0].id = "UPPER".into();
         assert!(validate_package(&package).is_err());
+    }
+
+    #[test]
+    fn validate_dir_key_rejects_windows_path_escapes() {
+        assert!(validate_dir_key("demo.counter", "plugin id").is_ok());
+        assert!(validate_dir_key("advance", "action id").is_ok());
+
+        // 盘符相对路径：`install_package_at` 会 `root.join(id)`，冒号必须拒
+        assert!(validate_dir_key("c:evil", "plugin id").is_err());
+        assert!(validate_dir_key("c:", "plugin id").is_err());
+        assert!(validate_dir_key("a:b", "plugin id").is_err());
+        // Win32 保留设备名与结尾点
+        assert!(validate_dir_key("con", "plugin id").is_err());
+        assert!(validate_dir_key("nul.txt", "plugin id").is_err());
+        assert!(validate_dir_key("foo.", "plugin id").is_err());
+
+        // 但能力名允许冒号（随包 registry 里的 `demo:run`），不能被误伤
+        assert!(validate_key("demo:run", "required capability").is_ok());
     }
 
     #[test]

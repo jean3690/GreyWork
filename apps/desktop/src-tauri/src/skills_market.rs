@@ -14,6 +14,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::http::{read_json, shared_client, RESPONSE_READ_TIMEOUT};
+use crate::path_safety::sanitize_rel_path;
 
 const DEFAULT_MARKET_ORIGIN: &str = "https://www.skills.sh";
 const MAX_FILES_PER_SKILL: usize = 128;
@@ -92,35 +93,6 @@ fn validate_skill_id(raw: &str) -> Result<String, String> {
     } else {
         Err(format!("invalid skill id (expect lowercase slug): {raw:?}"))
     }
-}
-
-/// 净化远端声明的相对路径：仅允许正斜杠分隔的非空普通段，拒绝 `..`、反斜杠与超深层级。
-fn sanitize_rel_path(raw: &str) -> Option<PathBuf> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty()
-        || trimmed.starts_with('/')
-        || trimmed.contains('\\')
-        || trimmed.contains('\0')
-    {
-        return None;
-    }
-    let mut out = PathBuf::new();
-    let segments = trimmed.split('/');
-    let mut depth = 0usize;
-    for segment in segments {
-        if segment.is_empty() || segment == "." {
-            continue;
-        }
-        if segment == ".." {
-            return None;
-        }
-        depth += 1;
-        if depth > 16 {
-            return None;
-        }
-        out.push(segment);
-    }
-    (!out.as_os_str().is_empty()).then_some(out)
 }
 
 fn market_origin(origin: Option<&str>) -> String {
@@ -366,24 +338,6 @@ mod tests {
         assert!(parse_download_ref("../etc/passwd").is_err());
         assert!(parse_download_ref("a/b/c/d").is_err());
         assert!(parse_download_ref("").is_err());
-    }
-
-    #[test]
-    fn rel_path_sanitizer_blocks_traversal_and_absolutes() {
-        assert_eq!(
-            sanitize_rel_path("SKILL.md"),
-            Some(PathBuf::from("SKILL.md"))
-        );
-        assert_eq!(
-            sanitize_rel_path("references/a.md"),
-            Some(PathBuf::from("references").join("a.md"))
-        );
-        assert_eq!(sanitize_rel_path("../evil"), None);
-        assert_eq!(sanitize_rel_path("/etc/passwd"), None);
-        assert_eq!(sanitize_rel_path("a\\b.md"), None);
-        assert_eq!(sanitize_rel_path(""), None);
-        let deep = (0..20).map(|_| "x").collect::<Vec<_>>().join("/");
-        assert_eq!(sanitize_rel_path(&deep), None);
     }
 
     #[test]

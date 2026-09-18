@@ -211,16 +211,10 @@ pub fn default_root(home: &Path) -> Result<PathBuf, String> {
 
 /// 校验并拼出某会话的附件目录。
 ///
-/// 只认纯 id（非空、无路径分隔符、无 `..`、不以 `.` 开头），且固定拼在附件根之下 ——
+/// 只认纯 id（见 `path_safety::is_safe_session_id`），且固定拼在附件根之下 ——
 /// 渲染端能调这个命令，就不能把任意路径的删除权交给它。
 fn session_attachments_dir(root: &Path, session_id: &str) -> Result<PathBuf, String> {
-    let invalid = session_id.is_empty()
-        || session_id.len() > 128
-        || session_id.starts_with('.')
-        || session_id.contains('/')
-        || session_id.contains('\\')
-        || session_id.contains("..");
-    if invalid {
+    if !crate::path_safety::is_safe_session_id(session_id) {
         return Err(format!("非法会话 id: {session_id}"));
     }
     Ok(root.join(ATTACHMENTS_SUB_DIR).join(session_id))
@@ -1001,7 +995,21 @@ mod tests {
         let victim = tmp.join("victim");
         std::fs::create_dir_all(&victim).unwrap();
 
-        for id in ["", "..", "../victim", "a/b", "a\\b", ".hidden"] {
+        for id in [
+            "",
+            "..",
+            "../victim",
+            "a/b",
+            "a\\b",
+            ".hidden",
+            // Windows 盘符相对路径：`join` 会整段替换基准目录
+            "C:evil",
+            "c:",
+            // Win32 保留设备名与结尾点（会被静默剥掉而与 `CON` 撞名）
+            "CON",
+            "con.txt",
+            "foo.",
+        ] {
             assert!(
                 prune_session_attachments(&root, id).is_err(),
                 "id {id:?} 应被拒绝"
