@@ -94,6 +94,22 @@ pub fn is_filesystem_root(path: &Path) -> bool {
     has_root
 }
 
+/// 去掉 Windows `canonicalize` 加的 verbatim 前缀，其余原样保留（分隔符、大小写）。
+///
+/// `\\?\C:\ws\a` → `C:\ws\a`；`\\?\UNC\server\share\a` → `\\server\share\a`。
+///
+/// 只在**返回渲染端**时用：`\\?\` 是宿主内部做长度/语义处理的形态，UI 里显示成
+/// 「会话存 \\?\C:\ws/.greyWork/sessions」既难看又会让前端的路径判定失效。
+/// 内部比较不依赖这个函数 —— 那边走 `acp_host::comparable_path`，它会再抹平一次。
+pub fn strip_verbatim_prefix(raw: &str) -> String {
+    // UNC 形态要先判：`\\?\UNC\server\share` 剥完前缀是 `\\server\share`，
+    // 直接删 `\\?\` 会留下一个假的 `UNC\` 目录名。
+    if let Some(rest) = raw.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{rest}");
+    }
+    raw.strip_prefix(r"\\?\").unwrap_or(raw).to_string()
+}
+
 /// 首段（第一个 `.` 之前）是否是 Win32 保留设备名。
 fn is_reserved_device_name(segment: &str) -> bool {
     let base = segment.split('.').next().unwrap_or(segment);
@@ -192,6 +208,22 @@ mod tests {
         assert!(!is_safe_session_id("foo."));
         assert!(!is_safe_session_id(&"x".repeat(SESSION_ID_MAX_CHARS + 1)));
         assert!(is_safe_session_id(&"x".repeat(SESSION_ID_MAX_CHARS)));
+    }
+
+    #[test]
+    fn strip_verbatim_prefix_keeps_drive_and_unc_shapes() {
+        assert_eq!(strip_verbatim_prefix(r"\\?\C:\ws\a"), r"C:\ws\a");
+        assert_eq!(strip_verbatim_prefix(r"\\?\C:\ws\"), r"C:\ws\");
+        // UNC：剥完应是 `\\server\share\a`，不是 `UNC\server\share\a`
+        assert_eq!(
+            strip_verbatim_prefix(r"\\?\UNC\server\share\a"),
+            r"\\server\share\a"
+        );
+        // 已经不带前缀的原样返回（POSIX、普通盘符路径、普通 UNC）
+        assert_eq!(strip_verbatim_prefix("/home/u/a"), "/home/u/a");
+        assert_eq!(strip_verbatim_prefix(r"C:\ws\a"), r"C:\ws\a");
+        assert_eq!(strip_verbatim_prefix(r"\\server\share"), r"\\server\share");
+        assert_eq!(strip_verbatim_prefix(""), "");
     }
 
     /// 所有平台都成立的根判定。

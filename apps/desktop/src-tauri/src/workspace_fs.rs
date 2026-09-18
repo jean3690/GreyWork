@@ -93,7 +93,9 @@ impl WorkspaceFsAccess {
         self.persist(&paths)?;
         Ok(canonical
             .into_iter()
-            .map(|path| path.to_string_lossy().into_owned())
+            // 返回渲染端前剥掉 `\\?\`：那是宿主内部形态，露到 UI 里既难看又会让
+            // 前端的绝对路径判定失效（见 path_safety::strip_verbatim_prefix）。
+            .map(|path| crate::path_safety::strip_verbatim_prefix(&path.to_string_lossy()))
             .collect())
     }
 
@@ -311,7 +313,9 @@ pub fn fs_list_dir(
             name: entry.file_name().to_string_lossy().into_owned(),
             kind: kind.to_string(),
             size: metadata.is_file().then_some(metadata.len()),
-            path: canonical.to_string_lossy().into_owned(),
+            // 剥掉 `\\?\` 再回前端；前端原样回传时宿主会重新 canonicalize，
+            // 与账本里的 verbatim 形态仍能对上。
+            path: crate::path_safety::strip_verbatim_prefix(&canonical.to_string_lossy()),
         });
     }
     Ok(out)

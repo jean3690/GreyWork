@@ -561,7 +561,10 @@ pub fn store_sessions_relocate(
 /// 默认数据根（`~/.greyWork`）——前端产物默认落盘目录基准。
 #[tauri::command]
 pub fn store_default_root(app: tauri::AppHandle) -> Result<String, String> {
-    default_root(&app_home(&app)?).map(|root| root.to_string_lossy().into_owned())
+    // 这里没有 canonicalize（路径来自 home_dir），本来就不带 `\\?\`；照样过一遍是为了
+    // 让「离开宿主的路径一律不带 verbatim 前缀」成为一条不用逐个核对的规则。
+    default_root(&app_home(&app)?)
+        .map(|root| crate::path_safety::strip_verbatim_prefix(&root.to_string_lossy()))
 }
 
 /// 删除某会话的附件目录（会话被删除时调用）：只删 `<root>/attachments/<会话id>`，
@@ -591,9 +594,11 @@ pub async fn pick_workspace_folder(
         .map_err(|error| format!("目录选择对话框失败: {error}"))?;
     selected
         .map(|path| {
-            access
-                .authorize_selected_path(&path)
-                .map(|path| path.to_string_lossy().into_owned())
+            access.authorize_selected_path(&path).map(|path| {
+                // 剥掉 `\\?\`：这个值会被存进工作区记录并在历史列表里显示，
+                // 也会被前端当绝对路径判定。
+                crate::path_safety::strip_verbatim_prefix(&path.to_string_lossy())
+            })
         })
         .transpose()
 }
