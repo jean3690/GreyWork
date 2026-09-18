@@ -24,7 +24,9 @@ vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => h }));
 vi.mock("vue-router", () => ({ useRoute: () => ({ path: "/assistants" }), useRouter: () => ({ push: vi.fn() }) }));
 
 import Titlebar from "@/features/shell/Titlebar.vue";
+import Hint from "@/features/shared/Hint.vue";
 import { i18n } from "@/i18n";
+import { hostOs } from "@/lib/host-platform";
 import { usePreviewStore } from "@/stores/preview";
 
 async function mountTitlebar() {
@@ -94,6 +96,61 @@ describe("标题栏窗口控制键", () => {
     wrapper.unmount();
 
     expect(h.unlisten).toHaveBeenCalledTimes(1);
+  });
+});
+
+// macOS 上窗口是 decorations:false（没有原生红绿灯），控件仍自绘，但按平台习惯放左侧
+// 且顺序相反；快捷键提示写 ⌘ 而不是 Ctrl。hostOs 未回来时一律按非 macOS 走。
+describe("标题栏 macOS 适配", () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    hostOs.value = null;
+    vi.stubGlobal("__TAURI_INTERNALS__", {});
+  });
+
+  afterEach(() => {
+    hostOs.value = null;
+    vi.unstubAllGlobals();
+  });
+
+  it("非 macOS 时控件靠 order-last 甩到最右，提示写 Ctrl+K", async () => {
+    const wrapper = await mountTitlebar();
+    const controls = wrapper.get('[data-testid="win-controls"]');
+
+    expect(controls.classes()).toContain("order-last");
+    expect(wrapper.get('[data-testid="titlebar-search"]').attributes("aria-label")).toBe("搜索");
+    // 顺序仍是 最小化 → 最大化 → 关闭
+    expect(controls.findAll("button").map((button) => button.attributes("data-testid"))).toEqual([
+      "win-minimize",
+      "win-maximize",
+      "win-close",
+    ]);
+  });
+
+  it("macOS 时控件留在左侧且顺序反转为 关闭 → 最大化 → 最小化", async () => {
+    hostOs.value = "macos";
+    const wrapper = await mountTitlebar();
+    const controls = wrapper.get('[data-testid="win-controls"]');
+
+    expect(controls.classes()).not.toContain("order-last");
+    expect(controls.classes()).toContain("-ml-2");
+    expect(controls.findAll("button").map((button) => button.attributes("data-testid"))).toEqual([
+      "win-close",
+      "win-maximize",
+      "win-minimize",
+    ]);
+  });
+
+  it("macOS 提示写 ⌘K，其余平台写 Ctrl+K", async () => {
+    // 提示文案挂在 Hint 的 prop 上（reka 的弹层只在悬停/聚焦时才 portal 出来，
+    // 所以不能断言 wrapper.text()）。
+    hostOs.value = "macos";
+    const mac = await mountTitlebar();
+    expect(mac.getComponent(Hint).props("text")).toContain("⌘K");
+
+    hostOs.value = "linux";
+    const linux = await mountTitlebar();
+    expect(linux.getComponent(Hint).props("text")).toContain("Ctrl+K");
   });
 });
 

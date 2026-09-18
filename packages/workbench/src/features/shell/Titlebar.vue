@@ -7,6 +7,7 @@ import { useWorkspaceStore } from "@/stores/workspace";
 import { usePreviewStore } from "@/stores/preview";
 import { useWorkspacePanelStore } from "@/stores/workspacePanel";
 import { useActivityStore } from "@/stores/activity";
+import { hostOs } from "@/lib/host-platform";
 import Icon from "@/features/shared/Icon.vue";
 import Hint from "@/features/shared/Hint.vue";
 import SearchPanel from "@/features/workspace/SearchPanel.vue";
@@ -38,6 +39,15 @@ const activeWorkspace = computed(
 
 /** 浏览器态没有宿主窗口可控，整组控制键不渲染。 */
 const hasWindowControls = isTauriRuntime();
+/**
+ * 是否 macOS。`hostOs` 未回来时按 false 走 —— 也就是 Windows/Linux 的既有布局。
+ *
+ * macOS 上窗口是 `decorations: false`（没有原生红绿灯），控件仍由本组件自绘，但按
+ * 平台习惯放**左侧**且顺序相反（关闭在最左）；图标沿用现有单色字形，不另画红黄绿圆点。
+ */
+const onMac = computed(() => hostOs.value === "macos");
+/** 快捷键提示：macOS 用 ⌘。按键处理（`onSearchShortcut`）本来就同时认 ctrl/meta。 */
+const searchHint = computed(() => `搜索会话与功能（${onMac.value ? "⌘K" : "Ctrl+K"}）`);
 const maximized = ref(false);
 let unlistenResized: UnlistenFn | null = null;
 
@@ -90,6 +100,43 @@ function closeWindow(): void {
     .catch((error: unknown) => console.error("[titlebar] 关闭窗口失败", error));
 }
 
+/**
+ * 三个窗口控制键的描述（Windows 顺序：最小化 → 最大化 → 关闭）。
+ *
+ * macOS 上整组放到左侧并把顺序反过来（关闭在最左），所以这里返回前先 reverse；
+ * 按钮本身只有一份定义，避免两套 DOM 各写一遍导致 hover 色/测试 id 漂移。
+ */
+const windowControls = computed(() => {
+  const controls = [
+    {
+      key: "minimize",
+      label: "最小化",
+      testid: "win-minimize",
+      hover: "hover:bg-panel hover:text-foreground",
+      icon: "minimize",
+      run: minimizeWindow,
+    },
+    {
+      key: "maximize",
+      label: maximized.value ? "向下还原" : "最大化",
+      testid: "win-maximize",
+      hover: "hover:bg-panel hover:text-foreground",
+      icon: maximized.value ? "restore" : "maximize",
+      run: toggleMaximizeWindow,
+    },
+    {
+      key: "close",
+      label: "关闭",
+      testid: "win-close",
+      // 关闭键 hover 用 Windows 的 #c42b1e 而非主题色——这里的目的就是仿系统 chrome。
+      hover: "hover:bg-[#c42b1e] hover:text-white",
+      icon: "close",
+      run: closeWindow,
+    },
+  ];
+  return onMac.value ? [...controls].reverse() : controls;
+});
+
 onMounted(async () => {
   window.addEventListener("keydown", onSearchShortcut);
   if (!hasWindowControls) return;
@@ -114,6 +161,27 @@ onBeforeUnmount(() => {
     data-tauri-drag-region
     data-testid="grey-titlebar"
   >
+    <!-- 窗口控制键（仅桌面壳）。DOM 里放第一个，靠 `order-last` 决定视觉位置：
+         macOS 留在左侧（平台习惯），其余平台甩到最右（仿 Windows chrome）。
+         `-ml-2`/`-mr-2` 抵消 header 的 px-2 贴住对应边角；self-stretch 吃满标题栏高度。 -->
+    <div
+      v-if="hasWindowControls"
+      class="flex self-stretch"
+      :class="onMac ? '-ml-2 mr-1' : 'order-last -mr-2 ml-1'"
+      data-testid="win-controls"
+    >
+      <button
+        v-for="control in windowControls"
+        :key="control.key"
+        :class="[controlButton, control.hover]"
+        :aria-label="control.label"
+        :data-testid="control.testid"
+        @click="control.run()"
+      >
+        <Icon :name="control.icon" :size="18" :stroke-width="2.6" />
+      </button>
+    </div>
+
     <button
       class="grid size-7 cursor-pointer place-items-center rounded-[6px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
       :aria-label="props.collapsed ? '展开侧栏' : '折叠侧栏'"
@@ -125,7 +193,7 @@ onBeforeUnmount(() => {
     <!-- 搜索：紧挨侧栏开合键。Popover 由本组件持有（触发器即这颗按钮），
          SearchPanel 只出 Content —— 层级、翻转夹紧、Esc、点外部关闭全交给 reka。 -->
     <Popover v-model:open="searchOpen">
-      <Hint text="搜索会话与功能（Ctrl+K）">
+      <Hint :text="searchHint">
         <PopoverTrigger as-child>
           <button
             class="grid size-7 cursor-pointer place-items-center rounded-[6px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
@@ -184,34 +252,5 @@ onBeforeUnmount(() => {
     >
       <Icon :name="activity.open ? 'down' : 'up'" :size="16" />
     </button>
-
-    <!-- Windows 式控制键：-mr-2 抵消 header 的 px-2 贴住右上角，self-stretch 吃满标题栏高度。
-         关闭键 hover 用 Windows 的 #c42b1e 而非主题色——这里的目的就是仿系统 chrome。 -->
-    <div v-if="hasWindowControls" class="-mr-2 ml-1 flex self-stretch" data-testid="win-controls">
-      <button
-        :class="[controlButton, 'hover:bg-panel hover:text-foreground']"
-        aria-label="最小化"
-        data-testid="win-minimize"
-        @click="minimizeWindow"
-      >
-        <Icon name="minimize" :size="18" :stroke-width="2.6" />
-      </button>
-      <button
-        :class="[controlButton, 'hover:bg-panel hover:text-foreground']"
-        :aria-label="maximized ? '向下还原' : '最大化'"
-        data-testid="win-maximize"
-        @click="toggleMaximizeWindow"
-      >
-        <Icon :name="maximized ? 'restore' : 'maximize'" :size="18" :stroke-width="2.6" />
-      </button>
-      <button
-        :class="[controlButton, 'hover:bg-[#c42b1e] hover:text-white']"
-        aria-label="关闭"
-        data-testid="win-close"
-        @click="closeWindow"
-      >
-        <Icon name="close" :size="18" :stroke-width="2.6" />
-      </button>
-    </div>
   </header>
 </template>

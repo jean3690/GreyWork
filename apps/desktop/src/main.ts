@@ -2,7 +2,7 @@ import { createApp, nextTick } from "vue";
 import { createPinia } from "pinia";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import App from "./App.vue";
-import { bootInstalledMarketPlugins, createAppRouter, i18n } from "@greywork/workbench";
+import { bootInstalledMarketPlugins, createAppRouter, i18n, loadHostOs } from "@greywork/workbench";
 import "./tailwind.css";
 
 /* ===== 启动基线打点 =====
@@ -67,6 +67,11 @@ async function bootstrap(): Promise<void> {
   const app = createApp(App).use(i18n).use(createPinia()).use(createAppRouter());
   app.mount("#app");
   mark("mounted");
+
+  // 宿主 OS：标题栏据此决定窗口控件放左还是放右、快捷键提示写 ⌘ 还是 Ctrl。
+  // 同样**不 await** —— 取不到就按非 macOS 渲染（Windows/Linux 的既有布局），
+  // 不能因为一次信息性 IPC 挡住首帧或窗口显示。
+  void loadHostOs();
   // Dev-only e2e 钩子：暴露内存 FS 与事件总线，便于 Playwright 注入产物并触发预览
   // （生产构建中 import.meta.env.DEV 为 false，整段被 tree-shake 移除）。
   if (import.meta.env.DEV) {
