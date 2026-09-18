@@ -495,4 +495,56 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
         let _ = std::fs::remove_dir_all(outside);
     }
+
+    /// 建一个目录联接（junction）指向 `target`。
+    ///
+    /// 用 junction 而不是 symlink：`mklink /J` 不需要 SeCreateSymbolicLinkPrivilege，
+    /// 非管理员、未开开发者模式也能建 —— 这既是它在 Windows 上更现实的越界形态，也让用例
+    /// 不依赖运行者的特权。两者都是 reparse point，`std::fs::canonicalize` 走
+    /// GetFinalPathNameByHandle 一并解析，所以覆盖的是同一条判定路径。
+    #[cfg(windows)]
+    fn junction(target: &Path, link: &Path) {
+        let output = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .output()
+            .expect("调用 mklink");
+        assert!(
+            output.status.success(),
+            "创建目录联接失败: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    /// Windows 上目录联接同样不能越出授权根（与 unix 的 symlink 用例对应）。
+    #[cfg(windows)]
+    #[test]
+    fn junction_cannot_escape_authorized_root() {
+        let root = temp_dir("junction-root");
+        let outside = temp_dir("junction-outside");
+        std::fs::write(outside.join("secret.txt"), b"secret").expect("写外部文件");
+        junction(&outside, &root.join("link"));
+        let access = access(&root);
+        assert!(access
+            .resolve_existing(&root.join("link/secret.txt").to_string_lossy())
+            .is_err());
+        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_dir_all(outside);
+    }
+
+    /// 写路径上的联接同样不能越界：`resolve_write` 会 canonicalize 最近的存在祖先。
+    #[cfg(windows)]
+    #[test]
+    fn write_through_junction_cannot_escape_authorized_root() {
+        let root = temp_dir("junction-write-root");
+        let outside = temp_dir("junction-write-outside");
+        junction(&outside, &root.join("link"));
+        let access = access(&root);
+        assert!(access
+            .resolve_write(&root.join("link/new.txt").to_string_lossy())
+            .is_err());
+        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_dir_all(outside);
+    }
 }
