@@ -179,12 +179,14 @@ fn shell_command_with(command: &str, needs_shell: impl Fn(&str) -> bool) -> Stri
 #[cfg(windows)]
 pub fn kill_process_tree(pid: u32) {
     let pid = pid.to_string();
-    let _ = std::process::Command::new("taskkill")
+    let mut command = std::process::Command::new("taskkill");
+    command
         .args(["/PID", pid.as_str(), "/T", "/F"])
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status();
+        .stderr(std::process::Stdio::null());
+    hide_console_std(&mut command);
+    let _ = command.status();
 }
 
 #[cfg(unix)]
@@ -204,6 +206,55 @@ pub fn isolate_process_group(command: &mut tokio::process::Command) {
     command.process_group(0);
     #[cfg(not(unix))]
     let _ = command;
+}
+
+/* ===== Windows 控制台窗口抑制 ===== */
+
+/// Windows `CREATE_NO_WINDOW`（`0x0800_0000`）：不给控制台程序分配新的控制台窗口。
+///
+/// `windows-sys` 不是本 crate 的直接依赖，所以写死字面量。抽成函数是为了让**任何**
+/// 平台都能把这个值钉住 —— `#[cfg(any(windows, test))]` 是因为非 Windows 的非测试
+/// 构建里它没有调用点，留着会被判 dead_code。
+#[cfg(any(windows, test))]
+const fn console_creation_flags() -> Option<u32> {
+    if cfg!(windows) {
+        Some(0x0800_0000)
+    } else {
+        None
+    }
+}
+
+/// 让 `std::process::Command` 在 Windows 上不闪控制台窗口；其他平台空实现。
+///
+/// 打包版是 GUI 子系统程序（自身没有控制台），spawn `taskkill` / `git` 这类控制台程序
+/// 时 Windows 会新分配一个控制台窗口 —— 现象就是黑框一闪。ACP 路径没这问题，因为
+/// `agent-client-protocol` 内部已经设了 `CREATE_NO_WINDOW`。
+pub fn hide_console_std(command: &mut std::process::Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        if let Some(flags) = console_creation_flags() {
+            command.creation_flags(flags);
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = command;
+    }
+}
+
+/// `tokio::process::Command` 版本；语义同 `hide_console_std`。
+pub fn hide_console_tokio(command: &mut tokio::process::Command) {
+    #[cfg(windows)]
+    {
+        if let Some(flags) = console_creation_flags() {
+            command.creation_flags(flags);
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = command;
+    }
 }
 
 /* ===== GUI 启动时的 PATH 兜底（Unix） ===== */
@@ -464,6 +515,16 @@ mod tests {
                 .ends_with("npx.cmd")),
             "cmd /C \"C:\\nodejs\\npx.cmd\" -y pkg"
         );
+    }
+
+    /// 常量必须在两个平台上都钉住：Windows 上是 `CREATE_NO_WINDOW`，其他平台是「不设」。
+    #[test]
+    fn console_creation_flags_pins_create_no_window() {
+        if cfg!(windows) {
+            assert_eq!(console_creation_flags(), Some(0x0800_0000));
+        } else {
+            assert_eq!(console_creation_flags(), None);
+        }
     }
 
     /// fish 的 `$PATH` 是列表，必须走 `string join :`；其余 shell 用 `"$PATH"`。

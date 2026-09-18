@@ -51,6 +51,9 @@ pub struct CommitResultDto {
 /// 在授权根内执行 git；失败返回 stderr（去尾空白）。绝不弹出交互提示。
 fn run_git(root: &Path, args: &[&str]) -> Result<String, String> {
     let mut cmd = std::process::Command::new(GIT);
+    // Windows 上隐藏控制台窗口（GUI 程序 spawn 控制台程序会闪黑框）。
+    // 只隐藏、不 detach：下面用 `.output()` 同步收 stdio。
+    crate::process_guard::hide_console_std(&mut cmd);
     cmd.current_dir(root)
         .env("GIT_TERMINAL_PROMPT", "0")
         // 只读操作不升级索引/引用（避免后台还挂着别的 git 时搬走锁文件）

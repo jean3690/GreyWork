@@ -493,6 +493,8 @@ async fn probe_stdio_inner(
     // 自成进程组组长：kill_process_tree 靠进程组整组回收，不设的话它找不到同名组
     // （ESRCH）而静默失效 —— npx → node 的孙子进程会残留。见 process_guard 的契约。
     crate::process_guard::isolate_process_group(&mut spawn);
+    // Windows 上隐藏控制台窗口（GUI 程序 spawn cmd.exe/控制台程序会闪黑框）
+    crate::process_guard::hide_console_tokio(&mut spawn);
     // 只改探测不够：MCP server 自己也要按 PATH 找 `npx`/`node`。用户没显式指定 PATH 时
     // 注入解析到的登录 shell PATH（见 process_guard::init_login_path；Windows 恒为 None）。
     let mut envs = env.unwrap_or_default();
