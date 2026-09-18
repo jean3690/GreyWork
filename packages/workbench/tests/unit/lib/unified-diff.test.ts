@@ -89,6 +89,12 @@ describe("parseUnifiedDiff", () => {
     const files = parseUnifiedDiff(["diff --git a/x b/x", "@@ -1 +1 @@", "-a", "+b", "\\ No newline at end of file"].join("\n"));
     expect(files[0].lines.at(-1)?.kind).toBe("meta");
   });
+
+  it("CRLF patch：路径与行内容都不带尾随 \\r", () => {
+    const files = parseUnifiedDiff(["diff --git a/src/a.ts b/src/a.ts", "@@ -1 +1 @@", "-old", "+new"].join("\r\n"));
+    expect(files[0].path).toBe("src/a.ts");
+    expect(files[0].lines.map((line) => line.text)).toEqual(["diff --git a/src/a.ts b/src/a.ts", "@@ -1 +1 @@", "old", "new"]);
+  });
 });
 
 describe("countDiffLines", () => {
@@ -131,6 +137,15 @@ describe("diffTexts", () => {
     expect(result.added).toBe(1);
     expect(result.removed).toBe(0);
     expect(result.lines.at(-1)).toEqual({ kind: "add", text: "c", oldNo: null, newNo: 3 });
+  });
+
+  it("两侧行尾不同（CRLF vs LF）不算改动", () => {
+    // Windows 上 agent 读回 CRLF 文件、写回 LF 是常态：不归一就会整篇判成改动。
+    const result = diffTexts("keep\r\nsame\r\n", "keep\nsame\n");
+    expect(result.added).toBe(0);
+    expect(result.removed).toBe(0);
+    expect(result.lines.every((line) => line.kind === "context")).toBe(true);
+    expect(result.lines.map((line) => line.text)).toEqual(["keep", "same"]);
   });
 
   it("纯删除：新文是前缀，只在尾部删减", () => {

@@ -52,6 +52,17 @@ function isMeta(line: string): boolean {
 }
 
 /**
+ * 按行拆分 patch / 文本，兼容 CRLF 与孤立 CR。
+ *
+ * Windows 上 `core.autocrlf=true` 的仓库、或 agent 直接读回来的 CRLF 文件，行尾会带
+ * `\r`：只按 `\n` 切会让每个 `\r` 留在行内容里（渲染成方块），文件路径也会带上尾随
+ * `\r`；两份原文差分时更糟 —— 一边 CRLF 一边 LF，逐行都判成改动，整篇都是红绿。
+ */
+function splitLinesCompat(text: string): string[] {
+  return text.split(/\r\n|\n|\r/);
+}
+
+/**
  * 解析 unified diff。
  *
  * 分段优先认 `diff --git`；没有它（`diff -u` 直出的裸 patch）时退而用 `+++` 行起段，
@@ -88,7 +99,7 @@ export function parseUnifiedDiff(text: string): DiffFile[] {
   /** 当前段；patch 没有文件头就先开一个匿名段，宁可标「未知文件」也不丢内容。 */
   const tail = (): DiffFile => files[files.length - 1] ?? openFile("(未知文件)", "");
 
-  for (const line of text.split("\n")) {
+  for (const line of splitLinesCompat(text)) {
     const git = GIT_HEADER.exec(line);
     if (git) {
       openFile(git[2], line);
@@ -183,7 +194,7 @@ const MAX_DIFF_CELLS = 4_000_000;
 /** 拆行：吃掉结尾换行，否则 `"a\n"` 会多出一条空行，差分出来凭空多一个改动。 */
 function splitLines(text: string): string[] {
   if (text === "") return [];
-  const lines = text.split("\n");
+  const lines = splitLinesCompat(text);
   if (lines[lines.length - 1] === "") lines.pop();
   return lines;
 }
