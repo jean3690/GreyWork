@@ -64,10 +64,7 @@ fn validate_workspace_root(raw: &str) -> Result<PathBuf, String> {
             "workspace root must be an absolute path, got: {raw:?}"
         ));
     }
-    let normalized = trimmed.replace('\\', "/");
-    if normalized == "/"
-        || (normalized.len() == 3 && normalized.as_bytes()[1] == b':' && normalized.ends_with('/'))
-    {
+    if crate::path_safety::is_filesystem_root(&path) {
         return Err("workspace root must not be a filesystem root".to_string());
     }
     if !path.is_dir() {

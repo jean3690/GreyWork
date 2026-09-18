@@ -139,19 +139,22 @@ fn normalize_lexical(path: &Path) -> PathBuf {
 /// Windows 上 `canonicalize` 会给路径加 `\\?\`（verbatim）前缀，而 agent 在工具调用里
 /// 报的路径没有；大小写与分隔符也不保证与锚定基准一致。不抹平这些差异，`starts_with`
 /// 会把工作区内的写入误判成越界 —— 现象是「工作区档位下 agent 改不了自己目录里的文件」。
-/// POSIX 路径大小写敏感，不能做同样处理。
+///
+/// macOS 默认文件系统（APFS / HFS+）同样大小写不敏感，也一并折：agent 回一个大小写
+/// 不同的路径会被 `is_within` 误拒（fail-closed，不是安全洞，但是 macOS 上的假阴性）。
+/// Linux 才是真正大小写敏感的 POSIX 语义，不能折。
 fn comparable_path(path: &Path) -> PathBuf {
     let normalized = normalize_lexical(path);
-    if cfg!(windows) {
-        PathBuf::from(windows_comparable_text(&normalized.to_string_lossy()))
+    if cfg!(any(windows, target_os = "macos")) {
+        PathBuf::from(flattened_comparable_text(&normalized.to_string_lossy()))
     } else {
         normalized
     }
 }
 
-/// `comparable_path` 的 Windows 分支：抹掉 verbatim 前缀、统一分隔符、折成小写。
+/// `comparable_path` 的「抹平」分支：去掉 verbatim 前缀、统一分隔符、折成小写。
 /// 抽成独立函数是为了能在任意平台单测（规则本身与平台无关）。
-fn windows_comparable_text(raw: &str) -> String {
+fn flattened_comparable_text(raw: &str) -> String {
     let stripped = raw.strip_prefix(r"\\?\").unwrap_or(raw);
     stripped.replace('\\', "/").to_lowercase()
 }
@@ -205,18 +208,14 @@ fn option_kind_label(kind: PermissionOptionKind) -> &'static str {
     }
 }
 
-/// cwd 校验：绝对路径、已存在的目录、非文件系统根（"/"、"C:\" 等）。
+/// cwd 校验：绝对路径、已存在的目录、非文件系统根（"/"、"C:\"、"\\server\share"）。
 fn validate_cwd(raw: &str) -> Result<PathBuf, String> {
     let trimmed = raw.trim();
     let path = PathBuf::from(trimmed);
     if trimmed.is_empty() || !path.is_absolute() {
         return Err(format!("cwd must be an absolute path, got: {raw:?}"));
     }
-    // 拒绝文件系统根："/"、"C:/"、"C:\"
-    let normalized = trimmed.replace('\\', "/");
-    if normalized == "/"
-        || (normalized.len() == 3 && normalized.as_bytes()[1] == b':' && normalized.ends_with('/'))
-    {
+    if crate::path_safety::is_filesystem_root(&path) {
         return Err("cwd must not be a filesystem root".to_string());
     }
     if !path.is_dir() {
@@ -682,7 +681,9 @@ pub async fn acp_start(
         let cwd = cwd
             .as_deref()
             .ok_or_else(|| "sandbox: workspace is required when sandbox is enabled".to_string())?;
-        let home = std::env::var("HOME").ok().map(std::path::PathBuf::from);
+        // 用 Tauri 的 home_dir 而不是裸 `HOME`：Windows 上对应的环境变量是
+        // `USERPROFILE`，只读 `HOME` 会拿不到值，agent 的配置目录就静默不挂载。
+        let home = app.path().home_dir().ok();
         crate::sandbox::wrap_command(mode, cwd, home.as_deref(), &command)?
     };
 
@@ -2168,33 +2169,50 @@ mod tests {
         assert!(!is_within(base, Path::new("/home/user/proj/../secret.ts")));
     }
 
-    /// Windows 归一化规则本身与平台无关，所以在 Linux 上也能钉住它。
+    /// 归一化规则本身与平台无关，所以在 Linux 上也能钉住它。
     /// 不这么做的话，verbatim 前缀 / 分隔符 / 大小写任一差异都会让工作区档位误判越界。
     #[test]
-    fn windows_comparable_text_flattens_prefix_separators_and_case() {
+    fn flattened_comparable_text_drops_prefix_separators_and_case() {
         assert_eq!(
-            windows_comparable_text(r"\\?\C:\Users\Me\Proj\a.ts"),
+            flattened_comparable_text(r"\\?\C:\Users\Me\Proj\a.ts"),
             "c:/users/me/proj/a.ts"
         );
         assert_eq!(
-            windows_comparable_text(r"C:/Users/Me/Proj/a.ts"),
+            flattened_comparable_text(r"C:/Users/Me/Proj/a.ts"),
             "c:/users/me/proj/a.ts"
         );
         assert_eq!(
-            windows_comparable_text(r"C:\Users\Me\Proj"),
+            flattened_comparable_text(r"C:\Users\Me\Proj"),
             "c:/users/me/proj"
         );
     }
 
-    /// 非 Windows 上 comparable_path 保持 POSIX 语义：大小写敏感。
-    #[cfg(not(windows))]
+    /// 词法归一化（消掉 `.` / `..`）在所有平台都要做 —— 否则 `/a/../b` 与 `/b`
+    /// 会被当成两个不同目录。
     #[test]
-    fn comparable_path_keeps_posix_case_sensitivity_off_windows() {
+    fn comparable_path_normalizes_lexically_on_every_platform() {
         assert_eq!(
             comparable_path(Path::new("/home/user/proj/../file.ts")),
             PathBuf::from("/home/user/file.ts")
         );
+    }
+
+    /// Linux 是真正大小写敏感的 POSIX 语义，不能折。
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn comparable_path_is_case_sensitive_on_linux() {
         assert_ne!(
+            comparable_path(Path::new("/Home/User")),
+            comparable_path(Path::new("/home/user"))
+        );
+    }
+
+    /// macOS 默认文件系统（APFS / HFS+）大小写不敏感，必须折 —— 否则 agent 回一个
+    /// 大小写不同的路径会被 `is_within` 误拒（工作区档位下写不进自己的文件）。
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn comparable_path_folds_case_on_macos() {
+        assert_eq!(
             comparable_path(Path::new("/Home/User")),
             comparable_path(Path::new("/home/user"))
         );

@@ -11,7 +11,7 @@
 //!
 //! 纯字符串逻辑，三个平台行为一致，测试在 Linux CI 上即可跑。
 
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 
 /// 相对路径的最大层级（远端技能快照用，防止超深目录）。
 const MAX_REL_DEPTH: usize = 16;
@@ -72,6 +72,26 @@ pub fn is_safe_session_id(id: &str) -> bool {
         && id.len() <= SESSION_ID_MAX_CHARS
         && !id.starts_with('.')
         && is_safe_path_segment(id)
+}
+
+/// 是否是文件系统根（`/`、`C:\`、`\\server\share`、`\\?\C:\`）。
+///
+/// 统一三处各自为政的判定（工作区选择、会话 cwd、工作区根校验）。判定方式是「有
+/// `RootDir` 组件、且没有任何普通组件」：
+/// - POSIX 上 `parent()` 为 `None` 也能判 `/`，但 Windows 上 UNC 根
+///   `\\server\share` 的 `parent()` **不是** `None`，只看 `parent()` 会漏；
+/// - 盘符相对路径 `C:` 有 `Prefix` 但没有 `RootDir`，**不算**根（它会在 `join` 时
+///   替换基准目录，由 `is_safe_path_segment` 那一层拦）。
+pub fn is_filesystem_root(path: &Path) -> bool {
+    let mut has_root = false;
+    for component in path.components() {
+        match component {
+            Component::Normal(_) => return false,
+            Component::RootDir => has_root = true,
+            Component::Prefix(_) | Component::CurDir | Component::ParentDir => {}
+        }
+    }
+    has_root
 }
 
 /// 首段（第一个 `.` 之前）是否是 Win32 保留设备名。
@@ -172,5 +192,33 @@ mod tests {
         assert!(!is_safe_session_id("foo."));
         assert!(!is_safe_session_id(&"x".repeat(SESSION_ID_MAX_CHARS + 1)));
         assert!(is_safe_session_id(&"x".repeat(SESSION_ID_MAX_CHARS)));
+    }
+
+    /// 所有平台都成立的根判定。
+    #[test]
+    fn filesystem_root_detection_covers_posix_roots() {
+        assert!(is_filesystem_root(Path::new("/")));
+        assert!(!is_filesystem_root(Path::new("/home")));
+        assert!(!is_filesystem_root(Path::new("relative")));
+        assert!(!is_filesystem_root(Path::new("")));
+        assert!(!is_filesystem_root(Path::new("..")));
+    }
+
+    /// Windows 的 `C:\` / UNC 根只有在 Windows 上才会被解析成 `Prefix + RootDir`；
+    /// 在 Linux 上 `C:\` 只是一个普通文件名，所以这条只能按平台跑。
+    #[cfg(windows)]
+    #[test]
+    fn filesystem_root_detection_covers_windows_roots() {
+        assert!(is_filesystem_root(Path::new(r"C:\")));
+        assert!(is_filesystem_root(Path::new("C:/")));
+        // UNC 根：`parent()` 不是 None，只看 parent() 的旧实现会漏掉
+        assert!(is_filesystem_root(Path::new(r"\\server\share")));
+        assert!(is_filesystem_root(Path::new(r"\\?\C:\")));
+
+        assert!(!is_filesystem_root(Path::new(r"C:\ws")));
+        assert!(!is_filesystem_root(Path::new(r"\\server\share\ws")));
+        // 盘符相对路径有 Prefix 但没有 RootDir，不算根
+        assert!(!is_filesystem_root(Path::new("C:")));
+        assert!(!is_filesystem_root(Path::new("C:evil")));
     }
 }

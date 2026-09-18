@@ -51,8 +51,22 @@ impl SandboxMode {
     }
 }
 
-/// 沙盒能力探测：bwrap 是否存在于 PATH。
+/// 沙盒可用性 = 平台是 Linux **且** PATH 里有可用的 bwrap。
+///
+/// 平台门控抽成参数化纯函数，是为了能在 Linux CI 上把「macOS/Windows 上就算装了
+/// bwrap 也不算可用」这条钉住：bwrap 及其参数（`--ro-bind` / `--unshare-net` /
+/// `--setenv`）都是 Linux-only，误判为可用会跳过降级、把 agent 直接起不来。
+fn sandbox_supported_on(os: &str, bwrap_found: bool) -> bool {
+    os == "linux" && bwrap_found
+}
+
+/// 沙盒能力探测。
 pub fn sandbox_available() -> bool {
+    sandbox_supported_on(std::env::consts::OS, bwrap_available())
+}
+
+/// PATH 里有没有能跑起来的 bwrap。
+fn bwrap_available() -> bool {
     std::process::Command::new("bwrap")
         .arg("--version")
         .output()
@@ -159,11 +173,14 @@ pub fn wrap_command(
         args.push("--unshare-net".to_string());
     }
 
-    // 原始命令经白名单校验后逐 token 展开，作为 bwrap 的 `--` 参数。
-    // 命令已通过 validate_spawn_command（无 shell 元字符），whitespace 拆分即安全。
-    let tokens = agent_cmd.split_whitespace().collect::<Vec<_>>();
+    // 原始命令经白名单校验后展开成 bwrap 的 `--` 参数。
+    // 首 token 用 split_first_token 拆（尊重引号）：带空格的绝对路径
+    // （如 `/home/u/my tools/bin/opencode`）用 split_whitespace 会被拆成两段。
+    // 其余参数仍按空白拆 —— 命令已过 validate_spawn_command，无 shell 元字符。
+    let (program, rest) = crate::process_guard::split_first_token(agent_cmd);
     args.push("--".to_string());
-    args.extend(tokens.iter().map(|token| token.to_string()));
+    args.push(program.to_string());
+    args.extend(rest.split_whitespace().map(|token| token.to_string()));
 
     serde_json::to_string(&serde_json::json!({
         "command": "bwrap",
@@ -193,6 +210,17 @@ mod tests {
             (SandboxMode::Filesystem, false)
         );
         assert_eq!(SandboxMode::Auto.resolve(false), (SandboxMode::Off, true));
+    }
+
+    /// 平台门控：bwrap 是 Linux-only，macOS 上 brew 装了它也不能算「沙盒可用」——
+    /// 否则会跳过降级、产出 bwrap 专属参数、agent 直接起不来。
+    #[test]
+    fn sandbox_is_available_only_on_linux_with_bwrap() {
+        assert!(sandbox_supported_on("linux", true));
+        assert!(!sandbox_supported_on("linux", false));
+        assert!(!sandbox_supported_on("macos", true));
+        assert!(!sandbox_supported_on("windows", true));
+        assert!(!sandbox_supported_on("freebsd", true));
     }
 
     /// 非 Linux（无 bwrap）上显式选 fs/full 也要降级为 off：让 agent 起得来，
@@ -295,6 +323,34 @@ mod tests {
         assert!(!joined.contains(&home.to_str().unwrap()));
         assert!(!joined.iter().any(|arg| arg.ends_with("Documents")));
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// 带空格的绝对路径必须整体作为一个 argv 元素：`split_whitespace` 会把它拆成两段，
+    /// bwrap 就找不到程序了。
+    #[test]
+    fn wrap_keeps_quoted_program_with_spaces_as_one_token() {
+        let workspace = std::env::temp_dir().join("greywork-sandbox-ws-quoted");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let config = wrap_command(
+            SandboxMode::Full,
+            &workspace,
+            None,
+            "\"/home/u/my tools/bin/opencode\" acp",
+        )
+        .unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&config).unwrap();
+        let joined = parsed["args"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| value.as_str().unwrap())
+            .collect::<Vec<_>>();
+        let sep = joined.iter().position(|arg| *arg == "--").unwrap();
+        assert_eq!(
+            &joined[sep + 1..],
+            &["/home/u/my tools/bin/opencode", "acp"]
+        );
+        std::fs::remove_dir_all(&workspace).unwrap();
     }
 
     #[test]

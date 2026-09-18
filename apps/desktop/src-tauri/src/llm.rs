@@ -225,7 +225,8 @@ async fn send_chat_request(
     // （env 名为空的本地服务如 Ollama 才允许匿名。）
     if !env_name.is_empty() && api_key.is_empty() {
         return Err(format!(
-            "未设置 API Key：先在本机终端执行 export {env_name}=你的密钥，再从同一终端启动 GreyWork（设置页 → Agent → 模型供应商可查看/修改变量名）"
+            "未设置 API Key：先在本机终端执行 {}，再从同一终端启动 GreyWork（设置页 → Agent → 模型供应商可查看/修改变量名）",
+            env_set_hint(env_name, cfg!(windows))
         ));
     }
     let client = crate::http::shared_client(10)?;
@@ -254,6 +255,18 @@ async fn send_chat_request(
         ));
     }
     Ok(response)
+}
+
+/// 设置环境变量在当前平台的写法。
+///
+/// 写死 `export` 会让 Windows 用户照做后仍然失败（cmd 用 `set`、PowerShell 用 `$env:`）。
+/// 参数化平台是为了能在 Linux CI 上把三种写法都钉住。
+fn env_set_hint(env_name: &str, windows: bool) -> String {
+    if windows {
+        format!("set {env_name}=你的密钥（PowerShell 用 $env:{env_name}=\"你的密钥\"）")
+    } else {
+        format!("export {env_name}=你的密钥")
+    }
 }
 
 /// 响应是否为 SSE 流（Content-Type 判定）。
@@ -599,6 +612,27 @@ mod tests {
     fn request_body_omits_reasoning_effort_when_auto() {
         let body = chat_request_body("gpt-test", &[], "auto");
         assert!(body.get("reasoning_effort").is_none());
+    }
+
+    /// 三种平台写法都要给对：写死 `export` 会让 Windows 用户照做后仍然失败。
+    #[test]
+    fn env_set_hint_matches_the_platform_shell() {
+        assert_eq!(
+            env_set_hint("OPENAI_API_KEY", false),
+            "export OPENAI_API_KEY=你的密钥"
+        );
+        let windows = env_set_hint("OPENAI_API_KEY", true);
+        assert!(
+            windows.starts_with("set OPENAI_API_KEY="),
+            "cmd 用 set: {windows}"
+        );
+        assert!(
+            windows.contains("$env:OPENAI_API_KEY="),
+            "PowerShell 用 $env:: {windows}"
+        );
+        // 两边都不该出现对方平台的写法
+        assert!(!env_set_hint("K", true).contains("export "));
+        assert!(!env_set_hint("K", false).contains("set K="));
     }
 
     fn sse_chunk(json: &str) -> Result<Bytes, reqwest::Error> {

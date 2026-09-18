@@ -480,15 +480,15 @@ async fn probe_stdio_inner(
 ) -> Result<(Option<String>, Option<String>, Vec<McpToolInfo>), String> {
     use tokio::io::{AsyncWriteExt, BufReader};
 
-    // Windows 上 npx/bunx 是 .cmd 垫片，CreateProcess 起不来：改由 cmd.exe 承载
-    // （解析到的绝对路径由 batch_program 给出，其余平台恒为 None）。
-    let mut spawn = match crate::process_guard::batch_program(command) {
-        Some(path) => {
-            let mut cmd = tokio::process::Command::new("cmd");
-            cmd.arg("/C").arg(path);
-            cmd
-        }
-        None => tokio::process::Command::new(command),
+    // Windows 上 npx/bunx 是 .cmd 垫片，CreateProcess 起不来：改由 cmd.exe 承载。
+    // 交给 cmd 的是**裸程序名**（与 ACP 侧同一形态），由它自己按 PATH + PATHEXT 找 ——
+    // 塞探测到的绝对路径要赌 cmd 的引号规则（含空格路径尤其），没必要冒这个险。
+    let mut spawn = if crate::process_guard::batch_program(command).is_some() {
+        let mut cmd = tokio::process::Command::new("cmd");
+        cmd.arg("/C").arg(command);
+        cmd
+    } else {
+        tokio::process::Command::new(command)
     };
     // 自成进程组组长：kill_process_tree 靠进程组整组回收，不设的话它找不到同名组
     // （ESRCH）而静默失效 —— npx → node 的孙子进程会残留。见 process_guard 的契约。

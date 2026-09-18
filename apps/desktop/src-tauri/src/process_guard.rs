@@ -45,7 +45,33 @@ pub fn validate_spawn_command(raw: &str, allowed_programs: &[&str]) -> Result<St
             "spawn program '{basename}' is not in the allowed list"
         ));
     }
+    // Windows 上会被 `shell_command` 套进 `cmd /C` 的命令（`.cmd`/`.bat` 垫片）额外拒 `%`：
+    // cmd.exe 会做变量展开，把宿主环境变量带进 agent 的 argv。
+    if let Some(found) = cmd_wrap_metachar(trimmed, batch_program(basename).is_some()) {
+        return Err(format!(
+            "spawn command contains character {found:?} that cmd.exe would expand"
+        ));
+    }
     Ok(trimmed.to_string())
+}
+
+/// Windows `cmd /C` 包装路径**专属**的元字符。
+///
+/// 只有会落到 `cmd /C` 的命令才需要拦（`shell_command` 的包装条件 = `batch_program`
+/// 命中 `.cmd`/`.bat` 垫片）：cmd.exe 会对 `%VAR%` 做变量展开，把宿主环境变量带进
+/// agent 的 argv。刻意**不**并进 `SHELL_META_CHARS`：`%` 在 POSIX 上是合法字符，
+/// 并进去会把 Linux/macOS 上本来能用的命令一并拒掉，改动面没必要。
+pub const CMD_WRAP_META_CHARS: &[char] = &['%'];
+
+/// `command` 里第一个会被 cmd.exe 展开的字符；不包装时恒为 `None`。
+///
+/// 抽成参数化纯函数，好在 Linux CI 上把规则钉住 —— 真实的 `will_wrap` 依赖 Windows 的
+/// PATH + PATHEXT 探测结果，在 CI 的 Linux job 上拿不到。
+fn cmd_wrap_metachar(command: &str, will_wrap: bool) -> Option<char> {
+    if !will_wrap {
+        return None;
+    }
+    command.chars().find(|c| CMD_WRAP_META_CHARS.contains(c))
 }
 
 /// 在给定 PATH 值里找可执行文件；纯文件系统命中，不起进程。
@@ -101,7 +127,7 @@ fn is_executable(_path: &Path) -> bool {
 ///
 /// 首 token 可能带引号：Windows 上 `C:\Program Files\...\npx.cmd` 这类路径必须引起来
 /// 才不会被切成两段。返回的 token 已去引号，rest 是其后原样的参数串。
-fn split_first_token(command: &str) -> (&str, &str) {
+pub(crate) fn split_first_token(command: &str) -> (&str, &str) {
     let trimmed = command.trim_start();
     if let Some(after) = trimmed.strip_prefix('"') {
         if let Some(end) = after.find('"') {
@@ -515,6 +541,19 @@ mod tests {
                 .ends_with("npx.cmd")),
             "cmd /C \"C:\\nodejs\\npx.cmd\" -y pkg"
         );
+    }
+
+    /// `%` 只在会经 `cmd /C` 中转时才拒：它是 cmd.exe 的变量展开符，但在 POSIX 上
+    /// 完全合法，不能并进全局元字符列表。
+    #[test]
+    fn cmd_wrap_metachar_only_applies_to_wrapped_commands() {
+        assert_eq!(cmd_wrap_metachar("npx -y pkg@%foo%", true), Some('%'));
+        assert_eq!(cmd_wrap_metachar("npx -y pkg@%foo%", false), None);
+        assert_eq!(cmd_wrap_metachar("npx -y pkg", true), None);
+
+        // 全局列表里没有 `%`：POSIX 上带 `%` 的命令仍被放行
+        assert!(!SHELL_META_CHARS.contains(&'%'));
+        assert!(validate_spawn_command("npx -y pkg@100%", ALLOWED).is_ok());
     }
 
     /// 常量必须在两个平台上都钉住：Windows 上是 `CREATE_NO_WINDOW`，其他平台是「不设」。

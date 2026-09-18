@@ -168,7 +168,9 @@ fn validate_folder(folder: &str) -> Result<PathBuf, String> {
     if !meta.is_dir() {
         return Err("工作区文件夹不是目录".into());
     }
-    if path.parent().is_none() {
+    // 统一走 path_safety：`parent().is_none()` 判不出 Windows 的 UNC 根
+    // `\\server\share`（它的 parent 不是 None），会把它当普通目录放行。
+    if crate::path_safety::is_filesystem_root(&path) {
         return Err("不允许把根目录作为工作区".into());
     }
     Ok(path)
