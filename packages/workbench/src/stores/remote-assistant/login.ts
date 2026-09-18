@@ -9,8 +9,18 @@
  */
 import { wechatBackend, type WechatLoginPoll } from "../../lib/wechat-backend";
 import { feishuBackend, type FeishuRegisterPoll, type FeishuRegisterStart } from "../../lib/feishu-backend";
+import { dingtalkBackend, type DingTalkRegisterPoll, type DingTalkRegisterStart } from "../../lib/dingtalk-backend";
 import { notify } from "../notice";
-import { delay, describeError, t, IDLE_FEISHU_REGISTER, QR_POLL_MAX_FAILURES, QR_POLL_MIN_INTERVAL_MS, QR_POLL_RETRY_MS } from "./shared";
+import {
+  delay,
+  describeError,
+  t,
+  IDLE_DINGTALK_REGISTER,
+  IDLE_FEISHU_REGISTER,
+  QR_POLL_MAX_FAILURES,
+  QR_POLL_MIN_INTERVAL_MS,
+  QR_POLL_RETRY_MS,
+} from "./shared";
 import type { RemoteAssistantState } from "./state";
 import type { StatusApi } from "./status";
 import type { ConnectApi } from "./connect";
@@ -26,6 +36,8 @@ export interface LoginApi {
   cancelLogin(): void;
   startFeishuRegistration(): Promise<void>;
   cancelFeishuRegistration(): void;
+  startDingTalkRegistration(): Promise<void>;
+  cancelDingTalkRegistration(): void;
 }
 
 export function createLoginSlice({ state, getStatus, getConnect }: LoginDeps): LoginApi {
@@ -190,10 +202,92 @@ export function createLoginSlice({ state, getStatus, getConnect }: LoginDeps): L
     void feishuBackend.registerCancel().catch(() => undefined);
   }
 
+  /* ===== 钉钉 · 扫码创建应用 ===== */
+
+  /** 递增即作废进行中的扫码轮询（取消 / 重开时旧循环自行退出）。 */
+  let dingtalkRegisterEpoch = 0;
+
+  /** 发起扫码创建应用：出二维码 → 轮询到确认 → 宿主落盘，这里只刷新状态并连上。 */
+  async function startDingTalkRegistration(): Promise<void> {
+    if (!state.available.value) return;
+    const epoch = ++dingtalkRegisterEpoch;
+    state.dingtalkRegister.value = { ...IDLE_DINGTALK_REGISTER, phase: "waiting" };
+    let started: DingTalkRegisterStart;
+    try {
+      started = await dingtalkBackend.registerBegin();
+    } catch (error) {
+      if (epoch !== dingtalkRegisterEpoch) return;
+      state.dingtalkRegister.value = { ...IDLE_DINGTALK_REGISTER, phase: "failed", detail: describeError(error) };
+      return;
+    }
+    if (epoch !== dingtalkRegisterEpoch) return;
+    state.dingtalkRegister.value = {
+      phase: "waiting",
+      qrUrl: started.qrUrl,
+      userCode: started.userCode,
+      detail: null,
+    };
+    void pollDingTalkRegistration(epoch, Math.max(started.interval * 1000, QR_POLL_MIN_INTERVAL_MS));
+  }
+
+  /** 轮询扫码结果；间隔固定（钉钉不支持服务端要求的放慢）。 */
+  async function pollDingTalkRegistration(epoch: number, intervalMs: number): Promise<void> {
+    let failures = 0;
+    while (epoch === dingtalkRegisterEpoch && state.dingtalkRegister.value.phase === "waiting") {
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+      if (epoch !== dingtalkRegisterEpoch) return;
+      let result: DingTalkRegisterPoll;
+      try {
+        result = await dingtalkBackend.registerPoll();
+        failures = 0;
+      } catch (error) {
+        if (epoch !== dingtalkRegisterEpoch) return;
+        failures += 1;
+        if (failures < QR_POLL_MAX_FAILURES) continue;
+        state.dingtalkRegister.value = {
+          ...IDLE_DINGTALK_REGISTER,
+          phase: "failed",
+          detail: describeError(error),
+        };
+        return;
+      }
+      if (epoch !== dingtalkRegisterEpoch) return;
+      if (result.state === "pending") continue;
+      if (result.state === "done") {
+        state.dingtalkRegister.value = { phase: "done", qrUrl: null, userCode: null, detail: null };
+        notify({ kind: "success", key: "dingtalk-register", title: t("remoteAssist.dingtalk.registerDone") });
+        await getStatus()
+          .refreshDingTalkStatus()
+          .catch(() => undefined);
+        // 与手填凭证一致：存好就顺手连上，用户不必再点一次。
+        await getConnect().connectDingTalk();
+        return;
+      }
+      // 失败原因优先用服务端给的描述，没有就用本地文案。钉钉没有「拒绝」这一细分状态。
+      const fallback = result.state === "expired" ? t("remoteAssist.dingtalk.registerExpired") : t("remoteAssist.dingtalk.registerFailed");
+      state.dingtalkRegister.value = {
+        ...IDLE_DINGTALK_REGISTER,
+        phase: "failed",
+        detail: result.detail ?? fallback,
+      };
+      return;
+    }
+  }
+
+  /** 取消扫码：作废宿主那边的 device_code，并让轮询循环退出。 */
+  function cancelDingTalkRegistration(): void {
+    dingtalkRegisterEpoch += 1;
+    state.dingtalkRegister.value = { ...IDLE_DINGTALK_REGISTER };
+    if (!state.available.value) return;
+    void dingtalkBackend.registerCancel().catch(() => undefined);
+  }
+
   return {
     startLogin,
     cancelLogin,
     startFeishuRegistration,
     cancelFeishuRegistration,
+    startDingTalkRegistration,
+    cancelDingTalkRegistration,
   };
 }

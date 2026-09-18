@@ -275,6 +275,320 @@ fn brief(text: &str) -> String {
     format!("{head}…")
 }
 
+/* ===== 扫码创建应用（设备授权流程） =====
+ *
+ * 与「用户已在开放平台建好应用」的手填路径并列的另一条入口：手机钉钉扫码 → 确认 →
+ * 服务端直接把 Client ID / Client Secret 交给宿主，用户不必去控制台抄两串密钥。
+ *
+ * 协议（与钉钉官方 OpenClaw 连接器 `device-auth.ts` 同形，全程 JSON）：
+ * 1. `POST https://oapi.dingtalk.com/app/registration/init` `{"source":…}` → `{errcode:0, nonce}`
+ * 2. `POST /app/registration/begin` `{"nonce":…}`
+ *    → `{errcode:0, device_code, user_code?, verification_uri_complete, expires_in, interval}`
+ * 3. `verification_uri_complete` 编成二维码 → 手机扫码确认
+ * 4. 每 `interval` 秒 `POST /app/registration/poll` `{"device_code":…}`
+ *    → `{errcode:0, status}`：`WAITING`（继续等）/ `SUCCESS`（带 client_id + client_secret）/
+ *    `FAIL`（`fail_reason` 说明原因）/ `EXPIRED`
+ *
+ * 与飞书那条流程的两处关键差异：
+ * - 「等待中」是 `errcode:0` + `status:WAITING`，**不是** HTTP 400 + 错误码那套；
+ * - `source` 是调用方标识（官方连接器同值），服务端据此路由到「一键创建机器人」页。
+ *
+ * 与手填路径一致：密钥只落宿主磁盘（0600），`device_code` 也只留在宿主内存里。
+ *
+ * 这几个接口没有公开文档，是钉钉给自家客户端留的内部通道；协议若变更，这里会以
+ * `errcode != 0` 或解析失败的形式**显式报错**（不静默失败），界面退回手填凭证即可。
+ */
+
+/// 注册接口在钉钉 OAPI 域（新版 `api.dingtalk.com` 上没有这个接口）。
+pub const REGISTRATION_BASE_URL: &str = "https://oapi.dingtalk.com";
+const REGISTRATION_INIT_PATH: &str = "/app/registration/init";
+const REGISTRATION_BEGIN_PATH: &str = "/app/registration/begin";
+const REGISTRATION_POLL_PATH: &str = "/app/registration/poll";
+/// 调用方标识：官方 OpenClaw 连接器同值，服务端据此路由到「一键创建机器人」页。
+const REGISTRATION_SOURCE: &str = "DING_DWS_CLAW";
+/// 服务端没给 `expires_in` / `interval` 时的兜底（官方连接器同值）。
+const DEFAULT_EXPIRE_IN: u64 = 7200;
+const DEFAULT_POLL_INTERVAL: u64 = 3;
+
+/// OAPI 统一信封：`errcode != 0` 即失败。
+#[derive(Debug, Clone, Deserialize)]
+struct ApiEnvelope<T> {
+    errcode: i64,
+    #[serde(default)]
+    errmsg: Option<String>,
+    #[serde(flatten)]
+    data: T,
+}
+
+impl<T> ApiEnvelope<T> {
+    fn into_data(self, action: &str) -> Result<T, String> {
+        if self.errcode != 0 {
+            let detail = self.errmsg.unwrap_or_default();
+            let detail = detail.trim();
+            return Err(if detail.is_empty() {
+                format!("{action}失败（errcode={}）", self.errcode)
+            } else {
+                format!("{action}失败：{detail}（errcode={}）", self.errcode)
+            });
+        }
+        Ok(self.data)
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct InitBody {
+    #[serde(default)]
+    nonce: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct BeginBody {
+    #[serde(default)]
+    device_code: Option<String>,
+    #[serde(default)]
+    user_code: Option<String>,
+    #[serde(default)]
+    verification_uri_complete: Option<String>,
+    #[serde(default)]
+    expires_in: Option<u64>,
+    #[serde(default)]
+    interval: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct PollBody {
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    client_id: Option<String>,
+    #[serde(default)]
+    client_secret: Option<String>,
+    #[serde(default)]
+    fail_reason: Option<String>,
+}
+
+/// 一次轮询的判定（纯函数产出，便于单测）。
+#[derive(Debug, Clone, PartialEq)]
+pub enum PollOutcome {
+    /// `WAITING`：还没扫码 / 还没在手机上确认。
+    Pending,
+    Done {
+        client_id: String,
+        client_secret: String,
+    },
+    /// `EXPIRED`：本次 device_code 已过期。
+    Expired(String),
+    /// `FAIL`，或没见过的状态 —— 后者如实报错，免得一直轮询到超时。
+    Failed(String),
+}
+
+/// 进行中的扫码会话（`device_code` 只在宿主内存，不落盘）。
+///
+/// 不存轮询间隔：钉钉没有「服务端要求放慢」那套，间隔一次定死在 `RegisterStartDto` 里，
+/// 由渲染端自己按它轮询。
+#[derive(Debug, Clone)]
+pub struct RegisterSession {
+    device_code: String,
+    /// 过期时刻（毫秒时间戳），由 `expires_in` 推出。
+    expires_at: i64,
+}
+
+/// 扫码引导信息（渲染端只需要这些：把 `qr_url` 编成二维码，显示配对码）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegisterStartDto {
+    pub qr_url: String,
+    /// 手机上的配对码（钉钉不保证下发，可能为 None）。
+    pub user_code: Option<String>,
+    pub expires_in: u64,
+    pub interval: u64,
+}
+
+/// 一次轮询的结果。`state`：pending / done / expired / error。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegisterPollDto {
+    pub state: String,
+    pub detail: Option<String>,
+    /// 成功时的 Client ID（Client Secret 已由宿主落盘，不下发到界面）。
+    pub client_id: Option<String>,
+}
+
+impl PollOutcome {
+    fn state(&self) -> &'static str {
+        match self {
+            PollOutcome::Done { .. } => "done",
+            PollOutcome::Expired(_) => "expired",
+            PollOutcome::Failed(_) => "error",
+            PollOutcome::Pending => "pending",
+        }
+    }
+
+    fn detail(&self) -> Option<String> {
+        match self {
+            PollOutcome::Expired(detail) | PollOutcome::Failed(detail) => {
+                let trimmed = detail.trim();
+                // 空串交给界面出本地化文案，别把空提示丢上去。
+                (!trimmed.is_empty()).then(|| trimmed.to_string())
+            }
+            _ => None,
+        }
+    }
+}
+
+/// 判定一次轮询响应。`status` 大小写不敏感（官方连接器先 `toUpperCase()`）。
+fn classify_poll(response: &PollBody) -> PollOutcome {
+    let status = response.status.as_deref().unwrap_or_default().trim();
+    let client_id = response.client_id.as_deref().unwrap_or_default().trim();
+    let client_secret = response.client_secret.as_deref().unwrap_or_default().trim();
+    // 先看凭证：`SUCCESS` 与凭证同时到达，按凭证判定比按 status 更稳。
+    if !client_id.is_empty() && !client_secret.is_empty() {
+        return PollOutcome::Done {
+            client_id: client_id.to_string(),
+            client_secret: client_secret.to_string(),
+        };
+    }
+    let reason = || {
+        response
+            .fail_reason
+            .as_deref()
+            .unwrap_or_default()
+            .trim()
+            .to_string()
+    };
+    if status.eq_ignore_ascii_case("WAITING") {
+        return PollOutcome::Pending;
+    }
+    if status.eq_ignore_ascii_case("EXPIRED") {
+        return PollOutcome::Expired(reason());
+    }
+    if status.eq_ignore_ascii_case("FAIL") {
+        return PollOutcome::Failed(reason());
+    }
+    // `SUCCESS` 却缺凭证、或没见过的状态：如实报错（界面有重试与手填两条退路）。
+    PollOutcome::Failed(if status.is_empty() {
+        "服务端未返回状态".into()
+    } else {
+        format!("未知状态: {status}")
+    })
+}
+
+/// 发一个注册请求并把信封拆开（`errcode != 0` 转成带服务端说明的错误）。
+/// `base` 是参数而非直接读常量：测试里指向本地 mock 服务端。
+async fn post_registration<T>(
+    client: &reqwest::Client,
+    base: &str,
+    path: &str,
+    body: serde_json::Value,
+    action: &str,
+) -> Result<T, String>
+where
+    T: for<'de> Deserialize<'de>,
+{
+    let url = format!("{}{path}", base.trim_end_matches('/'));
+    let response = client
+        .post(&url)
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json")
+        .json(&body)
+        .timeout(API_TIMEOUT)
+        .send()
+        .await
+        .map_err(|error| format!("{action}请求失败: {error}"))?;
+    let status = response.status();
+    let text = crate::http::read_text(response, API_TIMEOUT).await?;
+    let envelope: ApiEnvelope<T> = serde_json::from_str(&text).map_err(|error| {
+        format!(
+            "{action}响应解析失败: {error}（HTTP {status}: {}）",
+            brief(&text)
+        )
+    })?;
+    envelope.into_data(action)
+}
+
+/// 发起扫码：先取 nonce，再换回 `device_code`（留宿主）与二维码链接。
+pub async fn begin_registration(
+    client: &reqwest::Client,
+    base: &str,
+) -> Result<(RegisterSession, RegisterStartDto), String> {
+    let init: InitBody = post_registration(
+        client,
+        base,
+        REGISTRATION_INIT_PATH,
+        serde_json::json!({ "source": REGISTRATION_SOURCE }),
+        "发起扫码",
+    )
+    .await?;
+    let nonce = init.nonce.as_deref().unwrap_or_default().trim().to_string();
+    if nonce.is_empty() {
+        return Err("扫码注册响应缺少 nonce".into());
+    }
+
+    let begin: BeginBody = post_registration(
+        client,
+        base,
+        REGISTRATION_BEGIN_PATH,
+        serde_json::json!({ "nonce": nonce }),
+        "发起扫码",
+    )
+    .await?;
+    let device_code = begin
+        .device_code
+        .as_deref()
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let verification_uri_complete = begin
+        .verification_uri_complete
+        .as_deref()
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    if device_code.is_empty() || verification_uri_complete.is_empty() {
+        return Err("扫码注册响应缺少 device_code / 扫码链接".into());
+    }
+    let expires_in = begin
+        .expires_in
+        .filter(|value| *value > 0)
+        .unwrap_or(DEFAULT_EXPIRE_IN);
+    let interval = begin
+        .interval
+        .filter(|value| *value > 0)
+        .unwrap_or(DEFAULT_POLL_INTERVAL);
+    let session = RegisterSession {
+        device_code,
+        expires_at: now_ms() + (expires_in as i64) * 1000,
+    };
+    let dto = RegisterStartDto {
+        // 官方连接器把 `verification_uri_complete` 原样编成二维码（不追加参数）。
+        qr_url: verification_uri_complete,
+        user_code: begin
+            .user_code
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty()),
+        expires_in,
+        interval,
+    };
+    Ok((session, dto))
+}
+
+/// 轮询一次（钉钉不支持服务端要求的放慢，间隔固定）。
+pub async fn poll_registration(
+    client: &reqwest::Client,
+    base: &str,
+    session: &RegisterSession,
+) -> Result<PollOutcome, String> {
+    let body: PollBody = post_registration(
+        client,
+        base,
+        REGISTRATION_POLL_PATH,
+        serde_json::json!({ "device_code": session.device_code }),
+        "轮询扫码",
+    )
+    .await?;
+    Ok(classify_poll(&body))
+}
+
 /* ===== 宿主层：持久化 ===== */
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -385,6 +699,8 @@ pub(crate) struct Inner {
     state: String,
     detail: Option<String>,
     last_message_at: Option<i64>,
+    /// 进行中的扫码创建应用会话（device_code 只在内存里，不落盘）。
+    registration: Option<RegisterSession>,
 }
 
 impl Inner {
@@ -444,6 +760,14 @@ fn ensure_loaded(app: &AppHandle, inner: &mut Inner) -> Result<(), String> {
     inner.state = "stopped".into();
     inner.loaded = true;
     Ok(())
+}
+
+/// 凭证落盘（0600）：扫码路径与手填路径共用。
+fn store_credentials(app: &AppHandle, credentials: &StoredCredentials) -> Result<(), String> {
+    let dir = channel_dir(app, DIR_NAME)?;
+    let bytes = serde_json::to_vec_pretty(credentials)
+        .map_err(|error| format!("凭证序列化失败: {error}"))?;
+    write_private(&dir.join(CREDENTIALS_FILE), &bytes)
 }
 
 fn persist_peers(app: &AppHandle, peers: &PeerBook) {
@@ -675,10 +999,7 @@ pub async fn dingtalk_save_credentials(
         client_secret: secret,
         saved_at: Some(chrono::Utc::now().to_rfc3339()),
     };
-    let dir = channel_dir(&app, DIR_NAME)?;
-    let bytes = serde_json::to_vec_pretty(&credentials)
-        .map_err(|error| format!("凭证序列化失败: {error}"))?;
-    write_private(&dir.join(CREDENTIALS_FILE), &bytes)?;
+    store_credentials(&app, &credentials)?;
     inner.credentials = Some(credentials);
     inner.detail = None;
     log::info("dingtalk", "应用凭证已保存");
@@ -696,6 +1017,7 @@ pub async fn dingtalk_clear_credentials(
     ensure_loaded(&app, &mut inner)?;
     inner.credentials = None;
     inner.peers = PeerBook::default();
+    inner.registration = None;
     inner.state = "stopped".into();
     inner.detail = None;
     inner.last_message_at = None;
@@ -708,6 +1030,101 @@ pub async fn dingtalk_clear_credentials(
     }
     log::info("dingtalk", "凭证已清除");
     Ok(inner.status())
+}
+
+/// 发起扫码创建应用：返回二维码链接与配对码（`device_code` 留在宿主内存）。
+#[tauri::command]
+pub async fn dingtalk_register_begin(
+    host: State<'_, DingTalkHost>,
+) -> Result<RegisterStartDto, String> {
+    let client = crate::http::shared_client(10)?;
+    let (session, dto) = begin_registration(&client, REGISTRATION_BASE_URL).await?;
+    log::info("dingtalk", "已发起扫码创建应用");
+    host.lock().await.registration = Some(session);
+    Ok(dto)
+}
+
+/// 轮询扫码结果：成功时凭证直接落盘并写进宿主状态，渲染端只需刷新状态。
+#[tauri::command]
+pub async fn dingtalk_register_poll(
+    app: AppHandle,
+    host: State<'_, DingTalkHost>,
+) -> Result<RegisterPollDto, String> {
+    let session = {
+        let mut inner = host.lock().await;
+        ensure_loaded(&app, &mut inner)?;
+        inner
+            .registration
+            .clone()
+            .ok_or_else(|| "没有进行中的扫码创建流程".to_string())?
+    };
+    if now_ms() >= session.expires_at {
+        let mut inner = host.lock().await;
+        if current_device_code(&inner).as_deref() == Some(session.device_code.as_str()) {
+            inner.registration = None;
+        }
+        return Ok(RegisterPollDto {
+            state: "expired".into(),
+            detail: None,
+            client_id: None,
+        });
+    }
+
+    let client = crate::http::shared_client(10)?;
+    // 传输层错误 / `errcode != 0` 直接抛给渲染端计次重试；协议层的 pending / 失败走返回的 DTO。
+    let outcome = poll_registration(&client, REGISTRATION_BASE_URL, &session).await?;
+    let mut inner = host.lock().await;
+    let same_session = current_device_code(&inner).as_deref() == Some(session.device_code.as_str());
+    if let PollOutcome::Done {
+        client_id,
+        client_secret,
+    } = &outcome
+    {
+        let credentials = StoredCredentials {
+            client_id: client_id.clone(),
+            client_secret: client_secret.clone(),
+            saved_at: Some(chrono::Utc::now().to_rfc3339()),
+        };
+        // 落盘失败就留着会话（服务端在有效期内还会给凭证），让用户能重试。
+        store_credentials(&app, &credentials)?;
+        inner.credentials = Some(credentials);
+        inner.detail = None;
+        if same_session {
+            inner.registration = None;
+        }
+        log::info("dingtalk", "扫码创建应用成功，凭证已落盘");
+        return Ok(RegisterPollDto {
+            state: outcome.state().into(),
+            detail: None,
+            client_id: Some(client_id.clone()),
+        });
+    }
+    if same_session {
+        if outcome.state() == "pending" {
+            inner.registration = Some(session.clone());
+        } else {
+            inner.registration = None;
+        }
+    }
+    Ok(RegisterPollDto {
+        state: outcome.state().into(),
+        detail: outcome.detail(),
+        client_id: None,
+    })
+}
+
+/// 取消扫码创建（作废本次 device_code，不再轮询）。
+#[tauri::command]
+pub async fn dingtalk_register_cancel(host: State<'_, DingTalkHost>) -> Result<(), String> {
+    host.lock().await.registration = None;
+    Ok(())
+}
+
+fn current_device_code(inner: &Inner) -> Option<String> {
+    inner
+        .registration
+        .as_ref()
+        .map(|session| session.device_code.clone())
 }
 
 /// 启动 Stream 长连接（未配置凭证时报错，由界面引导去设置里填）。
@@ -1078,5 +1495,277 @@ mod tests {
         assert_eq!(reconnect_delay(0), Duration::from_secs(1));
         assert_eq!(reconnect_delay(3), Duration::from_secs(8));
         assert_eq!(reconnect_delay(20), RECONNECT_MAX_DELAY);
+    }
+
+    /* ===== 扫码创建应用：纯函数判定 ===== */
+
+    #[test]
+    fn classify_poll_covers_every_server_status() {
+        let classify =
+            |raw: &str| classify_poll(&serde_json::from_str::<PollBody>(raw).expect("轮询响应体"));
+        // 等待中：信封里的 errcode 已在 post_registration 剥掉，status 才说明进展。
+        assert_eq!(classify(r#"{"status":"WAITING"}"#), PollOutcome::Pending);
+        // 官方连接器先 toUpperCase()，这里大小写不敏感。
+        assert_eq!(classify(r#"{"status":"waiting"}"#), PollOutcome::Pending);
+        assert_eq!(
+            classify(r#"{"status":"SUCCESS","client_id":"a","client_secret":"b"}"#),
+            PollOutcome::Done {
+                client_id: "a".into(),
+                client_secret: "b".into(),
+            }
+        );
+        assert_eq!(
+            classify(r#"{"status":"FAIL","fail_reason":"用户拒绝"}"#),
+            PollOutcome::Failed("用户拒绝".into())
+        );
+        assert_eq!(
+            classify(r#"{"status":"EXPIRED"}"#),
+            PollOutcome::Expired(String::new())
+        );
+        // 凭证比 status 可信：SUCCESS 与凭证同时到达时按凭证判定。
+        assert_eq!(
+            classify(r#"{"status":"SUCCESS","client_id":"a","client_secret":"b"}"#),
+            PollOutcome::Done {
+                client_id: "a".into(),
+                client_secret: "b".into(),
+            }
+        );
+        // 缺凭证的 SUCCESS / 没见过的状态：如实报错，别当等待（否则会一直轮询到过期）。
+        assert!(matches!(
+            classify(r#"{"status":"SUCCESS"}"#),
+            PollOutcome::Failed(_)
+        ));
+        assert!(matches!(
+            classify(r#"{"status":"CREATING"}"#),
+            PollOutcome::Failed(_)
+        ));
+        assert!(matches!(classify(r#"{}"#), PollOutcome::Failed(_)));
+    }
+
+    #[test]
+    fn poll_outcome_state_and_detail_are_screen_ready() {
+        assert_eq!(PollOutcome::Pending.state(), "pending");
+        assert_eq!(
+            PollOutcome::Done {
+                client_id: "a".into(),
+                client_secret: "b".into()
+            }
+            .state(),
+            "done"
+        );
+        assert_eq!(PollOutcome::Expired("x".into()).state(), "expired");
+        assert_eq!(PollOutcome::Failed("x".into()).state(), "error");
+        // 空描述交给界面出本地化文案，别把空提示丢上去。
+        assert_eq!(PollOutcome::Failed(String::new()).detail(), None);
+        assert_eq!(PollOutcome::Expired("  ".into()).detail(), None);
+        assert_eq!(PollOutcome::Pending.detail(), None);
+        assert_eq!(
+            PollOutcome::Failed("服务端忙".into()).detail().as_deref(),
+            Some("服务端忙")
+        );
+    }
+
+    /* ===== 扫码创建应用：对本地 mock HTTP 服务器跑完整一轮 ===== */
+
+    /// 服务端真实形状：`init` 回 nonce，`begin` 回 device_code + 二维码链接。
+    const INIT_BODY: &str = r#"{"errcode":0,"errmsg":"ok","nonce":"n-123"}"#;
+    const BEGIN_BODY: &str = r#"{"errcode":0,"errmsg":"ok","device_code":"dc-abc","user_code":"AB12-CD34","verification_uri_complete":"https://oapi.dingtalk.com/app/registration/verify?code=AB12-CD34","expires_in":7200,"interval":3}"#;
+
+    /// 按脚本逐条应答的极简 HTTP 服务端（每连接一条请求，`Connection: close`），
+    /// 请求原文记录下来供断言 JSON 字段。
+    async fn spawn_registration_mock(
+        responses: Vec<(u16, &'static str)>,
+    ) -> (String, Arc<parking_lot::Mutex<Vec<String>>>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let recorded: Arc<parking_lot::Mutex<Vec<String>>> =
+            Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let sink = recorded.clone();
+        tokio::spawn(async move {
+            let mut index = 0usize;
+            loop {
+                let Ok((mut stream, _)) = listener.accept().await else {
+                    break;
+                };
+                // 读到请求头结束 + Content-Length 指定的 body，再回响应。
+                let mut buffer: Vec<u8> = Vec::new();
+                let mut chunk = [0u8; 2048];
+                loop {
+                    let read = stream.read(&mut chunk).await.unwrap_or(0);
+                    if read == 0 {
+                        break;
+                    }
+                    buffer.extend_from_slice(&chunk[..read]);
+                    let Some(position) = buffer.windows(4).position(|window| window == b"\r\n\r\n")
+                    else {
+                        continue;
+                    };
+                    let head = String::from_utf8_lossy(&buffer[..position]).to_string();
+                    let length: usize = head
+                        .lines()
+                        .find_map(|line| {
+                            let (name, value) = line.split_once(':')?;
+                            name.eq_ignore_ascii_case("content-length")
+                                .then(|| value.trim().parse::<usize>().ok())?
+                        })
+                        .unwrap_or(0);
+                    if buffer.len() >= position + 4 + length {
+                        break;
+                    }
+                }
+                sink.lock()
+                    .push(String::from_utf8_lossy(&buffer).to_string());
+                let (status, payload) = responses.get(index).copied().unwrap_or((500, "{}"));
+                index += 1;
+                let response = format!(
+                    "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
+                    payload.len()
+                );
+                let _ = stream.write_all(response.as_bytes()).await;
+                let _ = stream.shutdown().await;
+                if index >= responses.len() {
+                    break;
+                }
+            }
+        });
+        (format!("http://{addr}"), recorded)
+    }
+
+    fn session_for(device_code: &str) -> RegisterSession {
+        RegisterSession {
+            device_code: device_code.to_string(),
+            expires_at: now_ms() + 60_000,
+        }
+    }
+
+    #[tokio::test]
+    async fn begin_registration_sends_source_then_nonce_and_keeps_qr_link_verbatim() {
+        let (base, recorded) =
+            spawn_registration_mock(vec![(200, INIT_BODY), (200, BEGIN_BODY)]).await;
+        let client = crate::http::shared_client(5).expect("client");
+        let (session, dto) = begin_registration(&client, &base).await.expect("begin");
+
+        assert_eq!(dto.user_code.as_deref(), Some("AB12-CD34"));
+        assert_eq!(dto.expires_in, 7200, "服务端给了 expires_in，不该落兜底值");
+        assert_eq!(dto.interval, 3);
+        // 与飞书不同：官方连接器把 verification_uri_complete 原样编成二维码，不追加参数。
+        assert_eq!(
+            dto.qr_url,
+            "https://oapi.dingtalk.com/app/registration/verify?code=AB12-CD34"
+        );
+        assert_eq!(session.device_code, "dc-abc");
+        assert!(
+            session.expires_at > now_ms() + 7_000_000,
+            "有效期应按 expires_in 推算"
+        );
+
+        let sent = recorded.lock().join("\n");
+        assert!(
+            sent.contains("/app/registration/init"),
+            "缺 init 请求: {sent}"
+        );
+        assert!(
+            sent.contains("/app/registration/begin"),
+            "缺 begin 请求: {sent}"
+        );
+        assert!(sent.contains("DING_DWS_CLAW"), "init 缺 source: {sent}");
+        assert!(
+            sent.contains("n-123"),
+            "begin 未回填 init 拿到的 nonce: {sent}"
+        );
+    }
+
+    #[tokio::test]
+    async fn begin_registration_falls_back_when_server_omits_expiry() {
+        // 服务端没给 expires_in / interval 时用兜底值（官方连接器同值）。
+        let (base, _recorded) = spawn_registration_mock(vec![
+            (200, INIT_BODY),
+            (
+                200,
+                r#"{"errcode":0,"device_code":"dc-abc","verification_uri_complete":"https://x.test/qr"}"#,
+            ),
+        ])
+        .await;
+        let client = crate::http::shared_client(5).expect("client");
+        let (session, dto) = begin_registration(&client, &base).await.expect("begin");
+
+        assert_eq!(dto.expires_in, DEFAULT_EXPIRE_IN);
+        assert_eq!(dto.interval, DEFAULT_POLL_INTERVAL);
+        assert_eq!(dto.user_code, None, "钉钉不保证下发配对码");
+        assert!(
+            session.expires_at > now_ms() + 7_000_000,
+            "兜底的 7200s 有效期也要推算进会话"
+        );
+    }
+
+    #[tokio::test]
+    async fn begin_registration_rejects_response_without_nonce() {
+        let (base, _recorded) =
+            spawn_registration_mock(vec![(200, r#"{"errcode":0,"errmsg":"ok"}"#)]).await;
+        let client = crate::http::shared_client(5).expect("client");
+        let error = begin_registration(&client, &base)
+            .await
+            .expect_err("缺 nonce 应当报错");
+        assert!(error.contains("nonce"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn poll_registration_returns_credentials_when_confirmed() {
+        let (base, recorded) = spawn_registration_mock(vec![(
+            200,
+            r#"{"errcode":0,"errmsg":"ok","status":"SUCCESS","client_id":"ding-abc","client_secret":"secret-xyz"}"#,
+        )])
+        .await;
+        let client = crate::http::shared_client(5).expect("client");
+        let outcome = poll_registration(&client, &base, &session_for("dc-abc"))
+            .await
+            .expect("poll");
+
+        assert_eq!(
+            outcome,
+            PollOutcome::Done {
+                client_id: "ding-abc".into(),
+                client_secret: "secret-xyz".into(),
+            }
+        );
+        assert_eq!(outcome.state(), "done");
+        let sent = recorded.lock().join("\n");
+        assert!(
+            sent.contains("dc-abc"),
+            "轮询要把 device_code 带回去: {sent}"
+        );
+    }
+
+    #[tokio::test]
+    async fn poll_registration_surfaces_nonzero_errcode_as_error() {
+        // 与飞书相反：等待中是 errcode:0 + status:WAITING，非零 errcode 才是真失败。
+        let (base, _recorded) = spawn_registration_mock(vec![(
+            200,
+            r#"{"errcode":40078,"errmsg":"device_code 已过期"}"#,
+        )])
+        .await;
+        let client = crate::http::shared_client(5).expect("client");
+        let error = poll_registration(&client, &base, &session_for("dc-abc"))
+            .await
+            .expect_err("errcode 非零应当报错");
+
+        assert!(error.contains("40078"), "{error}");
+        assert!(error.contains("device_code 已过期"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn registration_rejects_non_json_body() {
+        // 网关 5xx 页面之类：报错要带上响应片段，便于定位。
+        let (base, _recorded) =
+            spawn_registration_mock(vec![(502, "<html>bad gateway</html>")]).await;
+        let client = crate::http::shared_client(5).expect("client");
+        let error = begin_registration(&client, &base)
+            .await
+            .expect_err("非 JSON 响应应当报错");
+        assert!(error.contains("bad gateway"), "{error}");
     }
 }

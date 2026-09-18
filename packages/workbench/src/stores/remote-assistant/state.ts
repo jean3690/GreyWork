@@ -19,6 +19,7 @@ import { useSettingsStore } from "../settings";
 import { useWorkspaceStore } from "../workspace";
 import {
   IDLE_DISCORD_STATUS,
+  IDLE_DINGTALK_REGISTER,
   IDLE_DINGTALK_STATUS,
   IDLE_FEISHU_REGISTER,
   IDLE_FEISHU_STATUS,
@@ -28,6 +29,7 @@ import {
   IDLE_WECOM_STATUS,
   readPeerArchive,
   type FeishuRegisterView,
+  type DingTalkRegisterView,
   type RemoteActivity,
   type RemotePeer,
   type WechatQrView,
@@ -59,6 +61,8 @@ export interface RemoteAssistantState {
   telegramBotLink: Ref<{ link: TelegramBotLink | null; error: string | null }>;
   /** 飞书扫码创建应用的界面状态。 */
   feishuRegister: Ref<FeishuRegisterView>;
+  /** 钉钉扫码创建应用的界面状态。 */
+  dingtalkRegister: Ref<DingTalkRegisterView>;
   qr: Ref<WechatQrView | null>;
   qrError: Ref<string | null>;
   activity: Ref<RemoteActivity[]>;
@@ -83,6 +87,7 @@ export function createRemoteAssistantState(): RemoteAssistantState {
     wecomStatus: ref<WecomStatus>({ ...IDLE_WECOM_STATUS }),
     telegramBotLink: ref<{ link: TelegramBotLink | null; error: string | null }>({ link: null, error: null }),
     feishuRegister: ref<FeishuRegisterView>({ ...IDLE_FEISHU_REGISTER }),
+    dingtalkRegister: ref<DingTalkRegisterView>({ ...IDLE_DINGTALK_REGISTER }),
     qr: ref<WechatQrView | null>(null),
     qrError: ref<string | null>(null),
     activity: ref<RemoteActivity[]>([]),

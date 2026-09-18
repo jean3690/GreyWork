@@ -189,6 +189,23 @@ export const IDLE_FEISHU_REGISTER: FeishuRegisterView = {
   detail: null,
 };
 
+/** 钉钉「扫码创建应用」的界面状态（凭证由宿主落盘，这里只有引导与结果）。 */
+export interface DingTalkRegisterView {
+  phase: "idle" | "waiting" | "done" | "failed";
+  /** 待扫的二维码链接（`waiting` 阶段才有）。 */
+  qrUrl: string | null;
+  /** 手机上的配对码，便于确认扫的是哪一次（钉钉可能不下发）。 */
+  userCode: string | null;
+  detail: string | null;
+}
+
+export const IDLE_DINGTALK_REGISTER: DingTalkRegisterView = {
+  phase: "idle",
+  qrUrl: null,
+  userCode: null,
+  detail: null,
+};
+
 export const IDLE_QQ_STATUS: QqStatus = {
   configured: false,
   appId: null,

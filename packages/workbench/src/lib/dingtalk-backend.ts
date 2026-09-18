@@ -44,6 +44,24 @@ export interface DingTalkInbound {
 export const DINGTALK_STATE_EVENT = "dingtalk://state";
 export const DINGTALK_INBOUND_EVENT = "dingtalk://inbound";
 
+/** 扫码创建应用的引导信息（`device_code` 只在宿主，不下发到界面）。 */
+export interface DingTalkRegisterStart {
+  /** 编成二维码的链接（手机钉钉扫它）。 */
+  qrUrl: string;
+  /** 手机上的配对码（钉钉不保证下发，可能为 null）。 */
+  userCode: string | null;
+  expiresIn: number;
+  /** 服务端要求的轮询间隔（秒）。 */
+  interval: number;
+}
+
+/** 一次轮询的结果；`done` 时凭证已由宿主落盘（界面只拿到 Client ID）。 */
+export interface DingTalkRegisterPoll {
+  state: "pending" | "done" | "expired" | "error";
+  detail: string | null;
+  clientId: string | null;
+}
+
 export const dingtalkBackend = {
   /** 仅桌面端可用；浏览器态调用方据此给出提示而非静默失败。 */
   supported: (): boolean => isTauriRuntime(),
@@ -77,6 +95,21 @@ export const dingtalkBackend = {
   /** 回一条文本（回发凭据在宿主侧，这里只传对端与文本）。 */
   async send(peerId: string, text: string): Promise<void> {
     await invoke("dingtalk_send", { peerId, text });
+  },
+
+  /** 发起扫码创建应用（不必先去控制台手工建应用）。 */
+  async registerBegin(): Promise<DingTalkRegisterStart> {
+    return invoke<DingTalkRegisterStart>("dingtalk_register_begin");
+  },
+
+  /** 轮询扫码结果；成功那一轮宿主会把 Client ID / Client Secret 写好。 */
+  async registerPoll(): Promise<DingTalkRegisterPoll> {
+    return invoke<DingTalkRegisterPoll>("dingtalk_register_poll");
+  },
+
+  /** 放弃本次扫码（作废 device_code）。 */
+  async registerCancel(): Promise<void> {
+    await invoke("dingtalk_register_cancel");
   },
 
   async onState(listener: (status: DingTalkStatus) => void): Promise<UnlistenFn> {

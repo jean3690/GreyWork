@@ -7,6 +7,7 @@ import { useSettingsStore, type ChannelId } from "@/stores/settings";
 import Icon from "@/features/shared/Icon.vue";
 import ChannelActions from "@/features/channels/ChannelActions.vue";
 import FeishuRegisterPanel from "@/features/channels/FeishuRegisterPanel.vue";
+import DingTalkRegisterPanel from "@/features/channels/DingTalkRegisterPanel.vue";
 import TelegramQrPanel from "@/features/channels/TelegramQrPanel.vue";
 import WechatQrPanel from "@/features/channels/WechatQrPanel.vue";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
@@ -257,6 +258,9 @@ const inputClass =
         <!-- 飞书：扫码创建是首选入口（省掉去控制台建应用抄密钥） -->
         <FeishuRegisterPanel v-else-if="props.channel === 'feishu'" />
 
+        <!-- 钉钉：扫码创建与手动填凭证并列（钉钉官方也走这条一键创建路径） -->
+        <DingTalkRegisterPanel v-else-if="props.channel === 'dingtalk'" />
+
         <div v-if="props.channel !== 'wechat'" class="flex flex-col gap-2 border-t border-line pt-3">
           <span class="text-[12px] text-foreground" :data-testid="`${props.channel}-credentials-label`">
             {{ tokenFields ? t(tokenFields.labelKey) : t(`remoteAssist.${props.channel}.${credentialFields.credentialsKey}`) }}
@@ -288,15 +292,6 @@ const inputClass =
           </template>
 
           <template v-else>
-            <!-- 钉钉没有「扫码创建应用 / 扫码取凭证」的开放接口（扫码登录与内置二维码
-                 都以已有 AppKey 为前提），所以这里只给控制台地址，不摆一个扫了没用的码 -->
-            <p
-              v-if="props.channel === 'dingtalk'"
-              class="rounded-[10px] border border-line bg-panel-2 px-3 py-2 text-[10.5px] leading-relaxed text-dim2"
-              data-testid="dingtalk-no-qr-hint"
-            >
-              {{ t("remoteAssist.dingtalk.noQrHint") }}
-            </p>
             <div v-if="props.channel === 'dingtalk'" class="flex items-center gap-1.5">
               <code class="min-w-0 flex-1 truncate rounded-[7px] bg-panel-2 px-2 py-1 font-mono text-[10.5px] text-dim2">
                 {{ DINGTALK_CONSOLE_URL }}

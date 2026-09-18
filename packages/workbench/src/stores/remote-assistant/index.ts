@@ -28,6 +28,7 @@ import {
   type WechatQrPhase,
   type WechatQrView,
   type FeishuRegisterView,
+  type DingTalkRegisterView,
 } from "./shared";
 import type { StatusApi } from "./status";
 import type { ConnectApi } from "./connect";
@@ -52,6 +53,7 @@ export type {
   WechatQrPhase,
   WechatQrView,
   FeishuRegisterView,
+  DingTalkRegisterView,
 };
 export {
   idleChannelStatus,
@@ -124,6 +126,9 @@ export const useRemoteAssistantStore = defineStore("remote-assistant", () => {
     feishuRegister: state.feishuRegister,
     startFeishuRegistration: login.startFeishuRegistration,
     cancelFeishuRegistration: login.cancelFeishuRegistration,
+    dingtalkRegister: state.dingtalkRegister,
+    startDingTalkRegistration: login.startDingTalkRegistration,
+    cancelDingTalkRegistration: login.cancelDingTalkRegistration,
     saveTelegramCredentials: connect.saveTelegramCredentials,
     connectTelegram: connect.connectTelegram,
     disconnectTelegram: connect.disconnectTelegram,
