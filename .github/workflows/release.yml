@@ -12,10 +12,14 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
   release:
     name: Release (${{ matrix.platform }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -32,33 +36,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Tauri system dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: apps/desktop/src-tauri
-
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-
       # Release 正文的唯一来源是 CHANGELOG.md 里对应版本的条目：改文案改那里，
       # 不要手改 Release。缺条目会在这里直接失败，避免发出没有说明的版本。
+      # 放在装依赖之前：缺条目时不该先花几分钟装工具链再报错。
       - name: 从 CHANGELOG 抽取发布说明
         id: notes
         run: node scripts/changelog-section.mjs "${{ github.ref_name }}" --github-output body
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/setup-rust
+        with:
+          # 与 ci.yml 的 desktop job 同一个缓存键，tag run 因此能命中 master 上的依赖缓存。
+          shared-key: tauri
+      - uses: ./.github/actions/setup-node
 
       # tauri-action 内部执行 tauri build：
       # beforeBuildCommand（pnpm build，编 renderer）→ Rust 编译 → 打 bundle 并上传到 Release。

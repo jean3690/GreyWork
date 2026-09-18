@@ -9,22 +9,24 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
-  web:
-    name: Lint · Test · Build (web)
+  # web 侧的检查拆成 4 个并行 job。实测（master push，run 35235248057）串行时这 5 步分别是
+  # ESLint 0.9 / Prettier 0.2 / typecheck 0.6 / 测试 1.4 / 构建 0.8 min，加起来 3.9 min 墙钟；
+  # 拆开后墙钟≈最慢的一步（测试 1.4 min），代价是每个 job 各付一次 install（缓存命中约 0.2 min）。
+  # 公开仓库的 Actions 分钟数不计费，多花的机器时间不产生成本。
+  lint:
+    name: Lint (eslint · prettier)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/setup-node
 
       - name: ESLint
         run: pnpm lint
@@ -32,18 +34,45 @@ jobs:
       - name: Prettier
         run: pnpm format:check
 
+  typecheck:
+    name: Typecheck (vue-tsc)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-node
+
       - name: Typecheck (packages + apps)
         run: pnpm typecheck
+
+  test:
+    name: Test (vitest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-node
 
       - name: Tests
         run: pnpm -r test
 
+  renderer:
+    name: Build (renderer)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-node
+
+      # 跑的就是 desktop 的 build 脚本（vue-tsc + vite），不拆脚本：保证 CI 构建的产物
+      # 与本地、与 tauri 打包时用的是同一条路径。类型检查在 typecheck job 已独立覆盖。
       - name: Build (web + desktop renderer)
         run: pnpm build
 
   desktop:
     name: Tauri Bundle (${{ matrix.platform }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -59,28 +88,11 @@ jobs:
             bundle: dmg
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install Tauri system dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
+      - uses: ./.github/actions/setup-rust
         with:
-          workspaces: apps/desktop/src-tauri
-
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+          # 与 release.yml 的打包 job 同一个缓存键：见 composite 里的说明。
+          shared-key: tauri
+      - uses: ./.github/actions/setup-node
 
       # tauri build 会先跑 beforeBuildCommand（pnpm build 编 renderer），
       # 再编译 Rust 并打整包 —— 这是 web/rust 两个 job 都覆盖不到的「整包能否出来」。
@@ -92,30 +104,26 @@ jobs:
   rust:
     name: Cargo Test (src-tauri)
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install Tauri system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
-
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: ./.github/actions/setup-rust
         with:
-          components: clippy, rustfmt
+          components: clippy,rustfmt
 
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: apps/desktop/src-tauri
-
+      # fmt / clippy / test 共用一个 job 和一个 target 目录：三者编译的产物互相复用，
+      # 拆开反而各自从缓存恢复一遍、各自重编一遍本地 crate。
       - name: Rustfmt
         working-directory: apps/desktop/src-tauri
         run: cargo fmt --check
 
+      # --locked：Cargo.lock 与 Cargo.toml 不一致时立刻失败，而不是在 CI 里静默改锁文件。
+      # --all-targets：不加就只检查 lib/bin，tests/ 与 examples/ 里的代码不受 lint
+      # 覆盖（本仓 tests/ 下有 7 个集成测试文件）。实测本地全量通过，加上不产生新告警。
       - name: Clippy
         working-directory: apps/desktop/src-tauri
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --locked --all-targets -- -D warnings
 
       - name: Tests
         working-directory: apps/desktop/src-tauri
-        run: cargo test
+        run: cargo test --locked

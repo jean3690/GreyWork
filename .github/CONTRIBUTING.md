@@ -17,13 +17,13 @@ pnpm -r test        # 全部测试（带 test 脚本的 package 各自跑 vitest
 pnpm build          # 桌面端渲染层构建
 ```
 
-Rust 侧（在 `apps/desktop/src-tauri` 下）：`cargo fmt` / `cargo clippy -- -D warnings` / `cargo test`。
+Rust 侧（在 `apps/desktop/src-tauri` 下）：`cargo fmt` / `cargo clippy --all-targets -- -D warnings` / `cargo test`。
 
 ## 提交纪律（钩子强制）
 
 - **pre-commit**：`lint-staged` 只对暂存文件跑 `eslint --fix` + `prettier`——违规代码会被自动修复或拦截
 - **pre-push**：`pnpm lint && pnpm -r test` 全量门禁
-- CI（`.github/workflows/ci.yml`）与本地钩子同构：lint → prettier → typecheck → test → build；Rust 侧 fmt → clippy → test
+- CI（`.github/workflows/ci.yml`）与本地钩子同构：lint / prettier / typecheck / test / build 拆成并行 job；Rust 侧 fmt → clippy → test
 
 ## 约定
 

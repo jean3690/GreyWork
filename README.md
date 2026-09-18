@@ -121,18 +121,22 @@ On Wayland, `pnpm tauri:wayland` sets the required environment variables.
 | `pnpm tauri build` | Build the full Tauri bundle                      |
 | `pnpm check`       | `typecheck` + `build`                            |
 
-Rust side (run inside `apps/desktop/src-tauri`): `cargo fmt`, `cargo clippy -- -D warnings`,
-`cargo test`.
+Rust side (run inside `apps/desktop/src-tauri`): `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`cargo test` — `--all-targets` so `tests/` and `examples/` are linted too.
 
 ## Testing & CI
 
 - Vitest runs in two projects — `node` for pure logic and `dom` for component behavior; coverage
   thresholds are configured per package.
-- `.github/workflows/ci.yml` mirrors the local hooks: ESLint → Prettier check → typecheck → tests →
-  build, plus `cargo fmt` → `cargo clippy` → `cargo test`.
+- `.github/workflows/ci.yml` mirrors the local hooks but runs the web checks as four parallel jobs —
+  lint (ESLint + Prettier), typecheck, vitest, renderer build — so the wall clock is the slowest job
+  instead of their sum, plus a Rust job (`cargo fmt` → `cargo clippy --locked` → `cargo test --locked`)
+  and a three-platform Tauri bundle matrix (deb / NSIS / dmg).
 - Tagging `v*` runs `.github/workflows/release.yml`, which builds deb / NSIS / dmg bundles and opens
   a draft GitHub Release. The release body is taken from the matching entry in
-  [CHANGELOG.md](CHANGELOG.md); un-draft it once all three platforms are green.
+  [CHANGELOG.md](CHANGELOG.md); un-draft it once all three platforms are green. Bundling shares the
+  `tauri` Rust cache key with CI, so a tag build reuses the dependency artifacts warmed on `master`
+  instead of recompiling the whole dependency tree.
 - A pre-push hook runs `pnpm lint && pnpm -r test`, so a broken push fails locally first.
 
 ## Security Model

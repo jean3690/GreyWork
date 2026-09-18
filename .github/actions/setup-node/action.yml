@@ -1,0 +1,19 @@
+name: Setup Node + pnpm
+description: 安装 pnpm / Node（含 pnpm store 缓存）并安装工作区依赖
+
+# 各 job 的这四步此前逐份复制，改动容易漏改（例如 node 版本、安装参数）。
+# 收成一个 composite 后，缓存与安装策略只有一处。
+runs:
+  using: composite
+  steps:
+    - uses: pnpm/action-setup@v4
+
+    # 必须在 pnpm/action-setup 之后：cache: pnpm 要调用 pnpm 取 store 路径。
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 24
+        cache: pnpm
+
+    - name: Install dependencies
+      shell: bash
+      run: pnpm install --frozen-lockfile

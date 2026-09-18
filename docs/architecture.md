@@ -75,13 +75,30 @@ desktop     ← workbench (+ Tauri Rust host)
 
 ## CI/CD
 
-GitHub Actions workflow (`.github/workflows/ci.yml`) runs on push/PR:
+GitHub Actions workflows live in `.github/workflows/` and share two composite actions
+(`.github/actions/setup-node`, `.github/actions/setup-rust`) so the toolchain/cache policy has a
+single home.
 
-1. **Web job**: ESLint → Prettier check → Typecheck (vue-tsc across all packages) → Tests → Build
-2. **Desktop job**: Installs Tauri system deps → Builds Rust cache → Runs Tauri bundle (deb only)
-3. **Rust job**: Cargo fmt check → Clippy (-D warnings) → Cargo test
+`ci.yml` runs on push to `master`/`main` and on every PR:
 
-Branch protection ensures all checks pass before merge.
+1. **Lint / Typecheck / Test / Build (renderer)** — four parallel jobs. They mirror the pre-push
+   hook; running them concurrently keeps the wall clock at the slowest job instead of the sum. Each
+   job installs the pnpm store from cache (~20-40s).
+2. **Tauri Bundle (deb / NSIS / dmg)** — three-platform matrix that installs the Tauri system deps,
+   compiles Rust, and packages the app; the renderer is built inside `tauri build` via
+   `beforeBuildCommand`.
+3. **Cargo Test (src-tauri)** — `cargo fmt --check`, `cargo clippy --locked --all-targets -- -D warnings`, `cargo test --locked`.
+
+Rust dependency caches come from `Swatinem/rust-cache` and are keyed with `shared-key: tauri`, so the
+CI bundle matrix and the release workflow restore the same dependency artifacts (the key still
+includes OS/arch and the rustc hash). Caches are only written on `master` and on tags: GitHub's cache
+budget is 10 GB per repository, and per-PR copies of the ~600 MB desktop cache evict the `master`
+entries, turning the next build into a full dependency recompile. The first run after a change to
+`Cargo.lock`, `RUSTFLAGS`, or a job's cache key is a cold build by design.
+
+`release.yml` runs on `v*` tags, extracts the release notes from `CHANGELOG.md`, and builds/uploads
+deb / NSIS / dmg to a draft Release via `tauri-action`. Branch protection ensures all checks pass
+before merge — if required check names change, update them in the branch protection settings.
 
 ## Design Principles
 
