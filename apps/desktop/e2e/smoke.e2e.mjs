@@ -35,9 +35,11 @@ async function waitServer(url, timeoutMs) {
   throw new Error(`vite dev server 未在 ${timeoutMs}ms 内就绪: ${url}`);
 }
 
+// shell: true —— Windows 上 `pnpm` 装的是 .cmd 垫片，Node 不带 shell 起不来。
 const server = spawn("pnpm", ["exec", "vite", "--port", String(PORT), "--strictPort"], {
   cwd: desktopRoot,
   stdio: ["ignore", "pipe", "pipe"],
+  shell: true,
 });
 let serverLog = "";
 server.stdout.on("data", (d) => (serverLog += d.toString()));

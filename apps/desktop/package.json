@@ -8,7 +8,7 @@
     "build": "vue-tsc --noEmit && cross-env NODE_OPTIONS=--max-old-space-size=6144 vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "tauri:wayland": "GDK_BACKEND=wayland WAYLAND_DISPLAY=wayland-0 WEBKIT_DISABLE_DMABUF_RENDERER=1 tauri",
+    "tauri:wayland": "cross-env GDK_BACKEND=wayland WAYLAND_DISPLAY=wayland-0 WEBKIT_DISABLE_DMABUF_RENDERER=1 tauri",
     "typecheck": "vue-tsc --noEmit",
     "test": "vitest run --coverage",
     "test:unit": "vitest run --project node",

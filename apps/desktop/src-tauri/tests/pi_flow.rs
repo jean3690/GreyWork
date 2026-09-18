@@ -65,9 +65,11 @@ async fn pi_bridge_handshake_thoughts_usage_and_turn_cancel() {
 
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let adapter = manifest_dir.join("tests/pi-acp-adapter.mjs");
+    // 路径统一正斜杠并加引号：`AcpAgent::from_str` 内部走 POSIX 规则的 `shell_words`，
+    // Windows 的反斜杠会被当转义符吃掉（`C:\a\x.mjs` → `C:ax.mjs`），带空格的目录也会被拆开。
     let cmd = format!(
-        "node {} --provider opencode --model ling-3.0-flash-fin-free",
-        adapter.display()
+        "node \"{}\" --provider opencode --model ling-3.0-flash-fin-free",
+        adapter.display().to_string().replace('\\', "/")
     );
 
     let agent = AcpAgent::from_str(&cmd).expect("valid command");

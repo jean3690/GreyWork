@@ -16,7 +16,12 @@ use tokio::sync::mpsc;
 async fn mock_agent_turn_cancel_keeps_session_alive() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let agent_script = manifest_dir.join("tests/mock-acp-agent.mjs");
-    let cmd = format!("node {}", agent_script.display());
+    // 路径统一正斜杠并加引号：`AcpAgent::from_str` 内部走 POSIX 规则的 `shell_words`，
+    // Windows 的反斜杠会被当转义符吃掉（`C:\a\x.mjs` → `C:ax.mjs`），带空格的目录也会被拆开。
+    let cmd = format!(
+        "node \"{}\"",
+        agent_script.display().to_string().replace('\\', "/")
+    );
 
     let agent = AcpAgent::from_str(&cmd).expect("valid command");
 

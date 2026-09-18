@@ -36,7 +36,8 @@ const piReady = new Promise((resolve) => {
 function startPi() {
   const args = ["--mode", "rpc", "--model", model];
   if (provider) args.push("--provider", provider);
-  pi = spawn("pi", args, { stdio: ["pipe", "pipe", "inherit"] });
+  // shell: true —— Windows 上 `pi` 装的是 .cmd/.ps1 垫片，Node 不带 shell 起不来。
+  pi = spawn("pi", args, { stdio: ["pipe", "pipe", "inherit"], shell: true });
   pi.on("error", (err) => {
     process.stderr.write(`pi spawn error: ${err.message}\n`);
   });
