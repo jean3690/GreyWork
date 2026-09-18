@@ -92,9 +92,9 @@ export function isBinaryKind(kind: ViewerKind): boolean {
   return BINARY_KINDS.has(kind);
 }
 
-/** 取路径末段文件名。 */
+/** 取路径末段文件名（兼容 Windows 分隔符）。 */
 export function basename(path: string): string {
-  return path.split("/").pop() ?? path;
+  return path.split(/[\\/]/).pop() ?? path;
 }
 
 /**

@@ -139,6 +139,23 @@ describe("展开与懒加载", () => {
     await tree.toggle("/ws/a.md");
     expect(h.listDir).toHaveBeenCalledTimes(1);
   });
+
+  it("Windows 反斜杠路径同样能展开：前缀匹配不依赖分隔符", async () => {
+    // Rust canonicalize 在 Windows 上回的是 `\\?\C:\ws\src` 这类反斜杠路径；
+    // 之前按 `${node.path}/` 拼前缀，findNode 永远找不到节点，点目录没反应。
+    h.isTauri.mockReturnValue(true);
+    h.resolveRoot.mockResolvedValue({ dir: "C:\\ws", bound: true });
+    h.listDir.mockResolvedValueOnce([{ name: "src", kind: "directory", origin: "C:\\ws\\src" }]);
+    const tree = useFileTreeStore();
+    await tree.refresh();
+
+    h.listDir.mockResolvedValueOnce([{ name: "index.ts", kind: "file", origin: "C:\\ws\\src\\index.ts" }]);
+    await tree.toggle("C:\\ws\\src");
+
+    expect(h.listDir).toHaveBeenCalledTimes(2);
+    expect(h.listDir).toHaveBeenLastCalledWith("C:\\ws\\src");
+    expect(tree.nodes[0].children?.map((child) => child.name)).toEqual(["index.ts"]);
+  });
 });
 
 describe("工作区文件夹绑定", () => {

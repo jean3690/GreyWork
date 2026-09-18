@@ -55,11 +55,30 @@ export const useFileTreeStore = defineStore("fileTree", () => {
     return entries.sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === "directory" ? -1 : 1));
   }
 
+  /**
+   * 比较/拼前缀用的路径归一形式 —— 只用于比较，不用于回传宿主。
+   *
+   * Windows 上 Rust 的 canonicalize 回的是 `\\?\C:\ws\a`（反斜杠 + 扩展长度前缀），
+   * 而这里的比较一律按 `/` 拼前缀；不归一的话 `findNode` 永远找不到已展开的子目录，
+   * 现象是「点目录不展开」。回传宿主的路径保持原样，避免破坏 `\\?\` 前缀语义。
+   */
+  function normalizePath(path: string): string {
+    return path.replace(/\\/g, "/").replace(/\/+$/, "");
+  }
+
+  /** 子项回退路径：沿用父路径的分隔符，避免 Windows 上拼出 `C:\ws/child`。 */
+  function childPath(parent: string, name: string): string {
+    const sep = parent.includes("\\") ? "\\" : "/";
+    return parent.endsWith(sep) ? `${parent}${name}` : `${parent}${sep}${name}`;
+  }
+
   /** 在已加载的树里按路径找节点（逐层下钻，不做全树遍历）。 */
   function findNode(path: string, level = diskNodes.value): FileTreeNode | null {
+    const target = normalizePath(path);
     for (const node of level) {
-      if (node.path === path) return node;
-      if (node.children && path.startsWith(`${node.path}/`)) {
+      const nodePath = normalizePath(node.path);
+      if (nodePath === target) return node;
+      if (node.children && target.startsWith(`${nodePath}/`)) {
         const hit = findNode(path, node.children);
         if (hit) return hit;
       }
@@ -152,7 +171,7 @@ export const useFileTreeStore = defineStore("fileTree", () => {
       node.children = sortEntries(
         entries.map((entry) => ({
           name: entry.name,
-          path: entry.origin ?? `${path}/${entry.name}`,
+          path: entry.origin ?? childPath(path, entry.name),
           kind: entry.kind,
         })),
       );
