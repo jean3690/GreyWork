@@ -251,6 +251,8 @@ mod tests {
         );
     }
 
+    // `/usr` 等只读绑定是 Linux 文件系统布局，故本用例仅在 Linux 上钉住。
+    #[cfg(target_os = "linux")]
     #[test]
     fn wrap_fs_binds_workspace_readonly_system_and_unshares_net() {
         let workspace = std::env::temp_dir().join("greywork-sandbox-ws");

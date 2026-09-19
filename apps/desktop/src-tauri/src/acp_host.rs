@@ -1668,7 +1668,8 @@ mod tests {
                 path.strip_prefix(&root)
                     .unwrap()
                     .to_string_lossy()
-                    .into_owned()
+                    // Windows 的分隔符是 `\`，归一成 `/` 以便跨平台断言。
+                    .replace('\\', "/")
             })
             .collect();
         assert_eq!(names, vec!["data.csv", "reports/brief.md"]);
@@ -1707,7 +1708,14 @@ mod tests {
     fn path_probe_hits_executable_and_misses_absent() {
         let dir = std::env::temp_dir().join(format!("gw-probe-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let exe = dir.join("gw-fake-agent");
+        // Windows 的 `probe_program` 按 PATHEXT 展开，只认 `.exe/.cmd/.bat` 之类；
+        // 裸名文件探不到，故此处按平台补上可执行扩展名。
+        let exe_name = if cfg!(windows) {
+            "gw-fake-agent.cmd"
+        } else {
+            "gw-fake-agent"
+        };
+        let exe = dir.join(exe_name);
         std::fs::write(&exe, b"#!/bin/sh\n").unwrap();
         #[cfg(unix)]
         {
