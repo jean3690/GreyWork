@@ -1,6 +1,6 @@
 [package]
 name = "greywork"
-version = "0.1.0"
+version = "0.1.1"
 description = "GreyWork desktop shell"
 authors = ["GreyWork Team"]
 edition = "2021"

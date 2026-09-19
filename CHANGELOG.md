@@ -8,6 +8,16 @@
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-09-19
+
+### 修复
+
+- 修复只在 Windows CI 暴露的 6 个单测失败（均为测试对平台的隐性假设，非生产逻辑回归）：
+  `process_guard` 的 `%` 断言按平台分叉（Windows 上 `npx` 经 `cmd /C` 中转、`%` 被拒为正确行为）；
+  `sandbox` 的 `--ro-bind /usr` 断言限定 Linux；`acp_host` 探测按 PATHEXT 补可执行扩展名、扫描路径分隔符归一；
+  `git` 含引号文件名用例限定类 Unix（`"` 在 Windows 文件名非法）；`http` 测试内 server 排空请求 + 优雅关闭，
+  消除 Windows 上的 RST(10053)。
+
 ## [0.1.0] - 2026-09-17
 
 首个公开版本：Tauri 2 桌面外壳 + Rust 宿主 + Vue 3 渲染层，三平台安装包（deb / NSIS / dmg）。
@@ -78,5 +88,6 @@
 **安装包**：Linux 用 `.deb`（`sudo dpkg -i` 或 `apt install ./`），Windows 用 NSIS 安装器，macOS 用 `.dmg`。
 产物当前未做代码签名：macOS 首次打开需右键「打开」，Windows 可能提示 SmartScreen。
 
-[Unreleased]: https://github.com/jean3690/GreyWork/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/jean3690/GreyWork/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/jean3690/GreyWork/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/jean3690/GreyWork/releases/tag/v0.1.0
