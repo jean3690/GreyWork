@@ -475,6 +475,8 @@ mod tests {
             .args(["mv", "a.txt", "renamed.txt"])
             .status()
             .expect("git mv");
+        // `"` 在 Windows 文件名里非法，含引号的用例仅在类 Unix 上跑。
+        #[cfg(not(windows))]
         std::fs::write(root.join("with\"quote.txt"), "q\n").expect("写含引号的文件");
 
         let entries = status(&access, &root.to_string_lossy()).expect("采集状态");
@@ -487,6 +489,7 @@ mod tests {
             !paths.contains(&"a.txt"),
             "旧路径不该被当成独立条目: {paths:?}"
         );
+        #[cfg(not(windows))]
         assert!(
             paths.contains(&"with\"quote.txt"),
             "含引号的文件名要原样返回: {paths:?}"

@@ -75,14 +75,22 @@ mod tests {
             .expect("bind");
         let addr = listener.local_addr().expect("addr");
         tokio::spawn(async move {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
             if let Ok((mut stream, _)) = listener.accept().await {
+                // 先把请求读干净：Windows 上带未读数据直接 drop socket 会触发 RST(10053)，
+                // 客户端读 body 时报 ConnectionAborted。
+                let mut scratch = [0u8; 1024];
+                let _ = stream.read(&mut scratch).await;
                 let body = "{\"ok\":true}";
                 let header = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                     body.len(),
                     body
                 );
-                let _ = tokio::io::AsyncWriteExt::write_all(&mut stream, header.as_bytes()).await;
+                let _ = stream.write_all(header.as_bytes()).await;
+                // flush + 半关闭：优雅发 FIN，让缓冲区数据先送达再关。
+                let _ = stream.flush().await;
+                let _ = stream.shutdown().await;
             }
         });
         let client = reqwest::Client::new();

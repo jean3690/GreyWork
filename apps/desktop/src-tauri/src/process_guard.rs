@@ -550,9 +550,15 @@ mod tests {
         assert_eq!(cmd_wrap_metachar("npx -y pkg@%foo%", false), None);
         assert_eq!(cmd_wrap_metachar("npx -y pkg", true), None);
 
-        // 全局列表里没有 `%`：POSIX 上带 `%` 的命令仍被放行
+        // 全局列表里没有 `%`：POSIX 上带 `%` 的命令仍被放行。
         assert!(!SHELL_META_CHARS.contains(&'%'));
-        assert!(validate_spawn_command("npx -y pkg@100%", ALLOWED).is_ok());
+        // Windows 上 `npx` 落在 `.cmd` 垫片、会经 `cmd /C` 中转，故 `%` 被拒（正确行为）；
+        // 其余平台不包装，`%` 放行。
+        if cfg!(windows) {
+            assert!(validate_spawn_command("npx -y pkg@100%", ALLOWED).is_err());
+        } else {
+            assert!(validate_spawn_command("npx -y pkg@100%", ALLOWED).is_ok());
+        }
     }
 
     /// 常量必须在两个平台上都钉住：Windows 上是 `CREATE_NO_WINDOW`，其他平台是「不设」。
