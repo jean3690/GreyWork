@@ -49,6 +49,37 @@ export function joinPath(parent: string, ...segments: string[]): string {
 }
 
 /**
+ * 路径末段（文件名）。
+ *
+ * 先剥尾部分隔符再取末段，与 `normalizePath` 的语义对齐：`"reports/"` → `"reports"`。
+ * 根目录（`"/"`）拿不到末段，返回空串 —— 调用方需要展示名时应自行兜底，
+ * 这里不编造一个名字出来。
+ *
+ * 大小写原样保留：Linux 上 `A.md` 与 `a.md` 是两个不同的文件。
+ */
+export function basename(path: string): string {
+  const trimmed = path.replace(TRAILING_SEPARATORS, "");
+  if (!trimmed) return "";
+  const cut = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+  return cut === -1 ? trimmed : trimmed.slice(cut + 1);
+}
+
+/**
+ * 扩展名（**不含点、不改大小写**，调用方按需 `.toLowerCase()`）。
+ *
+ * 先 `basename` 再找最后一个点 —— 直接对整条路径 `split(".").pop()` 会把带点的目录名
+ * 算进来（`/home/u/v1.2/report` → `"2/report"`），那是本函数存在的全部理由。
+ *
+ * 无扩展名返回空串：前导点是隐藏文件名（`.gitignore`）而非扩展名，尾点（`a.`）同理。
+ * 多点只取最后一段：`archive.tar.gz` → `"gz"`。
+ */
+export function extname(path: string): string {
+  const base = basename(path);
+  const dot = base.lastIndexOf(".");
+  return dot > 0 && dot < base.length - 1 ? base.slice(dot + 1) : "";
+}
+
+/**
  * 比较用的归一形式（`\` → `/`、去尾部斜杠）。
  *
  * **只用于比较，不回传宿主** —— 回传要保持宿主给的原样（含 Windows 的反斜杠）。

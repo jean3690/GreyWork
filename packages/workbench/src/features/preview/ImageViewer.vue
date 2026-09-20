@@ -7,6 +7,7 @@
  * 这是本组件唯一容易漏的地方。
  */
 import { onUnmounted, ref, toRef, watch } from "vue";
+import { extname } from "@greywork/core";
 import { usePreviewBinary } from "@/lib/preview-content";
 import type { PreviewTab } from "@/stores/preview";
 
@@ -38,7 +39,7 @@ watch(
   (bytes) => {
     release();
     if (!bytes) return;
-    const ext = props.tab.path.split(".").pop()?.toLowerCase() ?? "";
+    const ext = extname(props.tab.path).toLowerCase();
     // 未知扩展给 octet-stream：浏览器仍会尝试嗅探，但不会因为错误 MIME 拒绝渲染。
     const blob = new Blob([bytes as BlobPart], { type: MIME[ext] ?? "application/octet-stream" });
     objectUrl.value = URL.createObjectURL(blob);

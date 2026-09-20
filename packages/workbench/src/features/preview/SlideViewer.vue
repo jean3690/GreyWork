@@ -134,7 +134,35 @@ function boxStyle(rect: Rect): Record<string, string> {
 
 const ANCHOR_TO_JUSTIFY: Record<string, string> = { start: "flex-start", center: "center", end: "flex-end" };
 
-function textBoxStyle(rect: Rect, anchor: string, fill: string | null, line: string | null): Record<string, string> {
+/** 深底给浅字、浅底给深字：pptx 的文字颜色常留空由主题继承（尤其生成类演示），
+ *  照搬就会黑字压深底 —— 内容在 DOM 里却看不见。深色标题/章节页极常见，是最影响观感的保真缺口。
+ *  只作为兜底：run 自己声明了颜色（runStyle 里的 color）会覆盖，绝不篡改文档写明的颜色。
+ *  DocxBlocks 早已对表格单元格做了同款处理，这里补齐 pptx 侧。 */
+const DARK_INK = "#1A1A1A";
+const LIGHT_INK = "#FAFAF9";
+
+/** 相对亮度低于 0.5 视为深色（ITU-R BT.601 感知权重）。非 #rrggbb 一律当浅色。 */
+function isDark(color: string): boolean {
+  if (!/^#[0-9A-Fa-f]{6}$/.test(color)) return false;
+  const r = parseInt(color.slice(1, 3), 16);
+  const g = parseInt(color.slice(3, 5), 16);
+  const b = parseInt(color.slice(5, 7), 16);
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255 < 0.5;
+}
+
+/** 文字兜底色：取最近的不透明底色（文本框/单元格填充，否则幻灯片背景，否则白）判明暗。
+ *  幻灯片画布背景本就明确写出，据此推断比继承应用主题色更可靠（暗色应用主题下白底会得到浅字）。 */
+function inkFor(background: string | null): string {
+  return background && isDark(background) ? LIGHT_INK : DARK_INK;
+}
+
+function textBoxStyle(
+  rect: Rect,
+  anchor: string,
+  fill: string | null,
+  line: string | null,
+  slideBackground: string | null,
+): Record<string, string> {
   return {
     ...boxStyle(rect),
     display: "flex",
@@ -142,6 +170,7 @@ function textBoxStyle(rect: Rect, anchor: string, fill: string | null, line: str
     justifyContent: ANCHOR_TO_JUSTIFY[anchor] ?? "flex-start",
     // 不裁剪溢出：文本框算出来比内容小是常态，裁掉就又「看不到完整内容」了
     overflow: "visible",
+    color: inkFor(fill ?? slideBackground),
     ...(fill ? { background: fill } : {}),
     ...(line ? { border: `1px solid ${line}` } : {}),
   };
@@ -182,11 +211,12 @@ function runStyle(run: PptxRun): Record<string, string> {
   };
 }
 
-function cellStyle(fill: string | null): Record<string, string> {
+function cellStyle(fill: string | null, slideBackground: string | null): Record<string, string> {
   return {
     padding: "4px 6px",
     verticalAlign: "middle",
     border: "1px solid rgba(0, 0, 0, 0.12)",
+    color: inkFor(fill ?? slideBackground),
     ...(fill ? { background: fill } : {}),
   };
 }
@@ -229,7 +259,7 @@ const slideCount = computed(() => deck.value?.slides.length ?? 0);
                 <div
                   v-else-if="element.kind === 'text'"
                   data-testid="slide-text"
-                  :style="textBoxStyle(element.rect, element.anchor, element.fill, element.line)"
+                  :style="textBoxStyle(element.rect, element.anchor, element.fill, element.line, slide.background)"
                 >
                   <p v-for="(paragraph, pIndex) in element.paragraphs" :key="pIndex" :style="paragraphStyle(paragraph)">
                     <!-- 间距用 margin，不靠插值里的空格：Vue 会把文本节点尾部空白吃掉 -->
@@ -253,7 +283,7 @@ const slideCount = computed(() => deck.value?.slides.length ?? 0);
                           v-if="!cell.covered"
                           :colspan="cell.colSpan > 1 ? cell.colSpan : undefined"
                           :rowspan="cell.rowSpan > 1 ? cell.rowSpan : undefined"
-                          :style="cellStyle(cell.fill)"
+                          :style="cellStyle(cell.fill, slide.background)"
                         >
                           <p v-for="(paragraph, pIndex) in cell.paragraphs" :key="pIndex" :style="paragraphStyle(paragraph)">
                             <span v-for="(run, rIndex) in paragraph.runs" :key="rIndex" :style="runStyle(run)">{{ run.text }}</span>

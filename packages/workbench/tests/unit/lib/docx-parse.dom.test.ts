@@ -171,6 +171,48 @@ describe("parseDocx", () => {
     expect(list).toMatchObject({ ordered: false, level: 0, marker: "•" });
   });
 
+  it("编号超出单字符范围：字母走双射 26 进制（z→aa），中文计数补到两位", async () => {
+    const numbering = `
+      <w:abstractNum w:abstractNumId="0">
+        <w:lvl w:ilvl="0"><w:numFmt w:val="lowerLetter"/><w:lvlText w:val="%1."/></w:lvl>
+      </w:abstractNum>
+      <w:abstractNum w:abstractNumId="1">
+        <w:lvl w:ilvl="0"><w:numFmt w:val="chineseCounting"/><w:lvlText w:val="%1、"/></w:lvl>
+      </w:abstractNum>
+      <w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>
+      <w:num w:numId="2"><w:abstractNumId w:val="1"/></w:num>`;
+    const item = (numId: number, text: string) =>
+      `<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="${numId}"/></w:numPr></w:pPr><w:r><w:t>${text}</w:t></w:r></w:p>`;
+
+    const letters = paragraphs(
+      (await parseDocx(await buildDocx({ numbering, body: Array.from({ length: 27 }, (_, i) => item(1, `L${i}`)).join("") }))).blocks,
+    ).map((p) => p.list?.marker);
+    // 第 26 项 z、第 27 项回绕到 aa（旧实现 (index-1)%26 会退回 "a"）
+    expect(letters[25]).toBe("z.");
+    expect(letters[26]).toBe("aa.");
+
+    const chinese = paragraphs(
+      (await parseDocx(await buildDocx({ numbering, body: Array.from({ length: 11 }, (_, i) => item(2, `C${i}`)).join("") }))).blocks,
+    ).map((p) => p.list?.marker);
+    // 第 10 项十、第 11 项十一（旧实现从第 11 项起退回阿拉伯数字）
+    expect(chinese[9]).toBe("十、");
+    expect(chinese[10]).toBe("十一、");
+  });
+
+  it("具名高亮映射成 hex：CSS 认不出 darkYellow 这类关键字，直接照搬会让高亮消失", async () => {
+    const doc = await parseDocx(
+      await buildDocx({
+        body: `<w:p>
+          <w:r><w:rPr><w:highlight w:val="darkYellow"/></w:rPr><w:t>深黄</w:t></w:r>
+          <w:r><w:rPr><w:highlight w:val="yellow"/></w:rPr><w:t>黄</w:t></w:r>
+        </w:p>`,
+      }),
+    );
+    const runs = paragraphs(doc.blocks)[0].runs;
+    expect(runs[0].highlight).toBe("#808000");
+    expect(runs[1].highlight).toBe("#FFFF00");
+  });
+
   it("内联图片解析成 data URL，超链接只留外部目标", async () => {
     const doc = await parseDocx(
       await buildDocx({

@@ -262,6 +262,29 @@ function hexColor(value: string | null): string | null {
   return /^[0-9A-Fa-f]{6}$/.test(value) ? `#${value.toUpperCase()}` : null;
 }
 
+/**
+ * WordprocessingML 具名高亮 → hex。CSS 认不出 `darkYellow` 这类关键字，直接照搬会让高亮消失。
+ * 值取自 ECMA-376 的 ST_HighlightColor。
+ */
+const HIGHLIGHT_HEX: Record<string, string> = {
+  black: "#000000",
+  blue: "#0000FF",
+  cyan: "#00FFFF",
+  green: "#00FF00",
+  magenta: "#FF00FF",
+  red: "#FF0000",
+  yellow: "#FFFF00",
+  white: "#FFFFFF",
+  darkBlue: "#000080",
+  darkCyan: "#008080",
+  darkGreen: "#008000",
+  darkMagenta: "#800080",
+  darkRed: "#800000",
+  darkYellow: "#808000",
+  darkGray: "#808080",
+  lightGray: "#C0C0C0",
+};
+
 /** 从一串 rPr（样式链在前、直接格式在后）叠出最终字符样式。 */
 function mergeRunProps(sources: (Element | null)[]): Omit<DocxRun, "text" | "image" | "link"> {
   const merged: Omit<DocxRun, "text" | "image" | "link"> = {
@@ -294,7 +317,7 @@ function mergeRunProps(sources: (Element | null)[]): Omit<DocxRun, "text" | "ima
     const color = hexColor(relAttr(kid(rPr, "color"), "val"));
     if (color) merged.color = color;
     const highlight = relAttr(kid(rPr, "highlight"), "val");
-    if (highlight && highlight !== "none") merged.highlight = highlight;
+    if (highlight && highlight !== "none") merged.highlight = HIGHLIGHT_HEX[highlight] ?? highlight;
     const shading = hexColor(relAttr(kid(rPr, "shd"), "fill"));
     if (shading) merged.highlight = shading;
     const fonts = kid(rPr, "rFonts");
@@ -413,19 +436,43 @@ function toRoman(value: number): string {
   return out;
 }
 
+/** 双射 26 进制（a=1、z=26、aa=27…）。原实现 `(index-1)%26` 到第 27 项就回绕成 "a"。 */
+function toBase26(value: number): string {
+  let rest = value;
+  let out = "";
+  while (rest > 0) {
+    const remainder = (rest - 1) % 26;
+    out = LOWER_LETTERS[remainder] + out;
+    rest = Math.floor((rest - 1) / 26);
+  }
+  return out || "a";
+}
+
+const CN_DIGITS = "零一二三四五六七八九";
+
+/** 中文计数 1–99；超出退回阿拉伯数字（长中文列表罕见，原实现从第 11 项起就退回）。 */
+function chineseNumber(value: number): string {
+  if (value <= 0 || value > 99) return String(value);
+  if (value < 10) return CN_DIGITS[value];
+  const tens = Math.floor(value / 10);
+  const ones = value % 10;
+  const tensPart = tens === 1 ? "十" : `${CN_DIGITS[tens]}十`;
+  return ones === 0 ? tensPart : tensPart + CN_DIGITS[ones];
+}
+
 function formatNumber(index: number, format: string): string {
   switch (format) {
     case "lowerLetter":
-      return LOWER_LETTERS[(index - 1) % 26];
+      return toBase26(index);
     case "upperLetter":
-      return LOWER_LETTERS[(index - 1) % 26].toUpperCase();
+      return toBase26(index).toUpperCase();
     case "lowerRoman":
       return toRoman(index);
     case "upperRoman":
       return toRoman(index).toUpperCase();
     case "chineseCounting":
     case "chineseCountingThousand":
-      return "一二三四五六七八九十".charAt(index - 1) || String(index);
+      return chineseNumber(index);
     default:
       return String(index);
   }

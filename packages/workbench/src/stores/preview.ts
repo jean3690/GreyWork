@@ -25,6 +25,13 @@ const nextTabId = createIdFactory("pv");
  */
 export type PreviewSource = "vfs" | "disk" | "web";
 
+/**
+ * 表格类预览的两种呈现方式。
+ * `table` 是忠实还原（CSV 铺网格 / xlsx 走 Univer），`analysis` 是本仓自己的
+ * 统计·筛选·排序·分组·图表视图。
+ */
+export type PreviewMode = "table" | "analysis";
+
 export interface PreviewTab {
   id: string;
   /** `vfs` 为 VFS 相对路径，`disk` 为磁盘绝对路径。 */
@@ -39,6 +46,15 @@ export interface PreviewTab {
    * 「用系统应用打开」。`disk` 源的 path 本身就是磁盘路径，此项恒为空。
    */
   diskPath?: string;
+  /**
+   * 表格类预览的当前模式，缺省视作 `table`。
+   *
+   * 放进 tab 而不是 viewer 的局部 ref：区段切到「文件 / 变更」会把 PreviewSurface
+   * 整个卸下，局部状态一丢，用户切回来就得重新点一次「分析」。
+   * **必须是可选字段** —— 仓库里有十余处测试直接构造 PreviewTab 字面量，设成必填
+   * 会让它们全部编译不过，而它们与本功能无关。
+   */
+  mode?: PreviewMode;
 }
 
 interface PreviewPrefs {
@@ -135,6 +151,16 @@ export const usePreviewStore = defineStore("preview", () => {
   /** 就地重载某路径的 tab（产物被追加/覆盖时）；未打开则不做任何事，不偷偷弹面板。 */
   function reload(path: string): void {
     tabs.value = tabs.value.map((tab) => (tab.path === path ? { ...tab, revision: tab.revision + 1 } : tab));
+  }
+
+  /**
+   * 切换某个 tab 的表格预览模式。
+   *
+   * **不动 revision**：模式只是换个视图，内容没变。动 revision 会让 viewer 重读一遍文件，
+   * 切换模式的代价就变成「重新解析一次几 MB 的表格」。
+   */
+  function setMode(id: string, mode: PreviewMode): void {
+    tabs.value = tabs.value.map((tab) => (tab.id === id ? { ...tab, mode } : tab));
   }
 
   /**
@@ -249,6 +275,7 @@ export const usePreviewStore = defineStore("preview", () => {
     effectiveWidthPx,
     open,
     reload,
+    setMode,
     attachDiskPath,
     activate,
     moveTab,

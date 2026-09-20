@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { computed, ref, watch } from "vue";
-import { isTauriRuntime, joinPath, normalizePath } from "@greywork/core";
+import { basename, isTauriRuntime, joinPath, normalizePath } from "@greywork/core";
 import { listDir } from "../state/workspaceFiles";
 import { resolveWorkspaceRoot } from "../lib/workspace-dir";
 import { activeWorkspaceFolder } from "../lib/artifact-dir";
@@ -123,9 +123,7 @@ export const useFileTreeStore = defineStore("fileTree", () => {
     const folder = await pickWorkspaceFolder();
     if (!folder) return null;
     const workspaceStore = useWorkspaceStore();
-    const id =
-      workspaceStore.activeWorkspaceId ??
-      workspaceStore.createWorkspace(folder.split(/[/\\]/).filter(Boolean).pop() ?? folder, "右栏文件树绑定").id;
+    const id = workspaceStore.activeWorkspaceId ?? workspaceStore.createWorkspace(basename(folder) || folder, "右栏文件树绑定").id;
     await bindWorkspaceFolder(id, folder);
     await refresh();
     return folder;

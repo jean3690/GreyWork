@@ -4,7 +4,7 @@
  * 与 IO 分离的理由：限额与内联格式是发送链路的关键判定，必须在无 Tauri / 无 DOM 的
  * 单测里可验证。落盘、采集、剪贴板等副作用都在 `state/attachment-library.ts`。
  */
-import { createIdFactory } from "@greywork/core";
+import { createIdFactory, extname } from "@greywork/core";
 import type { Attachment, AttachmentKind } from "../types";
 
 export const ATTACHMENT_LIMITS = {
@@ -104,15 +104,11 @@ export const nextAttachmentId = createIdFactory("att");
 
 /** 文件名扩展名（小写、无点）；无扩展名返回空串。 */
 export function extOf(name: string): string {
-  const base = basename(name);
-  const dot = base.lastIndexOf(".");
-  return dot > 0 && dot < base.length - 1 ? base.slice(dot + 1).toLowerCase() : "";
+  return extname(name).toLowerCase();
 }
 
-/** 路径末段（兼容 Windows 分隔符）。 */
-export function basename(path: string): string {
-  return path.split(/[\\/]/).pop() ?? path;
-}
+/** 路径末段（兼容 Windows 分隔符）。实现在 `@greywork/core`，这里重导出给既有调用方。 */
+export { basename } from "@greywork/core";
 
 /** 按扩展名推断 mime；未知返回 fallback（可空串）。 */
 export function mimeForFile(name: string, fallback = ""): string {

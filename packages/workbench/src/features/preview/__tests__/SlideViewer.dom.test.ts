@@ -313,4 +313,29 @@ describe("SlideViewer", () => {
     expect(wrapper.find('[data-testid="slide-table"]').exists()).toBe(false);
     expect(wrapper.findAll('[data-testid="slide-page"]')).toHaveLength(1);
   });
+
+  it("深色背景无显式文字色：文本框兜底浅色，避免黑字压深底看不见", async () => {
+    const darkBgSlide = `<?xml version="1.0"?>
+<p:sld xmlns:a="${A}" xmlns:r="${R}" xmlns:p="${P}">
+  <p:cSld>
+    <p:bg><p:bgPr><a:solidFill><a:srgbClr val="1C1917"/></a:solidFill></p:bgPr></p:bg>
+    <p:spTree>
+      <p:sp>
+        <p:nvSpPr><p:cNvPr id="2" name="Title"/><p:nvPr/></p:nvSpPr>
+        <p:spPr><a:xfrm><a:off x="${48 * PX}" y="${33 * PX}"/><a:ext cx="${864 * PX}" cy="${67 * PX}"/></a:xfrm></p:spPr>
+        <p:txBody><a:p><a:pPr><a:buNone/></a:pPr><a:r><a:rPr sz="2600"/><a:t>无色标题</a:t></a:r></a:p></p:txBody>
+      </p:sp>
+    </p:spTree>
+  </p:cSld>
+</p:sld>`;
+    h.readBinary.mockResolvedValue(await buildPptx([{ file: "slide1.xml", xml: darkBgSlide }]));
+    const wrapper = mountViewer();
+    await settle();
+
+    const text = wrapper.get('[data-testid="slide-text"]');
+    expect(text.text()).toContain("无色标题");
+    // 文本框据深色背景兜底浅字；run 没声明颜色，故 span 上不覆盖
+    expect(text.attributes("style")).toContain("color: #FAFAF9");
+    expect(text.find("span").attributes("style")).not.toContain("color:");
+  });
 });

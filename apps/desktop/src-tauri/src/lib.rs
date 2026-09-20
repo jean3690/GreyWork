@@ -21,6 +21,7 @@ mod process_guard;
 pub mod qq;
 mod sandbox;
 mod scheduler;
+mod sheet;
 mod skills_market;
 mod store_fs;
 mod sys;
@@ -165,6 +166,7 @@ pub fn run() {
             wecom::wecom_send,
             workspace_fs::fs_read_text_file,
             workspace_fs::fs_read_binary,
+            sheet::fs_read_sheet,
             workspace_fs::fs_write_text_file,
             workspace_fs::fs_write_binary,
             workspace_fs::fs_ensure_dir,

@@ -62,6 +62,16 @@ describe("exportToPptx", () => {
     expect(data.byteLength).toBeGreaterThan(100);
     expect(data[0]).toBe(0x50);
   });
+
+  it("表格行比表头短 / 含缺失单元格：补齐列数并强制字符串，仍产出合法 pptx", async () => {
+    const data = await exportToPptx({
+      title: "参差表",
+      slides: [{ title: "表", table: { headers: ["A", "B", "C"], rows: [["1"], ["2", "3", "4"]] } }],
+    });
+    expect(data.byteLength).toBeGreaterThan(100);
+    expect(data[0]).toBe(0x50);
+    expect(data[1]).toBe(0x4b);
+  });
 });
 
 describe("resultSetToDeck", () => {

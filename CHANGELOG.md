@@ -8,6 +8,25 @@
 
 ## [Unreleased]
 
+### 新增
+
+- 预览支持**数据分析**：CSV 与 xlsx 的预览新增「表格 / 分析」模式切换，提供列统计摘要、
+  图表（柱状 / 折线 / 饼图，ECharts 懒加载）、分组聚合与筛选排序。统计 / 图表 / 分组基于
+  **全部已解析行**（含筛选后的行），数据网格沿用 500 行渲染上限 —— 看得少不等于算得少。
+- 预览支持老格式 `.xls` / `.xlt`：由宿主用 calamine 按**内容**嗅探解析（扩展名被改错的
+  OOXML 也能正确打开），不再只是「不支持预览」的占位提示。
+- `@greywork/core` 新增 `basename` / `extname` 两个路径工具：`\` 与 `/` 都认，`basename` 先剥
+  尾部分隔符再取末段（与同文件的 `normalizePath` 同语义，故 `"reports/"` → `"reports"`），
+  `extname` 不含点、不改大小写。
+
+### 变更
+
+- 渲染端 7 份手写的 `basename` 副本收口到 `@greywork/core`。`lib/viewer.ts` 与 `lib/attachments.ts`
+  保留原导出名转发，`stores/preview.ts`、`SheetViewer.vue`、`attachment-library.ts` 等调用方零改动。
+- 扩展名一律从**路径末段**取。此前是对整条路径 `split(".").pop()`，目录名带点时会拿到
+  `"v1.2/report"` → `"2/report"` 这类垃圾串，只是靠「命不中就回落 raw / octet-stream」掩盖着；
+  现在 `kindOfPath`、`codeLanguageOfPath`、图片预览的 MIME 推断都只在末段上找点。
+
 ## [0.1.1] - 2026-09-19
 
 ### 修复
