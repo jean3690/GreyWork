@@ -34,6 +34,13 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"]
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "category": "DeveloperTool",
+    "shortDescription": "Desktop-first AI agent workspace",
+    "longDescription": "GreyWork puts external coding agents (connected over the Agent Client\nProtocol) and local OpenAI-compatible models to work in one desktop workspace.\nSessions, artifacts, previews and multi-agent pipelines live side by side,\nso an agent's output is something you open rather than something you copy out\nof a terminal.",
+    "publisher": "GreyWork Team",
+    "homepage": "https://github.com/jean3690/GreyWork",
+    "copyright": "Copyright (c) 2026 jean",
+    "license": "MIT"
   }
 }

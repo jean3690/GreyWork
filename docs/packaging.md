@@ -38,6 +38,69 @@ The extra targets we drop were also the slowest:
   and `rpm` pulls in another toolchain. `deb` is what we ship.
 - Windows `msi` needs WiX; NSIS is smaller and is what we ship.
 
+## Bundle metadata
+
+`category`, `shortDescription`, `longDescription`, `publisher`, `homepage`, `copyright`
+and `license` live in the base `tauri.conf.json` because they are platform-neutral
+descriptions of the app. Where each one actually ends up is worth writing down, because
+the schema's one-line descriptions are easy to over-read. The deb column was verified by
+building the package and reading the generated `control` and `.desktop`; the rest is
+marked accordingly.
+
+| Key                | deb (verified)                                                   |
+| ------------------ | ---------------------------------------------------------------- |
+| `category`         | `.desktop` `Categories=Development;` (was empty)                 |
+| `shortDescription` | `Description:` first line, and `.desktop` `Comment=`             |
+| `longDescription`  | the indented extended description                                |
+| `homepage`         | `Homepage:`                                                      |
+| `publisher`        | _nothing_ — deb `Maintainer` comes from `Cargo.toml`'s `authors` |
+| `copyright`        | _nothing_                                                        |
+| `license`          | _nothing_                                                        |
+
+Two of these matter beyond the deb: `tauri-bundler` contains the NSIS metadata strings
+`Manufacturer` and `LegalCopyright`, so `publisher` and `copyright` are what the Windows
+installer reports to the OS. Neither `LSApplicationCategoryType` nor
+`NSHumanReadableCopyright` appears in the bundler at all, so `category` and `copyright`
+do **not** reach the macOS `Info.plist`.
+
+`category` also does **not** produce the deb `Section:` field, despite the two looking
+like the same concept in the schema. `Section` is a separate key that only exists on
+`bundle.linux.deb` — see below.
+
+## Debian package metadata
+
+Three deb-only keys are set in `src-tauri/tauri.linux.conf.json`, because none of them
+has an equivalent on the other platforms:
+
+- `linux.deb.section: "devel"` — the `Section:` field, which `bundle.category` does not
+  fill in. Without it `apt` has no section to file the package under.
+- `linux.deb.depends: ["libc6"]` — **appends** to the dependencies `tauri-bundler`
+  computes (`libwebkit2gtk-4.1-0`, `libgtk-3-0`), it does not replace them; the result is
+  `libc6, libwebkit2gtk-4.1-0, libgtk-3-0`. Debian Policy 8.6 requires the libc
+  dependency, and `lintian` flags its absence as an error.
+- `linux.deb.files` — ships `LICENSE` to `/usr/share/doc/grey-work/copyright`. Debian
+  Policy 12.5 requires a verbatim copyright file per package; without one `lintian`
+  reports `no-copyright-file`. `bundle.licenseFile` is **not** the knob for this: it is
+  read only by the NSIS/Windows bundler, and setting it changes nothing in the deb.
+  The destination hardcodes the package name (`grey-work`, derived from `productName`),
+  so it needs updating if the product is ever renamed.
+
+`lintian` on the resulting `.deb` is clean apart from four tags, all left as-is
+deliberately:
+
+| Tag                           | Why it is still open                                                         |
+| ----------------------------- | ---------------------------------------------------------------------------- |
+| `malformed-contact`           | `Maintainer` needs an RFC 822 `Name <email>`; we have no project address yet |
+| `no-changelog`                | Debian expects a `changelog.gz` in Debian's own format, not `CHANGELOG.md`   |
+| `unstripped-binary-or-object` | `strip` is not set on the release profile — see below                        |
+| `no-manual-page`              | there is no man page                                                         |
+
+The binary ships unstripped because the release profile does not set `strip`. Adding
+`strip = true` to `[profile.release]` in `src-tauri/Cargo.toml` would clear that tag and
+shrink the download, but it also removes the symbol table from all three platforms'
+binaries, which is what makes a panic backtrace readable. That trade-off is a support
+decision rather than a packaging one, so it is left open here.
+
 ## Windows installer
 
 `bundle.windows.webviewInstallMode` is written out explicitly as
@@ -63,6 +126,20 @@ download from a Microsoft endpoint while still needing the network at install ti
 `offlineInstaller` would multiply the installer size by roughly 7–10× to serve that
 same rare case. Switch to `offlineInstaller` if air-gapped installs become a
 requirement.
+
+### Installer languages
+
+`bundle.windows.nsis.languages` is set to `["SimpChinese", "English"]`. Tauri's default
+is `["English"]` alone, which hands a Chinese-first project an English-only installer.
+NSIS picks the language from the OS locale and falls back to the **first** entry in the
+list, so zh-CN Windows gets Chinese and every other locale gets English.
+`displayLanguageSelector` stays at its default (`false`) — the language follows the
+system, and no extra page is added to the installer.
+
+The entries are NSIS's contributed language file names (`SimpChinese.nlf` / `.nsh`,
+the file defining `${LANG_SIMPCHINESE}`), not BCP 47 tags. Adding a language here only
+takes effect on a Windows build, so it is verified by the NSIS row of the CI bundle
+matrix rather than locally.
 
 ## macOS
 

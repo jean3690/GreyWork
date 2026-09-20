@@ -5,6 +5,9 @@
       "webviewInstallMode": {
         "type": "downloadBootstrapper",
         "silent": true
+      },
+      "nsis": {
+        "languages": ["SimpChinese", "English"]
       }
     }
   }

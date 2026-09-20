@@ -30,11 +30,25 @@
 - 扩展名一律从**路径末段**取。此前是对整条路径 `split(".").pop()`，目录名带点时会拿到
   `"v1.2/report"` → `"2/report"` 这类垃圾串，只是靠「命不中就回落 raw / octet-stream」掩盖着；
   现在 `kindOfPath`、`codeLanguageOfPath`、图片预览的 MIME 推断都只在末段上找点。
+- 打包元数据补齐：`bundle.category`（deb 的 `.desktop` 从 `Categories=` 空值变为
+  `Categories=Development;`，应用菜单里终于能归类）、`shortDescription` / `longDescription`
+  （deb 的 `Description` 后面不再跟一行 `(none)`）、以及 `publisher` / `homepage` /
+  `copyright` / `license`。各字段究竟落到哪个平台、哪些其实不落地，记在 `docs/packaging.md`。
+- Windows 安装包语言设为 `["SimpChinese", "English"]`（Tauri 默认只有英文）。按系统语言自动选，
+  zh-CN 命中中文、其余回落英文；不弹语言选择页。
+- CI 新增 macOS job（`cargo clippy --locked` + `cargo test --locked` + vitest）。此前
+  `#[cfg(target_os = "macos")]` 的用例（APFS 大小写折叠、路径比较）**只被编译、从未执行**：
+  desktop 矩阵的 macOS 行只产包不跑测试。
 - 插件能力授权改为**按插件粒度**：给 A 授权 `net.fetch` 不再顺带放行 B，插件中心按插件分别授权/
   撤销。旧版全局授权存档（v1）首次启动时自动迁移为按插件授权并写回新存档。
 
 ### 修复
 
+- deb 包补齐 Debian Policy 要求的三处，同时消除 lintian 对应的 E 级告警：`Section: devel`
+  （`bundle.category` 并不填这个字段，它是 `bundle.linux.deb.section`）、`libc6` 依赖
+  （Policy 8.6；`deb.depends` 是**追加**到自动算出的 `libwebkit2gtk-4.1-0, libgtk-3-0` 之后，
+  不是替换），以及 `/usr/share/doc/grey-work/copyright`（Policy 12.5）。注意
+  `bundle.licenseFile` 只被 NSIS 打包器读取，对 deb 无任何作用。
 - 停用/卸载插件时回收其桌面悬浮窗（此前窗口会残留并继续渲染已停用的包）。
 - 官方插件市场的强制签名校验改为 URL 归一化比较，`.../registry.json?x=1` 之类的变体不再被降级为
   「第三方免签」。
