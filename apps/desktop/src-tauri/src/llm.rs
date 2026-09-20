@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::log;
 use bytes::Bytes;
@@ -20,6 +20,54 @@ use tokio::sync::Mutex;
 
 /// SSE 流空闲超时：连接保持但 N 秒无任何字节 → 按错误终止（服务端挂死不能永久悬挂回合）。
 const LLM_IDLE_TIMEOUT_SECS: u64 = 60;
+
+/// 增量合批时间窗：与渲染端 `stores/chat/stream.ts` 的 40ms flush 节奏对齐。
+const DELTA_FLUSH_INTERVAL: Duration = Duration::from_millis(40);
+/// 增量合批字节阈值：攒够就直接发，避免大段内容被无谓压后。
+const DELTA_FLUSH_BYTES: usize = 2048;
+
+/// 流式增量合批器（纯逻辑，便于单测）。
+///
+/// 上游按 token 产出增量，逐条过 IPC 意味着每个 token 一次 serde 序列化 + 一次全量
+/// 广播 + 一次 JS 回调；token 密集时这些开销远超内容本身。这里按「时间窗或字节阈值」
+/// 合并，`push` 只在需要发车时给出待发文本。
+///
+/// 取的是「上一条增量到达时刻」而非定时器：增量本身就是节拍，模型正常产出时每个
+/// 窗口都会被下一条增量触发；模型中途长停顿则内容多等一拍（下一条增量或回合结束的
+/// `finish` 兜底），不会丢内容。
+struct DeltaBatcher {
+    pending: String,
+    last_flush: Instant,
+}
+
+impl DeltaBatcher {
+    fn new() -> Self {
+        Self {
+            pending: String::new(),
+            last_flush: Instant::now(),
+        }
+    }
+
+    /// 收下一个增量；返回 `Some(合并后的文本)` 表示该发车了。
+    fn push(&mut self, delta: &str) -> Option<String> {
+        self.pending.push_str(delta);
+        if self.pending.len() >= DELTA_FLUSH_BYTES
+            || self.last_flush.elapsed() >= DELTA_FLUSH_INTERVAL
+        {
+            return self.finish();
+        }
+        None
+    }
+
+    /// 强制发车。回合结束 / 报错 / 中止前必须调用，否则最后一段内容会留在缓冲里。
+    fn finish(&mut self) -> Option<String> {
+        if self.pending.is_empty() {
+            return None;
+        }
+        self.last_flush = Instant::now();
+        Some(std::mem::take(&mut self.pending))
+    }
+}
 
 /// 事件信封：统一 kind + payload（与 acp_host 的 AcpEventEnvelope 同构）。
 #[derive(Serialize, Clone)]
@@ -345,6 +393,16 @@ fn emit_llm(
     emit(app, kind, payload);
 }
 
+/// 发一条增量。合批后仍走 `llm-delta` + `delta` 字段，前端契约不变（接收侧本就是累加）。
+fn emit_delta(app: &AppHandle, client_token: &str, delta: String) {
+    emit_llm(
+        app,
+        client_token,
+        "llm-delta",
+        serde_json::json!({ "delta": delta }),
+    );
+}
+
 /// SSE / 整段 JSON 双路处理；所有出口都保证发出 llm-done 或 llm-error。
 async fn stream_response(app: &AppHandle, response: reqwest::Response, client_token: &str) {
     if !is_sse_response(&response) {
@@ -356,12 +414,7 @@ async fn stream_response(app: &AppHandle, response: reqwest::Response, client_to
         {
             Ok(body) => match content_from_completion(&body) {
                 Some(content) => {
-                    emit_llm(
-                        app,
-                        client_token,
-                        "llm-delta",
-                        serde_json::json!({ "delta": content }),
-                    );
+                    emit_delta(app, client_token, content);
                     emit_llm(app, client_token, "llm-done", serde_json::json!({}));
                 }
                 None => {
@@ -380,46 +433,50 @@ async fn stream_response(app: &AppHandle, response: reqwest::Response, client_to
                     app,
                     client_token,
                     "llm-error",
-                    serde_json::json!({ "message": error.to_string() }),
+                    serde_json::json!({ "message": error }),
                 );
             }
         }
         return;
     }
 
-    let events = drain_sse(
+    // 边收边发：合批后在增量到达时立刻下发，而不是等整段响应收完再一次性铺出去。
+    // 末端内容靠 `finish()` 兜底——终止事件之前必须先把它发出去，否则最后一段会丢。
+    let mut batcher = DeltaBatcher::new();
+    let mut terminal = None;
+    drain_sse_into(
         response.bytes_stream(),
         Duration::from_secs(LLM_IDLE_TIMEOUT_SECS),
+        |event| match event {
+            SseEvent::Delta(delta) => {
+                if let Some(batch) = batcher.push(&delta) {
+                    emit_delta(app, client_token, batch);
+                }
+                true
+            }
+            terminal_event => {
+                terminal = Some(terminal_event);
+                false
+            }
+        },
     )
     .await;
-    for event in events {
-        match event {
-            SseEvent::Delta(delta) => {
-                emit_llm(
-                    app,
-                    client_token,
-                    "llm-delta",
-                    serde_json::json!({ "delta": delta }),
-                );
-            }
-            SseEvent::Done => {
-                emit_llm(app, client_token, "llm-done", serde_json::json!({}));
-                return;
-            }
-            SseEvent::Error(message) => {
-                log::error("llm", format!("流式失败: {message}"));
-                emit_llm(
-                    app,
-                    client_token,
-                    "llm-error",
-                    serde_json::json!({ "message": message }),
-                );
-                return;
-            }
-        }
+    if let Some(batch) = batcher.finish() {
+        emit_delta(app, client_token, batch);
     }
-    // 流在未发送 [DONE] 时关闭：仍视为结束，避免前端 busy 卡死。
-    emit_llm(app, client_token, "llm-done", serde_json::json!({}));
+    match terminal {
+        Some(SseEvent::Error(message)) => {
+            log::error("llm", format!("流式失败: {message}"));
+            emit_llm(
+                app,
+                client_token,
+                "llm-error",
+                serde_json::json!({ "message": message }),
+            );
+        }
+        // Done / 流在未发送 [DONE] 时关闭（None）：都按结束处理，避免前端 busy 卡死。
+        _ => emit_llm(app, client_token, "llm-done", serde_json::json!({})),
+    }
 }
 
 /// SSE 消费结果。
@@ -430,26 +487,45 @@ enum SseEvent {
     Error(String),
 }
 
-/// 消费 openai SSE 字节流为事件序列。空闲（无任何字节）超过 `idle` 按错误提前终止。
+/// 消费 openai SSE 字节流并收集为事件序列（`drain_sse_into` 的收集式包装）。
 async fn drain_sse(
-    mut stream: impl Stream<Item = Result<Bytes, reqwest::Error>> + Unpin,
+    stream: impl Stream<Item = Result<Bytes, reqwest::Error>> + Unpin,
     idle: Duration,
 ) -> Vec<SseEvent> {
-    let mut buffer = String::new();
     let mut events = Vec::new();
+    drain_sse_into(stream, idle, |event| {
+        events.push(event);
+        true
+    })
+    .await;
+    events
+}
+
+/// 逐事件消费 openai SSE 字节流：每解析出一条就立刻交给 `sink`，不等整段响应收完。
+///
+/// `sink` 返回 `false` 表示不再需要后续事件，消费立即停止；终止事件（`Done` /
+/// `Error`）交付后总是返回，它们的返回值不被检查。
+///
+/// 空闲（无任何字节）超过 `idle` 按错误提前终止。
+async fn drain_sse_into(
+    mut stream: impl Stream<Item = Result<Bytes, reqwest::Error>> + Unpin,
+    idle: Duration,
+    mut sink: impl FnMut(SseEvent) -> bool,
+) {
+    let mut buffer = String::new();
     loop {
         let chunk = match tokio::time::timeout(idle, stream.next()).await {
             Err(_) => {
-                events.push(SseEvent::Error(format!(
+                sink(SseEvent::Error(format!(
                     "LLM 响应空闲超时（{} 秒无数据）",
                     idle.as_secs()
                 )));
-                break;
+                return;
             }
-            Ok(None) => break, // 服务端关闭连接：调用方按结束处理
+            Ok(None) => return, // 服务端关闭连接：调用方按结束处理
             Ok(Some(Err(error))) => {
-                events.push(SseEvent::Error(error.to_string()));
-                break;
+                sink(SseEvent::Error(error.to_string()));
+                return;
             }
             Ok(Some(Ok(bytes))) => bytes,
         };
@@ -462,15 +538,16 @@ async fn drain_sse(
             };
             let data = data.trim();
             if data == "[DONE]" {
-                events.push(SseEvent::Done);
-                return events;
+                sink(SseEvent::Done);
+                return;
             }
             if let Some(delta) = delta_from_sse_data(data) {
-                events.push(SseEvent::Delta(delta));
+                if !sink(SseEvent::Delta(delta)) {
+                    return;
+                }
             }
         }
     }
-    events
 }
 
 /// 中止进行中的流任务并回收句柄。
@@ -672,6 +749,67 @@ mod tests {
         assert_eq!(events, vec![SseEvent::Delta("半".into())]);
     }
 
+    /// 事件是「解析出一条就交付一条」，不是收完整段再一次性铺出来——
+    /// 发送侧合批的正确性就建立在这个前提上。
+    #[tokio::test]
+    async fn drain_sse_into_delivers_each_event_as_it_is_parsed() {
+        let stream = futures_util::stream::iter(vec![
+            sse_chunk_delta("一"),
+            sse_chunk_delta("二"),
+            sse_chunk_delta("三"),
+        ]);
+        let mut seen = Vec::new();
+        drain_sse_into(stream, Duration::from_secs(5), |event| {
+            seen.push(event);
+            false // 第一条就喊停：后续增量不该再被消费
+        })
+        .await;
+        assert_eq!(seen, vec![SseEvent::Delta("一".into())]);
+    }
+
+    /// 把合批器的「上次发车时刻」往前拨，让时间窗分支必然命中——
+    /// 免得单测靠真实 sleep，CI 上既慢又不稳。
+    fn backdate(batcher: &mut DeltaBatcher, by: Duration) {
+        if let Some(aged) = Instant::now().checked_sub(by) {
+            batcher.last_flush = aged;
+        }
+    }
+
+    #[test]
+    fn delta_batcher_holds_empty_buffer_but_flushes_once_the_window_elapsed() {
+        let mut batcher = DeltaBatcher::new();
+        assert!(batcher.finish().is_none(), "空缓冲不该产出事件");
+        backdate(&mut batcher, DELTA_FLUSH_INTERVAL);
+        assert_eq!(batcher.push("迟到").as_deref(), Some("迟到"));
+    }
+
+    #[test]
+    fn delta_batcher_flushes_on_the_byte_threshold() {
+        let mut batcher = DeltaBatcher::new();
+        // 一次性超过字节阈值：与时间窗无关，必然发车（阈值按字节数判定）
+        let big = "x".repeat(DELTA_FLUSH_BYTES);
+        assert_eq!(batcher.push(&big).as_deref(), Some(big.as_str()));
+        assert!(batcher.finish().is_none(), "发车后缓冲应已清空");
+    }
+
+    /// 合批只该改变事件条数：内容与顺序必须逐字节不变。
+    /// 前端两处消费方（`stores/chat/stream.ts`、`stores/remote-assistant/pipeline.ts`）都是累加。
+    /// 不断言「几条事件」而断言拼接结果——避免依赖具体切分点。
+    #[test]
+    fn delta_batcher_preserves_order_and_never_loses_the_tail() {
+        let mut batcher = DeltaBatcher::new();
+        let mut seen = String::new();
+        for token in ["前", "中", "后", "尾"] {
+            if let Some(batch) = batcher.push(token) {
+                seen.push_str(&batch);
+            }
+        }
+        if let Some(batch) = batcher.finish() {
+            seen.push_str(&batch);
+        }
+        assert_eq!(seen, "前中后尾");
+    }
+
     /// 起本地 mock chat/completions 服务器，返回其 URL。
     /// body: 完整响应体；content_type: 响应类型。
     async fn mock_completions_server(body: String, content_type: &str) -> String {
@@ -818,5 +956,51 @@ mod tests {
         assert_eq!(events.len(), 2);
         assert_eq!(events[0], SseEvent::Delta("前".into()));
         assert!(matches!(&events[1], SseEvent::Error(message) if message.contains("空闲超时")));
+    }
+
+    /// 性能测量用例：统计发送侧合批前后的 `llm-delta` IPC 事件数。
+    /// 两种端点节奏各测一轮——合批的触发条件不同（时间窗 vs 字节阈值）。
+    /// 按需手动运行：
+    /// `cargo test --lib delta_batch_measurement -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore = "性能测量用例，按需手动运行"]
+    async fn delta_batch_measurement_counts_ipc_events() {
+        const TOKENS: usize = 200;
+        for (label, gap_ms) in [("100 tok/s", 10u64), ("无间隔突发", 0)] {
+            let chunk = sse_chunk_delta(&"x".repeat(30)).expect("chunk");
+            let stream = Box::pin(futures_util::stream::unfold(
+                (0usize, chunk),
+                move |(index, chunk)| async move {
+                    if index >= TOKENS {
+                        return None;
+                    }
+                    if gap_ms > 0 {
+                        tokio::time::sleep(Duration::from_millis(gap_ms)).await;
+                    }
+                    Some((Ok(chunk.clone()), (index + 1, chunk)))
+                },
+            ));
+            let mut batcher = DeltaBatcher::new();
+            let mut raw = 0usize;
+            let mut batched = 0usize;
+            drain_sse_into(stream, Duration::from_secs(5), |event| {
+                if let SseEvent::Delta(delta) = event {
+                    raw += 1;
+                    if batcher.push(&delta).is_some() {
+                        batched += 1;
+                    }
+                }
+                true
+            })
+            .await;
+            if batcher.finish().is_some() {
+                batched += 1;
+            }
+            println!(
+                "{label}：{TOKENS} 个 token → 逐条发 {raw} 条 IPC，合批后 {batched} 条（{:.0}×）",
+                raw as f64 / batched as f64
+            );
+            assert!(batched < raw, "合批必须减少事件数");
+        }
     }
 }
