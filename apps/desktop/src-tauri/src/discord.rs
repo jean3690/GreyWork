@@ -645,7 +645,8 @@ pub(crate) async fn send_text(
     peer_id: &str,
     text: &str,
 ) -> Result<(), String> {
-    let channel_id = decode_peer(peer_id).ok_or(format!("对端 id 无法解析: {peer_id:?}"))?;
+    let channel_id =
+        decode_peer(peer_id).ok_or_else(|| format!("对端 id 无法解析: {peer_id:?}"))?;
     let response = client
         .post(format!("{API_BASE}/channels/{channel_id}/messages"))
         .header("Authorization", auth_header(token))
@@ -1234,7 +1235,7 @@ mod tests {
             "非雪花频道 id"
         );
 
-        let mut nameless = base.clone();
+        let mut nameless = base;
         nameless["author"] = json!({ "id": "333" });
         let inbound = normalize_dispatch("MESSAGE_CREATE", &nameless, 5).expect("无用户名仍可");
         assert_eq!(inbound.nick, "333", "展示名回落到用户 id");
@@ -1459,7 +1460,7 @@ mod tests {
                 .find(|(event, _)| event == INBOUND_EVENT)
                 .expect("应广播入站消息")
                 .clone();
-            (inbound.0.clone(), inbound.1.clone())
+            (inbound.0, inbound.1)
         };
         assert_eq!(channel, "discord://inbound");
         assert_eq!(inbound["peerId"], "dm:222");

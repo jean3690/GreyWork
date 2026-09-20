@@ -128,14 +128,14 @@ fn openai_reasoning_effort(effort: &str) -> Option<&'static str> {
 /// 仅对显式档位（low/medium/high/max）添加，避免不支持的模型拒绝整个请求。
 fn chat_request_body(
     model: &str,
-    messages: &[LlmChatMessage],
+    messages: Vec<LlmChatMessage>,
     reasoning_effort: &str,
 ) -> serde_json::Value {
     let mut body = serde_json::json!({
         "model": model,
         "stream": true,
         "messages": messages
-            .iter()
+            .into_iter()
             .map(|message| serde_json::json!({
                 "role": message.role,
                 "content": message.content,
@@ -243,7 +243,7 @@ pub async fn llm_chat_start(
         &base_url,
         &model,
         &api_key_env,
-        &messages,
+        messages,
         &reasoning_effort,
         &headers.unwrap_or_default(),
     )
@@ -263,7 +263,7 @@ async fn send_chat_request(
     base_url: &str,
     model: &str,
     api_key_env: &str,
-    messages: &[LlmChatMessage],
+    messages: Vec<LlmChatMessage>,
     reasoning_effort: &str,
     headers: &HashMap<String, String>,
 ) -> Result<reqwest::Response, String> {
@@ -340,7 +340,7 @@ pub async fn chat_complete(
         base_url,
         model,
         api_key_env,
-        &messages,
+        messages,
         reasoning_effort,
         headers,
     )
@@ -646,7 +646,7 @@ mod tests {
             role: "user".into(),
             content: parts.clone(),
         }];
-        let body = chat_request_body("gpt-test", &messages, "auto");
+        let body = chat_request_body("gpt-test", messages, "auto");
         assert_eq!(body["messages"][0]["content"], parts);
     }
 
@@ -662,7 +662,7 @@ mod tests {
                 content: serde_json::json!("hi"),
             },
         ];
-        let body = chat_request_body("gpt-test", &messages, "high");
+        let body = chat_request_body("gpt-test", messages, "high");
         assert_eq!(body["model"], "gpt-test");
         assert_eq!(body["stream"], true);
         assert_eq!(body["reasoning_effort"], "high");
@@ -687,7 +687,7 @@ mod tests {
 
     #[test]
     fn request_body_omits_reasoning_effort_when_auto() {
-        let body = chat_request_body("gpt-test", &[], "auto");
+        let body = chat_request_body("gpt-test", vec![], "auto");
         assert!(body.get("reasoning_effort").is_none());
     }
 

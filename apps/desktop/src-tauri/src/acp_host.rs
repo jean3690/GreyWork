@@ -1057,7 +1057,7 @@ pub async fn acp_new_session(
         .map_err(|error| format!("session/new failed: {error}"))?;
     let session_id = response.session_id.clone();
     let id_str = session_id.to_string();
-    let config_options = serde_json::to_value(response.config_options.clone().unwrap_or_default())
+    let config_options = serde_json::to_value(response.config_options.unwrap_or_default())
         .unwrap_or_else(|_| serde_json::Value::Array(Vec::new()));
     session.session_id = Some(session_id);
     emit(
@@ -1120,7 +1120,7 @@ pub async fn acp_load_session(
         .await
         .map_err(|error| format!("session/load failed: {error}"))?;
     let id_str = session_id;
-    let config_options = serde_json::to_value(response.config_options.clone().unwrap_or_default())
+    let config_options = serde_json::to_value(response.config_options.unwrap_or_default())
         .unwrap_or_else(|_| serde_json::Value::Array(Vec::new()));
     // 仅请求成功后才有状态改写：session_id 回写 + 工作区锚定基准更新。
     // 失败路径必须保持原样——锚定若提前换成新 cwd，回落 new 前旧会话的
@@ -1286,7 +1286,7 @@ pub async fn acp_send(
         let sent = session
             .conn
             .clone()
-            .send_request(PromptRequest::new(session_id.clone(), blocks));
+            .send_request(PromptRequest::new(session_id, blocks));
         let turn_id = state.next_turn_id.fetch_add(1, Ordering::SeqCst);
         session.turns.insert(turn_id, sent.id().clone());
         (sent, turn_id, session.workspace_root.clone(), now_ms())
