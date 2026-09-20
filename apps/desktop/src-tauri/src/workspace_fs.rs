@@ -271,7 +271,9 @@ pub fn fs_read_text_file(
     if metadata.len() > MAX_TEXT_BYTES as u64 {
         return Err("文件超过 10MB 上限".into());
     }
-    std::fs::read_to_string(&path).map_err(|error| format!("读取文件失败: {error}"))
+    // strict UTF-8 会把 Windows 记事本默认的 GBK/GB18030（简中「ANSI」）与 UTF-16
+    // 文本文件读成乱码或直接报错；按编码嗅探 + 检测解码，统一回 UTF-8。
+    crate::text::decode_text_file(&path).map_err(|error| format!("读取文件失败: {error}"))
 }
 
 /// 读二进制文件（**原始字节**回传，≤20MB），供右栏预览真实磁盘上的 xlsx / pdf / 图片等。

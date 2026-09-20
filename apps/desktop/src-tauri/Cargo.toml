@@ -46,6 +46,12 @@ parking_lot = "0.12"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 base64 = "0.22"
 
+# 文本文件读取要按编码解码 —— Windows 记事本默认存 GBK/GB18030（简中「ANSI」）或
+# UTF-16，strict UTF-8 读会报错或读出乱码。encoding_rs 负责 BOM 嗅探与解码，
+# chardetng 负责无 BOM 时的编码检测（两者均来自 Firefox 的编码栈）。
+encoding_rs = "0.8"
+chardetng = "1"
+
 sha2 = "0.10"
 ed25519-dalek = { version = "2", features = ["std"] }
 getrandom = "0.3"
