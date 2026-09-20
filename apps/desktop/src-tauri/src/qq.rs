@@ -238,6 +238,303 @@ fn auth_header(token: &str) -> String {
     format!("QQBot {token}")
 }
 
+/* ===== 扫码创建机器人（q.qq.com 绑定流程） =====
+ *
+ * 与「去 q.qq.com 手工建机器人再抄 AppID / AppSecret」并列的另一条入口：手机 QQ 扫码 →
+ * 确认 → 服务端把 AppID 与**加密的** AppSecret 交给宿主，宿主本地解密后落盘（0600）。
+ *
+ * 协议（与 AstrBot `qqofficial/login_registration.py` 同形，全程 JSON）：
+ * 1. `POST https://q.qq.com/lite/create_bind_task` `{"key": <base64 AES-256 密钥>}`
+ *    → `{data:{task_id}}`；密钥本地生成、只留宿主内存，用来解 AppSecret
+ * 2. `https://q.qq.com/qqbot/openclaw/connect.html?task_id=<id>&_wv=2` 编成二维码 → 手机扫码确认
+ * 3. 每 `interval` 秒 `POST /lite/poll_bind_result` `{"task_id": <id>}`
+ *    → `{data:{status, bot_appid?, bot_encrypt_secret?}}`：
+ *    `status` 1=等待 / 2=完成（带 appid + 密文 secret）/ 3=过期
+ *
+ * AppSecret 密文是 base64(12B nonce ‖ 密文 ‖ 16B GCM tag)，用第 1 步的密钥做 AES-256-GCM 解密。
+ *
+ * 这几个接口没有公开文档，是腾讯给自家客户端（WorkBuddy / OpenClaw 等）留的内部通道；
+ * 协议若变更，这里会以 `retcode != 0`、状态缺失或解密失败的形式**显式报错**（不静默失败），
+ * 界面退回「去 q.qq.com 手填 AppID / AppSecret」即可。
+ */
+
+use aes_gcm::aead::{Aead, KeyInit};
+use aes_gcm::{Aes256Gcm, Key, Nonce};
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine as _;
+
+/// 绑定接口域名（q.qq.com）。
+const BIND_HOST: &str = "https://q.qq.com";
+const CREATE_BIND_PATH: &str = "/lite/create_bind_task";
+const POLL_BIND_PATH: &str = "/lite/poll_bind_result";
+/// 服务端不下发轮询间隔，固定按 2s 轮询（AstrBot 同值）。
+const BIND_POLL_INTERVAL: u64 = 2;
+/// 本地兜底有效期：服务端用 status=3 表达过期，这里只在它久不回话时收口，防止无限轮询。
+const BIND_EXPIRE_IN: u64 = 300;
+/// 绑定接口请求超时（qq.rs 无全局 API_TIMEOUT，就近定义）。
+const BIND_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// 绑定状态码（AstrBot：0=无 / 1=等待 / 2=完成 / 3=过期）。
+const BIND_STATUS_COMPLETED: i64 = 2;
+const BIND_STATUS_EXPIRED: i64 = 3;
+
+/// 绑定接口统一信封：`retcode` 缺省或为 0 即成功（AstrBot 同判）。
+#[derive(Debug, Clone, Default, Deserialize)]
+struct BindEnvelope {
+    #[serde(default)]
+    retcode: Option<i64>,
+    #[serde(default)]
+    msg: Option<String>,
+    #[serde(default)]
+    message: Option<String>,
+    #[serde(default)]
+    data: Option<serde_json::Value>,
+}
+
+impl BindEnvelope {
+    /// 拆信封：`retcode` 非 0 转成带服务端说明的错误，成功返回 `data`（可能为空对象）。
+    fn into_data(self, action: &str) -> Result<serde_json::Value, String> {
+        if let Some(code) = self.retcode {
+            if code != 0 {
+                let detail = self
+                    .msg
+                    .or(self.message)
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string();
+                return Err(if detail.is_empty() {
+                    format!("{action}失败（retcode={code}）")
+                } else {
+                    format!("{action}失败：{detail}（retcode={code}）")
+                });
+            }
+        }
+        Ok(self.data.unwrap_or(serde_json::Value::Null))
+    }
+}
+
+/// 轮询响应里 `data` 内层字段。
+#[derive(Debug, Clone, Default, Deserialize)]
+struct PollData {
+    #[serde(default)]
+    status: Option<i64>,
+    #[serde(default)]
+    bot_appid: Option<serde_json::Value>,
+    #[serde(default)]
+    bot_encrypt_secret: Option<String>,
+}
+
+/// 一次轮询的判定（纯函数产出，便于单测）。
+#[derive(Debug, Clone, PartialEq)]
+pub enum PollOutcome {
+    /// status=0/1：还没扫码 / 还没在手机上确认。
+    Pending,
+    Done {
+        app_id: String,
+        app_secret: String,
+    },
+    /// status=3：本次绑定任务已过期。
+    Expired,
+    /// 完成却缺字段、解密失败，或没见过的状态 —— 如实报错，免得一直轮询到超时。
+    Failed(String),
+}
+
+impl PollOutcome {
+    fn state(&self) -> &'static str {
+        match self {
+            PollOutcome::Done { .. } => "done",
+            PollOutcome::Expired => "expired",
+            PollOutcome::Failed(_) => "error",
+            PollOutcome::Pending => "pending",
+        }
+    }
+
+    fn detail(&self) -> Option<String> {
+        match self {
+            PollOutcome::Failed(detail) => {
+                let trimmed = detail.trim();
+                (!trimmed.is_empty()).then(|| trimmed.to_string())
+            }
+            _ => None,
+        }
+    }
+}
+
+/// 生成一把 base64 编码的 AES-256 绑定密钥（32 字节随机）。
+fn generate_bind_key() -> Result<String, String> {
+    let mut bytes = [0u8; 32];
+    getrandom::fill(&mut bytes).map_err(|error| format!("随机数生成失败: {error}"))?;
+    Ok(BASE64.encode(bytes))
+}
+
+/// 解密服务端下发的 AppSecret 密文：base64(12B nonce ‖ 密文 ‖ 16B GCM tag)。
+pub fn decrypt_secret(encrypted: &str, bind_key: &str) -> Result<String, String> {
+    let key_bytes = BASE64
+        .decode(bind_key.trim())
+        .map_err(|_| "绑定密钥 base64 解码失败".to_string())?;
+    let raw = BASE64
+        .decode(encrypted.trim())
+        .map_err(|_| "AppSecret 密文 base64 解码失败".to_string())?;
+    // 12B nonce + 至少 1B 密文 + 16B tag，少于这个长度就是密文格式不对。
+    if key_bytes.len() != 32 || raw.len() <= 28 {
+        return Err("AppSecret 密文格式异常".into());
+    }
+    let nonce = &raw[..12];
+    let ciphertext_and_tag = &raw[12..];
+    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key_bytes));
+    let plaintext = cipher
+        .decrypt(Nonce::from_slice(nonce), ciphertext_and_tag)
+        .map_err(|_| "AppSecret 解密失败".to_string())?;
+    String::from_utf8(plaintext).map_err(|_| "AppSecret 不是有效的 UTF-8".to_string())
+}
+
+/// 值归一成字符串（服务端 appid 可能给数字或字符串）。
+fn stringify(value: Option<&serde_json::Value>) -> String {
+    match value {
+        Some(serde_json::Value::String(text)) => text.trim().to_string(),
+        Some(serde_json::Value::Number(number)) => number.to_string(),
+        _ => String::new(),
+    }
+}
+
+/// 判定一次轮询响应（纯函数）。顺序：先看完成（带凭证），再看过期，其余按等待。
+pub fn classify_poll(data: &serde_json::Value, bind_key: &str) -> PollOutcome {
+    let parsed: PollData = serde_json::from_value(data.clone()).unwrap_or_default();
+    let status = parsed.status.unwrap_or(0);
+    if status == BIND_STATUS_COMPLETED {
+        let app_id = stringify(parsed.bot_appid.as_ref());
+        let encrypted = parsed
+            .bot_encrypt_secret
+            .as_deref()
+            .unwrap_or_default()
+            .trim();
+        if app_id.is_empty() || encrypted.is_empty() {
+            return PollOutcome::Failed("扫码成功但未返回完整 QQ 机器人凭证".into());
+        }
+        return match decrypt_secret(encrypted, bind_key) {
+            Ok(app_secret) => PollOutcome::Done { app_id, app_secret },
+            Err(error) => PollOutcome::Failed(error),
+        };
+    }
+    if status == BIND_STATUS_EXPIRED {
+        return PollOutcome::Expired;
+    }
+    PollOutcome::Pending
+}
+
+/// 二维码内容：绑定确认页（手机 QQ 扫它）。
+fn connect_url(task_id: &str) -> String {
+    format!(
+        "{BIND_HOST}/qqbot/openclaw/connect.html?task_id={}&_wv=2",
+        form_urlencoded::byte_serialize(task_id.as_bytes()).collect::<String>()
+    )
+}
+
+/// 进行中的扫码会话（`bind_key` 只在宿主内存，绝不下发到界面）。
+#[derive(Debug, Clone)]
+pub struct RegisterSession {
+    task_id: String,
+    bind_key: String,
+    /// 过期时刻（毫秒时间戳），本地兜底用。
+    expires_at: i64,
+}
+
+/// 扫码引导信息（渲染端只需要把 `qr_url` 编成二维码，按 `interval` 轮询）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegisterStartDto {
+    pub qr_url: String,
+    pub expires_in: u64,
+    pub interval: u64,
+}
+
+/// 一次轮询的结果。`state`：pending / done / expired / error。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegisterPollDto {
+    pub state: String,
+    pub detail: Option<String>,
+    /// 成功时的 AppID（AppSecret 已由宿主落盘，不下发到界面）。
+    pub app_id: Option<String>,
+}
+
+/// 发一个绑定请求并拆信封。`base` 是参数而非常量：测试里指向本地 mock 服务端。
+async fn post_bind(
+    client: &reqwest::Client,
+    base: &str,
+    path: &str,
+    body: serde_json::Value,
+    action: &str,
+) -> Result<serde_json::Value, String> {
+    let url = format!("{}{path}", base.trim_end_matches('/'));
+    let response = client
+        .post(&url)
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json")
+        .json(&body)
+        .timeout(BIND_TIMEOUT)
+        .send()
+        .await
+        .map_err(|error| format!("{action}请求失败: {error}"))?;
+    let status = response.status();
+    let text = read_text(response, BIND_TIMEOUT).await?;
+    let envelope: BindEnvelope = serde_json::from_str(&text).map_err(|error| {
+        format!(
+            "{action}响应解析失败: {error}（HTTP {status}: {}）",
+            brief(&text)
+        )
+    })?;
+    envelope.into_data(action)
+}
+
+/// 发起扫码：本地生成密钥 → 换回 `task_id`（留宿主）与二维码链接。
+pub async fn begin_registration(
+    client: &reqwest::Client,
+    base: &str,
+) -> Result<(RegisterSession, RegisterStartDto), String> {
+    let bind_key = generate_bind_key()?;
+    let data = post_bind(
+        client,
+        base,
+        CREATE_BIND_PATH,
+        serde_json::json!({ "key": bind_key }),
+        "发起扫码",
+    )
+    .await?;
+    let task_id = stringify(data.get("task_id"));
+    if task_id.is_empty() {
+        return Err("扫码绑定响应缺少 task_id".into());
+    }
+    let session = RegisterSession {
+        task_id: task_id.clone(),
+        bind_key,
+        expires_at: now_ms() + (BIND_EXPIRE_IN as i64) * 1000,
+    };
+    let dto = RegisterStartDto {
+        qr_url: connect_url(&task_id),
+        expires_in: BIND_EXPIRE_IN,
+        interval: BIND_POLL_INTERVAL,
+    };
+    Ok((session, dto))
+}
+
+/// 轮询一次（间隔固定，QQ 无「服务端要求放慢」那套）。
+pub async fn poll_registration(
+    client: &reqwest::Client,
+    base: &str,
+    session: &RegisterSession,
+) -> Result<PollOutcome, String> {
+    let data = post_bind(
+        client,
+        base,
+        POLL_BIND_PATH,
+        serde_json::json!({ "task_id": session.task_id }),
+        "轮询扫码",
+    )
+    .await?;
+    Ok(classify_poll(&data, &session.bind_key))
+}
+
 /* ===== 宿主层：持久化 ===== */
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -340,6 +637,8 @@ pub(crate) struct Inner {
     /// 网关会话：断线 resume 用（session_id + 最后事件序号）。
     session_id: Option<String>,
     last_seq: i64,
+    /// 进行中的扫码创建会话（task_id + bind_key 只在内存里，不落盘）。
+    registration: Option<RegisterSession>,
 }
 
 impl Inner {
@@ -539,7 +838,8 @@ pub(crate) async fn send_text(
     msg_id: &str,
     msg_seq: u64,
 ) -> Result<(), String> {
-    let (scope, openid) = decode_peer(peer_id).ok_or(format!("对端 id 无法解析: {peer_id:?}"))?;
+    let (scope, openid) =
+        decode_peer(peer_id).ok_or_else(|| format!("对端 id 无法解析: {peer_id:?}"))?;
     let path = match scope {
         ChatScope::C2c => format!("{API_BASE}/v2/users/{openid}/messages"),
         ChatScope::Group => format!("{API_BASE}/v2/groups/{openid}/messages"),
@@ -909,10 +1209,7 @@ pub async fn qq_save_credentials(
         app_secret: secret,
         saved_at: Some(chrono::Utc::now().to_rfc3339()),
     };
-    let dir = channel_dir(&app, DIR_NAME)?;
-    let bytes = serde_json::to_vec_pretty(&credentials)
-        .map_err(|error| format!("凭证序列化失败: {error}"))?;
-    write_private(&dir.join(CREDENTIALS_FILE), &bytes)?;
+    store_credentials(&app, &credentials)?;
     inner.credentials = Some(credentials);
     // 换了凭证就作废 token 与会话：旧票据属于上一个机器人。
     inner.access_token = None;
@@ -921,6 +1218,107 @@ pub async fn qq_save_credentials(
     inner.detail = None;
     log::info("qq", "AppID / AppSecret 已保存");
     Ok(inner.status())
+}
+
+/// 凭证落盘（0600）。扫码创建与手填两条路径共用，避免两处各写一遍。
+fn store_credentials(app: &AppHandle, credentials: &StoredCredentials) -> Result<(), String> {
+    let dir = channel_dir(app, DIR_NAME)?;
+    let bytes = serde_json::to_vec_pretty(credentials)
+        .map_err(|error| format!("凭证序列化失败: {error}"))?;
+    write_private(&dir.join(CREDENTIALS_FILE), &bytes)
+}
+
+/// 发起扫码创建机器人：返回二维码链接（`task_id` / `bind_key` 留在宿主内存）。
+#[tauri::command]
+pub async fn qq_register_begin(host: State<'_, QqHost>) -> Result<RegisterStartDto, String> {
+    let client = shared_client(10)?;
+    let (session, dto) = begin_registration(&client, BIND_HOST).await?;
+    log::info("qq", "已发起扫码创建机器人");
+    host.lock().await.registration = Some(session);
+    Ok(dto)
+}
+
+/// 轮询扫码结果：成功时解密 AppSecret 并落盘，渲染端只需刷新状态。
+#[tauri::command]
+pub async fn qq_register_poll(
+    app: AppHandle,
+    host: State<'_, QqHost>,
+) -> Result<RegisterPollDto, String> {
+    let session = {
+        let mut inner = host.lock().await;
+        ensure_loaded(&app, &mut inner)?;
+        inner
+            .registration
+            .clone()
+            .ok_or_else(|| "没有进行中的扫码创建流程".to_string())?
+    };
+    if now_ms() >= session.expires_at {
+        let mut inner = host.lock().await;
+        if current_task_id(&inner).as_deref() == Some(session.task_id.as_str()) {
+            inner.registration = None;
+        }
+        return Ok(RegisterPollDto {
+            state: "expired".into(),
+            detail: None,
+            app_id: None,
+        });
+    }
+
+    let client = shared_client(10)?;
+    // 传输层错误直接抛给渲染端计次重试；协议层的 pending / 失败走返回的 DTO。
+    let outcome = poll_registration(&client, BIND_HOST, &session).await?;
+    let mut inner = host.lock().await;
+    let same_session = current_task_id(&inner).as_deref() == Some(session.task_id.as_str());
+    if let PollOutcome::Done { app_id, app_secret } = &outcome {
+        let credentials = StoredCredentials {
+            app_id: app_id.clone(),
+            app_secret: app_secret.clone(),
+            saved_at: Some(chrono::Utc::now().to_rfc3339()),
+        };
+        // 落盘失败就留着会话（服务端在有效期内还会给凭证），让用户能重试。
+        store_credentials(&app, &credentials)?;
+        inner.credentials = Some(credentials);
+        // 新机器人：作废旧 token 与会话。
+        inner.access_token = None;
+        inner.token_expires_at = 0;
+        inner.session_id = None;
+        inner.detail = None;
+        if same_session {
+            inner.registration = None;
+        }
+        log::info("qq", "扫码创建机器人成功，凭证已落盘");
+        return Ok(RegisterPollDto {
+            state: outcome.state().into(),
+            detail: None,
+            app_id: Some(app_id.clone()),
+        });
+    }
+    if same_session {
+        if outcome.state() == "pending" {
+            inner.registration = Some(session.clone());
+        } else {
+            inner.registration = None;
+        }
+    }
+    Ok(RegisterPollDto {
+        state: outcome.state().into(),
+        detail: outcome.detail(),
+        app_id: None,
+    })
+}
+
+/// 取消扫码创建（作废本次 task_id，不再轮询）。
+#[tauri::command]
+pub async fn qq_register_cancel(host: State<'_, QqHost>) -> Result<(), String> {
+    host.lock().await.registration = None;
+    Ok(())
+}
+
+fn current_task_id(inner: &Inner) -> Option<String> {
+    inner
+        .registration
+        .as_ref()
+        .map(|session| session.task_id.clone())
 }
 
 /// 清除凭证与联系人凭据（相当于退出登录）。
@@ -941,6 +1339,7 @@ pub async fn qq_clear_credentials(
     inner.state = "stopped".into();
     inner.detail = None;
     inner.last_message_at = None;
+    inner.registration = None;
     let dir = channel_dir(&app, DIR_NAME)?;
     for name in [CREDENTIALS_FILE, PEERS_FILE] {
         let path = dir.join(name);
@@ -1159,5 +1558,97 @@ mod tests {
     fn intents_cover_only_public_c2c_and_group_events() {
         assert_eq!(INTENTS_PUBLIC_MESSAGES, 33_554_432);
         assert_eq!(INTENTS_PUBLIC_MESSAGES, 1 << 25);
+    }
+
+    /// 按服务端口径加密一份 AppSecret：base64(12B nonce ‖ 密文+tag)，密钥同样 base64。
+    fn encrypt_secret(secret: &str, key: &[u8; 32], nonce: [u8; 12]) -> String {
+        let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key));
+        let ciphertext = cipher
+            .encrypt(Nonce::from_slice(&nonce), secret.as_bytes())
+            .unwrap();
+        let mut raw = nonce.to_vec();
+        raw.extend_from_slice(&ciphertext);
+        BASE64.encode(raw)
+    }
+
+    #[test]
+    fn decrypt_secret_roundtrips_the_server_encoding() {
+        let key = [7u8; 32];
+        let bind_key = BASE64.encode(key);
+        let encrypted = encrypt_secret("s3cr3t-app-secret", &key, [1u8; 12]);
+        assert_eq!(
+            decrypt_secret(&encrypted, &bind_key).unwrap(),
+            "s3cr3t-app-secret"
+        );
+    }
+
+    #[test]
+    fn decrypt_secret_rejects_wrong_key_and_malformed_payload() {
+        let encrypted = encrypt_secret("secret", &[7u8; 32], [2u8; 12]);
+        // 换一把密钥：GCM tag 校验失败。
+        assert!(decrypt_secret(&encrypted, &BASE64.encode([9u8; 32])).is_err());
+        // 密文太短 / 非法 base64。
+        assert!(decrypt_secret(&BASE64.encode([0u8; 10]), &BASE64.encode([7u8; 32])).is_err());
+        assert!(decrypt_secret("!!!not-base64!!!", &BASE64.encode([7u8; 32])).is_err());
+    }
+
+    #[test]
+    fn classify_poll_maps_status_and_decrypts_on_completion() {
+        let key = [5u8; 32];
+        let bind_key = BASE64.encode(key);
+
+        // status 0/1 → 等待。
+        assert_eq!(
+            classify_poll(&json!({ "status": 0 }), &bind_key),
+            PollOutcome::Pending
+        );
+        assert_eq!(
+            classify_poll(&json!({ "status": 1 }), &bind_key),
+            PollOutcome::Pending
+        );
+        // status 3 → 过期。
+        assert_eq!(
+            classify_poll(&json!({ "status": 3 }), &bind_key),
+            PollOutcome::Expired
+        );
+        // status 2 + 凭证 → 完成，AppSecret 已解密（appid 兼容数字与字符串）。
+        let encrypted = encrypt_secret("app-secret", &key, [3u8; 12]);
+        assert_eq!(
+            classify_poll(
+                &json!({ "status": 2, "bot_appid": "102000000", "bot_encrypt_secret": encrypted }),
+                &bind_key
+            ),
+            PollOutcome::Done {
+                app_id: "102000000".into(),
+                app_secret: "app-secret".into(),
+            }
+        );
+        // 完成却缺字段 → 如实报错（不是静默 pending）。
+        assert!(matches!(
+            classify_poll(&json!({ "status": 2, "bot_appid": "102000000" }), &bind_key),
+            PollOutcome::Failed(_)
+        ));
+    }
+
+    #[test]
+    fn connect_url_encodes_task_id() {
+        assert_eq!(
+            connect_url("TASK+1/2"),
+            "https://q.qq.com/qqbot/openclaw/connect.html?task_id=TASK%2B1%2F2&_wv=2"
+        );
+    }
+
+    #[test]
+    fn bind_envelope_reports_retcode_failures() {
+        let failed: BindEnvelope =
+            serde_json::from_str(r#"{"retcode":10001,"msg":"注入失败"}"#).unwrap();
+        assert!(failed
+            .into_data("发起扫码")
+            .unwrap_err()
+            .contains("注入失败"));
+
+        let ok: BindEnvelope =
+            serde_json::from_str(r#"{"retcode":0,"data":{"task_id":"T1"}}"#).unwrap();
+        assert_eq!(ok.into_data("发起扫码").unwrap()["task_id"], "T1");
     }
 }

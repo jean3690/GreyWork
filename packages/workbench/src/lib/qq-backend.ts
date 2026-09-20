@@ -43,6 +43,22 @@ export interface QqInbound {
 export const QQ_STATE_EVENT = "qq://state";
 export const QQ_INBOUND_EVENT = "qq://inbound";
 
+/** 扫码创建机器人的引导信息（`task_id` / `bind_key` 只在宿主，不下发到界面）。 */
+export interface QqRegisterStart {
+  /** 编成二维码的链接（手机 QQ 扫它）。 */
+  qrUrl: string;
+  expiresIn: number;
+  /** 轮询间隔（秒）。 */
+  interval: number;
+}
+
+/** 一次轮询的结果；`done` 时凭证已由宿主落盘（界面只拿到 AppID）。 */
+export interface QqRegisterPoll {
+  state: "pending" | "done" | "expired" | "error";
+  detail: string | null;
+  appId: string | null;
+}
+
 export const qqBackend = {
   /** 仅桌面端可用；浏览器态调用方据此给出提示而非静默失败。 */
   supported: (): boolean => isTauriRuntime(),
@@ -57,6 +73,21 @@ export const qqBackend = {
       appId,
       appSecret: appSecret.trim() ? appSecret : null,
     });
+  },
+
+  /** 发起扫码创建机器人（不必先去 q.qq.com 手工建机器人）。 */
+  async registerBegin(): Promise<QqRegisterStart> {
+    return invoke<QqRegisterStart>("qq_register_begin");
+  },
+
+  /** 轮询扫码结果；成功那一轮宿主会把 AppID/AppSecret 写好。 */
+  async registerPoll(): Promise<QqRegisterPoll> {
+    return invoke<QqRegisterPoll>("qq_register_poll");
+  },
+
+  /** 放弃本次扫码（作废 task_id）。 */
+  async registerCancel(): Promise<void> {
+    await invoke("qq_register_cancel");
   },
 
   /** 清除凭证与联系人凭据（网关长连接随之停止）。 */

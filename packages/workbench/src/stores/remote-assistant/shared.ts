@@ -206,6 +206,20 @@ export const IDLE_DINGTALK_REGISTER: DingTalkRegisterView = {
   detail: null,
 };
 
+/** QQ「扫码创建机器人」的界面状态（凭证由宿主落盘，这里只有引导与结果）。 */
+export interface QqRegisterView {
+  phase: "idle" | "waiting" | "done" | "failed";
+  /** 待扫的二维码链接（`waiting` 阶段才有）。 */
+  qrUrl: string | null;
+  detail: string | null;
+}
+
+export const IDLE_QQ_REGISTER: QqRegisterView = {
+  phase: "idle",
+  qrUrl: null,
+  detail: null,
+};
+
 export const IDLE_QQ_STATUS: QqStatus = {
   configured: false,
   appId: null,

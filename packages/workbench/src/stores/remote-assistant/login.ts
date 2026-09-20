@@ -10,6 +10,7 @@
 import { wechatBackend, type WechatLoginPoll } from "../../lib/wechat-backend";
 import { feishuBackend, type FeishuRegisterPoll, type FeishuRegisterStart } from "../../lib/feishu-backend";
 import { dingtalkBackend, type DingTalkRegisterPoll, type DingTalkRegisterStart } from "../../lib/dingtalk-backend";
+import { qqBackend, type QqRegisterPoll, type QqRegisterStart } from "../../lib/qq-backend";
 import { notify } from "../notice";
 import {
   delay,
@@ -17,6 +18,7 @@ import {
   t,
   IDLE_DINGTALK_REGISTER,
   IDLE_FEISHU_REGISTER,
+  IDLE_QQ_REGISTER,
   QR_POLL_MAX_FAILURES,
   QR_POLL_MIN_INTERVAL_MS,
   QR_POLL_RETRY_MS,
@@ -38,6 +40,8 @@ export interface LoginApi {
   cancelFeishuRegistration(): void;
   startDingTalkRegistration(): Promise<void>;
   cancelDingTalkRegistration(): void;
+  startQqRegistration(): Promise<void>;
+  cancelQqRegistration(): void;
 }
 
 export function createLoginSlice({ state, getStatus, getConnect }: LoginDeps): LoginApi {
@@ -282,6 +286,73 @@ export function createLoginSlice({ state, getStatus, getConnect }: LoginDeps): L
     void dingtalkBackend.registerCancel().catch(() => undefined);
   }
 
+  /* ===== QQ · 扫码创建机器人 ===== */
+
+  /** 递增即作废进行中的扫码轮询（取消 / 重开时旧循环自行退出）。 */
+  let qqRegisterEpoch = 0;
+
+  /** 发起扫码创建机器人：出二维码 → 轮询到确认 → 宿主落盘，这里只刷新状态并连上。 */
+  async function startQqRegistration(): Promise<void> {
+    if (!state.available.value) return;
+    const epoch = ++qqRegisterEpoch;
+    state.qqRegister.value = { ...IDLE_QQ_REGISTER, phase: "waiting" };
+    let started: QqRegisterStart;
+    try {
+      started = await qqBackend.registerBegin();
+    } catch (error) {
+      if (epoch !== qqRegisterEpoch) return;
+      state.qqRegister.value = { ...IDLE_QQ_REGISTER, phase: "failed", detail: describeError(error) };
+      return;
+    }
+    if (epoch !== qqRegisterEpoch) return;
+    state.qqRegister.value = { phase: "waiting", qrUrl: started.qrUrl, detail: null };
+    void pollQqRegistration(epoch, Math.max(started.interval * 1000, QR_POLL_MIN_INTERVAL_MS));
+  }
+
+  /** 轮询扫码结果；间隔固定（QQ 不支持服务端要求的放慢）。 */
+  async function pollQqRegistration(epoch: number, intervalMs: number): Promise<void> {
+    let failures = 0;
+    while (epoch === qqRegisterEpoch && state.qqRegister.value.phase === "waiting") {
+      await delay(intervalMs);
+      if (epoch !== qqRegisterEpoch) return;
+      let result: QqRegisterPoll;
+      try {
+        result = await qqBackend.registerPoll();
+        failures = 0;
+      } catch (error) {
+        if (epoch !== qqRegisterEpoch) return;
+        failures += 1;
+        if (failures < QR_POLL_MAX_FAILURES) continue;
+        state.qqRegister.value = { ...IDLE_QQ_REGISTER, phase: "failed", detail: describeError(error) };
+        return;
+      }
+      if (epoch !== qqRegisterEpoch) return;
+      if (result.state === "pending") continue;
+      if (result.state === "done") {
+        state.qqRegister.value = { phase: "done", qrUrl: null, detail: null };
+        notify({ kind: "success", key: "qq-register", title: t("remoteAssist.qq.registerDone") });
+        await getStatus()
+          .refreshQqStatus()
+          .catch(() => undefined);
+        // 与手填凭证一致：存好就顺手连上，用户不必再点一次。
+        await getConnect().connectQq();
+        return;
+      }
+      // 失败原因优先用服务端给的描述，没有就用本地文案。QQ 没有「拒绝」这一细分状态。
+      const fallback = result.state === "expired" ? t("remoteAssist.qq.registerExpired") : t("remoteAssist.qq.registerFailed");
+      state.qqRegister.value = { ...IDLE_QQ_REGISTER, phase: "failed", detail: result.detail ?? fallback };
+      return;
+    }
+  }
+
+  /** 取消扫码：作废宿主那边的 task_id，并让轮询循环退出。 */
+  function cancelQqRegistration(): void {
+    qqRegisterEpoch += 1;
+    state.qqRegister.value = { ...IDLE_QQ_REGISTER };
+    if (!state.available.value) return;
+    void qqBackend.registerCancel().catch(() => undefined);
+  }
+
   return {
     startLogin,
     cancelLogin,
@@ -289,5 +360,7 @@ export function createLoginSlice({ state, getStatus, getConnect }: LoginDeps): L
     cancelFeishuRegistration,
     startDingTalkRegistration,
     cancelDingTalkRegistration,
+    startQqRegistration,
+    cancelQqRegistration,
   };
 }

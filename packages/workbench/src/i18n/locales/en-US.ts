@@ -835,6 +835,16 @@ export const enUS: MessageSchema = {
       credentialsFirst: "Fill in AppID / AppSecret before connecting.",
       passiveHint:
         "QQ requires passive replies to carry the msg_id of the incoming message (5-minute window); replies after that window will fail.",
+      registerTitle: "No QQ bot yet",
+      registerHint:
+        "Scan with mobile QQ to create a bot in one step: once confirmed, its AppID and AppSecret are written to this machine — no console copy-paste.",
+      registerStart: "Scan to create bot",
+      registerScanHint: "Scan this code with the QQ app on your phone and confirm the creation there.",
+      registerCancel: "Cancel",
+      registerDone: "Bot created — credentials stored on this machine.",
+      registerExpired: "This scan expired — start it again.",
+      registerFailed: "Could not create the bot by scanning.",
+      registerRetry: "Scan again",
     },
     discord: {
       requirement:
