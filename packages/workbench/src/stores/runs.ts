@@ -12,7 +12,7 @@ import { defineStore } from "pinia";
 import { ref, computed } from "vue";
 import { acp } from "../lib/acp-client";
 import { teamRunsBackend, type TeamRunRow } from "../lib/team-runs-backend";
-import { resolveWorkspaceDir } from "../lib/workspace-dir";
+import { isolateForRun, resolveWorkspaceDir } from "../lib/workspace-dir";
 import { parseToolActivityPayload } from "../lib/tool-activity";
 import { appEvents } from "../events";
 import { i18n } from "../i18n";
@@ -152,7 +152,9 @@ export const useRunsStore = defineStore("runs", () => {
     try {
       const provider = agentStore.agentProviders.find((provider) => provider.id === agentStore.selectedProviderId);
       if (!provider) throw new Error(t("errors.acpNotSelected"));
-      const workspace = await resolveWorkspaceDir();
+      // 编排子任务的工作区取自设置项 / 宿主私有根，**不跟随当前打开的对话**：
+      // 批次可能由定时任务在后台派发，那时「活动对话」与它无关。
+      const workspace = await isolateForRun(await resolveWorkspaceDir());
       handle = await acp.startAgent(provider.command, settings.effectivePermissionTier, settings.sandboxMode, workspace);
       const { sessionId } = await acp.openSession(handle, workspace, settings.enabledMcpServers);
       const { threadId, message } = chat.startAcpTurn(sub.prompt, sub.role);

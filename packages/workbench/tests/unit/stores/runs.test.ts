@@ -38,7 +38,7 @@ vi.mock("@greywork/acp", () => ({
     }) as never,
   desktopHomeDir: () => h.homeDir(),
 }));
-vi.mock("@/lib/workspace-dir", () => ({ resolveWorkspaceDir: () => h.homeDir() }));
+vi.mock("@/lib/workspace-dir", () => ({ resolveWorkspaceDir: () => h.homeDir(), isolateForRun: async (base: string) => base }));
 
 import { useRunsStore } from "@/stores/runs";
 import { useChatStore } from "@/stores/chat";

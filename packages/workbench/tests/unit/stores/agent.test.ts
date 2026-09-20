@@ -43,6 +43,8 @@ vi.mock("@/lib/workspace-dir", () => ({
     if (!dir) throw new Error("无法解析工作区目录");
     return dir;
   },
+  // runMode 默认 local：隔离层直通，测试不必真的派生快照。
+  isolateForRun: async (base: string) => base,
 }));
 
 import { acpDefaultConfigValues, setAcpDefaultConfig } from "@/stores/agent/shared";

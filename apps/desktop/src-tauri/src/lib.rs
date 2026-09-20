@@ -31,6 +31,7 @@ mod web_fetch;
 pub mod wechat;
 pub mod wecom;
 mod workspace_fs;
+mod worktree;
 
 use tauri::Manager;
 
@@ -184,6 +185,9 @@ pub fn run() {
             store_fs::attachments_prune_session,
             store_fs::store_sessions_relocate,
             store_fs::pick_workspace_folder,
+            worktree::worktree_provision,
+            worktree::worktree_release,
+            worktree::worktree_list,
             db::db_settings_load,
             db::db_settings_sync,
             db::db_automations_load,

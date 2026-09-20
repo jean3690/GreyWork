@@ -10,13 +10,14 @@ import type { AcpPermissionRequestPayload, AcpSessionConfigOption, AcpSessionOpe
 // 走 ./permissions 子路径而不是包根：那是无依赖的纯分类层。包根会连带拉起 client.ts
 // （@tauri-apps/api / ACP SDK），而权限分类在测试里必须能独立于传输层加载。
 import { classifyAcpPermission, safeAllowOnceId } from "@greywork/acp/permissions";
+import { basename } from "@greywork/core";
 import { watch } from "vue";
 import { acp } from "../../lib/acp-client";
-import { activeConversationFolder } from "../../lib/conversation-folder";
 import { normalizeAcpCommands } from "../../lib/slash-commands";
 import { formatDuration, parseToolActivityPayload } from "../../lib/tool-activity";
 import { permissionCommand } from "../../lib/permission-detail";
-import { resolveWorkspaceDir } from "../../lib/workspace-dir";
+import { activeConversationFolder } from "../../lib/conversation-folder";
+import { isolateForRun, resolveWorkspaceDir } from "../../lib/workspace-dir";
 import { parseScheduleFences } from "../../lib/schedule-fence";
 import { appEvents } from "../../events";
 import { notify } from "../notice";
@@ -358,7 +359,7 @@ export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi 
           for (const raw of payload.files) {
             if (typeof raw !== "string" || !raw.trim()) continue;
             const path = raw.trim();
-            appEvents.emit("preview:request", { path, name: path.split(/[\\/]/).pop() || path, source: "disk" });
+            appEvents.emit("preview:request", { path, name: basename(path) || path, source: "disk" });
           }
         }
         // 完成通知（success toast，自动消失）：回合结束是低频事件，值得一个明确的「完成」反馈，
@@ -455,7 +456,8 @@ export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi 
     try {
       // 当前会话绑定带磁盘文件夹的工作区 → 以该文件夹为 ACP 工作区（权限锚定基准）；
       // 否则回落设置项 workspaceDir 或宿主私有 ~/.greyWork。
-      workspace = activeConversationFolder() ?? (await resolveWorkspaceDir());
+      // runMode=worktree 时再由宿主把这套工作区派生为隔离快照。
+      workspace = await isolateForRun(activeConversationFolder() ?? (await resolveWorkspaceDir()));
     } catch (error) {
       return error instanceof Error ? error.message : String(error);
     }

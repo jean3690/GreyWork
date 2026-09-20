@@ -350,3 +350,33 @@ describe("编排并发度 maxParallel", () => {
     expect(useSettingsStore().maxParallel).toBe(2);
   });
 });
+
+describe("运行模式 runMode", () => {
+  it("setRunMode 变更即落盘：隔离档位跨重启保持", () => {
+    const settings = useSettingsStore();
+    expect(settings.runMode).toBe("local");
+    settings.setRunMode("worktree");
+
+    setActivePinia(createPinia());
+    expect(useSettingsStore().runMode).toBe("worktree");
+  });
+
+  it("未接入的 cloud 也照存：用户选的档位不该被悄悄改掉（是否生效由 UI 说明）", () => {
+    useSettingsStore().setRunMode("cloud");
+    expect(JSON.parse(storage.get("greywork.settings") ?? "{}").runMode).toBe("cloud");
+
+    setActivePinia(createPinia());
+    expect(useSettingsStore().runMode).toBe("cloud");
+  });
+
+  it("缺失或非法 runMode 一律回落 local，绝不因损坏配置悄悄进隔离", () => {
+    setActivePinia(createPinia());
+    expect(useSettingsStore().runMode).toBe("local"); // 旧快照没有该字段
+
+    for (const value of ["vm", "", 42, null, true, {}]) {
+      storage.set("greywork.settings", JSON.stringify({ runMode: value }));
+      setActivePinia(createPinia());
+      expect(useSettingsStore().runMode).toBe("local");
+    }
+  });
+});

@@ -470,8 +470,11 @@ export const zhCN = {
     },
     runModes: {
       local: { label: "Local", hint: "当前工作区直接执行" },
-      worktree: { label: "Worktree", hint: "宿主能力预留：独立 worktree 执行（未接入）" },
-      cloud: { label: "Cloud", hint: "宿主能力预留：云端执行（未接入）" },
+      worktree: {
+        label: "Worktree",
+        hint: "隔离执行：宿主派生独立 worktree（非 git 目录则复制一份快照），agent 的写入不落回工作区",
+      },
+      cloud: { label: "Cloud", hint: "宿主能力未接入：选中不生效" },
     },
     planMode: "计划模式",
     on: "开",

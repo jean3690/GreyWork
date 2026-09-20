@@ -480,8 +480,11 @@ export const enUS: MessageSchema = {
     },
     runModes: {
       local: { label: "Local", hint: "Run in the current workspace" },
-      worktree: { label: "Worktree", hint: "Host capability: run in an isolated worktree (not wired yet)" },
-      cloud: { label: "Cloud", hint: "Host capability: run in the cloud (not wired yet)" },
+      worktree: {
+        label: "Worktree",
+        hint: "Isolated: the host provisions a separate worktree (a directory snapshot for non-git folders); agent writes stay out of your workspace",
+      },
+      cloud: { label: "Cloud", hint: "Not wired yet — selecting has no effect" },
     },
     planMode: "Plan mode",
     on: "On",

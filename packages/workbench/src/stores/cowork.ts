@@ -19,7 +19,7 @@ import { appEvents } from "../events";
 import { i18n } from "../i18n";
 import { activeConversationFolder } from "../lib/conversation-folder";
 import { parseToolActivityPayload } from "../lib/tool-activity";
-import { resolveWorkspaceDir } from "../lib/workspace-dir";
+import { resolveWorkspaceDir, isolateForRun } from "../lib/workspace-dir";
 import type { ThreadMessage } from "../types";
 import { notify } from "./notice";
 import { useAgentStore } from "./agent";
@@ -415,7 +415,7 @@ export const useCoworkStore = defineStore("cowork", () => {
     probingProviders.value = { ...probingProviders.value, [providerId]: true };
     let handle: number | null = null;
     try {
-      const workspace = activeConversationFolder() ?? (await resolveWorkspaceDir());
+      const workspace = await isolateForRun(activeConversationFolder() ?? (await resolveWorkspaceDir()));
       handle = await acp.startAgent(provider.command, settings.effectivePermissionTier, settings.sandboxMode, workspace);
       const opened = await acp.openSession(handle, workspace);
       providerOptions.value = { ...providerOptions.value, [providerId]: opened.configOptions ?? [] };
@@ -452,7 +452,7 @@ export const useCoworkStore = defineStore("cowork", () => {
     const previousActive = sessionStore.activeSessionId;
     const created: Array<{ init: CoworkSlotInit; runtime: SlotRuntime }> = [];
     try {
-      const workspace = activeConversationFolder() ?? (await resolveWorkspaceDir());
+      const workspace = await isolateForRun(activeConversationFolder() ?? (await resolveWorkspaceDir()));
       await ensureListener();
       let index = 0;
       for (const member of members) {
