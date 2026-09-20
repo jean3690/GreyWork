@@ -17,6 +17,8 @@
   OOXML 也能正确打开），不再只是「不支持预览」的占位提示。
 - 远程助手 · QQ 通道支持「扫码创建机器人」：手机 QQ 扫码确认后，宿主直接把 AppID 与 AppSecret
   写入本机（0600），不必再去 QQ 开放平台抄密钥；手填凭证入口保留作兜底。
+- 插件作者文档 `docs/plugin-authoring.md`、市场发布说明 `plugin-market/README.md`，以及可直接
+  复制的插件包模板 `plugin-market/templates/`。
 - `@greywork/core` 新增 `basename` / `extname` 两个路径工具：`\` 与 `/` 都认，`basename` 先剥
   尾部分隔符再取末段（与同文件的 `normalizePath` 同语义，故 `"reports/"` → `"reports"`），
   `extname` 不含点、不改大小写。
@@ -28,6 +30,20 @@
 - 扩展名一律从**路径末段**取。此前是对整条路径 `split(".").pop()`，目录名带点时会拿到
   `"v1.2/report"` → `"2/report"` 这类垃圾串，只是靠「命不中就回落 raw / octet-stream」掩盖着；
   现在 `kindOfPath`、`codeLanguageOfPath`、图片预览的 MIME 推断都只在末段上找点。
+- 插件能力授权改为**按插件粒度**：给 A 授权 `net.fetch` 不再顺带放行 B，插件中心按插件分别授权/
+  撤销。旧版全局授权存档（v1）首次启动时自动迁移为按插件授权并写回新存档。
+
+### 修复
+
+- 停用/卸载插件时回收其桌面悬浮窗（此前窗口会残留并继续渲染已停用的包）。
+- 官方插件市场的强制签名校验改为 URL 归一化比较，`.../registry.json?x=1` 之类的变体不再被降级为
+  「第三方免签」。
+- 宿主 `plugin_window_open` 增加 `window.floating` 声明校验，与安装期校验、前端授权门禁三处一致。
+- 卸载插件时清空其能力授权，避免重装同 id 的其它包继承旧授权。
+- 补强插件包校验：mode 标题/heading/eyebrow 增加长度上界；`window` 声明必须同时声明
+  `window.floating`。
+- 清理插件系统死代码（未使用的窗口事件通道、渲染循环错误占位、旧版单计数器页面分支与
+  `RenderFrameInput` 类型）。
 
 ## [0.1.1] - 2026-09-19
 

@@ -578,6 +578,7 @@ export const enUS: MessageSchema = {
     registered: "Registered {id}",
     details: "Details",
     install: "Install",
+    upgrade: "Update",
     pluginsEmpty: "No plugins registered yet. Third-party plugins appear here once host code calls registerPlugin().",
     selfDisableWarn: "Disabling the plugin center hides this page; re-enable it under Settings → System.",
     restoreBuiltins: "Restore built-in plugins",
@@ -618,6 +619,9 @@ export const enUS: MessageSchema = {
     tabMcp: "MCP",
     tabSkills: "Skills",
     tabAudit: "Capability audit",
+    auditDesc: "Every capability call a plugin makes through the host broker (latest 200, including denials). Stored on this machine only.",
+    auditClear: "Clear",
+    auditEmpty: "No capability calls recorded yet.",
     mcpSearchPlaceholder: "Search MCP servers (registry.modelcontextprotocol.io)",
     mcpInstallHint:
       "Pick a server from the official registry and register it locally; you can adjust its name, transport and args in the dialog. Enabled servers are declared to the agent on session start.",

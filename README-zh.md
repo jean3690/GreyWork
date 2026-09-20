@@ -33,7 +33,9 @@ GreyWork 把外部编码智能体（走 **Agent Client Protocol**）与本机 Op
 
 **可扩展性**
 
-- 插件运行时基于 Cordis 微内核，能力需显式授权；声明式插件包只含受限 JSON，不执行远端 JavaScript。
+- 插件运行时基于 Cordis 微内核，能力**按插件**显式授权；声明式插件包只含受限 JSON，不执行远端 JavaScript。
+- 插件作者指南见 [docs/plugin-authoring.md](docs/plugin-authoring.md)，市场发布流程见
+  [plugin-market/README.md](plugin-market/README.md)。
 - **市场**收在一处：官方插件注册表（带签名 —— GitHub 账号失陷也无法投毒目录）、MCP Registry
   与 skills.sh 等技能源。
 - Agent 技能放在 `.agents/skills/`，由 `skills-lock.json` 记录哈希锁定。
@@ -127,7 +129,9 @@ Rust 侧（在 `apps/desktop/src-tauri` 下执行）：`cargo fmt`、`cargo clip
 - `.github/workflows/ci.yml` 与本地钩子同构，但 web 侧的检查拆成 4 个并行 job（lint / typecheck /
   测试 / 渲染层构建），墙钟取最慢的一个而不是各步之和；另有 Rust job（`cargo fmt` →
   `cargo clippy --locked` → `cargo test --locked`）、Windows job（`cargo test --locked` + vitest，
-  唯一会编译并运行 `#[cfg(windows)]` 代码的地方）和三平台打包矩阵（deb / NSIS / dmg）。
+  唯一会编译并运行 `#[cfg(windows)]` 代码的地方）、macOS job（`cargo clippy --locked` →
+  `cargo test --locked` + vitest，唯一会编译并运行 `#[cfg(target_os = "macos")]` 代码的地方）
+  和三平台打包矩阵（deb / NSIS / dmg）。
 - 打 `v*` 标签触发 `.github/workflows/release.yml`，产出 deb / NSIS / dmg 并开一个 draft Release；
   macOS 走通用二进制，Intel Mac 也能装。Release 正文自动取自 [CHANGELOG.md](CHANGELOG.md) 里该版本的
   条目，三个平台都成功后取消 draft 即发布。打包与 CI 共用 `tauri` 这份 Rust 缓存键，因此 tag 构建直接

@@ -85,7 +85,7 @@ pub struct MarketPluginManifest {
 }
 
 /// 悬浮窗声明：宿主按此建透明置顶小窗；内容 = 该包的 render 指令流。
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginWindowDecl {
     pub width: u32,
@@ -185,7 +185,6 @@ pub struct DeclarativePage {
     pub eyebrow: Option<String>,
     pub heading: String,
     pub body: String,
-    pub counter_label: Option<String>,
     #[serde(default)]
     pub fields: Vec<DeclarativeField>,
     #[serde(default)]
@@ -452,8 +451,32 @@ fn validate_registry(registry: &PluginRegistry, registry_url: &str) -> Result<()
     }
     verify_registry_signature(registry, registry_url)
 }
+/// registry URL 的规范形态：仅保留 scheme://host/path（host 小写、去结尾斜杠、
+/// 丢弃 query/fragment）。用于「是否官方源」判定 —— 否则 `.../registry.json?x=1`
+/// 这类变体会被当成第三方源，从而绕过官方源的强制签名。
+fn canonical_registry_url(raw: &str) -> Option<String> {
+    let url = reqwest::Url::parse(raw.trim()).ok()?;
+    let host = url.host_str()?.to_ascii_lowercase();
+    Some(format!(
+        "{}://{}{}",
+        url.scheme().to_ascii_lowercase(),
+        host,
+        url.path().trim_end_matches('/')
+    ))
+}
+
+fn is_official_registry_url(raw: &str) -> bool {
+    match (
+        canonical_registry_url(raw),
+        canonical_registry_url(OFFICIAL_REGISTRY_URL),
+    ) {
+        (Some(candidate), Some(official)) => candidate == official,
+        _ => false,
+    }
+}
+
 fn verify_registry_signature(registry: &PluginRegistry, registry_url: &str) -> Result<(), String> {
-    let is_official = registry_url == OFFICIAL_REGISTRY_URL;
+    let is_official = is_official_registry_url(registry_url);
     let Some(_signature) = &registry.signature else {
         if is_official {
             return Err("official plugin registry is missing its signature".to_string());
@@ -533,6 +556,22 @@ fn validate_requirement(requirement: &CapabilityRequirement) -> Result<(), Strin
             Ok(())
         }
     }
+}
+
+/// manifest 是否声明了 `window.floating` 能力。
+///
+/// 悬浮窗由宿主托管，但「能开窗」这件事必须在 manifest 里显式声明（用户据此知情授权）；
+/// `validate_package` 强制 window 声明与 requires 一致，宿主开窗命令再以此做纵深校验。
+pub(crate) fn declares_window_floating(manifest: &MarketPluginManifest) -> bool {
+    manifest
+        .requires
+        .iter()
+        .any(|requirement| match requirement {
+            CapabilityRequirement::Plain(capability) => capability == "window.floating",
+            CapabilityRequirement::Parameterized { capability, .. } => {
+                capability == "window.floating"
+            }
+        })
 }
 
 fn validate_host(host: &str) -> Result<(), String> {
@@ -615,6 +654,20 @@ fn validate_package(package: &PluginPackage) -> Result<(), String> {
         if mode.title.trim().is_empty() || mode.page.heading.trim().is_empty() {
             return Err(format!("mode {} requires title and page heading", mode.id));
         }
+        if mode.title.len() > 120 {
+            return Err(format!("mode {} title exceeds 120 characters", mode.id));
+        }
+        if mode.page.heading.len() > 160 {
+            return Err(format!("mode {} heading exceeds 160 characters", mode.id));
+        }
+        if mode
+            .page
+            .eyebrow
+            .as_deref()
+            .is_some_and(|eyebrow| eyebrow.len() > 120)
+        {
+            return Err(format!("mode {} eyebrow exceeds 120 characters", mode.id));
+        }
         if mode.page.body.len() > 16 * 1024 {
             return Err(format!("mode {} body is too large", mode.id));
         }
@@ -624,7 +677,8 @@ fn validate_package(package: &PluginPackage) -> Result<(), String> {
             .actions
             .iter()
             .any(|action| matches!(action.operation, DeclarativeOperation::Invoke { .. }));
-        if has_invoke != (manifest.kind == PluginKind::Worker) && has_invoke {
+        // invoke 动作要在 worker 里执行 —— 声明式包不得引用（拒绝而非静默忽略）。
+        if has_invoke && manifest.kind != PluginKind::Worker {
             return Err("invoke actions require a worker plugin".to_string());
         }
     }
@@ -644,6 +698,13 @@ fn validate_package(package: &PluginPackage) -> Result<(), String> {
             if size == 0 || size > 512 {
                 return Err("plugin window size must be 1-512 pixels".to_string());
             }
+        }
+        // 脱窗是受控能力：声明窗口就必须同时声明 window.floating（用户授权门禁的输入）。
+        if !declares_window_floating(manifest) {
+            return Err(
+                "window declaration requires the window.floating capability in requires"
+                    .to_string(),
+            );
         }
     }
     validate_ui_regions(manifest)?;
@@ -939,7 +1000,7 @@ fn validate_plugin_fetch_url(url: &str, allowed_hosts: &[String]) -> Result<reqw
     if parsed.scheme() != "https" {
         return Err("net.fetch only allows https: urls".to_string());
     }
-    if !parsed.username().is_empty() || !parsed.password().is_none() {
+    if !parsed.username().is_empty() || parsed.password().is_some() {
         return Err("net.fetch does not allow embedded credentials".to_string());
     }
     let host = parsed
@@ -1061,7 +1122,6 @@ mod tests {
                             eyebrow: Some("Marketplace plugin".into()),
                             heading: "Demo plugin is running".into(),
                             body: "Loaded from a declarative package.".into(),
-                            counter_label: None,
                             fields: vec![DeclarativeField {
                                 key: "count".into(),
                                 label: "Count".into(),
@@ -1107,6 +1167,77 @@ mod tests {
         )
         .is_err());
         assert!(validate_github_url("https://example.com/registry.json").is_err());
+    }
+
+    #[test]
+    fn official_registry_url_detection_is_normalized() {
+        // 官方 URL 的各种变体（大小写 host / 结尾斜杠 / query / fragment）都算官方源。
+        for variant in [
+            OFFICIAL_REGISTRY_URL,
+            "https://RAW.githubusercontent.com/jean3690/greywork-plugin-market/main/registry.json",
+            "https://raw.githubusercontent.com/jean3690/greywork-plugin-market/main/registry.json/",
+            "https://raw.githubusercontent.com/jean3690/greywork-plugin-market/main/registry.json?ref=main",
+            "  https://raw.githubusercontent.com/jean3690/greywork-plugin-market/main/registry.json  ",
+        ] {
+            assert!(
+                is_official_registry_url(variant),
+                "expected official: {variant}"
+            );
+        }
+        // 非官方源（不同仓库 / 不同 host / 非法 URL）不算官方。
+        for variant in [
+            "https://raw.githubusercontent.com/someone/other-market/main/registry.json",
+            "https://example.com/registry.json",
+            "not a url",
+        ] {
+            assert!(
+                !is_official_registry_url(variant),
+                "expected third-party: {variant}"
+            );
+        }
+    }
+
+    #[test]
+    fn official_registry_signature_is_mandatory_even_for_url_variants() {
+        // 官方源经变体 URL 访问时，缺签名仍必须拒绝（防降级为第三方免签）。
+        let registry = PluginRegistry {
+            schema_version: 1,
+            plugins: Vec::new(),
+            signature: None,
+        };
+        assert!(validate_registry(&registry, OFFICIAL_REGISTRY_URL).is_err());
+        assert!(validate_registry(
+            &registry,
+            "https://raw.githubusercontent.com/jean3690/greywork-plugin-market/main/registry.json/"
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn window_declaration_requires_the_floating_capability() {
+        // worker + render + window，但 requires 未声明 window.floating：拒绝。
+        let mut package = demo_package();
+        package.manifest.kind = PluginKind::Worker;
+        package.manifest.runtime = Some(CodePluginRuntime {
+            runtime_type: "worker".into(),
+            entry: "https://raw.githubusercontent.com/acme/plugins/main/demo.js".into(),
+            sha256: "a".repeat(64),
+            render: Some(RenderLoop {
+                handler: "draw".into(),
+                fps: Some(12),
+                width: Some(160),
+                height: Some(140),
+            }),
+        });
+        package.manifest.window = Some(PluginWindowDecl {
+            width: 160,
+            height: 140,
+        });
+        assert!(validate_package(&package).is_err());
+
+        // 声明 window.floating 后通过。
+        package.manifest.requires = vec![CapabilityRequirement::Plain("window.floating".into())];
+        assert!(validate_package(&package).is_ok());
     }
 
     #[test]

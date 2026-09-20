@@ -1,5 +1,3 @@
-import type { DeclarativeValue } from "./market-types";
-
 /**
  * 插件渲染指令集 v1：worker 渲染 handler 的返回值（纯 JSON），宿主白名单校验后
  * 画到 SVG 上。worker 保持零 DOM 访问 —— 渲染是数据交换，不是代码执行。
@@ -141,11 +139,4 @@ export function validateRenderCommands(value: unknown): RenderCommand[] | null {
     result.push(validated);
   }
   return result;
-}
-
-/** 渲染循环输入：当前状态 + 帧时间戳（worker 派生动画相位的依据）。 */
-export interface RenderFrameInput {
-  state: Readonly<Record<string, DeclarativeValue>>;
-  /** epoch ms（宿主时钟）。 */
-  now: number;
 }

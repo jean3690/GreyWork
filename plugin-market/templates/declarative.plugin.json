@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "manifest": {
+    "id": "demo.template",
+    "name": "Template Plugin",
+    "version": "1.0.0",
+    "description": "Copy me: a declarative plugin with one mode, one field and one action. Restricted JSON only — no code runs.",
+    "kind": "declarative",
+    "requires": [],
+    "contributes": {
+      "modes": [
+        {
+          "id": "demo-template",
+          "title": "Template",
+          "icon": "lightning",
+          "page": {
+            "eyebrow": "Template",
+            "heading": "Hello from a declarative plugin",
+            "body": "This package contains only restricted JSON; the host renders the page and owns the state.",
+            "fields": [
+              {
+                "key": "count",
+                "label": "Count",
+                "kind": "number",
+                "default": 0,
+                "min": 0,
+                "max": 100,
+                "step": 1
+              }
+            ],
+            "outputs": [{ "label": "Count", "valueKey": "count" }],
+            "actions": [
+              {
+                "id": "add-one",
+                "label": "+1",
+                "style": "primary",
+                "operation": { "type": "increment", "key": "count", "amount": 1 }
+              },
+              {
+                "id": "reset",
+                "label": "Reset",
+                "style": "danger",
+                "operation": { "type": "reset" }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

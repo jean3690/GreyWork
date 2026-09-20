@@ -162,22 +162,5 @@ function actionClass(action: DeclarativeAction): string {
         {{ busyAction === action.id ? "…" : action.label }}
       </button>
     </section>
-
-    <section v-if="props.page.counterLabel" class="rounded-[12px] border border-line-2 bg-panel-2 p-4">
-      <p class="text-[12px] text-dim2">{{ props.page.counterLabel }}</p>
-      <div class="mt-3 flex items-center gap-3">
-        <button
-          type="button"
-          class="h-8 cursor-pointer rounded-[8px] bg-accent px-3 text-[12px] font-medium text-accent-ink transition-opacity hover:opacity-90"
-          data-testid="declarative-plugin-increment"
-          @click="
-            setDeclarativePluginValue(`${props.pluginId}/${props.modeId}`, state, '__legacyCount', Number(state.__legacyCount ?? 0) + 1)
-          "
-        >
-          +1
-        </button>
-        <output class="font-mono text-[13px] text-foreground" data-testid="declarative-plugin-count">{{ state.__legacyCount ?? 0 }}</output>
-      </div>
-    </section>
   </main>
 </template>

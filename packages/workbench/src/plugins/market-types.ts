@@ -126,8 +126,6 @@ export interface DeclarativePage {
   eyebrow?: string;
   heading: string;
   body: string;
-  /** 旧版单计数器包；新包应使用 fields / outputs / actions。 */
-  counterLabel?: string;
   fields?: DeclarativeField[];
   outputs?: DeclarativeOutput[];
   actions?: DeclarativeAction[];

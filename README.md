@@ -37,8 +37,10 @@ messaging channels so you can drive the machine from your phone.
 
 **Extensibility**
 
-- Plugin runtime on a Cordis micro-kernel with capability grants; declarative plugins are restricted
-  JSON and never execute remote JavaScript.
+- Plugin runtime on a Cordis micro-kernel with **per-plugin** capability grants; declarative plugins
+  are restricted JSON and never execute remote JavaScript.
+- Authoring guide: [docs/plugin-authoring.md](docs/plugin-authoring.md); market publishing:
+  [plugin-market/README.md](plugin-market/README.md).
 - **Market** in one place: the official plugin registry (signed, so a compromised GitHub account
   cannot poison the catalog), the MCP registry, and skill sources such as skills.sh.
 - Agent skills vendored under `.agents/skills/`, locked with hashes in `skills-lock.json`.
@@ -135,7 +137,9 @@ signing still needs: [docs/packaging.md](docs/packaging.md).
   lint (ESLint + Prettier), typecheck, vitest, renderer build — so the wall clock is the slowest job
   instead of their sum, plus a Rust job (`cargo fmt` → `cargo clippy --locked` → `cargo test --locked`),
   a Windows job (`cargo test --locked` + vitest — the only place `#[cfg(windows)]` code is compiled
-  and run) and a three-platform Tauri bundle matrix (deb / NSIS / dmg).
+  and run), a macOS job (`cargo clippy --locked` → `cargo test --locked` + vitest — the only place
+  `#[cfg(target_os = "macos")]` code is compiled and run) and a three-platform Tauri bundle matrix
+  (deb / NSIS / dmg).
 - Tagging `v*` runs `.github/workflows/release.yml`, which builds deb / NSIS / dmg bundles and opens
   a draft GitHub Release. macOS is built as a universal binary so Intel Macs can install it too. The
   release body is taken from the matching entry in [CHANGELOG.md](CHANGELOG.md); un-draft it once all

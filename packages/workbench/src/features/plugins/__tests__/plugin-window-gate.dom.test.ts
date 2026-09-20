@@ -82,12 +82,23 @@ describe("window.floating 脱窗门禁", () => {
   it("声明 window + 授权后，区域宿主显示「弹出桌面」按钮", async () => {
     const { bootPlugins, grantPluginCapability } = await import("@/plugins/runtime");
     await bootPlugins();
-    grantPluginCapability("window.floating");
+    grantPluginCapability("demo.pet", "window.floating");
     const { component } = mountRegion(windowPluginPackage);
     const wrapper = mount(component);
     wrappers.push(wrapper);
 
     expect(wrapper.find('[data-testid="plugin-window-open-demo.pet"]').exists()).toBe(true);
+  });
+
+  it("授权只按插件隔离：给别的插件授权不放行本插件的脱窗按钮", async () => {
+    const { bootPlugins, grantPluginCapability } = await import("@/plugins/runtime");
+    await bootPlugins();
+    grantPluginCapability("demo.other", "window.floating");
+    const { component } = mountRegion(windowPluginPackage);
+    const wrapper = mount(component);
+    wrappers.push(wrapper);
+
+    expect(wrapper.find('[data-testid="plugin-window-open-demo.pet"]').exists()).toBe(false);
   });
 
   it("声明 window 但未授权：按钮不出现（门禁先于命令）", async () => {
@@ -102,7 +113,7 @@ describe("window.floating 脱窗门禁", () => {
   it("未声明 window 的插件：永不出现脱窗按钮", async () => {
     const { bootPlugins, grantPluginCapability } = await import("@/plugins/runtime");
     await bootPlugins();
-    grantPluginCapability("window.floating");
+    grantPluginCapability("demo.plain", "window.floating");
     const { component } = mountRegion(plainPluginPackage);
     const wrapper = mount(component);
     wrappers.push(wrapper);

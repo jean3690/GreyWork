@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "manifest": {
+    "id": "demo.worker-template",
+    "name": "Worker Template",
+    "version": "1.0.0",
+    "description": "Copy me: a worker plugin with one action and a render loop. Replace runtime.entry with a pinned commit URL and fill in runtime.sha256.",
+    "kind": "worker",
+    "runtime": {
+      "type": "worker",
+      "entry": "https://raw.githubusercontent.com/OWNER/REPO/COMMIT/demo.worker-template.js",
+      "sha256": "REPLACE_WITH_64_LOWERCASE_HEX",
+      "render": { "handler": "draw", "fps": 12, "width": 160, "height": 140 }
+    },
+    "requires": [],
+    "contributes": {
+      "modes": [
+        {
+          "id": "demo-worker-template",
+          "title": "Worker Template",
+          "icon": "magic",
+          "page": {
+            "eyebrow": "Template",
+            "heading": "Hello from a worker plugin",
+            "body": "This package runs one pinned ES module in a Web Worker; every host resource goes through greywork.call.",
+            "fields": [
+              {
+                "key": "count",
+                "label": "Count",
+                "kind": "number",
+                "default": 0,
+                "min": 0
+              }
+            ],
+            "outputs": [{ "label": "Count", "valueKey": "count" }],
+            "actions": [
+              {
+                "id": "bump",
+                "label": "Bump",
+                "style": "primary",
+                "operation": { "type": "invoke", "handler": "bump" }
+              }
+            ]
+          }
+        }
+      ],
+      "uiRegions": [
+        {
+          "region": "shellSidebar",
+          "id": "template.sidebar",
+          "title": "Template",
+          "order": 50,
+          "actions": [{ "id": "bump", "label": "Bump" }]
+        }
+      ]
+    }
+  }
+}

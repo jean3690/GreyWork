@@ -63,18 +63,24 @@ export interface CapabilityLoader extends CapabilitySeam {
   /** 按依赖拓扑序一次性激活全部已注册清单（bootstrap 调用）。 */
   activateAll(): Promise<void>;
   activeIds(): readonly string[];
-  /** 授权一个能力 id（幂等；只作用于之后的激活判定，不动已激活插件）。 */
-  grantCapability(capability: string): void;
+  /** 授权某插件一个能力 id（幂等；只作用于之后的激活判定，不动已激活插件）。 */
+  grantCapability(pluginId: string, capability: string): void;
   /** 撤销授权（不影响已激活插件；但运行期能力调用即时被拒）。 */
-  revokeCapability(capability: string): void;
-  isCapabilityGranted(capability: string): boolean;
-  /** 当前已授权能力 id 列表快照。 */
-  grantedCapabilities(): readonly string[];
+  revokeCapability(pluginId: string, capability: string): void;
+  /** 该插件是否已获此能力授权。 */
+  isCapabilityGranted(pluginId: string, capability: string): boolean;
+  /** 已授权能力快照：pluginId → 能力 id 列表（仅含非空项）。 */
+  grantedCapabilities(): Readonly<Record<string, readonly string[]>>;
   /** 设置可信插件 id 集（宿主签名内置插件）：其 requires 自动满足。默认空集。 */
   setTrustedPluginIds(ids: readonly string[]): void;
   /**
+   * v1 存档迁移专用：登记一组「历史全局授权」。后续 register 时，对声明了该能力的
+   * 插件逐一落成按插件授权（新存档语义）；不构成新的全局放行 —— 未声明者不受影响。
+   */
+  grantLegacyCapabilities(capabilities: readonly string[]): void;
+  /**
    * 运行期能力调用（worker host-call 通道的宿主侧收口）：
-   * 每次调用实时校验「插件已声明 + 全局已授权 + 注册表已登记」，任一不满足即抛错。
+   * 每次调用实时校验「插件已声明 + 该插件已授权 + 注册表已登记」，任一不满足即抛错。
    * revokeCapability 之后立即生效 —— 已激活插件的下一次调用即被拒绝。
    */
   callCapability(pluginId: string, capability: string, args: unknown): Promise<unknown>;
@@ -104,6 +110,9 @@ function manifestToPlugin(manifest: PluginManifest): Plugin.Object<Context> {
   };
 }
 
+/** 未授权插件的空集常量：避免每次查询都新建 Set。 */
+const EMPTY_CAPABILITIES: ReadonlySet<string> = new Set();
+
 export function createCapabilityLoader(): CapabilityLoader {
   const ctx = new Context();
   // 装载 seam 服务（immediate）：贡献聚合 ref 立即可用。
@@ -116,8 +125,20 @@ export function createCapabilityLoader(): CapabilityLoader {
   /** 已装载插件：id → fork scope；卸载时 fork.dispose() 触发 effect 清理。 */
   const forkById = new Map<string, ForkScope>();
   const active = ref(new Set<string>());
-  /** 全局已授权能力集（白名单）；由 runtime 从 capabilityGrants 存档重放。 */
-  const grantedCapabilities = new Set<string>();
+  /**
+   * 已授权能力（**按插件隔离**）：pluginId → 能力 id 集。
+   * 授权是「这个插件可以用这项能力」，不是「这项能力全局放开」——
+   * 给 A 授权 net.fetch 不会顺带放行 B。由 runtime 从 capabilityGrants 存档重放。
+   */
+  const grantedByPlugin = new Map<string, Set<string>>();
+  /** v1 全局白名单（迁移用）：注册时对声明该能力的插件落成按插件授权。 */
+  const legacyGlobalGrants = new Set<string>();
+
+  function grantTo(pluginId: string, capability: string): void {
+    const set = grantedByPlugin.get(pluginId) ?? new Set<string>();
+    set.add(capability);
+    grantedByPlugin.set(pluginId, set);
+  }
   /** 可信插件 id（内置，宿主签名）；其 requires 视为已满足。默认空集。 */
   let trustedPluginIds: ReadonlySet<string> = new Set();
 
@@ -193,12 +214,17 @@ export function createCapabilityLoader(): CapabilityLoader {
     return order;
   }
 
+  /** 某插件已授权能力集（缺省空集）。 */
+  function grantedSet(pluginId: string): ReadonlySet<string> {
+    return grantedByPlugin.get(pluginId) ?? EMPTY_CAPABILITIES;
+  }
+
   /** 门禁：返回该插件尚未授权、须补齐的 requires 子集（可信插件恒为空）。 */
   function missingGrants(id: string): string[] {
     if (trustedPluginIds.has(id)) return [];
     return (manifestById.get(id)?.requires ?? [])
       .map((spec) => normalizeGrantSpec(spec).capability)
-      .filter((capability) => !grantedCapabilities.has(capability));
+      .filter((capability) => !grantedSet(id).has(capability));
   }
 
   /** 插件对某能力的声明式授权（含参数）。找不到返回 null —— 未声明即不可调用。 */
@@ -222,6 +248,11 @@ export function createCapabilityLoader(): CapabilityLoader {
         manifestById.delete(manifest.id);
         pluginById.delete(manifest.id);
         throw error;
+      }
+      // v1 → v2 迁移：历史全局授权落到「声明了该能力」的插件上（新授权按插件隔离）。
+      for (const spec of manifest.requires ?? []) {
+        const capability = normalizeGrantSpec(spec).capability;
+        if (legacyGlobalGrants.has(capability)) grantTo(manifest.id, capability);
       }
     },
 
@@ -295,8 +326,8 @@ export function createCapabilityLoader(): CapabilityLoader {
       if (!trustedPluginIds.has(pluginId)) {
         const grant = declaredGrant(pluginId, capability);
         if (!grant) throw deny("capability is not declared in the plugin manifest");
-        // 调用时实时校验全局授权集 —— revokeCapability 后下一次调用即被拒绝。
-        if (!grantedCapabilities.has(capability)) throw deny("capability grant has been revoked or was never given");
+        // 调用时实时校验该插件的授权集 —— revokeCapability 后下一次调用即被拒绝。
+        if (!grantedSet(pluginId).has(capability)) throw deny("capability grant has been revoked or was never given");
         return definition.invoke(args, {
           pluginId,
           grant,
@@ -308,16 +339,21 @@ export function createCapabilityLoader(): CapabilityLoader {
       return definition.invoke(args, { pluginId, grant, audit: recordCapabilityAudit });
     },
 
-    grantCapability(capability: string): void {
-      grantedCapabilities.add(capability);
+    grantCapability: grantTo,
+    revokeCapability(pluginId: string, capability: string): void {
+      const set = grantedByPlugin.get(pluginId);
+      if (!set) return;
+      set.delete(capability);
+      if (set.size === 0) grantedByPlugin.delete(pluginId);
     },
-    revokeCapability(capability: string): void {
-      grantedCapabilities.delete(capability);
-    },
-    isCapabilityGranted: (capability: string) => grantedCapabilities.has(capability),
-    grantedCapabilities: () => [...grantedCapabilities],
+    isCapabilityGranted: (pluginId: string, capability: string) => grantedSet(pluginId).has(capability),
+    grantedCapabilities: () =>
+      Object.fromEntries([...grantedByPlugin.entries()].map(([pluginId, capabilities]) => [pluginId, [...capabilities]])),
     setTrustedPluginIds(ids: readonly string[]): void {
       trustedPluginIds = new Set(ids);
+    },
+    grantLegacyCapabilities(capabilities: readonly string[]): void {
+      for (const capability of capabilities) legacyGlobalGrants.add(capability);
     },
   };
 }
