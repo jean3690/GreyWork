@@ -320,8 +320,8 @@ const permissionTierLabel = computed(() => PERM_TIER_LABELS[settings.permissionT
         <span class="grid size-10 place-items-center rounded-[12px] bg-panel-2 text-dim">
           <Icon name="message" :size="18" />
         </span>
-        <p class="text-[13px] font-medium text-foreground">新对话已就绪</p>
-        <p class="text-[12px] text-dim2">输入指令开始工作，回车发送。</p>
+        <p class="text-[13px] font-medium text-foreground">{{ t("chat.composer.emptyTitle") }}</p>
+        <p class="text-[12px] text-dim2">{{ t("chat.composer.emptyHint") }}</p>
       </div>
     </div>
 
@@ -350,8 +350,8 @@ const permissionTierLabel = computed(() => PERM_TIER_LABELS[settings.permissionT
             :aria-controls="slashOpen ? 'slash-command-menu' : undefined"
             :aria-activedescendant="slashActiveOptionId"
             class="min-h-[76px] w-full resize-none bg-transparent px-2 py-1 text-[14px] leading-relaxed text-foreground outline-none placeholder:text-dim"
-            placeholder="输入指令，Enter 发送，Shift+Enter 换行…"
-            :aria-label="'发送消息'"
+            :placeholder="t('chat.composer.placeholderThread')"
+            :aria-label="t('chat.composer.ariaLabel')"
             @keydown="onKeydown"
             @blur="dismissSlashMenu"
             @paste="onComposerPaste"
@@ -375,7 +375,7 @@ const permissionTierLabel = computed(() => PERM_TIER_LABELS[settings.permissionT
                 </button>
               </Hint>
               <span class="shrink-0 text-[11px] text-dim2">
-                {{ turnActive ? "处理中…" : "就绪" }}
+                {{ turnActive ? t("chat.composer.processing") : t("chat.composer.ready") }}
               </span>
               <Hint v-if="settings.planMode" :text="t('chat.planModeTitle')" multiline>
                 <button
@@ -404,7 +404,7 @@ const permissionTierLabel = computed(() => PERM_TIER_LABELS[settings.permissionT
               :disabled="!canSend"
               @click="send"
             >
-              发送
+              {{ t("chat.send") }}
               <Icon name="send-one" :size="13" />
             </button>
           </div>

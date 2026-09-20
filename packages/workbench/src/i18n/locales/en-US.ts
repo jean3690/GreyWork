@@ -215,10 +215,27 @@ export const enUS: MessageSchema = {
       hint: "Enter to send · Shift+Enter for newline",
       input: "Tell GreyWork what to do; type {'@'} to reference a plugin / skill…",
     },
+    /** Visible composer strings shared by the guide and thread pages; only the placeholder splits by history. */
+    composer: {
+      placeholderNew: "Describe what you want done, then press Enter…",
+      placeholderThread: "Type an instruction. Enter to send, Shift+Enter for newline…",
+      ariaLabel: "Send message",
+      ready: "Ready",
+      processing: "Working…",
+      emptyTitle: "New conversation ready",
+      emptyHint: "Type an instruction to get started; press Enter to send.",
+    },
     busy: "Executing task…",
     plan: "Plan",
     speedBoost: "Speed ×1.5",
     shield: "Permission tier",
+    /** Run-environment hint on the guide composer; values match the RunMode in stores/settings. */
+    runEnvironment: {
+      label: "Run environment: {mode}",
+      local: "Local",
+      worktree: "Isolated worktree",
+      cloud: "Cloud",
+    },
     steps: {
       readContext: "Reading context",
       runTests: "Running tests",
@@ -330,6 +347,13 @@ export const enUS: MessageSchema = {
     emptyActivity: "No messages yet.",
     board: "Task board",
     activityTitle: "Activity",
+    /** Planner board in the lower half of the team page; data comes from "auto-run" subtasks. */
+    planner: {
+      title: "Orchestrated runs",
+      maxParallel: "Max parallel {n}",
+      empty: "No orchestrated runs yet.",
+      emptyHint: "Start an auto-run in a conversation; the subtask progress shows up here live.",
+    },
     turns: "Turns {used}/{max}",
     inflight: "Running {count}",
     unread: "Pending {count}",

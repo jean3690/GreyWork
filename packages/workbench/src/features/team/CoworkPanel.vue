@@ -188,15 +188,19 @@ function openSlot(threadId: string): void {
           >
             {{ t("cowork.memberConfig.label") }}
           </button>
-          <button
-            type="button"
-            class="grid size-7 place-items-center rounded-[8px] border border-line text-dim transition-colors hover:text-foreground"
-            :disabled="memberDrafts.length <= 1"
-            :aria-label="t('cowork.removeMember')"
-            @click="removeMember(index)"
-          >
-            <Icon name="close" :size="12" />
-          </button>
+          <!-- 纯图标按钮：aria-label 只服务读屏，看得见的人需要一条悬停提示。
+               （上面那个后端 <select> 不留提示，是因为它自己有可见的选中值。） -->
+          <Hint :text="t('cowork.removeMember')">
+            <button
+              type="button"
+              class="grid size-7 place-items-center rounded-[8px] border border-line text-dim transition-colors hover:text-foreground"
+              :disabled="memberDrafts.length <= 1"
+              :aria-label="t('cowork.removeMember')"
+              @click="removeMember(index)"
+            >
+              <Icon name="close" :size="12" />
+            </button>
+          </Hint>
           <div v-if="configTarget === index" data-testid="member-config-area" class="flex w-full flex-wrap items-center gap-1.5 ps-1">
             <span v-if="cowork.probingProviders[memberProviderIdOf(member) ?? '']" class="text-[11px] text-dim2">
               {{ t("cowork.memberConfig.probing") }}

@@ -48,15 +48,15 @@ const turnsLabel = computed<string>(() => {
 
     <!-- planner 编排运行（既有） -->
     <div class="mt-6 mb-2 flex items-center gap-2">
-      <h2 class="font-display text-[14px] font-semibold text-foreground">编排运行</h2>
+      <h2 class="font-display text-[14px] font-semibold text-foreground">{{ t("cowork.planner.title") }}</h2>
       <span class="rounded-full border border-line bg-panel-2 px-2 py-0.5 text-[10px] text-dim">
-        并行上限 {{ runsStore.maxParallel }}
+        {{ t("cowork.planner.maxParallel", { n: runsStore.maxParallel }) }}
       </span>
     </div>
 
     <div v-if="runsStore.runs.length === 0" class="flex flex-col items-center gap-2 py-10 text-center">
       <Icon name="peoples" :size="24" class="text-line-2" />
-      <p class="text-[12px] text-dim2">还没有编排运行。<br />在会话里发起「自动执行」，拆解出的子任务进度会实时出现在这里。</p>
+      <p class="text-[12px] text-dim2">{{ t("cowork.planner.empty") }}<br />{{ t("cowork.planner.emptyHint") }}</p>
     </div>
 
     <div class="flex flex-col gap-2.5">

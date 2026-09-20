@@ -55,7 +55,7 @@ function rowClass(active: boolean): string {
     <DialogContent
       :show-close-button="false"
       data-testid="settings-dialog"
-      class="flex max-h-[86vh] flex-col gap-0 overflow-hidden rounded-[14px] border-line bg-panel p-0 shadow-xl sm:max-w-[880px]"
+      class="flex h-[86vh] flex-col gap-0 overflow-hidden rounded-[14px] border-line bg-panel p-0 shadow-xl sm:max-w-[880px]"
     >
       <header class="flex items-center justify-between px-4 pb-2 pt-3.5">
         <DialogTitle class="text-[13px] font-medium text-foreground">{{ t("settings.title") }}</DialogTitle>

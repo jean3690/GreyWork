@@ -89,7 +89,7 @@ function fmtTime(ts: number): string {
     />
     <template v-else>
       <button
-        class="flex h-[34px] w-full cursor-pointer items-center gap-2 rounded-[8px] px-2 pr-12 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+        class="flex h-[34px] w-full cursor-pointer items-center gap-2 rounded-[8px] px-2 pr-14 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
         :class="active ? 'bg-panel text-foreground' : 'text-dim hover:bg-panel hover:text-foreground'"
         :aria-current="active ? 'true' : undefined"
         @click="emit('navigate', `/conversation/${session.id}`)"
@@ -108,7 +108,7 @@ function fmtTime(ts: number): string {
       >
         <button
           type="button"
-          class="grid size-5 cursor-pointer place-items-center rounded-[5px] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          class="grid size-[24px] cursor-pointer place-items-center rounded-[5px] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
           :aria-label="'重命名会话'"
           @click="startRename"
         >
@@ -116,7 +116,7 @@ function fmtTime(ts: number): string {
         </button>
         <button
           type="button"
-          class="grid size-5 cursor-pointer place-items-center rounded-[5px] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          class="grid size-[24px] cursor-pointer place-items-center rounded-[5px] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
           :aria-label="'删除会话'"
           @click="openDeleteConfirm"
         >

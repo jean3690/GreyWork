@@ -19,6 +19,11 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
+/** 提示内容挂在 body 的 [data-slot="tooltip-content"]；含 reka 的隐藏测量副本，故用 toContain。 */
+function tooltipText(): string {
+  return document.body.querySelector('[data-slot="tooltip-content"]')?.textContent ?? "";
+}
+
 /** 时间选择器弹层在 body 上：开弹层 → 点时 / 分。 */
 async function pickTime(wrapper: ReturnType<typeof mount>, hour: number, minute: number): Promise<void> {
   await wrapper.find('[data-testid="schedule-time"]').trigger("click");
@@ -82,6 +87,16 @@ describe("ScheduledView", () => {
     expect(wrapper.find('[data-testid="schedule-editor"]').exists()).toBe(false);
     expect(wrapper.text()).toContain("每周五 18:00");
     expect(wrapper.find('[data-testid="automation-acp-badge"]').text()).toContain(provider.name);
+  });
+
+  it("行内纯图标按钮带可见提示（编辑 / 启停 / 删除）", async () => {
+    const wrapper = await mountView();
+
+    const edit = wrapper.get('[data-testid="automation-edit"]');
+    expect(edit.attributes("title")).toBeUndefined();
+    await edit.trigger("focus");
+    await flushPromises();
+    expect(tooltipText()).toContain("编辑任务名与指令");
   });
 
   it("行内编辑取消：任务保持原样，编辑器收拢", async () => {

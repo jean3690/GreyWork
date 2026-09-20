@@ -21,6 +21,7 @@ import { i18n } from "@/i18n";
 import { clipPermissionDetail, permissionCommand } from "@/lib/permission-detail";
 import { useAgentStore } from "@/stores/agent";
 import Icon from "@/features/shared/Icon.vue";
+import Hint from "@/features/shared/Hint.vue";
 import type { PermissionTrace } from "@/types";
 
 const props = defineProps<{ trace?: PermissionTrace }>();
@@ -188,13 +189,16 @@ const traceDetail = computed(() => {
       <div v-if="paths.length" class="mt-1.5" data-testid="permission-paths">
         <span class="text-[10.5px] text-dim2">{{ t("chatView.permission.paths") }}</span>
         <ul class="m-0 mt-0.5 flex list-none flex-col gap-0.5 pl-0">
-          <li v-for="path in paths" :key="path" class="truncate font-mono text-[11px] text-dim [overflow-wrap:anywhere]" :title="path">
-            {{ path }}
-          </li>
+          <!-- 截断的路径：`<li>` 不可聚焦，提示仍只认悬停（与原生 title 同），换过来只为样式统一。 -->
+          <Hint v-for="path in paths" :key="path" :text="path" multiline>
+            <li class="truncate font-mono text-[11px] text-dim [overflow-wrap:anywhere]">{{ path }}</li>
+          </Hint>
         </ul>
       </div>
       <p class="mt-1 text-[10.5px] text-dim2">{{ t("chatView.permission.hint", { s: remainingLabel }) }}</p>
-      <p class="mt-0.5 truncate text-[10px] text-dim2" :title="toolCallId">{{ t("chatView.permission.toolCallId") }} {{ toolCallId }}</p>
+      <Hint :text="toolCallId" multiline>
+        <p class="mt-0.5 truncate text-[10px] text-dim2">{{ t("chatView.permission.toolCallId") }} {{ toolCallId }}</p>
+      </Hint>
       <div class="mt-2 flex flex-wrap items-center gap-1.5">
         <button
           v-for="option in options"

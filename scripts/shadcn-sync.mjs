@@ -78,7 +78,7 @@ const RULES = [
   {
     id: "tooltip-skin",
     only: /tooltip\/TooltipContent\.vue$/,
-    describe: "TooltipContent 收成项目紧凑规格（popover 底 + line-2 边 + 去箭头）",
+    describe: "TooltipContent 收成项目紧凑规格（popover 底 + line-2 边 + 320px 上限 + 去箭头）",
     apply(source) {
       let text = source;
       let count = 0;
@@ -92,8 +92,11 @@ const RULES = [
       // 上游默认是 bg-foreground/text-background 的深色块 + 内置箭头。
       // 项目既有的自制 tooltip 是「紧凑 + popover 底 + line-2 边 + 无箭头」，
       // 且带边框的提示配无边框箭头会留一道缝，所以箭头直接去掉。
+      //
+      // 320px 上限：上游只给 w-fit，长文案（完整路径、报错原文）会一路拉成
+      // 一条超出屏幕的窄条。封顶后长文案自己换行，短文案仍是单行贴内容宽。
       swap("bg-foreground text-background ", "border border-line-2 bg-popover text-foreground shadow-lg ");
-      swap("rounded-md px-3 py-1.5 text-xs", "rounded-[5px] px-1.5 py-0.5 text-[10px]");
+      swap("rounded-md px-3 py-1.5 text-xs", "rounded-[5px] px-1.5 py-0.5 text-[10px] max-w-[320px]");
       if (text.includes("<TooltipArrow")) {
         text = text.replace(/\s*<TooltipArrow[\s\S]*?\/>/, "");
         count += 1;

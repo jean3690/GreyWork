@@ -6,6 +6,7 @@ import { useAgentStore } from "@/stores/agent";
 import { useAutomationStore } from "@/stores/automation";
 import { useNoticeStore } from "@/stores/notice";
 import Icon from "@/features/shared/Icon.vue";
+import Hint from "@/features/shared/Hint.vue";
 import ScheduleEditor from "@/features/scheduled/ScheduleEditor.vue";
 
 /**
@@ -162,15 +163,17 @@ function runNow(id: string, name: string): void {
               </button>
             </template>
             <template v-else>
-              <button
-                type="button"
-                class="grid size-7 cursor-pointer place-items-center rounded-[8px] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground"
-                :aria-label="t('automation.editName')"
-                data-testid="automation-edit"
-                @click="editingId = task.id"
-              >
-                <Icon name="edit" :size="13" />
-              </button>
+              <Hint :text="t('automation.editName')">
+                <button
+                  type="button"
+                  class="grid size-7 cursor-pointer place-items-center rounded-[8px] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground"
+                  :aria-label="t('automation.editName')"
+                  data-testid="automation-edit"
+                  @click="editingId = task.id"
+                >
+                  <Icon name="edit" :size="13" />
+                </button>
+              </Hint>
               <button
                 class="flex h-7 cursor-pointer items-center gap-1 rounded-[8px] border border-line bg-panel px-2.5 text-[11px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
                 :disabled="task.running || automation.list.some((a) => a.running)"
@@ -179,20 +182,24 @@ function runNow(id: string, name: string): void {
                 <Icon name="lightning" :size="12" />
                 {{ task.running ? t("automation.running") : t("automation.runNow") }}
               </button>
-              <button
-                class="grid size-7 cursor-pointer place-items-center rounded-[8px] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground"
-                :aria-label="task.enabled ? t('automation.disable') : t('automation.enable')"
-                @click="automation.setEnabled(task.id, !task.enabled)"
-              >
-                <Icon :name="task.enabled ? 'check-one' : 'close-one'" :size="14" />
-              </button>
-              <button
-                class="grid size-7 cursor-pointer place-items-center rounded-[8px] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground"
-                :aria-label="t('automation.remove')"
-                @click="pendingDeleteId = task.id"
-              >
-                <Icon name="delete" :size="14" />
-              </button>
+              <Hint :text="task.enabled ? t('automation.disable') : t('automation.enable')">
+                <button
+                  class="grid size-7 cursor-pointer place-items-center rounded-[8px] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground"
+                  :aria-label="task.enabled ? t('automation.disable') : t('automation.enable')"
+                  @click="automation.setEnabled(task.id, !task.enabled)"
+                >
+                  <Icon :name="task.enabled ? 'check-one' : 'close-one'" :size="14" />
+                </button>
+              </Hint>
+              <Hint :text="t('automation.remove')">
+                <button
+                  class="grid size-7 cursor-pointer place-items-center rounded-[8px] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground"
+                  :aria-label="t('automation.remove')"
+                  @click="pendingDeleteId = task.id"
+                >
+                  <Icon name="delete" :size="14" />
+                </button>
+              </Hint>
             </template>
           </div>
         </div>

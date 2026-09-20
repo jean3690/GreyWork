@@ -215,10 +215,27 @@ export const zhCN = {
       hint: "Enter 发送 · Shift+Enter 换行",
       input: "给 GreyWork 下达任务，输入 {'@'} 引用插件 / 技能…",
     },
+    /** composer 的可见文案：引导页与对话页共用，只有占位语按「有没有历史消息」分两档。 */
+    composer: {
+      placeholderNew: "描述你想完成的任务，回车发送…",
+      placeholderThread: "输入指令，Enter 发送，Shift+Enter 换行…",
+      ariaLabel: "发送消息",
+      ready: "就绪",
+      processing: "处理中…",
+      emptyTitle: "新对话已就绪",
+      emptyHint: "输入指令开始工作，回车发送。",
+    },
     busy: "任务执行中…",
     plan: "计划",
     speedBoost: "速度 ×1.5",
     shield: "权限档位",
+    /** 引导页 composer 的运行环境提示；取值与 stores/settings 的 RunMode 对齐。 */
+    runEnvironment: {
+      label: "运行环境：{mode}",
+      local: "本地",
+      worktree: "独立工作树",
+      cloud: "云端",
+    },
     steps: {
       readContext: "读取上下文",
       runTests: "运行测试",
@@ -321,6 +338,13 @@ export const zhCN = {
     emptyActivity: "还没有往来消息。",
     board: "任务板",
     activityTitle: "协作往来",
+    /** 团队页下半段的 planner 看板：数据来自会话里「自动执行」拆出的子任务。 */
+    planner: {
+      title: "编排运行",
+      maxParallel: "并行上限 {n}",
+      empty: "还没有编排运行。",
+      emptyHint: "在会话里发起「自动执行」，拆解出的子任务进度会实时出现在这里。",
+    },
     turns: "回合 {used}/{max}",
     inflight: "在跑 {count}",
     unread: "待处理 {count}",

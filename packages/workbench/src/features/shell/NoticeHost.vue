@@ -2,6 +2,7 @@
 import { i18n } from "@/i18n";
 import { useNoticeStore, type NoticeKind } from "@/stores/notice";
 import Icon from "@/features/shared/Icon.vue";
+import Hint from "@/features/shared/Hint.vue";
 
 /**
  * 全局通知面的渲染宿主：挂在外壳顶层，读 notice store。
@@ -38,7 +39,7 @@ const TONE_BY_KIND: Record<NoticeKind, string> = {
     <div
       v-for="notice in notices.list"
       :key="notice.id"
-      class="pointer-events-auto rounded-[12px] border border-line bg-popover p-3 shadow-lg"
+      class="gw-notice-in pointer-events-auto rounded-[12px] border border-line bg-popover p-3 shadow-lg"
       :role="notice.kind === 'error' || notice.kind === 'warning' ? 'alert' : 'status'"
       :data-testid="`notice-${notice.kind}`"
     >
@@ -48,7 +49,10 @@ const TONE_BY_KIND: Record<NoticeKind, string> = {
         </span>
         <div class="min-w-0 flex-1">
           <p class="text-[12.5px] leading-snug font-medium text-foreground">{{ notice.title }}</p>
-          <p v-if="notice.detail" class="mt-0.5 line-clamp-3 text-[11px] leading-snug break-words text-dim2">{{ notice.detail }}</p>
+          <!-- detail 常是原始报错，`line-clamp-3` 会把它截断；挂一条提示让全文仍读得到。 -->
+          <Hint v-if="notice.detail" :text="notice.detail" multiline>
+            <p class="mt-0.5 line-clamp-3 text-[11px] leading-snug break-words text-dim2">{{ notice.detail }}</p>
+          </Hint>
           <button
             v-if="notice.action"
             type="button"
@@ -62,15 +66,31 @@ const TONE_BY_KIND: Record<NoticeKind, string> = {
             {{ notice.action.label }}
           </button>
         </div>
-        <button
-          type="button"
-          class="grid size-6 shrink-0 cursor-pointer place-items-center rounded-[6px] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
-          :aria-label="t('notice.dismiss')"
-          @click="notices.dismiss(notice.id)"
-        >
-          <Icon name="close" :size="12" />
-        </button>
+        <Hint :text="t('notice.dismiss')">
+          <button
+            type="button"
+            class="grid size-6 shrink-0 cursor-pointer place-items-center rounded-[6px] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+            :aria-label="t('notice.dismiss')"
+            @click="notices.dismiss(notice.id)"
+          >
+            <Icon name="close" :size="12" />
+          </button>
+        </Hint>
       </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+/* 只做进场：退场直接卸载元素（同 AgentProviderBar 的取舍 —— 留退场会让 DOM 多挂一帧）。
+ * 减少动效偏好由 apps/desktop/src/tailwind.css 的全局 media query 统一关掉。 */
+@keyframes gw-notice-in {
+  from {
+    opacity: 0;
+    transform: translateX(8px) scale(0.98);
+  }
+}
+.gw-notice-in {
+  animation: gw-notice-in 180ms ease-out;
+}
+</style>

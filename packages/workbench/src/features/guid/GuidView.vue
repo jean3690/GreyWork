@@ -144,8 +144,8 @@ function onKeydown(event: KeyboardEvent): void {
             :aria-controls="slashOpen ? 'slash-command-menu' : undefined"
             :aria-activedescendant="slashActiveOptionId"
             class="min-h-[88px] w-full resize-none bg-transparent px-2 py-1 text-[14px] leading-relaxed text-foreground outline-none placeholder:text-dim"
-            placeholder="描述你想完成的任务，回车发送…"
-            :aria-label="'发送消息'"
+            :placeholder="t('chat.composer.placeholderNew')"
+            :aria-label="t('chat.composer.ariaLabel')"
             @keydown="onKeydown"
             @blur="dismissSlashMenu"
             @paste="onComposerPaste"
@@ -169,7 +169,7 @@ function onKeydown(event: KeyboardEvent): void {
                 </button>
               </Hint>
               <span class="text-[11px] text-dim2">
-                运行环境：{{ settings.runMode === "cloud" ? "云端" : settings.runMode === "worktree" ? "独立工作树" : "本地" }}
+                {{ t("chat.runEnvironment.label", { mode: t(`chat.runEnvironment.${settings.runMode}`) }) }}
               </span>
               <Hint v-if="settings.planMode" :text="t('chat.planModeTitle')" multiline>
                 <button
@@ -198,7 +198,7 @@ function onKeydown(event: KeyboardEvent): void {
               :disabled="!draft.trim() && attachmentItems.length === 0"
               @click="onSubmit"
             >
-              发送
+              {{ t("chat.send") }}
               <Icon name="send-one" :size="13" />
             </button>
           </div>
