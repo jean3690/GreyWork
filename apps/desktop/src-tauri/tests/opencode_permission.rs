@@ -42,6 +42,13 @@ fn looks_like_model_failure(detail: &str) -> bool {
         "APIError",
         "rate limit",
         "not authenticated",
+        // 传输层故障同样让回合走不到工具调用，但报的是 certificate / connection 这类字样。
+        // 不补的话，受限网络（企业代理自签证书、CA 过期、断网、瞬时抖动）会把本该「跳过」
+        // 的情况变成硬失败 —— 而本测试要验的是权限链路，不是网络可达性。
+        "certificate",
+        "connection refused",
+        "timed out",
+        "dns error",
     ]
     .iter()
     .any(|needle| detail.contains(needle))
