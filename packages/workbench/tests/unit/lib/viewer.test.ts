@@ -22,7 +22,9 @@ describe("kindOfPath", () => {
     // 混为一谈会让用户拿到一个「文件已损坏」的解析错误而不是明确提示。
     ["legacy.doc", "legacy-office"],
     ["template.dot", "legacy-office"],
-    ["legacy.xls", "legacy-office"],
+    // 老格式表格例外：宿主用 calamine 按内容嗅探，真的能读，所以单独成类而不是占位提示。
+    ["legacy.xls", "xls"],
+    ["template.xlt", "xls"],
     ["legacy.ppt", "legacy-office"],
     ["fix.diff", "diff"],
     ["fix.patch", "diff"],
@@ -42,10 +44,17 @@ describe("kindOfPath", () => {
     expect(kindOfPath("archive.tar.zst")).toBe("raw");
     expect(kindOfPath("")).toBe("raw");
   });
+
+  it("目录名里的点不算扩展名（曾经从整条路径 split('.') 取，会拿到垃圾串）", () => {
+    // "v1.2/report" 曾经被判成扩展名 "2/report"；现在只在末段上找点。
+    expect(kindOfPath("v1.2/report")).toBe("raw");
+    expect(kindOfPath("v1.2/report.md")).toBe("md");
+    expect(kindOfPath("C:\\ws\\v1.2\\logo.png")).toBe("image");
+  });
 });
 
 describe("isBinaryKind", () => {
-  it.each<ViewerKind>(["xlsx", "docx", "pptx", "pdf", "image", "legacy-office"])("%s 必须按二进制读", (kind) => {
+  it.each<ViewerKind>(["xlsx", "xls", "docx", "pptx", "pdf", "image", "legacy-office"])("%s 必须按二进制读", (kind) => {
     expect(isBinaryKind(kind)).toBe(true);
   });
 
@@ -67,8 +76,12 @@ describe("basename", () => {
     expect(basename("a.md")).toBe("a.md");
   });
 
-  it("以斜杠结尾时返回空串（调用方自己决定要不要兜底）", () => {
-    expect(basename("reports/")).toBe("");
+  it("以斜杠结尾时先剥掉分隔符再取末段（与 core 的 normalizePath 同语义）", () => {
+    expect(basename("reports/")).toBe("reports");
+  });
+
+  it("Windows 分隔符一样认", () => {
+    expect(basename("C:\\ws\\reports\\a.md")).toBe("a.md");
   });
 });
 

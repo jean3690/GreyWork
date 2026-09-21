@@ -5,7 +5,7 @@
  * 需要其它 store 的地方由调用方以参数传入。
  */
 import type { AcpPromptUnit } from "@greywork/acp";
-import { createJsonStorage } from "@greywork/core";
+import { createJsonStorage, basename } from "@greywork/core";
 import type { AgentProviderConfig } from "@greywork/shell";
 import { ref } from "vue";
 import { i18n } from "../../i18n";
@@ -126,8 +126,8 @@ export function serializeProviderEnv(env: Record<string, string> | undefined): s
 /** 从命令首 token 派生探测程序（自配后端无预设 detect 元数据，仍能显示安装状态）。 */
 export function detectProgramOf(command: string): string[] {
   const program = command.trim().split(/\s+/)[0] ?? "";
-  const basename = program.split(/[\\/]/).pop() ?? program;
-  return basename ? [basename] : [];
+  const name = basename(program);
+  return name ? [name] : [];
 }
 
 const PROVIDERS_STORAGE_KEY = "greywork.agent-providers";

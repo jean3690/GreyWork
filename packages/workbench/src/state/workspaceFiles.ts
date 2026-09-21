@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
-import { isTauriRuntime } from "@greywork/core";
+import { basename, isTauriRuntime } from "@greywork/core";
+import type { SheetTable } from "../lib/tabular";
 
 /** 可读取的本地文件源：统一 Tauri 磁盘文件与浏览器 File 对象。 */
 export interface WorkspaceFileSource {
@@ -34,10 +35,6 @@ export const MAX_IMPORT_FILES = 50;
 /** 文本候选：扩展名白名单 + 大小上限（1MB）；二进制记录但不预载内容。 */
 export function isTextFile(name: string, size?: number): boolean {
   return TEXT_EXT.test(name) && (size === undefined || size <= MAX_TEXT_BYTES);
-}
-
-function basename(path: string): string {
-  return path.split(/[\\/]/).pop() ?? path;
 }
 
 /** 打开文件选择器（多选）。Tauri = 宿主对话框；浏览器 = input[type=file]。 */
@@ -216,8 +213,20 @@ export async function readBinaryFile(path: string): Promise<Uint8Array> {
   throw new Error(`fs_read_binary 返回了非二进制载荷：${Object.prototype.toString.call(raw)}`);
 }
 
-/** 浅层列目录（Rust fs_list_dir）。目录树按需逐层展开，不做递归扫描 —— 大仓库一次递归会卡死。 */
-export async function listDir(path: string): Promise<WorkspaceDirEntry[]> {
+/**
+ * 读取表格文件（Rust fs_read_sheet，calamine 解析，≤20MB）。
+ *
+ * 只对 `.xls` 这类渲染端读不了的老格式使用：命令按**路径**读取并走同一套授权，
+ * 因此只适用于磁盘来源 —— VFS 里的内存产物没有磁盘路径，走不通这条通道。
+ * 返回值已归一成字符串网格，与 xlsx / csv 两条前端通道同形。
+ */
+export function readSheet(path: string, sheet?: string, maxRows?: number): Promise<SheetTable> {
+  return invoke<SheetTable>("fs_read_sheet", { path, sheet, maxRows });
+}
+
+/** 浅层列目录（Rust fs_list_dir）。目录树按需逐层展开，不做递归扫描 —— 大仓库一次递归会卡死。 */ export async function listDir(
+  path: string,
+): Promise<WorkspaceDirEntry[]> {
   const raw = (await invoke<{ name: string; kind: string; size?: number; path: string }[]>("fs_list_dir", { path })) ?? [];
   return raw.map((entry) => ({
     name: entry.name,

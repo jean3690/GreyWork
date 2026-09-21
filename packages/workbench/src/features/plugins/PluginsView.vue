@@ -154,7 +154,7 @@ async function confirmInstall(): Promise<void> {
     }
     await installMarketPlugin(target.entryId);
     const missing = target.manifest.requires
-      .filter((grant) => !isPluginCapabilityGranted(grant.capability))
+      .filter((grant) => !isPluginCapabilityGranted(target.manifest.id, grant.capability))
       .map((grant) => grant.capability);
     if (missing.length) {
       // 引导授权：跳到已装页签 + 提示哪些能力还没授权（chip 在已装卡片上可点）。
@@ -234,14 +234,14 @@ function confirmSelfDisable(): void {
 }
 
 /** 能力授权 chip 的态色：未授权但正处在安装引导（pendingGrantId）时高亮闪烁。 */
-function grantChipClass(capability: string, manifestId: string): string {
-  if (isPluginCapabilityGranted(capability)) return "border-mint/30 bg-mint/10 text-mint";
+function grantChipClass(manifestId: string, capability: string): string {
+  if (isPluginCapabilityGranted(manifestId, capability)) return "border-mint/30 bg-mint/10 text-mint";
   if (pendingGrantId.value === manifestId) return "animate-pulse border-amber/60 bg-amber/20 text-amber";
   return "border-amber/30 bg-amber/10 text-amber";
 }
 
-function grantLabel(capability: string): string {
-  return isPluginCapabilityGranted(capability) ? t("market.granted") : t("market.notGranted");
+function grantLabel(manifestId: string, capability: string): string {
+  return isPluginCapabilityGranted(manifestId, capability) ? t("market.granted") : t("market.notGranted");
 }
 
 /** 审计结果态色：拒绝走橙、异常走琥珀、通过走薄荷。 */
@@ -291,14 +291,14 @@ function selectSection(section: MarketSection): void {
   if (section === "skills") void skills.refreshInstalled();
 }
 
-function toggleGrant(capability: string): void {
+function toggleGrant(manifestId: string, capability: string): void {
   notice.value = null;
-  if (isPluginCapabilityGranted(capability)) {
-    revokePluginCapability(capability);
+  if (isPluginCapabilityGranted(manifestId, capability)) {
+    revokePluginCapability(manifestId, capability);
     notice.value = { kind: "ok", text: t("market.capabilityRevoked", { capability: capabilityTitle(capability) }) };
     return;
   }
-  grantPluginCapability(capability);
+  grantPluginCapability(manifestId, capability);
   notice.value = { kind: "ok", text: t("market.capabilityGranted", { capability: capabilityTitle(capability) }) };
 }
 
@@ -363,26 +363,30 @@ async function confirmUninstall(): Promise<void> {
         <i v-if="activeSection === section.key" class="absolute inset-x-2 bottom-[-1px] h-0.5 rounded-full bg-accent"></i>
       </button>
       <div class="ml-auto flex items-center gap-1.5 pb-1">
-        <button
-          type="button"
-          class="grid size-8 cursor-pointer place-items-center rounded-[8px] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground disabled:opacity-40"
-          :disabled="marketLoading"
-          :aria-label="t('market.refreshCatalog')"
-          data-testid="plugin-market-refresh"
-          @click="refreshPluginCatalog()"
-        >
-          <Icon name="refresh" :size="14" :class="marketLoading ? 'animate-spin' : ''" />
-        </button>
-        <button
-          type="button"
-          class="grid size-8 cursor-pointer place-items-center rounded-[8px] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground"
-          :aria-label="t('market.registrySettings')"
-          :aria-expanded="registryOpen"
-          data-testid="plugin-registry-toggle"
-          @click="registryOpen = !registryOpen"
-        >
-          <Icon name="setting" :size="14" />
-        </button>
+        <Hint :text="t('market.refreshCatalog')">
+          <button
+            type="button"
+            class="grid size-8 cursor-pointer place-items-center rounded-[8px] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground disabled:opacity-40"
+            :disabled="marketLoading"
+            :aria-label="t('market.refreshCatalog')"
+            data-testid="plugin-market-refresh"
+            @click="refreshPluginCatalog()"
+          >
+            <Icon name="refresh" :size="14" :class="marketLoading ? 'animate-spin' : ''" />
+          </button>
+        </Hint>
+        <Hint :text="t('market.registrySettings')">
+          <button
+            type="button"
+            class="grid size-8 cursor-pointer place-items-center rounded-[8px] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground"
+            :aria-label="t('market.registrySettings')"
+            :aria-expanded="registryOpen"
+            data-testid="plugin-registry-toggle"
+            @click="registryOpen = !registryOpen"
+          >
+            <Icon name="setting" :size="14" />
+          </button>
+        </Hint>
       </div>
     </nav>
 
@@ -579,16 +583,16 @@ async function confirmUninstall(): Promise<void> {
                   <button
                     type="button"
                     class="cursor-pointer rounded-[6px] border px-1.5 py-0.5 text-[9.5px] transition-colors"
-                    :class="grantChipClass(required.capability, manifest.id)"
-                    :aria-pressed="isPluginCapabilityGranted(required.capability)"
+                    :class="grantChipClass(manifest.id, required.capability)"
+                    :aria-pressed="isPluginCapabilityGranted(manifest.id, required.capability)"
                     :data-testid="`plugin-capability-${manifest.id}-${required.capability}`"
                     @click="
                       pendingGrantId = null;
-                      toggleGrant(required.capability);
+                      toggleGrant(manifest.id, required.capability);
                     "
                   >
                     {{ capabilityTitle(required.capability) }}{{ required.hosts?.length ? ` · ${required.hosts.join(", ")}` : "" }} ·
-                    {{ grantLabel(required.capability) }}
+                    {{ grantLabel(manifest.id, required.capability) }}
                   </button>
                 </Hint>
               </div>
@@ -618,7 +622,7 @@ async function confirmUninstall(): Promise<void> {
               :data-testid="`plugin-upgrade-${manifest.id}`"
               @click="requestUpgrade(manifest.id, manifest.name)"
             >
-              {{ marketBusyId === manifest.id ? "…" : "升级" }}
+              {{ marketBusyId === manifest.id ? "…" : t("market.upgrade") }}
             </button>
             <button
               v-else
@@ -649,8 +653,8 @@ async function confirmUninstall(): Promise<void> {
     <section v-else-if="activeSection === 'audit'" class="mt-4" data-testid="plugin-audit-section">
       <div class="mb-3 flex items-end justify-between gap-3">
         <div>
-          <h2 class="text-[13px] font-semibold text-foreground">能力审计</h2>
-          <p class="mt-0.5 text-[10.5px] text-dim2">插件经宿主 broker 发起的每次能力调用（最近 200 条，含拒绝记录）。数据仅保存在本机。</p>
+          <h2 class="text-[13px] font-semibold text-foreground">{{ t("market.tabAudit") }}</h2>
+          <p class="mt-0.5 text-[10.5px] text-dim2">{{ t("market.auditDesc") }}</p>
         </div>
         <button
           type="button"
@@ -658,7 +662,7 @@ async function confirmUninstall(): Promise<void> {
           data-testid="plugin-audit-clear"
           @click="clearAudit"
         >
-          清空
+          {{ t("market.auditClear") }}
         </button>
       </div>
       <div v-if="auditEntries.length" class="flex flex-col gap-1.5">
@@ -682,7 +686,7 @@ async function confirmUninstall(): Promise<void> {
         </div>
       </div>
       <div v-else class="grid min-h-52 place-items-center rounded-[14px] border border-dashed border-line-2 text-center">
-        <p class="text-[12px] text-dim2">暂无能力调用记录。</p>
+        <p class="text-[12px] text-dim2">{{ t("market.auditEmpty") }}</p>
       </div>
     </section>
 

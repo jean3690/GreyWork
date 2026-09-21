@@ -145,7 +145,7 @@ describe("demo.worker 能力调用全链路", () => {
       requires: [{ capability: "net.fetch", hosts: ["api.github.com"] }],
     };
     loader.register(manifest);
-    loader.grantCapability("net.fetch");
+    loader.grantCapability("demo.worker", "net.fetch");
     await loader.activate("demo.worker");
 
     const worker = createSimulatedWorker(demoWorkerPluginCode);
@@ -169,7 +169,7 @@ describe("demo.worker 能力调用全链路", () => {
     ).toBe(true);
 
     // revoke 即时生效：下一次调用被拒，错误信息回到插件 handler。
-    loader.revokeCapability("net.fetch");
+    loader.revokeCapability("demo.worker", "net.fetch");
     const deniedPromise = worker.invoke("fetch-ip", { count: 0, status: "等待执行" });
     await pump();
     dispatchHostCalls();
@@ -196,7 +196,7 @@ describe("demo.worker 能力调用全链路", () => {
       version: "1.1.0",
       requires: [{ capability: "net.fetch", hosts: ["api.github.com"] }],
     });
-    loader.grantCapability("net.fetch");
+    loader.grantCapability("demo.worker", "net.fetch");
     await loader.activate("demo.worker");
 
     const worker = createSimulatedWorker(demoWorkerPluginCode.replace("api.github.com/meta", "evil.com/steal"));

@@ -2,6 +2,11 @@
 /**
  * ACP 后端图标轨道：初始只显示图标，点击项独占文字展开，其余保持收起。
  * 宽度不足时当前展开项始终留在主轨道，其他项收进「…」菜单。
+ *
+ * 展开宽度按内容撑开（不再写死 156px）：图标槽固定 30px，名字容器走
+ * `grid-template-columns: 0fr ↔ 1fr` —— fr 过渡把轨道宽度从 0 拉到内容的
+ * max-content，所以短名字（Codex）不会留一大截空白，长名字（GitHub Copilot CLI）
+ * 也不必靠截断凑数。名字常驻 DOM（只是被收成 0 宽），展开状态由 `data-expanded` 表达。
  */
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
@@ -35,8 +40,10 @@ const OVERFLOW_SLOT_PX = 38;
 const FALLBACK_RAIL_WIDTH_PX = 304;
 
 /**
- * 主轨道容量使用保守固定槽位计算：收起项 32px + 6px gap；展开项固定 156px + gap。
- * 始终预留「…」和一个收起项变成展开项的增量空间，点击前后可见项数量不跳变。
+ * 主轨道容量使用保守固定槽位计算：收起项 32px + 6px gap；展开项按最坏情况留 162px + gap。
+ * 展开宽度本身是按内容撑开的（见文件头），但名字容器的 max-w-[110px] 封了顶，
+ * 于是展开项实际宽度 ≤ 30(图标槽) + 110(名字上限) + 10(右内边距) + 2(边框) = 152px，
+ * 预算取 162 仍覆盖得住 —— 所以点开一项不会挤掉别的可见项，可见项数量不跳变。
  */
 const visibleCapacity = computed(() => {
   const width = railWidth.value > 0 ? railWidth.value : FALLBACK_RAIL_WIDTH_PX;
@@ -164,9 +171,9 @@ onBeforeUnmount(() => {
           <button
             type="button"
             data-testid="local-provider-button"
+            :data-expanded="expandedChoice === 'local'"
             :class="[
-              'flex h-8 cursor-pointer items-center overflow-hidden rounded-full border text-[11.5px] transition-[width,border-color,background-color,color,box-shadow] duration-150 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan',
-              expandedChoice === 'local' ? 'w-[96px] justify-start gap-1.5 px-2.5' : 'w-8 justify-center p-0',
+              'flex h-8 cursor-pointer items-center overflow-hidden rounded-full border text-[11.5px] transition-[border-color,background-color,color,box-shadow] duration-200 ease-out focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan',
               selected === null
                 ? 'border-cyan/70 bg-cyan/15 text-foreground shadow-[0_0_0_1px_rgba(77,159,255,0.12),0_0_18px_rgba(77,159,255,0.08)]'
                 : 'border-line-2 bg-panel text-dim hover:border-cyan/50 hover:text-foreground',
@@ -175,8 +182,16 @@ onBeforeUnmount(() => {
             aria-label="Local"
             @click="selectLocal"
           >
-            <Icon name="terminal" :size="14" class="shrink-0 text-dim" />
-            <span v-if="expandedChoice === 'local'" class="truncate whitespace-nowrap">Local</span>
+            <span class="grid size-[30px] shrink-0 place-items-center">
+              <Icon name="terminal" :size="14" class="text-dim" />
+            </span>
+            <!-- 收起即 0 宽：轨道 0fr 时整块被按钮的 overflow-hidden 裁掉，胶囊正好回到 32px 圆点。 -->
+            <span
+              class="grid min-w-0 transition-[grid-template-columns,padding,opacity] duration-200 ease-out"
+              :class="expandedChoice === 'local' ? 'grid-cols-[1fr] pr-2.5 opacity-100' : 'grid-cols-[0fr] pr-0 opacity-0'"
+            >
+              <span class="min-w-0 max-w-[110px] truncate text-left">Local</span>
+            </span>
           </button>
         </Hint>
       </div>
@@ -193,9 +208,9 @@ onBeforeUnmount(() => {
             type="button"
             data-testid="acp-provider-button"
             :data-provider-id="provider.id"
+            :data-expanded="expandedChoice === provider.id"
             :class="[
-              'relative flex h-8 cursor-pointer items-center overflow-hidden rounded-full border text-[11.5px] transition-[width,border-color,background-color,color,box-shadow] duration-150 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan',
-              expandedChoice === provider.id ? 'w-[156px] justify-start gap-1.5 px-2.5' : 'w-8 justify-center p-0',
+              'relative flex h-8 cursor-pointer items-center overflow-hidden rounded-full border text-[11.5px] transition-[border-color,background-color,color,box-shadow] duration-200 ease-out focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan',
               selected === provider.id
                 ? 'border-cyan/70 bg-cyan/15 text-foreground shadow-[0_0_0_1px_rgba(77,159,255,0.12),0_0_18px_rgba(77,159,255,0.08)]'
                 : provider.enabled
@@ -206,10 +221,16 @@ onBeforeUnmount(() => {
             :aria-label="provider.name"
             @click="selectAcp(provider.id)"
           >
-            <AgentProviderIcon :provider="provider" :size="15" :class="provider.enabled ? 'opacity-100' : 'opacity-70'" />
-            <span v-if="expandedChoice === provider.id" class="min-w-0 flex-1 truncate whitespace-nowrap text-left">{{
-              provider.name
-            }}</span>
+            <span class="grid size-[30px] shrink-0 place-items-center">
+              <AgentProviderIcon :provider="provider" :size="15" :class="provider.enabled ? 'opacity-100' : 'opacity-70'" />
+            </span>
+            <!-- 宽度由名字撑开；max-w-[110px] 封顶是槽位预算 162px 能兜住的前提（见上方常量注释）。 -->
+            <span
+              class="grid min-w-0 transition-[grid-template-columns,padding,opacity] duration-200 ease-out"
+              :class="expandedChoice === provider.id ? 'grid-cols-[1fr] pr-2.5 opacity-100' : 'grid-cols-[0fr] pr-0 opacity-0'"
+            >
+              <span class="min-w-0 max-w-[110px] truncate text-left">{{ provider.name }}</span>
+            </span>
             <span
               v-if="agent.providerInstalled(provider) !== null"
               class="absolute bottom-0.5 right-0.5 size-1.5 rounded-full ring-2 ring-panel"
@@ -232,7 +253,7 @@ onBeforeUnmount(() => {
               v-if="overflowAcpOptions.length > 0"
               type="button"
               data-testid="acp-overflow-toggle"
-              class="grid size-8 cursor-pointer place-items-center rounded-full border border-line-2 bg-panel text-dim transition-colors hover:border-cyan/50 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+              class="gw-bar-pop grid size-8 cursor-pointer place-items-center rounded-full border border-line-2 bg-panel text-dim transition-colors hover:border-cyan/50 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
               aria-label="更多 ACP"
             >
               <Icon name="more" :size="13" />
@@ -263,7 +284,7 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- Local 路由展开区：模型选择（即全局默认供应商）+ 会话级思考强度覆盖 -->
-    <div v-if="expandedChoice === 'local'" data-testid="local-selector" class="flex flex-wrap items-center gap-1.5 pl-1">
+    <div v-if="expandedChoice === 'local'" data-testid="local-selector" class="gw-bar-rise flex flex-wrap items-center gap-1.5 pl-1">
       <DropdownMenu>
         <DropdownMenuTrigger as-child>
           <button
@@ -319,7 +340,7 @@ onBeforeUnmount(() => {
       </Hint>
     </div>
 
-    <p v-if="settings.tempReadOnly" class="flex items-center gap-1.5 pl-1 text-[11px] text-dim">
+    <p v-if="settings.tempReadOnly" class="gw-bar-rise flex items-center gap-1.5 pl-1 text-[11px] text-dim">
       已临时降级为只读 · 基线 {{ TIER_LABELS[settings.permissionTier] }}
       <button
         type="button"
@@ -330,9 +351,39 @@ onBeforeUnmount(() => {
         恢复
       </button>
     </p>
-    <p v-if="connectError || (selected !== null && agent.acpStatus === 'error')" role="alert" class="truncate pl-1 text-[11px] text-orange">
+    <p
+      v-if="connectError || (selected !== null && agent.acpStatus === 'error')"
+      role="alert"
+      class="gw-bar-rise truncate pl-1 text-[11px] text-orange"
+    >
       <Icon name="close-one" :size="11" class="inline" />
       {{ connectError ?? "连接失败 —— 点击后端图标重试" }}
     </p>
   </div>
 </template>
+
+<style scoped>
+/* 选择栏的入场动效一律用关键帧（只做进场），不用 <Transition> 的 leave：
+ * 退场直接卸载元素，不留过渡尾巴 —— 否则 DOM 会多挂一帧，既拖住下方布局，
+ * 也让「点完立刻查 DOM」的测试（如 local-selector 收起）失准。 */
+@keyframes gw-bar-rise {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}
+.gw-bar-rise {
+  animation: gw-bar-rise 180ms ease-out;
+}
+
+/* 「…」溢出按钮：出现时缩一下再落位，避免整颗按钮凭空闪现。 */
+@keyframes gw-bar-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.75);
+  }
+}
+.gw-bar-pop {
+  animation: gw-bar-pop 160ms ease-out;
+}
+</style>

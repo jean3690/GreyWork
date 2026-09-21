@@ -117,31 +117,50 @@ describe("启停与持久化", () => {
 });
 
 describe("能力授权与持久化", () => {
-  it("第三方插件未授权时拒绝激活，授权后可激活", async () => {
+  it("第三方插件未授权时拒绝激活，按插件授权后可激活（不波及其它插件）", async () => {
     await boot();
     registerPlugin({ id: "ext.secure", name: "需授权插件", version: "1.0.0", requires: ["workspace:write"] });
 
     await expect(setPluginEnabled("ext.secure", true)).rejects.toThrow(/missing grants.*workspace:write/);
     expect(isPluginEnabled("ext.secure")).toBe(false);
 
-    grantPluginCapability("workspace:write");
-    expect(isPluginCapabilityGranted("workspace:write")).toBe(true);
-    expect(storageHolder.localStorage?.getItem("greywork.plugins.capabilityGrants")).toBe('["workspace:write"]');
+    grantPluginCapability("ext.secure", "workspace:write");
+    expect(isPluginCapabilityGranted("ext.secure", "workspace:write")).toBe(true);
+    // 授权按插件隔离：另一个插件不受影响。
+    expect(isPluginCapabilityGranted("ext.other", "workspace:write")).toBe(false);
+    expect(storageHolder.localStorage?.getItem("greywork.plugins.capabilityGrants.v2")).toBe('{"ext.secure":["workspace:write"]}');
     await setPluginEnabled("ext.secure", true);
     expect(isPluginEnabled("ext.secure")).toBe(true);
   });
 
-  it("boot 重放授权；撤销授权不强停活跃插件，但阻止其下次激活", async () => {
-    storageHolder.localStorage?.setItem("greywork.plugins.capabilityGrants", JSON.stringify(["workspace:write"]));
+  it("boot 重放按插件授权；撤销授权不强停活跃插件，但阻止其下次激活", async () => {
+    storageHolder.localStorage?.setItem("greywork.plugins.capabilityGrants.v2", JSON.stringify({ "ext.secure": ["workspace:write"] }));
     await boot();
-    expect(capabilityGrants.value).toEqual(["workspace:write"]);
+    expect(capabilityGrants.value).toEqual({ "ext.secure": ["workspace:write"] });
 
     registerPlugin({ id: "ext.secure", name: "需授权插件", version: "1.0.0", requires: ["workspace:write"] });
     await setPluginEnabled("ext.secure", true);
-    revokePluginCapability("workspace:write");
+    revokePluginCapability("ext.secure", "workspace:write");
     expect(isPluginEnabled("ext.secure")).toBe(true);
     await setPluginEnabled("ext.secure", false);
     await expect(setPluginEnabled("ext.secure", true)).rejects.toThrow(/missing grants/);
+  });
+
+  it("v1 全局白名单迁移：落到声明该能力的插件上，写回 v2 并清掉 v1 键", async () => {
+    storageHolder.localStorage?.setItem("greywork.plugins.capabilityGrants", JSON.stringify(["workspace:write"]));
+    await boot();
+
+    // 内置插件不声明该能力 → 无迁移项；v1 键应被清掉。
+    expect(storageHolder.localStorage?.getItem("greywork.plugins.capabilityGrants")).toBeNull();
+    expect(capabilityGrants.value).toEqual({});
+
+    // 迁移期之后注册的插件（市场包）：历史全局授权落到它身上并持久化。
+    registerPlugin({ id: "ext.secure", name: "需授权插件", version: "1.0.0", requires: ["workspace:write"] });
+    expect(isPluginCapabilityGranted("ext.secure", "workspace:write")).toBe(true);
+    expect(storageHolder.localStorage?.getItem("greywork.plugins.capabilityGrants.v2")).toBe('{"ext.secure":["workspace:write"]}');
+    // 直接激活即可（迁移已补授权）。
+    await setPluginEnabled("ext.secure", true);
+    expect(isPluginEnabled("ext.secure")).toBe(true);
   });
 });
 

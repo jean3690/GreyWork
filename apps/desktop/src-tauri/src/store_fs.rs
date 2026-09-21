@@ -758,7 +758,7 @@ mod tests {
         );
 
         // 内容有变 → 重新写入
-        let mut bumped = snapshot.clone();
+        let mut bumped = snapshot;
         bumped.sessions[0].title = "A2".into();
         bumped.sessions[0].updated_at = 99;
         let third = write_snapshot(&root, &bumped, &[], &[]).unwrap();

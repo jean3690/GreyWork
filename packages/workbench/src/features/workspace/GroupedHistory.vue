@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { joinPath } from "@greywork/core";
+import { basename, joinPath } from "@greywork/core";
 import { useSessionStore } from "@/stores/session";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { groupSessions, type HistoryGroup } from "@/lib/grouped";
@@ -123,7 +123,7 @@ function rowHint(group: HistoryGroup): string {
 }
 
 function folderName(folder: string): string {
-  return folder.split(/[/\\]/).filter(Boolean).pop() ?? folder;
+  return basename(folder) || folder;
 }
 
 /** 搬迁结果提示（换文件夹后告诉用户历史会话去哪了）；就地挂在对应工作区行下。 */
@@ -185,7 +185,7 @@ onMounted(() => {
       <Hint text="选择文件夹作为工作区">
         <button
           type="button"
-          class="ml-auto grid size-5 cursor-pointer place-items-center rounded-[5px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          class="ml-auto grid size-[24px] cursor-pointer place-items-center rounded-[5px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
           aria-label="添加工作区"
           @click="addWorkspace"
         >
@@ -223,7 +223,7 @@ onMounted(() => {
             <button
               type="button"
               :data-testid="`workspace-toggle-${rowKey(group)}`"
-              class="grid size-5 shrink-0 cursor-pointer place-items-center rounded-[5px] text-dim2 transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-default disabled:opacity-40"
+              class="grid size-[24px] shrink-0 cursor-pointer place-items-center rounded-[5px] text-dim2 transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-default disabled:opacity-40"
               :disabled="filtering"
               :aria-expanded="isExpanded(group)"
               :aria-controls="`workspace-group-${rowKey(group)}`"
@@ -253,7 +253,7 @@ onMounted(() => {
             <button
               type="button"
               :data-testid="`workspace-new-${rowKey(group)}`"
-              class="grid size-5 shrink-0 cursor-pointer place-items-center rounded-[5px] text-dim2 opacity-0 transition-opacity group-hover/ws:opacity-100 hover:text-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+              class="grid size-[24px] shrink-0 cursor-pointer place-items-center rounded-[5px] text-dim2 opacity-0 transition-opacity group-hover/ws:opacity-100 hover:text-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
               :aria-label="`在 ${group.name} 新建会话`"
               @click="newSessionIn(group)"
             >
@@ -265,7 +265,7 @@ onMounted(() => {
             <button
               type="button"
               :data-testid="`workspace-menu-${rowKey(group)}`"
-              class="grid size-5 shrink-0 cursor-pointer place-items-center rounded-[5px] text-dim2 opacity-0 transition-opacity group-hover/ws:opacity-100 hover:text-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+              class="grid size-[24px] shrink-0 cursor-pointer place-items-center rounded-[5px] text-dim2 opacity-0 transition-opacity group-hover/ws:opacity-100 hover:text-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
               :class="openMenuId === group.id ? 'text-foreground opacity-100' : ''"
               :aria-expanded="openMenuId === group.id"
               :aria-label="`${group.name} 的工作区设置`"
@@ -276,7 +276,7 @@ onMounted(() => {
             </button>
           </Hint>
           <!-- 兜底行没有设置项，用等宽占位保住右侧计数列对齐 -->
-          <span v-else class="size-5 shrink-0" aria-hidden="true" />
+          <span v-else class="size-[24px] shrink-0" aria-hidden="true" />
         </div>
 
         <!-- 管理面板：行尾 ⋯ 点开才显示，面板本体在 WorkspaceRowMenu（半途状态随卸载撤销） -->

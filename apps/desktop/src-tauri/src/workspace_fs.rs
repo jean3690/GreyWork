@@ -271,7 +271,9 @@ pub fn fs_read_text_file(
     if metadata.len() > MAX_TEXT_BYTES as u64 {
         return Err("文件超过 10MB 上限".into());
     }
-    std::fs::read_to_string(&path).map_err(|error| format!("读取文件失败: {error}"))
+    // strict UTF-8 会把 Windows 记事本默认的 GBK/GB18030（简中「ANSI」）与 UTF-16
+    // 文本文件读成乱码或直接报错；按编码嗅探 + 检测解码，统一回 UTF-8。
+    crate::text::decode_text_file(&path).map_err(|error| format!("读取文件失败: {error}"))
 }
 
 /// 读二进制文件（**原始字节**回传，≤20MB），供右栏预览真实磁盘上的 xlsx / pdf / 图片等。
@@ -309,21 +311,61 @@ pub fn fs_write_text_file(
 }
 
 /// 浅层列目录；指向授权根之外的符号链接不会暴露给渲染端。
-#[tauri::command]
-pub fn fs_list_dir(
-    access: tauri::State<'_, WorkspaceFsAccess>,
-    path: String,
-) -> Result<Vec<DirEntryInfo>, String> {
-    let path = access.resolve_existing(&path)?;
+/// 目录项是否可能是「链接 / 重解析点」——只有这类项才可能指向已授权父目录之外。
+///
+/// unix 上 `readdir` 的 `d_type` 直接带符号链接位，判定不额外发系统调用。
+/// Windows 上目录联接（junction）是重解析点，但 `is_symlink()` 未必为真，
+/// 故改按 `FILE_ATTRIBUTE_REPARSE_POINT` 判定：宁可多解析一次，也不能放过越界。
+/// 取不到元数据时同样按「可能是」处理（保守方向）。
+fn is_link_like(entry: &std::fs::DirEntry, file_type: &std::fs::FileType) -> bool {
+    if file_type.is_symlink() {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+        // `DirEntry::metadata` 在 Windows 复用目录枚举已取回的 WIN32_FIND_DATA，
+        // 不额外发系统调用。
+        return match entry.metadata() {
+            Ok(metadata) => metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0,
+            Err(_) => true,
+        };
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = entry;
+        false
+    }
+}
+
+/// 目录列举的实现（与 `#[tauri::command]` 解耦，便于单测与基准）。
+///
+/// 逐项 `canonicalize` 是这里的历史开销大头：每个目录项一次全路径解析、一次读锁、
+/// 两次字符串分配，万级目录会被放大成万次全路径解析。而父目录已经 `resolve_existing`
+/// 过，普通子项必然仍在该已授权目录内，路径由父目录 `join` 即得（父目录已是 canonical
+/// 形态，故 join 结果同样是 canonical 的）。只有链接 / 重解析点才回到 `resolve_existing`
+/// 走越界校验。
+fn list_dir(access: &WorkspaceFsAccess, raw: &str) -> Result<Vec<DirEntryInfo>, String> {
+    let dir = access.resolve_existing(raw)?;
     let mut out = Vec::new();
-    let reader = std::fs::read_dir(&path).map_err(|error| format!("打开目录失败: {error}"))?;
+    let reader = std::fs::read_dir(&dir).map_err(|error| format!("打开目录失败: {error}"))?;
     for entry in reader {
         let entry = entry.map_err(|error| format!("读取目录项失败: {error}"))?;
-        let entry_path = entry.path();
-        let Ok(canonical) = access.resolve_existing(&entry_path.to_string_lossy()) else {
-            continue;
+        let file_type = entry
+            .file_type()
+            .map_err(|error| format!("读取目录项类型失败: {error}"))?;
+        let resolved = if is_link_like(&entry, &file_type) {
+            let entry_path = dir.join(entry.file_name());
+            match access.resolve_existing(&entry_path.to_string_lossy()) {
+                Ok(path) => path,
+                // 与既有行为一致：越界（或断链）的链接项不出现在列表里。
+                Err(_) => continue,
+            }
+        } else {
+            dir.join(entry.file_name())
         };
-        let metadata = std::fs::metadata(&canonical)
+        let metadata = std::fs::metadata(&resolved)
             .map_err(|error| format!("读取目录项元数据失败: {error}"))?;
         let kind = if metadata.is_dir() {
             "directory"
@@ -336,10 +378,18 @@ pub fn fs_list_dir(
             size: metadata.is_file().then_some(metadata.len()),
             // 剥掉 `\\?\` 再回前端；前端原样回传时宿主会重新 canonicalize，
             // 与账本里的 verbatim 形态仍能对上。
-            path: crate::path_safety::strip_verbatim_prefix(&canonical.to_string_lossy()),
+            path: crate::path_safety::strip_verbatim_prefix(&resolved.to_string_lossy()),
         });
     }
     Ok(out)
+}
+
+#[tauri::command]
+pub fn fs_list_dir(
+    access: tauri::State<'_, WorkspaceFsAccess>,
+    path: String,
+) -> Result<Vec<DirEntryInfo>, String> {
+    list_dir(&access, &path)
 }
 
 /// 系统文件选择器。路径在返回渲染端前即写入宿主授权账本。
@@ -454,6 +504,138 @@ mod tests {
             .is_err());
         let _ = std::fs::remove_dir_all(root);
         let _ = std::fs::remove_dir_all(outside);
+    }
+
+    /// 快速路径的基本正确性：文件名 / 类型 / 大小 / 路径都要与逐项 canonicalize 时代一致。
+    #[test]
+    fn list_dir_reports_name_kind_size_and_canonical_path() {
+        let root = temp_dir("listdir-shape");
+        let access = access(&root);
+        std::fs::write(root.join("note.txt"), b"hello").expect("写文件");
+        std::fs::create_dir_all(root.join("sub")).expect("建子目录");
+        std::fs::write(root.join("sub/deep.txt"), b"x").expect("写子目录文件");
+
+        let canonical_root = std::fs::canonicalize(&root).expect("canonicalize 根目录");
+        // `list_dir` 返回前剥掉 Windows 的 `\\?\` 前缀（见 path_safety::strip_verbatim_prefix；
+        // 前端要的是可直接回传的普通形态），期望值同样按 strip 后的形态拼。
+        let client_root =
+            crate::path_safety::strip_verbatim_prefix(&canonical_root.to_string_lossy());
+        let client_root = Path::new(&client_root);
+        let entries = list_dir(&access, &root.to_string_lossy()).expect("列举目录");
+        let mut by_name: Vec<(String, String, Option<u64>, String)> = entries
+            .into_iter()
+            .map(|entry| (entry.name, entry.kind, entry.size, entry.path))
+            .collect();
+        by_name.sort();
+        assert_eq!(
+            by_name,
+            vec![
+                (
+                    "note.txt".to_string(),
+                    "file".to_string(),
+                    Some(5),
+                    client_root.join("note.txt").to_string_lossy().into_owned()
+                ),
+                (
+                    "sub".to_string(),
+                    "directory".to_string(),
+                    None,
+                    client_root.join("sub").to_string_lossy().into_owned()
+                ),
+            ]
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// 越界符号链接仍不得出现在列表里（快速路径只跳过普通项的 canonicalize，
+    /// 链接项必须回到 `resolve_existing` 走越界校验）。
+    #[cfg(unix)]
+    #[test]
+    fn list_dir_drops_escaping_symlink_but_keeps_plain_entries() {
+        use std::os::unix::fs::symlink;
+        let root = temp_dir("listdir-symlink-root");
+        let outside = temp_dir("listdir-symlink-outside");
+        std::fs::write(outside.join("secret.txt"), b"secret").expect("写外部文件");
+        std::fs::write(root.join("plain.txt"), b"plain").expect("写普通文件");
+        std::fs::create_dir_all(root.join("sub")).expect("建子目录");
+        symlink(&outside, root.join("escape")).expect("创建越界符号链接");
+        // 指向授权根内部的链接：仍应出现（且给出解析后的路径）。
+        symlink(root.join("sub"), root.join("inside")).expect("创建内部符号链接");
+
+        let access = access(&root);
+        let mut names: Vec<String> = list_dir(&access, &root.to_string_lossy())
+            .expect("列举目录")
+            .into_iter()
+            .map(|entry| entry.name)
+            .collect();
+        names.sort();
+        assert_eq!(
+            names,
+            vec!["inside", "plain.txt", "sub"],
+            "越界链接应被剔除，普通项与内部链接应保留"
+        );
+        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_dir_all(outside);
+    }
+
+    /// 宽目录列举耗时。默认 `#[ignore]`，用于性能改动前后的对比测量：
+    /// `cargo test --release -- --ignored --nocapture list_dir_wide_directory_timing`
+    #[test]
+    #[ignore = "性能测量用例，按需手动运行"]
+    fn list_dir_wide_directory_timing() {
+        const ENTRIES: usize = 4000;
+        let root = temp_dir("listdir-wide");
+        let access = access(&root);
+        for index in 0..ENTRIES {
+            std::fs::write(root.join(format!("f{index:05}.txt")), b"x").expect("写文件");
+        }
+        let raw = root.to_string_lossy().into_owned();
+
+        let started = std::time::Instant::now();
+        let baseline = list_dir_baseline(&access, &raw).expect("旧实现列举目录");
+        let baseline_elapsed = started.elapsed();
+
+        let started = std::time::Instant::now();
+        let current = list_dir(&access, &raw).expect("新实现列举目录");
+        let current_elapsed = started.elapsed();
+
+        assert_eq!(current.len(), ENTRIES);
+        assert_eq!(baseline.len(), ENTRIES);
+        println!(
+            "list_dir {ENTRIES} 项 —— 旧(逐项 canonicalize): {baseline_elapsed:?} / 新(仅链接项解析): {current_elapsed:?}"
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// 改动前的实现，仅供上面的对比测量保留。
+    fn list_dir_baseline(
+        access: &WorkspaceFsAccess,
+        raw: &str,
+    ) -> Result<Vec<DirEntryInfo>, String> {
+        let path = access.resolve_existing(raw)?;
+        let mut out = Vec::new();
+        let reader = std::fs::read_dir(&path).map_err(|error| format!("打开目录失败: {error}"))?;
+        for entry in reader {
+            let entry = entry.map_err(|error| format!("读取目录项失败: {error}"))?;
+            let entry_path = entry.path();
+            let Ok(canonical) = access.resolve_existing(&entry_path.to_string_lossy()) else {
+                continue;
+            };
+            let metadata = std::fs::metadata(&canonical)
+                .map_err(|error| format!("读取目录项元数据失败: {error}"))?;
+            let kind = if metadata.is_dir() {
+                "directory"
+            } else {
+                "file"
+            };
+            out.push(DirEntryInfo {
+                name: entry.file_name().to_string_lossy().into_owned(),
+                kind: kind.to_string(),
+                size: metadata.is_file().then_some(metadata.len()),
+                path: crate::path_safety::strip_verbatim_prefix(&canonical.to_string_lossy()),
+            });
+        }
+        Ok(out)
     }
 
     #[test]

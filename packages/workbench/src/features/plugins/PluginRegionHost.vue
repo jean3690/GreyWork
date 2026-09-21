@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import { useDeclarativePluginState } from "@/plugins/declarative-state";
 import type { MarketUiRegionContribution, CodePluginRuntime, DeclarativeValue, PluginWindowDecl } from "@/plugins/market-types";
 import { isPluginCapabilityGranted } from "@/plugins/runtime";
+import { openPluginWindow } from "@/plugins/plugin-window";
 import PluginRenderLoop from "@/features/plugins/PluginRenderLoop.vue";
 import Hint from "@/features/shared/Hint.vue";
 
@@ -33,16 +34,15 @@ const busyAction = ref<string | null>(null);
 const actionError = ref("");
 const pluginWindowBusy = ref(false);
 const pluginWindowError = ref("");
-/** 脱窗入口可见性：插件声明了 window 且 window.floating 已授权（门禁与能力目录一致）。 */
-const canFloat = computed(() => Boolean(props.windowDecl) && isPluginCapabilityGranted("window.floating"));
+/** 脱窗入口可见性：插件声明了 window 且「该插件」的 window.floating 已授权。 */
+const canFloat = computed(() => Boolean(props.windowDecl) && isPluginCapabilityGranted(props.pluginId, "window.floating"));
 
-async function openPluginWindow(): Promise<void> {
+async function openFloatingWindow(): Promise<void> {
   if (pluginWindowBusy.value) return;
   pluginWindowBusy.value = true;
   pluginWindowError.value = "";
   try {
-    const { invoke } = await import("@tauri-apps/api/core");
-    await invoke("plugin_window_open", { pluginId: props.pluginId });
+    await openPluginWindow(props.pluginId);
   } catch (error) {
     pluginWindowError.value = error instanceof Error ? error.message : String(error);
   } finally {
@@ -91,7 +91,7 @@ async function runAction(actionId: string): Promise<void> {
           class="h-6 cursor-pointer rounded-[6px] border border-dashed border-line-2 px-2.5 text-[10px] text-dim2 transition-colors hover:border-mint/40 hover:text-mint"
           :disabled="pluginWindowBusy"
           :data-testid="`plugin-window-open-${props.pluginId}`"
-          @click="openPluginWindow"
+          @click="openFloatingWindow"
         >
           {{ pluginWindowBusy ? "…" : "🪟 弹出桌面" }}
         </button>

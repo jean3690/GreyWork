@@ -3,6 +3,12 @@
  * xlsx 预览：exceljs 读回 → Univer workbook 快照 → 手动组装的 Univer 插件集渲染。
  * 转换在 `lib/univer-xlsx.ts`，生命周期在 `lib/univer-host.ts`。
  *
+ * 表格 / 分析双模式（分析面板见 `DataAnalysisPanel.vue`）。切到分析时**整块替换掉** Univer
+ * 容器而不是 `v-show` 藏起来：`display:none` 的元素没有布局盒，容器会被量成 0×0，
+ * Univer 的 canvas 与一堆 DOM 观察者要么跟着缩到 0、要么得赌它回切时能自己量回来。
+ * 重建的代价是重跑一遍 `xlsxToUniverWorkbook`（只吃内存里已有的字节，不重读盘），
+ * 换来的是确定的行为。
+ *
  * Univer 与其 CSS 全部动态 import：它是本仓最重的一组包，同步引会焊进主 chunk，
  * 让从不打开表格的用户也付启动代价（`PreviewSurface` 已按 kind 分包，这里别破坏它）。
  *
@@ -17,10 +23,11 @@
  * **只预览，不落盘**：保存功能已移除 —— Univer 表格里改的格子不会写回文件，也没有
  * 草稿 / 脏标记兜底，切 tab、关 tab 即丢弃。要真正编辑请用上方工具栏的「用系统应用打开」。
  */
-import { computed, ref, toRef } from "vue";
+import { computed, defineAsyncComponent, ref, toRef } from "vue";
 import { useI18n } from "vue-i18n";
 import Icon from "@/features/shared/Icon.vue";
 import Hint from "@/features/shared/Hint.vue";
+import PreviewModeSwitch from "@/features/preview/PreviewModeSwitch.vue";
 import { registerPresetPlugins, useUniverHost } from "@/lib/univer-host";
 import { basename } from "@/lib/viewer";
 import {
@@ -35,11 +42,29 @@ import { chatReceiverAvailable } from "@/lib/chat-receiver";
 import { injectSelectionIntoChat, sheetSelectionPrompt } from "@/lib/selection-injection";
 import { isDarkMode, watchTheme } from "@/lib/theme";
 import type { IWorkbookData, Workbook } from "@univerjs/core";
-import type { PreviewTab } from "@/stores/preview";
+import { usePreviewStore, type PreviewMode, type PreviewTab } from "@/stores/preview";
 
 const props = defineProps<{ tab: PreviewTab }>();
 
 const { t } = useI18n();
+const preview = usePreviewStore();
+
+const AnalysisPanel = defineAsyncComponent(() => import("@/features/preview/DataAnalysisPanel.vue"));
+
+const mode = computed<PreviewMode>(() => props.tab.mode ?? "table");
+
+function setMode(next: PreviewMode): void {
+  preview.setMode(props.tab.id, next);
+}
+
+/**
+ * Univer 当前激活的工作表名，喂给分析面板的 `v-model:sheet`。
+ *
+ * 不共享就会出现「表格页看 Sheet2、切到分析却是 Sheet1」这种静默错位 —— 分析面板只能
+ * 从文件里再读一次表，它无从知道 Univer 现在停在哪个 sheet 上。反向（面板里换 sheet
+ * 再切回表格）不跟随：驱动 Univer 切表要拿 unitId/subUnitId 走命令，收益不抵复杂度。
+ */
+const activeSheet = ref<string | null>(null);
 
 /**
  * 读当前选区（boot 闭包写出，dispose 归零）。表格的选区只在 Univer 的模型里，DOM 拿不到。
@@ -59,7 +84,7 @@ const { host, loading, error, bootError } = useUniverHost(toRef(props, "tab"), a
     { UniverRenderEnginePlugin },
     { UniverUIPlugin },
     { UniverDocsUIPlugin },
-    { UniverSheetsPlugin, SheetsSelectionsService, SetSelectionsOperation },
+    { UniverSheetsPlugin, SheetsSelectionsService, SetSelectionsOperation, SetWorksheetActiveOperation },
     { UniverSheetsUIPlugin },
     { UniverSheetsNumfmtPlugin },
     { UniverSheetsNumfmtUIPlugin },
@@ -134,11 +159,20 @@ const { host, loading, error, bootError } = useUniverHost(toRef(props, "tab"), a
     selectionLabel.value = found ? formatRangeLabel(found.sheet.getName(), found.range) : null;
   };
 
+  // 分析面板要的是「当前看的是哪张表」，同样只在 Univer 的模型里 —— 首帧手动同步一次，
+  // 之后靠下面的切表命令。
+  function syncActiveSheet(): void {
+    activeSheet.value = workbook.getActiveSheet(true)?.getName() ?? null;
+  }
+
   // 选区走 OPERATION（表格是 canvas 渲染，选区只在 Univer 的模型里）—— 所以刷新必须
   // 在这一层单独接，不能顺手塞进脏标记那条分支里（没有脏标记了，那条分支也不存在）。
   const subscription = injector.get(ICommandService).onCommandExecuted((info) => {
     if (info.id === SetSelectionsOperation.id) refreshSelectionLabel();
+    else if (info.id === SetWorksheetActiveOperation.id) syncActiveSheet();
   });
+
+  syncActiveSheet();
 
   return {
     dispose: () => {
@@ -146,6 +180,9 @@ const { host, loading, error, bootError } = useUniverHost(toRef(props, "tab"), a
       stopWatchTheme();
       readSelection = null;
       selectionLabel.value = null;
+      // `activeSheet` 故意不清：切到分析模式时 Univer 容器正是被这个 dispose 拆掉的，
+      // 清掉就等于把「用户刚才在看哪张表」一起丢了，分析面板只能退回首张表。
+      // 换文件时新实例的 `syncActiveSheet()` 会覆盖它。
       univer.dispose();
     },
   };
@@ -195,7 +232,8 @@ function sendSelectionToChat(): void {
         <span class="min-w-0 flex-1 truncate">{{ name }}</span>
       </Hint>
       <!-- 放在表头而非浮动浮层：表格是 canvas，浮层会与选区手柄 / 公式栏 / 右键菜单冲突 -->
-      <Hint v-if="!loading && !error && !bootError" :text="selectionTitle" multiline>
+      <!-- 分析模式下没有 Univer 实例（也就没有它的选区服务），按钮必须一起收起 -->
+      <Hint v-if="mode === 'table' && !loading && !error && !bootError" :text="selectionTitle" multiline>
         <button
           type="button"
           data-testid="sheet-send-to-chat"
@@ -207,13 +245,21 @@ function sendSelectionToChat(): void {
           {{ t("preview.selection.addRange") }}
         </button>
       </Hint>
+      <PreviewModeSwitch :model-value="mode" @update:model-value="setMode" />
     </div>
 
-    <p v-if="loading" class="px-4 py-3 text-[12px] text-dim2">读取中…</p>
-    <p v-else-if="error" role="alert" class="px-4 py-3 text-[12px] text-orange">读取失败：{{ error }}</p>
-    <p v-else-if="bootError" role="alert" class="px-4 py-3 text-[12px] text-orange">
-      无法渲染该表格：{{ bootError }}。可点上方工具栏的「用系统应用打开」看原文件。
-    </p>
-    <div v-show="!loading && !error && !bootError" ref="host" data-testid="sheet-viewer" class="min-h-0 flex-1" />
+    <!-- 分析模式整块替换掉 Univer 容器：`display:none` 的容器会被量成 0×0，Univer 的
+         canvas 与观察者要赌能自己量回来；重建只重跑一遍内存里已有字节的转换，行为确定。 -->
+    <template v-if="mode === 'table'">
+      <p v-if="loading" class="px-4 py-3 text-[12px] text-dim2">{{ t("preview.common.loading") }}</p>
+      <p v-else-if="error" role="alert" class="px-4 py-3 text-[12px] text-orange">
+        {{ t("preview.common.readFailed", { detail: error }) }}
+      </p>
+      <p v-else-if="bootError" role="alert" class="px-4 py-3 text-[12px] text-orange">
+        无法渲染该表格：{{ bootError }}。可点上方工具栏的「用系统应用打开」看原文件。
+      </p>
+      <div v-show="!loading && !error && !bootError" ref="host" data-testid="sheet-viewer" class="min-h-0 flex-1" />
+    </template>
+    <AnalysisPanel v-else v-model:sheet="activeSheet" class="min-h-0 flex-1" :tab="tab" />
   </div>
 </template>

@@ -21,15 +21,18 @@ mod process_guard;
 pub mod qq;
 mod sandbox;
 mod scheduler;
+mod sheet;
 mod skills_market;
 mod store_fs;
 mod sys;
 pub mod telegram;
 mod text;
+mod update;
 mod web_fetch;
 pub mod wechat;
 pub mod wecom;
 mod workspace_fs;
+mod worktree;
 
 use tauri::Manager;
 
@@ -153,6 +156,9 @@ pub fn run() {
             discord::discord_send,
             qq::qq_status,
             qq::qq_save_credentials,
+            qq::qq_register_begin,
+            qq::qq_register_poll,
+            qq::qq_register_cancel,
             qq::qq_clear_credentials,
             qq::qq_connect,
             qq::qq_disconnect,
@@ -165,6 +171,7 @@ pub fn run() {
             wecom::wecom_send,
             workspace_fs::fs_read_text_file,
             workspace_fs::fs_read_binary,
+            sheet::fs_read_sheet,
             workspace_fs::fs_write_text_file,
             workspace_fs::fs_write_binary,
             workspace_fs::fs_ensure_dir,
@@ -182,6 +189,9 @@ pub fn run() {
             store_fs::attachments_prune_session,
             store_fs::store_sessions_relocate,
             store_fs::pick_workspace_folder,
+            worktree::worktree_provision,
+            worktree::worktree_release,
+            worktree::worktree_list,
             db::db_settings_load,
             db::db_settings_sync,
             db::db_automations_load,
@@ -192,6 +202,8 @@ pub fn run() {
             db::db_team_runs_sync,
             db::db_agents_load,
             db::db_agents_sync,
+            update::check_update,
+            update::open_external,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

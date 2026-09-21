@@ -8,6 +8,7 @@ import Icon from "@/features/shared/Icon.vue";
 import ChannelActions from "@/features/channels/ChannelActions.vue";
 import FeishuRegisterPanel from "@/features/channels/FeishuRegisterPanel.vue";
 import DingTalkRegisterPanel from "@/features/channels/DingTalkRegisterPanel.vue";
+import QqRegisterPanel from "@/features/channels/QqRegisterPanel.vue";
 import TelegramQrPanel from "@/features/channels/TelegramQrPanel.vue";
 import WechatQrPanel from "@/features/channels/WechatQrPanel.vue";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
@@ -232,7 +233,7 @@ const inputClass =
         <!-- Telegram：已配置 → 扫码绑定；未配置 → 扫 BotFather 建机器人 -->
         <TelegramQrPanel v-else-if="props.channel === 'telegram'" />
 
-        <!-- QQ / 企业微信的能力边界提示：都在长连接协议里，提前说清楚比事后报错好 -->
+        <!-- QQ 的能力边界提示：被动回复窗口，提前说清楚比事后报错好 -->
         <p
           v-if="props.channel === 'qq'"
           class="rounded-[10px] border border-line bg-panel-2 px-3 py-2 text-[10.5px] leading-relaxed text-dim2"
@@ -260,6 +261,9 @@ const inputClass =
 
         <!-- 钉钉：扫码创建与手动填凭证并列（钉钉官方也走这条一键创建路径） -->
         <DingTalkRegisterPanel v-else-if="props.channel === 'dingtalk'" />
+
+        <!-- QQ：扫码创建与手动填凭证并列（腾讯自家客户端也走这条一键创建路径） -->
+        <QqRegisterPanel v-if="props.channel === 'qq'" />
 
         <div v-if="props.channel !== 'wechat'" class="flex flex-col gap-2 border-t border-line pt-3">
           <span class="text-[12px] text-foreground" :data-testid="`${props.channel}-credentials-label`">

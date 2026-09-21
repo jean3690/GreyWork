@@ -5,12 +5,15 @@
  * 未知扩展一律归 `raw`（CodeMirror 纯文本兜底），永远不会「打不开」。
  */
 
+import { extname } from "@greywork/core";
+
 export type ViewerKind =
   | "md"
   | "html"
   | "csv"
   | "code"
   | "xlsx"
+  | "xls"
   | "docx"
   | "pptx"
   | "pdf"
@@ -27,6 +30,10 @@ const EXT_KIND: Record<string, ViewerKind> = {
   htm: "html",
   csv: "csv",
   xlsx: "xlsx",
+  // 老格式表格单独成类：宿主用 calamine 按内容嗅探解析（见 sheet.rs），
+  // 与 doc/ppt 那些「真的读不了」的老格式不是一回事，混在一起就只能给占位提示。
+  xls: "xls",
+  xlt: "xls",
   docx: "docx",
   pptx: "pptx",
   pdf: "pdf",
@@ -37,8 +44,6 @@ const EXT_KIND: Record<string, ViewerKind> = {
   // 而不是落到 raw 被当文本读（二进制经 utf-8 解码就是满屏乱码，且不报错）。
   doc: "legacy-office",
   dot: "legacy-office",
-  xls: "legacy-office",
-  xlt: "legacy-office",
   ppt: "legacy-office",
   pot: "legacy-office",
   pps: "legacy-office",
@@ -79,11 +84,11 @@ const EXT_KIND: Record<string, ViewerKind> = {
  * 走错通道的代价不对称：二进制被当文本读会经 utf-8 解码后**不可逆地损坏**
  * （xlsx 读回即报「文件损坏」），所以这张表是白名单而非启发式判断。
  */
-const BINARY_KINDS: ReadonlySet<ViewerKind> = new Set<ViewerKind>(["xlsx", "docx", "pptx", "pdf", "image", "legacy-office"]);
+const BINARY_KINDS: ReadonlySet<ViewerKind> = new Set<ViewerKind>(["xlsx", "xls", "docx", "pptx", "pdf", "image", "legacy-office"]);
 
 /** 按扩展名推断产物查看类型；未知归 raw（文本兜底）。 */
 export function kindOfPath(path: string): ViewerKind {
-  const ext = path.split(".").pop()?.toLowerCase() ?? "";
+  const ext = extname(path).toLowerCase();
   return EXT_KIND[ext] ?? "raw";
 }
 
@@ -92,10 +97,14 @@ export function isBinaryKind(kind: ViewerKind): boolean {
   return BINARY_KINDS.has(kind);
 }
 
-/** 取路径末段文件名（兼容 Windows 分隔符）。 */
-export function basename(path: string): string {
-  return path.split(/[\\/]/).pop() ?? path;
-}
+/**
+ * 取路径末段文件名（兼容 Windows 分隔符）。
+ *
+ * 实现在 `@greywork/core`（与 `joinPath` / `normalizePath` 同一套分隔符规则）。
+ * 这里保留同名重导出，`stores/preview.ts` / `SheetViewer.vue` / `attachment-library.ts`
+ * 的既有 import 不必改。
+ */
+export { basename } from "@greywork/core";
 
 /**
  * CodeMirror 语言扩展键。
@@ -160,6 +169,6 @@ const EXT_LANGUAGE: Record<string, CodeLanguage> = {
 };
 
 export function codeLanguageOfPath(path: string): CodeLanguage | null {
-  const ext = path.split(".").pop()?.toLowerCase() ?? "";
+  const ext = extname(path).toLowerCase();
   return EXT_LANGUAGE[ext] ?? null;
 }

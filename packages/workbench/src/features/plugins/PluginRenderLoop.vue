@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, shallowRef } from "vue";
+import { onBeforeUnmount, onMounted, shallowRef } from "vue";
 import PluginRenderCanvas from "@/features/plugins/PluginRenderCanvas.vue";
 import { validateRenderCommands, type RenderCommand } from "@/plugins/render-commands";
 import type { DeclarativeValue } from "@/plugins/market-types";
@@ -55,8 +55,6 @@ onMounted(() => {
 onBeforeUnmount(() => {
   if (timer !== undefined) clearInterval(timer);
 });
-
-const error = ref("");
 </script>
 
 <template>
@@ -64,6 +62,5 @@ const error = ref("");
     <div class="rounded-[14px] border border-line bg-panel-2 p-2">
       <PluginRenderCanvas :commands="commands" :width="canvasWidth" :height="canvasHeight" />
     </div>
-    <p v-if="error" class="mt-1 text-center text-[10px] text-dim2">{{ error }}</p>
   </div>
 </template>

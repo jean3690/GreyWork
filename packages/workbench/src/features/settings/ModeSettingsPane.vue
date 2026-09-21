@@ -1,12 +1,17 @@
 <script setup lang="ts">
 /** 设置 · mode 分区：运行模式 / 权限档位（含临时只读）。 */
+import { useI18n } from "vue-i18n";
 import { useAgentStore } from "@/stores/agent";
 import { PERMISSION_TIERS, RUN_MODES, useSettingsStore } from "@/stores/settings";
 import { PERM_TIER_DESCS, PERM_TIER_LABELS, SANDBOX_LABELS, usePermissionSandbox } from "@/lib/permission-sandbox";
+import WorktreeSnapshotsCard from "@/features/settings/WorktreeSnapshotsCard.vue";
 
 const settings = useSettingsStore();
 const agent = useAgentStore();
 const { suggestedSandbox } = usePermissionSandbox();
+// 运行模式的 hint 是 i18n key（RUN_MODES 存 key、渲染处转译，同 AppearanceSettingsPane 的 FONT_SIZES）；
+// 本 pane 其余权限 / 沙盒文案仍走 permission-sandbox 的字面量，不在此次转 i18n 的范围内。
+const { t } = useI18n();
 
 function applyPermissionTier(tier: (typeof PERMISSION_TIERS)[number]["value"]): void {
   settings.permissionTier = tier;
@@ -22,15 +27,20 @@ function applyPermissionTier(tier: (typeof PERMISSION_TIERS)[number]["value"]): 
         <button
           v-for="mode in RUN_MODES"
           :key="mode.value"
+          :data-testid="`run-mode-${mode.value}`"
           class="flex cursor-pointer items-center gap-3 rounded-[10px] px-3 py-2 text-left transition-colors hover:bg-panel-2"
           :class="settings.runMode === mode.value ? 'bg-panel-2' : ''"
-          @click="settings.runMode = mode.value"
+          @click="settings.setRunMode(mode.value)"
         >
           <span class="text-[13px] text-foreground">{{ mode.label }}</span>
-          <span class="text-[11px] text-dim2">{{ mode.hint }}</span>
+          <span class="text-[11px] text-dim2">{{ t(mode.hint) }}</span>
         </button>
       </div>
+      <p v-if="settings.runMode === 'worktree'" class="mt-2 text-[11px] leading-relaxed text-amber-400">
+        本轮会话跑在快照里：agent 的写入不会出现在工作区文件树 / Git 面板。跑完在下面的「隔离快照」里释放。
+      </p>
     </div>
+    <WorktreeSnapshotsCard />
     <div class="rounded-[14px] border border-line bg-panel p-4">
       <div class="mb-3 text-[13px] font-medium text-foreground">权限档位</div>
       <div class="flex gap-2">

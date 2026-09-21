@@ -2,11 +2,12 @@
  * 全局通知面（NoticeHost）：按 kind 落 alert / status、action 按钮执行且随之消失、
  * 右上角关闭按钮 dismiss。store 用真的（本组件就是从 store 读），只验证渲染层契约。
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { mount, type DOMWrapper, type VueWrapper } from "@vue/test-utils";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { flushPromises, mount, type DOMWrapper, type VueWrapper } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 
 import NoticeHost from "@/features/shell/NoticeHost.vue";
+import { i18n } from "@/i18n";
 import { useNoticeStore } from "@/stores/notice";
 
 /** 卡片选择器：壳自己的 testid 也叫 notice-host，前缀选择器会误伤，显式排除。 */
@@ -27,6 +28,16 @@ beforeEach(() => {
   localStorage.clear();
   setActivePinia(createPinia());
 });
+
+afterEach(() => {
+  // 提示内容 Portal 到 body，用例之间必须清干净
+  document.body.innerHTML = "";
+});
+
+/** 提示内容挂在 body 的 [data-slot="tooltip-content"]；含 reka 的隐藏测量副本，故用 toContain。 */
+function tooltipText(): string {
+  return document.body.querySelector('[data-slot="tooltip-content"]')?.textContent ?? "";
+}
 
 describe("NoticeHost", () => {
   it("无通知时不渲染任何卡片", () => {
@@ -71,6 +82,16 @@ describe("NoticeHost", () => {
 
     expect(run).toHaveBeenCalledTimes(1);
     expect(wrapper.findAll(CARD)).toHaveLength(0);
+  });
+
+  it("关闭按钮带可见提示：aria-label 只服务读屏，看得见的人靠 Hint", async () => {
+    useNoticeStore().error("保存失败");
+
+    const wrapper = mountHost();
+    await dismissButton(wrapper).trigger("focus");
+    await flushPromises();
+
+    expect(tooltipText()).toContain(i18n.global.t("notice.dismiss"));
   });
 
   it("点右上角关闭：只 dismiss 当前这条，不波及同屏其它通知", async () => {

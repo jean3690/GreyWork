@@ -100,7 +100,7 @@ mod tests {
         let path = dir.join("greywork.log");
         let _ = fs::remove_file(&path);
         let target = LogTarget {
-            dir: dir.clone(),
+            dir,
             file_name: "greywork.log".into(),
         };
         write(&target, "INFO (scheduler) first\n");
@@ -120,7 +120,7 @@ mod tests {
         let _ = fs::remove_file(&path);
         let _ = fs::remove_file(&rotated);
         let target = LogTarget {
-            dir: dir.clone(),
+            dir,
             file_name: "greywork.log".into(),
         };
         // 写超一档（>1 MiB 触发轮转），再写一行新内容
@@ -151,7 +151,7 @@ mod tests {
         let dir = temp_dir("init_then_info_lands_on_disk_with_timestamp");
         let path = dir.join("greywork.log");
         let _ = fs::remove_file(&path);
-        init(dir.clone());
+        init(dir);
         info("scheduler", "hello-from-test");
         let content = fs::read_to_string(&path).expect("log written after init");
         assert!(content.contains("[INFO] (scheduler) hello-from-test"));

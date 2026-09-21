@@ -45,7 +45,12 @@ withDefaults(
     side?: "top" | "right" | "bottom" | "left";
     /** 与触发器的间距。 */
     sideOffset?: number;
-    /** 长文案（如完整路径）时才需要，交给弹层换行而不是撑成一条。 */
+    /**
+     * 长文案（如完整路径）时才需要。
+     * 宽度上限由 `TooltipContent` 的基类给（320px），这里只补两件事：行高放松，
+     * 以及 `overflow-wrap:anywhere` —— 正常句子按词断，只有没有空格的整串
+     * （路径 / URL / id）才逐字符断。别用 `break-all`，那会把英文单词劈开。
+     */
     multiline?: boolean;
   }>(),
   { text: null, side: "top", sideOffset: 4, multiline: false },
@@ -58,7 +63,7 @@ withDefaults(
       <TooltipTrigger as-child>
         <slot></slot>
       </TooltipTrigger>
-      <TooltipContent :side="side" :side-offset="sideOffset" :class="multiline ? 'max-w-[320px] leading-relaxed break-all' : undefined">
+      <TooltipContent :side="side" :side-offset="sideOffset" :class="multiline ? 'leading-relaxed [overflow-wrap:anywhere]' : undefined">
         {{ text }}
       </TooltipContent>
     </Tooltip>

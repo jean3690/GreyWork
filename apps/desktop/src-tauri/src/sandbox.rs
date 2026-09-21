@@ -130,6 +130,29 @@ fn isolated_home_args(home: &Path) -> Vec<String> {
     args
 }
 
+/// 把 agent 首 token 解析成沙盒里可直接 exec 的**真实绝对路径**（跟随符号链接）。
+///
+/// - 含路径分隔符（绝对/相对路径）→ 直接 `canonicalize`；
+/// - 裸程序名 → 先按登录 shell 的 `PATH` 探测（`probe_program`），再 `canonicalize`。
+///
+/// `canonicalize` 解掉 `~/.bun/bin/opencode → node_modules/…/opencode.exe` 这类
+/// symlink 跳转，返回的路径的父目录就是真正要 bind 进沙盒的目录。解析不到返回 None
+/// （由调用方原样透传裸名，让 bwrap 快速失败）。
+fn resolve_program_real_path(program: &str) -> Option<PathBuf> {
+    let has_separator = program.contains(std::path::MAIN_SEPARATOR)
+        || program.contains('/')
+        || Path::new(program).is_absolute();
+    let located = if has_separator {
+        PathBuf::from(program)
+    } else {
+        crate::process_guard::probe_program(
+            program,
+            crate::process_guard::effective_path().as_deref(),
+        )?
+    };
+    located.canonicalize().ok()
+}
+
 /// 将原始 agent 命令包裹进 bwrap 沙盒，返回 JSON 配置串（AcpAgent::from_str 可解析）。
 /// workspace 必须是已存在目录；home 仅用于查找白名单中的 Agent 配置路径。
 pub fn wrap_command(
@@ -178,8 +201,32 @@ pub fn wrap_command(
     // （如 `/home/u/my tools/bin/opencode`）用 split_whitespace 会被拆成两段。
     // 其余参数仍按空白拆 —— 命令已过 validate_spawn_command，无 shell 元字符。
     let (program, rest) = crate::process_guard::split_first_token(agent_cmd);
+    // 沙盒只 bind 了系统目录/工作区/白名单 HOME 配置，**没有** bind 用户装 CLI 的目录
+    // （`~/.bun/bin`、`~/.local/bin`、`~/node_modules`、nvm/cargo…）。裸名 `opencode`
+    // 靠沙盒内 PATH 查找必然命中一个未被 bind 的目录，bwrap `execvp` 报「No such file」，
+    // 前端再把它误译成「没找到 agent 命令」。故在宿主侧把首 token 解析成**真实绝对路径**
+    // （跟随符号链接，解掉 `.bun/bin → node_modules` 这类跳转），bind 其所在目录只读，
+    // 并用绝对路径直接 exec——彻底绕开沙盒内的 PATH 查找与 symlink 解析。
+    let program = match resolve_program_real_path(program) {
+        Some(real) => {
+            if let Some(parent) = real.parent() {
+                let dir = parent.to_string_lossy().into_owned();
+                // 系统只读目录已覆盖时不重复 bind（避免多挂一层无谓的 ro-bind）。
+                let already_bound = readonly_system_dirs()
+                    .iter()
+                    .any(|base| parent.starts_with(base));
+                if !already_bound {
+                    args.extend(["--ro-bind".to_string(), dir.clone(), dir]);
+                }
+            }
+            real.to_string_lossy().into_owned()
+        }
+        // 解析不到（真的没装或不在 PATH）：原样透传裸名，让 bwrap 快速失败，
+        // 前端据此给安装指引——与沙盒关闭时的失败语义一致。
+        None => program.to_string(),
+    };
     args.push("--".to_string());
-    args.push(program.to_string());
+    args.push(program);
     args.extend(rest.split_whitespace().map(|token| token.to_string()));
 
     serde_json::to_string(&serde_json::json!({
@@ -257,8 +304,14 @@ mod tests {
     fn wrap_fs_binds_workspace_readonly_system_and_unshares_net() {
         let workspace = std::env::temp_dir().join("greywork-sandbox-ws");
         std::fs::create_dir_all(&workspace).unwrap();
-        let config =
-            wrap_command(SandboxMode::Filesystem, &workspace, None, "opencode acp").unwrap();
+        // 用一个 PATH 上不存在的名字：本用例只钉 bind/net，程序 token 是否解析无关。
+        let config = wrap_command(
+            SandboxMode::Filesystem,
+            &workspace,
+            None,
+            "gw-nonexistent-agent-xyz acp",
+        )
+        .unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&config).unwrap();
         assert_eq!(parsed["command"], "bwrap");
         let args = parsed["args"].as_array().unwrap();
@@ -271,7 +324,7 @@ mod tests {
         assert!(joined.windows(2).any(|pair| pair == ["--ro-bind", "/usr"]));
         // 原始命令在 `--` 之后
         let sep = joined.iter().position(|arg| *arg == "--").unwrap();
-        assert_eq!(&joined[sep + 1..], &["opencode", "acp"]);
+        assert_eq!(&joined[sep + 1..], &["gw-nonexistent-agent-xyz", "acp"]);
         std::fs::remove_dir_all(&workspace).unwrap();
     }
 
@@ -287,13 +340,12 @@ mod tests {
         )
         .unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&config).unwrap();
-        let joined = parsed["args"]
+        let has_unshare_net = parsed["args"]
             .as_array()
             .unwrap()
             .iter()
-            .map(|v| v.as_str().unwrap())
-            .collect::<Vec<_>>();
-        assert!(!joined.contains(&"--unshare-net"));
+            .any(|v| v.as_str() == Some("--unshare-net"));
+        assert!(!has_unshare_net);
         std::fs::remove_dir_all(&workspace).unwrap();
     }
 
@@ -309,7 +361,7 @@ mod tests {
             SandboxMode::Filesystem,
             &workspace,
             Some(&home),
-            "opencode acp",
+            "gw-nonexistent-agent-xyz acp",
         )
         .unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&config).unwrap();
@@ -359,5 +411,52 @@ mod tests {
     fn wrap_rejects_missing_workspace() {
         let ghost = std::env::temp_dir().join("greywork-sandbox-ghost");
         assert!(wrap_command(SandboxMode::Filesystem, &ghost, None, "opencode acp").is_err());
+    }
+
+    /// 回归：agent 二进制经 symlink 装在非系统目录（如 `~/.bun/bin/opencode →
+    /// node_modules/…/opencode.exe`）时，沙盒必须 bind **真实二进制所在目录**并用
+    /// 解析后的绝对路径 exec —— 否则 bwrap `execvp` 在未 bind 的目录里找不到程序，
+    /// 报「No such file」，前端误译成「没找到 agent 命令」。仅 Unix：依赖 symlink 语义。
+    #[cfg(unix)]
+    #[test]
+    fn wrap_binds_real_binary_dir_and_execs_resolved_path_via_symlink() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let root = std::env::temp_dir().join("greywork-sandbox-symlink");
+        let _ = std::fs::remove_dir_all(&root);
+        let real_dir = root.join("node_modules/opencode-ai/bin");
+        let link_dir = root.join(".bun/bin");
+        let workspace = root.join("workspace");
+        std::fs::create_dir_all(&real_dir).unwrap();
+        std::fs::create_dir_all(&link_dir).unwrap();
+        std::fs::create_dir_all(&workspace).unwrap();
+        let real_bin = real_dir.join("opencode.exe");
+        std::fs::write(&real_bin, b"#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&real_bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let link_bin = link_dir.join("opencode");
+        symlink(&real_bin, &link_bin).unwrap();
+
+        let cmd = format!("{} acp", link_bin.to_string_lossy());
+        let config = wrap_command(SandboxMode::Filesystem, &workspace, None, &cmd).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&config).unwrap();
+        let joined = parsed["args"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| value.as_str().unwrap())
+            .collect::<Vec<_>>();
+
+        let real_dir_canon = real_dir.canonicalize().unwrap();
+        let real_bin_canon = real_bin.canonicalize().unwrap();
+        // 真实二进制目录被 ro-bind 进沙盒。
+        assert!(joined
+            .windows(2)
+            .any(|pair| pair == ["--ro-bind", real_dir_canon.to_str().unwrap()]));
+        // `--` 之后用解析后的真实绝对路径，而非 symlink 路径。
+        let sep = joined.iter().position(|arg| *arg == "--").unwrap();
+        assert_eq!(
+            &joined[sep + 1..],
+            &[real_bin_canon.to_str().unwrap(), "acp"]
+        );
+        std::fs::remove_dir_all(&root).unwrap();
     }
 }

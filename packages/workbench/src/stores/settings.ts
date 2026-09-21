@@ -86,6 +86,7 @@ export const FONT_SIZES: readonly { value: FontSize; label: string; scale: numbe
 const THEME_VALUES: Record<ThemeId, true> = { greywork: true, "night-blue": true, "night-green": true, github: true, fox: true };
 const COLOR_MODE_VALUES: Record<ColorMode, true> = { dark: true, light: true, system: true };
 const FONT_SIZE_VALUES: Record<FontSize, true> = { small: true, medium: true, large: true };
+const RUN_MODE_VALUES: Record<RunMode, true> = { local: true, worktree: true, cloud: true };
 
 export const RUN_MODES: { value: RunMode; label: string; hint: string }[] = [
   { value: "local", label: "Local", hint: "settings.runModes.local.hint" },
@@ -231,6 +232,8 @@ export interface SavedSettings {
   permissionTier?: PermTier;
   sandboxMode?: SandboxMode;
   workspaceDir?: string;
+  /** 运行模式；未接入的档位（cloud）也照存，由 UI 负责标注它不生效。 */
+  runMode?: RunMode;
   mcpServers?: McpServerEntry[];
   /** 用户自定义技能市场源。 */
   skillSources?: SkillSourceEntry[];
@@ -273,7 +276,10 @@ export const useSettingsStore = defineStore("settings", () => {
   const tempReadOnly = ref(false);
   /** 实际下发给宿主的档位：临时降级期间一律只读，否则用基线档位。 */
   const effectivePermissionTier = computed<PermTier>(() => (tempReadOnly.value ? "read-only" : permissionTier.value));
-  /** 运行模式（顶栏胶囊）；worktree/cloud 为宿主能力预留，当前仅 local 生效。 */
+  /**
+   * 运行模式：local 直接在工作区执行；worktree 由宿主派生隔离快照（见 lib/workspace-dir.ts
+   * 的 isolateForRun）；cloud 尚无宿主实现，选中不产生任何效果。
+   */
   const runMode = ref<RunMode>("local");
   /** ACP 会话工作区目录（空 = 宿主私有 ~/.greyWork；宿主只接受已授权目录）。 */
   const workspaceDir = ref("");
@@ -349,11 +355,19 @@ export const useSettingsStore = defineStore("settings", () => {
     persist();
   }
 
+  /** 运行模式变更即落盘：隔离档位要跨重启保持，否则用户下次开场又回到 local。 */
+  function setRunMode(value: RunMode): void {
+    runMode.value = value;
+    persist();
+  }
+
   function applySaved(saved: SavedSettings | null | undefined): void {
     if (!saved) return;
     if (saved.permissionTier && PERM_TIER_VALUES[saved.permissionTier]) permissionTier.value = saved.permissionTier;
     // 无字段（旧快照）与非法值都迁移到 auto；绝不因损坏配置回落为直启。
     sandboxMode.value = saved.sandboxMode && SANDBOX_MODE_VALUES[saved.sandboxMode] ? saved.sandboxMode : "auto";
+    // 运行模式：旧快照缺字段或非法值一律回落 local —— 绝不因损坏配置悄悄进隔离。
+    runMode.value = saved.runMode && RUN_MODE_VALUES[saved.runMode] ? saved.runMode : "local";
     if (typeof saved.workspaceDir === "string") workspaceDir.value = saved.workspaceDir;
     // 并发度：仅整数且落在区间内才接受；越界 / 非法值静默回落默认 2（不写通知）。
     if (Number.isInteger(saved.maxParallel)) {
@@ -438,6 +452,7 @@ export const useSettingsStore = defineStore("settings", () => {
       modelProviders: modelProviders.value,
       permissionTier: permissionTier.value,
       sandboxMode: sandboxMode.value,
+      runMode: runMode.value,
       workspaceDir: workspaceDir.value,
       mcpServers: mcpServers.value,
       skillSources: skillSources.value,
@@ -626,6 +641,7 @@ export const useSettingsStore = defineStore("settings", () => {
     setTheme,
     setColorMode,
     setFontSize,
+    setRunMode,
     locale,
     selectedModelProviderId,
     modelProviders,

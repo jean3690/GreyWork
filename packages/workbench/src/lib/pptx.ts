@@ -71,9 +71,12 @@ export async function exportToPptx(deck: PptxDeck): Promise<Uint8Array> {
     }
     if (slide.table) {
       const { headers, rows } = slide.table;
+      // 行可能比表头短（动态结果集常见）：pptxgenjs 按单元格数排版，参差会错列，
+      // undefined 单元格还可能抛错。统一补齐到最宽列数并把每格强制成字符串。
+      const width = rows.reduce((widest, row) => Math.max(widest, row.length), headers.length);
       const body = [headers, ...rows].map((row, rowIndex) =>
-        row.map((cell) => ({
-          text: cell,
+        Array.from({ length: width }, (_, column) => ({
+          text: row[column] == null ? "" : String(row[column]),
           options: {
             bold: rowIndex === 0,
             color: rowIndex === 0 ? "FFFFFF" : "292524",

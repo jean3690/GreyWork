@@ -32,6 +32,7 @@ const VIEWERS: Record<ViewerKind, Component> = {
   raw: makeViewer(() => import("@/features/preview/TextViewer.vue")),
   image: makeViewer(() => import("@/features/preview/ImageViewer.vue")),
   xlsx: makeViewer(() => import("@/features/preview/SheetViewer.vue")),
+  xls: makeViewer(() => import("@/features/preview/LegacySheetViewer.vue")),
   docx: makeViewer(() => import("@/features/preview/DocViewer.vue")),
   pptx: makeViewer(() => import("@/features/preview/SlideViewer.vue")),
   pdf: makeViewer(() => import("@/features/preview/PdfViewer.vue")),
@@ -42,8 +43,15 @@ const VIEWERS: Record<ViewerKind, Component> = {
 
 const viewer = computed(() => VIEWERS[props.tab.kind]);
 
-/** 只有能拿到 DOM 文本的渲染器才挂划词层（canvas 类见 lib/selection.ts 的说明）。 */
-const textSelectable = computed(() => isTextSelectableKind(props.tab.kind));
+/**
+ * 是否挂划词层。
+ *
+ * 除「本来就没有可选文本」的 kind 外，分析模式也要放行：xlsx 的表格模式是 Univer canvas
+ * （拿不到 DOM 文本，见 lib/selection.ts），但分析模式渲染的是真实 `<table>`，划词完全可用。
+ * 这里必须按模式**显式开门**，不能靠「不挂」来回避 —— `SelectionLayer.resolveScope()` 在
+ * 找不到 `[data-selection-scope]` 时会回退到 root 本身，于是整个面板都会变成作用域。
+ */
+const textSelectable = computed(() => isTextSelectableKind(props.tab.kind) || props.tab.mode === "analysis");
 
 /** 划词层的作用域容器：它在事件里惰性查 `[data-selection-scope]`，不追各个 viewer 的根。 */
 const surfaceEl = ref<HTMLElement | null>(null);

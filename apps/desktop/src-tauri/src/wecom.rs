@@ -930,7 +930,8 @@ pub async fn wecom_send(
     text: String,
 ) -> Result<(), String> {
     let text = clamp_text(&text)?;
-    let (scope, id) = decode_peer(&peer_id).ok_or(format!("对端 id 无法解析: {peer_id:?}"))?;
+    let (scope, id) =
+        decode_peer(&peer_id).ok_or_else(|| format!("对端 id 无法解析: {peer_id:?}"))?;
     let (sender, credential) = {
         let mut inner = host.lock().await;
         ensure_loaded(&app, &mut inner)?;

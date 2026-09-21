@@ -5,9 +5,17 @@ import { adaptInstalledPlugin } from "./declarative";
 import { createWorkerCodePluginRuntime, type CodePluginRuntime, type CodePluginRuntimeFactory } from "./code-runtime";
 import { clearDeclarativePluginState } from "./declarative-state";
 import type { InstalledPluginPackage, MarketPluginManifest, PluginInstallReport, PluginRegistryEntry } from "./market-types";
-import { isPluginEnabled, pluginManifests, registerPlugin, setPluginEnabled, unregisterPlugin } from "./runtime";
+import {
+  clearPluginCapabilityGrants,
+  isPluginEnabled,
+  pluginManifests,
+  registerPlugin,
+  setPluginEnabled,
+  unregisterPlugin,
+} from "./runtime";
 import { useCapabilityLoader } from "./current";
 import { setNetFetchTransportForHost } from "./capabilities";
+import { closePluginWindow } from "./plugin-window";
 
 if (isTauriRuntime()) {
   // net.fetch 能力走宿主 IPC：Rust 侧对 hosts 白名单做二次校验（纵深防御），
@@ -232,8 +240,11 @@ export async function uninstallMarketPlugin(id: string): Promise<void> {
   marketError.value = "";
   try {
     if (isPluginEnabled(id)) await setPluginEnabled(id, false);
+    // 停用路径已关窗；这里再兜一次，覆盖「未启用但窗口曾开过」的残留。
+    await closePluginWindow(id);
     await invoke("plugin_market_uninstall", { pluginId: id });
     unregisterPlugin(id);
+    clearPluginCapabilityGrants(id);
     codeRuntimes.get(id)?.dispose();
     codeRuntimes.delete(id);
     clearDeclarativePluginState(id);

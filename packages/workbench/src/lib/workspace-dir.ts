@@ -39,3 +39,26 @@ export async function resolveWorkspaceRoot(): Promise<WorkspaceRootResolution> {
   if (active) return { dir: active, bound: true };
   return { dir: await resolveWorkspaceDir(), bound: false };
 }
+
+/** worktree_provision 返回的宿主契约（kind：git = 真实 worktree / copy = 目录复制兜底 / direct = 数据根直通）。 */
+export interface WorktreeProvision {
+  root: string;
+  kind: "git" | "copy" | "direct";
+  source: string;
+}
+
+/**
+ * 按 runMode 给本轮 ACP 会话套上运行环境隔离，返回真正该用的工作区目录。
+ *
+ * 只做「判定 + 派生」，**不解析 base** —— base 由调用点按自己的会话归属给出：
+ * 单 Agent 对话与团队协作取当前对话绑定的文件夹，编排子任务取设置项。
+ * 早先把两者揉进一个 `resolveRunWorkspace()` 时，runs.ts 顺带被塞进了
+ * 「跟随当前打开的对话」的语义，那不是它的意图。
+ *
+ * 非桌面端、或档位不是 worktree，一律原样返回 base。
+ */
+export async function isolateForRun(base: string): Promise<string> {
+  if (useSettingsStore().runMode !== "worktree" || !isTauriRuntime()) return base;
+  const provisioned = await invoke<WorktreeProvision>("worktree_provision", { source: base });
+  return provisioned.root;
+}

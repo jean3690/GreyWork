@@ -98,6 +98,7 @@ jobs:
       # 再编译 Rust 并打整包 —— 这是 web/rust 两个 job 都覆盖不到的「整包能否出来」。
       # 每平台只打一个 bundle，验证该平台 SDK/链接/打包管线齐全：
       # Linux 走 deb（AppImage 需现场下载 linuxdeploy，CI 不稳定），Windows 走 nsis，macOS 走 dmg。
+      # CI 只验「整包能否出来」，不签更新产物（应用不内置原地升级，无签名密钥）。
       - name: Build (tauri bundle)
         run: pnpm --filter @greywork/desktop tauri build --bundles ${{ matrix.bundle }}
 
@@ -152,5 +153,38 @@ jobs:
 
       # 前端跑与 ubuntu 的 test job 同一套（core 的盘符路径工具、workbench 的标题栏
       # 适配都在里面）。在此之前没有任何 JS 测试跑在 Windows 上。
+      - name: Tests (vitest)
+        run: pnpm -r test
+
+  # macOS 的 cfg 分支（APFS 大小写折叠、路径比较）在 ubuntu 的 rust job 里编不到，
+  # desktop 矩阵的 macOS 行只走 tauri build —— 只产包、不跑测试，于是那些用例从未执行过。
+  # 与 windows job 对称：一次 cargo test 同时覆盖 macOS 专属代码的编译与行为。
+  macos:
+    name: macOS (cargo test · vitest)
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      # 不传 shared-key：desktop job 的 macOS 行打的是 release + universal-apple-darwin，
+      # 这里是 debug 的测试构建，共用键只会互相覆盖对方的 profile 产物（理由同 windows job）。
+      - uses: ./.github/actions/setup-rust
+        with:
+          # setup-rust 装的是 minimal profile，clippy 不会自带 —— 与 ubuntu 的 rust job 同理。
+          # 顺带补上：ubuntu 看不到 cfg(target_os = "macos")，macOS 专属的未使用 import /
+          # 死代码此前无人管。
+          components: clippy
+      - uses: ./.github/actions/setup-node
+
+      - name: Clippy (src-tauri)
+        working-directory: apps/desktop/src-tauri
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      # 与 rust job 相同的 --locked：Cargo.lock 与 Cargo.toml 不一致时立刻失败。
+      - name: Cargo Test (src-tauri)
+        working-directory: apps/desktop/src-tauri
+        run: cargo test --locked
+
+      # 前端也跑一遍：macOS 上走的是与 ubuntu 相同的 vite/vitest，但涉及平台分支的
+      # 渲染端用例（core 的路径工具按平台分叉）值得在第三个平台上确认一次。
       - name: Tests (vitest)
         run: pnpm -r test

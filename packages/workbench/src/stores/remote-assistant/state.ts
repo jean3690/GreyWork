@@ -23,6 +23,7 @@ import {
   IDLE_DINGTALK_STATUS,
   IDLE_FEISHU_REGISTER,
   IDLE_FEISHU_STATUS,
+  IDLE_QQ_REGISTER,
   IDLE_QQ_STATUS,
   IDLE_STATUS,
   IDLE_TELEGRAM_STATUS,
@@ -30,6 +31,7 @@ import {
   readPeerArchive,
   type FeishuRegisterView,
   type DingTalkRegisterView,
+  type QqRegisterView,
   type RemoteActivity,
   type RemotePeer,
   type WechatQrView,
@@ -63,6 +65,8 @@ export interface RemoteAssistantState {
   feishuRegister: Ref<FeishuRegisterView>;
   /** 钉钉扫码创建应用的界面状态。 */
   dingtalkRegister: Ref<DingTalkRegisterView>;
+  /** QQ 扫码创建机器人的界面状态。 */
+  qqRegister: Ref<QqRegisterView>;
   qr: Ref<WechatQrView | null>;
   qrError: Ref<string | null>;
   activity: Ref<RemoteActivity[]>;
@@ -88,6 +92,7 @@ export function createRemoteAssistantState(): RemoteAssistantState {
     telegramBotLink: ref<{ link: TelegramBotLink | null; error: string | null }>({ link: null, error: null }),
     feishuRegister: ref<FeishuRegisterView>({ ...IDLE_FEISHU_REGISTER }),
     dingtalkRegister: ref<DingTalkRegisterView>({ ...IDLE_DINGTALK_REGISTER }),
+    qqRegister: ref<QqRegisterView>({ ...IDLE_QQ_REGISTER }),
     qr: ref<WechatQrView | null>(null),
     qrError: ref<string | null>(null),
     activity: ref<RemoteActivity[]>([]),

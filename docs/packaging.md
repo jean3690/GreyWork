@@ -38,6 +38,69 @@ The extra targets we drop were also the slowest:
   and `rpm` pulls in another toolchain. `deb` is what we ship.
 - Windows `msi` needs WiX; NSIS is smaller and is what we ship.
 
+## Bundle metadata
+
+`category`, `shortDescription`, `longDescription`, `publisher`, `homepage`, `copyright`
+and `license` live in the base `tauri.conf.json` because they are platform-neutral
+descriptions of the app. Where each one actually ends up is worth writing down, because
+the schema's one-line descriptions are easy to over-read. The deb column was verified by
+building the package and reading the generated `control` and `.desktop`; the rest is
+marked accordingly.
+
+| Key                | deb (verified)                                                   |
+| ------------------ | ---------------------------------------------------------------- |
+| `category`         | `.desktop` `Categories=Development;` (was empty)                 |
+| `shortDescription` | `Description:` first line, and `.desktop` `Comment=`             |
+| `longDescription`  | the indented extended description                                |
+| `homepage`         | `Homepage:`                                                      |
+| `publisher`        | _nothing_ — deb `Maintainer` comes from `Cargo.toml`'s `authors` |
+| `copyright`        | _nothing_                                                        |
+| `license`          | _nothing_                                                        |
+
+Two of these matter beyond the deb: `tauri-bundler` contains the NSIS metadata strings
+`Manufacturer` and `LegalCopyright`, so `publisher` and `copyright` are what the Windows
+installer reports to the OS. Neither `LSApplicationCategoryType` nor
+`NSHumanReadableCopyright` appears in the bundler at all, so `category` and `copyright`
+do **not** reach the macOS `Info.plist`.
+
+`category` also does **not** produce the deb `Section:` field, despite the two looking
+like the same concept in the schema. `Section` is a separate key that only exists on
+`bundle.linux.deb` — see below.
+
+## Debian package metadata
+
+Three deb-only keys are set in `src-tauri/tauri.linux.conf.json`, because none of them
+has an equivalent on the other platforms:
+
+- `linux.deb.section: "devel"` — the `Section:` field, which `bundle.category` does not
+  fill in. Without it `apt` has no section to file the package under.
+- `linux.deb.depends: ["libc6"]` — **appends** to the dependencies `tauri-bundler`
+  computes (`libwebkit2gtk-4.1-0`, `libgtk-3-0`), it does not replace them; the result is
+  `libc6, libwebkit2gtk-4.1-0, libgtk-3-0`. Debian Policy 8.6 requires the libc
+  dependency, and `lintian` flags its absence as an error.
+- `linux.deb.files` — ships `LICENSE` to `/usr/share/doc/grey-work/copyright`. Debian
+  Policy 12.5 requires a verbatim copyright file per package; without one `lintian`
+  reports `no-copyright-file`. `bundle.licenseFile` is **not** the knob for this: it is
+  read only by the NSIS/Windows bundler, and setting it changes nothing in the deb.
+  The destination hardcodes the package name (`grey-work`, derived from `productName`),
+  so it needs updating if the product is ever renamed.
+
+`lintian` on the resulting `.deb` is clean apart from four tags, all left as-is
+deliberately:
+
+| Tag                           | Why it is still open                                                         |
+| ----------------------------- | ---------------------------------------------------------------------------- |
+| `malformed-contact`           | `Maintainer` needs an RFC 822 `Name <email>`; we have no project address yet |
+| `no-changelog`                | Debian expects a `changelog.gz` in Debian's own format, not `CHANGELOG.md`   |
+| `unstripped-binary-or-object` | `strip` is not set on the release profile — see below                        |
+| `no-manual-page`              | there is no man page                                                         |
+
+The binary ships unstripped because the release profile does not set `strip`. Adding
+`strip = true` to `[profile.release]` in `src-tauri/Cargo.toml` would clear that tag and
+shrink the download, but it also removes the symbol table from all three platforms'
+binaries, which is what makes a panic backtrace readable. That trade-off is a support
+decision rather than a packaging one, so it is left open here.
+
 ## Windows installer
 
 `bundle.windows.webviewInstallMode` is written out explicitly as
@@ -64,6 +127,20 @@ download from a Microsoft endpoint while still needing the network at install ti
 same rare case. Switch to `offlineInstaller` if air-gapped installs become a
 requirement.
 
+### Installer languages
+
+`bundle.windows.nsis.languages` is set to `["SimpChinese", "English"]`. Tauri's default
+is `["English"]` alone, which hands a Chinese-first project an English-only installer.
+NSIS picks the language from the OS locale and falls back to the **first** entry in the
+list, so zh-CN Windows gets Chinese and every other locale gets English.
+`displayLanguageSelector` stays at its default (`false`) — the language follows the
+system, and no extra page is added to the installer.
+
+The entries are NSIS's contributed language file names (`SimpChinese.nlf` / `.nsh`,
+the file defining `${LANG_SIMPCHINESE}`), not BCP 47 tags. Adding a language here only
+takes effect on a Windows build, so it is verified by the NSIS row of the CI bundle
+matrix rather than locally.
+
 ## macOS
 
 - `bundle.macOS.minimumSystemVersion` is pinned to `10.13` explicitly. That matches
@@ -77,6 +154,24 @@ requirement.
   `aarch64-apple-darwin` and `x86_64-apple-darwin` installed, which the `targets`
   input of the `setup-rust` composite handles. Cost: two full Rust compiles, so the
   macOS release job is the slowest of the three.
+
+## In-app update check (no signed auto-update)
+
+The app does **not** bundle an in-place updater: no `tauri-plugin-updater`, no
+`bundle.createUpdaterArtifacts`, no minisign signing, no `latest.json`. A signed updater
+chain needs a private key held as a repo secret and a `latest.json` manifest merged
+race-free across parallel release jobs; we opted to keep the release pipeline key-free.
+
+What the titlebar "Check for updates" does instead (`lib/update-backend.ts` + the Rust
+`check_update` command in `src-tauri/src/update.rs`):
+
+- Calls the GitHub Releases API (`/releases/latest`) from the **host** — the renderer CSP
+  only allows `self` + `ipc`, and the API rejects requests without a `User-Agent`. It
+  compares `tag_name` with the running version and shows the release notes.
+- "Go to download" opens the release page in the system browser via `open_external`
+  (http/https only). Every platform takes this same manual path.
+
+No repo secrets are required to build or release.
 
 ## Code signing & notarization — not wired up yet
 

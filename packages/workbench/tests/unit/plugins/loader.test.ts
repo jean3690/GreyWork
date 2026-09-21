@@ -151,7 +151,7 @@ describe("capability loader", () => {
       CapabilityCallError,
     );
 
-    loader.grantCapability("net.fetch");
+    loader.grantCapability("ext.fetcher", "net.fetch");
     await loader.activate("ext.fetcher");
 
     // 白名单域名：通过（真实 fetch 未 mock 时 api.github.com 会失败，
@@ -162,15 +162,55 @@ describe("capability loader", () => {
     await expect(loader.callCapability("ext.fetcher", "fs.read", {})).rejects.toThrow(/not registered/);
 
     // revoke 即时生效：已激活插件的下一次调用被拒。
-    loader.revokeCapability("net.fetch");
+    loader.revokeCapability("ext.fetcher", "net.fetch");
     await expect(loader.callCapability("ext.fetcher", "net.fetch", { url: "https://api.github.com/" })).rejects.toThrow(/revoked/);
 
     // 可信插件：声明即可调用。
     loader.setTrustedPluginIds(["ext.fetcher"]);
-    loader.grantCapability("net.fetch");
+    loader.grantCapability("ext.fetcher", "net.fetch");
     const before = capabilityAuditLog().length;
     await expect(loader.callCapability("ext.fetcher", "net.fetch", { url: "http://api.github.com/" })).rejects.toThrow(/https/);
     // 拒绝路径也留审计。
     expect(capabilityAuditLog().length).toBeGreaterThanOrEqual(before);
+  });
+
+  it("授权按插件隔离：给 A 授权不放行 B，撤销只影响 A", async () => {
+    const loader = createCapabilityLoader();
+    for (const id of ["ext.a", "ext.b"]) {
+      loader.register({
+        id,
+        name: id,
+        version: "0.1.0",
+        requires: [{ capability: "net.fetch", hosts: ["api.github.com"] }],
+      });
+    }
+
+    loader.grantCapability("ext.a", "net.fetch");
+    expect(loader.isCapabilityGranted("ext.a", "net.fetch")).toBe(true);
+    expect(loader.isCapabilityGranted("ext.b", "net.fetch")).toBe(false);
+    expect(loader.grantedCapabilities()).toEqual({ "ext.a": ["net.fetch"] });
+
+    // B 未授权 → 激活被门禁拒绝；A 正常激活。
+    await expect(loader.activate("ext.b")).rejects.toThrow(/missing grants.*net.fetch/);
+    await loader.activate("ext.a");
+
+    // 撤销 A 的授权：授权快照清空（不影响 B，因为 B 本就没有）。
+    loader.revokeCapability("ext.a", "net.fetch");
+    expect(loader.grantedCapabilities()).toEqual({});
+  });
+
+  it("grantLegacyCapabilities：历史全局授权在注册时落到声明该能力的插件上", () => {
+    const loader = createCapabilityLoader();
+    loader.grantLegacyCapabilities(["net.fetch"]);
+    loader.register({
+      id: "ext.legacy",
+      name: "旧授权迁移",
+      version: "0.1.0",
+      requires: [{ capability: "net.fetch", hosts: ["api.github.com"] }],
+    });
+    loader.register({ id: "ext.plain", name: "未声明该能力", version: "0.1.0" });
+
+    expect(loader.grantedCapabilities()).toEqual({ "ext.legacy": ["net.fetch"] });
+    expect(loader.isCapabilityGranted("ext.plain", "net.fetch")).toBe(false);
   });
 });

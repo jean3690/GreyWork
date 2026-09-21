@@ -30,3 +30,6 @@ sample-preview.docx
 # 插件市场签名私钥（ed25519）：公钥硬编码在宿主 plugin_market.rs，私钥永不入库
 plugin-market/.signing-key*
 plugin-market/.signing-key.pem
+
+# updater 签名私钥：绝不入库，填进 GitHub Secrets
+.secrets/

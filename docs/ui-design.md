@@ -102,6 +102,10 @@ Font size: 15px base.
 - **只有当提示本身是在解释「为什么不能用」时**，才把触发器的 `disabled` 换成 `aria-disabled`：
   原生 `disabled` 的元素收不到指针事件，提示永远弹不出来。换用 `aria-disabled` 后必须确认
   点击处理器自带守卫。按钮只是瞬时忙（执行中）而提示讲的是「点了会做什么」，照常用 `disabled`。
+- **弹层有 320px 上限**（`TooltipContent` 基类里的 `max-w-[320px]`，由 `shadcn-sync.mjs` 的
+  `tooltip-skin` 规则落盘）。上游只给 `w-fit`，长文案（完整路径、报错原文）会被拉成一条超出屏幕的窄条；
+  封顶后长文案自己换行，短文案仍是单行贴内容宽。`multiline` 只再补 `overflow-wrap:anywhere`：
+  正常句子按词断，只有没有空格的整串（路径 / URL / id）才逐字符断 —— 别用 `break-all`，那会把英文单词劈开。
 - `<iframe>` 上的 `title` **不是** tooltip，是 iframe 的可访问名 —— 不要迁。
 - 测试里查提示内容要 `await trigger("focus")` + 查 `document.body` 的
   `[data-slot="tooltip-content"]`；它的 `textContent` 含 reka 的 1px 隐藏测量副本（文本出现两遍），
@@ -144,7 +148,11 @@ Font size: 15px base.
 
 已完成：底座（30 个组件 / 148 文件）、8 处手写弹窗（6 处迁到 `dialog` / `alert-dialog`；`PermissionCard`
 改内联 `role="group"`——它本就不是模态；`UnsavedChangesDialog` 随功能删除）、3 个菜单（`dropdown-menu`）、
-约 53 处 `title` → `Hint`、`SearchPanel` → `Popover`、插件市场加载态 → `Skeleton`。
+约 58 处 `title` → `Hint`（原生 `title` 至此迁完，只剩 `ConfirmDialog` 的 `title` prop 与 `<iframe title>`）、
+`SearchPanel` → `Popover`、插件市场加载态 → `Skeleton`。
+另外给一批只有 `aria-label` 的**纯图标按钮**补了 `Hint`（定时任务的编辑 / 启停 / 删除、协作面板的移除成员、
+插件市场的刷新 / 注册表设置、通知卡的关闭）：`aria-label` 只服务读屏，看得见的人需要一条悬停提示。
+判断准则与上面一致 —— 提示说的是「点了会做什么」就照常用 `disabled`，只有提示在解释「为什么不能用」时才换 `aria-disabled`。
 另有 3 个新弹窗（会话图片灯箱 / MCP JSON / 技能源表单）一开始就建在 shadcn 上：现在共 9 处
 `dialog` / `alert-dialog` 使用点、0 处手写模态。
 `Button` / `Select` / 原生复选框 / `AcpModelSelector` / `SlashCommandMenu` / `SelectionToolbar`

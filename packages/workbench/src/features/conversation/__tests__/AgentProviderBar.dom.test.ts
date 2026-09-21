@@ -208,18 +208,21 @@ describe("AgentProviderBar · ACP 会话配置选择器", () => {
   it("首屏只显示图标；点击后仅当前 ACP 展开名称", async () => {
     const { wrapper } = mountBar();
     expect(wrapper.text()).toContain("ACP 选择");
-    expect(openCodeButton(wrapper).text()).not.toContain("OpenCode");
+    // 名字常驻 DOM（收起态是靠 grid 0fr 把宽度收成 0），所以「有没有展开」看 data-expanded，
+    // 不能再用 text() 判断 —— 那已经恒为真。
+    expect(openCodeButton(wrapper).text()).toContain("OpenCode");
+    expect(openCodeButton(wrapper).attributes("data-expanded")).toBe("false");
 
     h.startAgent.mockResolvedValue(7);
     h.openSession.mockResolvedValue(options(true));
     await openCodeButton(wrapper).trigger("click");
-    await vi.waitFor(() => expect(openCodeButton(wrapper).text()).toContain("OpenCode"));
+    await vi.waitFor(() => expect(openCodeButton(wrapper).attributes("data-expanded")).toBe("true"));
 
     const codex = providerButton(wrapper, "codex");
-    expect(codex.text()).not.toContain("Codex");
+    expect(codex.attributes("data-expanded")).toBe("false");
     await codex.trigger("click");
-    await vi.waitFor(() => expect(providerButton(wrapper, "codex").text()).toContain("Codex"));
-    expect(openCodeButton(wrapper).text()).not.toContain("OpenCode");
+    await vi.waitFor(() => expect(providerButton(wrapper, "codex").attributes("data-expanded")).toBe("true"));
+    expect(openCodeButton(wrapper).attributes("data-expanded")).toBe("false");
   });
 
   it("收起图标提供名称提示（已换成 Hint），并只引用随包发出的 mono 变体", async () => {

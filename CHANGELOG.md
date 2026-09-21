@@ -8,6 +8,67 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-21
+
+### 新增
+
+- 预览支持**数据分析**：CSV 与 xlsx 的预览新增「表格 / 分析」模式切换，提供列统计摘要、
+  图表（柱状 / 折线 / 饼图，ECharts 懒加载）、分组聚合与筛选排序。统计 / 图表 / 分组基于
+  **全部已解析行**（含筛选后的行），数据网格沿用 500 行渲染上限 —— 看得少不等于算得少。
+- 预览支持老格式 `.xls` / `.xlt`：由宿主用 calamine 按**内容**嗅探解析（扩展名被改错的
+  OOXML 也能正确打开），不再只是「不支持预览」的占位提示。
+- 远程助手 · QQ 通道支持「扫码创建机器人」：手机 QQ 扫码确认后，宿主直接把 AppID 与 AppSecret
+  写入本机（0600），不必再去 QQ 开放平台抄密钥；手填凭证入口保留作兜底。
+- 插件作者文档 `docs/plugin-authoring.md`、市场发布说明 `plugin-market/README.md`，以及可直接
+  复制的插件包模板 `plugin-market/templates/`。
+- `@greywork/core` 新增 `basename` / `extname` 两个路径工具：`\` 与 `/` 都认，`basename` 先剥
+  尾部分隔符再取末段（与同文件的 `normalizePath` 同语义，故 `"reports/"` → `"reports"`），
+  `extname` 不含点、不改大小写。
+- 标题栏加 GitHub 入口与「检查更新」：GitHub 图标点开本项目仓库；检查更新对比当前版本与
+  最新 Release 并展示新版发布说明，点「前往下载」用系统浏览器打开发布页手动安装。应用不
+  内置原地升级（不做 minisign 签名、不产 `latest.json`），全平台走同一套手动下载流程。
+
+### 变更
+
+- 渲染端 7 份手写的 `basename` 副本收口到 `@greywork/core`。`lib/viewer.ts` 与 `lib/attachments.ts`
+  保留原导出名转发，`stores/preview.ts`、`SheetViewer.vue`、`attachment-library.ts` 等调用方零改动。
+- 扩展名一律从**路径末段**取。此前是对整条路径 `split(".").pop()`，目录名带点时会拿到
+  `"v1.2/report"` → `"2/report"` 这类垃圾串，只是靠「命不中就回落 raw / octet-stream」掩盖着；
+  现在 `kindOfPath`、`codeLanguageOfPath`、图片预览的 MIME 推断都只在末段上找点。
+- 打包元数据补齐：`bundle.category`（deb 的 `.desktop` 从 `Categories=` 空值变为
+  `Categories=Development;`，应用菜单里终于能归类）、`shortDescription` / `longDescription`
+  （deb 的 `Description` 后面不再跟一行 `(none)`）、以及 `publisher` / `homepage` /
+  `copyright` / `license`。各字段究竟落到哪个平台、哪些其实不落地，记在 `docs/packaging.md`。
+- Windows 安装包语言设为 `["SimpChinese", "English"]`（Tauri 默认只有英文）。按系统语言自动选，
+  zh-CN 命中中文、其余回落英文；不弹语言选择页。
+- CI 新增 macOS job（`cargo clippy --locked` + `cargo test --locked` + vitest）。此前
+  `#[cfg(target_os = "macos")]` 的用例（APFS 大小写折叠、路径比较）**只被编译、从未执行**：
+  desktop 矩阵的 macOS 行只产包不跑测试。
+- 插件能力授权改为**按插件粒度**：给 A 授权 `net.fetch` 不再顺带放行 B，插件中心按插件分别授权/
+  撤销。旧版全局授权存档（v1）首次启动时自动迁移为按插件授权并写回新存档。
+- 界面提示统一走 `Hint` 组件：剩余的原生 `title` 全部迁完，只有 `aria-label` 的纯图标按钮
+  （定时任务的编辑 / 启停 / 删除、协作面板的移除成员、插件市场的刷新 / 注册表设置、通知卡的关闭）
+  补上悬停提示。提示弹层加了 320px 宽度上限，长文案（完整路径、报错原文）改为按词换行，
+  不再被拉成一条超出屏幕的窄条；键盘聚焦也能出提示。
+- 引导页 / 对话页的输入卡文案、团队页「编排运行」段、插件市场「能力审计」段的硬编码中文收进 i18n。
+
+### 修复
+
+- deb 包补齐 Debian Policy 要求的三处，同时消除 lintian 对应的 E 级告警：`Section: devel`
+  （`bundle.category` 并不填这个字段，它是 `bundle.linux.deb.section`）、`libc6` 依赖
+  （Policy 8.6；`deb.depends` 是**追加**到自动算出的 `libwebkit2gtk-4.1-0, libgtk-3-0` 之后，
+  不是替换），以及 `/usr/share/doc/grey-work/copyright`（Policy 12.5）。注意
+  `bundle.licenseFile` 只被 NSIS 打包器读取，对 deb 无任何作用。
+- 停用/卸载插件时回收其桌面悬浮窗（此前窗口会残留并继续渲染已停用的包）。
+- 官方插件市场的强制签名校验改为 URL 归一化比较，`.../registry.json?x=1` 之类的变体不再被降级为
+  「第三方免签」。
+- 宿主 `plugin_window_open` 增加 `window.floating` 声明校验，与安装期校验、前端授权门禁三处一致。
+- 卸载插件时清空其能力授权，避免重装同 id 的其它包继承旧授权。
+- 补强插件包校验：mode 标题/heading/eyebrow 增加长度上界；`window` 声明必须同时声明
+  `window.floating`。
+- 清理插件系统死代码（未使用的窗口事件通道、渲染循环错误占位、旧版单计数器页面分支与
+  `RenderFrameInput` 类型）。
+
 ## [0.1.1] - 2026-09-19
 
 ### 修复
@@ -86,7 +147,8 @@
   Windows 构建失败、macOS 缺 `macos-private-api` 编译不过、构建脚本里 POSIX 风格的环境变量前缀。
 
 **安装包**：Linux 用 `.deb`（`sudo dpkg -i` 或 `apt install ./`），Windows 用 NSIS 安装器，macOS 用 `.dmg`。
-产物当前未做代码签名：macOS 首次打开需右键「打开」，Windows 可能提示 SmartScreen。
+[Unreleased]: https://github.com/jean3690/GreyWork/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/jean3690/GreyWork/compare/v0.1.1...v0.2.0
 
 [Unreleased]: https://github.com/jean3690/GreyWork/compare/v0.1.1...HEAD
 [0.1.1]: https://github.com/jean3690/GreyWork/compare/v0.1.0...v0.1.1
