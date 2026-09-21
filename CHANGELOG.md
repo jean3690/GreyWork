@@ -8,6 +8,8 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-21
+
 ### 新增
 
 - 预览支持**数据分析**：CSV 与 xlsx 的预览新增「表格 / 分析」模式切换，提供列统计摘要、
@@ -148,7 +150,8 @@
   Windows 构建失败、macOS 缺 `macos-private-api` 编译不过、构建脚本里 POSIX 风格的环境变量前缀。
 
 **安装包**：Linux 用 `.deb`（`sudo dpkg -i` 或 `apt install ./`），Windows 用 NSIS 安装器，macOS 用 `.dmg`。
-产物当前未做代码签名：macOS 首次打开需右键「打开」，Windows 可能提示 SmartScreen。
+[Unreleased]: https://github.com/jean3690/GreyWork/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/jean3690/GreyWork/compare/v0.1.1...v0.2.0
 
 [Unreleased]: https://github.com/jean3690/GreyWork/compare/v0.1.1...HEAD
 [0.1.1]: https://github.com/jean3690/GreyWork/compare/v0.1.0...v0.1.1
