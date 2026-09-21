@@ -27,11 +27,11 @@ mod store_fs;
 mod sys;
 pub mod telegram;
 mod text;
+mod update;
 mod web_fetch;
 pub mod wechat;
 pub mod wecom;
 mod workspace_fs;
-mod update;
 mod worktree;
 
 use tauri::Manager;

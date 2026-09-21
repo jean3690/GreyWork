@@ -98,8 +98,11 @@ jobs:
       # 再编译 Rust 并打整包 —— 这是 web/rust 两个 job 都覆盖不到的「整包能否出来」。
       # 每平台只打一个 bundle，验证该平台 SDK/链接/打包管线齐全：
       # Linux 走 deb（AppImage 需现场下载 linuxdeploy，CI 不稳定），Windows 走 nsis，macOS 走 dmg。
+      # CI 只验「整包能否出来」，不签更新产物：createUpdaterArtifacts 开着会要求
+      # TAURI_SIGNING_PRIVATE_KEY，而冒烟矩阵没有（也不该依赖 release 机密——fork PR 读不到）。
+      # 用 -c 内联覆盖关掉更新产物，签名与 latest.json 只在 release.yml 里做。
       - name: Build (tauri bundle)
-        run: pnpm --filter @greywork/desktop tauri build --bundles ${{ matrix.bundle }}
+        run: pnpm --filter @greywork/desktop tauri build --bundles ${{ matrix.bundle }} -c '{"bundle":{"createUpdaterArtifacts":false}}'
 
   rust:
     name: Cargo Test (src-tauri)

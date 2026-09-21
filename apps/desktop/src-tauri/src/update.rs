@@ -11,8 +11,7 @@ use tauri_plugin_opener::OpenerExt;
 /// 本项目仓库（README / tauri.conf 的 homepage 同址）。
 const REPO_URL: &str = "https://github.com/jean3690/GreyWork";
 /// 最新 Release 的 GitHub API。
-const LATEST_RELEASE_API: &str =
-    "https://api.github.com/repos/jean3690/GreyWork/releases/latest";
+const LATEST_RELEASE_API: &str = "https://api.github.com/repos/jean3690/GreyWork/releases/latest";
 
 /// 一次「最新发布」的结果（版本号 + 发布说明），交给渲染端与当前版本比对后展示。
 #[derive(Debug, Serialize)]
@@ -76,7 +75,11 @@ pub async fn check_update() -> Result<LatestRelease, String> {
 
     Ok(LatestRelease {
         version,
-        name: json["name"].as_str().filter(|s| !s.is_empty()).unwrap_or(&tag).to_string(),
+        name: json["name"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .unwrap_or(&tag)
+            .to_string(),
         tag,
         notes: json["body"].as_str().unwrap_or_default().to_string(),
         url: json["html_url"]
@@ -84,7 +87,10 @@ pub async fn check_update() -> Result<LatestRelease, String> {
             .filter(|s| !s.is_empty())
             .unwrap_or(REPO_URL)
             .to_string(),
-        published_at: json["published_at"].as_str().unwrap_or_default().to_string(),
+        published_at: json["published_at"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
         prerelease: json["prerelease"].as_bool().unwrap_or(false),
     })
 }
