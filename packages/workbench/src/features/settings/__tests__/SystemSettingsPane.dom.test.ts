@@ -81,6 +81,6 @@ describe("SystemSettingsPane · 托盘区块", () => {
   it("浏览器预览态（没有宿主）：同样不给档位", async () => {
     const wrapper = await render("browser");
     expect(wrapper.find('[data-testid="tray-close-to-tray"]').exists()).toBe(false);
-    expect(wrapper.get('[data-testid="tray-unavailable"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="tray-unavailable"]').exists()).toBe(true);
   });
 });
