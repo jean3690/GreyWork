@@ -516,6 +516,11 @@ mod tests {
         std::fs::write(root.join("sub/deep.txt"), b"x").expect("写子目录文件");
 
         let canonical_root = std::fs::canonicalize(&root).expect("canonicalize 根目录");
+        // `list_dir` 返回前剥掉 Windows 的 `\\?\` 前缀（见 path_safety::strip_verbatim_prefix；
+        // 前端要的是可直接回传的普通形态），期望值同样按 strip 后的形态拼。
+        let client_root =
+            crate::path_safety::strip_verbatim_prefix(&canonical_root.to_string_lossy());
+        let client_root = Path::new(&client_root);
         let entries = list_dir(&access, &root.to_string_lossy()).expect("列举目录");
         let mut by_name: Vec<(String, String, Option<u64>, String)> = entries
             .into_iter()
@@ -529,16 +534,13 @@ mod tests {
                     "note.txt".to_string(),
                     "file".to_string(),
                     Some(5),
-                    canonical_root
-                        .join("note.txt")
-                        .to_string_lossy()
-                        .into_owned()
+                    client_root.join("note.txt").to_string_lossy().into_owned()
                 ),
                 (
                     "sub".to_string(),
                     "directory".to_string(),
                     None,
-                    canonical_root.join("sub").to_string_lossy().into_owned()
+                    client_root.join("sub").to_string_lossy().into_owned()
                 ),
             ]
         );

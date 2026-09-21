@@ -187,6 +187,21 @@ fn strip(raw: &Path) -> String {
     crate::path_safety::strip_verbatim_prefix(&raw.to_string_lossy())
 }
 
+/// 把 `home` 折成 canonical 形态。
+///
+/// `resolve_existing`（源路径）与 `WorkspaceFsAccess::new`（授权根）都在 **canonical**
+/// 形态上比对；worktree 层若拿**原始** `home` 去拼 `default_root` / `worktrees` 基目录，
+/// 两边就会错位 —— macOS 的 `/var` → `/private/var`、Windows 的 `\\?\` 前缀或 8.3 短名，
+/// 都会让同一个目录变成两个字符串。后果按严重度：
+/// - 「源就是数据根」判定失效 → 把数据根复制进它自己的子目录 → `copy_dir` 无限递归爆栈；
+/// - `release` 的 `starts_with` 守卫误拒合法快照（同一个目录被当成根外路径）。
+///
+/// `home` 一定存在（`home_dir()` / 测试临时目录），canonicalize 失败就原样返回，
+/// 退化为旧行为而不是 panic。
+fn canonical_home(home: &Path) -> PathBuf {
+    std::fs::canonicalize(home).unwrap_or_else(|_| home.to_path_buf())
+}
+
 /* ===== 核心逻辑（home 由命令/测试各自提供） ===== */
 
 fn provision(
@@ -198,7 +213,8 @@ fn provision(
     if !source.is_dir() {
         return Err("worktree 源必须是目录".into());
     }
-    let default_root = store_fs::default_root(home)?;
+    let home = canonical_home(home);
+    let default_root = store_fs::default_root(&home)?;
     let worktrees_base = default_root.join(WORKTREES_SUB_DIR);
     // 数据根本身没有可隔离的工作区：直通，不做任何复制/目录创建。
     if crate::path_safety::same_path(&source, &default_root) {
@@ -210,6 +226,14 @@ fn provision(
     }
 
     let target = deterministic_target(&worktrees_base, &source)?;
+    // 快照目录绝不能落在源目录内部：源恰好是数据根时（`~/.greyWork` 内有 `worktrees/`），
+    // `copy_dir` 会顺着刚建出来的目标目录一路递归到爆栈。这条不变量挡在复制之前。
+    if target.starts_with(&source) {
+        return Err(format!(
+            "快照目录会落在源目录内部，无法隔离: {}",
+            target.display()
+        ));
+    }
     let stripped = strip(&source);
 
     // 幂等：已 provision 过就直接复用（目录名对同一 source 确定）。
@@ -275,7 +299,8 @@ fn provision(
 
 fn release(access: &WorkspaceFsAccess, home: &Path, root_raw: &str) -> Result<(), String> {
     let root = access.resolve_existing(root_raw)?;
-    let default_root = store_fs::default_root(home)?;
+    let home = canonical_home(home);
+    let default_root = store_fs::default_root(&home)?;
     let worktrees_base = default_root.join(WORKTREES_SUB_DIR);
     // 只允许回收基目录之下的快照，绝不删除数据根 / 用户目录本身。
     if !root.starts_with(&worktrees_base) {
@@ -335,7 +360,8 @@ fn release(access: &WorkspaceFsAccess, home: &Path, root_raw: &str) -> Result<()
 /// 只认写过 provision 标记的目录：基目录里没有标记的东西（用户手放的、上次崩溃留下的
 /// 半成品）不列 —— 列出来也只会给 UI 一个 `release` 会拒收的条目。
 fn list(home: &Path) -> Result<Vec<WorktreeEntryDto>, String> {
-    let worktrees_base = store_fs::default_root(home)?.join(WORKTREES_SUB_DIR);
+    let home = canonical_home(home);
+    let worktrees_base = store_fs::default_root(&home)?.join(WORKTREES_SUB_DIR);
     if !worktrees_base.is_dir() {
         return Ok(Vec::new()); // 一次都没派过：空列表，不是错误
     }
@@ -419,7 +445,9 @@ mod tests {
 
     /// 授权根是 home：源项目放 home 下，worktree 目标在 home/.greyWork 下，都覆盖在根内。
     fn home_fixture(tag: &str) -> (PathBuf, WorkspaceFsAccess) {
-        let home = temp_dir(tag);
+        // 与宿主同形：授权根与 worktree 层都在 canonical 形态上比对（macOS 的 `/var` 是
+        // 符号链接、Windows `canonicalize` 会加 `\\?\`），测试也用 canonical 的 home 才一致。
+        let home = canonical_home(&temp_dir(tag));
         let access = WorkspaceFsAccess::new(&home, home.join("gw-worktree-access-test.json"))
             .expect("创建授权状态");
         (home, access)
@@ -483,8 +511,11 @@ mod tests {
         assert!(target.join("sub/y.txt").is_file());
         assert_eq!(
             target,
-            home.join(".greyWork/worktrees")
-                .join(deterministic_target_name(&root).unwrap())
+            PathBuf::from(strip(
+                &home
+                    .join(".greyWork/worktrees")
+                    .join(deterministic_target_name(&root).unwrap())
+            ))
         );
         // 幂等：同一 source 返回同一目录
         let again = provision(&access, &home, &root.to_string_lossy()).expect("再次 provision");
@@ -545,12 +576,13 @@ mod tests {
     /// 数据根直通：不给 ~/.greyWork 造分身，且不可被 release 删除。
     #[test]
     fn default_root_passes_through() {
-        let home = temp_dir("direct-home");
+        let home = canonical_home(&temp_dir("direct-home"));
         let base = store_fs::default_root(&home).expect("default root");
         let access = WorkspaceFsAccess::new(&base, base.join("gw-access.json")).expect("授权");
         let dto = provision(&access, &home, &base.to_string_lossy()).expect("provision");
         assert_eq!(dto.kind, "direct");
-        assert_eq!(dto.root, base.to_string_lossy());
+        // 直通返回源的 strip 形态，与 provision 其余分支的返回值同形。
+        assert_eq!(dto.root, strip(&base));
         // 直通不落快照，故不出现在列表里（WorktreeEntryDto 文档承诺的不变量）。
         assert!(list(&home).expect("list").is_empty());
         assert!(release(&access, &home, &base.to_string_lossy()).is_err());
