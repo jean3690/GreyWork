@@ -259,15 +259,13 @@ fn provision(
         .map_err(|error| format!("创建 worktrees 基目录失败: {error}"))?;
 
     // git 仓库走真实 worktree；空仓库 / add 失败一律回落复制兜底（kind="copy"）。
+    // 交给 git 的路径要先 strip：Windows 上 `canonicalize` 带来的 `\\?\` 前缀 git 不认，
+    // 会让 `worktree add` 失败、静默回落成 copy（snapshot 仍是快照，但不是真 worktree）。
+    let target_plain = strip(&target);
     let kind = if is_git_repo(&source) {
         match run_git(
-            &source,
-            &[
-                "worktree",
-                "add",
-                "--detach",
-                target.to_str().unwrap_or_default(),
-            ],
+            Path::new(&stripped),
+            &["worktree", "add", "--detach", target_plain.as_str()],
         ) {
             Ok(_) => "git",
             Err(error) => {
@@ -317,9 +315,12 @@ fn release(access: &WorkspaceFsAccess, home: &Path, root_raw: &str) -> Result<()
         let removed_via_git = marker
             .as_ref()
             .map(|marker| {
-                let source = Path::new(&marker.source);
+                // 与 provision 同一条纪律：交给 git 的路径先 strip 掉 `\\?\`。
+                let source_plain = strip(Path::new(&marker.source));
+                let source = Path::new(&source_plain);
                 if source.is_dir() && is_git_repo(source) {
                     // 必须在仓库内（源）执行，git 不允许移除「当前工作树」。
+                    let target_plain = strip(&root);
                     run_git(
                         source,
                         &[
@@ -327,7 +328,7 @@ fn release(access: &WorkspaceFsAccess, home: &Path, root_raw: &str) -> Result<()
                             "remove",
                             "--force",
                             "--force",
-                            root.to_str().unwrap_or_default(),
+                            target_plain.as_str(),
                         ],
                     )
                     .is_ok()
