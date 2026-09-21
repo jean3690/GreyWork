@@ -8,6 +8,17 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **全局右键菜单**：标题栏、侧栏导航、会话历史行、文件树、预览标签、预览空态、活动带标签、
+  聊天消息各有贴合上下文的条目；输入框补上剪切 / 复制 / 粘贴 / 全选（自绘菜单会拦掉原生
+  菜单，不补就没有编辑动作）。
+
+### 修复
+
+- 文件操作失败提示（用系统应用打开 / 在文件夹中显示）此前在文件树、预览侧栏、老格式
+  Office 查看器里各硬编码一份中文，收口到 `fileOp.*` 并补齐中英文。
+
 ## [0.2.0] - 2026-09-21
 
 ### 新增
@@ -149,7 +160,5 @@
 **安装包**：Linux 用 `.deb`（`sudo dpkg -i` 或 `apt install ./`），Windows 用 NSIS 安装器，macOS 用 `.dmg`。
 [Unreleased]: https://github.com/jean3690/GreyWork/compare/v0.2.0...HEAD
 [0.2.0]: https://github.com/jean3690/GreyWork/compare/v0.1.1...v0.2.0
-
-[Unreleased]: https://github.com/jean3690/GreyWork/compare/v0.1.1...HEAD
 [0.1.1]: https://github.com/jean3690/GreyWork/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/jean3690/GreyWork/releases/tag/v0.1.0

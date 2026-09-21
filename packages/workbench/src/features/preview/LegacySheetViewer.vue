@@ -70,8 +70,8 @@ async function openExternal(): Promise<void> {
     notify({
       kind: "warning",
       key: "legacy-sheet-open-external",
-      title: t("preview.xls.openFailed"),
-      detail: t("preview.xls.openFailedDetail", { path }),
+      title: t("fileOp.openFailed"),
+      detail: t("fileOp.openFailedDetail", { path }),
     });
   }
 }

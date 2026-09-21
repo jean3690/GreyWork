@@ -29,9 +29,9 @@ import { i18n } from "@/i18n";
 import { hostOs } from "@/lib/host-platform";
 import { usePreviewStore } from "@/stores/preview";
 
-async function mountTitlebar() {
+async function mountTitlebar(props: Record<string, unknown> = {}) {
   // 布局指示器用 useI18n() 取模式名，所以要装 i18n 插件
-  const wrapper = mount(Titlebar, { props: { collapsed: false }, global: { plugins: [i18n] } });
+  const wrapper = mount(Titlebar, { props: { collapsed: false, ...props }, global: { plugins: [i18n] } });
   await flushPromises();
   return wrapper;
 }
@@ -151,6 +151,74 @@ describe("标题栏 macOS 适配", () => {
     hostOs.value = "linux";
     const linux = await mountTitlebar();
     expect(linux.getComponent(Hint).props("text")).toContain("Ctrl+K");
+  });
+});
+
+describe("标题栏侧栏开合键", () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    hostOs.value = null;
+    vi.stubGlobal("__TAURI_INTERNALS__", {});
+  });
+
+  afterEach(() => {
+    hostOs.value = null;
+    vi.unstubAllGlobals();
+  });
+
+  it("桌面端不渲染 —— 侧栏顶部的品牌键已经在做同一件事，不重复摆两颗", async () => {
+    const wrapper = await mountTitlebar();
+    expect(wrapper.find('[data-testid="titlebar-sider-toggle"]').exists()).toBe(false);
+  });
+
+  it("移动端渲染，点击 emit toggleSider，标签随折叠态在展开/折叠之间切换", async () => {
+    const wrapper = await mountTitlebar({ collapsed: true, showSiderToggle: true });
+    const button = wrapper.get('[data-testid="titlebar-sider-toggle"]');
+    expect(button.attributes("aria-label")).toBe("展开侧栏");
+
+    await button.trigger("click");
+    expect(wrapper.emitted("toggleSider")).toHaveLength(1);
+
+    await wrapper.setProps({ collapsed: false });
+    expect(wrapper.get('[data-testid="titlebar-sider-toggle"]').attributes("aria-label")).toBe("折叠侧栏");
+  });
+});
+
+// 窗口三键紧挨高频按钮，误点「关闭」的代价最高，所以组里加一条竖线把它隔开。
+// 隔离线靠 order 在两个平台各贴正确的一侧：非 mac 在三键左侧，mac 在三键右侧。
+describe("标题栏窗口控制键隔离线", () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    hostOs.value = null;
+    vi.stubGlobal("__TAURI_INTERNALS__", {});
+  });
+
+  afterEach(() => {
+    hostOs.value = null;
+    vi.unstubAllGlobals();
+  });
+
+  it("非 mac：隔离线排在最小化之前（挡住左侧的活动面板开关）", async () => {
+    const wrapper = await mountTitlebar();
+    const divider = wrapper.get('[data-testid="win-controls-divider"]');
+
+    expect(wrapper.get('[data-testid="win-controls"]').element.firstElementChild).toBe(divider.element);
+    expect(divider.classes()).not.toContain("order-last");
+  });
+
+  it("mac：隔离线靠 order-last 排到三键之后（挡住右侧的搜索键）", async () => {
+    hostOs.value = "macos";
+    const wrapper = await mountTitlebar();
+    const divider = wrapper.get('[data-testid="win-controls-divider"]');
+
+    expect(divider.classes()).toContain("order-last");
+  });
+
+  it("浏览器态没有窗口三键，隔离线一并消失", async () => {
+    vi.unstubAllGlobals();
+    const wrapper = await mountTitlebar();
+
+    expect(wrapper.find('[data-testid="win-controls-divider"]').exists()).toBe(false);
   });
 });
 

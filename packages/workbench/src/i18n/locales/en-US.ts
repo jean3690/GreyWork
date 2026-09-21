@@ -30,6 +30,85 @@ export const enUS: MessageSchema = {
   titlebar: {
     github: "View this project on GitHub",
     update: "Check for updates",
+    search: "Search",
+    /* Tooltip for the search key; {key} is filled with ⌘K / Ctrl+K by Titlebar. */
+    searchHint: "Search sessions and features ({key})",
+    /* aria-labels for the panel toggles: one wording per current state. */
+    expandSidebar: "Expand sidebar",
+    collapseSidebar: "Collapse sidebar",
+    expandPreview: "Expand preview panel",
+    collapsePreview: "Collapse preview panel",
+    expandWorkspace: "Expand workspace panel",
+    collapseWorkspace: "Collapse workspace panel",
+    expandActivity: "Expand activity panel",
+    collapseActivity: "Collapse activity panel",
+    noWorkspace: "No workspace bound",
+  },
+  /* Context-menu labels: grouped by region, mirroring lib/context-menu.ts builders. */
+  contextMenu: {
+    fileTree: {
+      open: "Open",
+      openExternal: "Open with system app",
+      reveal: "Show in folder",
+      copyPath: "Copy path",
+      refresh: "Refresh file tree",
+    },
+    previewTab: {
+      activate: "Switch to this tab",
+      reload: "Reload",
+      openExternal: "Open with system app",
+      reveal: "Show in folder",
+      copyPath: "Copy path",
+      close: "Close tab",
+      closeOthers: "Close other tabs",
+      closeAll: "Close all tabs",
+    },
+    previewEmpty: {
+      openFiles: "Open file tree",
+      fetchWeb: "Fetch web page",
+      closeAll: "Close all previews",
+    },
+    historyRow: {
+      rename: "Rename conversation",
+      copyTitle: "Copy title",
+      delete: "Delete conversation",
+    },
+    message: {
+      copyBody: "Copy text",
+    },
+    composer: {
+      cut: "Cut",
+      copy: "Copy",
+      paste: "Paste",
+      pasteFailed: "Could not read clipboard text; use Ctrl/Cmd+V instead",
+      selectAll: "Select all",
+    },
+    titlebar: {
+      toggleSidebar: "Toggle sidebar",
+      togglePreview: "Toggle preview panel",
+      toggleWorkspace: "Toggle workspace panel",
+      toggleActivity: "Toggle activity panel",
+      newChat: "New conversation",
+      openSettings: "Open settings",
+    },
+    siderNav: {
+      newChat: "New conversation",
+      openSettings: "Open settings",
+      collapseSidebar: "Collapse sidebar",
+    },
+    activityTab: {
+      activate: "Switch to this panel",
+      collapse: "Collapse activity panel",
+    },
+  },
+  /* Notices for a failed "open with system app" / "show in folder". Consumers are not only
+     the context menus (preview viewers use them too), hence a group of their own. {path} is
+     filled by the caller. */
+  fileOp: {
+    openFailed: "Could not open with a system app",
+    openFailedDetail: "{path} may have been moved or deleted, or no app on this system can open it.",
+    revealFailed: "Could not show in folder",
+    revealFailedDetail: "{path} may have been moved or deleted.",
   },
   update: {
     title: "Check for updates",
@@ -138,8 +217,6 @@ export const enUS: MessageSchema = {
       readFailed: "Could not parse this workbook: {detail}",
       fallback: "Use the button below to open the original file with a system app.",
       openExternal: "Open with system app",
-      openFailed: "Could not open with the system app",
-      openFailedDetail: "{path} may have been moved or deleted, or no app on this system can open it.",
     },
     analysis: {
       noData: "No data to analyze",

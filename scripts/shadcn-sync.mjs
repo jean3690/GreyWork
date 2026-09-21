@@ -76,6 +76,17 @@ const RULES = [
     },
   },
   {
+    id: "destructive-foreground",
+    describe: "destructive-foreground → destructive（项目只定义 --destructive，没有 foreground 变体）",
+    apply(source) {
+      // shadcn 新版把破坏性条目的文字色写成 text-destructive-foreground，但 tailwind.css
+      // 只映射了 --color-destructive；不收敛的话这类名会解析成空工具类（颜色静默失效）。
+      // dropdown-menu 的既有写法就是 text-destructive，这里对齐同一约定。
+      const pattern = /destructive-foreground/g;
+      return { text: source.replace(pattern, "destructive"), count: countMatches(source, pattern) };
+    },
+  },
+  {
     id: "tooltip-skin",
     only: /tooltip\/TooltipContent\.vue$/,
     describe: "TooltipContent 收成项目紧凑规格（popover 底 + line-2 边 + 320px 上限 + 去箭头）",

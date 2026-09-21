@@ -21,16 +21,23 @@ import FileTree from "@/features/preview/FileTree.vue";
 import GitChangePanel from "@/features/preview/GitChangePanel.vue";
 import PreviewSurface from "@/features/preview/PreviewSurface.vue";
 import WebFetchDialog from "@/features/preview/WebFetchDialog.vue";
+import ContextMenuRegion from "@/features/shared/ContextMenuRegion.vue";
 import { DEFAULT_PREVIEW_PANEL_PX, MAX_PREVIEW_PANEL_PX, MIN_PREVIEW_PANEL_PX, PREVIEW_TAB_BAR_HEIGHT } from "@/lib/layout";
 import { openWithSystemApp, resolveTabDiskPath } from "@/lib/open-external";
+import { revealInFolder } from "@/lib/reveal";
+import { copyText } from "@/lib/clipboard";
+import { buildPreviewEmptyItems, buildPreviewTabItems, type ContextMenuItem, type ContextTarget } from "@/lib/context-menu";
 import { usePreviewBridge } from "@/lib/preview-bridge";
 import { useResizableSplit } from "@/lib/resizable-split";
 import { usePreviewStore, type PreviewTab } from "@/stores/preview";
 import { notify } from "@/stores/notice";
+import { i18n } from "@/i18n";
 
 type Section = "files" | "preview" | "git";
 
 const preview = usePreviewStore();
+/** 外壳组件不装 i18n 插件也要能渲染（测试直接 mount 本组件），故用全局实例而非 useI18n。 */
+const t = i18n.global.t;
 
 // 事件订阅挂在组件作用域内，随卸载解绑（详见 preview-bridge.ts）。
 usePreviewBridge();
@@ -63,17 +70,67 @@ const externalPath = computed(() => {
   return resolveTabDiskPath(tab);
 });
 
-async function openExternal(): Promise<void> {
-  const path = externalPath.value;
+/** 用系统应用打开；缺省取当前 tab 的磁盘孪生路径（标题栏按钮走缺省，右键菜单传具体路径）。 */
+async function openExternal(path = externalPath.value): Promise<void> {
   if (!path) return;
-  if (!(await openWithSystemApp(path))) {
-    notify({
-      kind: "warning",
-      key: "preview-open-external",
-      title: "无法用系统应用打开",
-      detail: `${path} 可能已被移动或删除，也可能是系统里没有能打开它的程序。`,
-    });
-  }
+  if (await openWithSystemApp(path)) return;
+  notify({
+    kind: "warning",
+    key: "preview-open-external",
+    title: t("fileOp.openFailed"),
+    detail: t("fileOp.openFailedDetail", { path }),
+  });
+}
+
+async function revealPath(path: string): Promise<void> {
+  if (await revealInFolder(path)) return;
+  notify({
+    kind: "warning",
+    key: "preview-reveal",
+    title: t("fileOp.revealFailed"),
+    detail: t("fileOp.revealFailedDetail", { path }),
+  });
+}
+
+/* ===== 右键菜单 =====
+ * 标签条与预览空态是两个**兄弟** root（各自只包自己那层元素）：区域之间不得嵌套，
+ * 否则 reka 的 trigger 冒泡会让内外两个菜单同时打开（见 lib/context-menu.ts 顶部）。
+ * 预览内容区（PreviewSurface）刻意不包 —— 它的右键属于第三方查看器（如 Univer 表格）。 */
+function tabById(id: string): PreviewTab | undefined {
+  return preview.tabs.find((tab) => tab.id === id);
+}
+
+function diskPathOf(id: string): string | null {
+  const tab = tabById(id);
+  return tab ? resolveTabDiskPath(tab) : null;
+}
+
+function buildTabMenu(target: ContextTarget | null): ContextMenuItem[] {
+  return buildPreviewTabItems(target, t, {
+    activate: (id) => preview.activate(id),
+    reload: (id) => {
+      const tab = tabById(id);
+      if (tab) preview.reload(tab.path);
+    },
+    close: (id) => preview.close(id),
+    closeOthers: (id) => preview.closeOthers(id),
+    closeAll: () => preview.closeAll(),
+    copyPath: (text) => void copyText(text),
+    openExternal: (path) => void openExternal(path),
+    reveal: (path) => void revealPath(path),
+    diskPath: diskPathOf,
+    displayPath: (id) => diskPathOf(id) ?? tabById(id)?.path ?? "",
+    hasMultiple: preview.tabs.length > 1,
+  });
+}
+
+function buildEmptyMenu(): ContextMenuItem[] {
+  return buildPreviewEmptyItems(t, {
+    openFiles: () => (section.value = "files"),
+    fetchWeb: () => (fetchDialogOpen.value = true),
+    closeAll: () => preview.closeAll(),
+    hasTabs: preview.tabs.length > 0,
+  });
 }
 
 /** 双击把手复位到默认宽度：比「拖回大概位置」可靠，也是常见的分隔条约定。 */
@@ -248,70 +305,76 @@ const sectionClass = (active: boolean): string =>
 
     <template v-else>
       <!-- tab 条：左侧 tab 溢出横向滚动；支持中键关闭与拖拽重排 -->
-      <div v-if="preview.tabs.length" class="flex h-7 shrink-0 items-center gap-1 overflow-x-auto border-b border-line ps-4 pe-1">
-        <div
-          v-for="(tab, index) in preview.tabs"
-          :key="tab.id"
-          data-testid="preview-tab"
-          draggable="true"
-          class="flex h-6 shrink-0 items-center gap-1 rounded-[6px] px-1.5 text-[11.5px] transition-colors"
-          :class="[
-            tab.id === preview.activeId ? 'bg-panel text-foreground' : 'text-dim hover:text-foreground',
-            draggingTabId && draggingTabId !== tab.id ? 'opacity-60' : '',
-          ]"
-          @dragstart="onTabDragStart($event, tab)"
-          @dragover.prevent
-          @drop="onTabDrop($event, index)"
-          @dragend="draggingTabId = null"
-          @auxclick="onTabAuxclick($event, tab.id)"
-        >
-          <Hint :text="tab.path" multiline>
-            <button
-              type="button"
-              class="max-w-[160px] cursor-pointer truncate focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
-              :aria-label="`查看 ${tab.name}`"
-              :aria-current="tab.id === preview.activeId ? 'true' : undefined"
-              @click="preview.activate(tab.id)"
-            >
-              {{ tab.name }}
-            </button>
-          </Hint>
-          <button
-            type="button"
-            data-testid="preview-tab-close"
-            class="grid size-4 cursor-pointer place-items-center rounded-[4px] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
-            :aria-label="`关闭 ${tab.name}`"
-            @click.stop="preview.close(tab.id)"
+      <ContextMenuRegion v-if="preview.tabs.length" :build="buildTabMenu">
+        <div class="flex h-7 shrink-0 items-center gap-1 overflow-x-auto border-b border-line ps-4 pe-1">
+          <div
+            v-for="(tab, index) in preview.tabs"
+            :key="tab.id"
+            data-testid="preview-tab"
+            data-ctx="preview-tab"
+            :data-tab-id="tab.id"
+            draggable="true"
+            class="flex h-6 shrink-0 items-center gap-1 rounded-[6px] px-1.5 text-[11.5px] transition-colors"
+            :class="[
+              tab.id === preview.activeId ? 'bg-panel text-foreground' : 'text-dim hover:text-foreground',
+              draggingTabId && draggingTabId !== tab.id ? 'opacity-60' : '',
+            ]"
+            @dragstart="onTabDragStart($event, tab)"
+            @dragover.prevent
+            @drop="onTabDrop($event, index)"
+            @dragend="draggingTabId = null"
+            @auxclick="onTabAuxclick($event, tab.id)"
           >
-            <Icon name="close" :size="10" />
-          </button>
-        </div>
-      </div>
-
-      <div class="min-h-0 flex-1 overflow-hidden">
-        <PreviewSurface v-if="preview.activeTab" :tab="preview.activeTab" />
-        <div v-else class="flex size-full flex-col items-center justify-center gap-2 px-4 text-center">
-          <span class="text-[12px] text-dim2">暂无预览内容</span>
-          <span class="text-[11px] text-dim2">从「文件」里点一个文件，或等产物生成后自动打开</span>
-          <div class="mt-1 flex items-center gap-2">
+            <Hint :text="tab.path" multiline>
+              <button
+                type="button"
+                class="max-w-[160px] cursor-pointer truncate focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+                :aria-label="`查看 ${tab.name}`"
+                :aria-current="tab.id === preview.activeId ? 'true' : undefined"
+                @click="preview.activate(tab.id)"
+              >
+                {{ tab.name }}
+              </button>
+            </Hint>
             <button
               type="button"
-              data-testid="preview-empty-files"
-              class="cursor-pointer rounded-[6px] border border-line-2 bg-panel px-2.5 py-1 text-[11.5px] text-dim transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
-              @click="section = 'files'"
+              data-testid="preview-tab-close"
+              class="grid size-4 cursor-pointer place-items-center rounded-[4px] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+              :aria-label="`关闭 ${tab.name}`"
+              @click.stop="preview.close(tab.id)"
             >
-              打开文件树
-            </button>
-            <button
-              type="button"
-              data-testid="preview-empty-fetch"
-              class="cursor-pointer rounded-[6px] border border-line-2 bg-panel px-2.5 py-1 text-[11.5px] text-dim transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
-              @click="fetchDialogOpen = true"
-            >
-              抓取网页
+              <Icon name="close" :size="10" />
             </button>
           </div>
         </div>
+      </ContextMenuRegion>
+
+      <div class="min-h-0 flex-1 overflow-hidden">
+        <PreviewSurface v-if="preview.activeTab" :tab="preview.activeTab" />
+        <ContextMenuRegion v-else :build="buildEmptyMenu">
+          <div data-testid="preview-empty" class="flex size-full flex-col items-center justify-center gap-2 px-4 text-center">
+            <span class="text-[12px] text-dim2">暂无预览内容</span>
+            <span class="text-[11px] text-dim2">从「文件」里点一个文件，或等产物生成后自动打开</span>
+            <div class="mt-1 flex items-center gap-2">
+              <button
+                type="button"
+                data-testid="preview-empty-files"
+                class="cursor-pointer rounded-[6px] border border-line-2 bg-panel px-2.5 py-1 text-[11.5px] text-dim transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+                @click="section = 'files'"
+              >
+                打开文件树
+              </button>
+              <button
+                type="button"
+                data-testid="preview-empty-fetch"
+                class="cursor-pointer rounded-[6px] border border-line-2 bg-panel px-2.5 py-1 text-[11.5px] text-dim transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+                @click="fetchDialogOpen = true"
+              >
+                抓取网页
+              </button>
+            </div>
+          </div>
+        </ContextMenuRegion>
       </div>
     </template>
 

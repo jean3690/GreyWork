@@ -14,6 +14,16 @@ import AcpSessionConfig from "@/features/conversation/AcpSessionConfig.vue";
 import AgentProviderBar from "@/features/conversation/AgentProviderBar.vue";
 import Icon from "@/features/shared/Icon.vue";
 import Hint from "@/features/shared/Hint.vue";
+import ContextMenuRegion from "@/features/shared/ContextMenuRegion.vue";
+import {
+  buildComposerItems,
+  buildMessageItems,
+  type ComposerMenuActions,
+  type ContextMenuItem,
+  type ContextTarget,
+} from "@/lib/context-menu";
+import { copyText } from "@/lib/clipboard";
+import { copySelection, cutSelection, hasTextSelection, pasteInto, selectAllText } from "@/lib/textarea-actions";
 import ConversationMessage from "@/features/conversation/ConversationMessage.vue";
 import SessionStatusIndicator from "@/features/shared/SessionStatusIndicator.vue";
 import PermissionCard from "@/features/conversation/PermissionCard.vue";
@@ -242,181 +252,215 @@ const PERM_TIER_LABELS: Record<PermTier, string> = {
   full: "完全访问",
 };
 const permissionTierLabel = computed(() => PERM_TIER_LABELS[settings.permissionTier] ?? settings.permissionTier);
+
+/* ===== 右键菜单 =====
+ * 整页只挂一个 root（<section> 没有 ref，可安全当 trigger）：
+ * - 消息 article 标 data-ctx="message"，按 id 回查正文；
+ * - 输入框标 data-ctx="composer"，提供剪切/复制/粘贴/全选。
+ *
+ * 刻意**不**包 scrollEl / textarea：reka 的 asChild 会丢弃子元素自身的 ref
+ * （reka Primitive/Slot.js 里 `delete props.ref`），包了会让 scrollEl / textareaEl 变 null，
+ * 钉底滚动与斜杠命令都会失效。单 root 同时也避免了嵌套 trigger 双开。
+ */
+function composerActions(): ComposerMenuActions {
+  const el = textareaEl.value;
+  return {
+    cut: () => void cutSelection(el),
+    copy: () => void copySelection(el),
+    paste: () => void pasteInto(el),
+    selectAll: () => selectAllText(el),
+    hasSelection: hasTextSelection(el),
+  };
+}
+
+function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
+  if (target?.ctx === "message") {
+    const id = target.el.dataset.messageId;
+    const message = messages.value.find((candidate) => candidate.id === id);
+    return buildMessageItems(message?.content ?? null, t, { copyBody: (text) => void copyText(text) });
+  }
+  if (target?.ctx === "composer") return buildComposerItems(t, composerActions());
+  // 页头 / 空白处：不弹自定义菜单（同时把原生菜单拦掉）。
+  return [];
+}
 </script>
 
 <template>
-  <section class="flex h-full min-h-0 flex-col">
-    <div class="flex h-[46px] shrink-0 items-center gap-2 border-b border-line-2 bg-panel px-3">
-      <button
-        class="grid size-7 cursor-pointer place-items-center rounded-[6px] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
-        aria-label="返回"
-        @click="goBack"
-      >
-        <Icon name="arrow-left" :size="16" />
-      </button>
-      <div class="min-w-0 flex-1">
-        <div class="truncate text-[13px] font-medium text-foreground">{{ session?.title ?? "新对话" }}</div>
-        <div class="truncate text-[10px] text-dim2">{{ workspaceName }}</div>
-      </div>
-      <div class="flex shrink-0 items-center gap-1.5">
-        <SessionStatusIndicator :status="status" chip />
-        <span class="flex h-5 items-center gap-1 rounded-full border border-line bg-panel-2 px-2 text-[10.5px] text-dim">
-          <Icon name="robot" :size="10" />
-          {{ backendLabel }}
-        </span>
-        <span class="flex h-5 items-center gap-1 rounded-full border border-line bg-panel-2 px-2 text-[10.5px] text-dim">
-          <Icon name="shield" :size="10" />
-          {{ permissionTierLabel }}
-        </span>
-        <Hint v-if="agent.acpMcpServers.length || agent.acpMcpSkipped.length" :text="mcpChipTitle" multiline>
-          <span
-            class="flex h-5 items-center gap-1 rounded-full border border-line px-2 text-[10.5px]"
-            :class="agent.acpMcpServers.length ? 'bg-cyan/10 text-cyan' : 'bg-panel-2 text-dim2'"
-            data-testid="session-mcp-chip"
-          >
-            <Icon name="earth" :size="10" />
-            {{ mcpChipLabel }}
-          </span>
-        </Hint>
+  <ContextMenuRegion :build="buildMenu">
+    <section class="flex h-full min-h-0 flex-col">
+      <div class="flex h-[46px] shrink-0 items-center gap-2 border-b border-line-2 bg-panel px-3">
         <button
-          v-if="turnActive"
-          type="button"
-          class="flex h-6 cursor-pointer items-center gap-1 rounded-[6px] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
-          @click="stop"
+          class="grid size-7 cursor-pointer place-items-center rounded-[6px] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          aria-label="返回"
+          @click="goBack"
         >
-          <Icon name="close-one" :size="11" />
-          停止
+          <Icon name="arrow-left" :size="16" />
         </button>
-      </div>
-    </div>
-
-    <div ref="scrollEl" class="min-h-0 flex-1 overflow-y-auto" @scroll.passive="onScroll">
-      <!-- 短会话：普通整列渲染 -->
-      <div v-if="messages.length && !useVirtual" class="mx-auto flex w-full max-w-[860px] flex-col gap-4 px-4 py-6 sm:px-6">
-        <ConversationMessage v-for="message in messages" :key="message.id" :message="message" :thread-id="sessionId" />
-      </div>
-      <!-- 长会话：虚拟窗口渲染（动态测量高度，钉底跟流） -->
-      <div
-        v-else-if="messages.length"
-        class="relative mx-auto w-full max-w-[860px] px-4 sm:px-6"
-        :style="{ height: `${virtualTotalHeight}px` }"
-      >
-        <div
-          v-for="row in virtualizerRef.getVirtualItems()"
-          :key="String(row.key)"
-          :ref="measureRow"
-          :data-index="row.index"
-          class="absolute left-0 top-0 w-full pb-4"
-          :style="{ transform: `translateY(${row.start + V_PAD_TOP}px)` }"
-        >
-          <ConversationMessage :message="messages[row.index]" :thread-id="sessionId" />
+        <div class="min-w-0 flex-1">
+          <div class="truncate text-[13px] font-medium text-foreground">{{ session?.title ?? "新对话" }}</div>
+          <div class="truncate text-[10px] text-dim2">{{ workspaceName }}</div>
         </div>
-      </div>
-      <!-- 空会话引导 -->
-      <div
-        v-else
-        class="mx-auto flex h-full w-full max-w-[860px] flex-col items-center justify-center gap-2 px-4 py-16 text-center sm:px-6"
-      >
-        <span class="grid size-10 place-items-center rounded-[12px] bg-panel-2 text-dim">
-          <Icon name="message" :size="18" />
-        </span>
-        <p class="text-[13px] font-medium text-foreground">{{ t("chat.composer.emptyTitle") }}</p>
-        <p class="text-[12px] text-dim2">{{ t("chat.composer.emptyHint") }}</p>
-      </div>
-    </div>
-
-    <div class="shrink-0 border-t border-line-2 bg-panel px-4 py-3 sm:px-6">
-      <div class="mx-auto flex w-full max-w-[860px] flex-col gap-2.5">
-        <PermissionCard />
-        <AgentProviderBar />
-        <div
-          ref="attachEl"
-          data-attachment-dropzone
-          data-testid="composer-card"
-          class="relative flex w-full flex-col gap-2 rounded-[16px] border bg-panel-2 p-3 shadow-[0_8px_24px_rgba(0,0,0,0.1)] transition-[border-color,box-shadow] focus-within:border-cyan/50 focus-within:shadow-[0_10px_28px_rgba(0,0,0,0.14)]"
-          :class="attachmentDragging ? 'border-cyan ring-2 ring-cyan/40' : 'border-line-2'"
-          @dragover="onComposerDragOver"
-          @dragleave="onComposerDragLeave"
-          @drop="onComposerDrop"
-        >
-          <AttachmentTray :items="attachmentItems" @remove="removeAttachment" />
-          <textarea
-            ref="textareaEl"
-            v-model="draft"
-            rows="3"
-            role="combobox"
-            aria-autocomplete="list"
-            :aria-expanded="slashOpen"
-            :aria-controls="slashOpen ? 'slash-command-menu' : undefined"
-            :aria-activedescendant="slashActiveOptionId"
-            class="min-h-[76px] w-full resize-none bg-transparent px-2 py-1 text-[14px] leading-relaxed text-foreground outline-none placeholder:text-dim"
-            :placeholder="t('chat.composer.placeholderThread')"
-            :aria-label="t('chat.composer.ariaLabel')"
-            @keydown="onKeydown"
-            @blur="dismissSlashMenu"
-            @paste="onComposerPaste"
-          />
-          <div class="flex min-w-0 flex-wrap items-center gap-1.5 border-t border-line/70 px-2 pt-2" data-testid="composer-config-row">
-            <span v-if="agent.routeToAcp" class="mr-0.5 text-[10px] font-medium tracking-[0.08em] text-dim2">会话配置</span>
-            <AcpSessionConfig />
-          </div>
-          <div class="flex items-center justify-between gap-2" data-testid="composer-action-row">
-            <div class="flex min-w-0 items-center gap-1.5">
-              <Hint :text="imagesAllowed ? t('chat.uploadFile') : t('chat.attachImagesUnsupported')" multiline>
-                <button
-                  type="button"
-                  data-testid="composer-attach"
-                  class="grid size-6 shrink-0 cursor-pointer place-items-center rounded-[6px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40"
-                  :disabled="turnActive || attachmentsFull"
-                  :aria-label="t('chat.uploadFile')"
-                  @click="pickAttachmentFiles"
-                >
-                  <Icon name="plus" :size="14" />
-                </button>
-              </Hint>
-              <span class="shrink-0 text-[11px] text-dim2">
-                {{ turnActive ? t("chat.composer.processing") : t("chat.composer.ready") }}
-              </span>
-              <Hint v-if="settings.planMode" :text="t('chat.planModeTitle')" multiline>
-                <button
-                  type="button"
-                  data-testid="composer-plan-chip"
-                  class="flex h-5 shrink-0 cursor-pointer items-center rounded-full border border-line bg-panel px-2 text-[10.5px] text-dim transition-colors hover:text-foreground"
-                  @click="settings.planMode = false"
-                >
-                  {{ t("chat.planMode") }}
-                </button>
-              </Hint>
-              <Hint v-if="chat.speedBoost" :text="t('chat.speedTitle')" multiline>
-                <button
-                  type="button"
-                  data-testid="composer-speed-chip"
-                  class="flex h-5 shrink-0 cursor-pointer items-center rounded-full border border-line bg-panel px-2 text-[10.5px] text-dim transition-colors hover:text-foreground"
-                  @click="chat.speedBoost = false"
-                >
-                  {{ t("chat.speedBoost") }}
-                </button>
-              </Hint>
-            </div>
-            <button
-              data-testid="composer-send"
-              class="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-[10px] border border-accent bg-accent px-3 text-[12px] font-medium text-accent-ink transition-[background-color,border-color,color,opacity] hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:border-line-2 disabled:bg-panel disabled:text-dim2 disabled:opacity-100"
-              :disabled="!canSend"
-              @click="send"
+        <div class="flex shrink-0 items-center gap-1.5">
+          <SessionStatusIndicator :status="status" chip />
+          <span class="flex h-5 items-center gap-1 rounded-full border border-line bg-panel-2 px-2 text-[10.5px] text-dim">
+            <Icon name="robot" :size="10" />
+            {{ backendLabel }}
+          </span>
+          <span class="flex h-5 items-center gap-1 rounded-full border border-line bg-panel-2 px-2 text-[10.5px] text-dim">
+            <Icon name="shield" :size="10" />
+            {{ permissionTierLabel }}
+          </span>
+          <Hint v-if="agent.acpMcpServers.length || agent.acpMcpSkipped.length" :text="mcpChipTitle" multiline>
+            <span
+              class="flex h-5 items-center gap-1 rounded-full border border-line px-2 text-[10.5px]"
+              :class="agent.acpMcpServers.length ? 'bg-cyan/10 text-cyan' : 'bg-panel-2 text-dim2'"
+              data-testid="session-mcp-chip"
             >
-              {{ t("chat.send") }}
-              <Icon name="send-one" :size="13" />
-            </button>
-          </div>
-          <SlashCommandMenu
-            v-if="slashOpen"
-            :items="slashItems"
-            :active-index="slashActiveIndex"
-            @select="selectSlashCommand"
-            @update:active-index="slashActiveIndex = $event"
-          />
+              <Icon name="earth" :size="10" />
+              {{ mcpChipLabel }}
+            </span>
+          </Hint>
+          <button
+            v-if="turnActive"
+            type="button"
+            class="flex h-6 cursor-pointer items-center gap-1 rounded-[6px] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
+            @click="stop"
+          >
+            <Icon name="close-one" :size="11" />
+            停止
+          </button>
         </div>
       </div>
-    </div>
-  </section>
+
+      <div ref="scrollEl" class="min-h-0 flex-1 overflow-y-auto" @scroll.passive="onScroll">
+        <!-- 短会话：普通整列渲染 -->
+        <div v-if="messages.length && !useVirtual" class="mx-auto flex w-full max-w-[860px] flex-col gap-4 px-4 py-6 sm:px-6">
+          <ConversationMessage v-for="message in messages" :key="message.id" :message="message" :thread-id="sessionId" />
+        </div>
+        <!-- 长会话：虚拟窗口渲染（动态测量高度，钉底跟流） -->
+        <div
+          v-else-if="messages.length"
+          class="relative mx-auto w-full max-w-[860px] px-4 sm:px-6"
+          :style="{ height: `${virtualTotalHeight}px` }"
+        >
+          <div
+            v-for="row in virtualizerRef.getVirtualItems()"
+            :key="String(row.key)"
+            :ref="measureRow"
+            :data-index="row.index"
+            class="absolute left-0 top-0 w-full pb-4"
+            :style="{ transform: `translateY(${row.start + V_PAD_TOP}px)` }"
+          >
+            <ConversationMessage :message="messages[row.index]" :thread-id="sessionId" />
+          </div>
+        </div>
+        <!-- 空会话引导 -->
+        <div
+          v-else
+          class="mx-auto flex h-full w-full max-w-[860px] flex-col items-center justify-center gap-2 px-4 py-16 text-center sm:px-6"
+        >
+          <span class="grid size-10 place-items-center rounded-[12px] bg-panel-2 text-dim">
+            <Icon name="message" :size="18" />
+          </span>
+          <p class="text-[13px] font-medium text-foreground">{{ t("chat.composer.emptyTitle") }}</p>
+          <p class="text-[12px] text-dim2">{{ t("chat.composer.emptyHint") }}</p>
+        </div>
+      </div>
+
+      <div class="shrink-0 border-t border-line-2 bg-panel px-4 py-3 sm:px-6">
+        <div class="mx-auto flex w-full max-w-[860px] flex-col gap-2.5">
+          <PermissionCard />
+          <AgentProviderBar />
+          <div
+            ref="attachEl"
+            data-attachment-dropzone
+            data-testid="composer-card"
+            class="relative flex w-full flex-col gap-2 rounded-[16px] border bg-panel-2 p-3 shadow-[0_8px_24px_rgba(0,0,0,0.1)] transition-[border-color,box-shadow] focus-within:border-cyan/50 focus-within:shadow-[0_10px_28px_rgba(0,0,0,0.14)]"
+            :class="attachmentDragging ? 'border-cyan ring-2 ring-cyan/40' : 'border-line-2'"
+            @dragover="onComposerDragOver"
+            @dragleave="onComposerDragLeave"
+            @drop="onComposerDrop"
+          >
+            <AttachmentTray :items="attachmentItems" @remove="removeAttachment" />
+            <textarea
+              ref="textareaEl"
+              v-model="draft"
+              data-ctx="composer"
+              rows="3"
+              role="combobox"
+              aria-autocomplete="list"
+              :aria-expanded="slashOpen"
+              :aria-controls="slashOpen ? 'slash-command-menu' : undefined"
+              :aria-activedescendant="slashActiveOptionId"
+              class="min-h-[76px] w-full resize-none bg-transparent px-2 py-1 text-[14px] leading-relaxed text-foreground outline-none placeholder:text-dim"
+              :placeholder="t('chat.composer.placeholderThread')"
+              :aria-label="t('chat.composer.ariaLabel')"
+              @keydown="onKeydown"
+              @blur="dismissSlashMenu"
+              @paste="onComposerPaste"
+            />
+            <div class="flex min-w-0 flex-wrap items-center gap-1.5 border-t border-line/70 px-2 pt-2" data-testid="composer-config-row">
+              <span v-if="agent.routeToAcp" class="mr-0.5 text-[10px] font-medium tracking-[0.08em] text-dim2">会话配置</span>
+              <AcpSessionConfig />
+            </div>
+            <div class="flex items-center justify-between gap-2" data-testid="composer-action-row">
+              <div class="flex min-w-0 items-center gap-1.5">
+                <Hint :text="imagesAllowed ? t('chat.uploadFile') : t('chat.attachImagesUnsupported')" multiline>
+                  <button
+                    type="button"
+                    data-testid="composer-attach"
+                    class="grid size-6 shrink-0 cursor-pointer place-items-center rounded-[6px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40"
+                    :disabled="turnActive || attachmentsFull"
+                    :aria-label="t('chat.uploadFile')"
+                    @click="pickAttachmentFiles"
+                  >
+                    <Icon name="plus" :size="14" />
+                  </button>
+                </Hint>
+                <span class="shrink-0 text-[11px] text-dim2">
+                  {{ turnActive ? t("chat.composer.processing") : t("chat.composer.ready") }}
+                </span>
+                <Hint v-if="settings.planMode" :text="t('chat.planModeTitle')" multiline>
+                  <button
+                    type="button"
+                    data-testid="composer-plan-chip"
+                    class="flex h-5 shrink-0 cursor-pointer items-center rounded-full border border-line bg-panel px-2 text-[10.5px] text-dim transition-colors hover:text-foreground"
+                    @click="settings.planMode = false"
+                  >
+                    {{ t("chat.planMode") }}
+                  </button>
+                </Hint>
+                <Hint v-if="chat.speedBoost" :text="t('chat.speedTitle')" multiline>
+                  <button
+                    type="button"
+                    data-testid="composer-speed-chip"
+                    class="flex h-5 shrink-0 cursor-pointer items-center rounded-full border border-line bg-panel px-2 text-[10.5px] text-dim transition-colors hover:text-foreground"
+                    @click="chat.speedBoost = false"
+                  >
+                    {{ t("chat.speedBoost") }}
+                  </button>
+                </Hint>
+              </div>
+              <button
+                data-testid="composer-send"
+                class="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-[10px] border border-accent bg-accent px-3 text-[12px] font-medium text-accent-ink transition-[background-color,border-color,color,opacity] hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:border-line-2 disabled:bg-panel disabled:text-dim2 disabled:opacity-100"
+                :disabled="!canSend"
+                @click="send"
+              >
+                {{ t("chat.send") }}
+                <Icon name="send-one" :size="13" />
+              </button>
+            </div>
+            <SlashCommandMenu
+              v-if="slashOpen"
+              :items="slashItems"
+              :active-index="slashActiveIndex"
+              @select="selectSlashCommand"
+              @update:active-index="slashActiveIndex = $event"
+            />
+          </div>
+        </div>
+      </div>
+    </section>
+  </ContextMenuRegion>
 </template>

@@ -93,7 +93,8 @@ function timeLabel(ts: number): string {
 </script>
 
 <template>
-  <article class="flex flex-col">
+  <!-- data-ctx/data-message-id：会话页的右键菜单靠它认出「右键的是哪条消息」（见 ConversationView）。 -->
+  <article class="flex flex-col" data-ctx="message" :data-message-id="message.id">
     <div
       v-if="message.role === 'user'"
       class="msg__bubble ml-auto max-w-[78%] rounded-tl-[16px] rounded-tr-[16px] rounded-br-[4px] rounded-bl-[16px] bg-bubble px-4 py-3"

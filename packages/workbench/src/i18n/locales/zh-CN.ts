@@ -30,6 +30,84 @@ export const zhCN = {
   titlebar: {
     github: "在 GitHub 上查看本项目",
     update: "检查更新",
+    search: "搜索",
+    /** 搜索键的悬停提示；{key} 由 Titlebar 按平台填 ⌘K / Ctrl+K。 */
+    searchHint: "搜索会话与功能（{key}）",
+    /* 面板开合键的 aria-label：按当前状态给「展开 / 折叠」两种说法。 */
+    expandSidebar: "展开侧栏",
+    collapseSidebar: "折叠侧栏",
+    expandPreview: "展开预览面板",
+    collapsePreview: "折叠预览面板",
+    expandWorkspace: "展开工作区面板",
+    collapseWorkspace: "折叠工作区面板",
+    expandActivity: "展开活动面板",
+    collapseActivity: "收起活动面板",
+    noWorkspace: "未绑定工作区",
+  },
+  /* 右键菜单文案：按区域分组，与 lib/context-menu.ts 的构建器一一对应。 */
+  contextMenu: {
+    fileTree: {
+      open: "打开",
+      openExternal: "用系统应用打开",
+      reveal: "在文件夹中显示",
+      copyPath: "复制路径",
+      refresh: "刷新文件树",
+    },
+    previewTab: {
+      activate: "切换到此标签",
+      reload: "重新加载",
+      openExternal: "用系统应用打开",
+      reveal: "在文件夹中显示",
+      copyPath: "复制路径",
+      close: "关闭标签",
+      closeOthers: "关闭其他标签",
+      closeAll: "关闭全部标签",
+    },
+    previewEmpty: {
+      openFiles: "打开文件树",
+      fetchWeb: "抓取网页",
+      closeAll: "关闭全部预览",
+    },
+    historyRow: {
+      rename: "重命名会话",
+      copyTitle: "复制标题",
+      delete: "删除会话",
+    },
+    message: {
+      copyBody: "复制正文",
+    },
+    composer: {
+      cut: "剪切",
+      copy: "复制",
+      paste: "粘贴",
+      pasteFailed: "无法读取剪贴板文本，请改用 Ctrl/Cmd+V 粘贴",
+      selectAll: "全选",
+    },
+    titlebar: {
+      toggleSidebar: "切换侧栏",
+      togglePreview: "切换预览面板",
+      toggleWorkspace: "切换工作区面板",
+      toggleActivity: "切换活动面板",
+      newChat: "新建对话",
+      openSettings: "打开设置",
+    },
+    siderNav: {
+      newChat: "新建对话",
+      openSettings: "打开设置",
+      collapseSidebar: "折叠侧栏",
+    },
+    activityTab: {
+      activate: "切换到该面板",
+      collapse: "收起活动面板",
+    },
+  },
+  /* 「用系统应用打开 / 在文件夹中显示」失败时的提示。消费方不止右键菜单（预览查看器
+     也在用），故独立成组，不塞进 contextMenu。{path} 由调用方填。 */
+  fileOp: {
+    openFailed: "无法用系统应用打开",
+    openFailedDetail: "{path} 可能已被移动或删除，也可能是系统里没有能打开它的程序。",
+    revealFailed: "无法在文件夹中显示",
+    revealFailedDetail: "{path} 可能已被移动或删除。",
   },
   update: {
     title: "检查更新",
@@ -138,8 +216,6 @@ export const zhCN = {
       readFailed: "无法解析这个表格：{detail}",
       fallback: "可以点下面的按钮用系统应用打开原文件。",
       openExternal: "用系统应用打开",
-      openFailed: "无法用系统应用打开",
-      openFailedDetail: "{path} 可能已被移动或删除，也可能是系统里没有能打开它的程序。",
     },
     analysis: {
       noData: "没有可分析的数据",

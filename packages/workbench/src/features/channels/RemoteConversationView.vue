@@ -4,6 +4,9 @@ import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
 import Icon from "@/features/shared/Icon.vue";
 import MarkdownText from "@/features/shared/MarkdownText.vue";
+import ContextMenuRegion from "@/features/shared/ContextMenuRegion.vue";
+import { buildComposerItems, type ComposerMenuActions, type ContextMenuItem, type ContextTarget } from "@/lib/context-menu";
+import { copySelection, cutSelection, hasTextSelection, pasteInto, selectAllText } from "@/lib/textarea-actions";
 import { useRemoteAssistantStore } from "@/stores/remote-assistant";
 import { useSessionStore } from "@/stores/session";
 
@@ -89,83 +92,108 @@ function onKeydown(event: KeyboardEvent): void {
 function back(): void {
   void router.push("/assistants");
 }
+
+/* ===== 输入框右键菜单 =====
+ * 与对话页 / 新建对话页的输入框同一套条目。区域挂在本页根 `<section>`：textarea 自己
+ * 带 ref，不能当 trigger（reka 的 asChild 会丢弃子元素的 ref）。
+ */
+const composerEl = ref<HTMLTextAreaElement | null>(null);
+
+function composerActions(): ComposerMenuActions {
+  const el = composerEl.value;
+  return {
+    cut: () => void cutSelection(el),
+    copy: () => void copySelection(el),
+    paste: () => pasteInto(el),
+    selectAll: () => selectAllText(el),
+    hasSelection: hasTextSelection(el),
+  };
+}
+
+function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
+  return target?.ctx === "composer" ? buildComposerItems(t, composerActions()) : [];
+}
 </script>
 
 <template>
-  <section class="mx-auto flex min-h-0 h-full w-full max-w-[860px] flex-col px-4 py-4 sm:px-6" data-testid="remote-conversation">
-    <header class="mb-3 flex items-center gap-2.5">
-      <!-- title 与 aria-label 同文案：可读名已由 aria-label 给出，重复的悬停提示没有增量 -->
-      <button
-        type="button"
-        class="grid size-7 shrink-0 cursor-pointer place-items-center rounded-[7px] border border-line bg-panel-2 text-dim transition-colors hover:border-line-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
-        :aria-label="t('remoteAssist.conversation.back')"
-        data-testid="remote-conversation-back"
-        @click="back"
-      >
-        <Icon name="arrow-left" :size="14" />
-      </button>
-      <span class="grid size-8 shrink-0 place-items-center rounded-[9px] bg-panel-2 text-dim">
-        <Icon name="message" :size="16" />
-      </span>
-      <div class="min-w-0">
-        <div class="truncate text-[13px] font-medium text-foreground">
-          <template v-if="peer">{{ t(`remoteAssist.channels.${peer.channel}`) }} · {{ peer.nick }}</template>
-          <template v-else>{{ peerId }}</template>
-        </div>
-        <div class="truncate text-[11px] text-dim2">
-          {{ peer && store.connectedOf(peer.channel) ? t("remoteAssist.channels.online") : t("remoteAssist.channels.offline") }}
-        </div>
-      </div>
-    </header>
-
-    <div
-      ref="scroller"
-      class="min-h-0 flex-1 overflow-y-auto rounded-[14px] border border-line bg-panel p-3"
-      data-testid="remote-message-list"
-    >
-      <p v-if="messages.length === 0" class="py-10 text-center text-[12px] text-dim2">{{ t("remoteAssist.conversation.empty") }}</p>
-      <ul v-else class="flex flex-col gap-2.5">
-        <li v-for="message in messages" :key="message.id" class="flex" :class="message.role === 'user' ? 'justify-start' : 'justify-end'">
-          <!-- 对端（微信那侧）：左侧浅底；本机助手 / 人工回复：右侧主色底 -->
-          <div
-            class="max-w-[78%] rounded-[12px] px-3 py-2 text-[12.5px] leading-relaxed"
-            :class="message.role === 'user' ? 'bg-panel-2 text-foreground' : 'bg-accent/12 text-foreground'"
-            :data-role="message.role"
-          >
-            <MarkdownText :content="message.content" />
+  <ContextMenuRegion :build="buildMenu">
+    <section class="mx-auto flex min-h-0 h-full w-full max-w-[860px] flex-col px-4 py-4 sm:px-6" data-testid="remote-conversation">
+      <header class="mb-3 flex items-center gap-2.5">
+        <!-- title 与 aria-label 同文案：可读名已由 aria-label 给出，重复的悬停提示没有增量 -->
+        <button
+          type="button"
+          class="grid size-7 shrink-0 cursor-pointer place-items-center rounded-[7px] border border-line bg-panel-2 text-dim transition-colors hover:border-line-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          :aria-label="t('remoteAssist.conversation.back')"
+          data-testid="remote-conversation-back"
+          @click="back"
+        >
+          <Icon name="arrow-left" :size="14" />
+        </button>
+        <span class="grid size-8 shrink-0 place-items-center rounded-[9px] bg-panel-2 text-dim">
+          <Icon name="message" :size="16" />
+        </span>
+        <div class="min-w-0">
+          <div class="truncate text-[13px] font-medium text-foreground">
+            <template v-if="peer">{{ t(`remoteAssist.channels.${peer.channel}`) }} · {{ peer.nick }}</template>
+            <template v-else>{{ peerId }}</template>
           </div>
-        </li>
-      </ul>
-    </div>
-
-    <footer class="mt-3">
-      <div class="flex flex-col gap-2 rounded-[14px] border border-line-2 bg-panel-2 p-2.5">
-        <textarea
-          v-model="draft"
-          rows="2"
-          class="min-h-[52px] w-full resize-none bg-transparent px-2 py-1 text-[13px] leading-relaxed text-foreground outline-none placeholder:text-dim"
-          :placeholder="t('remoteAssist.conversation.placeholder')"
-          :aria-label="t('remoteAssist.conversation.send')"
-          data-testid="remote-composer-input"
-          @keydown="onKeydown"
-        />
-        <div class="flex items-center justify-between gap-2">
-          <span class="min-w-0 truncate text-[11px] text-dim2" data-testid="remote-composer-hint">
-            {{ canSend ? "" : blockedHint }}
-          </span>
-          <button
-            type="button"
-            class="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-[10px] border border-accent bg-accent px-3 text-[12px] font-medium text-accent-ink transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:border-line-2 disabled:bg-panel disabled:text-dim2 disabled:opacity-100"
-            :disabled="!canSend || !draft.trim() || sending"
-            data-testid="remote-composer-send"
-            @click="void send()"
-          >
-            {{ sending ? t("remoteAssist.conversation.sending") : t("remoteAssist.conversation.send") }}
-            <Icon name="send-one" :size="13" />
-          </button>
+          <div class="truncate text-[11px] text-dim2">
+            {{ peer && store.connectedOf(peer.channel) ? t("remoteAssist.channels.online") : t("remoteAssist.channels.offline") }}
+          </div>
         </div>
-        <p v-if="sendError" class="text-[11px] text-destructive" data-testid="remote-composer-error">{{ sendError }}</p>
+      </header>
+
+      <div
+        ref="scroller"
+        class="min-h-0 flex-1 overflow-y-auto rounded-[14px] border border-line bg-panel p-3"
+        data-testid="remote-message-list"
+      >
+        <p v-if="messages.length === 0" class="py-10 text-center text-[12px] text-dim2">{{ t("remoteAssist.conversation.empty") }}</p>
+        <ul v-else class="flex flex-col gap-2.5">
+          <li v-for="message in messages" :key="message.id" class="flex" :class="message.role === 'user' ? 'justify-start' : 'justify-end'">
+            <!-- 对端（微信那侧）：左侧浅底；本机助手 / 人工回复：右侧主色底 -->
+            <div
+              class="max-w-[78%] rounded-[12px] px-3 py-2 text-[12.5px] leading-relaxed"
+              :class="message.role === 'user' ? 'bg-panel-2 text-foreground' : 'bg-accent/12 text-foreground'"
+              :data-role="message.role"
+            >
+              <MarkdownText :content="message.content" />
+            </div>
+          </li>
+        </ul>
       </div>
-    </footer>
-  </section>
+
+      <footer class="mt-3">
+        <div class="flex flex-col gap-2 rounded-[14px] border border-line-2 bg-panel-2 p-2.5">
+          <textarea
+            ref="composerEl"
+            v-model="draft"
+            data-ctx="composer"
+            rows="2"
+            class="min-h-[52px] w-full resize-none bg-transparent px-2 py-1 text-[13px] leading-relaxed text-foreground outline-none placeholder:text-dim"
+            :placeholder="t('remoteAssist.conversation.placeholder')"
+            :aria-label="t('remoteAssist.conversation.send')"
+            data-testid="remote-composer-input"
+            @keydown="onKeydown"
+          />
+          <div class="flex items-center justify-between gap-2">
+            <span class="min-w-0 truncate text-[11px] text-dim2" data-testid="remote-composer-hint">
+              {{ canSend ? "" : blockedHint }}
+            </span>
+            <button
+              type="button"
+              class="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-[10px] border border-accent bg-accent px-3 text-[12px] font-medium text-accent-ink transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:border-line-2 disabled:bg-panel disabled:text-dim2 disabled:opacity-100"
+              :disabled="!canSend || !draft.trim() || sending"
+              data-testid="remote-composer-send"
+              @click="void send()"
+            >
+              {{ sending ? t("remoteAssist.conversation.sending") : t("remoteAssist.conversation.send") }}
+              <Icon name="send-one" :size="13" />
+            </button>
+          </div>
+          <p v-if="sendError" class="text-[11px] text-destructive" data-testid="remote-composer-error">{{ sendError }}</p>
+        </div>
+      </footer>
+    </section>
+  </ContextMenuRegion>
 </template>

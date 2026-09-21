@@ -18,8 +18,12 @@ import { sniffOfficeContainer, type OfficeContainer } from "@/lib/legacy-office"
 import { formatBytes } from "@/lib/attachments";
 import { openWithSystemApp, resolveTabDiskPath } from "@/lib/open-external";
 import { usePreviewBinary } from "@/lib/preview-content";
+import { i18n } from "@/i18n";
 import type { PreviewTab } from "@/stores/preview";
 import { notify } from "@/stores/notice";
+
+/** 本组件只对「打开失败」这条共享提示走 i18n（文案与 fileOp.* 同源）；其余文案尚未 i18n。 */
+const t = i18n.global.t;
 
 const props = defineProps<{ tab: PreviewTab }>();
 
@@ -102,8 +106,8 @@ async function openExternal(): Promise<void> {
     notify({
       kind: "warning",
       key: "legacy-office-open-external",
-      title: "无法用系统应用打开",
-      detail: `${path} 可能已被移动或删除，也可能是系统里没有能打开它的程序。`,
+      title: t("fileOp.openFailed"),
+      detail: t("fileOp.openFailedDetail", { path }),
     });
   }
 }

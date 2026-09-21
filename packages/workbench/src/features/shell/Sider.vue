@@ -5,10 +5,13 @@ import { useSessionStore } from "@/stores/session";
 import { useCapabilityLoader } from "@/plugins/current";
 import { buildNavItems } from "@/lib/nav-items";
 import Icon from "@/features/shared/Icon.vue";
+import ContextMenuRegion from "@/features/shared/ContextMenuRegion.vue";
 import GroupedHistory from "@/features/workspace/GroupedHistory.vue";
 import SiderFooter from "@/features/shell/SiderFooter.vue";
 import SiderToolbar from "@/features/shell/SiderToolbar.vue";
 import SiderRegions from "@/features/shell/SiderRegions.vue";
+import { buildSiderNavItems, type ContextMenuItem } from "@/lib/context-menu";
+import { i18n } from "@/i18n";
 
 /**
  * GreyWork 风格左侧栏：品牌入口 + 新对话 + 快捷入口 + 会话历史。
@@ -25,6 +28,21 @@ const emit = defineEmits<{ newChat: []; navigate: [path: string]; toggleSider: [
 
 const route = useRoute();
 const sessionStore = useSessionStore();
+/** 外壳组件不装 i18n 插件也要能渲染，故用全局实例而非 useI18n。 */
+const t = i18n.global.t;
+
+/**
+ * 导航区右键菜单。**只包导航块**（新对话 + 快捷入口 + 分隔线），不包整个 aside：
+ * 会话历史行各自是一个 root，包进来就成了嵌套 trigger，内外会同时打开
+ * （见 lib/context-menu.ts 顶部）。
+ */
+function buildMenu(): ContextMenuItem[] {
+  return buildSiderNavItems(t, {
+    newChat: () => emit("newChat"),
+    openSettings: () => emit("openSettings"),
+    toggleSidebar: () => emit("toggleSider"),
+  });
+}
 
 /** 高亮哪条会话：URL 参数优先，直接落 /guid 时退回 store 的激活项。 */
 const activeSessionId = computed<string | null>(() => {
@@ -66,20 +84,22 @@ const navItems = computed(() => buildNavItems(useCapabilityLoader().snapshot().m
         </button>
       </div>
 
-      <div class="flex flex-col gap-0.5 px-2">
-        <button
-          v-for="item in navItems"
-          :key="item.path"
-          class="flex h-[34px] cursor-pointer items-center gap-2 rounded-[8px] px-2 text-[13px] transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
-          :class="route.path === item.path ? 'bg-panel text-foreground' : 'text-dim hover:bg-panel hover:text-foreground'"
-          @click="emit('navigate', item.path)"
-        >
-          <span class="grid size-5 place-items-center rounded-[5px] bg-panel text-dim">
-            <Icon :name="item.icon" :size="14" />
-          </span>
-          {{ item.label }}
-        </button>
-      </div>
+      <ContextMenuRegion :build="buildMenu">
+        <div class="flex flex-col gap-0.5 px-2">
+          <button
+            v-for="item in navItems"
+            :key="item.path"
+            class="flex h-[34px] cursor-pointer items-center gap-2 rounded-[8px] px-2 text-[13px] transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+            :class="route.path === item.path ? 'bg-panel text-foreground' : 'text-dim hover:bg-panel hover:text-foreground'"
+            @click="emit('navigate', item.path)"
+          >
+            <span class="grid size-5 place-items-center rounded-[5px] bg-panel text-dim">
+              <Icon :name="item.icon" :size="14" />
+            </span>
+            {{ item.label }}
+          </button>
+        </div>
+      </ContextMenuRegion>
 
       <div class="mx-2 my-2 h-px shrink-0 bg-line-2" />
 

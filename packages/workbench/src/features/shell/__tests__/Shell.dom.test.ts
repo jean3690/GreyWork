@@ -30,9 +30,9 @@ import { usePreviewStore } from "@/stores/preview";
 import { useWorkspacePanelStore } from "@/stores/workspacePanel";
 
 const Titlebar = {
-  props: ["collapsed"],
+  props: ["collapsed", "showSiderToggle"],
   emits: ["toggle-sider"],
-  template: `<div data-testid="titlebar" :data-collapsed="collapsed" />`,
+  template: `<div data-testid="titlebar" :data-collapsed="collapsed" :data-sider-toggle="showSiderToggle" />`,
 };
 const SettingsDialog = {
   props: ["open", "section"],
@@ -93,6 +93,8 @@ describe("Shell", () => {
     expect(wrapper.find('[data-testid="shell"]').exists()).toBe(true);
     expect(wrapper.find('[data-testid="router-view-stub"]').exists()).toBe(true);
     expect(wrapper.get('[data-testid="titlebar"]').attributes("data-collapsed")).toBe("false");
+    // 桌面端侧栏常驻，开合键交给侧栏顶部的品牌键；标题栏那颗只在移动端渲染
+    expect(wrapper.get('[data-testid="titlebar"]').attributes("data-sider-toggle")).toBe("false");
     expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
     expect(document.documentElement.getAttribute("data-palette")).toBe("greywork");
     expect(h.bootPlugins).toHaveBeenCalledTimes(1);
@@ -173,6 +175,8 @@ describe("Shell", () => {
     window.dispatchEvent(new Event("resize"));
     await nextTick();
     expect(titlebar(wrapper)).toBe("true");
+    // 窄屏收起时 Sider 整个不挂载，标题栏那颗是唯一的抽屉入口
+    expect(wrapper.get('[data-testid="titlebar"]').attributes("data-sider-toggle")).toBe("true");
 
     await press({ key: "2", code: "Digit2", ctrlKey: true });
     expect(titlebar(wrapper)).toBe("false");

@@ -263,7 +263,14 @@ function handleNewChat(): void {
   <!-- 裸窗口（悬浮宠物等）：只有 router-view，无外壳 chrome。 -->
   <router-view v-if="bareWindow" />
   <div v-else class="flex size-full min-h-0 flex-col overflow-hidden bg-background" data-testid="shell">
-    <Titlebar :collapsed="collapsed" @toggle-sider="collapsed = !collapsed" @navigate="navigate" />
+    <Titlebar
+      :collapsed="collapsed"
+      :show-sider-toggle="isMobile"
+      @toggle-sider="collapsed = !collapsed"
+      @navigate="navigate"
+      @new-chat="handleNewChat"
+      @open-settings="openSettings"
+    />
     <div class="relative flex min-h-0 flex-1 overflow-hidden">
       <!-- 移动端展开的侧栏是抽屉：遮罩点击收起，侧栏悬浮于内容之上而非挤占宽度 -->
       <div v-if="isMobile && !collapsed" class="absolute inset-0 z-30 bg-black/30" aria-hidden="true" @click="collapsed = true" />

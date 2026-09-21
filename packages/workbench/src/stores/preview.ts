@@ -212,6 +212,17 @@ export const usePreviewStore = defineStore("preview", () => {
     if (!next) setCollapsed(true);
   }
 
+  /**
+   * 关闭除 id 外的全部 tab（右键菜单「关闭其他标签」）。
+   * 保留项若原本不是激活项，会被提升为激活项 —— 否则 activeId 会指向已关闭的 tab。
+   */
+  function closeOthers(id: string): void {
+    const kept = tabs.value.find((tab) => tab.id === id);
+    if (!kept) return;
+    tabs.value = [kept];
+    activeId.value = kept.id;
+  }
+
   function closeAll(): void {
     tabs.value = [];
     activeId.value = null;
@@ -280,6 +291,7 @@ export const usePreviewStore = defineStore("preview", () => {
     activate,
     moveTab,
     close,
+    closeOthers,
     closeAll,
     setCollapsed,
     toggle,

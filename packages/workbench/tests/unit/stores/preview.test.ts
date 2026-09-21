@@ -277,6 +277,39 @@ describe("closeAll", () => {
   });
 });
 
+describe("closeOthers", () => {
+  it("只留目标 tab，其余全部关闭", () => {
+    const preview = usePreviewStore();
+    preview.open("a.md");
+    const b = preview.open("b.md");
+    preview.open("c.md");
+
+    preview.closeOthers(b);
+    expect(preview.tabs.map((tab) => tab.path)).toEqual(["b.md"]);
+  });
+
+  it("目标不是当前激活项时被提升为 activeId", () => {
+    const preview = usePreviewStore();
+    const a = preview.open("a.md");
+    preview.open("b.md");
+    preview.open("c.md");
+    expect(preview.activeId).not.toBe(a);
+
+    preview.closeOthers(a);
+    expect(preview.activeId).toBe(a);
+  });
+
+  it("不存在的 id 是空操作，不误清 tab", () => {
+    const preview = usePreviewStore();
+    preview.open("a.md");
+    const b = preview.open("b.md");
+
+    preview.closeOthers("pv-nope");
+    expect(preview.tabs.map((tab) => tab.path)).toEqual(["a.md", "b.md"]);
+    expect(preview.activeId).toBe(b);
+  });
+});
+
 describe("setAvailable（视口是否渲染右栏）", () => {
   it("默认可用", () => {
     expect(usePreviewStore().available).toBe(true);

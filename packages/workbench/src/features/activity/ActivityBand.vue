@@ -18,11 +18,16 @@ import { partitionActivityTabs, resolveActiveTab, sortUiRegions } from "@/lib/ui
 import { useCapabilityLoader } from "@/plugins/current";
 import { useActivityStore } from "@/stores/activity";
 import Hint from "@/features/shared/Hint.vue";
+import ContextMenuRegion from "@/features/shared/ContextMenuRegion.vue";
 import type { UiRegionContribution } from "@/plugins/types";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { buildActivityTabItems, type ContextMenuItem, type ContextTarget } from "@/lib/context-menu";
+import { i18n } from "@/i18n";
 
 const activity = useActivityStore();
 const overflowOpen = ref(false);
+/** 外壳组件不装 i18n 插件也要能渲染，故用全局实例而非 useI18n。 */
+const t = i18n.global.t;
 
 /** activityPanel 区贡献：按 order 排序后分区为 常驻 / 「更多」。 */
 const contributions = computed(() =>
@@ -64,6 +69,14 @@ function activate(id: string): void {
   overflowOpen.value = false;
 }
 
+/** 标签条右键菜单：命中标签给「切换到该面板」，否则只给「收起活动面板」。 */
+function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
+  return buildActivityTabItems(target, t, {
+    activate,
+    collapse: () => activity.setOpen(false),
+  });
+}
+
 /** 「更多」下拉：Esc / 点外部 / 选中项后的收起全交给 DropdownMenu（含键盘漫游与翻转碰撞处理）。 */
 
 /** 最后一个「更多」项也被停用时，下拉不能开着空壳。 */
@@ -86,58 +99,62 @@ watch(
   >
     <div class="flex h-full flex-col">
       <!-- 标签条：与右栏区段条同一节奏 -->
-      <div class="flex h-[34px] shrink-0 items-center gap-1 border-b border-line px-3">
-        <Hint v-for="contribution in partitioned.pinned" :key="contribution.id" :text="contribution.id">
-          <button
-            type="button"
-            data-testid="activity-tab"
-            :class="tabClass(contribution.id === active?.id)"
-            :aria-current="contribution.id === active?.id ? 'true' : undefined"
-            @click="activate(contribution.id)"
-          >
-            {{ contribution.title }}
-          </button>
-        </Hint>
+      <ContextMenuRegion :build="buildMenu">
+        <div class="flex h-[34px] shrink-0 items-center gap-1 border-b border-line px-3">
+          <Hint v-for="contribution in partitioned.pinned" :key="contribution.id" :text="contribution.id">
+            <button
+              type="button"
+              data-testid="activity-tab"
+              data-ctx="activity-tab"
+              :data-tab-id="contribution.id"
+              :class="tabClass(contribution.id === active?.id)"
+              :aria-current="contribution.id === active?.id ? 'true' : undefined"
+              @click="activate(contribution.id)"
+            >
+              {{ contribution.title }}
+            </button>
+          </Hint>
 
-        <div class="ms-auto flex shrink-0 items-center gap-0.5">
-          <!-- 低频面板收进「更多」，不占常驻标签位 -->
-          <div v-if="partitioned.overflow.length" class="relative">
-            <DropdownMenu v-model:open="overflowOpen">
-              <DropdownMenuTrigger as-child>
-                <button
-                  type="button"
-                  data-testid="activity-overflow-toggle"
-                  class="grid size-6 cursor-pointer place-items-center rounded-[6px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
-                  :class="overflowOpen || activeIsOverflow ? 'bg-panel text-foreground' : ''"
-                  aria-label="更多面板"
-                >
-                  <Icon name="more" :size="13" />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent data-testid="activity-overflow-menu" side="top" align="end" class="min-w-[120px] border-line-2">
-                <DropdownMenuItem
-                  v-for="contribution in partitioned.overflow"
-                  :key="contribution.id"
-                  data-testid="activity-overflow-item"
-                  class="h-6 cursor-pointer rounded-[5px] px-2 text-[11.5px] text-dim"
-                  @select="activate(contribution.id)"
-                >
-                  {{ contribution.title }}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+          <div class="ms-auto flex shrink-0 items-center gap-0.5">
+            <!-- 低频面板收进「更多」，不占常驻标签位 -->
+            <div v-if="partitioned.overflow.length" class="relative">
+              <DropdownMenu v-model:open="overflowOpen">
+                <DropdownMenuTrigger as-child>
+                  <button
+                    type="button"
+                    data-testid="activity-overflow-toggle"
+                    class="grid size-6 cursor-pointer place-items-center rounded-[6px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+                    :class="overflowOpen || activeIsOverflow ? 'bg-panel text-foreground' : ''"
+                    aria-label="更多面板"
+                  >
+                    <Icon name="more" :size="13" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent data-testid="activity-overflow-menu" side="top" align="end" class="min-w-[120px] border-line-2">
+                  <DropdownMenuItem
+                    v-for="contribution in partitioned.overflow"
+                    :key="contribution.id"
+                    data-testid="activity-overflow-item"
+                    class="h-6 cursor-pointer rounded-[5px] px-2 text-[11.5px] text-dim"
+                    @select="activate(contribution.id)"
+                  >
+                    {{ contribution.title }}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+            <button
+              type="button"
+              data-testid="activity-collapse"
+              class="grid size-6 cursor-pointer place-items-center rounded-[6px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+              aria-label="收起活动面板"
+              @click="activity.setOpen(false)"
+            >
+              <Icon name="down" :size="13" />
+            </button>
           </div>
-          <button
-            type="button"
-            data-testid="activity-collapse"
-            class="grid size-6 cursor-pointer place-items-center rounded-[6px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
-            aria-label="收起活动面板"
-            @click="activity.setOpen(false)"
-          >
-            <Icon name="down" :size="13" />
-          </button>
         </div>
-      </div>
+      </ContextMenuRegion>
 
       <!-- 内容区：收起时 v-show 隐藏但保持挂载，插件面板的滚动位置/状态不丢 -->
       <div v-show="activity.open" class="min-h-0 flex-1 overflow-hidden">
