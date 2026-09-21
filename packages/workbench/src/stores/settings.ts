@@ -239,6 +239,8 @@ export interface SavedSettings {
   skillSources?: SkillSourceEntry[];
   /** 多智能体编排并发度（同时跑的回合上限）；1-8，越界静默回落 2。 */
   maxParallel?: number;
+  /** 关闭窗口时是否只隐藏到系统托盘（默认 true）；宿主据此决定拦不拦 CloseRequested。 */
+  closeToTray?: boolean;
   /** 远程助手 · 通道与回复偏好（旧快照缺失 = 默认值）。 */
   remoteAssist?: Partial<Omit<RemoteAssistPrefs, "channels">> & {
     channels?: {
@@ -267,6 +269,8 @@ export const useSettingsStore = defineStore("settings", () => {
   const sandboxMode = ref<SandboxMode>("auto");
   /** 多智能体编排并发度（同时跑的回合上限）。默认 2，与既有并行编排一致。 */
   const maxParallel = ref(2);
+  /** 关闭到托盘（默认开）：点关闭按钮只隐藏窗口，托盘「退出应用」才真正退出。 */
+  const closeToTray = ref(true);
   /**
    * 会话内临时降级到只读：**刻意不持久化**。
    *
@@ -361,6 +365,12 @@ export const useSettingsStore = defineStore("settings", () => {
     persist();
   }
 
+  /** 关闭行为变更即落盘；宿主侧由 lib/tray-bridge 的 watch 同步（本 store 不直接碰 IPC）。 */
+  function setCloseToTray(value: boolean): void {
+    closeToTray.value = value;
+    persist();
+  }
+
   function applySaved(saved: SavedSettings | null | undefined): void {
     if (!saved) return;
     if (saved.permissionTier && PERM_TIER_VALUES[saved.permissionTier]) permissionTier.value = saved.permissionTier;
@@ -374,6 +384,8 @@ export const useSettingsStore = defineStore("settings", () => {
       const n = saved.maxParallel as number;
       maxParallel.value = n >= MAX_PARALLEL_RANGE.min && n <= MAX_PARALLEL_RANGE.max ? n : 2;
     }
+    // 缺字段（旧快照）保持默认「关闭到托盘」；只有显式 false 才改成关闭即退出。
+    if (typeof saved.closeToTray === "boolean") closeToTray.value = saved.closeToTray;
     if (saved.theme && THEME_VALUES[saved.theme as ThemeId]) theme.value = saved.theme as ThemeId;
     if (saved.colorMode && COLOR_MODE_VALUES[saved.colorMode]) colorMode.value = saved.colorMode;
     // v0.1 兼容：旧 theme 字段承载明暗模式；读入后下一次 persist 会写成新结构。
@@ -457,6 +469,7 @@ export const useSettingsStore = defineStore("settings", () => {
       mcpServers: mcpServers.value,
       skillSources: skillSources.value,
       maxParallel: maxParallel.value,
+      closeToTray: closeToTray.value,
       remoteAssist: {
         replyMode: remoteAssist.value.replyMode,
         replyProviderId: remoteAssist.value.replyProviderId,
@@ -629,6 +642,8 @@ export const useSettingsStore = defineStore("settings", () => {
     permissionTier,
     sandboxMode,
     maxParallel,
+    closeToTray,
+    setCloseToTray,
     tempReadOnly,
     effectivePermissionTier,
     runMode,

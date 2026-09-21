@@ -109,6 +109,16 @@ export const zhCN = {
     revealFailed: "无法在文件夹中显示",
     revealFailedDetail: "{path} 可能已被移动或删除。",
   },
+  /* 系统托盘（宿主原生菜单，不是 settings.tray）：宿主不持有语言，文案由渲染端推送，
+     见 lib/tray-bridge.ts 与 src-tauri/src/tray.rs。 */
+  trayMenu: {
+    toggleWindow: "显示/隐藏主窗口",
+    newChat: "新建对话",
+    settings: "打开设置",
+    quit: "退出应用",
+    /** 窗口首次藏进托盘时的系统通知正文（每个进程只发一次）。 */
+    hiddenHint: "GreyWork 仍在后台运行，可从系统托盘恢复窗口。",
+  },
   update: {
     title: "检查更新",
     checking: "正在检查更新…",
@@ -533,6 +543,13 @@ export const zhCN = {
       skills: { title: "技能", desc: "工作区技能：安装 / 更新 / 卸载与官方市场" },
       storage: { title: "存储", desc: "会话落盘与远端同步" },
       team: { title: "团队", desc: "成员与协作空间" },
+    },
+    tray: {
+      title: "系统托盘",
+      description: "托盘菜单可显示/隐藏窗口、新建对话、打开设置或退出应用。",
+      unavailable: "当前系统没有可用的托盘（Linux 需要 AppIndicator 宿主），因此关闭窗口会直接退出应用。",
+      closeToTray: { label: "关闭到托盘", desc: "点关闭按钮只隐藏窗口，从托盘「退出应用」才真正退出" },
+      quitOnClose: { label: "关闭即退出", desc: "点关闭按钮直接退出进程，托盘图标随之消失" },
     },
     close: "关闭设置",
     name: "名称",

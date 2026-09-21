@@ -380,3 +380,29 @@ describe("运行模式 runMode", () => {
     }
   });
 });
+
+describe("关闭行为 closeToTray", () => {
+  it("默认关闭到托盘（true）", () => {
+    expect(useSettingsStore().closeToTray).toBe(true);
+  });
+
+  it("setCloseToTray(false) 落盘并跨重启保持", () => {
+    const settings = useSettingsStore();
+    settings.setCloseToTray(false);
+    expect(JSON.parse(storage.get("greywork.settings") ?? "{}").closeToTray).toBe(false);
+
+    setActivePinia(createPinia());
+    expect(useSettingsStore().closeToTray).toBe(false);
+  });
+
+  it("旧快照缺失该字段时回落默认 true，非法类型同样不采纳", () => {
+    setActivePinia(createPinia());
+    expect(useSettingsStore().closeToTray).toBe(true); // 旧快照没有该字段
+
+    for (const value of ["yes", 1, null, {}]) {
+      storage.set("greywork.settings", JSON.stringify({ closeToTray: value }));
+      setActivePinia(createPinia());
+      expect(useSettingsStore().closeToTray).toBe(true);
+    }
+  });
+});

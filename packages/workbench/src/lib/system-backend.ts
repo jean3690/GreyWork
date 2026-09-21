@@ -13,6 +13,13 @@ export interface SysInfo {
   logDir: string | null;
   activeAgents: number;
   os: string;
+  /**
+   * 宿主是否真的建出了系统托盘。
+   *
+   * 没有托盘时「关闭到托盘」是无效档位（宿主会把关闭行为钳回「关闭即退出」，
+   * 否则窗口藏起来后没有任何入口能恢复），设置页据此不给选。
+   */
+  trayAvailable: boolean;
 }
 
 export const systemBackend = {

@@ -27,6 +27,7 @@ mod store_fs;
 mod sys;
 pub mod telegram;
 mod text;
+mod tray;
 mod update;
 mod web_fetch;
 pub mod wechat;
@@ -53,11 +54,28 @@ pub fn run() {
         .manage(discord::DiscordHost::default())
         .manage(qq::QqHost::default())
         .manage(wecom::WecomHost::default())
+        .manage(tray::TrayState::default())
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) = event {
                 if let Some(access) = window.try_state::<workspace_fs::WorkspaceFsAccess>() {
                     if let Err(error) = access.authorize_drop_paths(paths) {
                         log::warn("workspace_fs", format!("拖放路径授权失败: {error}"));
+                    }
+                }
+            }
+            // 关闭到托盘：只拦主窗口。偏好由渲染端经 set_close_to_tray 同步（它是设置
+            // 快照的一部分），但**托盘真的建出来了**才是前提 —— should_hide_on_close
+            // 把这两条一起判了。没有托盘还拦下关闭，窗口会消失且无入口恢复。
+            // 托盘「退出应用」走 app.exit，不经过这里。
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == tray::MAIN_WINDOW {
+                    if let Some(state) = window.try_state::<tray::TrayState>() {
+                        if state.should_hide_on_close() {
+                            api.prevent_close();
+                            let _ = window.hide();
+                            // 窗口藏起来后托盘是唯一入口，第一次要说一声。
+                            tray::notify_hidden(window.app_handle(), &state);
+                        }
                     }
                 }
             }
@@ -81,6 +99,15 @@ pub fn run() {
                 .map_err(|err| -> Box<dyn std::error::Error> { err.into() })?;
             app.manage(database);
             scheduler::spawn_ticker(app.handle().clone(), data_dir.join("greywork.db"));
+            // 系统托盘：构建失败不该拦启动（例如 Linux 缺 AppIndicator 宿主），
+            // 记一条日志后继续 —— 没有托盘，其余功能照常。失败时 TrayState.available
+            // 保持 false，关闭行为随之回落到「关闭即退出」，不会把用户锁在隐藏窗口里。
+            if let Err(error) = tray::init(app) {
+                log::warn(
+                    "tray",
+                    format!("系统托盘初始化失败，本次不提供托盘: {error}"),
+                );
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -202,9 +229,27 @@ pub fn run() {
             db::db_team_runs_sync,
             db::db_agents_load,
             db::db_agents_sync,
+            tray::set_close_to_tray,
+            tray::set_tray_labels,
             update::check_update,
             update::open_external,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        // 走 build + App::run(callback) 而不是 Builder::run(context)：只有后者能拿到
+        // 事件循环回调，macOS 的 Reopen 需要它。
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(on_run_event);
+}
+
+/// 事件循环回调。目前只处理 macOS 的 Reopen。
+///
+/// 窗口被「关闭到托盘」藏起来之后，Dock 图标还在 —— 点 Dock 是 macOS 用户最直觉的
+/// 恢复方式，不处理的话点了没反应，只能绕去菜单栏托盘图标。`RunEvent::Reopen` 这个
+/// 变体本身是 `#[cfg(target_os = "macos")]`，所以整块按平台编译。
+#[allow(unused_variables)]
+fn on_run_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
+    #[cfg(target_os = "macos")]
+    if let tauri::RunEvent::Reopen { .. } = event {
+        tray::show_main(app);
+    }
 }

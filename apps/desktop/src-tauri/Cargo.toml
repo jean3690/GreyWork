@@ -28,7 +28,10 @@ debug = 1
 # macos-private-api: 悬浮宠物窗用 WebviewWindowBuilder::transparent，该方法在 macOS 上
 # 被 #[cfg(any(not(target_os = "macos"), feature = "macos-private-api"))] 门控，
 # 不开这个 feature 则 macOS 编译报 E0599。同时需 tauri.conf.json 的 app.macOSPrivateApi: true。
-tauri = { version = "2", features = ["macos-private-api"] }
+# tray-icon: 系统托盘（TrayIconBuilder / Menu）在这个 feature 之后才存在。
+# 不开 image-png：托盘图标直接取 app.default_window_icon()（构建期已解码成 RGBA），
+# 只有从字节流 Image::from_bytes 载图标才需要它。
+tauri = { version = "2", features = ["macos-private-api", "tray-icon"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-window-state = "2"

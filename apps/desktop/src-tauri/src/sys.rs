@@ -17,6 +17,9 @@ pub struct SysInfo {
     pub active_agents: usize,
     /// 宿主 OS 名。
     pub os: String,
+    /// 宿主是否真的建出了系统托盘。设置页据此决定「关闭到托盘」能不能选 ——
+    /// 没有托盘时该档位无效（宿主会把关闭行为钳回「关闭即退出」）。
+    pub tray_available: bool,
 }
 
 /// 系统信息快照。
@@ -24,6 +27,7 @@ pub struct SysInfo {
 pub async fn sys_info(
     db: tauri::State<'_, crate::db::Db>,
     acp: tauri::State<'_, crate::acp_host::AcpHost>,
+    tray: tauri::State<'_, crate::tray::TrayState>,
 ) -> Result<SysInfo, String> {
     Ok(SysInfo {
         version: env!("CARGO_PKG_VERSION").to_string(),
@@ -31,6 +35,7 @@ pub async fn sys_info(
         log_dir: crate::log::dir().map(|path| path.to_string_lossy().into_owned()),
         active_agents: acp.session_count().await,
         os: std::env::consts::OS.to_string(),
+        tray_available: tray.available(),
     })
 }
 
@@ -71,6 +76,7 @@ mod tests {
             log_dir: Some("/tmp/logs".into()),
             active_agents: 2,
             os: "linux".into(),
+            tray_available: false,
         })
         .expect("serialize");
         let map = json.as_object().expect("object");
@@ -80,6 +86,7 @@ mod tests {
         );
         assert!(map.contains_key("logDir"));
         assert!(map.contains_key("activeAgents"));
+        assert!(map.contains_key("trayAvailable"));
         assert_eq!(map["version"], "0.1.0");
     }
 }

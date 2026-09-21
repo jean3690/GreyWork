@@ -110,6 +110,16 @@ export const enUS: MessageSchema = {
     revealFailed: "Could not show in folder",
     revealFailedDetail: "{path} may have been moved or deleted.",
   },
+  /* System tray (the host-native menu, not settings.tray): the host holds no language, so
+     labels are pushed from the renderer — see lib/tray-bridge.ts and src-tauri/src/tray.rs. */
+  trayMenu: {
+    toggleWindow: "Show/Hide Window",
+    newChat: "New Conversation",
+    settings: "Open Settings",
+    quit: "Quit",
+    /** Body of the one-time system notification shown when the window is first hidden to tray. */
+    hiddenHint: "GreyWork is still running in the background. Restore the window from the system tray.",
+  },
   update: {
     title: "Check for updates",
     checking: "Checking for updates…",
@@ -543,6 +553,13 @@ export const enUS: MessageSchema = {
       skills: { title: "Skills", desc: "Workspace skills: install / update / remove and the official market" },
       storage: { title: "Storage", desc: "Session persistence and remote sync" },
       team: { title: "Team", desc: "Members and collaboration spaces" },
+    },
+    tray: {
+      title: "System tray",
+      description: "The tray menu can show/hide the window, start a conversation, open settings, or quit.",
+      unavailable: "No system tray is available on this system (Linux needs an AppIndicator host), so closing the window quits the app.",
+      closeToTray: { label: "Close to tray", desc: "The close button only hides the window; quit from the tray menu" },
+      quitOnClose: { label: "Quit on close", desc: "The close button exits the process and removes the tray icon" },
     },
     close: "Close settings",
     name: "Name",

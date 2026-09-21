@@ -43,6 +43,7 @@ describe("system-backend 双态", () => {
       logDir: "/home/test/.local/share/greywork/logs",
       activeAgents: 2,
       os: "linux",
+      trayAvailable: true,
     };
     invokeMock.mockResolvedValue(snapshot);
 

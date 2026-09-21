@@ -13,8 +13,10 @@ import { useActivityStore } from "@/stores/activity";
 import { useLayoutStore } from "@/stores/layout";
 import { useRemoteAssistantStore } from "@/stores/remote-assistant";
 import { appEvents } from "@/events";
+import { i18n } from "@/i18n";
 import { applyAppearance as applyAppearanceToDom } from "@/lib/theme";
 import { modeOfShortcut, visibilityOf, type LayoutMode } from "@/lib/layout-modes";
+import { syncCloseToTray, syncTrayLabels, useTrayBridge, type TrayLabels } from "@/lib/tray-bridge";
 import { bootPlugins } from "@/plugins/runtime";
 import Sider from "@/features/shell/Sider.vue";
 import Titlebar from "@/features/shell/Titlebar.vue";
@@ -200,6 +202,43 @@ function observeMainRow(): void {
 // 折叠态或宽度偏好变了 → 预留立刻重算（不用等下一次测宽），生效宽度随之收敛。
 watch([() => workspace.collapsed, () => workspace.widthPx, () => preview.collapsed, () => preview.widthPx], () => syncReserves());
 
+/**
+ * 「关闭到托盘」同步给宿主：宿主在 CloseRequested 里读它决定拦不拦（见 src-tauri/src/tray.rs）。
+ * immediate 让默认 / 本地缓存值先落地；设置从 SQLite 水合完成后若真值不同会再触发一次，
+ * 因此不会出现「偏好是关到托盘、宿主却按关闭即退出拦」的错配。
+ *
+ * 宿主还会再叠一道可用性钳制：托盘没建出来时这个偏好不生效（否则窗口藏起来没入口恢复）。
+ */
+watch(
+  () => settings.closeToTray,
+  (enabled) => void syncCloseToTray(enabled),
+  { immediate: true },
+);
+
+/**
+ * 托盘菜单文案同步给宿主。宿主侧菜单是原生控件、不认 vue-i18n，所以每次切语言都要
+ * 整份重推（见 src-tauri/src/tray.rs 的 set_tray_labels）。immediate 让启动时就落地，
+ * 覆盖掉宿主构建菜单时用的那套占位文案。
+ */
+function currentTrayLabels(): TrayLabels {
+  const t = i18n.global.t;
+  return {
+    toggleWindow: t("trayMenu.toggleWindow"),
+    newChat: t("trayMenu.newChat"),
+    settings: t("trayMenu.settings"),
+    quit: t("trayMenu.quit"),
+    hiddenHint: t("trayMenu.hiddenHint"),
+  };
+}
+watch(
+  () => i18n.global.locale.value,
+  () => void syncTrayLabels(currentTrayLabels()),
+  { immediate: true },
+);
+
+/** 托盘事件订阅的解绑函数（浏览器态是空函数）。 */
+let disposeTrayBridge: (() => void) | null = null;
+
 onMounted(() => {
   syncViewport();
   window.addEventListener("resize", syncViewport);
@@ -210,6 +249,8 @@ onMounted(() => {
   void bootPlugins();
   // 远程助手：注册通道事件、按设置自动连接（幂等；浏览器态内部直接跳过）。
   void useRemoteAssistantStore().init();
+  // 系统托盘：把菜单事件转成应用内动作（新建对话 / 打开设置）。宿主已先显示并聚焦窗口。
+  disposeTrayBridge = useTrayBridge({ onNewChat: handleNewChat, onOpenSettings: openSettings });
 });
 function syncSystemTheme(event: MediaQueryListEvent): void {
   systemDark.value = event.matches;
@@ -222,6 +263,8 @@ onBeforeUnmount(() => {
   darkMedia?.removeEventListener("change", syncSystemTheme);
   rowObserver?.disconnect();
   rowObserver = null;
+  disposeTrayBridge?.();
+  disposeTrayBridge = null;
   unsubscribeSettingsOpen();
 });
 
