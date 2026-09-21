@@ -5,7 +5,7 @@
  * 用 jszip 现拼最小 pptx，不依赖落盘 fixture。
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { flushPromises, mount } from "@vue/test-utils";
+import { mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import JSZip from "jszip";
 
@@ -193,11 +193,14 @@ beforeEach(() => {
   h.readBinary.mockReset();
 });
 
-/** 现拼 pptx 有 JSZip 的 setTimeout 分片，flushPromises（纯微任务）喂不到，需等一个真实宏任务。 */
-async function settle(): Promise<void> {
-  await flushPromises();
-  await new Promise((resolve) => setTimeout(resolve, 60));
-}
+/**
+ * 等解析落地：各用例轮询到自己的终态断言成立为止，不用固定时长的 sleep。
+ *
+ * 现拼 pptx 的解压是 JSZip 的 setTimeout 分片，`flushPromises`（纯微任务）喂不到，必须让出
+ * 真实宏任务；但「让出多久」不能赌 —— 耗时随 runner 负载浮动，赌多少毫秒都可能不够。
+ * 更麻烦的是中间态很具欺骗性：`loading` 已转 false 而 `deck` 尚未赋值，页头显示「演示文稿」
+ * 看着像渲染完了，其实只是还没解析完（CI 上就偶发断言到这一态）。故改用 vi.waitFor 轮询。
+ */
 
 describe("SlideViewer", () => {
   it("读取中：加载占位，页头回落默认文案", () => {
@@ -212,9 +215,7 @@ describe("SlideViewer", () => {
       await buildPptx([{ file: "slide1.xml", xml: slideXml(`${TEXT_BOX}${SHAPES}${PIC}${TABLE}`), notes: NOTES, image: true }]),
     );
     const wrapper = mountViewer();
-    await settle();
-
-    expect(wrapper.text()).toContain("共 1 页");
+    await vi.waitFor(() => expect(wrapper.text()).toContain("共 1 页"));
     expect(wrapper.get('[data-testid="slide-viewer"]').text()).toContain("第 1 页");
     expect(wrapper.get('[data-testid="slide-viewer"]').text()).toContain("备注：这是演讲者备注");
 
@@ -269,9 +270,7 @@ describe("SlideViewer", () => {
       ]),
     );
     const wrapper = mountViewer();
-    await settle();
-
-    expect(wrapper.text()).toContain("共 2 页");
+    await vi.waitFor(() => expect(wrapper.text()).toContain("共 2 页"));
     expect(wrapper.findAll('[data-testid="slide-page"]')).toHaveLength(2);
     expect(wrapper.get('[data-testid="slide-viewer"]').text()).toContain("第 1 页");
     expect(wrapper.get('[data-testid="slide-viewer"]').text()).toContain("第 2 页");
@@ -280,36 +279,32 @@ describe("SlideViewer", () => {
   it("空演示文稿：没有任何幻灯片时给提示而不是白屏", async () => {
     h.readBinary.mockResolvedValue(await buildPptx([]));
     const wrapper = mountViewer();
-    await settle();
-    expect(wrapper.text()).toContain("这份演示文稿没有幻灯片");
+    await vi.waitFor(() => expect(wrapper.text()).toContain("这份演示文稿没有幻灯片"));
     expect(wrapper.findAll('[data-testid="slide-page"]')).toHaveLength(0);
   });
 
   it("读文件失败：读取失败 alert", async () => {
     h.readBinary.mockRejectedValue(new Error("权限不足"));
     const wrapper = mountViewer();
-    await settle();
-    expect(wrapper.get('[role="alert"]').text()).toContain("读取失败：权限不足");
+    await vi.waitFor(() => expect(wrapper.get('[role="alert"]').text()).toContain("读取失败：权限不足"));
   });
 
   it("垃圾字节：标明无法解析并提示走系统应用", async () => {
     h.readBinary.mockResolvedValue(new Uint8Array([137, 80, 78, 71]));
     const wrapper = mountViewer();
-    await settle();
-    expect(wrapper.get('[role="alert"]').text()).toContain("无法解析该演示文稿");
+    await vi.waitFor(() => expect(wrapper.get('[role="alert"]').text()).toContain("无法解析该演示文稿"));
     expect(wrapper.get('[role="alert"]').text()).toContain("用系统应用打开");
   });
 
   it("切代次：revision 自增后重读并重绘，不留旧内容", async () => {
     h.readBinary.mockResolvedValueOnce(await buildPptx([{ file: "slide1.xml", xml: slideXml(TEXT_BOX) }]));
     const wrapper = mountViewer();
-    await settle();
-    expect(wrapper.text()).toContain("数据结果");
+    await vi.waitFor(() => expect(wrapper.text()).toContain("数据结果"));
 
     h.readBinary.mockResolvedValueOnce(await buildPptx([{ file: "slide1.xml", xml: slideXml(SHAPES) }]));
     await wrapper.setProps({ tab: tab({ revision: 1 }) });
-    await settle();
-    expect(wrapper.findAll('[data-testid="slide-text"]')).toHaveLength(0);
+    // 新 deck 落地前旧 deck 还在 DOM 里，所以「slide-text 消失」既是终态也是判别式
+    await vi.waitFor(() => expect(wrapper.findAll('[data-testid="slide-text"]')).toHaveLength(0));
     expect(wrapper.find('[data-testid="slide-table"]').exists()).toBe(false);
     expect(wrapper.findAll('[data-testid="slide-page"]')).toHaveLength(1);
   });
@@ -330,10 +325,9 @@ describe("SlideViewer", () => {
 </p:sld>`;
     h.readBinary.mockResolvedValue(await buildPptx([{ file: "slide1.xml", xml: darkBgSlide }]));
     const wrapper = mountViewer();
-    await settle();
+    await vi.waitFor(() => expect(wrapper.text()).toContain("无色标题"));
 
     const text = wrapper.get('[data-testid="slide-text"]');
-    expect(text.text()).toContain("无色标题");
     // 文本框据深色背景兜底浅字；run 没声明颜色，故 span 上不覆盖
     expect(text.attributes("style")).toContain("color: #FAFAF9");
     expect(text.find("span").attributes("style")).not.toContain("color:");

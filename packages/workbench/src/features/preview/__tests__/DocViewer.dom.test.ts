@@ -4,7 +4,7 @@
  * 「代次自增放弃旧解析」也顺带覆盖：连续换内容时旧结果不能画上来。
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { flushPromises, mount } from "@vue/test-utils";
+import { mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import JSZip from "jszip";
 
@@ -47,11 +47,11 @@ beforeEach(() => {
   h.readBinary.mockReset();
 });
 
-/** JSZip 内部按 setTimeout 分片，flushPromises（纯微任务）喂不到，需等一个真实宏任务。 */
-async function settle(): Promise<void> {
-  await flushPromises();
-  await new Promise((resolve) => setTimeout(resolve, 40));
-}
+/**
+ * 等解析落地：轮询到各用例自己的终态断言成立为止，不用固定时长的 sleep。
+ * docx 解压同样是 JSZip 的 setTimeout 分片，耗时随 runner 负载浮动，赌固定毫秒数会偶发断言在
+ * 「还没解析完」的中间态上（`loading` 已 false 而内容尚未落地）。同 SlideViewer 用例。
+ */
 
 describe("DocViewer", () => {
   it("读取中：加载占位", () => {
@@ -62,16 +62,13 @@ describe("DocViewer", () => {
   it("读取失败：alert + 错误文案", async () => {
     h.readBinary.mockRejectedValue(new Error("boom"));
     const wrapper = mountViewer();
-    await settle();
-    expect(wrapper.get('[role="alert"]').text()).toContain("读取失败：boom");
+    await vi.waitFor(() => expect(wrapper.get('[role="alert"]').text()).toContain("读取失败：boom"));
   });
 
   it("解析成功：计数栏表达段落块，正文渲染出文字", async () => {
     h.readBinary.mockResolvedValue(await buildDocx("<w:p><w:r><w:t>你好，世界</w:t></w:r></w:p>"));
     const wrapper = mountViewer();
-    await settle();
-
-    expect(wrapper.text()).toContain("1 个段落块");
+    await vi.waitFor(() => expect(wrapper.text()).toContain("1 个段落块"));
     expect(wrapper.get('[data-testid="doc-viewer"]').text()).toContain("你好，世界");
   });
 
@@ -80,26 +77,19 @@ describe("DocViewer", () => {
       "<w:p><w:r><w:t>表前段落</w:t></w:r></w:p>" + "<w:tbl><w:tr><w:tc><w:p><w:r><w:t>单元格</w:t></w:r></w:p></w:tc></w:tr></w:tbl>";
     h.readBinary.mockResolvedValue(await buildDocx(body));
     const wrapper = mountViewer();
-    await settle();
-
-    expect(wrapper.text()).toContain("2 个段落块 · 1 张表格");
+    await vi.waitFor(() => expect(wrapper.text()).toContain("2 个段落块 · 1 张表格"));
   });
 
   it("空正文：给出提示而不是裸白", async () => {
     h.readBinary.mockResolvedValue(await buildDocx(""));
     const wrapper = mountViewer();
-    await settle();
-
-    expect(wrapper.text()).toContain("这份文档没有正文内容。");
+    await vi.waitFor(() => expect(wrapper.text()).toContain("这份文档没有正文内容。"));
   });
 
   it("解析失败（垃圾字节）：parseError 状态，不进白屏", async () => {
     h.readBinary.mockResolvedValue(new Uint8Array([1, 2, 3, 4]));
     const wrapper = mountViewer();
-    await settle();
-
-    const alert = wrapper.get('[role="alert"]');
-    expect(alert.text()).toContain("无法解析该文档");
+    await vi.waitFor(() => expect(wrapper.get('[role="alert"]').text()).toContain("无法解析该文档"));
   });
 
   it("从有文档切到无正文的新内容：计数与正文状态一起归零（代次正确性）", async () => {
@@ -107,13 +97,11 @@ describe("DocViewer", () => {
     const second = await buildDocx("");
     h.readBinary.mockResolvedValueOnce(first).mockResolvedValueOnce(second);
     const wrapper = mountViewer();
-    await settle();
-    expect(wrapper.text()).toContain("1 个段落块");
+    await vi.waitFor(() => expect(wrapper.text()).toContain("1 个段落块"));
 
     await wrapper.setProps({ tab: tab({ revision: 1 }) });
-    await settle();
-
-    expect(wrapper.text()).toContain("这份文档没有正文内容。");
+    // 新 deck 落地前旧 deck 还在 DOM 里，所以这条既是终态也是判别式
+    await vi.waitFor(() => expect(wrapper.text()).toContain("这份文档没有正文内容。"));
     expect(wrapper.text()).not.toContain("初稿");
   });
 });
