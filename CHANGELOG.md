@@ -8,6 +8,8 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-21
+
 ### 新增
 
 - **系统托盘**：托盘菜单可显示/隐藏主窗口、新建对话、打开设置、退出应用；Windows / macOS 上
@@ -176,7 +178,9 @@
   Windows 构建失败、macOS 缺 `macos-private-api` 编译不过、构建脚本里 POSIX 风格的环境变量前缀。
 
 **安装包**：Linux 用 `.deb`（`sudo dpkg -i` 或 `apt install ./`），Windows 用 NSIS 安装器，macOS 用 `.dmg`。
-[Unreleased]: https://github.com/jean3690/GreyWork/compare/v0.2.0...HEAD
+
+[Unreleased]: https://github.com/jean3690/GreyWork/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/jean3690/GreyWork/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/jean3690/GreyWork/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/jean3690/GreyWork/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/jean3690/GreyWork/releases/tag/v0.1.0
