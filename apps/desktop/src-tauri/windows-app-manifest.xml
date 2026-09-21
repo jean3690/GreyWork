@@ -1,0 +1,17 @@
+<!-- 应用清单（Windows）。内容与 tauri-build 的默认清单一致，抄在这里是为了让 build.rs 能用
+     `/MANIFESTINPUT:` 把它挂到**所有**产物上 —— 见 build.rs 的说明。
+     tauri-build 一旦改了默认清单，这里要跟着改。 -->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity
+        type="win32"
+        name="Microsoft.Windows.Common-Controls"
+        version="6.0.0.0"
+        processorArchitecture="*"
+        publicKeyToken="6595b64144ccf1df"
+        language="*"
+      />
+    </dependentAssembly>
+  </dependency>
+</assembly>
