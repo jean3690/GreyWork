@@ -1,30 +1,30 @@
 <script setup lang="ts">
 /**
- * 检查更新对话框：打开即查 GitHub 最新 Release，与当前版本比对后给出
- * 「已是最新 / 有新版本」，并展示发布说明（新版本改了什么）。有更新时「前往下载」
- * 用系统浏览器打开发布页 —— 应用没有内置 updater，更新即手动下载安装。
+ * 检查更新对话框：打开即按平台检查更新，展示新版发布说明（改了什么）。
+ *
+ * - auto（Windows / macOS）：「下载并安装」应用内下载、校验签名、安装，进度实时显示，
+ *   装完提示重启。
+ * - manual（Linux deb）：「前往下载」用系统浏览器打开发布页手动装。
+ * - unsupported（浏览器态）：提示需要桌面版。
  *
  * 消费者用 `v-if` 挂载，存在即打开态；关闭由消费者卸载（与本目录其它弹窗一致）。
  */
 import { onMounted, ref } from "vue";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { i18n } from "@/i18n";
-import { updateBackend, isNewerVersion, REPO_URL, type LatestRelease } from "@/lib/update-backend";
+import { updateBackend, type UpdateStatus, type DownloadProgress } from "@/lib/update-backend";
 
 const emit = defineEmits<{ close: [] }>();
 const t = i18n.global.t;
 
-/** checking → 查询中；latest → 已比对（release + newer 决定「有更新/已最新」）；error → 失败。 */
-type Phase = "checking" | "latest" | "error";
+/** checking→查询中；ready→已比对；installing→下载安装中；installed→装完待重启；error→失败。 */
+type Phase = "checking" | "ready" | "installing" | "installed" | "error";
 
 const phase = ref<Phase>("checking");
-const current = ref<string | null>(null);
-const release = ref<LatestRelease | null>(null);
-const newer = ref(false);
-/** 错误分档：unsupported = 浏览器态没有宿主通道；failed = 网络/接口失败（带 detail）。 */
-const errorKind = ref<"unsupported" | "failed">("failed");
+const status = ref<UpdateStatus | null>(null);
+const progress = ref<DownloadProgress | null>(null);
 const errorDetail = ref("");
-const opening = ref(false);
+const busy = ref(false);
 
 const open = ref(true);
 
@@ -34,29 +34,52 @@ function onOpenChange(next: boolean): void {
 
 async function runCheck(): Promise<void> {
   phase.value = "checking";
+  progress.value = null;
   try {
-    current.value = await updateBackend.currentVersion();
-    const latest = await updateBackend.checkUpdate();
-    release.value = latest;
-    newer.value = current.value ? isNewerVersion(latest.version, current.value) : true;
-    phase.value = "latest";
+    status.value = await updateBackend.check();
+    phase.value = "ready";
   } catch (cause) {
-    const message = cause instanceof Error ? cause.message : String(cause);
-    errorKind.value = message === "browser-unsupported" ? "unsupported" : "failed";
-    errorDetail.value = message;
+    errorDetail.value = cause instanceof Error ? cause.message : String(cause);
     phase.value = "error";
   }
 }
 
-async function goDownload(): Promise<void> {
-  if (opening.value) return;
-  opening.value = true;
+/** auto 通道：应用内下载并安装，装完转 installed 等用户点重启。 */
+async function install(): Promise<void> {
+  if (busy.value) return;
+  busy.value = true;
+  phase.value = "installing";
   try {
-    await updateBackend.openExternal(release.value?.url ?? `${REPO_URL}/releases`);
+    await updateBackend.downloadAndInstall((p) => (progress.value = p));
+    phase.value = "installed";
+  } catch (cause) {
+    errorDetail.value = cause instanceof Error ? cause.message : String(cause);
+    phase.value = "error";
+  } finally {
+    busy.value = false;
+  }
+}
+
+/** manual 通道：打开发布页手动下载。 */
+async function download(): Promise<void> {
+  if (busy.value) return;
+  busy.value = true;
+  try {
+    await updateBackend.openExternal(status.value?.url ?? "");
     emit("close");
   } finally {
-    opening.value = false;
+    busy.value = false;
   }
+}
+
+async function restart(): Promise<void> {
+  await updateBackend.relaunchApp();
+}
+
+/** 下载进度百分比；总大小未知（服务端没给 Content-Length）时返回 null。 */
+function percent(p: DownloadProgress): number | null {
+  if (p.total <= 0) return null;
+  return Math.min(100, Math.round((p.downloaded / p.total) * 100));
 }
 
 onMounted(runCheck);
@@ -77,55 +100,92 @@ onMounted(runCheck);
       </DialogDescription>
 
       <!-- 失败 -->
-      <template v-else-if="phase === 'error'">
-        <DialogDescription class="mt-2 text-[12px] leading-relaxed text-orange" role="alert" data-testid="update-error">
-          {{ errorKind === "unsupported" ? t("update.unsupported") : t("update.failed", { detail: errorDetail }) }}
+      <DialogDescription
+        v-else-if="phase === 'error'"
+        class="mt-2 text-[12px] leading-relaxed text-orange"
+        role="alert"
+        data-testid="update-error"
+      >
+        {{ t("update.failed", { detail: errorDetail }) }}
+      </DialogDescription>
+
+      <!-- 下载 / 安装中 -->
+      <template v-else-if="phase === 'installing'">
+        <DialogDescription class="mt-2 text-[12px] leading-relaxed text-dim2" data-testid="update-installing">
+          {{ progress?.phase === "installing" ? t("update.installingNow") : t("update.downloading") }}
         </DialogDescription>
+        <div class="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-panel-2">
+          <div
+            class="h-full rounded-full bg-accent transition-all"
+            :class="progress && percent(progress) === null ? 'w-1/3 animate-pulse' : ''"
+            :style="progress && percent(progress) !== null ? { width: `${percent(progress)}%` } : undefined"
+          />
+        </div>
       </template>
 
-      <!-- 已比对：有更新 / 已最新 -->
-      <template v-else>
-        <DialogDescription class="mt-2 flex items-center gap-2 text-[12px] text-dim2">
-          <span>{{ t("update.current", { version: current ?? "—" }) }}</span>
-          <span aria-hidden="true">·</span>
-          <span>{{ t("update.latest", { version: release?.version ?? "—" }) }}</span>
+      <!-- 装完待重启 -->
+      <DialogDescription
+        v-else-if="phase === 'installed'"
+        class="mt-2 text-[12px] leading-relaxed text-foreground"
+        data-testid="update-installed"
+      >
+        {{ t("update.installed") }}
+      </DialogDescription>
+
+      <!-- 已比对：unsupported / 有更新 / 已最新 -->
+      <template v-else-if="status">
+        <DialogDescription
+          v-if="status.mode === 'unsupported'"
+          class="mt-2 text-[12px] leading-relaxed text-dim2"
+          data-testid="update-unsupported"
+        >
+          {{ t("update.unsupported") }}
         </DialogDescription>
 
-        <p
-          v-if="newer"
-          class="mt-2 inline-flex w-fit items-center rounded-[6px] bg-accent/15 px-2 py-0.5 text-[11.5px] font-medium text-accent"
-          data-testid="update-available"
-        >
-          {{ t("update.available") }}
-        </p>
-        <p v-else class="mt-2 text-[12px] text-dim2" data-testid="update-uptodate">{{ t("update.upToDate") }}</p>
+        <template v-else>
+          <DialogDescription class="mt-2 flex items-center gap-2 text-[12px] text-dim2">
+            <span>{{ t("update.current", { version: status.currentVersion ?? "—" }) }}</span>
+            <span aria-hidden="true">·</span>
+            <span>{{ t("update.latest", { version: status.version ?? "—" }) }}</span>
+          </DialogDescription>
 
-        <!-- 发布说明：新版本改了什么 -->
-        <template v-if="newer && release">
-          <div class="mt-3 text-[12px] font-medium text-foreground">
-            {{ release.name }}
-            <span v-if="release.publishedAt" class="ml-1 text-[11px] font-normal text-dim2">
-              {{ release.publishedAt.slice(0, 10) }}
-            </span>
-          </div>
-          <pre
-            v-if="release.notes.trim()"
-            class="mt-1.5 max-h-[300px] overflow-y-auto rounded-[8px] border border-line-2 bg-panel-2 p-2.5 text-[12px] leading-relaxed whitespace-pre-wrap text-dim"
-            data-testid="update-notes"
-            >{{ release.notes.trim() }}</pre
+          <p
+            v-if="status.hasUpdate"
+            class="mt-2 inline-flex w-fit items-center rounded-[6px] bg-accent/15 px-2 py-0.5 text-[11.5px] font-medium text-accent"
+            data-testid="update-available"
           >
-          <p v-else class="mt-1.5 text-[12px] text-dim2">{{ t("update.notesEmpty") }}</p>
+            {{ t("update.available") }}
+          </p>
+          <p v-else class="mt-2 text-[12px] text-dim2" data-testid="update-uptodate">{{ t("update.upToDate") }}</p>
+
+          <!-- 发布说明：新版本改了什么 -->
+          <template v-if="status.hasUpdate">
+            <div class="mt-3 text-[12px] font-medium text-foreground">
+              {{ t("update.latest", { version: status.version ?? "—" }) }}
+              <span v-if="status.date" class="ml-1 text-[11px] font-normal text-dim2">{{ status.date }}</span>
+            </div>
+            <pre
+              v-if="status.notes.trim()"
+              class="mt-1.5 max-h-[300px] overflow-y-auto rounded-[8px] border border-line-2 bg-panel-2 p-2.5 text-[12px] leading-relaxed whitespace-pre-wrap text-dim"
+              data-testid="update-notes"
+              >{{ status.notes.trim() }}</pre
+            >
+            <p v-else class="mt-1.5 text-[12px] text-dim2">{{ t("update.notesEmpty") }}</p>
+          </template>
         </template>
       </template>
 
       <div class="mt-4 flex justify-end gap-2">
+        <!-- 关闭 / 以后再说：安装中不给关（避免中断下载）。 -->
         <button
+          v-if="phase !== 'installing'"
           type="button"
           class="rounded-[8px] border border-line bg-panel-2 px-3 py-1.5 text-[12px] text-dim transition-colors hover:text-foreground"
           @click="emit('close')"
         >
-          {{ phase === "latest" && newer ? t("update.later") : t("update.close") }}
+          {{ phase === "ready" && status?.hasUpdate ? t("update.later") : t("update.close") }}
         </button>
+
         <button
           v-if="phase === 'error'"
           type="button"
@@ -135,13 +195,36 @@ onMounted(runCheck);
         >
           {{ t("update.retry") }}
         </button>
+
         <button
-          v-else-if="phase === 'latest' && newer"
+          v-else-if="phase === 'installed'"
+          type="button"
+          data-testid="update-restart"
+          class="rounded-[8px] bg-accent px-3 py-1.5 text-[12px] font-medium text-accent-ink transition-opacity hover:bg-accent"
+          @click="restart"
+        >
+          {{ t("update.restart") }}
+        </button>
+
+        <!-- auto 通道：应用内下载并安装 -->
+        <button
+          v-else-if="phase === 'ready' && status?.hasUpdate && status.mode === 'auto'"
+          type="button"
+          data-testid="update-install"
+          class="rounded-[8px] bg-accent px-3 py-1.5 text-[12px] font-medium text-accent-ink transition-opacity hover:bg-accent"
+          @click="install"
+        >
+          {{ t("update.install") }}
+        </button>
+
+        <!-- manual 通道：打开发布页 -->
+        <button
+          v-else-if="phase === 'ready' && status?.hasUpdate && status.mode === 'manual'"
           type="button"
           data-testid="update-download"
-          :disabled="opening"
+          :disabled="busy"
           class="rounded-[8px] bg-accent px-3 py-1.5 text-[12px] font-medium text-accent-ink transition-opacity hover:bg-accent disabled:opacity-60"
-          @click="goDownload"
+          @click="download"
         >
           {{ t("update.download") }}
         </button>

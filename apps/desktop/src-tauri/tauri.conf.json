@@ -34,6 +34,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
     "category": "DeveloperTool",
     "shortDescription": "Desktop-first AI agent workspace",
@@ -42,5 +43,11 @@
     "homepage": "https://github.com/jean3690/GreyWork",
     "copyright": "Copyright (c) 2026 jean",
     "license": "MIT"
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": ["https://github.com/jean3690/GreyWork/releases/latest/download/latest.json"],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDc5ODY3NEZBNjIyNDhEOUIKUldTYmpTUmkrblNHZWZSemRONWMxZEJEcUk1b2IzNE5QWVFwcXJoQ0t5S2VOcENFUm5CVTkyMnIK"
+    }
   }
 }

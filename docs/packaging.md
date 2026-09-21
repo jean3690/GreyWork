@@ -155,6 +155,45 @@ matrix rather than locally.
   input of the `setup-rust` composite handles. Cost: two full Rust compiles, so the
   macOS release job is the slowest of the three.
 
+## Auto-update (updater signing) — wired up
+
+In-app auto-update runs on `tauri-plugin-updater`, which is **separate from OS code
+signing**. It verifies a minisign signature over each update artifact; it does not make
+Gatekeeper or SmartScreen trust the installer (that is the section below).
+
+How it fits together:
+
+- `bundle.createUpdaterArtifacts: true` makes `tauri build` emit an updater artifact per
+  platform (Windows `.nsis.zip`, macOS `.app.tar.gz`) plus a `.sig` next to each, and a
+  `latest.json` manifest.
+- `plugins.updater.pubkey` in `tauri.conf.json` is the minisign **public** key. The
+  matching private key was generated with `tauri signer generate` and lives **only** in
+  the repo secrets — never committed (`.secrets/` is gitignored).
+- `release.yml` passes `TAURI_SIGNING_PRIVATE_KEY` + `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
+  as env to the build; `tauri build` signs the artifacts and writes the `.sig` values into
+  `latest.json`. Without those secrets a build with `createUpdaterArtifacts` **fails** — a
+  deliberate trip-wire so an unsigned release can't ship silently.
+- `plugins.updater.endpoints` points at
+  `releases/latest/download/latest.json`. The app fetches it, compares versions, verifies
+  the signature with the bundled pubkey, then downloads + installs.
+
+**Platform reach:** Windows and macOS only. Linux ships `deb`, which the updater cannot
+patch in place (only AppImage is an updater target on Linux), so the app falls back to
+"open the release page and download manually" there — see `lib/update-backend.ts`'s
+`manual` mode.
+
+**Setup once (repo owner):** create two GitHub Actions secrets —
+`TAURI_SIGNING_PRIVATE_KEY` (the contents of the generated key file) and
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (empty if the key has no password). Lose the private
+key and every future auto-update breaks; there is no recovery except shipping a new pubkey
+in an app update users install manually.
+
+**Known caveat:** the three release jobs run in parallel and each uploads to the same
+release. `tauri-action` fetches and merges `latest.json`, but two jobs finishing at the
+exact same moment can race. Only Windows and macOS write updater artifacts (Linux does
+not), so the window is two jobs wide; if a merge is ever lost, re-running the affected job
+re-uploads a merged manifest.
+
 ## Code signing & notarization — not wired up yet
 
 Deliberately left out: both require certificates we do not have, and wiring the
