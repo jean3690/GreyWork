@@ -67,10 +67,6 @@ jobs:
         uses: tauri-apps/tauri-action@action-v1.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # updater 签名：tauri build 见到这两个变量就对 NSIS/app 产物签名并生成 latest.json。
-          # 私钥与密码存在仓库 Secrets（本地生成，绝不入库）；缺失时 createUpdaterArtifacts 会报错。
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: apps/desktop
           tagName: ${{ github.ref_name }}

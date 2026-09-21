@@ -34,10 +34,6 @@ tauri-plugin-dialog = "2"
 tauri-plugin-window-state = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-clipboard-manager = "2"
-# 自动更新：下载并校验签名后的安装包（Windows NSIS / macOS app）。Linux deb 无原地
-# 升级路径，前端对 Linux 回落到「打开发布页手动下载」。process 用于装完重启应用。
-tauri-plugin-updater = "2"
-tauri-plugin-process = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 agent-client-protocol = "2.0.0"

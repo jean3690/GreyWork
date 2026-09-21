@@ -1,10 +1,8 @@
 <script setup lang="ts">
 /**
- * 检查更新对话框：打开即按平台检查更新，展示新版发布说明（改了什么）。
+ * 检查更新对话框：打开即查 GitHub 最新 Release，展示新版发布说明（改了什么）。
  *
- * - auto（Windows / macOS）：「下载并安装」应用内下载、校验签名、安装，进度实时显示，
- *   装完提示重启。
- * - manual（Linux deb）：「前往下载」用系统浏览器打开发布页手动装。
+ * - manual（桌面端）：「前往下载」用系统浏览器打开发布页手动装（应用不内置原地升级）。
  * - unsupported（浏览器态）：提示需要桌面版。
  *
  * 消费者用 `v-if` 挂载，存在即打开态；关闭由消费者卸载（与本目录其它弹窗一致）。
@@ -12,17 +10,16 @@
 import { onMounted, ref } from "vue";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { i18n } from "@/i18n";
-import { updateBackend, type UpdateStatus, type DownloadProgress } from "@/lib/update-backend";
+import { updateBackend, type UpdateStatus } from "@/lib/update-backend";
 
 const emit = defineEmits<{ close: [] }>();
 const t = i18n.global.t;
 
-/** checking→查询中；ready→已比对；installing→下载安装中；installed→装完待重启；error→失败。 */
-type Phase = "checking" | "ready" | "installing" | "installed" | "error";
+/** checking→查询中；ready→已比对；error→失败。 */
+type Phase = "checking" | "ready" | "error";
 
 const phase = ref<Phase>("checking");
 const status = ref<UpdateStatus | null>(null);
-const progress = ref<DownloadProgress | null>(null);
 const errorDetail = ref("");
 const busy = ref(false);
 
@@ -34,7 +31,6 @@ function onOpenChange(next: boolean): void {
 
 async function runCheck(): Promise<void> {
   phase.value = "checking";
-  progress.value = null;
   try {
     status.value = await updateBackend.check();
     phase.value = "ready";
@@ -44,23 +40,7 @@ async function runCheck(): Promise<void> {
   }
 }
 
-/** auto 通道：应用内下载并安装，装完转 installed 等用户点重启。 */
-async function install(): Promise<void> {
-  if (busy.value) return;
-  busy.value = true;
-  phase.value = "installing";
-  try {
-    await updateBackend.downloadAndInstall((p) => (progress.value = p));
-    phase.value = "installed";
-  } catch (cause) {
-    errorDetail.value = cause instanceof Error ? cause.message : String(cause);
-    phase.value = "error";
-  } finally {
-    busy.value = false;
-  }
-}
-
-/** manual 通道：打开发布页手动下载。 */
+/** 打开发布页手动下载。 */
 async function download(): Promise<void> {
   if (busy.value) return;
   busy.value = true;
@@ -70,16 +50,6 @@ async function download(): Promise<void> {
   } finally {
     busy.value = false;
   }
-}
-
-async function restart(): Promise<void> {
-  await updateBackend.relaunchApp();
-}
-
-/** 下载进度百分比；总大小未知（服务端没给 Content-Length）时返回 null。 */
-function percent(p: DownloadProgress): number | null {
-  if (p.total <= 0) return null;
-  return Math.min(100, Math.round((p.downloaded / p.total) * 100));
 }
 
 onMounted(runCheck);
@@ -107,29 +77,6 @@ onMounted(runCheck);
         data-testid="update-error"
       >
         {{ t("update.failed", { detail: errorDetail }) }}
-      </DialogDescription>
-
-      <!-- 下载 / 安装中 -->
-      <template v-else-if="phase === 'installing'">
-        <DialogDescription class="mt-2 text-[12px] leading-relaxed text-dim2" data-testid="update-installing">
-          {{ progress?.phase === "installing" ? t("update.installingNow") : t("update.downloading") }}
-        </DialogDescription>
-        <div class="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-panel-2">
-          <div
-            class="h-full rounded-full bg-accent transition-all"
-            :class="progress && percent(progress) === null ? 'w-1/3 animate-pulse' : ''"
-            :style="progress && percent(progress) !== null ? { width: `${percent(progress)}%` } : undefined"
-          />
-        </div>
-      </template>
-
-      <!-- 装完待重启 -->
-      <DialogDescription
-        v-else-if="phase === 'installed'"
-        class="mt-2 text-[12px] leading-relaxed text-foreground"
-        data-testid="update-installed"
-      >
-        {{ t("update.installed") }}
       </DialogDescription>
 
       <!-- 已比对：unsupported / 有更新 / 已最新 -->
@@ -176,9 +123,7 @@ onMounted(runCheck);
       </template>
 
       <div class="mt-4 flex justify-end gap-2">
-        <!-- 关闭 / 以后再说：安装中不给关（避免中断下载）。 -->
         <button
-          v-if="phase !== 'installing'"
           type="button"
           class="rounded-[8px] border border-line bg-panel-2 px-3 py-1.5 text-[12px] text-dim transition-colors hover:text-foreground"
           @click="emit('close')"
@@ -194,27 +139,6 @@ onMounted(runCheck);
           @click="runCheck"
         >
           {{ t("update.retry") }}
-        </button>
-
-        <button
-          v-else-if="phase === 'installed'"
-          type="button"
-          data-testid="update-restart"
-          class="rounded-[8px] bg-accent px-3 py-1.5 text-[12px] font-medium text-accent-ink transition-opacity hover:bg-accent"
-          @click="restart"
-        >
-          {{ t("update.restart") }}
-        </button>
-
-        <!-- auto 通道：应用内下载并安装 -->
-        <button
-          v-else-if="phase === 'ready' && status?.hasUpdate && status.mode === 'auto'"
-          type="button"
-          data-testid="update-install"
-          class="rounded-[8px] bg-accent px-3 py-1.5 text-[12px] font-medium text-accent-ink transition-opacity hover:bg-accent"
-          @click="install"
-        >
-          {{ t("update.install") }}
         </button>
 
         <!-- manual 通道：打开发布页 -->

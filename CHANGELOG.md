@@ -25,11 +25,8 @@
   尾部分隔符再取末段（与同文件的 `normalizePath` 同语义，故 `"reports/"` → `"reports"`），
   `extname` 不含点、不改大小写。
 - 标题栏加 GitHub 入口与「检查更新」：GitHub 图标点开本项目仓库；检查更新对比当前版本与
-  最新 Release 并展示新版发布说明。Windows / macOS 走 `tauri-plugin-updater` 应用内下载、
-  验签（minisign）、安装并重启；Linux deb 无原地升级路径，回落到「前往下载」打开发布页。
-- 应用内自动更新的签名与发布：`bundle.createUpdaterArtifacts` 产出带 `.sig` 的更新包与
-  `latest.json`，`release.yml` 用仓库 Secrets 里的 minisign 私钥签名（本地 `tauri signer`
-  生成，私钥不入库）。这层只保证更新包可信，与 macOS/Windows 的系统级代码签名无关。
+  最新 Release 并展示新版发布说明，点「前往下载」用系统浏览器打开发布页手动安装。应用不
+  内置原地升级（不做 minisign 签名、不产 `latest.json`），全平台走同一套手动下载流程。
 
 ### 变更
 
