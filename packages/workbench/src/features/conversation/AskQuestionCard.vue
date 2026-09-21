@@ -154,8 +154,11 @@ function submit(): void {
           </button>
         </div>
 
-        <!-- 「其他」自由输入：选项并非穷举，用户常要自行补充 -->
-        <label class="flex items-center gap-2 rounded-[8px] border border-line bg-panel px-2 py-1">
+        <!-- 「其他」自由输入：选项并非穷举，用户常要自行补充。
+             焦点反馈做在这个 label 上（内层 input 的 outline-none 生效后不再自画描边）。 -->
+        <label
+          class="flex items-center gap-2 rounded-[8px] border border-line bg-panel px-2 py-1 transition-colors focus-within:border-cyan/50"
+        >
           <Icon name="plus" :size="11" class="shrink-0 text-dim2" />
           <input
             v-model="customs[index]"

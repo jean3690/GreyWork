@@ -382,6 +382,8 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
             @drop="onComposerDrop"
           >
             <AttachmentTray :items="attachmentItems" @remove="removeAttachment" />
+            <!-- outline-none 在这里是真生效的：base.css 的全局焦点环放在 @layer base 里，
+               能被 @layer utilities 的 .outline-none 盖掉。焦点反馈由外层卡片的 focus-within 承担。 -->
             <textarea
               ref="textareaEl"
               v-model="draft"
@@ -392,7 +394,7 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
               :aria-expanded="slashOpen"
               :aria-controls="slashOpen ? 'slash-command-menu' : undefined"
               :aria-activedescendant="slashActiveOptionId"
-              class="min-h-[76px] w-full resize-none bg-transparent px-2 py-1 text-[14px] leading-relaxed text-foreground outline-none placeholder:text-dim"
+              class="min-h-[76px] w-full resize-none rounded-[10px] bg-panel px-2.5 py-2 text-[14px] leading-relaxed text-foreground outline-none placeholder:text-dim"
               :placeholder="t('chat.composer.placeholderThread')"
               :aria-label="t('chat.composer.ariaLabel')"
               @keydown="onKeydown"

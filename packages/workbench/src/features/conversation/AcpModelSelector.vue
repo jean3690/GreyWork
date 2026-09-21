@@ -160,6 +160,9 @@ function toggle(): void {
       :class="[openUp ? 'bottom-full mb-1' : 'top-full mt-1', alignLeft ? 'left-0' : 'right-0']"
       @keydown.esc.prevent="closeMenu"
     >
+      <!-- 搜索行：菜单打开时这个 input 会自动获焦，且键盘导航全程留在它身上（列表走
+           aria-activedescendant），它始终是唯一的焦点目标 —— 再补一个 focus-within 指示
+           只会永远亮着、什么信息都不传达。内层 outline-none 生效即可（见 theme/base.css）。 -->
       <div v-if="showSearch" class="flex items-center gap-1.5 border-b border-line px-2.5 py-2">
         <Icon name="search" :size="13" class="shrink-0 text-dim2" />
         <input

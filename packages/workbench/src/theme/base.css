@@ -4,7 +4,7 @@
  *
  * 本文件已按 Phase 2–6 逐表面迁移收窄：凡模板已带 tailwind 工具类的选择器均已拆除，
  * 仅保留无法由单模板工具类表达的跨组件共享规则：
- *   - 全局 reset / focus-visible
+ *   - 表单控件兜底 reset（button / input）+ 全局 focus-visible（**在 @layer base 里**，见下方长注释）
  *   - .gw-core-host（GreyWorkCore 3D 画布宿主）
  *   - .footnote / .msg__text / .composer__caret（跨组件共享文本样式）
  *   - .seg/.seg__btn（SettingsView / ChatComposer 分段开关）
@@ -44,25 +44,48 @@ body {
   color: var(--text);
 }
 
-button,
-input {
-  font-family: inherit;
-}
-input {
-  background: transparent;
-  border: none;
-  outline: none;
-  color: var(--text);
-}
-button {
-  cursor: pointer;
-}
-button:focus-visible,
-input:focus-visible,
-textarea:focus-visible,
-[role="button"]:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+/* ===== 表单控件重置 + 全局焦点环：**必须**待在 @layer base 里 =====
+ *
+ * 本文件其余规则都是无层的，而无层样式**永远压过** @layer 里的样式 —— 与选择器特异度无关
+ * （Tailwind v4 把工具类放进 @layer utilities，正是为了让用户的无层 CSS 能覆盖它）。
+ * 把下面这些「模板工具类本来就该能覆盖」的兜底写在无层区，会一次性踩四个坑：
+ *   1. `input { border: none }` 压掉全应用每个 `<input>` 的 `.border` / `.border-line`，
+ *      `background: transparent` 连 `.bg-panel-2` 一起压掉 —— 于是声明了边框和底色的
+ *      输入框实际渲染成无边框透明块（设置里的 WebDAV / MCP 注册表 / 模型供应商表单…约 20 处）；
+ *   2. 同一条也压掉 `focus:border-accent` / `focus-visible:border-cyan`（border-style 已是
+ *      none，改边框色根本看不见）；
+ *   3. 全局焦点环压掉 `.outline-none`，于是每个输入框点下去都冒出一个直角蓝框；
+ *   4. `font-family: inherit` 压掉 `.font-mono`（密钥 / URL 这类等宽输入框会变成比例字体）、
+ *      `button { cursor: pointer }` 压掉 `disabled:cursor-not-allowed`（禁用按钮仍显示手型）。
+ * 放进 @layer base 之后 @layer utilities 正常胜出：写了工具类的元素按工具类渲染，
+ * 没写的仍然拿到这份兜底重置与焦点环。改这里之前请先跑
+ * `tests/unit/theme/base-css-layers.test.ts`。
+ *
+ * reset 只列 button / input：`<textarea>` 与 `<select>` 的 `font: inherit` + 透明底色
+ * 已由 Tailwind preflight（同在 @layer base）给到，不必在这里重复一遍 —— 但焦点环
+ * 那段要连 textarea 一起列，preflight 不管焦点环。
+ */
+@layer base {
+  button,
+  input {
+    font-family: inherit;
+  }
+  button {
+    cursor: pointer;
+  }
+  input {
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text);
+  }
+  button:focus-visible,
+  input:focus-visible,
+  textarea:focus-visible,
+  [role="button"]:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
 }
 
 /* 插件式共享画布宿主（GreyWorkCore singleton 挂载点） */

@@ -164,13 +164,14 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
       </div>
 
       <footer class="mt-3">
-        <div class="flex flex-col gap-2 rounded-[14px] border border-line-2 bg-panel-2 p-2.5">
+        <!-- 焦点反馈做在卡片上（文字区的 outline-none 生效后，内层不再自画描边）。 -->
+        <div class="flex flex-col gap-2 rounded-[14px] border border-line-2 bg-panel-2 p-2.5 transition-colors focus-within:border-cyan/50">
           <textarea
             ref="composerEl"
             v-model="draft"
             data-ctx="composer"
             rows="2"
-            class="min-h-[52px] w-full resize-none bg-transparent px-2 py-1 text-[13px] leading-relaxed text-foreground outline-none placeholder:text-dim"
+            class="min-h-[52px] w-full resize-none rounded-[10px] bg-panel px-2.5 py-2 text-[13px] leading-relaxed text-foreground outline-none placeholder:text-dim"
             :placeholder="t('remoteAssist.conversation.placeholder')"
             :aria-label="t('remoteAssist.conversation.send')"
             data-testid="remote-composer-input"
