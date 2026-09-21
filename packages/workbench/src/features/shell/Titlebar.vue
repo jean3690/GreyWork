@@ -12,6 +12,9 @@ import Icon from "@/features/shared/Icon.vue";
 import Hint from "@/features/shared/Hint.vue";
 import SearchPanel from "@/features/workspace/SearchPanel.vue";
 import { Popover, PopoverTrigger } from "@/components/ui/popover";
+import { useI18n } from "vue-i18n";
+import { updateBackend, REPO_URL } from "@/lib/update-backend";
+import UpdateDialog from "@/features/shell/UpdateDialog.vue";
 
 /**
  * GreyWork 风格标题栏：侧栏开合 + 主导航 + 当前工作区指示 + 右上角窗口控制键。
@@ -32,6 +35,15 @@ const workspaceStore = useWorkspaceStore();
 const preview = usePreviewStore();
 const workspace = useWorkspacePanelStore();
 const activity = useActivityStore();
+const { t } = useI18n();
+
+/** 检查更新对话框；`v-if` 挂载 UpdateDialog，关闭即卸载（打开时才发起 GitHub 查询）。 */
+const updateOpen = ref(false);
+
+/** GitHub 图标：用系统浏览器打开本项目仓库（浏览器态回落新标签页）。 */
+function openRepo(): void {
+  void updateBackend.openExternal(REPO_URL);
+}
 
 const activeWorkspace = computed(
   () => workspaceStore.workspaces.find((workspace) => workspace.id === workspaceStore.activeWorkspaceId) ?? null,
@@ -206,6 +218,36 @@ onBeforeUnmount(() => {
       </Hint>
       <SearchPanel v-if="searchOpen" @close="searchOpen = false" />
     </Popover>
+
+    <!-- GitHub 仓库：官方 mark 需要填充，故不走描边式的 Icon 组件，内联 SVG（fill=currentColor）。 -->
+    <Hint :text="t('titlebar.github')">
+      <button
+        class="grid size-7 cursor-pointer place-items-center rounded-[6px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+        :aria-label="t('titlebar.github')"
+        data-testid="titlebar-github"
+        @click="openRepo"
+      >
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" focusable="false">
+          <path
+            d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"
+          />
+        </svg>
+      </button>
+    </Hint>
+
+    <!-- 检查更新：refresh 图标语义即「查一遍」。点击打开对话框（打开时才发起 GitHub 查询）。 -->
+    <Hint :text="t('titlebar.update')">
+      <button
+        class="grid size-7 cursor-pointer place-items-center rounded-[6px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+        :aria-label="t('titlebar.update')"
+        data-testid="titlebar-update"
+        @click="updateOpen = true"
+      >
+        <Icon name="refresh" :size="16" />
+      </button>
+    </Hint>
+
+    <UpdateDialog v-if="updateOpen" @close="updateOpen = false" />
 
     <div class="ml-auto flex items-center gap-1.5 rounded-[6px] border border-line-2 bg-panel px-2 py-1 text-[12px] text-dim">
       <span class="size-1.5 rounded-full" :class="activeWorkspace ? 'bg-mint' : 'bg-dim2'" />

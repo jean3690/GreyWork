@@ -31,6 +31,7 @@ mod web_fetch;
 pub mod wechat;
 pub mod wecom;
 mod workspace_fs;
+mod update;
 mod worktree;
 
 use tauri::Manager;
@@ -201,6 +202,8 @@ pub fn run() {
             db::db_team_runs_sync,
             db::db_agents_load,
             db::db_agents_sync,
+            update::check_update,
+            update::open_external,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
