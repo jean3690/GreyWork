@@ -62,7 +62,7 @@ aes-gcm = "0.10"
 ed25519-dalek = { version = "2", features = ["std"] }
 getrandom = "0.3"
 form_urlencoded = "1"
-tokio-tungstenite = { version = "0.29.0", default-features = false, features = ["rustls-tls-webpki-roots", "connect"] }
+tokio-tungstenite = { version = "0.30.0", default-features = false, features = ["rustls-tls-webpki-roots", "connect"] }
 
 # 老格式 .xls（OLE2/BIFF）在渲染端没有可用的解析器：exceljs 只认 xlsx，Univer 也走 exceljs。
 # JS 侧唯一能读 xls 的 SheetJS 已从 npm 下架（npm 上停在 0.18.5，带两个未修复 CVE），
