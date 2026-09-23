@@ -7,14 +7,19 @@
  * 命中不了就回落到 default_* 图标 —— 树里任何一行都该有个图标可显示。
  *
  * 结果用 Map 缓存：树展开后每行都会查一遍，同一文件名/目录名反复查询没必要重复做匹配。
+ * 缓存有界（LRU）：大仓库里文件名/目录名几乎是无限的，不设上限就是随浏览单调增长。
  */
 import { getIconForFile, getIconForFolder, getIconForOpenFolder } from "vscode-icons-js";
+import { createBoundedMap } from "./bounded-map";
 
 const ICON_BASE = "/vscode-icons/";
 
-const FILE_CACHE = new Map<string, string>();
-const FOLDER_CACHE = new Map<string, string>();
-const FOLDER_OPEN_CACHE = new Map<string, string>();
+/** 单个缓存的上限。图标 URL 本身很轻，这里只是兜住"无限文件名"的增长。 */
+const ICON_CACHE_LIMIT = 512;
+
+const FILE_CACHE = createBoundedMap<string, string>(ICON_CACHE_LIMIT);
+const FOLDER_CACHE = createBoundedMap<string, string>(ICON_CACHE_LIMIT);
+const FOLDER_OPEN_CACHE = createBoundedMap<string, string>(ICON_CACHE_LIMIT);
 
 function urlOf(icon: string | undefined, fallback: string): string {
   return `${ICON_BASE}${icon || fallback}`;

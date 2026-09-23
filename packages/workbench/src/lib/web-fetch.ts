@@ -6,6 +6,7 @@
  * 既不 `v-html`，也不加载远端 HTML 里的任何资源或脚本。
  */
 import { webFetchBackend } from "./web-fetch-backend";
+import { createBoundedMap } from "./bounded-map";
 
 export interface WebArticle {
   /** 归一化后的请求地址，也是缓存键与预览 tab 的 path。 */
@@ -16,8 +17,14 @@ export interface WebArticle {
   text: string;
 }
 
-/** 正文缓存：预览 store 不存内容，viewer 按 URL 回这里取。 */
-const CACHE = new Map<string, WebArticle>();
+/**
+ * 正文缓存：预览 store 不存内容，viewer 按 URL 回这里取。
+ *
+ * 有界（LRU）：一条记录是整页正文，几十 KB 到几百 KB 不等，无上限时"读过多少网页就留多少
+ * 正文"，在低内存设备上会直接推高常驻内存（见 lib/bounded-map.ts）。
+ */
+const CACHE_LIMIT = 64;
+const CACHE = createBoundedMap<string, WebArticle>(CACHE_LIMIT);
 
 /** 输入归一化：补 https:// 前缀，去首尾空白；空串返回空串。 */
 export function normalizeUrl(input: string): string {

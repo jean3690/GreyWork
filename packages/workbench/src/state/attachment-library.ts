@@ -29,6 +29,7 @@ import {
   type AttachmentRejection,
 } from "../lib/attachments";
 import { i18n } from "../i18n";
+import { createBoundedMap } from "../lib/bounded-map";
 import { notify } from "../stores/notice";
 import type { Attachment } from "../types";
 import { base64ToBytes, bytesToBase64, ensureDir, readBinaryFile, readTextFile, writeBinaryFile } from "./workspaceFiles";
@@ -446,9 +447,9 @@ export async function readAttachmentText(item: Attachment): Promise<{ text: stri
 
 /* ===== 缩略图 URL 缓存 ===== */
 
-/** path → objectURL。会话切换时整体释放；超过上限按插入顺序淘汰最旧的。 */
-const urlCache = new Map<string, string>();
+/** path → objectURL。会话切换时整体释放；超过上限按最近最少使用淘汰。 */
 const URL_CACHE_LIMIT = 24;
+const urlCache = createBoundedMap<string, string>(URL_CACHE_LIMIT, (url) => URL.revokeObjectURL(url));
 
 /**
  * 渲染缩略图用的 URL：内联数据直接用，磁盘附件读字节转 blob URL 并进 LRU。
@@ -462,15 +463,8 @@ export async function attachmentObjectUrl(item: Attachment): Promise<string | nu
   try {
     const bytes = await readAttachmentBytes(item);
     const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: item.mime || "application/octet-stream" }));
+    // 淘汰与释放绑定在容器上（见 lib/bounded-map.ts 的 onEvict），这里不必再手写 revoke。
     urlCache.set(item.path, url);
-    if (urlCache.size > URL_CACHE_LIMIT) {
-      const oldest = urlCache.keys().next().value;
-      if (oldest !== undefined) {
-        const stale = urlCache.get(oldest);
-        if (stale) URL.revokeObjectURL(stale);
-        urlCache.delete(oldest);
-      }
-    }
     return url;
   } catch {
     return null;
@@ -479,6 +473,5 @@ export async function attachmentObjectUrl(item: Attachment): Promise<string | nu
 
 /** 释放全部缩略图 URL（会话切换 / 组件卸载时调用，避免 blob 常驻内存）。 */
 export function releaseAttachmentObjectUrls(): void {
-  for (const url of urlCache.values()) URL.revokeObjectURL(url);
   urlCache.clear();
 }

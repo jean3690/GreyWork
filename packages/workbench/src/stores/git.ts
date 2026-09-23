@@ -30,6 +30,26 @@ export const useGitStore = defineStore("git", () => {
   const diffLoading = ref(false);
   const diffError = ref<string | null>(null);
 
+  /**
+   * diff 缓存上限：一条是整份 unified diff 文本，大仓库里单个文件就上百 KB。
+   * 不设上限时"点过多少文件就留多少"，低内存设备上会随浏览单调推高常驻内存。
+   *
+   * 淘汰按插入序（Record 的字符串键保持插入序）而非最近使用 —— 读取路径是组件里
+   * 直接属性访问（`git.diffCache[path]`），做命中刷新就得把读也收进 store，收益不值这个改动。
+   * 代价只是回看很久以前的文件会重新取一次 diff。
+   */
+  const DIFF_CACHE_LIMIT = 32;
+
+  /** 写入 diff 并收敛缓存大小。每次写入都整表复制，有界才不会被"复制 + 增长"拖成平方级。 */
+  function putDiff(path: string, text: string): void {
+    const next: Record<string, string> = { ...diffCache.value, [path]: text };
+    const keys = Object.keys(next);
+    if (keys.length > DIFF_CACHE_LIMIT) {
+      for (const stale of keys.slice(0, keys.length - DIFF_CACHE_LIMIT)) delete next[stale];
+    }
+    diffCache.value = next;
+  }
+
   const commitMessage = ref("");
   const committing = ref(false);
   const commitError = ref<string | null>(null);
@@ -97,7 +117,7 @@ export const useGitStore = defineStore("git", () => {
     diffLoading.value = true;
     diffError.value = null;
     try {
-      diffCache.value = { ...diffCache.value, [path]: await service.diff(path) };
+      putDiff(path, await service.diff(path));
     } catch (cause) {
       diffError.value = cause instanceof Error ? cause.message : String(cause);
     } finally {
