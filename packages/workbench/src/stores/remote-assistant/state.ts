@@ -14,8 +14,8 @@ import type { QqStatus } from "../../lib/qq-backend";
 import type { TelegramBotLink, TelegramStatus } from "../../lib/telegram-backend";
 import type { WecomStatus } from "../../lib/wecom-backend";
 import { wechatBackend, type WechatStatus } from "../../lib/wechat-backend";
-import { defaultMediaCapability } from "../../lib/channel-media";
-import type { MediaCapability } from "../../types";
+import { defaultChannelMediaCapability } from "../../lib/channel-media";
+import type { ChannelMediaCapability } from "../../types";
 import { useSessionStore } from "../session";
 import { useSettingsStore } from "../settings";
 import { useWorkspaceStore } from "../workspace";
@@ -77,13 +77,13 @@ export interface RemoteAssistantState {
   /** 联系人档案（持久化）：会话绑定、回发凭据与最近往来。 */
   peers: Ref<RemotePeer[]>;
   /** 各通道的媒体能力（协议事实）：宿主直出，取不到时保留默认矩阵。 */
-  mediaCapabilities: Ref<Record<RemoteChannel, MediaCapability>>;
+  mediaCapabilities: Ref<Record<RemoteChannel, ChannelMediaCapability>>;
 }
 
 /** 默认能力矩阵：与宿主 `channel_media::capability_of` 同口径，用于宿主取不到时的兜底。 */
-function defaultCapabilities(): Record<RemoteChannel, MediaCapability> {
-  const map = {} as Record<RemoteChannel, MediaCapability>;
-  for (const channel of REMOTE_CHANNELS) map[channel] = defaultMediaCapability(channel);
+function defaultCapabilities(): Record<RemoteChannel, ChannelMediaCapability> {
+  const map = {} as Record<RemoteChannel, ChannelMediaCapability>;
+  for (const channel of REMOTE_CHANNELS) map[channel] = defaultChannelMediaCapability(channel);
   return map;
 }
 

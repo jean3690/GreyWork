@@ -31,7 +31,7 @@ const mocks = vi.hoisted(() => ({
 
 // 出站媒体已收进通用层（按 channel 分发），断言打在这里。
 const mediaMocks = vi.hoisted(() => ({
-  capabilities: vi.fn<() => Promise<Record<string, string>>>(async () => ({})),
+  capabilities: vi.fn<() => Promise<Record<string, { inbound: string[]; outbound: string[] }>>>(async () => ({})),
   sendMedia: vi.fn<(channel: string, peerId: string, path: string, kind?: string, token?: string) => Promise<void>>(),
   takeMedia: vi.fn<(channel: string, path: string) => Promise<Uint8Array>>(),
 }));
@@ -224,7 +224,7 @@ describe("RemoteConversationView", () => {
 
   it("通道只能接收媒体（inboundOnly）：禁用附件入口并说明原因", async () => {
     const { wrapper } = await mountPage(true, { contextToken: "ctx-1" });
-    mediaMocks.capabilities.mockResolvedValueOnce({ wechat: "inboundOnly" });
+    mediaMocks.capabilities.mockResolvedValueOnce({ wechat: { inbound: ["image", "video", "audio", "file"], outbound: [] } });
     await useRemoteAssistantStore().refreshMediaCapabilities();
     await wrapper.vm.$nextTick();
 

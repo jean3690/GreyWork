@@ -9,36 +9,46 @@
 import { invoke } from "@tauri-apps/api/core";
 
 import { binaryPayload } from "../state/workspaceFiles";
-import type { MediaCapability } from "../types";
+import type { ChannelMediaCapability, MediaKind } from "../types";
+
+const ALL_KINDS: MediaKind[] = ["image", "video", "audio", "file"];
 
 /** 取不到宿主矩阵时的兜底（与 `channel_media::capability_of` 同口径）。 */
-export function defaultMediaCapability(channel: string): MediaCapability {
+export function defaultChannelMediaCapability(channel: string): ChannelMediaCapability {
   switch (channel) {
     case "wechat":
+      return { inbound: ALL_KINDS, outbound: ["image", "video", "file"] };
     case "telegram":
     case "discord":
+      return { inbound: ALL_KINDS, outbound: ALL_KINDS };
     case "feishu":
+      return { inbound: ALL_KINDS, outbound: ["image", "file"] };
     case "qq":
-      return "both";
+      return { inbound: ALL_KINDS, outbound: ["image", "video", "file"] };
     case "wecom":
-      return "imageOnly";
+      return { inbound: ["image", "video", "file"], outbound: ["image"] };
     case "dingtalk":
-      return "inboundOnly";
+      return { inbound: ALL_KINDS, outbound: [] };
     default:
-      return "none";
+      return { inbound: [], outbound: [] };
   }
 }
 
-/** 该能力下这种媒体能不能出站（与宿主 `capability_allows` 同口径）。 */
-export function mediaCapabilityAllows(cap: MediaCapability, kind: "image" | "file"): boolean {
-  if (cap === "both") return true;
-  return cap === "imageOnly" && kind === "image";
+/**
+ * 该能力下这种媒体能不能出站（与宿主 `capability_allows` 同口径）。
+ *
+ * 原生支持即可发；否则只要这条通道能发文件，就把视频 / 语音当文件发 —— 真正的降级改写
+ * 在宿主 `channel_send_media`，这里只负责「提前告知」。
+ */
+export function channelMediaAllows(cap: ChannelMediaCapability, kind: MediaKind): boolean {
+  if (cap.outbound.includes(kind)) return true;
+  return kind !== "file" && cap.outbound.includes("file");
 }
 
 export const channelMediaBackend = {
   /** 各通道的媒体能力矩阵（宿主直出）；调用失败时调用方保留默认值。 */
-  async capabilities(): Promise<Record<string, MediaCapability>> {
-    return invoke<Record<string, MediaCapability>>("channel_media_capabilities");
+  async capabilities(): Promise<Record<string, ChannelMediaCapability>> {
+    return invoke<Record<string, ChannelMediaCapability>>("channel_media_capabilities");
   },
 
   /**
@@ -52,12 +62,12 @@ export const channelMediaBackend = {
   },
 
   /**
-   * 发一条媒体（图片 / 文件）给某个联系人。
+   * 发一条媒体（图片 / 视频 / 语音 / 文件）给某个联系人。
    *
    * `path` 必须是已授权路径（渲染端选过的文件、`~/.greyWork` 下的附件）；`kind` 省略时
-   * 由宿主按魔数嗅探。`contextToken` 只有微信需要（回信凭据按条颁发），其余通道不传。
+   * 由宿主按扩展名 / 魔数判类。`contextToken` 只有微信需要（回信凭据按条颁发），其余通道不传。
    */
-  async sendMedia(channel: string, peerId: string, path: string, kind?: "image" | "file", contextToken?: string): Promise<void> {
+  async sendMedia(channel: string, peerId: string, path: string, kind?: MediaKind, contextToken?: string): Promise<void> {
     await invoke("channel_send_media", {
       channel,
       peerId,

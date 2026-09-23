@@ -11,7 +11,7 @@
 import type { LlmChatParams } from "@greywork/llm";
 import type { AgentProviderConfig } from "@greywork/shell";
 import { basename } from "@greywork/core";
-import type { Attachment, MediaCapability, MediaRef, ThreadMessage } from "../../types";
+import type { Attachment, ChannelMediaCapability, MediaRef, ThreadMessage } from "../../types";
 import { dingtalkBackend, type DingTalkInbound } from "../../lib/dingtalk-backend";
 import { feishuBackend, type FeishuInbound } from "../../lib/feishu-backend";
 import { discordBackend, type DiscordInbound } from "../../lib/discord-backend";
@@ -19,7 +19,7 @@ import { qqBackend, type QqInbound } from "../../lib/qq-backend";
 import { telegramBackend, type TelegramInbound } from "../../lib/telegram-backend";
 import { wecomBackend, type WecomInbound } from "../../lib/wecom-backend";
 import { wechatBackend, type WechatInbound } from "../../lib/wechat-backend";
-import { channelMediaBackend, mediaCapabilityAllows } from "../../lib/channel-media";
+import { channelMediaAllows, channelMediaBackend } from "../../lib/channel-media";
 import { markdownToPlainText } from "../../lib/wechat-text";
 import { attachmentKind, createAttachment } from "../../lib/attachments";
 import { materializeAttachments } from "../../state/attachment-library";
@@ -58,16 +58,20 @@ export interface PipelineApi {
  */
 const REMOTE_SEND_HINT_HEAD = "【宿主能力提示 · 远程文件发送】你正在通过聊天通道与用户对话：用户**不在本机**，看不到你的工作区与磁盘。";
 
-function remoteSendHint(cap: MediaCapability): string {
-  if (cap === "both") {
+/** 未指定通道时的默认能力：可发任意类别（按「能发文件」生成提示）。 */
+const FULL_MEDIA_CAPABILITY: ChannelMediaCapability = {
+  inbound: ["image", "video", "audio", "file"],
+  outbound: ["image", "video", "audio", "file"],
+};
+
+function remoteSendHint(cap: ChannelMediaCapability): string {
+  if (cap.outbound.length === 0) {
     return [
       REMOTE_SEND_HINT_HEAD,
-      "用户要求「把某个文件发给我」时，**不要**回答「文件已在本机、无需发送」。正确做法是：把该文件放进你的工作区目录（若它已在工作区内则不必移动），然后在回复的**最末尾**输出一个 ```sendfile 代码围栏，内容为要发送文件的**绝对路径**组成的 JSON 数组，例如：",
-      '```sendfile\n["/绝对/路径/报告.xlsx"]\n```',
-      "规则：只输出一个围栏；路径必须是绝对路径，且落在工作区或用户已授权的目录内（否则宿主会拒发）；单个文件不超过 20MB；用户没有要求发文件时，绝对不要输出该围栏。",
+      "这条通道**只能收文件、不能发文件**。用户要求「把某个文件发给我」时，直接说明这条通道发不了文件（建议改用其他通道），**不要**输出任何围栏，也不要回答「文件已在本机、无需发送」。",
     ].join("\n");
   }
-  if (cap === "imageOnly") {
+  if (!cap.outbound.includes("file")) {
     return [
       REMOTE_SEND_HINT_HEAD,
       "这条通道**只能发送图片**，发不了文件。用户要图片时，把图片放进工作区后在回复最末尾输出一个 ```sendfile 围栏（内容是图片绝对路径的 JSON 数组）：",
@@ -77,7 +81,9 @@ function remoteSendHint(cap: MediaCapability): string {
   }
   return [
     REMOTE_SEND_HINT_HEAD,
-    "这条通道**只能收文件、不能发文件**。用户要求「把某个文件发给我」时，直接说明这条通道发不了文件（建议改用其他通道），**不要**输出任何围栏，也不要回答「文件已在本机、无需发送」。",
+    "用户要求「把某个文件发给我」时，**不要**回答「文件已在本机、无需发送」。正确做法是：把该文件放进你的工作区目录（若它已在工作区内则不必移动），然后在回复的**最末尾**输出一个 ```sendfile 代码围栏，内容为要发送文件的**绝对路径**组成的 JSON 数组，例如：",
+    '```sendfile\n["/绝对/路径/报告.xlsx"]\n```',
+    "规则：只输出一个围栏；路径必须是绝对路径，且落在工作区或用户已授权的目录内（否则宿主会拒发）；单个文件不超过 20MB；用户没有要求发文件时，绝对不要输出该围栏。",
   ].join("\n");
 }
 
@@ -367,7 +373,7 @@ export function createPipelineSlice({ state, getStatus, getPeers }: PipelineDeps
     text: string,
     providerName: string,
     attachments: readonly Attachment[] = [],
-    hostHint: string = remoteSendHint("both"),
+    hostHint: string = remoteSendHint(FULL_MEDIA_CAPABILITY),
   ): Promise<TurnResult> {
     const agent = useAgentStore();
     const scaffold = getPeers().appendRemoteMessage(sessionId, "assistant", "");
@@ -457,11 +463,12 @@ export function createPipelineSlice({ state, getStatus, getPeers }: PipelineDeps
   }
 
   /** 能力不允许时的说明文案（宿主侧另有一份兜底，这里负责界面可读）。 */
-  function capabilityMessage(cap: MediaCapability): string {
-    if (cap === "inboundOnly") return t("remoteAssist.conversation.mediaInboundOnly");
-    if (cap === "imageOnly") return t("remoteAssist.conversation.mediaImageOnly");
-    if (cap === "none") return t("remoteAssist.conversation.mediaUnsupported");
-    // both 之下不该走到这里；留一条通用文案兜住「声明与实际不一致」的极端情况。
+  function capabilityMessage(cap: ChannelMediaCapability): string {
+    if (cap.outbound.length === 0) {
+      return cap.inbound.length ? t("remoteAssist.conversation.mediaInboundOnly") : t("remoteAssist.conversation.mediaUnsupported");
+    }
+    if (!cap.outbound.includes("file")) return t("remoteAssist.conversation.mediaImageOnly");
+    // 能发文件时不该走到这里；留一条通用文案兜住「声明与实际不一致」的极端情况。
     return t("remoteAssist.conversation.mediaUnsupported");
   }
 
@@ -478,7 +485,7 @@ export function createPipelineSlice({ state, getStatus, getPeers }: PipelineDeps
     contextToken: string | null = peer.contextToken,
   ): Promise<void> {
     const cap = state.mediaCapabilities.value[peer.channel];
-    if (!mediaCapabilityAllows(cap, kind)) throw new Error(capabilityMessage(cap));
+    if (!channelMediaAllows(cap, kind)) throw new Error(capabilityMessage(cap));
     if (peer.channel === "wechat" && !contextToken) {
       throw new Error(t("remoteAssist.conversation.noContextToken"));
     }
@@ -505,7 +512,7 @@ export function createPipelineSlice({ state, getStatus, getPeers }: PipelineDeps
   ): Promise<void> {
     if (!items.length) return;
     const cap = state.mediaCapabilities.value[peer.channel];
-    const sendable = items.filter((item) => mediaCapabilityAllows(cap, item.kind));
+    const sendable = items.filter((item) => channelMediaAllows(cap, item.kind));
     if (sendable.length < items.length) {
       getStatus().recordActivity({
         direction: "out",
@@ -557,7 +564,7 @@ export function createPipelineSlice({ state, getStatus, getPeers }: PipelineDeps
     const media = mediaOf(peer, attachments);
     // 能力不允许就整条拒掉：别先把附件写进会话存档（界面显示"已发出"）再悄悄发不出去。
     const cap = state.mediaCapabilities.value[peer.channel];
-    const blocked = media.find((item) => !mediaCapabilityAllows(cap, item.kind));
+    const blocked = media.find((item) => !channelMediaAllows(cap, item.kind));
     if (blocked) return { ok: false, error: capabilityMessage(cap) };
     const sessionId = peer.sessionId || getPeers().peerSessionId(peer);
     getPeers().appendRemoteMessage(sessionId, "assistant", trimmed, attachments);

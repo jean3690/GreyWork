@@ -126,10 +126,14 @@ export type ThinkingSegment = Extract<MessageSegment, { kind: "thinking" }>;
 /**
  * 附件类别：
  * - `image` / `text` 能内联进 prompt（前者 base64 内容块，后者文本内容块）；
+ * - `video` / `audio` 是视频与语音（能预览播放，但内联不了内容）；
  * - `file` 是通用二进制文件（PDF / 压缩包 / Office 文档…），内联不了内容，
  *   模型侧只拿到一条路径引用，真读文件交给本机 ACP agent。
  */
-export type AttachmentKind = "image" | "text" | "file";
+export type AttachmentKind = "image" | "video" | "audio" | "text" | "file";
+
+/** 通道媒体的类别（宿主 `channel_media::MediaKind` 的镜像；不含 `text`）。 */
+export type MediaKind = "image" | "video" | "audio" | "file";
 
 /**
  * 一条随消息发出的附件（图片 / 文本文件 / 通用文件）。
@@ -172,7 +176,7 @@ export interface Attachment {
  * 七条通道共用同一形状（宿主 `channel_media::MediaRefDto` 直出）。
  */
 export interface MediaRef {
-  kind: "image" | "file";
+  kind: MediaKind;
   name: string;
   mime: string;
   size: number;
@@ -183,12 +187,14 @@ export interface MediaRef {
 /**
  * 一条通道的媒体能力。**协议事实**，宿主 `channel_media::capability_of` 是唯一来源，
  * 渲染端只做「提前告知」：
- * - `both`：收发图片与文件；
- * - `imageOnly`：只能发图片（企业微信的被动回复没有文件出口）；
- * - `inboundOnly`：只能收、不能发（钉钉 sessionWebhook 没有媒体通道）；
- * - `none`：完全不支持媒体。
+ * - `inbound`：能收哪些类别；
+ * - `outbound`：能**原生**发哪些类别。发不了原生的类别，只要这条通道能发文件，就降级为
+ *   文件发（判定见 `channelMediaAllows`）；`outbound` 为空即完全发不了媒体。
  */
-export type MediaCapability = "both" | "imageOnly" | "inboundOnly" | "none";
+export interface ChannelMediaCapability {
+  inbound: MediaKind[];
+  outbound: MediaKind[];
+}
 
 /**
  * 待确认的定时任务提案（AI 回复中的 ```schedule 围栏解析产物）。

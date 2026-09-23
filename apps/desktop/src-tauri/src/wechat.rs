@@ -1199,7 +1199,9 @@ pub(crate) async fn send_media_impl(
             data: media.bytes,
             caption: None,
         },
-        MediaKind::File => SendContent::File {
+        // 视频 / 语音按文件发：SDK 会按扩展名把 mp4 归为视频条目；语音无发送端点，
+        // 共享层已在分发前把非原生类别降级为文件。
+        MediaKind::Video | MediaKind::Audio | MediaKind::File => SendContent::File {
             data: media.bytes,
             file_name: media.name.clone(),
             caption: None,

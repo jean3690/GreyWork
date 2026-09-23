@@ -780,7 +780,8 @@ pub(crate) async fn send_media_impl(
                 upload_image(&client, DEFAULT_DOMAIN, &token, media.bytes, media.name).await?;
             ("image", serde_json::json!({ "image_key": image_key }))
         }
-        MediaKind::File => {
+        // 视频 / 语音无原生出站端点（media 需封面、audio 需 opus），共享层已降级为文件。
+        MediaKind::Video | MediaKind::Audio | MediaKind::File => {
             let file_key =
                 upload_file(&client, DEFAULT_DOMAIN, &token, media.bytes, &media.name).await?;
             ("file", serde_json::json!({ "file_key": file_key }))

@@ -1055,7 +1055,8 @@ pub(crate) async fn send_media_impl(
     };
     let (method, field) = match media.kind {
         MediaKind::Image => ("sendPhoto", "photo"),
-        MediaKind::File => ("sendDocument", "document"),
+        // 视频 / 语音暂按文档发；原生端点（sendVideo / sendVoice / sendAudio）在出站提交里接。
+        MediaKind::Video | MediaKind::Audio | MediaKind::File => ("sendDocument", "document"),
     };
     let part = reqwest::multipart::Part::bytes(media.bytes).file_name(media.name);
     let form = reqwest::multipart::Form::new()

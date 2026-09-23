@@ -13,43 +13,55 @@ vi.mock("@greywork/core", async (importOriginal) => ({
   isTauriRuntime: () => true,
 }));
 
-import { channelMediaBackend, defaultMediaCapability, mediaCapabilityAllows } from "@/lib/channel-media";
+import { channelMediaAllows, channelMediaBackend, defaultChannelMediaCapability } from "@/lib/channel-media";
 
 beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe("defaultMediaCapability", () => {
-  it("与宿主 capability_of 同口径：微信/Telegram/Discord/飞书/QQ 双向，企微仅图片，钉钉仅接收", () => {
-    expect(defaultMediaCapability("wechat")).toBe("both");
-    expect(defaultMediaCapability("telegram")).toBe("both");
-    expect(defaultMediaCapability("discord")).toBe("both");
-    expect(defaultMediaCapability("feishu")).toBe("both");
-    expect(defaultMediaCapability("qq")).toBe("both");
-    expect(defaultMediaCapability("wecom")).toBe("imageOnly");
-    expect(defaultMediaCapability("dingtalk")).toBe("inboundOnly");
-    expect(defaultMediaCapability("nope")).toBe("none");
+describe("defaultChannelMediaCapability", () => {
+  it("与宿主 capability_of 同口径：入站全类别，出站按各通道原生能力", () => {
+    const all = ["image", "video", "audio", "file"];
+    expect(defaultChannelMediaCapability("wechat").outbound).toEqual(["image", "video", "file"]);
+    expect(defaultChannelMediaCapability("telegram").outbound).toEqual(all);
+    expect(defaultChannelMediaCapability("discord").outbound).toEqual(all);
+    expect(defaultChannelMediaCapability("feishu").outbound).toEqual(["image", "file"]);
+    expect(defaultChannelMediaCapability("qq").outbound).toEqual(["image", "video", "file"]);
+    expect(defaultChannelMediaCapability("wecom").outbound).toEqual(["image"]);
+    expect(defaultChannelMediaCapability("dingtalk").outbound).toEqual([]);
+    expect(defaultChannelMediaCapability("nope")).toEqual({ inbound: [], outbound: [] });
+    // 入站：企业微信暂缓语音，其余全类别。
+    expect(defaultChannelMediaCapability("wecom").inbound).toEqual(["image", "video", "file"]);
+    expect(defaultChannelMediaCapability("telegram").inbound).toEqual(all);
   });
 });
 
-describe("mediaCapabilityAllows", () => {
-  it("both 全放行；imageOnly 只放图片；inboundOnly / none 一律挡下", () => {
-    expect(mediaCapabilityAllows("both", "image")).toBe(true);
-    expect(mediaCapabilityAllows("both", "file")).toBe(true);
-    expect(mediaCapabilityAllows("imageOnly", "image")).toBe(true);
-    expect(mediaCapabilityAllows("imageOnly", "file")).toBe(false);
-    expect(mediaCapabilityAllows("inboundOnly", "image")).toBe(false);
-    expect(mediaCapabilityAllows("inboundOnly", "file")).toBe(false);
-    expect(mediaCapabilityAllows("none", "image")).toBe(false);
-    expect(mediaCapabilityAllows("none", "file")).toBe(false);
+describe("channelMediaAllows", () => {
+  it("原生支持即放行；否则能发文件就降级放行；不能发文件则挡下", () => {
+    const caps = defaultChannelMediaCapability;
+    expect(channelMediaAllows(caps("telegram"), "video")).toBe(true);
+    expect(channelMediaAllows(caps("telegram"), "audio")).toBe(true);
+    // 微信无原生语音 → 降级为文件放行。
+    expect(channelMediaAllows(caps("wechat"), "audio")).toBe(true);
+    // 飞书无原生视频 → 降级为文件放行。
+    expect(channelMediaAllows(caps("feishu"), "video")).toBe(true);
+    // 企业微信只能发图片：文件 / 视频 / 语音全挡。
+    expect(channelMediaAllows(caps("wecom"), "image")).toBe(true);
+    expect(channelMediaAllows(caps("wecom"), "file")).toBe(false);
+    expect(channelMediaAllows(caps("wecom"), "video")).toBe(false);
+    expect(channelMediaAllows(caps("wecom"), "audio")).toBe(false);
+    // 钉钉出站全无。
+    for (const kind of ["image", "video", "audio", "file"] as const) {
+      expect(channelMediaAllows(caps("dingtalk"), kind)).toBe(false);
+    }
   });
 });
 
 describe("channelMediaBackend", () => {
   it("能力矩阵：一条无参命令直取宿主", async () => {
-    mocks.invoke.mockResolvedValueOnce({ wechat: "both", wecom: "imageOnly" });
+    mocks.invoke.mockResolvedValueOnce({ wechat: { inbound: ["image"], outbound: ["image"] } });
     const caps = await channelMediaBackend.capabilities();
-    expect(caps).toEqual({ wechat: "both", wecom: "imageOnly" });
+    expect(caps).toEqual({ wechat: { inbound: ["image"], outbound: ["image"] } });
     expect(mocks.invoke).toHaveBeenCalledWith("channel_media_capabilities");
   });
 

@@ -266,16 +266,16 @@ function build(): Harness {
     settings,
     session: { ensure: (id: string) => ({ id, messages: [] }) },
     llm: llm.client,
-    // 能力矩阵与宿主 capability_of 同口径：钉钉仅接收、企微仅图片，其余双向。
+    // 能力矩阵与宿主 capability_of 同口径：钉钉仅接收、企微仅图片，其余可发文件。
     mediaCapabilities: {
       value: {
-        wechat: "both",
-        dingtalk: "inboundOnly",
-        feishu: "both",
-        telegram: "both",
-        qq: "both",
-        discord: "both",
-        wecom: "imageOnly",
+        wechat: { inbound: ["image", "video", "audio", "file"], outbound: ["image", "video", "file"] },
+        dingtalk: { inbound: ["image", "video", "audio", "file"], outbound: [] },
+        feishu: { inbound: ["image", "video", "audio", "file"], outbound: ["image", "file"] },
+        telegram: { inbound: ["image", "video", "audio", "file"], outbound: ["image", "video", "audio", "file"] },
+        qq: { inbound: ["image", "video", "audio", "file"], outbound: ["image", "video", "file"] },
+        discord: { inbound: ["image", "video", "audio", "file"], outbound: ["image", "video", "audio", "file"] },
+        wecom: { inbound: ["image", "video", "file"], outbound: ["image"] },
       },
     },
   } as never;

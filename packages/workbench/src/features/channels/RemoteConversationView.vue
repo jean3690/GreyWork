@@ -76,15 +76,16 @@ const blockedHint = computed(() => {
 });
 
 /** 该通道的媒体能力（宿主直出，取不到时 store 保留默认矩阵）。 */
-const mediaCapability = computed(() => (peer.value ? store.mediaCapabilities[peer.value.channel] : "none"));
-/** 只有 both / imageOnly 才放开附件入口；inboundOnly / none 通道只能发文字。 */
-const canAttach = computed(() => mediaCapability.value === "both" || mediaCapability.value === "imageOnly");
-/** 受限通道的媒体提示（both 为空串，不占位）。 */
+const mediaCapability = computed(() => (peer.value ? store.mediaCapabilities[peer.value.channel] : { inbound: [], outbound: [] }));
+/** 出站能发任意类别（含降级为文件）才放开附件入口；完全发不了媒体的通道只能发文字。 */
+const canAttach = computed(() => mediaCapability.value.outbound.length > 0);
+/** 受限通道的媒体提示（能发文件时为空串，不占位）。 */
 const mediaHint = computed(() => {
   const cap = mediaCapability.value;
-  if (cap === "inboundOnly") return t("remoteAssist.conversation.mediaInboundOnly");
-  if (cap === "imageOnly") return t("remoteAssist.conversation.mediaImageOnly");
-  if (cap === "none") return t("remoteAssist.conversation.mediaUnsupported");
+  if (cap.outbound.length === 0) {
+    return cap.inbound.length ? t("remoteAssist.conversation.mediaInboundOnly") : t("remoteAssist.conversation.mediaUnsupported");
+  }
+  if (!cap.outbound.includes("file")) return t("remoteAssist.conversation.mediaImageOnly");
   return "";
 });
 

@@ -12,8 +12,8 @@ import { qqBackend, type QqStatus } from "../../lib/qq-backend";
 import { telegramBackend, type TelegramBotLink, type TelegramStatus } from "../../lib/telegram-backend";
 import { wecomBackend, type WecomStatus } from "../../lib/wecom-backend";
 import { wechatBackend, type WechatStatus } from "../../lib/wechat-backend";
-import { channelMediaBackend, defaultMediaCapability } from "../../lib/channel-media";
-import type { MediaCapability } from "../../types";
+import { channelMediaBackend, defaultChannelMediaCapability } from "../../lib/channel-media";
+import type { ChannelMediaCapability } from "../../types";
 import {
   ACTIVITY_LIMIT,
   aid,
@@ -31,6 +31,13 @@ import {
   type RemoteChannel,
 } from "./shared";
 import type { RemoteAssistantState } from "./state";
+
+/** 宿主下发的媒体能力形状校验：两个字段都得是数组，否则按默认矩阵兜底。 */
+function isChannelMediaCapability(value: unknown): value is ChannelMediaCapability {
+  if (!value || typeof value !== "object") return false;
+  const cap = value as Partial<ChannelMediaCapability>;
+  return Array.isArray(cap.inbound) && Array.isArray(cap.outbound);
+}
 
 export interface StatusApi {
   statusOf(channel: RemoteChannel): ChannelStatus;
@@ -148,11 +155,10 @@ export function createStatusSlice({ state }: { state: RemoteAssistantState }): S
     if (!state.available.value) return;
     try {
       const caps = await channelMediaBackend.capabilities();
-      const next = {} as Record<RemoteChannel, MediaCapability>;
+      const next = {} as Record<RemoteChannel, ChannelMediaCapability>;
       for (const channel of REMOTE_CHANNELS) {
         const cap = caps[channel];
-        next[channel] =
-          cap === "both" || cap === "imageOnly" || cap === "inboundOnly" || cap === "none" ? cap : defaultMediaCapability(channel);
+        next[channel] = isChannelMediaCapability(cap) ? cap : defaultChannelMediaCapability(channel);
       }
       state.mediaCapabilities.value = next;
     } catch (error) {

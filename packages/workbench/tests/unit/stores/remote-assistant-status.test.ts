@@ -13,7 +13,7 @@ const backends = vi.hoisted(() => ({
   discordStatus: vi.fn<() => Promise<unknown>>(() => Promise.resolve({})),
   wecomStatus: vi.fn<() => Promise<unknown>>(() => Promise.resolve({})),
   botLink: vi.fn<() => Promise<unknown>>(() => Promise.resolve({ username: "gw_bot" })),
-  capabilities: vi.fn<() => Promise<Record<string, string>>>(() => Promise.resolve({})),
+  capabilities: vi.fn<() => Promise<Record<string, { inbound: string[]; outbound: string[] }>>>(() => Promise.resolve({})),
 }));
 
 vi.mock("@/lib/wechat-backend", () => ({ wechatBackend: { status: () => backends.wechatStatus() } }));
@@ -62,7 +62,7 @@ interface StatusHarness {
   wecomStatus: { value: WecomStatus | null };
   telegramBotLink: { value: { link: TelegramBotLink | null; error: string | null } };
   activity: { value: unknown[] };
-  mediaCapabilities: { value: Record<string, string> };
+  mediaCapabilities: { value: Record<string, { inbound: string[]; outbound: string[] }> };
 }
 
 function build(): StatusHarness {
@@ -76,7 +76,7 @@ function build(): StatusHarness {
   const wecomStatus = { value: null };
   const telegramBotLink = { value: { link: null, error: null } };
   const activity = { value: [] as unknown[] };
-  const mediaCapabilities = { value: {} as Record<string, string> };
+  const mediaCapabilities = { value: {} as Record<string, { inbound: string[]; outbound: string[] }> };
   const api = createStatusSlice({
     state: {
       available,
@@ -290,17 +290,19 @@ describe("刷新门禁", () => {
 
   it("媒体能力：宿主直出的矩阵写回（缺项与非法值回落默认口径）", async () => {
     const h = build();
-    backends.capabilities.mockResolvedValue({ wechat: "both", wecom: "imageOnly", dingtalk: "bogus" });
+    backends.capabilities.mockResolvedValue({
+      wechat: { inbound: ["image"], outbound: ["image"] },
+      wecom: { inbound: ["image"], outbound: ["image"] },
+      dingtalk: "bogus", // 非法形状：校验应回落默认
+    } as never);
     await h.api.refreshMediaCapabilities();
-    expect(h.mediaCapabilities.value).toEqual({
-      wechat: "both",
-      dingtalk: "inboundOnly", // 非法值回落默认
-      feishu: "both", // 宿主没给 → 默认
-      telegram: "both",
-      qq: "both",
-      discord: "both",
-      wecom: "imageOnly",
-    });
+    expect(h.mediaCapabilities.value.wechat).toEqual({ inbound: ["image"], outbound: ["image"] });
+    expect(h.mediaCapabilities.value.wecom).toEqual({ inbound: ["image"], outbound: ["image"] });
+    // 非法值 → 回落默认（钉钉出站为空）。
+    expect(h.mediaCapabilities.value.dingtalk).toEqual({ inbound: ["image", "video", "audio", "file"], outbound: [] });
+    // 宿主没给 → 默认口径。
+    expect(h.mediaCapabilities.value.telegram.outbound).toEqual(["image", "video", "audio", "file"]);
+    expect(h.mediaCapabilities.value.feishu.outbound).toEqual(["image", "file"]);
   });
 
   it("媒体能力：浏览器态不碰宿主；宿主抛错时保留现有矩阵", async () => {
@@ -310,10 +312,10 @@ describe("刷新门禁", () => {
     expect(backends.capabilities).not.toHaveBeenCalled();
 
     h.available.value = true;
-    h.mediaCapabilities.value = { wechat: "both" };
+    h.mediaCapabilities.value = { wechat: { inbound: ["image"], outbound: ["image"] } };
     backends.capabilities.mockRejectedValue(new Error("命令缺失"));
     await h.api.refreshMediaCapabilities();
-    expect(h.mediaCapabilities.value).toEqual({ wechat: "both" });
+    expect(h.mediaCapabilities.value).toEqual({ wechat: { inbound: ["image"], outbound: ["image"] } });
   });
 });
 
