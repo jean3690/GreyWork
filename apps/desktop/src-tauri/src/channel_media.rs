@@ -139,6 +139,20 @@ pub fn capability_allows(cap: &ChannelMediaCapability, kind: MediaKind) -> bool 
     kind != MediaKind::File && cap.outbound.contains(&MediaKind::File)
 }
 
+/// 出站类别 → 实际下发给通道的类别：能力不允许返回 None，非原生但可降级的改写为 `File`。
+///
+/// 各通道的 `match media.kind` 因此只会见到自己原生支持的类别。
+pub fn effective_kind(cap: &ChannelMediaCapability, kind: MediaKind) -> Option<MediaKind> {
+    if !capability_allows(cap, kind) {
+        return None;
+    }
+    if cap.outbound.contains(&kind) {
+        Some(kind)
+    } else {
+        Some(MediaKind::File)
+    }
+}
+
 /* ===== 纯函数：命名 / 嗅探 / 判类 ===== */
 
 /// 按魔数嗅探图片：(mime, 扩展名)。认不出返回 None。
@@ -561,12 +575,12 @@ pub async fn channel_send_media(
     if let Some(explicit) = kind.as_deref() {
         media.kind = resolve_media_kind_named(Some(explicit), &media.name, &media.bytes);
     }
-    if !capability_allows(&cap, media.kind) {
+    let Some(kind) = effective_kind(&cap, media.kind) else {
         return Err(capability_error(&channel, &cap, media.kind));
-    }
+    };
     // 原生端点做不到、但这条通道能发文件：降级为文件发。集中在这一处，各通道的
     // `match media.kind` 就只会见到自己原生支持的类别。
-    if !cap.outbound.contains(&media.kind) {
+    if kind != media.kind {
         log::info(
             &channel,
             format!(
@@ -575,7 +589,7 @@ pub async fn channel_send_media(
                 media.name
             ),
         );
-        media.kind = MediaKind::File;
+        media.kind = kind;
     }
     match channel.as_str() {
         "wechat" => {
@@ -802,6 +816,31 @@ mod tests {
         let unknown = capability_of("nope");
         assert!(unknown.inbound.is_empty() && unknown.outbound.is_empty());
         assert!(!capability_allows(&unknown, File));
+    }
+
+    #[test]
+    fn effective_kind_degrades_to_file_or_rejects() {
+        use MediaKind::{Audio, File, Image, Video};
+
+        // 原生支持：原样返回。
+        assert_eq!(
+            effective_kind(&capability_of("telegram"), Video),
+            Some(Video)
+        );
+        assert_eq!(
+            effective_kind(&capability_of("telegram"), Audio),
+            Some(Audio)
+        );
+        // 非原生但能发文件：降级为 File。
+        assert_eq!(effective_kind(&capability_of("wechat"), Audio), Some(File));
+        assert_eq!(effective_kind(&capability_of("feishu"), Video), Some(File));
+        assert_eq!(effective_kind(&capability_of("qq"), Audio), Some(File));
+        // 企业微信只能发图片：文件 / 视频 / 语音都拒。
+        assert_eq!(effective_kind(&capability_of("wecom"), Image), Some(Image));
+        assert_eq!(effective_kind(&capability_of("wecom"), File), None);
+        assert_eq!(effective_kind(&capability_of("wecom"), Video), None);
+        // 钉钉出站全无。
+        assert_eq!(effective_kind(&capability_of("dingtalk"), Image), None);
     }
 
     #[test]

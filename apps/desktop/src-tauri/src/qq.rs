@@ -30,8 +30,8 @@ use crate::channel_common::{
     app_sink, channel_dir, now_ms, read_json, sleep_or_stop, write_private, EventSink,
 };
 use crate::channel_media::{
-    inbox_dir, kind_by_name, prune_inbox, sniff_image, store_inbound_media, MediaKind, MediaRefDto,
-    OutboundMedia, MAX_MEDIA_BYTES,
+    ext_of, inbox_dir, kind_by_name, prune_inbox, sniff_image, store_inbound_media, MediaKind,
+    MediaRefDto, OutboundMedia, MAX_MEDIA_BYTES,
 };
 use crate::http::{read_text, shared_client, RESPONSE_READ_TIMEOUT};
 use crate::log;
@@ -58,8 +58,10 @@ const MAX_TEXT_CHARS: usize = 1000;
 const MAX_INBOUND_MEDIA: usize = 4;
 /// 分片预上传要求的 `md5_10m`：文件前 10002432 字节（约 10MB）的 MD5。
 const MD5_10M_LEN: usize = 10_002_432;
-/// 富媒体业务类型：1 图片（仅 png/jpg），4 文件。视频（2）/语音（3）本版不发。
+/// 富媒体业务类型：1 图片（仅 png/jpg）、2 视频（mp4/mov）、4 文件。
+/// 语音（3）要 SILK 编码，本版不发 —— 共享层已把音频降级为文件。
 const FILE_TYPE_IMAGE: i64 = 1;
+const FILE_TYPE_MEDIA: i64 = 2;
 const FILE_TYPE_FILE: i64 = 4;
 /// access_token 提前刷新窗口（官方说明：到期前 60s 内取会拿到新 token）。
 const TOKEN_REFRESH_MARGIN_SECS: i64 = 60;
@@ -348,14 +350,23 @@ fn messages_url(scope: &ChatScope, openid: &str) -> String {
     format!("{}/messages", base_url(scope, openid))
 }
 
-/// QQ 的业务类型：图片只认 png/jpg，其余一律按文件（4）发，免得撞 850019「不支持的文件格式」。
+/// QQ 的业务类型：图片只认 png/jpg、视频只认 mp4/mov，其余一律按文件（4）发，
+/// 免得撞 850019「不支持的文件格式」。语音要 SILK 编码，共享层已把它降级为文件。
 fn qq_file_type(media: &OutboundMedia) -> i64 {
-    if media.kind == MediaKind::Image {
-        if let Some((mime, _)) = sniff_image(&media.bytes) {
-            if mime == "image/png" || mime == "image/jpeg" {
-                return FILE_TYPE_IMAGE;
+    match media.kind {
+        MediaKind::Image => {
+            if let Some((mime, _)) = sniff_image(&media.bytes) {
+                if mime == "image/png" || mime == "image/jpeg" {
+                    return FILE_TYPE_IMAGE;
+                }
             }
         }
+        MediaKind::Video => {
+            if matches!(ext_of(&media.name).as_str(), "mp4" | "mov") {
+                return FILE_TYPE_MEDIA;
+            }
+        }
+        MediaKind::Audio | MediaKind::File => {}
     }
     FILE_TYPE_FILE
 }
@@ -2168,6 +2179,28 @@ mod tests {
             kind: MediaKind::File,
         };
         assert_eq!(qq_file_type(&doc), FILE_TYPE_FILE);
+
+        // 视频：mp4/mov 走视频（2），其余容器降级为文件。
+        let mp4 = OutboundMedia {
+            bytes: b"\x00\x00\x00\x18ftypisom".to_vec(),
+            name: "clip.mp4".into(),
+            kind: MediaKind::Video,
+        };
+        assert_eq!(qq_file_type(&mp4), FILE_TYPE_MEDIA);
+        let mkv = OutboundMedia {
+            bytes: vec![0x1a, 0x45, 0xdf, 0xa3],
+            name: "clip.mkv".into(),
+            kind: MediaKind::Video,
+        };
+        assert_eq!(qq_file_type(&mkv), FILE_TYPE_FILE);
+
+        // 语音：QQ 要 SILK，共享层已降级为文件（kind 到不了这里，这里兜底也是文件）。
+        let voice = OutboundMedia {
+            bytes: b"OggS....".to_vec(),
+            name: "note.ogg".into(),
+            kind: MediaKind::Audio,
+        };
+        assert_eq!(qq_file_type(&voice), FILE_TYPE_FILE);
     }
 
     #[test]

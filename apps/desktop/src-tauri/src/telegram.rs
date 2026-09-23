@@ -24,7 +24,7 @@ use crate::channel_common::{
     app_sink, channel_dir, now_ms, read_json, sleep_or_stop, write_private, EventSink,
 };
 use crate::channel_media::{
-    inbox_dir, prune_inbox, store_inbound_media, MediaKind, MediaRefDto, OutboundMedia,
+    ext_of, inbox_dir, prune_inbox, store_inbound_media, MediaKind, MediaRefDto, OutboundMedia,
     MAX_MEDIA_BYTES,
 };
 use crate::http::{shared_client, RESPONSE_READ_TIMEOUT};
@@ -1032,7 +1032,25 @@ pub async fn telegram_send(
     send_text(&client, &token, chat_id, &text).await
 }
 
-/// 回一条媒体：图片走 `sendPhoto`、其余走 `sendDocument`（multipart 直传字节，不落临时文件）。
+/// 出站端点：图片 / 视频 / 语音 / 文件各走各的 Telegram 方法。
+///
+/// 语音 OGG/OPUS 走 `sendVoice`（对端显示为语音条），其余音频走 `sendAudio`。
+fn send_endpoint(kind: MediaKind, name: &str) -> (&'static str, &'static str) {
+    match kind {
+        MediaKind::Image => ("sendPhoto", "photo"),
+        MediaKind::Video => ("sendVideo", "video"),
+        MediaKind::Audio => {
+            if matches!(ext_of(name).as_str(), "ogg" | "opus") {
+                ("sendVoice", "voice")
+            } else {
+                ("sendAudio", "audio")
+            }
+        }
+        MediaKind::File => ("sendDocument", "document"),
+    }
+}
+
+/// 回一条媒体：按类别走对应端点（multipart 直传字节，不落临时文件）。
 ///
 /// token 不出宿主：与文本同一条路径，渲染端只传对端 id 与授权面内的本地路径。
 pub(crate) async fn send_media_impl(
@@ -1054,11 +1072,7 @@ pub(crate) async fn send_media_impl(
             .map(|credentials| credentials.token.clone())
             .ok_or("尚未配置 Telegram bot token")?
     };
-    let (method, field) = match media.kind {
-        MediaKind::Image => ("sendPhoto", "photo"),
-        // 视频 / 语音暂按文档发；原生端点（sendVideo / sendVoice / sendAudio）在出站提交里接。
-        MediaKind::Video | MediaKind::Audio | MediaKind::File => ("sendDocument", "document"),
-    };
+    let (method, field) = send_endpoint(media.kind, &media.name);
     let part = reqwest::multipart::Part::bytes(media.bytes).file_name(media.name);
     let form = reqwest::multipart::Form::new()
         .text("chat_id", chat_id.to_string())
@@ -1400,6 +1414,35 @@ mod tests {
         assert_eq!(
             (media[2].kind, media[2].name.as_str()),
             (MediaKind::Video, "clip.mp4")
+        );
+    }
+
+    #[test]
+    fn send_endpoint_maps_kinds_and_voice_format() {
+        assert_eq!(
+            send_endpoint(MediaKind::Image, "a.png"),
+            ("sendPhoto", "photo")
+        );
+        assert_eq!(
+            send_endpoint(MediaKind::Video, "a.mp4"),
+            ("sendVideo", "video")
+        );
+        assert_eq!(
+            send_endpoint(MediaKind::File, "a.pdf"),
+            ("sendDocument", "document")
+        );
+        // 语音：OGG/OPUS 走 sendVoice，其余音频走 sendAudio。
+        assert_eq!(
+            send_endpoint(MediaKind::Audio, "note.ogg"),
+            ("sendVoice", "voice")
+        );
+        assert_eq!(
+            send_endpoint(MediaKind::Audio, "note.OPUS"),
+            ("sendVoice", "voice")
+        );
+        assert_eq!(
+            send_endpoint(MediaKind::Audio, "song.mp3"),
+            ("sendAudio", "audio")
         );
     }
 
