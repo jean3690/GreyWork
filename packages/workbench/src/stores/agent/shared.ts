@@ -9,7 +9,7 @@ import { createJsonStorage, basename } from "@greywork/core";
 import type { AgentProviderConfig } from "@greywork/shell";
 import { ref } from "vue";
 import { i18n } from "../../i18n";
-import { inlineTextAttachment } from "../../lib/attachments";
+import { inlineFileAttachment, inlineTextAttachment } from "../../lib/attachments";
 import { readAttachmentBase64, readAttachmentText } from "../../state/attachment-library";
 import type { Attachment, ThreadMessage } from "../../types";
 import { notify } from "../notice";
@@ -253,9 +253,12 @@ export async function toAcpUnits(attachments: readonly Attachment[], imageSuppor
           continue;
         }
         units.push({ type: "image", data: await readAttachmentBase64(item), mimeType: item.mime || "image/png" });
-      } else {
+      } else if (item.kind === "text") {
         const { text, truncated } = await readAttachmentText(item);
         units.push({ type: "text", text: inlineTextAttachment(item.name, text, truncated) });
+      } else {
+        // 通用文件：只递路径引用。本机 ACP agent 能按路径直接读，不必把字节塞进 prompt。
+        units.push({ type: "text", text: inlineFileAttachment(item.name, item.path) });
       }
     } catch (error) {
       notify({

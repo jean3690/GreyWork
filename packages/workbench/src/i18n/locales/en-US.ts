@@ -380,7 +380,7 @@ export const enUS: MessageSchema = {
     attachTooMany: "Up to {max} attachments per message",
     attachTooLarge: '"{name}" exceeds the {limit} limit and was not added',
     attachTotalTooLarge: "Attachments exceed the {limit} total limit and were not added",
-    attachUnsupported: '"{name}" is not a supported image or text file',
+    attachUnsupported: '"{name}" is not a supported file',
     attachImagesUnsupported: "The current ACP backend does not accept images; only text files can be attached",
     attachUnavailable: "Attachment is no longer available",
     attachPickerFailed: "Failed to pick attachments",

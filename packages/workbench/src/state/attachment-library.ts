@@ -2,13 +2,14 @@
  * 附件库：采集（选择 / 拖放 / 粘贴）→ 落库（`~/.greyWork/attachments/<会话id>/`）→ 读取。
  *
  * 两阶段设计：
- * - **采集**只产生内存草稿（图片 dataUrl / 文本 text），输入卡据此立即出缩略图，
- *   此时选而不发不会在磁盘上留垃圾；
+ * - **采集**只产生内存草稿（图片 dataUrl / 文本 text / 通用文件 bytes），输入卡据此
+ *   立即出缩略图，此时选而不发不会在磁盘上留垃圾；
  * - **落库**（materialize）在发送时按会话目录写盘，并**剥离内联数据**只留 path ——
  *   会话是整条 ThreadMessage 落盘的，把 base64 留在消息里会撑爆 localStorage
  *   与会话 JSON 文件，路径化存储的意义也就没了。
  *
- * 浏览器态没有文件系统，只能保留内联副本（限额由 attachments.ts 单独收紧）。
+ * 浏览器态没有文件系统，只能保留内联副本（限额由 attachments.ts 单独收紧，
+ * 通用文件在浏览器态直接不收）。
  */
 import { invoke } from "@tauri-apps/api/core";
 import { isTauriRuntime, joinPath } from "@greywork/core";
@@ -130,6 +131,13 @@ async function toDraft(candidate: Candidate, isDesktop: boolean): Promise<Attach
       dataUrl: `data:${mime};base64,${bytesToBase64(bytes)}`,
     });
   }
+  if (kind === "file") {
+    // 通用文件只能落盘（浏览器态在 validateAttachment 已被拒），草稿必须带上原始字节，
+    // 否则落库那一刻已经没有数据源了。
+    const bytes = candidate.bytes;
+    if (!isDesktop || !bytes?.length) return null;
+    return createAttachment({ kind: "file", name: candidate.name, mime, size: bytes.length, bytes });
+  }
   const text = candidate.text ?? decodeUtf8(candidate.bytes);
   if (text == null) return null;
   const clipped = clipText(text);
@@ -177,7 +185,8 @@ export async function pickAttachments(existing: readonly Attachment[] = []): Pro
 }
 
 async function candidatesFromDialog(): Promise<Candidate[]> {
-  const paths = await invoke<string[]>("fs_pick_files", { purpose: "attachments", multiple: true });
+  // purpose="media"：不限扩展名 —— 通用文件（PDF / 压缩包 / Office 文档）也要能选。
+  const paths = await invoke<string[]>("fs_pick_files", { purpose: "media", multiple: true });
   return candidatesFromPaths(paths);
 }
 
@@ -353,11 +362,11 @@ async function rgbaToPng(rgba: Uint8Array, width: number, height: number): Promi
 export async function materializeAttachments(sessionId: string, items: readonly Attachment[]): Promise<Attachment[]> {
   if (!items.length) return [];
   const dir = await ensureAttachmentLibrary(sessionId);
-  if (!dir) return [...items];
+  if (!dir) return items.map(stripTransient);
   const out: Attachment[] = [];
   for (const item of items) {
     if (item.path) {
-      out.push(item);
+      out.push(stripTransient(item));
       continue;
     }
     try {
@@ -373,16 +382,29 @@ export async function materializeAttachments(sessionId: string, items: readonly 
         detail: error instanceof Error ? `${item.name}：${error.message}` : item.name,
         key: "attachment-write",
       });
-      out.push(item);
+      out.push(stripTransient(item));
     }
   }
   return out;
 }
 
+/**
+ * 去掉仅草稿期存在的字段（`bytes`）。会话是整条 ThreadMessage 序列化落盘的，
+ * `Uint8Array` 会退化成 `{"0":..,"1":..}` 的巨型对象。
+ */
+function stripTransient(item: Attachment): Attachment {
+  if (!item.bytes) return item;
+  const rest: Attachment = { ...item };
+  delete rest.bytes;
+  return rest;
+}
+
 function extOfName(item: Attachment): string {
   const ext = item.name.split(".").pop()?.toLowerCase() ?? "";
   if (/^[a-z0-9]{1,8}$/.test(ext)) return ext;
-  return item.kind === "image" ? "png" : "txt";
+  if (item.kind === "image") return "png";
+  if (item.kind === "text") return "txt";
+  return "bin";
 }
 
 /* ===== 读取（发送与渲染共用） ===== */
@@ -393,6 +415,9 @@ function dataUrlPayload(dataUrl: string): string {
 }
 
 async function attachmentBytes(item: Attachment): Promise<Uint8Array> {
+  // 草稿期的原始字节优先：通用文件只在这一段存在数据（无 dataUrl / text），
+  // 微信入站媒体也是先拿字节再落库，避免绕一圈 base64。
+  if (item.bytes?.length) return item.bytes;
   if (item.path && isTauriRuntime()) return readBinaryFile(item.path);
   if (item.dataUrl) return base64ToBytes(dataUrlPayload(item.dataUrl));
   if (item.text != null) return new TextEncoder().encode(item.text);

@@ -379,7 +379,7 @@ export const zhCN = {
     attachTooMany: "最多只能添加 {max} 个附件",
     attachTooLarge: "「{name}」超过 {limit} 上限，未添加",
     attachTotalTooLarge: "附件总大小超过 {limit} 上限，未添加",
-    attachUnsupported: "「{name}」不是支持的图片或文本文件",
+    attachUnsupported: "「{name}」不是支持的文件",
     attachImagesUnsupported: "当前 ACP 后端不支持图片输入，仅可添加文本文件",
     attachUnavailable: "附件已不可用",
     attachPickerFailed: "选择附件失败",

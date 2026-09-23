@@ -52,6 +52,11 @@ function openAttachment(item: Attachment): void {
   if (item.kind === "image" && item.dataUrl) lightbox.value = { src: item.dataUrl, name: item.name };
 }
 
+/** 附件是否点得开：有落库路径，或浏览器态的内联图片。都没有就别给可点的假象。 */
+function canOpenAttachment(item: Attachment): boolean {
+  return Boolean(item.path) || (item.kind === "image" && Boolean(item.dataUrl));
+}
+
 /** Dialog 收下 Esc / 点遮罩后关闭。 */
 function onLightboxOpenChange(next: boolean): void {
   if (!next) lightbox.value = null;
@@ -104,8 +109,9 @@ function timeLabel(ts: number): string {
           <Hint v-for="item in attachmentList" :key="item.id" :text="item.name" multiline>
             <button
               type="button"
-              class="cursor-pointer overflow-hidden rounded-[8px] border border-line-2 text-left transition-opacity hover:opacity-90"
+              class="cursor-pointer overflow-hidden rounded-[8px] border border-line-2 text-left transition-opacity hover:opacity-90 disabled:cursor-default disabled:hover:opacity-100"
               :aria-label="item.name"
+              :disabled="!canOpenAttachment(item)"
               :data-testid="item.kind === 'image' ? 'message-attachment-image' : 'message-attachment-file'"
               @click="openAttachment(item)"
             >

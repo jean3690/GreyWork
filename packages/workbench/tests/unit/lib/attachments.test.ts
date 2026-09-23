@@ -11,7 +11,9 @@ import {
   createAttachment,
   extOf,
   formatBytes,
+  inlineFileAttachment,
   inlineTextAttachment,
+  isAttachmentKind,
   mimeForFile,
   normalizeAttachments,
   safeAttachmentName,
@@ -36,9 +38,16 @@ describe("attachmentKind", () => {
     expect(attachmentKind("data.json", "")).toBe("text");
   });
 
-  it("两者都不认识 → null", () => {
-    expect(attachmentKind("archive.zip", "")).toBeNull();
-    expect(attachmentKind("noext", "application/octet-stream")).toBeNull();
+  it("认得出是文件（有扩展名或有 mime）→ file", () => {
+    expect(attachmentKind("archive.zip", "")).toBe("file");
+    expect(attachmentKind("noext", "application/octet-stream")).toBe("file");
+    expect(attachmentKind("paper.pdf", "application/pdf")).toBe("file");
+    expect(attachmentKind("deck.pptx", "")).toBe("file");
+  });
+
+  it("既无扩展名又无 mime → null", () => {
+    expect(attachmentKind("noext", "")).toBeNull();
+    expect(attachmentKind("noext", "   ")).toBeNull();
   });
 });
 
@@ -64,8 +73,19 @@ describe("validateAttachment", () => {
     expect(validateAttachment(meta, [], true)).toBeNull();
   });
 
-  it("不支持的扩展名被拒", () => {
-    expect(validateAttachment({ ...meta, name: "a.zip", mime: "" }, [], true)?.key).toBe("chat.attachUnsupported");
+  it("既无扩展名又无 mime 的候选被拒", () => {
+    expect(validateAttachment({ ...meta, name: "noext", mime: "" }, [], true)?.key).toBe("chat.attachUnsupported");
+  });
+
+  it("通用文件：桌面态放行、浏览器态拒（没有文件系统落库）", () => {
+    const zip = { name: "a.zip", mime: "application/zip", size: 1024 };
+    expect(validateAttachment(zip, [], true)).toBeNull();
+    expect(validateAttachment(zip, [], false)?.key).toBe("chat.attachUnsupported");
+  });
+
+  it("通用文件超 20MB 被拒", () => {
+    const big = { name: "a.pdf", mime: "application/pdf", size: ATTACHMENT_LIMITS.maxFileBytes + 1 };
+    expect(validateAttachment(big, [], true)?.key).toBe("chat.attachTooLarge");
   });
 
   it("数量超限被拒", () => {
@@ -116,6 +136,37 @@ describe("normalizeAttachments", () => {
       { id: "att-3", kind: "text", name: "n.md", mime: "text/markdown", size: 12, text: "# hi", truncated: true },
     ]);
   });
+
+  it("file 记录保留，且剥离瞬时 bytes", () => {
+    const raw = [
+      {
+        id: "att-4",
+        kind: "file",
+        name: "paper.pdf",
+        mime: "application/pdf",
+        size: 3,
+        path: "/tmp/paper.pdf",
+        bytes: new Uint8Array([1, 2, 3]),
+      },
+    ];
+    expect(normalizeAttachments(raw)).toEqual([
+      { id: "att-4", kind: "file", name: "paper.pdf", mime: "application/pdf", size: 3, path: "/tmp/paper.pdf" },
+    ]);
+  });
+
+  it("未知 kind 被丢弃", () => {
+    expect(normalizeAttachments([{ id: "att-5", kind: "video", name: "v.mp4", path: "/tmp/v.mp4" }])).toEqual([]);
+  });
+});
+
+describe("isAttachmentKind", () => {
+  it("只认三个已知 kind", () => {
+    expect(isAttachmentKind("image")).toBe(true);
+    expect(isAttachmentKind("text")).toBe(true);
+    expect(isAttachmentKind("file")).toBe(true);
+    expect(isAttachmentKind("video")).toBe(false);
+    expect(isAttachmentKind(undefined)).toBe(false);
+  });
 });
 
 describe("createAttachment", () => {
@@ -161,6 +212,18 @@ describe("inlineTextAttachment", () => {
   it("内容含围栏时加长围栏，避免提前闭合", () => {
     const out = inlineTextAttachment("a.md", "```js\ncode\n```", false);
     expect(out).toContain("````\n```js\ncode\n```\n````");
+  });
+});
+
+describe("inlineFileAttachment", () => {
+  it("带路径时给出路径引用，不内联内容", () => {
+    expect(inlineFileAttachment("paper.pdf", "/home/u/.greyWork/attachments/s1/att-1.pdf")).toBe(
+      "\n\n---\n[文件：paper.pdf（本地路径：/home/u/.greyWork/attachments/s1/att-1.pdf）]\n",
+    );
+  });
+
+  it("缺 path 时退化为只报文件名", () => {
+    expect(inlineFileAttachment("paper.pdf")).toBe("\n\n---\n[文件：paper.pdf]\n");
   });
 });
 

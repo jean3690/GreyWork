@@ -1,5 +1,5 @@
 /**
- * 附件（图片 / 文本文件）的纯逻辑：类型判定、限额校验、旧数据归一化、文本内联格式。
+ * 附件（图片 / 文本文件 / 通用文件）的纯逻辑：类型判定、限额校验、旧数据归一化、内联格式。
  *
  * 与 IO 分离的理由：限额与内联格式是发送链路的关键判定，必须在无 Tauri / 无 DOM 的
  * 单测里可验证。落盘、采集、剪贴板等副作用都在 `state/attachment-library.ts`。
@@ -14,8 +14,10 @@ export const ATTACHMENT_LIMITS = {
   maxImageBytes: 10 * 1024 * 1024,
   /** 单个文本文件上限。 */
   maxTextBytes: 1024 * 1024,
-  /** 单条消息附件总字节上限。 */
-  maxTotalBytes: 16 * 1024 * 1024,
+  /** 单个通用文件上限（与宿主 fs_read_binary / fs_write_binary 的 20MB 通道对齐）。 */
+  maxFileBytes: 20 * 1024 * 1024,
+  /** 单条消息附件总字节上限。必须 > maxFileBytes，否则单个大文件在总量校验上被误拒。 */
+  maxTotalBytes: 24 * 1024 * 1024,
   /** 内联进 prompt 的字符上限（超出截断并标记）。 */
   maxInlineTextChars: 120_000,
   /** 浏览器态图片上限：附件内联进会话存档，受 localStorage 5MB 硬限约束，必须更严。 */
@@ -95,6 +97,19 @@ const EXT_TO_MIME: Record<string, string> = {
   sh: "text/plain",
   sql: "text/plain",
   ini: "text/plain",
+  // 通用文件（kind = "file"）：mime 只用于展示与宿主侧元数据，不参与内联。
+  pdf: "application/pdf",
+  zip: "application/zip",
+  gz: "application/gzip",
+  tar: "application/x-tar",
+  "7z": "application/x-7z-compressed",
+  rar: "application/vnd.rar",
+  doc: "application/msword",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xls: "application/vnd.ms-excel",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ppt: "application/vnd.ms-powerpoint",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 };
 
 const TEXT_EXT_SET: ReadonlySet<string> = new Set(TEXT_EXTENSIONS);
@@ -115,7 +130,11 @@ export function mimeForFile(name: string, fallback = ""): string {
   return EXT_TO_MIME[extOf(name)] ?? fallback;
 }
 
-/** 判定附件类别：mime 优先，扩展名兜底；两者都不认识 → null（不支持）。 */
+/** 判定附件类别：mime 优先，扩展名兜底。
+ *
+ * 认不出具体类型但**看得出是个文件**（有扩展名或有 mime）→ `"file"`：通用文件不该
+ * 被当成「不支持」挡在门外，它照样能落库、能走微信通道发出去，只是内联不进 prompt。
+ * 两者都缺（无名无类型）才返回 null。 */
 export function attachmentKind(name: string, mime: string): AttachmentKind | null {
   const normalized = mime.trim().toLowerCase();
   if (IMAGE_MIMES.has(normalized)) return "image";
@@ -123,7 +142,13 @@ export function attachmentKind(name: string, mime: string): AttachmentKind | nul
   const ext = extOf(name);
   if ((IMAGE_EXTENSIONS as readonly string[]).includes(ext)) return "image";
   if (TEXT_EXT_SET.has(ext)) return "text";
+  if (ext || normalized) return "file";
   return null;
+}
+
+/** 归一化历史数据时用的 kind 判定（避免把任意字符串当成合法 kind 收下）。 */
+export function isAttachmentKind(value: unknown): value is AttachmentKind {
+  return value === "image" || value === "text" || value === "file";
 }
 
 /** 采集期拒绝原因：i18n key + 插值参数（UI 自行翻译，模块不碰 i18n 实例）。 */
@@ -145,6 +170,9 @@ export function validateAttachment(
 ): AttachmentRejection | null {
   const kind = attachmentKind(meta.name, meta.mime);
   if (!kind) return { key: "chat.attachUnsupported", params: { name: meta.name } };
+  // 通用文件必须落盘才发得出去，浏览器态没有文件系统，收下等于把 base64 塞进
+  // localStorage —— 直接按「不支持」拒掉，别让用户以为选上了。
+  if (kind === "file" && !isDesktop) return { key: "chat.attachUnsupported", params: { name: meta.name } };
   if (existing.length >= ATTACHMENT_LIMITS.maxCount) {
     return { key: "chat.attachTooMany", params: { max: ATTACHMENT_LIMITS.maxCount } };
   }
@@ -153,7 +181,9 @@ export function validateAttachment(
       ? isDesktop
         ? ATTACHMENT_LIMITS.maxImageBytes
         : ATTACHMENT_LIMITS.maxBrowserImageBytes
-      : ATTACHMENT_LIMITS.maxTextBytes;
+      : kind === "text"
+        ? ATTACHMENT_LIMITS.maxTextBytes
+        : ATTACHMENT_LIMITS.maxFileBytes;
   if (meta.size > limit) {
     return { key: "chat.attachTooLarge", params: { name: meta.name, limit: formatBytes(limit) } };
   }
@@ -173,7 +203,8 @@ export function createAttachment(input: Omit<Attachment, "id">): Attachment {
  * 归一化历史数据里的 attachments。
  *
  * 旧版本该字段是 `string[]`（且从未被真实写入非空值），无法还原成文件，
- * 直接丢弃；畸形对象同理。返回的数组保证每条都具备渲染与发送所需的最小字段。
+ * 直接丢弃；畸形对象同理。返回的数组保证每条都具备渲染与发送所需的最小字段，
+ * 且**不含** `bytes`（瞬时字段，历史数据里若有也是序列化残渣）。
  */
 export function normalizeAttachments(raw: unknown): Attachment[] {
   if (!Array.isArray(raw)) return [];
@@ -181,7 +212,7 @@ export function normalizeAttachments(raw: unknown): Attachment[] {
   for (const item of raw) {
     if (!item || typeof item !== "object") continue;
     const candidate = item as Partial<Attachment>;
-    if (candidate.kind !== "image" && candidate.kind !== "text") continue;
+    if (!isAttachmentKind(candidate.kind)) continue;
     if (typeof candidate.id !== "string" || typeof candidate.name !== "string") continue;
     const hasBody = typeof candidate.path === "string" || typeof candidate.dataUrl === "string" || typeof candidate.text === "string";
     if (!hasBody) continue;
@@ -218,6 +249,17 @@ export function inlineTextAttachment(name: string, content: string, truncated: b
   const fence = textFence(content);
   const body = truncated ? `${content}\n[...内容过长已截断]` : content;
   return `\n\n---\n[附件：${name}]\n${fence}\n${body}\n${fence}\n`;
+}
+
+/**
+ * 通用文件附件的内联格式：只给路径引用，**不内联内容**（二进制塞不进文本 prompt）。
+ *
+ * 与 `inlineTextAttachment` 互补：ACP 本机 agent 能按路径直接读文件，纯 LLM 至少
+ * 知道「有这么个文件」，而不是被无声吞掉。缺 path（落库失败）时退化为只报文件名。
+ */
+export function inlineFileAttachment(name: string, path?: string): string {
+  const ref = path ? `${name}（本地路径：${path}）` : name;
+  return `\n\n---\n[文件：${ref}]\n`;
 }
 
 /**

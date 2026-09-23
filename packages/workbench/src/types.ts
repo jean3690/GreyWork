@@ -123,15 +123,21 @@ export type MessageSegment =
 /** 思考段（组件 props 用的具名别名）。 */
 export type ThinkingSegment = Extract<MessageSegment, { kind: "thinking" }>;
 
-export type AttachmentKind = "image" | "text";
+/**
+ * 附件类别：
+ * - `image` / `text` 能内联进 prompt（前者 base64 内容块，后者文本内容块）；
+ * - `file` 是通用二进制文件（PDF / 压缩包 / Office 文档…），内联不了内容，
+ *   模型侧只拿到一条路径引用，真读文件交给本机 ACP agent。
+ */
+export type AttachmentKind = "image" | "text" | "file";
 
 /**
- * 一条随消息发出的附件（图片 / 文本文件）。
+ * 一条随消息发出的附件（图片 / 文本文件 / 通用文件）。
  *
- * 生命周期分两段：采集期是内存草稿（只有 dataUrl/text，用于输入卡即时预览），
+ * 生命周期分两段：采集期是内存草稿（dataUrl/text/bytes，用于输入卡即时预览与落库），
  * 发送时落进附件库并**剥离内联数据**只留 path —— 会话是整条 ThreadMessage 落盘的，
  * 把 base64 留在消息里会把 localStorage 与会话 JSON 一起撑爆。浏览器态没有
- * 文件系统，只能保留内联副本（限额因此更严）。
+ * 文件系统，只能保留内联副本（限额因此更严，通用文件直接不收）。
  */
 export interface Attachment {
   id: string;
@@ -149,6 +155,14 @@ export interface Attachment {
   text?: string;
   /** 文本已按内联上限截断（仅浏览器态可判定，用于展示提示）。 */
   truncated?: boolean;
+  /**
+   * 原始字节，**仅草稿期存在**（落库前由 `materializeAttachments` 剥离）。
+   *
+   * 通用文件无法内联进 prompt，必须原样带到写盘那一刻；绕道 `dataUrl` 会让 base64
+   * 白撑 33%。绝不进会话存档 —— `Uint8Array` 经 JSON 序列化会退化成
+   * `{"0":..,"1":..}` 的巨型对象。
+   */
+  bytes?: Uint8Array;
 }
 
 /**

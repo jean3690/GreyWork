@@ -242,13 +242,20 @@ pub fn fs_write_binary(
     path: String,
     data_base64: String,
 ) -> Result<(), String> {
-    if data_base64.len() > MAX_BINARY_BYTES {
+    // 上限以**解码后的字节数**为准：base64 会把载荷撑大约 4/3，旧实现拿编码串长度
+    // 比 20MB，等于把有效上限压到 ~15MB。这里先按编码串长度粗筛一次（避免为一个
+    // 超大字符串白分配解码缓冲），再以解码字节数定音。
+    let max_encoded = MAX_BINARY_BYTES / 3 * 4 + 8;
+    if data_base64.len() > max_encoded {
         return Err("文件超过 20MB 上限".into());
     }
-    let path = access.resolve_write(&path)?;
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(data_base64.as_bytes())
         .map_err(|error| format!("base64 解码失败: {error}"))?;
+    if bytes.len() > MAX_BINARY_BYTES {
+        return Err("文件超过 20MB 上限".into());
+    }
+    let path = access.resolve_write(&path)?;
     std::fs::write(&path, bytes).map_err(|error| format!("写入文件失败: {error}"))
 }
 
@@ -401,20 +408,12 @@ pub async fn fs_pick_files(
     multiple: bool,
 ) -> Result<Vec<String>, String> {
     use tauri_plugin_dialog::DialogExt;
-    if purpose != "attachments" && purpose != "workspace" {
+    // `media` 是对话附件通道：不限扩展名 —— 通用文件（PDF / 压缩包 / Office 文档）
+    // 也要能选，类型判定与限额由渲染端 `lib/attachments.ts` 统一把关。
+    if purpose != "media" && purpose != "workspace" {
         return Err(format!("未知文件选择用途: {purpose}"));
     }
-    let mut dialog = app.dialog().file().set_title("选择文件");
-    if purpose == "attachments" {
-        dialog = dialog.add_filter(
-            "图片与文本",
-            &[
-                "png", "jpg", "jpeg", "gif", "webp", "bmp", "txt", "md", "markdown", "json", "csv",
-                "log", "ts", "tsx", "js", "jsx", "vue", "html", "htm", "css", "scss", "py", "rs",
-                "go", "java", "kt", "yml", "yaml", "toml", "xml", "sh", "sql", "ini",
-            ],
-        );
-    }
+    let dialog = app.dialog().file().set_title("选择文件");
     let selected = if multiple {
         let (tx, rx) = tokio::sync::oneshot::channel();
         dialog.pick_files(move |paths| {

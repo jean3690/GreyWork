@@ -1,7 +1,7 @@
 import type { ModelProviderConfig, ReasoningEffort } from "@greywork/shell";
 import { ref } from "vue";
 import type { LlmChatMessage, LlmContentPart } from "@greywork/llm";
-import { inlineTextAttachment } from "../lib/attachments";
+import { inlineFileAttachment, inlineTextAttachment } from "../lib/attachments";
 import { readAttachmentBase64, readAttachmentText } from "../state/attachment-library";
 import { i18n } from "../i18n";
 import { notify } from "../stores/notice";
@@ -69,9 +69,14 @@ async function toContentParts(
         const base64 = item.dataUrl ? null : await readAttachmentBase64(item);
         images.push({ type: "image_url", image_url: { url: item.dataUrl ?? `data:${item.mime || "image/png"};base64,${base64}` } });
         attached = true;
-      } else {
+      } else if (item.kind === "text") {
         const { text: content, truncated } = await readAttachmentText(item);
         text += inlineTextAttachment(item.name, content, truncated);
+        attached = true;
+      } else {
+        // 通用文件（PDF / 压缩包等）内容内联不了，只递一条路径引用 —— 至少让模型知道
+        // 有这么个文件，而不是被无声吞掉。
+        text += inlineFileAttachment(item.name, item.path);
         attached = true;
       }
     } catch (error) {

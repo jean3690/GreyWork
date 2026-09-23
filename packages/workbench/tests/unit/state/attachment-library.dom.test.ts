@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 const invokeMock = vi.mocked((await import("@tauri-apps/api/core")).invoke);
 
-import { readAttachmentBase64, readAttachmentBytes } from "@/state/attachment-library";
+import { materializeAttachments, readAttachmentBase64, readAttachmentBytes } from "@/state/attachment-library";
 import type { Attachment } from "@/types";
 
 /** "ABC" 的字节与 base64 —— 与别处用例里的 "QUJD" 同源。 */
@@ -88,5 +88,39 @@ describe("按路径读取附件", () => {
 
     await expect(readAttachmentBase64(attachment())).rejects.toThrow(/没有可读的图片数据/);
     await expect(readAttachmentBytes(attachment())).rejects.toThrow(/没有可读的数据源/);
+  });
+
+  it("草稿字节优先于 path（通用文件只在草稿期有数据）", async () => {
+    enableTauri();
+    // path 存在但磁盘上并没有这个文件：若没走 bytes，这里会因 invoke 返回 undefined 而报错。
+    const draft = attachment({ kind: "file", name: "a.zip", mime: "application/zip", path: "/tmp/a.zip", bytes: new Uint8Array(ABC) });
+
+    expect(Array.from(await readAttachmentBytes(draft))).toEqual(ABC);
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("materializeAttachments", () => {
+  it("落库后剥离草稿字节，只留 path（Uint8Array 不能进会话存档）", async () => {
+    enableTauri();
+    invokeMock.mockImplementation((cmd: string) =>
+      cmd === "store_default_root" ? Promise.resolve("/tmp/gw-root") : Promise.resolve(undefined),
+    );
+
+    const draft = attachment({ kind: "file", name: "paper.pdf", mime: "application/pdf", bytes: new Uint8Array(ABC) });
+    const [stored] = await materializeAttachments("s1", [draft]);
+
+    expect(stored.bytes).toBeUndefined();
+    expect(stored.path).toMatch(/attachments[/\\]s1[/\\]a1\.pdf$/);
+    expect(invokeMock).toHaveBeenCalledWith("fs_write_binary", { path: stored.path, dataBase64: ABC_BASE64 });
+  });
+
+  it("没有文件系统（浏览器态）时也剥掉 bytes", async () => {
+    const draft = attachment({ kind: "file", name: "paper.pdf", bytes: new Uint8Array(ABC) });
+
+    const [stored] = await materializeAttachments("s1", [draft]);
+
+    expect(stored.bytes).toBeUndefined();
+    expect(invokeMock).not.toHaveBeenCalled();
   });
 });

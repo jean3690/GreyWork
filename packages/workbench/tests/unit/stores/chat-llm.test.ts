@@ -36,6 +36,10 @@ function textAttachment(id: string): Attachment {
   return { id, kind: "text", name: `${id}.md`, mime: "text/markdown", size: 10, path: `/tmp/${id}.md` };
 }
 
+function fileAttachment(id: string): Attachment {
+  return { id, kind: "file", name: `${id}.pdf`, mime: "application/pdf", size: 99, path: `/tmp/${id}.pdf` };
+}
+
 beforeEach(() => {
   h.readAttachmentBase64.mockReset();
   h.readAttachmentBase64.mockImplementation(() => Promise.resolve("QUJD"));
@@ -126,6 +130,15 @@ describe("buildLlmHistory", () => {
     expect(content[0].text).toContain("读一下");
     expect(content[0].text).toContain("[附件：t1.md]");
     expect(content[0].text).toContain("[...内容过长已截断]");
+  });
+
+  it("通用文件只递路径引用，不读内容", async () => {
+    const history = await buildLlmHistory([{ role: "user", content: "看下这个", attachments: [fileAttachment("f1")] }]);
+    const content = history[1]?.content as { type: string; text: string }[];
+    expect(content[0].type).toBe("text");
+    expect(content[0].text).toContain("看下这个");
+    expect(content[0].text).toContain("[文件：f1.pdf（本地路径：/tmp/f1.pdf）]");
+    expect(h.readAttachmentText).not.toHaveBeenCalled();
   });
 
   it("内联数据（浏览器态 dataUrl）直接用，不再读盘", async () => {

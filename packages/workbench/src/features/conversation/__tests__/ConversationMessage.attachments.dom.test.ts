@@ -65,6 +65,19 @@ describe("ConversationMessage · 附件", () => {
     expect(requests).toContainEqual({ path: "/tmp/notes.md", name: "notes.md", source: "disk" });
   });
 
+  it("通用文件出文件名 chip；没有可打开来源时按钮禁用", async () => {
+    const pdf: Attachment = { id: "a3", kind: "file", name: "paper.pdf", mime: "application/pdf", size: 99, path: "/tmp/paper.pdf" };
+    const orphan: Attachment = { id: "a4", kind: "file", name: "ghost.pdf", mime: "application/pdf", size: 1 };
+
+    const { wrapper } = mountMessage(userMessage([pdf, orphan]));
+    const chips = wrapper.findAll('[data-testid="message-attachment-file"]');
+
+    expect(chips).toHaveLength(2);
+    expect(chips[0].text()).toContain("paper.pdf");
+    expect(chips[0].attributes("disabled")).toBeUndefined();
+    expect(chips[1].attributes("disabled")).toBeDefined();
+  });
+
   it("缩略图读不到（文件被移走）时退化为占位，不抛错", async () => {
     h.attachmentObjectUrl.mockResolvedValue(null);
     const { wrapper } = mountMessage(userMessage([image]));
