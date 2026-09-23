@@ -63,6 +63,9 @@ sha1 = "0.10"
 # 企业微信 / QQ 扫码创建：AstrBot 逆向出的 q.qq.com 绑定流程把 AppSecret 以 AES-256-GCM
 # 密文下发（12B nonce + 密文 + 16B tag），绑定用的对称密钥由本机生成并只留在宿主内存。
 aes-gcm = "0.10"
+# 企业微信入站长连接的媒体是 AES-256-CBC 密文（IV 取密钥前 16 字节，PKCS#7 填充）：
+# 只要块解密 + 手工 CBC 链接，不引 cbc crate。aes 已是 aes-gcm 的传递依赖。
+aes = "0.8"
 ed25519-dalek = { version = "2", features = ["std"] }
 getrandom = "0.3"
 form_urlencoded = "1"

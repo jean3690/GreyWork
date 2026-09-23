@@ -12,6 +12,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { isTauriRuntime } from "@greywork/core";
 
+import type { MediaRef } from "../types";
+
 /** 宿主侧长连接状态机。 */
 export type WecomState = "stopped" | "connecting" | "connected" | "error";
 
@@ -36,8 +38,10 @@ export interface WecomInbound {
   /** 发送者 userid（判归属人）。 */
   senderId: string;
   text: string;
-  /** 非文本消息的类型（如 image）；文本消息为空串（界面如实说明只认文字）。 */
+  /** 收不下也转不成文本的消息类型（如 voice）；文本 / 图片 / 文件为空串。 */
   unsupported: string;
+  /** 随消息到达的图片 / 文件（长连接媒体已按 aeskey 解密）；字节在宿主 inbox，凭 `path` 取走。 */
+  media?: MediaRef[];
   at: number;
 }
 

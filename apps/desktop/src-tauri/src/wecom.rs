@@ -15,19 +15,31 @@
 //! 归属人策略与其余通道一致（第一个来消息的人成为默认主人）。
 
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use aes::cipher::generic_array::GenericArray;
+use aes::cipher::{BlockDecrypt, KeyInit};
+use aes::Aes256;
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine as _;
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::channel_common::{
     app_sink, channel_dir, now_ms, read_json, sleep_or_stop, write_private, EventSink,
 };
+use crate::channel_media::{
+    inbox_dir, prune_inbox, store_inbound_media, MediaKind, MediaRefDto, OutboundMedia,
+    MAX_MEDIA_BYTES,
+};
+use crate::http::{shared_client, RESPONSE_READ_TIMEOUT};
 use crate::log;
 
 const DIR_NAME: &str = "wecom";
@@ -45,6 +57,19 @@ const PING_INTERVAL: Duration = Duration::from_secs(25);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 /// 单条文本上限：markdown 消息上限 20480 字节，这里按字符保守取 4000。
 const MAX_TEXT_CHARS: usize = 4000;
+/// 单条消息最多收几条媒体（防止一条消息拖垮一整轮下载）。
+const MAX_INBOUND_MEDIA: usize = 4;
+/// 媒体上传分片大小（base64 编码前的原始字节）。
+const UPLOAD_CHUNK_SIZE: usize = 512 * 1024;
+/// 媒体上传三步（init → chunk × N → finish）的命令名。
+const UPLOAD_INIT_CMD: &str = "aibot_upload_media_init";
+const UPLOAD_CHUNK_CMD: &str = "aibot_upload_media_chunk";
+const UPLOAD_FINISH_CMD: &str = "aibot_upload_media_finish";
+/// 被动回复 / 主动推送的命令名。
+const RESPOND_CMD: &str = "aibot_respond_msg";
+const PUSH_CMD: &str = "aibot_send_msg";
+/// 媒体消息里的类别字段值（企业微信出站只认 image，文件出口不存在）。
+const MEDIA_TYPE_IMAGE: &str = "image";
 
 /* ===== 协议形状 ===== */
 
@@ -88,6 +113,57 @@ struct CallbackBody {
     text: Option<TextBlock>,
     #[serde(default)]
     event: Option<EventBlock>,
+    /// 图片 / 视频：`{url, aeskey}`（长连接模式额外给 aeskey，字节要解密）。
+    #[serde(default)]
+    image: Option<MediaBlock>,
+    #[serde(default)]
+    video: Option<MediaBlock>,
+    /// 文件：`{url, aeskey, name?, size?}`。
+    #[serde(default)]
+    file: Option<FileBlock>,
+    /// 图文混排：`{msg_item: [{type, text?, image?}]}`。
+    #[serde(default)]
+    mixed: Option<MixedBlock>,
+}
+
+/// 图片 / 视频块。
+#[derive(Debug, Clone, Default, Deserialize)]
+struct MediaBlock {
+    #[serde(default)]
+    url: Option<String>,
+    #[serde(default)]
+    aeskey: Option<String>,
+}
+
+/// 文件块。
+#[derive(Debug, Clone, Default, Deserialize)]
+struct FileBlock {
+    #[serde(default)]
+    url: Option<String>,
+    #[serde(default)]
+    aeskey: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    size: Option<u64>,
+}
+
+/// 图文混排块。
+#[derive(Debug, Clone, Default, Deserialize)]
+struct MixedBlock {
+    #[serde(default)]
+    msg_item: Vec<MixedItem>,
+}
+
+/// 图文混排里的一项：`type` 是 `text` 或 `image`。
+#[derive(Debug, Clone, Default, Deserialize)]
+struct MixedItem {
+    #[serde(default, rename = "type")]
+    kind: Option<String>,
+    #[serde(default)]
+    text: Option<TextBlock>,
+    #[serde(default)]
+    image: Option<MediaBlock>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -153,13 +229,41 @@ pub struct WecomInboundDto {
     /// 发送者 userid（判归属人）。
     pub sender_id: String,
     pub text: String,
-    /// 非文本消息的类型（如 image），文本消息为空串。
+    /// 收不下也转不成文本的消息类型（如 voice），其余为空串。
     pub unsupported: String,
+    /// 随消息到达的图片 / 文件；字节在宿主 inbox，凭 `path` 取走。
+    pub media: Vec<MediaRefDto>,
     pub at: i64,
 }
 
+/// 归一后的入站草稿：媒体还是「待下载」的 `{url, aeskey}`，等异步取字节落盘后再产 DTO。
+#[derive(Debug, Clone)]
+pub(crate) struct WecomInboundDraft {
+    pub msg_id: String,
+    pub peer_id: String,
+    pub nick: String,
+    pub sender_id: String,
+    pub text: String,
+    pub unsupported: String,
+    pub at: i64,
+    pub media: Vec<PendingMedia>,
+}
+
+/// 待下载的一条入站媒体（长连接模式给的是加密直链 + aeskey）。
+#[derive(Debug, Clone)]
+pub(crate) struct PendingMedia {
+    url: String,
+    aeskey: Option<String>,
+    kind: MediaKind,
+    name: String,
+    declared_size: Option<u64>,
+}
+
 /// 归一条消息回调；缺关键字段返回 None。
-pub fn normalize_callback(body: &serde_json::Value, received_at: i64) -> Option<WecomInboundDto> {
+pub(crate) fn normalize_callback(
+    body: &serde_json::Value,
+    received_at: i64,
+) -> Option<WecomInboundDraft> {
     let parsed: CallbackBody = serde_json::from_value(body.clone()).ok()?;
     let sender = parsed
         .from
@@ -180,33 +284,101 @@ pub fn normalize_callback(body: &serde_json::Value, received_at: i64) -> Option<
         return None;
     }
     let msgtype = parsed.msgtype.clone().unwrap_or_default();
-    let text = if msgtype == "text" {
-        parsed
+    let text = match msgtype.as_str() {
+        "text" => parsed
             .text
             .as_ref()
             .and_then(|block| block.content.clone())
-            .unwrap_or_default()
-    } else {
-        String::new()
+            .unwrap_or_default(),
+        // 图文混排里的文本项也当正文转达，免得只有图没话。
+        "mixed" => parsed.mixed.as_ref().map(mixed_text).unwrap_or_default(),
+        _ => String::new(),
     };
+    let media = pending_media(&parsed);
+    // 文本 / 有媒体的消息都算「转达到了」；其余（voice、缺直链的 image…）如实标注类型。
+    let handled = msgtype == "text" || !media.is_empty();
     let at = parsed
         .create_time
         .filter(|seconds| *seconds > 0)
         .map(|seconds| seconds.saturating_mul(1000))
         .unwrap_or(received_at);
-    Some(WecomInboundDto {
+    Some(WecomInboundDraft {
         msg_id: parsed.msgid,
         nick: peer_id.clone(),
         peer_id,
         sender_id: sender,
         text,
-        unsupported: if msgtype == "text" {
-            String::new()
-        } else {
-            msgtype
-        },
+        unsupported: if handled { String::new() } else { msgtype },
         at,
+        media,
     })
+}
+
+/// 图文混排里的文本项拼成正文。
+fn mixed_text(mixed: &MixedBlock) -> String {
+    mixed
+        .msg_item
+        .iter()
+        .filter(|item| item.kind.as_deref() == Some("text"))
+        .filter_map(|item| item.text.as_ref())
+        .filter_map(|block| block.content.as_deref())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// 从回调里挑出可下载的媒体（图片 / 文件 / 视频 / 图文混排里的图），最多 4 条。
+fn pending_media(body: &CallbackBody) -> Vec<PendingMedia> {
+    let mut out = Vec::new();
+    if let Some(block) = body.image.as_ref() {
+        push_pending(&mut out, block, MediaKind::Image);
+    }
+    if let Some(block) = body.video.as_ref() {
+        push_pending(&mut out, block, MediaKind::File);
+    }
+    if let Some(block) = body.file.as_ref() {
+        out.push(PendingMedia {
+            url: block.url.clone().unwrap_or_default().trim().to_string(),
+            aeskey: block.aeskey.clone(),
+            kind: MediaKind::File,
+            name: block
+                .name
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("attachment")
+                .to_string(),
+            declared_size: block.size,
+        });
+    }
+    if let Some(mixed) = body.mixed.as_ref() {
+        for item in &mixed.msg_item {
+            if item.kind.as_deref() == Some("image") {
+                if let Some(block) = item.image.as_ref() {
+                    push_pending(&mut out, block, MediaKind::Image);
+                }
+            }
+        }
+    }
+    out.retain(|item| !item.url.is_empty());
+    out.truncate(MAX_INBOUND_MEDIA);
+    out
+}
+
+/// 把图片 / 视频块归一成待下载项（无直链的丢掉）。
+fn push_pending(out: &mut Vec<PendingMedia>, block: &MediaBlock, kind: MediaKind) {
+    let url = block.url.clone().unwrap_or_default().trim().to_string();
+    if url.is_empty() {
+        return;
+    }
+    out.push(PendingMedia {
+        url,
+        aeskey: block.aeskey.clone(),
+        kind,
+        name: "attachment".to_string(),
+        declared_size: None,
+    });
 }
 
 /// 文本净化：空文本拒绝，超长截断。
@@ -257,6 +429,171 @@ pub fn subscribe_frame(bot_id: &str, secret: &str, req_id: &str) -> serde_json::
 /// 心跳帧。
 pub fn ping_frame(req_id: &str) -> serde_json::Value {
     serde_json::json!({ "cmd": "ping", "headers": { "req_id": req_id } })
+}
+
+/* ===== 媒体：出站帧与上传体（纯函数，可单测） ===== */
+
+/// 媒体消息体：`{msgtype: <type>, <type>: {media_id}}`（键名随类别变，故用 Map 拼）。
+fn media_body(media_type: &str, media_id: &str) -> serde_json::Map<String, serde_json::Value> {
+    let mut body = serde_json::Map::new();
+    body.insert(
+        "msgtype".into(),
+        serde_json::Value::String(media_type.to_string()),
+    );
+    body.insert(
+        media_type.into(),
+        serde_json::json!({ "media_id": media_id }),
+    );
+    body
+}
+
+/// 媒体被动回复帧：msgtype 就是媒体类别（image），media_id 由上传换得。
+pub fn respond_media_frame(req_id: &str, media_type: &str, media_id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "cmd": RESPOND_CMD,
+        "headers": { "req_id": req_id },
+        "body": serde_json::Value::Object(media_body(media_type, media_id)),
+    })
+}
+
+/// 媒体主动推送帧：与文本推送同形，只把 msgtype 换成媒体类别。
+pub fn push_media_frame(
+    scope: &ChatScope,
+    id: &str,
+    media_type: &str,
+    media_id: &str,
+    req_id: &str,
+) -> serde_json::Value {
+    let mut body = media_body(media_type, media_id);
+    body.insert("chatid".into(), serde_json::Value::String(id.to_string()));
+    body.insert(
+        "chat_type".into(),
+        serde_json::json!(if *scope == ChatScope::Single { 1 } else { 2 }),
+    );
+    serde_json::json!({
+        "cmd": PUSH_CMD,
+        "headers": { "req_id": req_id },
+        "body": serde_json::Value::Object(body),
+    })
+}
+
+/// 上传第一步的请求体。
+pub fn upload_init_body(
+    name: &str,
+    media_type: &str,
+    size: usize,
+    total_chunks: usize,
+    md5: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "filename": name,
+        "type": media_type,
+        "total_size": size,
+        "total_chunks": total_chunks,
+        "md5": md5,
+    })
+}
+
+/// 上传第二步（每片）的请求体：分片原文 base64。
+pub fn upload_chunk_body(
+    upload_id: &str,
+    index: usize,
+    total_chunks: usize,
+    base64_data: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "upload_id": upload_id,
+        "chunk_index": index,
+        "total_chunks": total_chunks,
+        "base64_data": base64_data,
+    })
+}
+
+/// 上传第三步（合并）的请求体。
+pub fn upload_finish_body(upload_id: &str, name: &str, media_type: &str) -> serde_json::Value {
+    serde_json::json!({
+        "upload_id": upload_id,
+        "filename": name,
+        "media_type": media_type,
+    })
+}
+
+/* ===== 媒体：入站解密（AES-256-CBC，密钥即 aeskey） ===== */
+
+/// 小写十六进制（上传第一步要带的整文件 md5）。
+fn md5_hex(bytes: &[u8]) -> String {
+    use md5::Md5;
+    use sha2::Digest as _;
+    let mut hasher = Md5::new();
+    hasher.update(bytes);
+    let digest = hasher.finalize();
+    let mut out = String::with_capacity(digest.len() * 2);
+    for byte in digest.iter() {
+        let _ = write!(out, "{byte:02x}");
+    }
+    out
+}
+
+/// 解 aeskey：base64（长度非 4 的倍数时补齐 `=`），须解出 32 字节。
+fn decode_aes_key(aes_key: &str) -> Result<Vec<u8>, String> {
+    let raw = aes_key.trim();
+    if raw.is_empty() {
+        return Err("缺少 aeskey".into());
+    }
+    let padded = if raw.len().is_multiple_of(4) {
+        raw.to_string()
+    } else {
+        format!("{raw}{}", "=".repeat(4 - raw.len() % 4))
+    };
+    let key = BASE64
+        .decode(padded)
+        .map_err(|_| "aeskey base64 解码失败".to_string())?;
+    if key.len() != 32 {
+        return Err("aeskey 不是 32 字节".into());
+    }
+    Ok(key)
+}
+
+/// 解密企业微信入站媒体：AES-256-CBC，IV 取密钥前 16 字节，PKCS#7 去填充。
+///
+/// 与官方 SDK（`download_file`）同一算法；`aes` 已是 `aes-gcm` 的传递依赖，这里不引新 crate。
+pub fn decrypt_media(encrypted: &[u8], aes_key: &str) -> Result<Vec<u8>, String> {
+    if encrypted.is_empty() {
+        return Err("密文为空".into());
+    }
+    if !encrypted.len().is_multiple_of(16) {
+        return Err("密文长度不是 16 的倍数".into());
+    }
+    let key = decode_aes_key(aes_key)?;
+    let cipher = Aes256::new(GenericArray::from_slice(&key));
+    let mut prev = [0u8; 16];
+    prev.copy_from_slice(&key[..16]);
+    let mut out = Vec::with_capacity(encrypted.len());
+    for block in encrypted.as_chunks::<16>().0 {
+        let mut buf = GenericArray::clone_from_slice(block);
+        cipher.decrypt_block(&mut buf);
+        for (index, byte) in buf.iter().enumerate() {
+            out.push(byte ^ prev[index]);
+        }
+        prev.copy_from_slice(block);
+    }
+    unpad_pkcs7(out)
+}
+
+/// PKCS#7 去填充（块长 16）。
+fn unpad_pkcs7(mut data: Vec<u8>) -> Result<Vec<u8>, String> {
+    let pad = *data.last().ok_or("解密结果为空")? as usize;
+    if pad == 0 || pad > 16 || pad > data.len() {
+        return Err("PKCS#7 填充值非法".into());
+    }
+    if data[data.len() - pad..]
+        .iter()
+        .any(|byte| *byte as usize != pad)
+    {
+        return Err("PKCS#7 填充字节不一致".into());
+    }
+    data.truncate(data.len() - pad);
+    Ok(data)
 }
 
 /// 请求回执判定：errcode 缺失或 0 视为成功。
@@ -353,10 +690,11 @@ pub struct WecomStatusDto {
     pub peer_count: usize,
 }
 
-/// 连接任务要发出去的一帧：可选回执通道（有回执的调用会等 errcode）。
+/// 连接任务要发出去的一帧：可选回执通道（有回执的调用会等它自己的 errcode / body）。
 pub(crate) struct Outgoing {
     pub frame: serde_json::Value,
-    pub ack: Option<oneshot::Sender<Result<(), String>>>,
+    /// 回执通道：等待方拿到回执帧的 body（媒体上传要从这里读 upload_id / media_id）。
+    pub ack: Option<oneshot::Sender<Result<serde_json::Value, String>>>,
     pub req_id: Option<String>,
 }
 
@@ -443,15 +781,21 @@ pub(crate) struct LinkDeps {
     persist: Arc<dyn Fn(&PeerBook) + Send + Sync>,
     /// 除归属人外是否也答复其他人（连接建立时定下，改设置后重连生效）。
     allow_other_senders: bool,
+    /// 入站媒体收件目录（连上时解析一次；不可用时入站附件整体丢弃并记日志）。
+    inbox: Option<PathBuf>,
 }
 
 impl LinkDeps {
     fn for_app(app: &AppHandle) -> Self {
         let handle = app.clone();
+        let inbox = inbox_dir(app, DIR_NAME)
+            .inspect_err(|error| log::warn("wecom", format!("收件目录不可用: {error}")))
+            .ok();
         Self {
             sink: app_sink(app),
             persist: Arc::new(move |peers: &PeerBook| persist_peers(&handle, peers)),
             allow_other_senders: false,
+            inbox,
         }
     }
 
@@ -560,7 +904,7 @@ async fn serve(
                 if let (Some(ack), Some(req_id)) = (outgoing.ack, outgoing.req_id) {
                     // 等自己的回执：期间到达的回调照常处理。
                     match ack_with_callbacks(socket, &req_id, deps, inner, allow_other_senders).await {
-                        Ok(()) => { let _ = ack.send(Ok(())); }
+                        Ok(body) => { let _ = ack.send(Ok(body)); }
                         Err(error) => {
                             let fatal = error.starts_with("__closed__");
                             let _ = ack.send(Err(error.trim_start_matches("__closed__").to_string()));
@@ -603,14 +947,14 @@ async fn serve(
     }
 }
 
-/// 等某条请求的回执；期间到达的回调照常分发（回调不能被回执等丢）。
+/// 等某条请求的回执；期间到达的回调照常分发（回调不能被回执等丢）。返回回执帧的 body。
 async fn ack_with_callbacks(
     socket: &mut WsStream,
     req_id: &str,
     deps: &LinkDeps,
     inner: &Mutex<Inner>,
     allow_other_senders: bool,
-) -> Result<(), String> {
+) -> Result<serde_json::Value, String> {
     let deadline = tokio::time::Instant::now() + REQUEST_TIMEOUT;
     loop {
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
@@ -623,7 +967,7 @@ async fn ack_with_callbacks(
         if frame.headers.req_id.as_deref() == Some(req_id) {
             return match frame_error(&frame) {
                 Some(error) => Err(error),
-                None => Ok(()),
+                None => Ok(frame.body.unwrap_or(serde_json::Value::Null)),
             };
         }
         if let Some(end) = handle_callback_frame(&frame, deps, inner, allow_other_senders).await {
@@ -645,22 +989,22 @@ async fn handle_callback_frame(
         "aibot_msg_callback" => {
             let body = frame.body.clone().unwrap_or(serde_json::Value::Null);
             let req_id = frame.headers.req_id.clone().unwrap_or_default();
-            let Some(message) = normalize_callback(&body, now_ms()) else {
+            let Some(draft) = normalize_callback(&body, now_ms()) else {
                 log::warn("wecom", "回调缺少发送者/会话标识，忽略");
                 return None;
             };
             let (peers, allowed) = {
                 let mut guard = inner.lock().await;
-                guard.peers.claim_owner(&message.sender_id);
-                guard.peers.remember(&message.peer_id, &req_id, message.at);
+                guard.peers.claim_owner(&draft.sender_id);
+                guard.peers.remember(&draft.peer_id, &req_id, draft.at);
                 if guard
                     .last_message_at
-                    .map(|last| message.at > last)
+                    .map(|last| draft.at > last)
                     .unwrap_or(true)
                 {
-                    guard.last_message_at = Some(message.at);
+                    guard.last_message_at = Some(draft.at);
                 }
-                let allowed = guard.peers.allows(&message.sender_id, allow_other_senders);
+                let allowed = guard.peers.allows(&draft.sender_id, allow_other_senders);
                 emit_state(&guard, deps);
                 (guard.peers.clone(), allowed)
             };
@@ -670,11 +1014,13 @@ async fn handle_callback_frame(
                     "wecom",
                     format!(
                         "忽略非授权发送者 {}（可在设置中允许其他联系人）",
-                        message.sender_id
+                        draft.sender_id
                     ),
                 );
                 return None;
             }
+            // 媒体字节下载（并解密）进 inbox 后再广播（渲染端凭 path 取走）。
+            let message = materialize_inbound(deps, draft).await;
             deps.emit(
                 INBOUND_EVENT,
                 serde_json::to_value(message).unwrap_or(serde_json::Value::Null),
@@ -715,6 +1061,100 @@ async fn handle_callback_frame(
             log::info("wecom", format!("忽略未处理的回调 cmd={other}"));
             None
         }
+    }
+}
+
+/// 下载一条入站媒体（长连接模式给的是加密直链 + aeskey），解密后卡 20MB 上限。
+async fn download_media(
+    client: &reqwest::Client,
+    pending: &PendingMedia,
+) -> Result<Vec<u8>, String> {
+    if pending
+        .declared_size
+        .is_some_and(|size| size > MAX_MEDIA_BYTES)
+    {
+        return Err(format!(
+            "媒体超过 {} MB 上限",
+            MAX_MEDIA_BYTES / (1024 * 1024)
+        ));
+    }
+    let response = client
+        .get(&pending.url)
+        .send()
+        .await
+        .map_err(|error| format!("下载媒体请求失败: {error}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("下载媒体返回 {status}"));
+    }
+    let bytes = tokio::time::timeout(RESPONSE_READ_TIMEOUT, response.bytes())
+        .await
+        .map_err(|_| "下载媒体读取超时".to_string())?
+        .map_err(|error| format!("读取媒体字节失败: {error}"))?;
+    let plain = match pending.aeskey.as_deref().map(str::trim) {
+        Some(key) if !key.is_empty() => decrypt_media(&bytes, key)?,
+        _ => bytes.to_vec(),
+    };
+    if plain.len() as u64 > MAX_MEDIA_BYTES {
+        return Err(format!(
+            "媒体超过 {} MB 上限",
+            MAX_MEDIA_BYTES / (1024 * 1024)
+        ));
+    }
+    Ok(plain)
+}
+
+/// 把入站草稿的媒体下载进 inbox（单条失败只记日志，不中断整轮）。
+async fn materialize_inbound(deps: &LinkDeps, draft: WecomInboundDraft) -> WecomInboundDto {
+    let WecomInboundDraft {
+        msg_id,
+        peer_id,
+        nick,
+        sender_id,
+        text,
+        unsupported,
+        at,
+        media,
+    } = draft;
+    let mut refs = Vec::new();
+    if !media.is_empty() {
+        match deps.inbox.as_deref() {
+            None => log::warn("wecom", "收件目录不可用，丢弃入站媒体"),
+            Some(inbox) => match shared_client(10) {
+                Err(error) => log::warn("wecom", format!("下载媒体前建客户端失败: {error}")),
+                Ok(client) => {
+                    let received_at = now_ms();
+                    for (index, pending) in media.iter().enumerate() {
+                        match download_media(&client, pending).await {
+                            Ok(bytes) => {
+                                if let Some(dto) = store_inbound_media(
+                                    inbox,
+                                    DIR_NAME,
+                                    received_at,
+                                    index,
+                                    pending.kind,
+                                    &pending.name,
+                                    bytes,
+                                ) {
+                                    refs.push(dto);
+                                }
+                            }
+                            Err(error) => log::warn("wecom", format!("入站媒体下载失败: {error}")),
+                        }
+                    }
+                }
+            },
+        }
+    }
+    WecomInboundDto {
+        msg_id,
+        peer_id,
+        nick,
+        sender_id,
+        text,
+        unsupported,
+        media: refs,
+        at,
     }
 }
 
@@ -876,6 +1316,7 @@ pub async fn wecom_clear_credentials(
         }
     }
     log::info("wecom", "凭证已清除");
+    prune_inbox(&app, DIR_NAME, true);
     Ok(inner.status())
 }
 
@@ -896,6 +1337,8 @@ pub async fn wecom_connect(
         inner.detail = None;
     }
     let epoch = host.epoch.fetch_add(1, Ordering::SeqCst) + 1;
+    // 上次会话遗留的未取走收件文件先清掉（渲染端崩溃 / 未取走）。
+    prune_inbox(&app, DIR_NAME, false);
     let inner = host.inner.clone();
     let epochs = host.epoch.clone();
     let mut deps = LinkDeps::for_app(&app);
@@ -949,6 +1392,15 @@ pub async fn wecom_send(
             (push_frame(&scope, &id, &text, &req_id), req_id)
         }
     };
+    send_frame(&sender, frame, req_id).await.map(|_| ())
+}
+
+/// 发一个已拼好的帧并等它自己的回执（期间到达的回调照常处理），返回回执帧的 body。
+async fn send_frame(
+    sender: &mpsc::Sender<Outgoing>,
+    frame: serde_json::Value,
+    req_id: String,
+) -> Result<serde_json::Value, String> {
     let (ack_tx, ack_rx) = oneshot::channel();
     sender
         .send(Outgoing {
@@ -959,6 +1411,109 @@ pub async fn wecom_send(
         .await
         .map_err(|_| "长连接已断开".to_string())?;
     ack_rx.await.map_err(|_| "长连接已断开".to_string())?
+}
+
+/// 发一个「命令 + body」请求（req_id 自动生成），返回回执 body。媒体上传三步用它。
+async fn request(
+    sender: &mpsc::Sender<Outgoing>,
+    cmd: &str,
+    body: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let req_id = new_req_id();
+    let frame = serde_json::json!({
+        "cmd": cmd,
+        "headers": { "req_id": req_id.clone() },
+        "body": body,
+    });
+    send_frame(sender, frame, req_id).await
+}
+
+/// 上传一条本地媒体换 `media_id`：init → 分片 × N → finish（同一长连接上三步请求）。
+async fn upload_media(
+    sender: &mpsc::Sender<Outgoing>,
+    media: &OutboundMedia,
+    media_type: &str,
+) -> Result<String, String> {
+    if media.bytes.is_empty() {
+        return Err("不能发送空文件".into());
+    }
+    let total_chunks = media.bytes.len().div_ceil(UPLOAD_CHUNK_SIZE);
+    let init = request(
+        sender,
+        UPLOAD_INIT_CMD,
+        upload_init_body(
+            &media.name,
+            media_type,
+            media.bytes.len(),
+            total_chunks,
+            &md5_hex(&media.bytes),
+        ),
+    )
+    .await?;
+    let upload_id = init
+        .get("upload_id")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "媒体上传缺少 upload_id".to_string())?
+        .to_string();
+    for (index, chunk) in media.bytes.chunks(UPLOAD_CHUNK_SIZE).enumerate() {
+        request(
+            sender,
+            UPLOAD_CHUNK_CMD,
+            upload_chunk_body(&upload_id, index, total_chunks, &BASE64.encode(chunk)),
+        )
+        .await?;
+    }
+    let finish = request(
+        sender,
+        UPLOAD_FINISH_CMD,
+        upload_finish_body(&upload_id, &media.name, media_type),
+    )
+    .await?;
+    finish
+        .get("media_id")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "媒体上传缺少 media_id".to_string())
+}
+
+/// 发一条媒体：先上传换 `media_id`，再被动回复（有 req_id）或主动推送。
+///
+/// 企业微信出站只有图片出口（图文混排），文件出口不存在 —— 能力矩阵已拦文件，这里再兜一层。
+pub(crate) async fn send_media_impl(
+    app: &AppHandle,
+    peer_id: &str,
+    media: OutboundMedia,
+) -> Result<(), String> {
+    if media.kind != MediaKind::Image {
+        return Err("企业微信只能发送图片".into());
+    }
+    let (scope, id) =
+        decode_peer(peer_id).ok_or_else(|| format!("对端 id 无法解析: {peer_id:?}"))?;
+    let (sender, credential) = {
+        let host = app.state::<WecomHost>();
+        let mut inner = host.lock().await;
+        ensure_loaded(app, &mut inner)?;
+        let sender = inner
+            .outgoing
+            .clone()
+            .ok_or("通道未连接：先连接企业微信通道再发送")?;
+        (sender, inner.peers.reply_credential(peer_id))
+    };
+    let media_id = upload_media(&sender, &media, MEDIA_TYPE_IMAGE).await?;
+    match credential {
+        Some(req_id) => {
+            let frame = respond_media_frame(&req_id, MEDIA_TYPE_IMAGE, &media_id);
+            send_frame(&sender, frame, req_id).await.map(|_| ())
+        }
+        None => {
+            let req_id = new_req_id();
+            let frame = push_media_frame(&scope, &id, MEDIA_TYPE_IMAGE, &media_id, &req_id);
+            send_frame(&sender, frame, req_id).await.map(|_| ())
+        }
+    }
 }
 
 /* ===== 单测（纯函数） ===== */
@@ -1121,5 +1676,160 @@ mod tests {
     #[test]
     fn ws_url_is_the_official_long_connection_endpoint() {
         assert_eq!(WS_URL, "wss://openws.work.weixin.qq.com");
+    }
+
+    #[test]
+    fn normalize_extracts_media_from_image_file_and_mixed() {
+        let image = json!({
+            "msgid": "M1", "chattype": "single", "from": { "userid": "u" },
+            "msgtype": "image",
+            "image": { "url": "https://cdn/1", "aeskey": "K1" },
+        });
+        let draft = normalize_callback(&image, 1).expect("图片消息");
+        assert_eq!(draft.unsupported, "", "有可下载媒体的消息不算 unsupported");
+        assert_eq!(draft.media.len(), 1);
+        assert_eq!(draft.media[0].kind, MediaKind::Image);
+        assert_eq!(draft.media[0].url, "https://cdn/1");
+        assert_eq!(draft.media[0].aeskey.as_deref(), Some("K1"));
+
+        let file = json!({
+            "msgid": "M2", "chattype": "single", "from": { "userid": "u" },
+            "msgtype": "file",
+            "file": { "url": "https://cdn/2", "aeskey": "K2", "name": "报表.pdf", "size": 99 },
+        });
+        let draft = normalize_callback(&file, 1).expect("文件消息");
+        assert_eq!(draft.media.len(), 1);
+        assert_eq!(draft.media[0].kind, MediaKind::File);
+        assert_eq!(draft.media[0].name, "报表.pdf");
+        assert_eq!(draft.media[0].declared_size, Some(99));
+
+        let mixed = json!({
+            "msgid": "M3", "chattype": "single", "from": { "userid": "u" },
+            "msgtype": "mixed",
+            "mixed": { "msg_item": [
+                { "type": "text", "text": { "content": "看这张" } },
+                { "type": "image", "image": { "url": "https://cdn/3", "aeskey": "K3" } },
+            ] },
+        });
+        let draft = normalize_callback(&mixed, 1).expect("图文混排");
+        assert_eq!(draft.text, "看这张", "图文混排的文本项也当正文");
+        assert_eq!(draft.media.len(), 1);
+        assert_eq!(draft.media[0].kind, MediaKind::Image);
+    }
+
+    #[test]
+    fn pending_media_drops_empty_urls_and_caps() {
+        let body = CallbackBody {
+            image: Some(MediaBlock {
+                url: Some("   ".into()),
+                aeskey: None,
+            }),
+            ..CallbackBody::default()
+        };
+        assert!(pending_media(&body).is_empty(), "空直链丢掉");
+
+        let items: Vec<MixedItem> = (0..(MAX_INBOUND_MEDIA + 2))
+            .map(|index| MixedItem {
+                kind: Some("image".into()),
+                image: Some(MediaBlock {
+                    url: Some(format!("https://cdn/{index}")),
+                    aeskey: None,
+                }),
+                ..MixedItem::default()
+            })
+            .collect();
+        let body = CallbackBody {
+            mixed: Some(MixedBlock { msg_item: items }),
+            ..CallbackBody::default()
+        };
+        assert_eq!(pending_media(&body).len(), MAX_INBOUND_MEDIA);
+    }
+
+    /// 按服务端口径加密一份媒体：AES-256-CBC，IV 取密钥前 16 字节，PKCS#7 填充。
+    fn encrypt_media(plain: &[u8], key: &[u8; 32]) -> Vec<u8> {
+        use aes::cipher::BlockEncrypt;
+        let cipher = Aes256::new(GenericArray::from_slice(key));
+        let pad = 16 - (plain.len() % 16);
+        let mut padded = plain.to_vec();
+        for _ in 0..pad {
+            padded.push(pad as u8);
+        }
+        let mut prev = [0u8; 16];
+        prev.copy_from_slice(&key[..16]);
+        let mut out = Vec::with_capacity(padded.len());
+        for block in padded.as_chunks::<16>().0 {
+            let mut buf = GenericArray::clone_from_slice(block);
+            for (index, byte) in buf.iter_mut().enumerate() {
+                *byte ^= prev[index];
+            }
+            cipher.encrypt_block(&mut buf);
+            out.extend_from_slice(&buf);
+            prev.copy_from_slice(&buf);
+        }
+        out
+    }
+
+    #[test]
+    fn decrypt_media_roundtrips_aes_256_cbc() {
+        let key = [7u8; 32];
+        let encoded = BASE64.encode(key);
+        let plain = b"hello wecom media".to_vec();
+        let encrypted = encrypt_media(&plain, &key);
+        assert_eq!(decrypt_media(&encrypted, &encoded).unwrap(), plain);
+
+        // 真实形状：43 字符、不带 `=` 的 aeskey 也要能解。
+        let trimmed = encoded.trim_end_matches('=');
+        assert_eq!(trimmed.len(), 43);
+        assert_eq!(decrypt_media(&encrypted, trimmed).unwrap(), plain);
+
+        // 密文长度不是 16 的倍数 / 缺密钥 → 报错而不是给出乱码。
+        assert!(decrypt_media(&encrypted[..encrypted.len() - 1], &encoded).is_err());
+        assert!(decrypt_media(&encrypted, "  ").is_err());
+        assert!(
+            decrypt_media(&encrypted, &BASE64.encode([9u8; 16])).is_err(),
+            "密钥长度不对"
+        );
+    }
+
+    #[test]
+    fn md5_hex_matches_known_vector() {
+        assert_eq!(md5_hex(b"abc"), "900150983cd24fb0d6963f7d28e17f72");
+    }
+
+    #[test]
+    fn media_frames_carry_media_id() {
+        let respond = respond_media_frame("req-1", MEDIA_TYPE_IMAGE, "MID");
+        assert_eq!(respond["cmd"], "aibot_respond_msg");
+        assert_eq!(respond["headers"]["req_id"], "req-1", "必须透传回调 req_id");
+        assert_eq!(respond["body"]["msgtype"], "image");
+        assert_eq!(respond["body"]["image"]["media_id"], "MID");
+
+        let push = push_media_frame(&ChatScope::Group, "CHAT1", MEDIA_TYPE_IMAGE, "MID", "req-2");
+        assert_eq!(push["cmd"], "aibot_send_msg");
+        assert_eq!(push["body"]["chatid"], "CHAT1");
+        assert_eq!(push["body"]["chat_type"], 2);
+        assert_eq!(push["body"]["msgtype"], "image");
+        assert_eq!(push["body"]["image"]["media_id"], "MID");
+    }
+
+    #[test]
+    fn upload_bodies_carry_required_fields() {
+        let init = upload_init_body("a.png", MEDIA_TYPE_IMAGE, 1024, 1, "deadbeef");
+        assert_eq!(init["filename"], "a.png");
+        assert_eq!(init["type"], "image");
+        assert_eq!(init["total_size"], 1024);
+        assert_eq!(init["total_chunks"], 1);
+        assert_eq!(init["md5"], "deadbeef");
+
+        let chunk = upload_chunk_body("UP1", 0, 2, "QUJD");
+        assert_eq!(chunk["upload_id"], "UP1");
+        assert_eq!(chunk["chunk_index"], 0);
+        assert_eq!(chunk["total_chunks"], 2);
+        assert_eq!(chunk["base64_data"], "QUJD");
+
+        let finish = upload_finish_body("UP1", "a.png", MEDIA_TYPE_IMAGE);
+        assert_eq!(finish["upload_id"], "UP1");
+        assert_eq!(finish["filename"], "a.png");
+        assert_eq!(finish["media_type"], "image");
     }
 }
