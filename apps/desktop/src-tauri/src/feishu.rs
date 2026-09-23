@@ -17,18 +17,23 @@
 //! 渲染端拿不到密钥，也拿不到 tenant token。
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::SinkExt;
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use tokio::sync::Mutex;
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::channel_common::{
     app_sink, channel_dir, now_ms, read_json, sleep_or_stop, write_private, EventSink,
+};
+use crate::channel_media::{
+    inbox_dir, prune_inbox, store_inbound_media, MediaKind, MediaRefDto, OutboundMedia,
+    MAX_MEDIA_BYTES,
 };
 use crate::log;
 
@@ -47,6 +52,8 @@ const PONG_GRACE: Duration = Duration::from_secs(5);
 /// 分片重组缓存上限与 TTL。
 const FRAGMENT_LIMIT: usize = 32;
 const FRAGMENT_TTL: Duration = Duration::from_secs(5);
+/// 单条消息最多收几条媒体（防止一条消息拖垮一整轮下载）。
+const MAX_INBOUND_MEDIA: usize = 4;
 /// 重连退避上限。
 const RECONNECT_MAX_DELAY: Duration = Duration::from_secs(60);
 
@@ -356,6 +363,67 @@ pub fn message_text(message: &EventMessage) -> String {
         .unwrap_or_default()
 }
 
+/// 待下载的一条入站媒体：飞书给的是 file_key / image_key，字节要经 `resources` 端点取回。
+#[derive(Debug, Clone)]
+pub(crate) struct PendingMedia {
+    kind: MediaKind,
+    name: String,
+    /// 资源类型（`image` / `file`）——下载端点的 `type` 参数。
+    resource_type: &'static str,
+    file_key: String,
+}
+
+/// 从消息 content 里抽出可下载的媒体（按 message_type 分叉；text / post 等返回空）。
+pub(crate) fn content_media(message: &EventMessage) -> Vec<PendingMedia> {
+    let message_type = message.message_type.as_deref().unwrap_or("text");
+    let Some(content) = message
+        .content
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    else {
+        return Vec::new();
+    };
+    let Ok(parsed) = serde_json::from_str::<serde_json::Value>(content) else {
+        return Vec::new();
+    };
+    let field = |key: &str| {
+        parsed
+            .get(key)
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    };
+    let item = match message_type {
+        "image" => field("image_key").map(|file_key| PendingMedia {
+            kind: MediaKind::Image,
+            name: "image".into(),
+            resource_type: "image",
+            file_key,
+        }),
+        "file" => field("file_key").map(|file_key| PendingMedia {
+            kind: MediaKind::File,
+            name: field("file_name").unwrap_or_else(|| "file".into()),
+            resource_type: "file",
+            file_key,
+        }),
+        "audio" => field("file_key").map(|file_key| PendingMedia {
+            kind: MediaKind::File,
+            name: "audio".into(),
+            resource_type: "file",
+            file_key,
+        }),
+        "media" => field("file_key").map(|file_key| PendingMedia {
+            kind: MediaKind::File,
+            name: field("file_name").unwrap_or_else(|| "video".into()),
+            resource_type: "file",
+            file_key,
+        }),
+        _ => None,
+    };
+    item.into_iter().take(MAX_INBOUND_MEDIA).collect()
+}
+
 impl MessageEvent {
     /// 联系人标识：单聊用发送者 open_id（回消息也用它），群聊退到 chat_id（群是同一主体）。
     pub fn peer_key(&self) -> Option<String> {
@@ -434,13 +502,22 @@ pub fn ack_payload() -> Vec<u8> {
         .into_bytes()
 }
 
-/// 文本消息的上行内容：飞书要求 content 是字符串化的 JSON。
-pub fn text_message_body(receive_id: &str, text: &str) -> serde_json::Value {
+/// 上行消息体：`content` 统一是字符串化的 JSON（官方要求）。
+pub fn message_body(
+    receive_id: &str,
+    msg_type: &str,
+    content: &serde_json::Value,
+) -> serde_json::Value {
     serde_json::json!({
         "receive_id": receive_id,
-        "msg_type": "text",
-        "content": serde_json::json!({ "text": text }).to_string(),
+        "msg_type": msg_type,
+        "content": content.to_string(),
     })
+}
+
+/// 文本消息的上行内容：飞书要求 content 是字符串化的 JSON。
+pub fn text_message_body(receive_id: &str, text: &str) -> serde_json::Value {
+    message_body(receive_id, "text", &serde_json::json!({ "text": text }))
 }
 
 pub async fn fetch_endpoint(
@@ -539,6 +616,24 @@ pub async fn send_text(
     receive_id: &str,
     text: &str,
 ) -> Result<(), String> {
+    send_message(
+        client,
+        domain,
+        token,
+        receive_id_type,
+        text_message_body(receive_id, text),
+    )
+    .await
+}
+
+/// 发一条消息（body 已按 msg_type 组装好）；文本与媒体共用同一条 REST 路径。
+async fn send_message(
+    client: &reqwest::Client,
+    domain: &str,
+    token: &str,
+    receive_id_type: &str,
+    body: serde_json::Value,
+) -> Result<(), String> {
     let url = format!(
         "{}/open-apis/im/v1/messages?receive_id_type={receive_id_type}",
         domain.trim_end_matches('/')
@@ -547,7 +642,7 @@ pub async fn send_text(
         .post(&url)
         .header("Authorization", format!("Bearer {token}"))
         .header("Content-Type", "application/json")
-        .json(&text_message_body(receive_id, text))
+        .json(&body)
         .timeout(API_TIMEOUT)
         .send()
         .await
@@ -557,8 +652,14 @@ pub async fn send_text(
     if !status.is_success() {
         return Err(format!("发送失败 HTTP {status}: {}", brief(&body)));
     }
+    check_code(&body, "发送")?;
+    Ok(())
+}
+
+/// 校验飞书统一响应体：`code != 0` 一律当失败（把 msg 带出去），成功则回解析后的 JSON。
+fn check_code(body: &str, action: &str) -> Result<serde_json::Value, String> {
     let parsed: serde_json::Value =
-        serde_json::from_str(&body).map_err(|error| format!("发送响应解析失败: {error}"))?;
+        serde_json::from_str(body).map_err(|error| format!("{action}响应解析失败: {error}"))?;
     let code = parsed
         .get("code")
         .and_then(|value| value.as_i64())
@@ -568,9 +669,131 @@ pub async fn send_text(
             .get("msg")
             .and_then(|value| value.as_str())
             .unwrap_or("");
-        return Err(format!("发送失败 code={code} msg={message}"));
+        return Err(format!("{action}失败 code={code} msg={message}"));
     }
-    Ok(())
+    Ok(parsed)
+}
+
+/// 上传图片（`im/v1/images`）→ image_key。
+async fn upload_image(
+    client: &reqwest::Client,
+    domain: &str,
+    token: &str,
+    bytes: Vec<u8>,
+    name: String,
+) -> Result<String, String> {
+    let url = format!("{}/open-apis/im/v1/images", domain.trim_end_matches('/'));
+    let part = reqwest::multipart::Part::bytes(bytes).file_name(name);
+    let form = reqwest::multipart::Form::new()
+        .text("image_type", "message")
+        .part("image", part);
+    let response = client
+        .post(&url)
+        .header("Authorization", format!("Bearer {token}"))
+        .multipart(form)
+        .timeout(API_TIMEOUT)
+        .send()
+        .await
+        .map_err(|error| format!("上传图片失败: {error}"))?;
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(format!("上传图片 HTTP {status}: {}", brief(&body)));
+    }
+    let parsed = check_code(&body, "上传图片")?;
+    parsed
+        .get("data")
+        .and_then(|data| data.get("image_key"))
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "上传图片响应缺少 image_key".to_string())
+}
+
+/// 上传文件（`im/v1/files`）→ file_key。
+async fn upload_file(
+    client: &reqwest::Client,
+    domain: &str,
+    token: &str,
+    bytes: Vec<u8>,
+    name: &str,
+) -> Result<String, String> {
+    let url = format!("{}/open-apis/im/v1/files", domain.trim_end_matches('/'));
+    let part = reqwest::multipart::Part::bytes(bytes).file_name(name.to_string());
+    let form = reqwest::multipart::Form::new()
+        .text("file_type", "stream")
+        .text("file_name", name.to_string())
+        .part("file", part);
+    let response = client
+        .post(&url)
+        .header("Authorization", format!("Bearer {token}"))
+        .multipart(form)
+        .timeout(API_TIMEOUT)
+        .send()
+        .await
+        .map_err(|error| format!("上传文件失败: {error}"))?;
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(format!("上传文件 HTTP {status}: {}", brief(&body)));
+    }
+    let parsed = check_code(&body, "上传文件")?;
+    parsed
+        .get("data")
+        .and_then(|data| data.get("file_key"))
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "上传文件响应缺少 file_key".to_string())
+}
+
+/// 发一条媒体：图片先传 `im/v1/images` 换 image_key，文件先传 `im/v1/files` 换 file_key，
+/// 再以 `msg_type=image|file` 发出去（飞书没有「一步直传」的消息接口）。
+pub(crate) async fn send_media_impl(
+    app: &AppHandle,
+    peer_id: &str,
+    media: OutboundMedia,
+) -> Result<(), String> {
+    let (credentials, record) = {
+        let host = app.state::<FeishuHost>();
+        let mut inner = host.lock().await;
+        ensure_loaded(app, &mut inner)?;
+        let credentials = inner.credentials.clone().ok_or("尚未配置飞书应用凭证")?;
+        let record = inner
+            .peers
+            .target(peer_id)
+            .cloned()
+            .ok_or("会话信息不可用：等对方再发一条消息")?;
+        (credentials, record)
+    };
+    let client = crate::http::shared_client(10)?;
+    let token = tenant_access_token(
+        &client,
+        DEFAULT_DOMAIN,
+        &credentials.app_id,
+        &credentials.app_secret,
+    )
+    .await?;
+    let (msg_type, content) = match media.kind {
+        MediaKind::Image => {
+            let image_key =
+                upload_image(&client, DEFAULT_DOMAIN, &token, media.bytes, media.name).await?;
+            ("image", serde_json::json!({ "image_key": image_key }))
+        }
+        MediaKind::File => {
+            let file_key =
+                upload_file(&client, DEFAULT_DOMAIN, &token, media.bytes, &media.name).await?;
+            ("file", serde_json::json!({ "file_key": file_key }))
+        }
+    };
+    send_message(
+        &client,
+        DEFAULT_DOMAIN,
+        &token,
+        &record.receive_id_type,
+        message_body(&record.receive_id, msg_type, &content),
+    )
+    .await
 }
 
 fn brief(text: &str) -> String {
@@ -989,6 +1212,8 @@ pub struct FeishuInboundDto {
     /// text / image / audio …（非文本由界面如实说明）。
     pub message_type: Option<String>,
     pub chat_type: Option<String>,
+    /// 随消息到达的图片 / 文件；字节在宿主 inbox，凭 `path` 取走。
+    pub media: Vec<MediaRefDto>,
     pub at: i64,
 }
 
@@ -1086,14 +1311,20 @@ fn persist_peers(app: &AppHandle, peers: &PeerBook) {
 pub(crate) struct StreamDeps {
     sink: EventSink,
     persist: Arc<dyn Fn(&PeerBook) + Send + Sync>,
+    /// 入站媒体收件目录（连上时解析一次；不可用时入站媒体整体丢弃并记日志）。
+    inbox: Option<PathBuf>,
 }
 
 impl StreamDeps {
     fn for_app(app: &AppHandle) -> Self {
         let handle = app.clone();
+        let inbox = inbox_dir(app, DIR_NAME)
+            .inspect_err(|error| log::warn("feishu", format!("收件目录不可用: {error}")))
+            .ok();
         Self {
             sink: app_sink(app),
             persist: Arc::new(move |peers: &PeerBook| persist_peers(&handle, peers)),
+            inbox,
         }
     }
 
@@ -1250,14 +1481,23 @@ pub(crate) async fn stream_once(
                     frame.payload.clone()
                 };
                 if frame.header("type") == Some("event") {
+                    // 先回执再处理：官方要求 3 秒内回执，而事件处理（含媒体下载）要走网络，
+                    // 绝不能挡在回执前面 —— 否则服务端会判定超时并重推同一条事件。
+                    let mut ack = frame.clone();
+                    ack.set_header("biz_rt", "0");
+                    ack.payload = ack_payload();
+                    if let Err(error) = socket.send(Message::Binary(ack.encode().into())).await {
+                        return Err(format!("回执发送失败: {error}"));
+                    }
                     handle_event_payload(&payload, deps, inner, allow_other_senders).await;
-                }
-                // 无论是否处理，都要在同 SeqID 上回执（官方 3 秒内不回会重推）。
-                let mut ack = frame.clone();
-                ack.set_header("biz_rt", "0");
-                ack.payload = ack_payload();
-                if let Err(error) = socket.send(Message::Binary(ack.encode().into())).await {
-                    return Err(format!("回执发送失败: {error}"));
+                } else {
+                    // 非事件帧也要在同 SeqID 上回执。
+                    let mut ack = frame.clone();
+                    ack.set_header("biz_rt", "0");
+                    ack.payload = ack_payload();
+                    if let Err(error) = socket.send(Message::Binary(ack.encode().into())).await {
+                        return Err(format!("回执发送失败: {error}"));
+                    }
                 }
             }
             other => log::warn("feishu", format!("未知帧 method={other}")),
@@ -1285,13 +1525,8 @@ async fn handle_event_payload(
         log::warn("feishu", "消息缺少发送者标识，忽略");
         return;
     };
-    let text = message_text(
-        event
-            .event
-            .message
-            .as_ref()
-            .unwrap_or(&EventMessage::default()),
-    );
+    let message = event.event.message.clone().unwrap_or_default();
+    let text = message_text(&message);
     let (peers, allowed, at) = {
         let mut guard = inner.lock().await;
         // 第一个来消息的人是这台机器的默认主人；其他人要不要答复由设置决定。
@@ -1312,31 +1547,136 @@ async fn handle_event_payload(
         );
         return;
     }
+    // 回执已在 stream_once 里先行发出；这里才做网络下载，不占 3 秒回执窗口。
+    let media = materialize_inbound(deps, inner, &message).await;
     let payload = FeishuInboundDto {
-        message_id: event
-            .event
-            .message
-            .as_ref()
-            .and_then(|message| message.message_id.clone()),
+        message_id: message.message_id.clone(),
         peer_id,
         nick: event.display_nick(),
         text,
-        message_type: event
-            .event
-            .message
-            .as_ref()
-            .and_then(|message| message.message_type.clone()),
-        chat_type: event
-            .event
-            .message
-            .as_ref()
-            .and_then(|message| message.chat_type.clone()),
+        message_type: message.message_type.clone(),
+        chat_type: message.chat_type.clone(),
+        media,
         at,
     };
     deps.emit(
         INBOUND_EVENT,
         serde_json::to_value(payload).unwrap_or(serde_json::Value::Null),
     );
+}
+
+/// 下载一条入站媒体资源：`im/v1/messages/{message_id}/resources/{file_key}?type=...`。
+async fn download_resource(
+    client: &reqwest::Client,
+    domain: &str,
+    token: &str,
+    message_id: &str,
+    pending: &PendingMedia,
+) -> Result<Vec<u8>, String> {
+    let url = format!(
+        "{}/open-apis/im/v1/messages/{message_id}/resources/{}?type={}",
+        domain.trim_end_matches('/'),
+        pending.file_key,
+        pending.resource_type,
+    );
+    let response = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {token}"))
+        .timeout(API_TIMEOUT)
+        .send()
+        .await
+        .map_err(|error| format!("下载媒体失败: {error}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("下载媒体 HTTP {status}: {}", brief(&body)));
+    }
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|error| format!("读取媒体字节失败: {error}"))?;
+    if bytes.len() as u64 > MAX_MEDIA_BYTES {
+        return Err(format!(
+            "媒体超过 {} MB 上限",
+            MAX_MEDIA_BYTES / (1024 * 1024)
+        ));
+    }
+    Ok(bytes.to_vec())
+}
+
+/// 把入站消息里的媒体下载进 inbox（单条失败只记日志，不中断整轮）。
+async fn materialize_inbound(
+    deps: &StreamDeps,
+    inner: &Mutex<Inner>,
+    message: &EventMessage,
+) -> Vec<MediaRefDto> {
+    let pending = content_media(message);
+    if pending.is_empty() {
+        return Vec::new();
+    }
+    let Some(inbox) = deps.inbox.as_deref() else {
+        log::warn("feishu", "收件目录不可用，丢弃入站媒体");
+        return Vec::new();
+    };
+    let Some(message_id) = message
+        .message_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        log::warn("feishu", "消息缺少 message_id，无法下载媒体");
+        return Vec::new();
+    };
+    let credentials = {
+        let guard = inner.lock().await;
+        guard.credentials.clone()
+    };
+    let Some(credentials) = credentials else {
+        log::warn("feishu", "缺少凭证，无法下载入站媒体");
+        return Vec::new();
+    };
+    let client = match crate::http::shared_client(10) {
+        Ok(client) => client,
+        Err(error) => {
+            log::warn("feishu", format!("下载媒体前建客户端失败: {error}"));
+            return Vec::new();
+        }
+    };
+    let token = match tenant_access_token(
+        &client,
+        DEFAULT_DOMAIN,
+        &credentials.app_id,
+        &credentials.app_secret,
+    )
+    .await
+    {
+        Ok(token) => token,
+        Err(error) => {
+            log::warn("feishu", format!("换取 token 失败，跳过入站媒体: {error}"));
+            return Vec::new();
+        }
+    };
+    let received_at = now_ms();
+    let mut refs = Vec::new();
+    for (index, item) in pending.iter().enumerate() {
+        match download_resource(&client, DEFAULT_DOMAIN, &token, message_id, item).await {
+            Ok(bytes) => {
+                if let Some(dto) = store_inbound_media(
+                    inbox,
+                    DIR_NAME,
+                    received_at,
+                    index,
+                    item.kind,
+                    &item.name,
+                    bytes,
+                ) {
+                    refs.push(dto);
+                }
+            }
+            Err(error) => log::warn("feishu", format!("入站媒体下载失败: {error}")),
+        }
+    }
+    refs
 }
 
 /* ===== 宿主层：Tauri 命令 ===== */
@@ -1412,6 +1752,7 @@ pub async fn feishu_clear_credentials(
             let _ = std::fs::remove_file(&path);
         }
     }
+    prune_inbox(&app, DIR_NAME, true);
     log::info("feishu", "凭证已清除");
     Ok(inner.status())
 }
@@ -1525,6 +1866,8 @@ pub async fn feishu_connect(
         (credentials.app_id, credentials.app_secret)
     };
     let epoch = host.epoch.fetch_add(1, Ordering::SeqCst) + 1;
+    // 上次会话遗留的未取走收件文件先清掉（渲染端崩溃 / 未取走）。
+    prune_inbox(&app, DIR_NAME, false);
     let inner = host.inner.clone();
     let epochs = host.epoch.clone();
     let deps = StreamDeps::for_app(&app);
@@ -1798,6 +2141,51 @@ mod tests {
     }
 
     #[test]
+    fn content_media_extracts_image_and_file_keys() {
+        let image = EventMessage {
+            message_type: Some("image".into()),
+            content: Some(r#"{"image_key":"img_v2_abc"}"#.into()),
+            ..Default::default()
+        };
+        let media = content_media(&image);
+        assert_eq!(media.len(), 1);
+        assert_eq!(media[0].kind, MediaKind::Image);
+        assert_eq!(media[0].resource_type, "image");
+        assert_eq!(media[0].file_key, "img_v2_abc");
+
+        let file = EventMessage {
+            message_type: Some("file".into()),
+            content: Some(r#"{"file_key":"file_v2_x","file_name":"报表.xlsx"}"#.into()),
+            ..Default::default()
+        };
+        let media = content_media(&file);
+        assert_eq!(media[0].kind, MediaKind::File);
+        assert_eq!(media[0].name, "报表.xlsx");
+        assert_eq!(media[0].resource_type, "file");
+
+        let text = EventMessage {
+            message_type: Some("text".into()),
+            content: Some(r#"{"text":"hi"}"#.into()),
+            ..Default::default()
+        };
+        assert!(content_media(&text).is_empty(), "文本消息没有可下载资源");
+    }
+
+    #[test]
+    fn message_body_stringifies_media_content() {
+        let body = message_body(
+            "ou_abc",
+            "image",
+            &serde_json::json!({ "image_key": "img_1" }),
+        );
+        assert_eq!(body["msg_type"], "image");
+        let content: serde_json::Value =
+            serde_json::from_str(body["content"].as_str().expect("content is api string"))
+                .expect("inner json");
+        assert_eq!(content["image_key"], "img_1");
+    }
+
+    #[test]
     fn fragments_reassemble_by_sum_and_seq() {
         let mut fragments = Fragments::default();
         assert!(fragments.push("m-1", 2, 0, b"hello ".to_vec()).is_none());
@@ -1933,6 +2321,7 @@ mod tests {
                     *persisted.lock() = Some(peers.clone());
                 })
             },
+            inbox: None,
         };
         let inner = Mutex::new(Inner::default());
 

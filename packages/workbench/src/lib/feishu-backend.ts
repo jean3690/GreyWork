@@ -12,6 +12,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { isTauriRuntime } from "@greywork/core";
 
+import type { MediaRef } from "../types";
+
 export type FeishuState = "stopped" | "connecting" | "connected" | "error";
 
 export interface FeishuStatus {
@@ -35,6 +37,8 @@ export interface FeishuInbound {
   messageType: string | null;
   /** p2p / group。 */
   chatType: string | null;
+  /** 随消息到达的图片 / 文件；字节在宿主 inbox，凭 `path` 取走。 */
+  media?: MediaRef[];
   at: number;
 }
 
