@@ -1,1 +1,11 @@
 pnpm exec lint-staged
+
+# Rust 格式：CI 的 rust job 第一步就是 `cargo fmt --check`，而 lint-staged 的配置只管
+# ts/vue/md 等前端文件，Rust 的格式漂移（中文字面量按 unicode 宽度计入 max_width，
+# 肉眼看没超宽的行 rustfmt 也要求换行）会一路漏到 CI 才变红。所以这里补一道。
+#
+# 只在有 .rs 暂存时跑：纯前端提交不必付这份开销。cargo fmt 不受暂存区限制，检查的是
+# 整个 crate —— 与 CI 的命令一致，不该出现「本地过、CI 红」的另一半。
+if git diff --cached --name-only --diff-filter=ACM | grep -q '\.rs$'; then
+  (cd apps/desktop/src-tauri && cargo fmt --check)
+fi

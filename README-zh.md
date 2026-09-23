@@ -136,7 +136,10 @@ Rust 侧（在 `apps/desktop/src-tauri` 下执行）：`cargo fmt`、`cargo clip
   macOS 走通用二进制，Intel Mac 也能装。Release 正文自动取自 [CHANGELOG.md](CHANGELOG.md) 里该版本的
   条目，三个平台都成功后取消 draft 即发布。打包与 CI 共用 `tauri` 这份 Rust 缓存键，因此 tag 构建直接
   复用 master 上已编译好的依赖产物。
-- pre-push 钩子会跑 `pnpm lint && pnpm -r test`，问题在本地就拦住。
+- 钩子让 CI 不是第一个发现问题的地方：pre-commit 在暂存区含 `.rs` 时跑 `cargo fmt --check`；
+  pre-push 跑 `pnpm lint && pnpm -r test`，本轮推送触及 `apps/desktop/src-tauri` 时再按 CI 的顺序补
+  `cargo fmt --check` → `cargo clippy --locked --all-targets -- -D warnings` → `cargo test --locked`
+  （纯前端 / 文档推送跳过，不必等一次 cargo 编译）。
 
 ## 安全模型
 

@@ -1,1 +1,16 @@
 pnpm lint && pnpm -r test
+
+# Rust 侧对齐 CI 的 rust job（格式在 pre-commit 已拦一道，这里仍然重跑：--no-verify
+# 跳过提交钩子的人不能顺带跳过推送前的这道）。三条命令与 ci.yml 逐字一致。
+#
+# 只在本轮推送真的动了 src-tauri 时才跑：纯前端 / 文档推送不必等一次 cargo 编译。
+# `@{push}` 解析不出来时（分支没有 upstream 等）git diff 会以 128 退出，落到 else
+# 分支照跑 —— 宁可多跑一次，不可漏。
+if git diff --quiet '@{push}..HEAD' -- apps/desktop/src-tauri 2>/dev/null; then
+  echo "[pre-push] 本次推送未触及 apps/desktop/src-tauri，跳过 Rust 检查"
+else
+  (cd apps/desktop/src-tauri &&
+    cargo fmt --check &&
+    cargo clippy --locked --all-targets -- -D warnings &&
+    cargo test --locked)
+fi

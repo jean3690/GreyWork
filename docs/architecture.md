@@ -88,6 +88,7 @@ single home.
    compiles Rust, and packages the app; the renderer is built inside `tauri build` via
    `beforeBuildCommand`.
 3. **Cargo Test (src-tauri)** — `cargo fmt --check`, `cargo clippy --locked --all-targets -- -D warnings`, `cargo test --locked`.
+   The pre-push hook runs these same three commands, in this order, when a push touches `apps/desktop/src-tauri`.
 
 Rust dependency caches come from `Swatinem/rust-cache` and are keyed with `shared-key: tauri`, so the
 CI bundle matrix and the release workflow restore the same dependency artifacts (the key still

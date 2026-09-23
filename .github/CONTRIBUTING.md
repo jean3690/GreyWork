@@ -21,8 +21,11 @@ Rust 侧（在 `apps/desktop/src-tauri` 下）：`cargo fmt` / `cargo clippy --a
 
 ## 提交纪律（钩子强制）
 
-- **pre-commit**：`lint-staged` 只对暂存文件跑 `eslint --fix` + `prettier`——违规代码会被自动修复或拦截
-- **pre-push**：`pnpm lint && pnpm -r test` 全量门禁
+- **pre-commit**：`lint-staged` 只对暂存文件跑 `eslint --fix` + `prettier`——违规代码会被自动修复或拦截；
+  暂存区含 `.rs` 时另跑 `cargo fmt --check`（CI 的 rust job 第一步，格式漂移不该等 CI 才发现）
+- **pre-push**：`pnpm lint && pnpm -r test` 全量门禁；本轮推送触及 `apps/desktop/src-tauri` 时，再按 CI 的
+  顺序补 `cargo fmt --check` → `cargo clippy --locked --all-targets -- -D warnings` → `cargo test --locked`
+  ——纯前端 / 文档推送会跳过这半，不必等一次 cargo 编译
 - CI（`.github/workflows/ci.yml`）与本地钩子同构：lint / prettier / typecheck / test / build 拆成并行 job；Rust 侧 fmt → clippy → test
 
 ## 约定

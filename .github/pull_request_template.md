@@ -15,7 +15,7 @@
 - [ ] `pnpm lint` 通过（pre-commit 钩子已强制暂存区）
 - [ ] `pnpm -r test` 通过（pre-push 钩子已强制）
 - [ ] 涉及 UI：浏览器实测过浅色外壳与 shadcn 组件
-- [ ] 涉及 Rust：`cargo clippy -- -D warnings` 通过
+- [ ] 涉及 Rust：`cargo clippy --locked --all-targets -- -D warnings` 与 `cargo test --locked` 通过（pre-push 钩子已强制）
 - [ ] 无新增依赖的重量级替代（遵循「删除重量代码」原则）
 
 ## 验证证据

@@ -145,7 +145,11 @@ signing still needs: [docs/packaging.md](docs/packaging.md).
   release body is taken from the matching entry in [CHANGELOG.md](CHANGELOG.md); un-draft it once all
   three platforms are green. Bundling shares the `tauri` Rust cache key with CI, so a tag build reuses
   the dependency artifacts warmed on `master` instead of recompiling the whole dependency tree.
-- A pre-push hook runs `pnpm lint && pnpm -r test`, so a broken push fails locally first.
+- Hooks keep CI from being the first place a problem shows up: pre-commit runs `cargo fmt --check`
+  whenever `.rs` files are staged, and pre-push runs `pnpm lint && pnpm -r test` plus — when the push
+  touches `apps/desktop/src-tauri` — the three Cargo Test commands in order: `cargo fmt --check` →
+  `cargo clippy --locked --all-targets -- -D warnings` → `cargo test --locked`. Pushes that stay on
+  the renderer skip the cargo half, so they don't wait on a compile.
 
 ## Security Model
 
