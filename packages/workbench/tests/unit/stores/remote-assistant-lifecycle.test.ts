@@ -70,6 +70,11 @@ interface LifecycleFixture {
     qqStatus: { value: { state: string; configured: boolean; detail: string | null } };
     discordStatus: { value: { state: string; configured: boolean; detail: string | null } };
     wecomStatus: { value: { state: string; configured: boolean; detail: string | null } };
+    workspace: {
+      workspaceById(id: string | null): unknown;
+      ensureWorkspace(seed: { id: string; name: string; description?: string; icon?: string }): unknown;
+      setFolder(id: string, folder: string): void;
+    };
   };
 }
 
@@ -117,6 +122,11 @@ function build(): LifecycleFixture {
     qqStatus: idleChannel(),
     discordStatus: idleChannel(),
     wecomStatus: idleChannel(),
+    workspace: {
+      workspaceById: () => undefined,
+      ensureWorkspace: (seed: { id: string; name: string; description?: string; icon?: string }) => ({ ...seed, folder: undefined }),
+      setFolder: vi.fn(),
+    },
   };
   const statusApi = {
     ...refresh,

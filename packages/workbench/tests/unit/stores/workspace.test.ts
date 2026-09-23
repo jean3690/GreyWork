@@ -69,6 +69,17 @@ describe("工作区 CRUD", () => {
     expect(store.workspaceById(workspace.id)?.files).toHaveLength(0);
   });
 
+  it("ensureWorkspace 按固定 id 幂等创建且不切换当前工作区", () => {
+    const store = useWorkspaceStore();
+    const current = store.createWorkspace("当前工作区");
+    const remote = store.ensureWorkspace({ id: "w-remote", name: "远程助手", icon: "robot" });
+    expect(remote.id).toBe("w-remote");
+    expect(remote.icon).toBe("robot");
+    expect(store.activeWorkspaceId).toBe(current.id);
+    expect(store.ensureWorkspace({ id: "w-remote", name: "别的名字" }).id).toBe(remote.id);
+    expect(store.workspaces.filter((workspace) => workspace.id === "w-remote")).toHaveLength(1);
+  });
+
   it("setFolder 记录存放文件夹", () => {
     const store = useWorkspaceStore();
     const workspace = store.createWorkspace("文件夹工作区");

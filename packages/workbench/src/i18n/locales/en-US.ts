@@ -896,6 +896,17 @@ export const enUS: MessageSchema = {
       title: "Remote assistants",
       desc: "Reach this machine's assistant from messaging channels on your phone.",
     },
+    workspace: {
+      name: "Remote assistant",
+      dialogTitle: "Remote assistant workspace folder",
+      dialogHint: "New sessions from every remote channel use this workspace; logging out or clearing credentials starts a new session.",
+      folderDefault: "Default folder",
+      folderChange: "Change folder",
+      folderReset: "Restore default",
+      folderChanged: "Workspace folder updated ({count} sessions relocated)",
+      folderFailed: "Failed to update workspace folder",
+      desktopOnly: "Workspace folder management requires the desktop app.",
+    },
     channels: {
       wechat: "WeChat",
       feishu: "Feishu",
@@ -939,6 +950,8 @@ export const enUS: MessageSchema = {
       skillsName: "Skills",
       skillsDesc: "Skills installed under .agents/skills in the workspace — ACP agents pick them up on new sessions.",
       skillsBadge: "{count} installed",
+      workspaceName: "Workspace folder",
+      workspaceDesc: "Shared folder for remote sessions; choose where it lives.",
     },
     telegram: {
       requirement: "Create a bot with {'@'}BotFather and paste its token (like 123456789:AAF-…) to start sending and receiving.",

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
+import { basename } from "@greywork/core";
 import { useI18n } from "vue-i18n";
 import { useAgentStore } from "@/stores/agent";
 import { useRemoteAssistantStore, type RemoteChannel } from "@/stores/remote-assistant";
@@ -10,6 +11,9 @@ import RemoteChannelDialog from "@/features/settings/RemoteChannelDialog.vue";
 import RemoteReplyDialog from "@/features/settings/RemoteReplyDialog.vue";
 import RemoteMcpDialog from "@/features/settings/RemoteMcpDialog.vue";
 import RemoteSkillsDialog from "@/features/settings/RemoteSkillsDialog.vue";
+import RemoteWorkspaceFolderDialog from "@/features/settings/RemoteWorkspaceFolderDialog.vue";
+import { REMOTE_WORKSPACE_ID } from "@/lib/remote-workspace";
+import { useWorkspaceStore } from "@/stores/workspace";
 
 /**
  * 设置 · 远程助手：一张「图标 + 描述」的集成清单，点任意一行开对应配置弹窗。
@@ -32,9 +36,10 @@ const store = useRemoteAssistantStore();
 const settings = useSettingsStore();
 const agent = useAgentStore();
 const skills = useSkillsStore();
+const workspaces = useWorkspaceStore();
 
 /** 弹窗标识：通道用通道 id，本机集成用固定名。null = 全部关闭。 */
-type DialogId = RemoteChannel | "reply" | "mcp" | "skills";
+type DialogId = RemoteChannel | "reply" | "mcp" | "skills" | "workspace";
 const openDialog = ref<DialogId | null>(null);
 
 /** 通道行清单（顺序即界面顺序）；RemoteChannel 与设置里的 ChannelId 取值一致。 */
@@ -67,6 +72,10 @@ const mcpBadge = computed(() =>
 );
 
 const skillsBadge = computed(() => t("remoteAssist.rows.skillsBadge", { count: skills.installed.length }));
+const workspaceBadge = computed(() => {
+  const folder = workspaces.workspaceById(REMOTE_WORKSPACE_ID)?.folder;
+  return folder ? basename(folder) : t("remoteAssist.workspace.folderDefault");
+});
 
 const integrations = computed<{ id: DialogId; icon: string; name: string; desc: string; badge: string; testId: string }[]>(() => [
   {
@@ -92,6 +101,14 @@ const integrations = computed<{ id: DialogId; icon: string; name: string; desc: 
     desc: t("remoteAssist.rows.skillsDesc"),
     badge: skillsBadge.value,
     testId: "integration-skills",
+  },
+  {
+    id: "workspace",
+    icon: "folder",
+    name: t("remoteAssist.rows.workspaceName"),
+    desc: t("remoteAssist.rows.workspaceDesc"),
+    badge: workspaceBadge.value,
+    testId: "integration-workspace",
   },
 ]);
 
@@ -166,5 +183,6 @@ onMounted(() => {
     <RemoteReplyDialog v-else-if="openDialog === 'reply'" :open="true" @close="openDialog = null" />
     <RemoteMcpDialog v-else-if="openDialog === 'mcp'" :open="true" @close="openDialog = null" />
     <RemoteSkillsDialog v-else-if="openDialog === 'skills'" :open="true" @close="openDialog = null" />
+    <RemoteWorkspaceFolderDialog v-else-if="openDialog === 'workspace'" :open="true" @close="openDialog = null" />
   </div>
 </template>

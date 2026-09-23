@@ -199,6 +199,7 @@ function build(): ConnectHarness {
     state: state as unknown as RemoteAssistantState,
     getStatus: () => statusApi,
     getLogin: () => login,
+    getPeers: () => ({ resetChannelSessions: vi.fn() }) as never,
   });
   return {
     api,

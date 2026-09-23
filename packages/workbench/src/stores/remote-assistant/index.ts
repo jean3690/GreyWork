@@ -92,7 +92,7 @@ export const useRemoteAssistantStore = defineStore("remote-assistant", () => {
   const getPipeline = (): PipelineApi => api.pipeline as PipelineApi;
 
   api.status = createStatusSlice({ state });
-  api.connect = createConnectSlice({ state, getStatus, getLogin });
+  api.connect = createConnectSlice({ state, getStatus, getLogin, getPeers });
   api.login = createLoginSlice({ state, getStatus, getConnect });
   api.peers = createPeersSlice({ state });
   api.pipeline = createPipelineSlice({ state, getStatus, getPeers });
@@ -115,6 +115,7 @@ export const useRemoteAssistantStore = defineStore("remote-assistant", () => {
     peerList: peers.peerList,
     peerById: peers.peerByKey,
     markPeerRead: peers.markPeerRead,
+    ensurePeerSession: peers.peerSessionId,
     sendFromDesktop: pipeline.sendFromDesktop,
     statusOf: status.statusOf,
     connectedOf: status.connectedOf,

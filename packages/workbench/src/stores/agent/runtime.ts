@@ -16,7 +16,7 @@ import { acp } from "../../lib/acp-client";
 import { normalizeAcpCommands } from "../../lib/slash-commands";
 import { formatDuration, parseToolActivityPayload } from "../../lib/tool-activity";
 import { permissionCommand } from "../../lib/permission-detail";
-import { activeConversationFolder } from "../../lib/conversation-folder";
+import { conversationFolder } from "../../lib/conversation-folder";
 import { isolateForRun, resolveWorkspaceDir } from "../../lib/workspace-dir";
 import { parseScheduleFences } from "../../lib/schedule-fence";
 import { appEvents } from "../../events";
@@ -454,10 +454,12 @@ export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi 
     if (!acp.isAvailable()) return t("errors.acpTransportUnavailable");
     let workspace: string;
     try {
-      // 当前会话绑定带磁盘文件夹的工作区 → 以该文件夹为 ACP 工作区（权限锚定基准）；
+      // 本回合所属会话绑定带磁盘文件夹的工作区 → 以该文件夹为 ACP 工作区（权限锚定基准）；
       // 否则回落设置项 workspaceDir 或宿主私有 ~/.greyWork。
+      // 按 threadId 取而非「当前活动对话」：远程助手回消息时活动对话是用户正在看的那个，
+      // 这一轮该在**对端会话**的工作区里跑（默认即「远程助手」工作区）。
       // runMode=worktree 时再由宿主把这套工作区派生为隔离快照。
-      workspace = await isolateForRun(activeConversationFolder() ?? (await resolveWorkspaceDir()));
+      workspace = await isolateForRun(conversationFolder(threadId) ?? (await resolveWorkspaceDir()));
     } catch (error) {
       return error instanceof Error ? error.message : String(error);
     }

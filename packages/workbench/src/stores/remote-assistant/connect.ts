@@ -16,11 +16,13 @@ import { describeError, t, type RemoteChannel } from "./shared";
 import type { RemoteAssistantState } from "./state";
 import type { StatusApi } from "./status";
 import type { LoginApi } from "./login";
+import type { PeersApi } from "./peers";
 
 export interface ConnectDeps {
   state: RemoteAssistantState;
   getStatus: () => StatusApi;
   getLogin: () => LoginApi;
+  getPeers: () => PeersApi;
 }
 
 export interface ConnectApi {
@@ -54,7 +56,7 @@ export interface ConnectApi {
   applySenderPolicy(channel: RemoteChannel): Promise<void>;
 }
 
-export function createConnectSlice({ state, getStatus, getLogin }: ConnectDeps): ConnectApi {
+export function createConnectSlice({ state, getStatus, getLogin, getPeers }: ConnectDeps): ConnectApi {
   const settings = state.settings;
 
   /* ===== 微信 · 连接 / 断开 / 退出 ===== */
@@ -82,6 +84,9 @@ export function createConnectSlice({ state, getStatus, getLogin }: ConnectDeps):
     if (!state.available.value) return;
     getLogin().cancelLogin();
     await wechatBackend.logout();
+    // 退出登录 / 清凭证 = 「重新建立连接」：作废该通道的会话绑定，下次来消息另开新会话
+    // （不沿用上一段连接的上下文）。放在后端调用之后 —— 后端没清成功就不该动本地绑定。
+    getPeers().resetChannelSessions("wechat");
     await getStatus().refreshStatus();
     getStatus().recordActivity({
       direction: "in",
@@ -128,6 +133,7 @@ export function createConnectSlice({ state, getStatus, getLogin }: ConnectDeps):
   async function clearDingTalkCredentials(): Promise<void> {
     if (!state.available.value) return;
     state.dingtalkStatus.value = await dingtalkBackend.clearCredentials();
+    getPeers().resetChannelSessions("dingtalk");
     getStatus().recordActivity({
       direction: "in",
       peer: t("remoteAssist.channels.dingtalk"),
@@ -173,6 +179,7 @@ export function createConnectSlice({ state, getStatus, getLogin }: ConnectDeps):
   async function clearFeishuCredentials(): Promise<void> {
     if (!state.available.value) return;
     state.feishuStatus.value = await feishuBackend.clearCredentials();
+    getPeers().resetChannelSessions("feishu");
     getStatus().recordActivity({
       direction: "in",
       peer: t("remoteAssist.channels.feishu"),
@@ -218,6 +225,7 @@ export function createConnectSlice({ state, getStatus, getLogin }: ConnectDeps):
   async function clearTelegramCredentials(): Promise<void> {
     if (!state.available.value) return;
     state.telegramStatus.value = await telegramBackend.clearCredentials();
+    getPeers().resetChannelSessions("telegram");
     getStatus().recordActivity({
       direction: "in",
       peer: t("remoteAssist.channels.telegram"),
@@ -263,6 +271,7 @@ export function createConnectSlice({ state, getStatus, getLogin }: ConnectDeps):
   async function clearQqCredentials(): Promise<void> {
     if (!state.available.value) return;
     state.qqStatus.value = await qqBackend.clearCredentials();
+    getPeers().resetChannelSessions("qq");
     getStatus().recordActivity({
       direction: "in",
       peer: t("remoteAssist.channels.qq"),
@@ -308,6 +317,7 @@ export function createConnectSlice({ state, getStatus, getLogin }: ConnectDeps):
   async function clearDiscordCredentials(): Promise<void> {
     if (!state.available.value) return;
     state.discordStatus.value = await discordBackend.clearCredentials();
+    getPeers().resetChannelSessions("discord");
     getStatus().recordActivity({
       direction: "in",
       peer: t("remoteAssist.channels.discord"),
@@ -353,6 +363,7 @@ export function createConnectSlice({ state, getStatus, getLogin }: ConnectDeps):
   async function clearWecomCredentials(): Promise<void> {
     if (!state.available.value) return;
     state.wecomStatus.value = await wecomBackend.clearCredentials();
+    getPeers().resetChannelSessions("wecom");
     getStatus().recordActivity({
       direction: "in",
       peer: t("remoteAssist.channels.wecom"),

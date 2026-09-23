@@ -299,6 +299,34 @@ export const useWorkspaceStore = defineStore("workspace", () => {
     return workspace;
   }
 
+  /**
+   * 按**指定 id** 幂等建区（不存在才建），不触碰 `activeWorkspaceId`。
+   *
+   * 给「远程助手」这类系统工作区用：id 必须跨会话稳定，才能被别的模块按 id 找到
+   * （`createWorkspace` 的 id 是生成的，找不回来）。
+   *
+   * 追加在末尾而不是插到队首：启动落点最后一档是 `workspaces[0]?.id`，插队首会让它
+   * 在「用户只此一个工作区」时把启动页顶成系统工作区。
+   */
+  function ensureWorkspace(seed: { id: string; name: string; description?: string; icon?: string }): WorkspaceRecord {
+    const existing = workspaceById(seed.id);
+    if (existing) return existing;
+    const now = Date.now();
+    const workspace: WorkspaceRecord = {
+      id: seed.id,
+      name: seed.name.trim(),
+      description: seed.description?.trim() ?? "",
+      files: [],
+      createdAt: now,
+      updatedAt: now,
+      lastUsedAt: now,
+      ...(seed.icon ? { icon: seed.icon } : {}),
+    };
+    workspaces.value.push(workspace);
+    persist();
+    return workspace;
+  }
+
   function renameWorkspace(id: string, name: string): void {
     const workspace = workspaceById(id);
     const trimmed = name.trim();
@@ -391,6 +419,7 @@ export const useWorkspaceStore = defineStore("workspace", () => {
     setActiveWorkspace,
     setDefaultWorkspace,
     createWorkspace,
+    ensureWorkspace,
     renameWorkspace,
     updateDescription,
     deleteWorkspace,

@@ -862,6 +862,17 @@ export const zhCN = {
       title: "远程助手",
       desc: "把本机助手接到消息通道，手机上也能使唤它。",
     },
+    workspace: {
+      name: "远程助手",
+      dialogTitle: "远程助手工作区文件夹",
+      dialogHint: "所有远程通道的新会话都归入这个工作区；退出登录或清除凭证后会新开会话。",
+      folderDefault: "默认文件夹",
+      folderChange: "更改文件夹",
+      folderReset: "恢复默认",
+      folderChanged: "工作区文件夹已更新（搬迁 {count} 个会话）",
+      folderFailed: "更新工作区文件夹失败",
+      desktopOnly: "工作区文件夹需要桌面版才能管理。",
+    },
     channels: {
       wechat: "微信",
       feishu: "飞书",
@@ -905,6 +916,8 @@ export const zhCN = {
       skillsName: "技能",
       skillsDesc: "工作区 .agents/skills 下已装的技能，ACP agent 新开会话即识别。",
       skillsBadge: "{count} 个已安装",
+      workspaceName: "工作区文件夹",
+      workspaceDesc: "远程会话共用的工作区，可自定义文件夹位置。",
     },
     telegram: {
       requirement: "在 {'@'}BotFather 里创建机器人拿到 token（形如 123456789:AAF-…），填进来即可收发消息。",

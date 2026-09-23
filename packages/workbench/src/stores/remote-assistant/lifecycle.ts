@@ -172,10 +172,28 @@ export function createLifecycleSlice({ state, getStatus, getConnect, getPipeline
       await getStatus()
         .refreshWecomStatus()
         .catch(() => undefined);
+      // 媒体能力矩阵：宿主直出，取不到就沿用默认（能力提示只是提前告知，真拦截在宿主侧）。
+      await getStatus().refreshMediaCapabilities();
     } catch (error) {
       console.error("[remote-assistant] 初始化失败", error);
       return;
     }
+
+    const anyReady =
+      state.status.value.loggedIn ||
+      state.dingtalkStatus.value.configured ||
+      state.feishuStatus.value.configured ||
+      state.telegramStatus.value.configured ||
+      state.qqStatus.value.configured ||
+      state.discordStatus.value.configured ||
+      state.wecomStatus.value.configured;
+    if (anyReady) {
+      ensureRemoteWorkspace(state.workspace);
+      await ensureRemoteWorkspaceFolder(state.workspace).catch((error: unknown) => {
+        console.warn("[remote-assistant] 远程工作区文件夹未就绪", error);
+      });
+    }
+
     if (settings.remoteAssist.channels.wechat.autoConnect && state.status.value.loggedIn && state.status.value.state !== "connected") {
       await getConnect().connect();
     }

@@ -194,6 +194,20 @@ export function base64ToBytes(base64: string): Uint8Array {
 }
 
 /**
+ * 把「原始字节回传」命令的返回值收敛成 `Uint8Array`。
+ *
+ * 这类命令（`fs_read_binary` / `wechat_take_media`）用 `tauri::ipc::Response` 回载荷，
+ * 前端拿到的是 ArrayBuffer；但形状真被改坏时（比如退回 base64 字符串、或包装成对象），
+ * **必须报错而不是强转** —— 一个空的/错位的缓冲区会让 docx/xlsx 报「文件已损坏」，
+ * 排查方向全在文件上。`source` 只用于错误文案。
+ */
+export function binaryPayload(raw: unknown, source: string): Uint8Array {
+  if (raw instanceof Uint8Array) return raw; // 视图直接复用（零拷贝）
+  if (raw instanceof ArrayBuffer) return new Uint8Array(raw);
+  throw new Error(`${source} 返回了非二进制载荷：${Object.prototype.toString.call(raw)}`);
+}
+
+/**
  * 读取磁盘二进制文件（Rust fs_read_binary，**原始字节**回传，≤20MB）。
  *
  * 走原始字节而不是 base64：base64 会把载荷撑大 33%，还要经 JSON 转义、由前端再解码一遍 ——
@@ -204,13 +218,7 @@ export function base64ToBytes(base64: string): Uint8Array {
  * 经 utf-8 解码后不可逆损坏，所以通道由调用侧按 kind 明确选定。
  */
 export async function readBinaryFile(path: string): Promise<Uint8Array> {
-  const raw = await invoke<ArrayBuffer | Uint8Array>("fs_read_binary", { path });
-  // 视图直接复用（零拷贝）；ArrayBuffer 建视图。**其余形状直接报错而不是强转** ——
-  // 契约真被改坏时，一个空的/错位的缓冲区会让 docx/xlsx 报「文件已损坏」，
-  // 排查方向全在文件上，不如在这里就说清楚。
-  if (raw instanceof Uint8Array) return raw;
-  if (raw instanceof ArrayBuffer) return new Uint8Array(raw);
-  throw new Error(`fs_read_binary 返回了非二进制载荷：${Object.prototype.toString.call(raw)}`);
+  return binaryPayload(await invoke<ArrayBuffer | Uint8Array>("fs_read_binary", { path }), "fs_read_binary");
 }
 
 /**

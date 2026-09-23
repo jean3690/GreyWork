@@ -2,7 +2,7 @@
 // 持久化（localStorage）与消息落会话。切片经 createPeersSlice({ state }) 直接注入。
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { i18n } from "@/i18n";
-import type { ThreadMessage } from "@/types";
+import type { Attachment, ThreadMessage } from "@/types";
 import type { RemotePeer } from "@/stores/remote-assistant/shared";
 import { createPeersSlice, type PeersApi } from "@/stores/remote-assistant/peers";
 import type { RemoteAssistantState } from "@/stores/remote-assistant/state";
@@ -75,6 +75,21 @@ function build(): PeerHarness {
   let seq = 0;
   let dirty = 0;
   const workspaceId: string | null = "ws-1";
+  const remoteWorkspace = {
+    id: "w-remote",
+    name: "远程助手",
+    description: "",
+    files: [],
+    createdAt: 1,
+    updatedAt: 1,
+    lastUsedAt: 1,
+    icon: "robot",
+  };
+  const workspace = {
+    activeWorkspaceId: workspaceId,
+    workspaceById: (id: string | null) => (id === remoteWorkspace.id ? remoteWorkspace : undefined),
+    ensureWorkspace: () => remoteWorkspace,
+  };
   const session = {
     activeSessionId: null as string | null,
     getSession(id: string) {
@@ -100,7 +115,7 @@ function build(): PeerHarness {
     sessionCount: () => sessions.size,
   };
   const api = createPeersSlice({
-    state: { peers: peersRef, session, workspace: { activeWorkspaceId: workspaceId } } as unknown as RemoteAssistantState,
+    state: { peers: peersRef, session, workspace } as unknown as RemoteAssistantState,
   });
   return {
     api,
@@ -202,6 +217,18 @@ describe("联系人 → 会话桥接", () => {
     expect(h.peersRef.value[0].sessionId).toBe(id);
   });
 
+  it("resetChannelSessions：只作废指定通道的会话与 contextToken", () => {
+    const h = build();
+    h.peersRef.value = [
+      peer({ channel: "wechat", id: "w1", sessionId: "old-wechat", contextToken: "token" }),
+      peer({ channel: "dingtalk", id: "d1", sessionId: "keep", contextToken: null }),
+    ];
+    h.api.resetChannelSessions("wechat");
+    expect(h.peersRef.value[0]).toMatchObject({ sessionId: "", contextToken: null });
+    expect(h.peersRef.value[1]).toMatchObject({ sessionId: "keep", contextToken: null });
+    expect(archivedPeer(h, "wechat:w1")?.sessionId).toBe("");
+  });
+
   it("新建会话不把用户正在看的会话切走（活动位还原）", () => {
     const h = build();
     h.session.setActive("watching");
@@ -220,6 +247,18 @@ describe("消息落会话", () => {
     expect(message.content).toBe("你好");
     expect(typeof message.ts).toBe("number");
     expect(h.session.getSession("s-1")?.messages).toHaveLength(1);
+  });
+
+  it("appendRemoteMessage：带附件时挂到消息上；空附件不写空数组字段", () => {
+    const h = build();
+    h.addSession("s-1");
+    const image: Attachment = { id: "att-1", kind: "image", name: "pic.png", mime: "image/png", size: 3, path: "/tmp/pic.png" };
+
+    const withMedia = h.api.appendRemoteMessage("s-1", "user", "", [image]);
+    expect(withMedia.attachments).toEqual([image]);
+
+    const plain = h.api.appendRemoteMessage("s-1", "assistant", "好的");
+    expect(plain.attachments).toBeUndefined();
   });
 
   it("updateRemoteMessage：就地改写正文并标脏；未知消息不动", () => {
