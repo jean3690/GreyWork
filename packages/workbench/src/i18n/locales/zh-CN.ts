@@ -230,6 +230,14 @@ export const zhCN = {
       binary: "二进制文件，无法以文本预览",
       notUtf8: "此文件不是 UTF-8 编码，只作只读预览；保存会把整份文件转码，故不提供编辑。",
     },
+    image: {
+      zoomIn: "放大",
+      zoomOut: "缩小",
+      fit: "适应",
+      actual: "原始尺寸",
+      rotateLeft: "左转 90°",
+      rotateRight: "右转 90°",
+    },
     table: {
       empty: "空文件",
       truncated: "仅显示前 {limit} 行，共 {total} 行",

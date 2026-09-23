@@ -228,6 +228,14 @@ export const enUS: MessageSchema = {
       binary: "Binary file — cannot be previewed as text",
       notUtf8: "This file is not UTF-8, so it is read-only: saving would re-encode the whole file.",
     },
+    image: {
+      zoomIn: "Zoom in",
+      zoomOut: "Zoom out",
+      fit: "Fit",
+      actual: "Actual size",
+      rotateLeft: "Rotate left 90°",
+      rotateRight: "Rotate right 90°",
+    },
     table: {
       empty: "Empty file",
       truncated: "Showing the first {limit} of {total} rows",

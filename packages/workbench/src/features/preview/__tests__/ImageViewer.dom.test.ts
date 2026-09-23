@@ -110,3 +110,64 @@ describe("ImageViewer", () => {
     expect(h.revokeUrl).toHaveBeenCalledWith(src);
   });
 });
+
+describe("ImageViewer 视图变换", () => {
+  /** 当前倍率文案，如 "125%"。 */
+  function level(wrapper: ReturnType<typeof mountViewer>): string {
+    return wrapper.get('[data-testid="image-zoom-level"]').text();
+  }
+
+  function styleOf(wrapper: ReturnType<typeof mountViewer>): string {
+    return wrapper.get('[data-testid="image-viewer"]').attributes("style") ?? "";
+  }
+
+  it("缩放按钮改倍率，「适应」能一键回到 100%", async () => {
+    const wrapper = mountViewer();
+    await flushPromises();
+    expect(level(wrapper)).toBe("100%");
+
+    await wrapper.get('[data-testid="image-zoom-in"]').trigger("click");
+    expect(level(wrapper)).toBe("125%");
+    await wrapper.get('[data-testid="image-zoom-out"]').trigger("click");
+    expect(level(wrapper)).toBe("100%");
+    await wrapper.get('[data-testid="image-zoom-in"]').trigger("click");
+    await wrapper.get('[data-testid="image-fit"]').trigger("click");
+    expect(level(wrapper)).toBe("100%");
+  });
+
+  it("旋转把角度写进 transform，左右各一下回到 0", async () => {
+    const wrapper = mountViewer();
+    await flushPromises();
+
+    await wrapper.get('[data-testid="image-rotate-right"]').trigger("click");
+    expect(styleOf(wrapper)).toContain("rotate(90deg)");
+    await wrapper.get('[data-testid="image-rotate-left"]').trigger("click");
+    expect(styleOf(wrapper)).toContain("rotate(0deg)");
+  });
+
+  it("内容刷新（revision 自增）后视图归位：沿用上一张的缩放会让人以为新图坏了", async () => {
+    const wrapper = mountViewer();
+    await flushPromises();
+    await wrapper.get('[data-testid="image-zoom-in"]').trigger("click");
+    await wrapper.get('[data-testid="image-rotate-right"]').trigger("click");
+    expect(styleOf(wrapper)).toContain("rotate(90deg)");
+
+    await wrapper.setProps({ tab: tab({ revision: 1 }) });
+    await flushPromises();
+
+    expect(level(wrapper)).toBe("100%");
+    expect(styleOf(wrapper)).toContain("rotate(0deg)");
+  });
+
+  it("旋转会重新适应：转过 90° 的图不会溢出容器（布局不可测时退回 1）", async () => {
+    const wrapper = mountViewer();
+    await flushPromises();
+
+    await wrapper.get('[data-testid="image-zoom-in"]').trigger("click");
+    expect(wrapper.get('[data-testid="image-fit"]').attributes("aria-pressed")).toBe("false");
+
+    await wrapper.get('[data-testid="image-rotate-right"]').trigger("click");
+    // 旋转后回到「适应」态：倍率由当前角度下的可容纳尺寸决定
+    expect(wrapper.get('[data-testid="image-fit"]').attributes("aria-pressed")).toBe("true");
+  });
+});
