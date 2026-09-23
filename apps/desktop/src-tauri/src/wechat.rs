@@ -596,9 +596,27 @@ impl InboundCtx {
                     }
                 }
                 Err(error) => {
+                    // 真机排查用：把 CDN 引用的形状一并记下 ——「服务端有没有给 full_url」
+                    // 与「key 是 media 自带还是 image_item.aeskey 覆盖」直接对应协议里两个
+                    // 待确认项；若失败样本清一色 full_url=无，就说明按 encrypt_query_param
+                    // 拼下载地址这条路不对。
                     log::warn(
                         "wechat",
-                        format!("入站媒体下载失败（{}）: {error}", item.name),
+                        format!(
+                            "入站媒体 {} 下载失败（kind={}，full_url={}，aes_key={}）: {error}",
+                            item.name,
+                            item.kind.as_str(),
+                            if item.media.full_url.is_some() {
+                                "有"
+                            } else {
+                                "无"
+                            },
+                            if item.aes_key.is_some() {
+                                "覆盖"
+                            } else {
+                                "自带"
+                            },
+                        ),
                     );
                 }
             }
@@ -1214,6 +1232,9 @@ pub async fn wechat_send_typing(
 /// 由通用命令 `channel_send_media` 分发进来（授权面、大小闸与能力校验已在那边做过），
 /// 这里只管微信这一套协议：按 `context_token` 找回被回复的那条消息（微信的 token 按条
 /// 颁发，用错会被服务端静默丢弃），用 SDK 的 `reply_media` / `send_media` 发出去。
+///
+/// 日志带上「走哪个端点（图片 / 视频 / 文件）、回复还是主动发、多大」——出站媒体端点是否
+/// 被账号放行只有真机才能确认，失败时这几项能一眼区分是端点没权限、凭据过期，还是体积被拒。
 pub(crate) async fn send_media_impl(
     app: &AppHandle,
     to_user_id: &str,
@@ -1223,7 +1244,10 @@ pub(crate) async fn send_media_impl(
     let host = app.state::<WechatHost>();
     let handles = host.handles(app)?;
     let bot = ensure_bot(handles.clone()).await?;
-    let content = match media.kind {
+    let byte_len = media.bytes.len();
+    let kind = media.kind;
+    let name = media.name.clone();
+    let content = match kind {
         MediaKind::Image => SendContent::Image {
             data: media.bytes,
             caption: None,
@@ -1235,11 +1259,21 @@ pub(crate) async fn send_media_impl(
         // 语音无发送端点：共享层已在分发前把音频降级为文件。
         MediaKind::Audio | MediaKind::File => SendContent::File {
             data: media.bytes,
-            file_name: media.name.clone(),
+            file_name: name.clone(),
             caption: None,
         },
     };
-    let result = match context_token.and_then(|token| handles.message_for_token(token)) {
+    let reply = context_token.and_then(|token| handles.message_for_token(token));
+    if context_token.is_some() && reply.is_none() {
+        // 兜底：凭据过期 / 不认识时退回主动发送（协议允许但部分账号会静默丢弃），
+        // 记一笔以便区分「发失败」是凭据问题还是端点问题。
+        log::warn(
+            "wechat",
+            format!("回复凭据未命中（可能已过期），{name} 改走主动发送 → {to_user_id}"),
+        );
+    }
+    let mode = if reply.is_some() { "reply" } else { "send" };
+    let result = match reply {
         Some(message) => bot.reply_media(&message, content).await,
         None => bot.send_media(to_user_id, content).await,
     };
@@ -1247,7 +1281,10 @@ pub(crate) async fn send_media_impl(
         Ok(()) => {
             log::info(
                 "wechat",
-                format!("已发送媒体 {} → {to_user_id}", media.name),
+                format!(
+                    "已发送媒体 {name}（kind={}，{mode}，{byte_len} 字节）→ {to_user_id}",
+                    kind.as_str()
+                ),
             );
             Ok(())
         }
@@ -1255,7 +1292,10 @@ pub(crate) async fn send_media_impl(
             let detail = error.to_string();
             log::warn(
                 "wechat",
-                format!("发送媒体 {} → {to_user_id} 失败: {detail}", media.name),
+                format!(
+                    "发送媒体 {name} 失败（kind={}，{mode}，{byte_len} 字节）→ {to_user_id}: {detail}",
+                    kind.as_str()
+                ),
             );
             Err(detail)
         }

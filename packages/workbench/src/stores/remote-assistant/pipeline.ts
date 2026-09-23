@@ -19,7 +19,7 @@ import { qqBackend, type QqInbound } from "../../lib/qq-backend";
 import { telegramBackend, type TelegramInbound } from "../../lib/telegram-backend";
 import { wecomBackend, type WecomInbound } from "../../lib/wecom-backend";
 import { wechatBackend, type WechatInbound } from "../../lib/wechat-backend";
-import { channelMediaAllows, channelMediaBackend } from "../../lib/channel-media";
+import { channelMediaAllows, channelMediaBackend, channelMediaHint } from "../../lib/channel-media";
 import { markdownToPlainText } from "../../lib/wechat-text";
 import { attachmentKind, createAttachment } from "../../lib/attachments";
 import { materializeAttachments } from "../../state/attachment-library";
@@ -479,12 +479,9 @@ export function createPipelineSlice({ state, getStatus, getPeers }: PipelineDeps
 
   /** 能力不允许时的说明文案（宿主侧另有一份兜底，这里负责界面可读）。 */
   function capabilityMessage(cap: ChannelMediaCapability): string {
-    if (cap.outbound.length === 0) {
-      return cap.inbound.length ? t("remoteAssist.conversation.mediaInboundOnly") : t("remoteAssist.conversation.mediaUnsupported");
-    }
-    if (!cap.outbound.includes("file")) return t("remoteAssist.conversation.mediaImageOnly");
-    // 能发文件时不该走到这里；留一条通用文案兜住「声明与实际不一致」的极端情况。
-    return t("remoteAssist.conversation.mediaUnsupported");
+    // 能发文件时 `channelMediaAllows` 对任何类别都放行，走不到这里；留一条通用文案
+    // 兜住「声明与实际不一致」的极端情况。
+    return channelMediaHint(cap) || t("remoteAssist.conversation.mediaUnsupported");
   }
 
   /**

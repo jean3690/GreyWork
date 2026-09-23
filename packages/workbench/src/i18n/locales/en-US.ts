@@ -1061,7 +1061,7 @@ export const enUS: MessageSchema = {
       attach: "Add attachment",
       mediaNoPath: "This attachment hasn't been saved to disk yet, so it can't be sent.",
       mediaInboundOnly: "This channel can only receive files — it can't send them.",
-      mediaImageOnly: "This channel can only send images, not files.",
+      mediaKindsOnly: "This channel can only send {kinds}.",
       mediaUnsupported: "This channel doesn't support sending images or files.",
     },
     status: {
@@ -1105,7 +1105,14 @@ export const enUS: MessageSchema = {
     media: {
       inbound: "Received {count} media items",
       imageInbound: "Received an image",
+      videoInbound: "Received a video: {name}",
+      audioInbound: "Received a voice message: {name}",
       fileInbound: "Received file: {name}",
+      kindImage: "images",
+      kindVideo: "videos",
+      kindAudio: "voice messages",
+      kindFile: "files",
+      kindSeparator: ", ",
       takeFailed: "Failed to receive media ({name}): {detail}",
       sendFailed: "Failed to send media ({name}): {detail}",
       artifactSent: "Sent back artifact: {name}",

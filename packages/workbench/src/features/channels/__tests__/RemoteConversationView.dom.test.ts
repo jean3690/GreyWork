@@ -255,4 +255,14 @@ describe("RemoteConversationView", () => {
     expect(wrapper.get('[data-testid="remote-composer-attach"]').attributes("disabled")).toBeDefined();
     expect(wrapper.get('[data-testid="remote-composer-hint"]').text()).toContain("只能接收文件");
   });
+
+  it("通道只能发图片（企业微信）：附件入口可用，提示按原生类别列举", async () => {
+    const { wrapper } = await mountPage(true, { contextToken: "ctx-1" });
+    mediaMocks.capabilities.mockResolvedValueOnce({ wechat: { inbound: ["image", "video", "file"], outbound: ["image"] } });
+    await useRemoteAssistantStore().refreshMediaCapabilities();
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.get('[data-testid="remote-composer-attach"]').attributes("disabled")).toBeUndefined();
+    expect(wrapper.get('[data-testid="remote-composer-hint"]').text()).toContain("只能发送图片");
+  });
 });

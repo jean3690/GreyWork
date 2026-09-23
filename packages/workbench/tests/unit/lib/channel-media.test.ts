@@ -13,7 +13,7 @@ vi.mock("@greywork/core", async (importOriginal) => ({
   isTauriRuntime: () => true,
 }));
 
-import { channelMediaAllows, channelMediaBackend, defaultChannelMediaCapability } from "@/lib/channel-media";
+import { channelMediaAllows, channelMediaBackend, channelMediaHint, defaultChannelMediaCapability } from "@/lib/channel-media";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -54,6 +54,27 @@ describe("channelMediaAllows", () => {
     for (const kind of ["image", "video", "audio", "file"] as const) {
       expect(channelMediaAllows(caps("dingtalk"), kind)).toBe(false);
     }
+  });
+});
+
+describe("channelMediaHint", () => {
+  it("能发文件的通道不给提示（不占位）", () => {
+    for (const channel of ["telegram", "discord", "wechat", "qq", "feishu"]) {
+      expect(channelMediaHint(defaultChannelMediaCapability(channel))).toBe("");
+    }
+  });
+
+  it("只能发原生类别时按类别列举（企业微信只有图片）", () => {
+    expect(channelMediaHint(defaultChannelMediaCapability("wecom"))).toBe("这条通道只能发送图片。");
+  });
+
+  it("多个原生类别用分隔符连接", () => {
+    expect(channelMediaHint({ inbound: ["image"], outbound: ["image", "video"] })).toBe("这条通道只能发送图片、视频。");
+  });
+
+  it("完全发不了媒体：能收则提示只能接收，否则提示不支持", () => {
+    expect(channelMediaHint(defaultChannelMediaCapability("dingtalk"))).toBe("这条通道只能接收文件，不能发送。");
+    expect(channelMediaHint({ inbound: [], outbound: [] })).toBe("这条通道不支持发送图片或文件。");
   });
 });
 

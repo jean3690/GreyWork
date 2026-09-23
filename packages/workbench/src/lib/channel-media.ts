@@ -8,10 +8,21 @@
 
 import { invoke } from "@tauri-apps/api/core";
 
+import { i18n } from "../i18n";
 import { binaryPayload } from "../state/workspaceFiles";
 import type { ChannelMediaCapability, MediaKind } from "../types";
 
+const t = i18n.global.t;
+
 const ALL_KINDS: MediaKind[] = ["image", "video", "audio", "file"];
+
+/** 列举原生出站类别时的界面标签 key。 */
+const KIND_LABEL_KEY: Record<MediaKind, string> = {
+  image: "remoteAssist.media.kindImage",
+  video: "remoteAssist.media.kindVideo",
+  audio: "remoteAssist.media.kindAudio",
+  file: "remoteAssist.media.kindFile",
+};
 
 /** 取不到宿主矩阵时的兜底（与 `channel_media::capability_of` 同口径）。 */
 export function defaultChannelMediaCapability(channel: string): ChannelMediaCapability {
@@ -43,6 +54,24 @@ export function defaultChannelMediaCapability(channel: string): ChannelMediaCapa
 export function channelMediaAllows(cap: ChannelMediaCapability, kind: MediaKind): boolean {
   if (cap.outbound.includes(kind)) return true;
   return kind !== "file" && cap.outbound.includes("file");
+}
+
+/**
+ * 受限通道的媒体提示（能发文件时为空串，不占位）。
+ *
+ * - 完全发不了媒体：能收 → 「只能接收」，否则 → 「不支持」。
+ * - 发不了文件（出站被裁到原生类别，如企业微信只有图片）：按原生类别列举
+ *   「只能发送 …」，比写死「只能发图片」更贴近实际能力。
+ */
+export function channelMediaHint(cap: ChannelMediaCapability): string {
+  if (cap.outbound.length === 0) {
+    return cap.inbound.length ? t("remoteAssist.conversation.mediaInboundOnly") : t("remoteAssist.conversation.mediaUnsupported");
+  }
+  if (!cap.outbound.includes("file")) {
+    const kinds = cap.outbound.map((kind) => t(KIND_LABEL_KEY[kind])).join(t("remoteAssist.media.kindSeparator"));
+    return t("remoteAssist.conversation.mediaKindsOnly", { kinds });
+  }
+  return "";
 }
 
 export const channelMediaBackend = {

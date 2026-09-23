@@ -8,6 +8,7 @@ import MarkdownText from "@/features/shared/MarkdownText.vue";
 import AttachmentTray from "@/features/conversation/AttachmentTray.vue";
 import ContextMenuRegion from "@/features/shared/ContextMenuRegion.vue";
 import { buildComposerItems, type ComposerMenuActions, type ContextMenuItem, type ContextTarget } from "@/lib/context-menu";
+import { channelMediaHint } from "@/lib/channel-media";
 import { copySelection, cutSelection, hasTextSelection, pasteInto, selectAllText } from "@/lib/textarea-actions";
 import { useAttachments, useAttachmentThumbs } from "@/lib/use-attachments";
 import { materializeAttachments } from "@/state/attachment-library";
@@ -80,14 +81,7 @@ const mediaCapability = computed(() => (peer.value ? store.mediaCapabilities[pee
 /** 出站能发任意类别（含降级为文件）才放开附件入口；完全发不了媒体的通道只能发文字。 */
 const canAttach = computed(() => mediaCapability.value.outbound.length > 0);
 /** 受限通道的媒体提示（能发文件时为空串，不占位）。 */
-const mediaHint = computed(() => {
-  const cap = mediaCapability.value;
-  if (cap.outbound.length === 0) {
-    return cap.inbound.length ? t("remoteAssist.conversation.mediaInboundOnly") : t("remoteAssist.conversation.mediaUnsupported");
-  }
-  if (!cap.outbound.includes("file")) return t("remoteAssist.conversation.mediaImageOnly");
-  return "";
-});
+const mediaHint = computed(() => channelMediaHint(mediaCapability.value));
 
 function scrollToBottom(): void {
   void nextTick(() => {

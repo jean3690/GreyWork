@@ -1015,7 +1015,7 @@ export const zhCN = {
       attach: "添加附件",
       mediaNoPath: "这个附件还没落盘，发送不了。",
       mediaInboundOnly: "这条通道只能接收文件，不能发送。",
-      mediaImageOnly: "这条通道只能发送图片，发不了文件。",
+      mediaKindsOnly: "这条通道只能发送{kinds}。",
       mediaUnsupported: "这条通道不支持发送图片或文件。",
     },
     status: {
@@ -1058,7 +1058,15 @@ export const zhCN = {
     media: {
       inbound: "收到 {count} 个媒体文件",
       imageInbound: "收到一张图片",
+      videoInbound: "收到视频：{name}",
+      audioInbound: "收到语音：{name}",
       fileInbound: "收到文件：{name}",
+      // 能力提示里列举通道原生出站类别用的标签（受限通道「只能发送 …」）。
+      kindImage: "图片",
+      kindVideo: "视频",
+      kindAudio: "语音",
+      kindFile: "文件",
+      kindSeparator: "、",
       takeFailed: "接收媒体失败（{name}）：{detail}",
       sendFailed: "发送媒体失败（{name}）：{detail}",
       artifactSent: "已回传产物：{name}",
