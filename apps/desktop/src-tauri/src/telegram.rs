@@ -257,7 +257,7 @@ pub struct TelegramInboundDto {
     pub nick: String,
     /// 文本正文（图片 / 文件的配文也算正文）；非文本消息为空串。
     pub text: String,
-    /// 随消息到达的图片 / 文件（语音、视频按文件收）；字节在宿主 inbox，凭 `path` 取走。
+    /// 随消息到达的图片 / 视频 / 语音 / 文件；字节在宿主 inbox，凭 `path` 取走。
     pub media: Vec<MediaRefDto>,
     pub at: i64,
 }
@@ -326,7 +326,7 @@ fn user_nick(user: &Option<User>, chat: &Chat, peer_id: &str) -> String {
     peer_id.to_string()
 }
 
-/// 一条消息里可收的媒体：图片取最大档，文件 / 语音 / 音频 / 视频按文件收，最多 4 条。
+/// 一条消息里可收的媒体：图片取最大档；文件 / 语音 / 音频 / 视频按各自类别收，最多 4 条。
 fn pending_media(message: &Message) -> Vec<PendingMedia> {
     let mut out = Vec::new();
     if let Some(largest) = message.photo.as_ref().and_then(|sizes| sizes.last()) {
@@ -338,23 +338,24 @@ fn pending_media(message: &Message) -> Vec<PendingMedia> {
         });
     }
     if let Some(document) = message.document.as_ref() {
-        out.push(document_media(document, "document"));
+        out.push(document_media(document, "document", None));
     }
-    for (slot, fallback) in [
-        (message.voice.as_ref(), "voice"),
-        (message.audio.as_ref(), "audio"),
-        (message.video.as_ref(), "video"),
+    for (slot, fallback, kind) in [
+        (message.voice.as_ref(), "voice", MediaKind::Audio),
+        (message.audio.as_ref(), "audio", MediaKind::Audio),
+        (message.video.as_ref(), "video", MediaKind::Video),
     ] {
         if let Some(item) = slot {
-            out.push(document_media(item, fallback));
+            out.push(document_media(item, fallback, Some(kind)));
         }
     }
     out.truncate(MAX_INBOUND_MEDIA);
     out
 }
 
-/// document / voice / audio / video 归一：mime 是 `image/*` 的按图片收（以文件方式发的图也走图片端点）。
-fn document_media(document: &Document, fallback: &str) -> PendingMedia {
+/// document / voice / audio / video 归一：`kind` 为 None 时按 mime 猜
+/// （以文件方式发的图也走图片端点），否则用调用方给的类别。
+fn document_media(document: &Document, fallback: &str, kind: Option<MediaKind>) -> PendingMedia {
     let name = document
         .file_name
         .as_deref()
@@ -362,10 +363,10 @@ fn document_media(document: &Document, fallback: &str) -> PendingMedia {
         .filter(|value| !value.is_empty())
         .unwrap_or(fallback)
         .to_string();
-    let kind = match document.mime_type.as_deref() {
+    let kind = kind.unwrap_or_else(|| match document.mime_type.as_deref() {
         Some(mime) if mime.starts_with("image/") => MediaKind::Image,
         _ => MediaKind::File,
-    };
+    });
     PendingMedia {
         file_id: document.file_id.clone(),
         kind,
@@ -1373,6 +1374,33 @@ mod tests {
         assert_eq!(media.len(), MAX_INBOUND_MEDIA, "超出上限截断");
         assert_eq!(media[1].kind, MediaKind::Image, "image/* 按图片收");
         assert_eq!(media[1].name, "document", "无名回落固定标签");
+        assert_eq!(media[2].kind, MediaKind::Audio, "语音按音频收");
+        assert_eq!(media[2].name, "voice");
+        assert_eq!(media[3].kind, MediaKind::Audio, "音频按音频收");
+        assert_eq!(media[3].name, "audio");
+    }
+
+    #[test]
+    fn pending_media_classifies_voice_audio_video() {
+        let mut msg = message(11, None);
+        msg.voice = Some(document("v", Some("note.ogg"), None));
+        msg.audio = Some(document("a", Some("song.mp3"), None));
+        msg.video = Some(document("m", Some("clip.mp4"), None));
+
+        let media = pending_media(&msg);
+        assert_eq!(media.len(), 3);
+        assert_eq!(
+            (media[0].kind, media[0].name.as_str()),
+            (MediaKind::Audio, "note.ogg")
+        );
+        assert_eq!(
+            (media[1].kind, media[1].name.as_str()),
+            (MediaKind::Audio, "song.mp3")
+        );
+        assert_eq!(
+            (media[2].kind, media[2].name.as_str()),
+            (MediaKind::Video, "clip.mp4")
+        );
     }
 
     #[test]

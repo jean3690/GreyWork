@@ -372,6 +372,13 @@ pub fn resolve_media_kind_named(explicit: Option<&str>, name: &str, bytes: &[u8]
     sniff_kind(bytes).unwrap_or(MediaKind::File)
 }
 
+/// 按文件名扩展名判类（不嗅探字节）：认不出返回 File。
+///
+/// 入站某些通道只给 mime 或什么都没有、只给文件名时用它兜底判类。
+pub fn kind_by_name(name: &str) -> MediaKind {
+    kind_of_ext(&ext_of(name)).unwrap_or(MediaKind::File)
+}
+
 /* ===== 目录 / 落盘 / 取走 ===== */
 
 /// 入站媒体收件目录（不存在则创建）。

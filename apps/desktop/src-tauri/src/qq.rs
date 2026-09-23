@@ -30,7 +30,7 @@ use crate::channel_common::{
     app_sink, channel_dir, now_ms, read_json, sleep_or_stop, write_private, EventSink,
 };
 use crate::channel_media::{
-    inbox_dir, prune_inbox, sniff_image, store_inbound_media, MediaKind, MediaRefDto,
+    inbox_dir, kind_by_name, prune_inbox, sniff_image, store_inbound_media, MediaKind, MediaRefDto,
     OutboundMedia, MAX_MEDIA_BYTES,
 };
 use crate::http::{read_text, shared_client, RESPONSE_READ_TIMEOUT};
@@ -208,7 +208,7 @@ pub struct QqInboundDto {
     /// 发送者 openid（群聊里用来判归属人）。
     pub sender_id: String,
     pub text: String,
-    /// 随消息到达的图片 / 文件；字节在宿主 inbox，凭 `path` 取走。
+    /// 随消息到达的图片 / 视频 / 语音 / 文件；字节在宿主 inbox，凭 `path` 取走。
     pub media: Vec<MediaRefDto>,
     pub at: i64,
 }
@@ -285,7 +285,8 @@ pub(crate) fn normalize_dispatch(
     })
 }
 
-/// 附件归一：`image/*` 按图片收，其余按文件收；无直链的丢掉；最多 4 条。
+/// 附件归一：按 mime 分图片 / 视频 / 语音，认不出再按文件名扩展名，最后按文件收；
+/// 无直链的丢掉；最多 4 条。
 fn pending_attachments(attachments: &[AttachmentPayload]) -> Vec<PendingAttachment> {
     let mut out: Vec<PendingAttachment> = attachments
         .iter()
@@ -298,7 +299,9 @@ fn pending_attachments(attachments: &[AttachmentPayload]) -> Vec<PendingAttachme
                 .filter(|value| !value.is_empty());
             let kind = match item.content_type.as_deref() {
                 Some(mime) if mime.starts_with("image/") => MediaKind::Image,
-                _ => MediaKind::File,
+                Some(mime) if mime.starts_with("video/") => MediaKind::Video,
+                Some(mime) if mime.starts_with("audio/") => MediaKind::Audio,
+                _ => kind_by_name(name.unwrap_or("")),
             };
             PendingAttachment {
                 url: item.url.trim().to_string(),
@@ -2111,19 +2114,26 @@ mod tests {
             "author": { "user_openid": "U9" },
             "attachments": [
                 { "content_type": "image/png", "filename": "图.png", "size": 12, "url": "https://cdn/1" },
-                { "content_type": "application/pdf", "filename": "报表.pdf", "url": "https://cdn/2" },
-                { "content_type": "application/octet-stream", "url": "https://cdn/3" },
+                { "content_type": "video/mp4", "filename": "片.mp4", "url": "https://cdn/2" },
+                { "content_type": "application/octet-stream", "filename": "声.mp3", "url": "https://cdn/3" },
+                { "content_type": "application/octet-stream", "url": "https://cdn/4" },
                 { "url": "   " }
             ],
         });
         let inbound = normalize_dispatch("C2C_MESSAGE_CREATE", &data, 1).expect("纯附件消息也要收");
         assert_eq!(inbound.text, "");
-        assert_eq!(inbound.media.len(), 3, "空直链的丢掉");
+        assert_eq!(inbound.media.len(), 4, "空直链的丢掉");
         assert_eq!(inbound.media[0].kind, MediaKind::Image, "image/* 按图片");
         assert_eq!(inbound.media[0].name, "图.png");
         assert_eq!(inbound.media[0].declared_size, Some(12));
-        assert_eq!(inbound.media[1].kind, MediaKind::File, "其余按文件");
-        assert_eq!(inbound.media[2].name, "attachment", "缺文件名回落");
+        assert_eq!(inbound.media[1].kind, MediaKind::Video, "video/* 按视频");
+        assert_eq!(
+            inbound.media[2].kind,
+            MediaKind::Audio,
+            "mime 认不出时按扩展名判语音"
+        );
+        assert_eq!(inbound.media[3].kind, MediaKind::File, "都认不出按文件");
+        assert_eq!(inbound.media[3].name, "attachment", "缺文件名回落");
     }
 
     #[test]

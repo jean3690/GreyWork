@@ -408,13 +408,13 @@ pub(crate) fn content_media(message: &EventMessage) -> Vec<PendingMedia> {
             file_key,
         }),
         "audio" => field("file_key").map(|file_key| PendingMedia {
-            kind: MediaKind::File,
+            kind: MediaKind::Audio,
             name: "audio".into(),
             resource_type: "file",
             file_key,
         }),
         "media" => field("file_key").map(|file_key| PendingMedia {
-            kind: MediaKind::File,
+            kind: MediaKind::Video,
             name: field("file_name").unwrap_or_else(|| "video".into()),
             resource_type: "file",
             file_key,
@@ -1213,7 +1213,7 @@ pub struct FeishuInboundDto {
     /// text / image / audio …（非文本由界面如实说明）。
     pub message_type: Option<String>,
     pub chat_type: Option<String>,
-    /// 随消息到达的图片 / 文件；字节在宿主 inbox，凭 `path` 取走。
+    /// 随消息到达的图片 / 视频 / 语音 / 文件；字节在宿主 inbox，凭 `path` 取走。
     pub media: Vec<MediaRefDto>,
     pub at: i64,
 }
@@ -2163,6 +2163,24 @@ mod tests {
         assert_eq!(media[0].kind, MediaKind::File);
         assert_eq!(media[0].name, "报表.xlsx");
         assert_eq!(media[0].resource_type, "file");
+
+        let audio = EventMessage {
+            message_type: Some("audio".into()),
+            content: Some(r#"{"file_key":"audio_v2_x","duration":3000}"#.into()),
+            ..Default::default()
+        };
+        let media = content_media(&audio);
+        assert_eq!(media[0].kind, MediaKind::Audio);
+        assert_eq!(media[0].resource_type, "file");
+
+        let video = EventMessage {
+            message_type: Some("media".into()),
+            content: Some(r#"{"file_key":"video_v2_x","file_name":"片.mp4"}"#.into()),
+            ..Default::default()
+        };
+        let media = content_media(&video);
+        assert_eq!(media[0].kind, MediaKind::Video);
+        assert_eq!(media[0].name, "片.mp4");
 
         let text = EventMessage {
             message_type: Some("text".into()),

@@ -231,7 +231,7 @@ pub struct WecomInboundDto {
     pub text: String,
     /// 收不下也转不成文本的消息类型（如 voice），其余为空串。
     pub unsupported: String,
-    /// 随消息到达的图片 / 文件；字节在宿主 inbox，凭 `path` 取走。
+    /// 随消息到达的图片 / 视频 / 文件；字节在宿主 inbox，凭 `path` 取走。
     pub media: Vec<MediaRefDto>,
     pub at: i64,
 }
@@ -328,14 +328,16 @@ fn mixed_text(mixed: &MixedBlock) -> String {
         .join("\n")
 }
 
-/// 从回调里挑出可下载的媒体（图片 / 文件 / 视频 / 图文混排里的图），最多 4 条。
+/// 从回调里挑出可下载的媒体（图片 / 视频 / 文件 / 图文混排里的图），最多 4 条。
+///
+/// 入站语音暂缓：企业微信语音回调给的是 `media_id` 而非 `url`+`aeskey`，与现有下载路径不合。
 fn pending_media(body: &CallbackBody) -> Vec<PendingMedia> {
     let mut out = Vec::new();
     if let Some(block) = body.image.as_ref() {
         push_pending(&mut out, block, MediaKind::Image);
     }
     if let Some(block) = body.video.as_ref() {
-        push_pending(&mut out, block, MediaKind::File);
+        push_pending(&mut out, block, MediaKind::Video);
     }
     if let Some(block) = body.file.as_ref() {
         out.push(PendingMedia {
@@ -1702,6 +1704,15 @@ mod tests {
         assert_eq!(draft.media[0].kind, MediaKind::File);
         assert_eq!(draft.media[0].name, "报表.pdf");
         assert_eq!(draft.media[0].declared_size, Some(99));
+
+        let video = json!({
+            "msgid": "M4", "chattype": "single", "from": { "userid": "u" },
+            "msgtype": "video",
+            "video": { "url": "https://cdn/4", "aeskey": "K4" },
+        });
+        let draft = normalize_callback(&video, 1).expect("视频消息");
+        assert_eq!(draft.media.len(), 1);
+        assert_eq!(draft.media[0].kind, MediaKind::Video);
 
         let mixed = json!({
             "msgid": "M3", "chattype": "single", "from": { "userid": "u" },

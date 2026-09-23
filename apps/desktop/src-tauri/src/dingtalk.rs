@@ -199,30 +199,41 @@ impl ChatbotMessage {
         stripped.trim().to_string()
     }
 
-    /// 本条消息里可下载的图片下载码（picture 的顶层下载码 + 富文本里的图片项），最多 4 张。
+    /// 本条消息里可下载的媒体（类别 + 下载码）：picture / video / audio / file 的顶层下载码，
+    /// 加上富文本里的图片项，最多 4 条。
     ///
     /// 钉钉的富文本下发形状有两种（`content.richText` 或顶层 `richText`），都兼容。
-    pub fn pending_images(&self) -> Vec<String> {
-        let mut codes = Vec::new();
-        if self.msgtype.as_deref() == Some("picture") {
-            if let Some(code) = self
-                .download_code
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-            {
-                codes.push(code.to_string());
-            }
+    /// 群聊里用户往往 @ 不到机器人、消息里也不带 `download_code`，此时按空值过滤掉（仅单聊可靠）。
+    pub fn pending_media(&self) -> Vec<(MediaKind, String)> {
+        let mut out = Vec::new();
+        let kind = match self.msgtype.as_deref() {
+            Some("picture") => Some(MediaKind::Image),
+            Some("video") => Some(MediaKind::Video),
+            Some("audio") => Some(MediaKind::Audio),
+            Some("file") => Some(MediaKind::File),
+            _ => None,
+        };
+        if let (Some(kind), Some(code)) = (kind, self.top_download_code()) {
+            out.push((kind, code));
         }
         if self.msgtype.as_deref() == Some("richText") {
             for item in self.rich_text_items() {
                 if let Some(code) = rich_text_image_code(&item) {
-                    codes.push(code);
+                    out.push((MediaKind::Image, code));
                 }
             }
         }
-        codes.truncate(MAX_INBOUND_MEDIA);
-        codes
+        out.truncate(MAX_INBOUND_MEDIA);
+        out
+    }
+
+    /// 顶层下载码：空串 / 纯空白视为没有。
+    fn top_download_code(&self) -> Option<String> {
+        self.download_code
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
     }
 
     /// 富文本项列表：优先顶层 `richText`，否则取 `content.richText`。
@@ -884,11 +895,11 @@ fn persist_peers(app: &AppHandle, peers: &PeerBook) {
     }
 }
 
-/// 长连接的对外出口：事件广播 + 联系人凭据落盘 + 入站图片收件目录。
+/// 长连接的对外出口：事件广播 + 联系人凭据落盘 + 入站媒体收件目录。
 pub(crate) struct StreamDeps {
     sink: EventSink,
     persist: Arc<dyn Fn(&PeerBook) + Send + Sync>,
-    /// 入站图片收件目录（连上时解析一次；不可用时入站图片整体丢弃并记日志）。
+    /// 入站媒体收件目录（连上时解析一次；不可用时入站媒体整体丢弃并记日志）。
     inbox: Option<PathBuf>,
 }
 
@@ -1109,24 +1120,24 @@ async fn download_robot_image(
     Ok(bytes.to_vec())
 }
 
-/// 把入站图片下载进 inbox（单张失败只记日志，不中断整轮）。
+/// 把入站媒体下载进 inbox（单条失败只记日志，不中断整轮）。
 async fn materialize_inbound(
     deps: &StreamDeps,
     inner: &Mutex<Inner>,
     message: &ChatbotMessage,
-    codes: Vec<String>,
+    media: Vec<(MediaKind, String)>,
 ) -> Vec<MediaRefDto> {
-    if codes.is_empty() {
+    if media.is_empty() {
         return Vec::new();
     }
     let Some(inbox) = deps.inbox.as_deref() else {
-        log::warn("dingtalk", "收件目录不可用，丢弃入站图片");
+        log::warn("dingtalk", "收件目录不可用，丢弃入站媒体");
         return Vec::new();
     };
     let client = match crate::http::shared_client(10) {
         Ok(client) => client,
         Err(error) => {
-            log::warn("dingtalk", format!("下载图片前建客户端失败: {error}"));
+            log::warn("dingtalk", format!("下载媒体前建客户端失败: {error}"));
             return Vec::new();
         }
     };
@@ -1151,14 +1162,14 @@ async fn materialize_inbound(
         Err(error) => {
             log::warn(
                 "dingtalk",
-                format!("取 accessToken 失败，丢弃入站图片: {error}"),
+                format!("取 accessToken 失败，丢弃入站媒体: {error}"),
             );
             return Vec::new();
         }
     };
     let received_at = now_ms();
     let mut refs = Vec::new();
-    for (index, code) in codes.iter().enumerate() {
+    for (index, (kind, code)) in media.iter().enumerate() {
         match download_robot_image(&client, &token, code, &robot_code).await {
             Ok(bytes) => {
                 if let Some(dto) = store_inbound_media(
@@ -1166,14 +1177,14 @@ async fn materialize_inbound(
                     DIR_NAME,
                     received_at,
                     index,
-                    MediaKind::Image,
-                    "image",
+                    *kind,
+                    kind.as_str(),
                     bytes,
                 ) {
                     refs.push(dto);
                 }
             }
-            Err(error) => log::warn("dingtalk", format!("入站图片下载失败: {error}")),
+            Err(error) => log::warn("dingtalk", format!("入站媒体下载失败: {error}")),
         }
     }
     refs
@@ -1223,7 +1234,7 @@ async fn handle_chatbot_frame(
         return;
     }
     // 图片下载进 inbox 后再广播（渲染端凭 path 取走）；文本消息这里为空。
-    let media = materialize_inbound(deps, inner, &message, message.pending_images()).await;
+    let media = materialize_inbound(deps, inner, &message, message.pending_media()).await;
     let payload = DingTalkInboundDto {
         msg_id: message.msg_id.clone(),
         peer_id,
@@ -2065,16 +2076,35 @@ mod tests {
         assert!(error.contains("bad gateway"), "{error}");
     }
 
-    /* ===== 入站图片：下载码提取 ===== */
+    /* ===== 入站媒体：下载码提取 ===== */
 
     #[test]
-    fn pending_images_reads_picture_and_richtext() {
+    fn pending_media_reads_kinds_and_richtext() {
         let picture: ChatbotMessage = serde_json::from_value(json!({
             "msgtype": "picture",
             "downloadCode": "DC-1",
         }))
         .expect("图片消息");
-        assert_eq!(picture.pending_images(), vec!["DC-1".to_string()]);
+        assert_eq!(
+            picture.pending_media(),
+            vec![(MediaKind::Image, "DC-1".to_string())]
+        );
+
+        // 视频 / 语音 / 文件也按各自类别收（顶层 downloadCode）。
+        for (msgtype, kind) in [
+            ("video", MediaKind::Video),
+            ("audio", MediaKind::Audio),
+            ("file", MediaKind::File),
+        ] {
+            let message: ChatbotMessage =
+                serde_json::from_value(json!({ "msgtype": msgtype, "downloadCode": "DC-X" }))
+                    .expect("媒体消息");
+            assert_eq!(
+                message.pending_media(),
+                vec![(kind, "DC-X".to_string())],
+                "{msgtype} 应按 {kind:?} 收"
+            );
+        }
 
         // 富文本：content.richText 形状，混着文本项与图片项。
         let rich: ChatbotMessage = serde_json::from_value(json!({
@@ -2087,8 +2117,11 @@ mod tests {
         }))
         .expect("富文本消息");
         assert_eq!(
-            rich.pending_images(),
-            vec!["DC-2".to_string(), "DC-3".to_string()]
+            rich.pending_media(),
+            vec![
+                (MediaKind::Image, "DC-2".to_string()),
+                (MediaKind::Image, "DC-3".to_string()),
+            ]
         );
 
         // 顶层 richText 形状也认。
@@ -2097,37 +2130,34 @@ mod tests {
             "richText": [ { "downloadCode": "DC-4" } ],
         }))
         .expect("富文本消息");
-        assert_eq!(top.pending_images(), vec!["DC-4".to_string()]);
+        assert_eq!(
+            top.pending_media(),
+            vec![(MediaKind::Image, "DC-4".to_string())]
+        );
 
-        // 文本消息 / 语音 / 空下载码都不产出图片。
+        // 文本消息 / 空下载码都不产出媒体。
         let text: ChatbotMessage = serde_json::from_value(json!({
             "msgtype": "text",
             "text": { "content": "你好" },
         }))
         .expect("文本消息");
-        assert!(text.pending_images().is_empty());
-        let audio: ChatbotMessage = serde_json::from_value(json!({
-            "msgtype": "audio",
-            "downloadCode": "DC-AUDIO",
-        }))
-        .expect("语音消息");
-        assert!(audio.pending_images().is_empty(), "本版只收图片");
+        assert!(text.pending_media().is_empty());
         let blank: ChatbotMessage = serde_json::from_value(json!({
             "msgtype": "picture",
             "downloadCode": "   ",
         }))
         .expect("空下载码");
-        assert!(blank.pending_images().is_empty());
+        assert!(blank.pending_media().is_empty());
     }
 
     #[test]
-    fn pending_images_caps_at_max() {
+    fn pending_media_caps_at_max() {
         let items: Vec<serde_json::Value> = (0..(MAX_INBOUND_MEDIA + 3))
             .map(|index| json!({ "downloadCode": format!("DC-{index}") }))
             .collect();
         let message: ChatbotMessage =
             serde_json::from_value(json!({ "msgtype": "richText", "richText": items }))
                 .expect("富文本消息");
-        assert_eq!(message.pending_images().len(), MAX_INBOUND_MEDIA);
+        assert_eq!(message.pending_media().len(), MAX_INBOUND_MEDIA);
     }
 }

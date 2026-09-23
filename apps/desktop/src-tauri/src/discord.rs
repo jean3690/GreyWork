@@ -33,8 +33,8 @@ use crate::channel_common::{
     app_sink, channel_dir, now_ms, read_json, sleep_or_stop, write_private, EventSink,
 };
 use crate::channel_media::{
-    inbox_dir, prune_inbox, store_inbound_media, MediaKind, MediaRefDto, OutboundMedia,
-    MAX_MEDIA_BYTES,
+    inbox_dir, kind_by_name, prune_inbox, store_inbound_media, MediaKind, MediaRefDto,
+    OutboundMedia, MAX_MEDIA_BYTES,
 };
 use crate::http::{read_text, shared_client, RESPONSE_READ_TIMEOUT};
 use crate::log;
@@ -210,7 +210,7 @@ pub struct DiscordInboundDto {
     /// 发送者用户 id（判归属人用）。
     pub sender_id: String,
     pub text: String,
-    /// 随消息到达的图片 / 文件；字节在宿主 inbox，凭 `path` 取走。
+    /// 随消息到达的图片 / 视频 / 语音 / 文件；字节在宿主 inbox，凭 `path` 取走。
     pub media: Vec<MediaRefDto>,
     pub at: i64,
 }
@@ -289,7 +289,8 @@ pub(crate) fn normalize_dispatch(
     })
 }
 
-/// 附件归一：`image/*` 按图片收，其余按文件收；无直链的丢掉；最多 4 条。
+/// 附件归一：按 mime 分图片 / 视频 / 语音，认不出再按文件名扩展名，最后按文件收；
+/// 无直链的丢掉；最多 4 条。
 fn pending_attachments(attachments: &[AttachmentPayload]) -> Vec<PendingAttachment> {
     let mut out: Vec<PendingAttachment> = attachments
         .iter()
@@ -298,7 +299,9 @@ fn pending_attachments(attachments: &[AttachmentPayload]) -> Vec<PendingAttachme
             let name = item.filename.trim();
             let kind = match item.content_type.as_deref() {
                 Some(mime) if mime.starts_with("image/") => MediaKind::Image,
-                _ => MediaKind::File,
+                Some(mime) if mime.starts_with("video/") => MediaKind::Video,
+                Some(mime) if mime.starts_with("audio/") => MediaKind::Audio,
+                _ => kind_by_name(name),
             };
             PendingAttachment {
                 url: item.url.trim().to_string(),
@@ -1427,16 +1430,24 @@ mod tests {
             "attachments": [
                 { "filename": "pic.png", "content_type": "image/png", "size": 10, "url": "https://cdn.example/pic" },
                 { "filename": "报表.xlsx", "content_type": "application/vnd.ms-excel", "size": 20, "url": "https://cdn.example/report" },
+                { "filename": "clip.mp4", "content_type": "video/mp4", "url": "https://cdn.example/v" },
+                { "filename": "note.m4a", "content_type": null, "url": "https://cdn.example/a" },
                 { "filename": "no-url.bin", "url": "" },
             ],
         });
         let draft = normalize_dispatch("MESSAGE_CREATE", &data, 1).expect("附件消息也是消息");
         assert_eq!(draft.text, "");
-        assert_eq!(draft.media.len(), 2, "无直链的附件丢掉");
+        assert_eq!(draft.media.len(), 4, "无直链的附件丢掉");
         assert_eq!(draft.media[0].kind, MediaKind::Image);
         assert_eq!(draft.media[0].name, "pic.png");
         assert_eq!(draft.media[1].kind, MediaKind::File);
         assert_eq!(draft.media[1].name, "报表.xlsx");
+        assert_eq!(draft.media[2].kind, MediaKind::Video, "video/* 按视频");
+        assert_eq!(
+            draft.media[3].kind,
+            MediaKind::Audio,
+            "无 mime 时按扩展名判语音"
+        );
     }
 
     #[test]

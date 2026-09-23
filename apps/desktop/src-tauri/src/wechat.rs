@@ -103,7 +103,7 @@ pub struct WechatInboundDto {
     pub text: String,
     /// item_list 的类型集合（1 文本 / 2 图片 / 3 语音 / 4 文件 / 5 视频）。
     pub item_types: Vec<i64>,
-    /// 已下载解密的媒体（图片 / 文件）；失败或未支持的类型不出现在这里。
+    /// 已下载解密的媒体（图片 / 视频 / 语音 / 文件）；失败或未支持的类型不出现在这里。
     pub media: Vec<MediaRefDto>,
     pub create_time_ms: i64,
     /// 宿主收到消息的时刻（epoch ms）。
@@ -125,10 +125,9 @@ struct InboundMedia {
     aes_key: Option<String>,
 }
 
-/// 按条目自己的 `type` 抽可下载媒体：`2` 图片、`4` 文件。
+/// 按条目自己的 `type` 抽可下载媒体：`2` 图片、`3` 语音、`4` 文件、`5` 视频。
 ///
-/// 文本 / 语音 / 视频不进这里（语音只有云端转写文本，见 `text_of`）。
-/// 缺少 `media`（拿不到 CDN 引用）的条目直接跳过。
+/// 文本条目不进这里（`text_of` 另取）。缺少 `media`（拿不到 CDN 引用）的条目直接跳过。
 fn collect_media(message: &IncomingMessage) -> Vec<InboundMedia> {
     let mut out = Vec::new();
     for (index, item) in message.raw.item_list.iter().enumerate() {
@@ -147,6 +146,22 @@ fn collect_media(message: &IncomingMessage) -> Vec<InboundMedia> {
                     declared_size: None,
                     aes_key: nonempty(image.aeskey.as_deref())
                         .or_else(|| nonempty(Some(media.aes_key.as_str()))),
+                    media,
+                });
+            }
+            MessageItemType::Voice => {
+                let Some(voice) = item.voice_item.as_ref() else {
+                    continue;
+                };
+                let Some(media) = voice.media.clone() else {
+                    continue;
+                };
+                out.push(InboundMedia {
+                    kind: MediaKind::Audio,
+                    name: format!("voice-{index}"),
+                    declared_size: None,
+                    // 语音没有独立 aeskey 字段，用 media 自带的。
+                    aes_key: None,
                     media,
                 });
             }
@@ -171,6 +186,21 @@ fn collect_media(message: &IncomingMessage) -> Vec<InboundMedia> {
                         .and_then(|value| value.trim().parse::<u64>().ok()),
                     media,
                     aes_key: None,
+                });
+            }
+            MessageItemType::Video => {
+                let Some(video) = item.video_item.as_ref() else {
+                    continue;
+                };
+                let Some(media) = video.media.clone() else {
+                    continue;
+                };
+                out.push(InboundMedia {
+                    kind: MediaKind::Video,
+                    name: format!("video-{index}"),
+                    declared_size: video.video_size.and_then(|size| u64::try_from(size).ok()),
+                    aes_key: None,
+                    media,
                 });
             }
             _ => {}
@@ -211,16 +241,15 @@ fn item_types_of(message: &IncomingMessage) -> Vec<i64> {
         .collect()
 }
 
-/// 是否含「可识别条目」：文本 / 语音（转写）/ 图片 / 文件。
+/// 是否含「可识别条目」：文本 / 语音 / 图片 / 文件 / 视频（1..=5）。
 ///
 /// 顶层 `message_type` 不可靠 —— 媒体消息也可能是 1，所以内容判定只看 `item_list`。
-/// 视频（5）本轮既不落媒体也无文本，收下只会得到一条「认不了」的回执，不如直接丢。
 fn has_recognizable_items(message: &IncomingMessage) -> bool {
     message
         .raw
         .item_list
         .iter()
-        .any(|item| matches!(item.item_type as i32, 1..=4))
+        .any(|item| matches!(item.item_type as i32, 1..=5))
 }
 
 /// 非空字符串（空串与纯空白都视为「没有」）。
@@ -1321,6 +1350,41 @@ mod tests {
         }
     }
 
+    /// 带 CDN 引用的语音条目（无转写文本；用于入站媒体抽取用例）。
+    fn voice_item_media(media: Option<CDNMedia>) -> WireMessageItem {
+        WireMessageItem {
+            item_type: MessageItemType::Voice,
+            text_item: None,
+            image_item: None,
+            voice_item: Some(VoiceItem {
+                media,
+                encode_type: None,
+                text: None,
+                playtime: Some(1500),
+            }),
+            file_item: None,
+            video_item: None,
+            ref_msg: None,
+        }
+    }
+
+    fn video_item(media: Option<CDNMedia>, size: Option<i64>) -> WireMessageItem {
+        WireMessageItem {
+            item_type: MessageItemType::Video,
+            text_item: None,
+            image_item: None,
+            voice_item: None,
+            file_item: None,
+            video_item: Some(wechatbot::VideoItem {
+                media,
+                video_size: size,
+                play_length: Some(3),
+                thumb_media: None,
+            }),
+            ref_msg: None,
+        }
+    }
+
     /// 组一条「用户发来的」线格式消息（SDK 的解析入口只认 message_type = User）。
     fn wire(items: Vec<WireMessageItem>) -> WireMessage {
         WireMessage {
@@ -1373,40 +1437,29 @@ mod tests {
     }
 
     #[test]
-    fn text_of_ignores_media_placeholders_and_video_is_not_recognizable() {
+    fn text_of_ignores_media_placeholders_and_video_is_recognizable() {
         // 纯图片：文本必须是空串（SDK 的 `IncomingMessage::text` 会给 "[image]" 占位串）。
         let image_only = parse(vec![image_item(Some("k"), Some(media_ref("p", "k")))]);
         assert_eq!(text_of(&image_only), "");
         assert!(has_recognizable_items(&image_only));
 
-        // 纯视频：既没有文本也没有可下载媒体 → 不收。
-        let video_only = parse(vec![WireMessageItem {
-            item_type: MessageItemType::Video,
-            text_item: None,
-            image_item: None,
-            voice_item: None,
-            file_item: None,
-            video_item: Some(wechatbot::VideoItem {
-                media: None,
-                video_size: None,
-                play_length: Some(3),
-                thumb_media: None,
-            }),
-            ref_msg: None,
-        }]);
-        assert!(!has_recognizable_items(&video_only));
+        // 纯视频：无文本，但已可下载 → 认得出（本轮起视频纳入入站媒体）。
+        let video_only = parse(vec![video_item(Some(media_ref("p", "k")), Some(3_000_000))]);
+        assert!(has_recognizable_items(&video_only));
         assert_eq!(text_of(&video_only), "");
     }
 
     #[test]
-    fn collect_media_picks_images_and_files() {
+    fn collect_media_picks_all_kinds() {
         let message = parse(vec![
             image_item(Some("img-key"), Some(media_ref("p1", "fallback"))),
             text_item("附带一句"),
+            voice_item_media(Some(media_ref("p3", "vk"))),
             file_item(Some("报表.xlsx"), Some("2048"), Some(media_ref("p2", "fk"))),
+            video_item(Some(media_ref("p4", "mk")), Some(3_000_000)),
         ]);
         let items = collect_media(&message);
-        assert_eq!(items.len(), 2);
+        assert_eq!(items.len(), 4);
 
         assert_eq!(items[0].kind, MediaKind::Image);
         assert_eq!(items[0].name, "image-0");
@@ -1416,10 +1469,18 @@ mod tests {
             "图片优先用条目自带的 key"
         );
 
-        assert_eq!(items[1].kind, MediaKind::File);
-        assert_eq!(items[1].name, "报表.xlsx");
-        assert_eq!(items[1].declared_size, Some(2048));
-        assert!(items[1].aes_key.is_none(), "文件用 media 自带的 key");
+        assert_eq!(items[1].kind, MediaKind::Audio);
+        assert_eq!(items[1].name, "voice-2");
+        assert!(items[1].aes_key.is_none(), "语音用 media 自带的 key");
+
+        assert_eq!(items[2].kind, MediaKind::File);
+        assert_eq!(items[2].name, "报表.xlsx");
+        assert_eq!(items[2].declared_size, Some(2048));
+        assert!(items[2].aes_key.is_none(), "文件用 media 自带的 key");
+
+        assert_eq!(items[3].kind, MediaKind::Video);
+        assert_eq!(items[3].name, "video-4");
+        assert_eq!(items[3].declared_size, Some(3_000_000));
     }
 
     #[test]
@@ -1427,6 +1488,8 @@ mod tests {
         let message = parse(vec![
             image_item(Some("k"), None),
             file_item(Some("x.bin"), None, None),
+            voice_item_media(None),
+            video_item(None, None),
         ]);
         assert!(collect_media(&message).is_empty());
     }
