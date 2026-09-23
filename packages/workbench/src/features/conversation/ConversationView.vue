@@ -4,6 +4,7 @@ import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
 import { useVirtualizer } from "@tanstack/vue-virtual";
 import { MCP_SKIP_REASONS } from "@/lib/mcp-labels";
+import { deviceTier } from "@/lib/device-tier";
 import { useAgentStore } from "@/stores/agent";
 import { useChatStore } from "@/stores/chat";
 import { useSessionStore } from "@/stores/session";
@@ -118,18 +119,22 @@ function scrollToBottom(): void {
 /* ===== 消息列表虚拟化 =====
  * 短会话（≤ VIRTUAL_THRESHOLD 条）走普通整列渲染（简单、无测量抖动）；
  * 长会话切成动态测量虚拟列表（@tanstack/vue-virtual），只挂载可视窗口 ± overscan。
- * 钉底语义：用户停留在底部附近时，新消息/流式长高自动跟底；上翻阅读时不被拽走。 */
-const VIRTUAL_THRESHOLD = 60;
+ * 钉底语义：用户停留在底部附近时，新消息/流式长高自动跟底；上翻阅读时不被拽走。
+ *
+ * 低端设备（lib/device-tier.ts）：阈值减半、overscan 收到 3 —— 挂载行数直接决定 DOM
+ * 与布局开销，少挂几屏是低内存机上最直接的省法；代价是快速滚动时更容易看到空白行，
+ * 但比整窗卡顿可接受。options 是 computed，档位被宿主快照升级后会自行重建。 */
+const VIRTUAL_THRESHOLD = computed(() => (deviceTier.value === "low" ? 30 : 60));
 const V_PAD_TOP = 24; // 对齐原 py-6 顶距
 const V_PAD_BOTTOM = 24; // 对齐原 py-6 底距
-const useVirtual = computed(() => messages.value.length > VIRTUAL_THRESHOLD);
+const useVirtual = computed(() => messages.value.length > VIRTUAL_THRESHOLD.value);
 
 /** 动态 options：count 随消息数变化（vue-virtual 以 Ref<options> 驱动重建）。 */
 const virtualOptions = computed(() => ({
   getScrollElement: () => scrollEl.value,
   count: useVirtual.value ? messages.value.length : 0,
   estimateSize: () => 72,
-  overscan: 8,
+  overscan: deviceTier.value === "low" ? 3 : 8,
   getItemKey: (index: number) => messages.value[index]?.id ?? index,
 }));
 const virtualizerRef = useVirtualizer(virtualOptions);

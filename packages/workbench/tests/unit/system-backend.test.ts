@@ -44,6 +44,8 @@ describe("system-backend 双态", () => {
       activeAgents: 2,
       os: "linux",
       trayAvailable: true,
+      totalMemoryBytes: 16 * 1024 ** 3,
+      cpuCount: 8,
     };
     invokeMock.mockResolvedValue(snapshot);
 

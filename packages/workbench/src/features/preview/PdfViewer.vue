@@ -11,19 +11,26 @@
  * 结果是 404 或退化成 "Setting up fake worker failed"。用 Vite 的 `?url` 让 worker
  * 作为独立资源产出，再把地址交给 pdf.js。
  */
-import { onBeforeUnmount, onUnmounted, ref, toRef, watch } from "vue";
+import { computed, onBeforeUnmount, onUnmounted, ref, toRef, watch } from "vue";
 import { useI18n } from "vue-i18n";
 // 只取 URL 字符串，Vite 会把 worker 作为资源单独产出（v6 是 ESM worker）。
 // 用预压缩的 *.min.mjs：worker 是 ?url 原样拷贝的资产，不走 Vite minify，
 // 非 min 版 2.2MB 会原封不动躺进安装包。
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { buildTextLayer, layoutTextItems, type MeasureText } from "@/lib/pdf-text-layer";
+import { deviceTier } from "@/lib/device-tier";
 import { recallPdfProgress, rememberPdfProgress } from "@/lib/preview-scroll";
 import { usePreviewBinary } from "@/lib/preview-content";
 import type { PreviewTab } from "@/stores/preview";
 
-/** 首批渲染页数；其余滚到底部再追加 —— 200 页的 PDF 一次性渲染会卡死主线程。 */
-const PAGE_BATCH = 3;
+/**
+ * 首批渲染页数；其余滚到底部再追加 —— 200 页的 PDF 一次性渲染会卡死主线程。
+ *
+ * 低端设备（lib/device-tier.ts）收到 1 页：每页画布按 dpr 放大后的位图是实打实的显存/
+ * 内存占用，低内存机上"一次三页"很容易顶到峰值。代价是滚动到底部的追加更频繁，
+ * 但每次只画一页，主线程不会被长任务占住。
+ */
+const PAGE_BATCH = computed(() => (deviceTier.value === "low" ? 1 : 3));
 /** 距底部多少 px 触发追加。 */
 const LOAD_AHEAD_PX = 400;
 /**
@@ -145,7 +152,7 @@ async function renderNextBatch(mine: number): Promise<void> {
   const dpr = typeof window === "undefined" ? 1 : window.devicePixelRatio || 1;
 
   const from = renderedPages.value + 1;
-  const to = Math.min(document_.numPages, renderedPages.value + PAGE_BATCH);
+  const to = Math.min(document_.numPages, renderedPages.value + PAGE_BATCH.value);
   for (let pageNumber = from; pageNumber <= to; pageNumber += 1) {
     const page = await document_.getPage(pageNumber);
     if (mine !== generation) return;

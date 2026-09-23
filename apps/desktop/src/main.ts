@@ -2,7 +2,7 @@ import { createApp, nextTick } from "vue";
 import { createPinia } from "pinia";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import App from "./App.vue";
-import { bootInstalledMarketPlugins, createAppRouter, i18n, loadHostOs } from "@greywork/workbench";
+import { bootInstalledMarketPlugins, createAppRouter, i18n, initDeviceTier, loadHostSystem } from "@greywork/workbench";
 import "./tailwind.css";
 
 /* ===== 启动基线打点 =====
@@ -46,6 +46,11 @@ function reportStartup(pluginsMs: number | null): void {
 async function bootstrap(): Promise<void> {
   mark("bootstrap");
 
+  // 设备分级：必须在 mount 之前同步落地 —— 首帧的动效与虚拟列表参数就该按真实档位渲染，
+  // 晚一帧等于低端机上白跑一遍 standard 的开销。宿主快照（真实内存/核数）在 mount 后异步
+  // 补齐，只做单向升级（见 lib/device-tier.ts）。
+  initDeviceTier();
+
   // 已装插件清单：与 mount **并发**发起，不再串在首帧前面。
   //
   // 以前是 `await bootInstalledMarketPlugins()` 再 mount，两个代价：一是那次读盘 IPC
@@ -70,8 +75,8 @@ async function bootstrap(): Promise<void> {
 
   // 宿主 OS：标题栏据此决定窗口控件放左还是放右、快捷键提示写 ⌘ 还是 Ctrl。
   // 同样**不 await** —— 取不到就按非 macOS 渲染（Windows/Linux 的既有布局），
-  // 不能因为一次信息性 IPC 挡住首帧或窗口显示。
-  void loadHostOs();
+  // 不能因为一次信息性 IPC 挡住首帧或窗口显示。同一份 sys_info 顺带校正设备分级。
+  void loadHostSystem();
   // Dev-only e2e 钩子：暴露内存 FS 与事件总线，便于 Playwright 注入产物并触发预览
   // （生产构建中 import.meta.env.DEV 为 false，整段被 tree-shake 移除）。
   if (import.meta.env.DEV) {

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useVirtualizer } from "@tanstack/vue-virtual";
+import { deviceTier } from "@/lib/device-tier";
 import GroupedHistoryRow from "@/features/workspace/GroupedHistoryRow.vue";
 
 /**
@@ -10,8 +11,10 @@ import GroupedHistoryRow from "@/features/workspace/GroupedHistoryRow.vue";
  * 不需要像聊天消息那样动态测量，只挂载可视窗口 ± overscan 的行。虚拟行是绝对定位
  * 在「固定总高的相对容器」里的，外层仍是 GroupedHistory 那一个滚动容器 ——
  * 滚动条只有一条，不引入内层滚动。
+ *
+ * 低端设备（lib/device-tier.ts）：阈值减半、overscan 收到 3，减少同时挂载的行数。
  */
-const VIRTUAL_THRESHOLD = 60;
+const VIRTUAL_THRESHOLD = computed(() => (deviceTier.value === "low" ? 30 : 60));
 /** 行步长：34px 行高 + 2px 间距（与普通路径的 flex gap-0.5 对齐）。 */
 const ROW_STRIDE = 36;
 
@@ -26,7 +29,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{ navigate: [path: string] }>();
 
-const virtual = computed(() => props.sessions.length > VIRTUAL_THRESHOLD);
+const virtual = computed(() => props.sessions.length > VIRTUAL_THRESHOLD.value);
 
 /** count 随会话数变化；不足阈值时计 0（实例常驻，但什么都不渲染）。
  *  getScrollElement 里读 scrollTick：它是父组件挂载后自增的哨兵，只有父 ref 就位后
@@ -37,7 +40,7 @@ const virtualOptions = computed(() => ({
   // 首帧视口：RO 就位前先按它渲染窗口，避免空首屏（测试环境无布局时也靠它出内容）
   initialRect: { top: 0, left: 0, width: 300, height: 600 },
   estimateSize: () => ROW_STRIDE,
-  overscan: 8,
+  overscan: deviceTier.value === "low" ? 3 : 8,
   getItemKey: (index: number) => props.sessions[index]?.id ?? index,
 }));
 const virtualizer = useVirtualizer(virtualOptions);

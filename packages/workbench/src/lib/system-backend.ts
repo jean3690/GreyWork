@@ -20,6 +20,10 @@ export interface SysInfo {
    * 否则窗口藏起来后没有任何入口能恢复），设置页据此不给选。
    */
   trayAvailable: boolean;
+  /** 物理内存总量（字节）；宿主取不到为 null（Windows 等平台回落渲染端探测）。 */
+  totalMemoryBytes: number | null;
+  /** 逻辑核数；取不到为 0。设备分级用它判低端（见 lib/device-tier.ts）。 */
+  cpuCount: number;
 }
 
 export const systemBackend = {

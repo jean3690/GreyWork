@@ -20,6 +20,48 @@ pub struct SysInfo {
     /// 宿主是否真的建出了系统托盘。设置页据此决定「关闭到托盘」能不能选 ——
     /// 没有托盘时该档位无效（宿主会把关闭行为钳回「关闭即退出」）。
     pub tray_available: bool,
+    /// 物理内存总量（字节）。取不到为 None（渲染端回落 `navigator.deviceMemory`）。
+    pub total_memory_bytes: Option<u64>,
+    /// 逻辑核数。取不到为 0（渲染端回落 `navigator.hardwareConcurrency`）。
+    pub cpu_count: usize,
+}
+
+/// 逻辑核数。`available_parallelism` 是标准库唯一的可移植入口；容器里被 cgroup 限核时
+/// 它给的是**限额后的**核数，正是"这台机器能并行跑多少"想要的语义。
+fn cpu_count() -> usize {
+    std::thread::available_parallelism().map(|n| n.get()).unwrap_or(0)
+}
+
+/// 物理内存总量（字节）。跨平台各读各的：Linux 走 /proc/meminfo，macOS 走 sysctl，
+/// 其余平台返回 None 由渲染端兜底 —— 不为一个诊断字段引入 sysinfo 这类重依赖。
+fn total_memory_bytes() -> Option<u64> {
+    #[cfg(target_os = "linux")]
+    {
+        // MemTotal 单位 kB，形如 "MemTotal:       16316456 kB"。
+        let text = std::fs::read_to_string("/proc/meminfo").ok()?;
+        for line in text.lines() {
+            if let Some(rest) = line.strip_prefix("MemTotal:") {
+                let kib: u64 = rest.split_whitespace().next()?.parse().ok()?;
+                return Some(kib.saturating_mul(1024));
+            }
+        }
+        None
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let out = std::process::Command::new("sysctl")
+            .args(["-n", "hw.memsize"])
+            .output()
+            .ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        String::from_utf8(out.stdout).ok()?.trim().parse().ok()
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        None
+    }
 }
 
 /// 系统信息快照。
@@ -36,6 +78,8 @@ pub async fn sys_info(
         active_agents: acp.session_count().await,
         os: std::env::consts::OS.to_string(),
         tray_available: tray.available(),
+        total_memory_bytes: total_memory_bytes(),
+        cpu_count: cpu_count(),
     })
 }
 
@@ -77,6 +121,8 @@ mod tests {
             active_agents: 2,
             os: "linux".into(),
             tray_available: false,
+            total_memory_bytes: Some(8 * 1024 * 1024 * 1024),
+            cpu_count: 8,
         })
         .expect("serialize");
         let map = json.as_object().expect("object");
@@ -87,6 +133,14 @@ mod tests {
         assert!(map.contains_key("logDir"));
         assert!(map.contains_key("activeAgents"));
         assert!(map.contains_key("trayAvailable"));
+        assert!(map.contains_key("totalMemoryBytes"));
+        assert!(map.contains_key("cpuCount"));
         assert_eq!(map["version"], "0.1.0");
+    }
+
+    #[test]
+    fn cpu_count_is_positive() {
+        // 任何真实运行环境都至少有一个可用核；0 只作为"取不到"的哨兵。
+        assert!(cpu_count() >= 1);
     }
 }

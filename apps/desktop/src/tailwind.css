@@ -86,6 +86,21 @@
   }
 }
 
+/* ===== 低端设备降级基线 =====
+ * 由 lib/device-tier.ts 判定（低内存 / 少核）后写 <html data-perf="low">。与上面的
+ * prefers-reduced-motion 是**两条独立信号**：那条是用户的系统偏好，这条是设备跑不动。
+ * 低端机上持续动画（扫光、脉冲骨架屏、弹层进出场）会长期占着合成器与主线程，正是卡顿
+ * 的来源，所以这里同样归零 —— 交互反馈改由静态态表达，不牺牲可用性。
+ */
+[data-perf="low"] *,
+[data-perf="low"] *::before,
+[data-perf="low"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
 /* ===== 视口高度链 =====
  * Shell 依赖 size-full（height:100%）撑满窗口；WebKitGTK 对「百分比高度祖先
  * 未定义高度」按 auto 塌缩（Chromium 宽容），导致桌面端内容只占窗口上部、底部大片空白。

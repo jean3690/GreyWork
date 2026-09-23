@@ -25,6 +25,8 @@ function sysInfo(trayAvailable: boolean) {
     activeAgents: 0,
     os: "linux",
     trayAvailable,
+    totalMemoryBytes: 16 * 1024 ** 3,
+    cpuCount: 8,
   };
 }
 

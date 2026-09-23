@@ -12,7 +12,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({
   boot: vi.fn<() => Promise<void>>(),
-  loadHostOs: vi.fn<() => Promise<void>>(),
+  loadHostSystem: vi.fn<() => Promise<void>>(),
+  initDeviceTier: vi.fn<() => void>(),
   show: vi.fn<() => Promise<void>>(),
   getWindow: vi.fn(),
   appPlugin: (app: unknown) => {
@@ -22,7 +23,8 @@ const h = vi.hoisted(() => ({
 
 vi.mock("@greywork/workbench", () => ({
   bootInstalledMarketPlugins: () => h.boot(),
-  loadHostOs: () => h.loadHostOs(),
+  loadHostSystem: () => h.loadHostSystem(),
+  initDeviceTier: () => h.initDeviceTier(),
   createAppRouter: () => h.appPlugin,
   i18n: { install: h.appPlugin },
   workspaceFs: {},
@@ -47,7 +49,7 @@ describe("bootstrap", () => {
     performance.clearMarks();
     performance.clearMeasures();
     h.boot.mockResolvedValue(undefined);
-    h.loadHostOs.mockResolvedValue(undefined);
+    h.loadHostSystem.mockResolvedValue(undefined);
     h.show.mockResolvedValue(undefined);
     h.getWindow.mockReturnValue({ show: h.show });
   });
@@ -56,7 +58,9 @@ describe("bootstrap", () => {
     await import("../../src/main");
 
     expect(h.boot).toHaveBeenCalledTimes(1);
-    expect(h.loadHostOs).toHaveBeenCalledTimes(1);
+    expect(h.loadHostSystem).toHaveBeenCalledTimes(1);
+    // 设备分级要在 mount 之前同步落地：首帧就该按真实档位渲染。
+    expect(h.initDeviceTier).toHaveBeenCalledTimes(1);
     await vi.waitFor(() => expect(h.show).toHaveBeenCalledTimes(1));
     const appEl = document.querySelector("#app");
     expect(appEl?.childElementCount).toBeGreaterThan(0);
@@ -89,7 +93,7 @@ describe("bootstrap", () => {
 
   it("sys_info IPC 一直不返回，也不挡挂载与窗口显示", async () => {
     // 标题栏据此决定控件位置与快捷键提示，但它是**信息性**的：拿不到就按非 macOS 渲染。
-    h.loadHostOs.mockReturnValue(new Promise<void>(() => {}));
+    h.loadHostSystem.mockReturnValue(new Promise<void>(() => {}));
     await import("../../src/main");
 
     expect(document.querySelector("#app")?.childElementCount).toBeGreaterThan(0);
