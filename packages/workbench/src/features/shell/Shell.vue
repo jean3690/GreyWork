@@ -17,6 +17,7 @@ import { i18n } from "@/i18n";
 import { applyAppearance as applyAppearanceToDom } from "@/lib/theme";
 import { modeOfShortcut, visibilityOf, type LayoutMode } from "@/lib/layout-modes";
 import { syncCloseToTray, syncTrayLabels, useTrayBridge, type TrayLabels } from "@/lib/tray-bridge";
+import { useCloseGuard } from "@/lib/close-guard";
 import { bootPlugins } from "@/plugins/runtime";
 import Sider from "@/features/shell/Sider.vue";
 import Titlebar from "@/features/shell/Titlebar.vue";
@@ -251,6 +252,10 @@ onMounted(() => {
   void useRemoteAssistantStore().init();
   // 系统托盘：把菜单事件转成应用内动作（新建对话 / 打开设置）。宿主已先显示并聚焦窗口。
   disposeTrayBridge = useTrayBridge({ onNewChat: handleNewChat, onOpenSettings: openSettings });
+  // 关窗 / 退出守卫：拦下「有未保存改动」的退出，交给预览那套先保存再走。
+  // 与托盘桥同为应用级接线，所以放在外壳而不是预览面板里；确认弹层的渲染点在
+  // PreviewSider（它持有 saver 注册表，见 lib/close-guard.ts）。
+  useCloseGuard();
 });
 function syncSystemTheme(event: MediaQueryListEvent): void {
   systemDark.value = event.matches;

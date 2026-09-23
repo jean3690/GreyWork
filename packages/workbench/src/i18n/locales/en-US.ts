@@ -218,6 +218,11 @@ export const enUS: MessageSchema = {
       loading: "Loading…",
       readFailed: "Failed to read: {detail}",
     },
+    guard: {
+      title: "Save failed — discard changes anyway?",
+      message: "Changes to {names} could not be saved; continuing will lose them.",
+      confirm: "Discard and continue",
+    },
     table: {
       empty: "Empty file",
       truncated: "Showing the first {limit} of {total} rows",

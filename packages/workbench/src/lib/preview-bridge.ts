@@ -1,6 +1,7 @@
 import { onUnmounted } from "vue";
 import { appEvents } from "../events";
 import { usePreviewStore } from "../stores/preview";
+import { requestLeave } from "./preview-edit-guard";
 
 /**
  * 把应用事件总线接到预览面板。
@@ -13,6 +14,10 @@ import { usePreviewStore } from "../stores/preview";
  * - `artifact:created` / `preview:request` / `editor:open` → 打开并聚焦（用户/管线刚产出东西，该看见）
  * - `artifact:updated` → 只在**已打开**该路径时自增 revision 重载，不弹面板
  *   （后台给某张表追加一行不该抢走用户正在看的东西）
+ *
+ * 三个「打开并聚焦」都包在 `requestLeave` 里：它们会切换激活 tab，而切 tab 会卸载当前
+ * 编辑器 —— 用户正在改的文件若是脏的，直接被顶掉就是静默丢改动。`artifact:updated`
+ * 只动 revision、不动 activeId，不包。
  */
 type PreviewStore = ReturnType<typeof usePreviewStore>;
 
@@ -20,18 +25,24 @@ type PreviewStore = ReturnType<typeof usePreviewStore>;
 export function wirePreviewBridge(preview: PreviewStore): Array<() => void> {
   return [
     appEvents.on("artifact:created", ({ path, name, diskPath }) => {
-      preview.open(path, name);
-      if (diskPath) preview.attachDiskPath(path, diskPath);
+      requestLeave(() => {
+        preview.open(path, name);
+        if (diskPath) preview.attachDiskPath(path, diskPath);
+      });
     }),
     appEvents.on("artifact:updated", ({ path, diskPath }) => {
       preview.reload(path);
       if (diskPath) preview.attachDiskPath(path, diskPath);
     }),
     appEvents.on("preview:request", ({ path, name, source, diskPath }) => {
-      preview.open(path, name, source ?? "vfs");
-      if (diskPath) preview.attachDiskPath(path, diskPath);
+      requestLeave(() => {
+        preview.open(path, name, source ?? "vfs");
+        if (diskPath) preview.attachDiskPath(path, diskPath);
+      });
     }),
-    appEvents.on("editor:open", ({ path }) => preview.open(path)),
+    appEvents.on("editor:open", ({ path }) => {
+      requestLeave(() => preview.open(path));
+    }),
   ];
 }
 

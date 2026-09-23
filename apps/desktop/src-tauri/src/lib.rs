@@ -2,6 +2,7 @@ mod acp_host;
 mod acp_process;
 mod channel_common;
 mod channel_media;
+mod close_guard;
 mod cron;
 mod db;
 pub mod dingtalk;
@@ -85,6 +86,7 @@ pub fn run() {
         .manage(qq::QqHost::default())
         .manage(wecom::WecomHost::default())
         .manage(tray::TrayState::default())
+        .manage(close_guard::CloseGuard::default())
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) = event {
                 if let Some(access) = window.try_state::<workspace_fs::WorkspaceFsAccess>() {
@@ -144,6 +146,8 @@ pub fn run() {
             sys::sys_info,
             sys::reveal_path,
             sys::open_path,
+            close_guard::set_unsaved_changes,
+            close_guard::confirm_exit,
             acp_host::acp_permission_respond,
             acp_host::acp_start,
             acp_host::acp_new_session,
@@ -274,15 +278,23 @@ pub fn run() {
         .run(on_run_event);
 }
 
-/// 事件循环回调。目前只处理 macOS 的 Reopen。
+/// 事件循环回调：macOS 的 Reopen + 有未保存改动时的退出拦截。
 ///
 /// 窗口被「关闭到托盘」藏起来之后，Dock 图标还在 —— 点 Dock 是 macOS 用户最直觉的
 /// 恢复方式，不处理的话点了没反应，只能绕去菜单栏托盘图标。`RunEvent::Reopen` 这个
 /// 变体本身是 `#[cfg(target_os = "macos")]`，所以整块按平台编译。
-#[allow(unused_variables)]
+///
+/// `ExitRequested` 兜的是渲染端够不着的那两条退出路径：托盘菜单「退出应用」与
+/// macOS 的 Cmd+Q（`app.exit` 绕过 CloseRequested，见 close_guard.rs 顶部）。
+/// 拦下后发事件给渲染端，由它先保存、再调 `confirm_exit` 真正退出。
 fn on_run_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
     #[cfg(target_os = "macos")]
     if let tauri::RunEvent::Reopen { .. } = event {
         tray::show_main(app);
+    }
+    if let tauri::RunEvent::ExitRequested { api, .. } = event {
+        if close_guard::handle_exit_requested(app) {
+            api.prevent_exit();
+        }
     }
 }

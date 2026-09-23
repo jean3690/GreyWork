@@ -217,6 +217,13 @@ export const zhCN = {
       loading: "读取中…",
       readFailed: "读取失败：{detail}",
     },
+    /* 离开可编辑预览（切区段 / 切标签 / 关标签 / 关窗）前先自动保存；
+       只有保存失败才弹这个确认。names 是未能保存的文件名，顿号连接。 */
+    guard: {
+      title: "保存失败，仍要放弃改动？",
+      message: "{names} 的改动未能保存，继续操作将丢失这些改动。",
+      confirm: "放弃并继续",
+    },
     table: {
       empty: "空文件",
       truncated: "仅显示前 {limit} 行，共 {total} 行",

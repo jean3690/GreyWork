@@ -32,6 +32,8 @@ import { useResizableSplit } from "@/lib/resizable-split";
 import { usePreviewStore, type PreviewTab } from "@/stores/preview";
 import { notify } from "@/stores/notice";
 import { isPreviewDirty, previewSaver } from "@/lib/preview-save";
+import { cancelDiscard, confirmDiscard, pendingDiscard, requestLeave } from "@/lib/preview-edit-guard";
+import { syncUnsavedChanges } from "@/lib/close-guard";
 import ConfirmDialog from "@/features/settings/ConfirmDialog.vue";
 import { i18n } from "@/i18n";
 
@@ -53,6 +55,18 @@ watch(
     if (id) section.value = "preview";
   },
 );
+
+/**
+ * 区段切换：先过守卫再切。
+ *
+ * 区段用 `v-if` 切，离开预览区就会卸载编辑器并注销 saver —— 未保存的编辑随之消失
+ * （此前只对「关标签」做了确认，切区段是条静默丢改动的路）。走 requestLeave 让它先自动
+ * 保存，写不进去才弹确认。切到当前区段直接返回，省掉一次无意义的写盘。
+ */
+function switchSection(next: Section): void {
+  if (next === section.value) return;
+  requestLeave(() => (section.value = next));
+}
 
 const { dragging, onPointerDown } = useResizableSplit({
   width: () => preview.widthPx,
@@ -109,10 +123,10 @@ function diskPathOf(id: string): string | null {
 
 function buildTabMenu(target: ContextTarget | null): ContextMenuItem[] {
   return buildPreviewTabItems(target, t, {
-    activate: (id) => preview.activate(id),
+    activate: (id) => activateTab(id),
     reload: (id) => {
       const tab = tabById(id);
-      if (tab) preview.reload(tab.path);
+      if (tab) reloadTab(tab.path);
     },
     close: (id) => requestClose({ kind: "one", id }),
     closeOthers: (id) => requestClose({ kind: "others", id }),
@@ -128,7 +142,7 @@ function buildTabMenu(target: ContextTarget | null): ContextMenuItem[] {
 
 function buildEmptyMenu(): ContextMenuItem[] {
   return buildPreviewEmptyItems(t, {
-    openFiles: () => (section.value = "files"),
+    openFiles: () => switchSection("files"),
     fetchWeb: () => (fetchDialogOpen.value = true),
     closeAll: () => requestClose({ kind: "all" }),
     hasTabs: preview.tabs.length > 0,
@@ -147,22 +161,16 @@ function onTabAuxclick(event: MouseEvent, id: string): void {
   requestClose({ kind: "one", id });
 }
 
-/* ===== 保存 / 关闭前兜住未保存改动 ===== */
+/* ===== 保存 / 离开前兜住未保存改动 ===== */
 
-/** 关闭动作：单个 / 除某个外全部 / 全部。confirm 弹层据此算出会丢弃哪些 tab。 */
+/**
+ * 关闭动作：单个 / 除某个外全部 / 全部。
+ * 只描述「关哪些」，不关心怎么关 —— 守卫会先尝试保存，失败才问用户。
+ */
 type CloseAction = { kind: "one"; id: string } | { kind: "others"; id: string } | { kind: "all" };
 
-/** 待确认的关闭动作（会丢弃脏 tab 时才置位）；null = 无弹层。 */
-const pendingClose = ref<CloseAction | null>(null);
 /** 保存在途：禁用保存按钮防重复点击，也让 Ctrl+S 在写盘期间空转。 */
 const saving = ref(false);
-
-/** 某个关闭动作会连带关掉的 tab 集合。 */
-function tabsClosedBy(action: CloseAction): PreviewTab[] {
-  if (action.kind === "one") return preview.tabs.filter((tab) => tab.id === action.id);
-  if (action.kind === "others") return preview.tabs.filter((tab) => tab.id !== action.id);
-  return [...preview.tabs];
-}
 
 function performClose(action: CloseAction): void {
   if (action.kind === "one") preview.close(action.id);
@@ -170,27 +178,48 @@ function performClose(action: CloseAction): void {
   else preview.closeAll();
 }
 
-/** 关闭入口：会丢弃未保存改动时先弹确认，否则直接关。 */
+/**
+ * 关闭入口：交给守卫先自动保存，写不进去才弹「放弃并继续」。
+ * 之前的实现是「脏了就无条件问要不要放弃」，与切区段/切标签的静默丢改动不一致；
+ * 现在几条离开路径共用一个策略：能存就存，存不了才问。
+ */
 function requestClose(action: CloseAction): void {
-  if (tabsClosedBy(action).some((tab) => isPreviewDirty(tab.id))) {
-    pendingClose.value = action;
-    return;
-  }
-  performClose(action);
+  requestLeave(() => performClose(action));
 }
 
-function confirmClose(): void {
-  if (pendingClose.value) performClose(pendingClose.value);
-  pendingClose.value = null;
+/** 激活另一个 tab：同样先过守卫（切 tab 会卸载当前编辑器）。 */
+function activateTab(id: string): void {
+  if (id === preview.activeId) return;
+  requestLeave(() => preview.activate(id));
 }
 
-/** 待确认关闭里会被丢弃的脏 tab 数（弹层文案用）。 */
-const pendingDirtyCount = computed(() =>
-  pendingClose.value ? tabsClosedBy(pendingClose.value).filter((tab) => isPreviewDirty(tab.id)).length : 0,
-);
+/**
+ * 重新加载某路径：也先过守卫。
+ *
+ * 「重新加载」会重建 viewer（Univer / contenteditable 实例全丢），脏改动会无声消失。
+ * 先自动保存再重读，用户拿到的是「已保存的内容」——既没丢改动，也达到了刷新目的。
+ */
+function reloadTab(path: string): void {
+  requestLeave(() => preview.reload(path));
+}
+
+/** 待确认弹层里未能保存的 tab 名（文案用）。 */
+const discardNames = computed(() => pendingDiscard.value?.failed.map((tab) => tab.name).join("、") ?? "");
+
+/** 展开成模板可直接读的布尔，省得依赖「导入的 ref 在模板里自动解包」这条细节。 */
+const discardOpen = computed(() => pendingDiscard.value !== null);
 
 /** 当前激活 tab 是否有未保存改动（保存按钮可用态、Ctrl+S 拦截判据）。 */
 const activeDirty = computed(() => (preview.activeTab ? isPreviewDirty(preview.activeTab.id) : false));
+
+/** 全部 tab 的未保存改动数。 */
+const dirtyCount = computed(() => preview.tabs.filter((tab) => isPreviewDirty(tab.id)).length);
+
+/**
+ * 把「有没有未保存改动」同步给宿主 —— 宿主只认这一个布尔，据此决定要不要在
+ * `ExitRequested`（托盘退出 / Cmd+Q）里拦下。immediate 让启动后的真值先落地。
+ */
+watch(dirtyCount, (count) => void syncUnsavedChanges(count > 0), { immediate: true });
 
 /** 保存当前激活 tab；失败弹通知 —— 吞掉会让用户误以为存住了。 */
 async function saveActive(): Promise<void> {
@@ -298,7 +327,7 @@ const sectionClass = (active: boolean): string =>
         data-testid="preview-section-files"
         :class="sectionClass(section === 'files')"
         :aria-current="section === 'files' ? 'true' : undefined"
-        @click="section = 'files'"
+        @click="switchSection('files')"
       >
         文件
       </button>
@@ -307,7 +336,7 @@ const sectionClass = (active: boolean): string =>
         data-testid="preview-section-preview"
         :class="sectionClass(section === 'preview')"
         :aria-current="section === 'preview' ? 'true' : undefined"
-        @click="section = 'preview'"
+        @click="switchSection('preview')"
       >
         预览<span v-if="preview.tabs.length" class="ms-1 text-dim2">{{ preview.tabs.length }}</span>
       </button>
@@ -316,7 +345,7 @@ const sectionClass = (active: boolean): string =>
         data-testid="preview-section-git"
         :class="sectionClass(section === 'git')"
         :aria-current="section === 'git' ? 'true' : undefined"
-        @click="section = 'git'"
+        @click="switchSection('git')"
       >
         变更
       </button>
@@ -348,7 +377,7 @@ const sectionClass = (active: boolean): string =>
           data-testid="preview-reload"
           class="grid size-6 cursor-pointer place-items-center rounded-[6px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
           aria-label="重新加载当前预览"
-          @click="preview.reload(preview.activeTab.path)"
+          @click="reloadTab(preview.activeTab.path)"
         >
           <Icon name="refresh" :size="13" />
         </button>
@@ -417,7 +446,7 @@ const sectionClass = (active: boolean): string =>
                 class="max-w-[160px] cursor-pointer truncate focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
                 :aria-label="`查看 ${tab.name}`"
                 :aria-current="tab.id === preview.activeId ? 'true' : undefined"
-                @click="preview.activate(tab.id)"
+                @click="activateTab(tab.id)"
               >
                 {{ tab.name }}
               </button>
@@ -453,7 +482,7 @@ const sectionClass = (active: boolean): string =>
                 type="button"
                 data-testid="preview-empty-files"
                 class="cursor-pointer rounded-[6px] border border-line-2 bg-panel px-2.5 py-1 text-[11.5px] text-dim transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
-                @click="section = 'files'"
+                @click="switchSection('files')"
               >
                 打开文件树
               </button>
@@ -474,12 +503,12 @@ const sectionClass = (active: boolean): string =>
     <WebFetchDialog v-if="fetchDialogOpen" @close="fetchDialogOpen = false" />
 
     <ConfirmDialog
-      v-if="pendingClose"
-      title="放弃未保存的改动？"
-      :message="`有 ${pendingDirtyCount} 个文件的改动尚未保存，关闭后将丢失。`"
-      confirm-label="关闭不保存"
-      @confirm="confirmClose"
-      @cancel="pendingClose = null"
+      v-if="discardOpen"
+      :title="t('preview.guard.title')"
+      :message="t('preview.guard.message', { names: discardNames })"
+      :confirm-label="t('preview.guard.confirm')"
+      @confirm="confirmDiscard"
+      @cancel="cancelDiscard"
     />
   </aside>
 </template>
