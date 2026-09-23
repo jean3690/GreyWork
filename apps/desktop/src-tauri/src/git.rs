@@ -308,7 +308,12 @@ fn rename_target(path: &str) -> String {
         return after.trim().to_string();
     };
     match after.find('}') {
-        Some(close) => format!("{}{}{}", &before[..open], &after[..close], &after[close + 1..]),
+        Some(close) => format!(
+            "{}{}{}",
+            &before[..open],
+            &after[..close],
+            &after[close + 1..]
+        ),
         // 花括号没闭合：不猜，退化成「取箭头右边」。
         None => after.trim().to_string(),
     }
@@ -391,12 +396,21 @@ fn validate_rel_path(path: &str) -> Result<(), String> {
     if path.starts_with('-') {
         return Err(format!("非法路径: {path}"));
     }
-    let candidate = Path::new(path);
-    if candidate.is_absolute()
-        || candidate
-            .components()
-            .any(|component| matches!(component, std::path::Component::ParentDir))
-    {
+    // 逐 component 判绝对路径，而不是用 `Path::is_absolute()`：后者在 Windows 上只认
+    // 「前缀 + 根」（`C:\x`、`\\srv\share\x`），POSIX 风格的 `/abs/x` 有根没前缀，会被它
+    // 放行 —— 而 git 在 Windows 上照样把 `/abs/x` 当绝对路径解释。
+    // `Prefix` 单列是为 `C:x` 这类「有前缀无根」的盘符相对路径：它同样会被 git 解释到
+    // 仓库之外（与 path_safety.rs 记的那类逃逸同源）。Linux 上 `C:x` 只是个普通文件名，
+    // 这里靠 `Path` 的平台语义自动放行，不做过度拒绝。
+    let escaped = Path::new(path).components().any(|component| {
+        matches!(
+            component,
+            std::path::Component::ParentDir
+                | std::path::Component::RootDir
+                | std::path::Component::Prefix(_)
+        )
+    });
+    if escaped {
         return Err(format!("非法路径: {path}"));
     }
     Ok(())
@@ -977,8 +991,15 @@ mod tests {
         let access = access(&root);
 
         let result = changes(&access, &root.to_string_lossy()).expect("采集变更");
-        let a = result.iter().find(|e| e.path == "a.txt").expect("a 在变更里");
-        assert_eq!(a.index.as_deref(), Some("modified"), "已跟踪文件改动后暂存 → M");
+        let a = result
+            .iter()
+            .find(|e| e.path == "a.txt")
+            .expect("a 在变更里");
+        assert_eq!(
+            a.index.as_deref(),
+            Some("modified"),
+            "已跟踪文件改动后暂存 → M"
+        );
         assert_eq!(a.worktree.as_deref(), Some("modified"));
         assert_eq!(a.staged_add, 1, "index 侧 1 行");
         assert_eq!(a.add, 1, "worktree 侧 1 行（不是两侧相加的 2）");
@@ -1049,7 +1070,10 @@ mod tests {
         // 未暂存侧：只有 a（b 已进 index，不该出现在这一侧）
         let work = diff(&access, &root_text, None, false).expect("未暂存 diff");
         assert!(work.contains("a.txt"));
-        assert!(!work.contains("b.txt"), "已暂存的文件不该出现在未暂存 diff 里");
+        assert!(
+            !work.contains("b.txt"),
+            "已暂存的文件不该出现在未暂存 diff 里"
+        );
 
         // 已暂存侧：只有 b
         let staged = diff(&access, &root_text, None, true).expect("已暂存 diff");
@@ -1073,6 +1097,31 @@ mod tests {
         assert!(validate_rel_path("带 空格/中文.md").is_ok());
         for bad in ["", "../x", "a/../../x", "/abs/x", "-p"] {
             assert!(validate_rel_path(bad).is_err(), "{bad:?} 应被拒绝");
+        }
+    }
+
+    /// Windows 独有的绝对路径形态：`/abs/x` 有根无前缀（`is_absolute()` 漏掉的正是它），
+    /// `C:x` 有前缀无根，`C:\x` 与 `\\srv\share\x` 两者俱全 —— 四种都必须在 Windows 上被拒。
+    /// 由 windows job 的 `cargo test` 真正跑到（Linux 上这几串只是普通文件名，见下一个用例）。
+    #[cfg(windows)]
+    #[test]
+    fn relative_path_validation_rejects_windows_absolute_forms() {
+        for bad in [r"/abs/x", r"C:x", r"C:\x", r"\\srv\share\x"] {
+            assert!(validate_rel_path(bad).is_err(), "{bad:?} 应被拒绝");
+        }
+    }
+
+    /// 反向约束：非 Windows 上 `C:x` / `a:b.txt` 就是合法文件名（ext4/APFS 都允许冒号），
+    /// 校验器靠 `Path` 的平台语义判定，不该把它们连坐拒掉 —— 否则这类文件在变更面板里
+    /// 永远暂存不了。这条用例钉住「按平台语义而非字符串模式匹配」这个实现选择。
+    #[cfg(not(windows))]
+    #[test]
+    fn relative_path_validation_keeps_colon_filenames_outside_windows() {
+        for ok in [r"C:x", "a:b.txt"] {
+            assert!(
+                validate_rel_path(ok).is_ok(),
+                "{ok:?} 在非 Windows 上是普通文件名"
+            );
         }
     }
 

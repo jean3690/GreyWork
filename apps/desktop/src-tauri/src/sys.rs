@@ -29,7 +29,9 @@ pub struct SysInfo {
 /// 逻辑核数。`available_parallelism` 是标准库唯一的可移植入口；容器里被 cgroup 限核时
 /// 它给的是**限额后的**核数，正是"这台机器能并行跑多少"想要的语义。
 fn cpu_count() -> usize {
-    std::thread::available_parallelism().map(|n| n.get()).unwrap_or(0)
+    std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(0)
 }
 
 /// 低端设备判据（纯函数，便于单测）：物理内存 ≤ 4 GiB 或逻辑核数 ≤ 2。
@@ -37,6 +39,11 @@ fn cpu_count() -> usize {
 /// 阈值与渲染端 `lib/device-tier.ts` 保持一致 —— 两侧对"低端"的定义必须同源，否则会出现
 /// 宿主按低端关了 GPU 渲染、渲染端却按标准档跑动效的分裂状态。
 /// 内存取不到（None）时不据此判低端，只留核数这一条，避免在拿不到信息的平台上误伤。
+///
+/// 非 Linux 平台在 lib 目标里没有调用方（消费方只有 lib.rs 那段 Linux 兜底），
+/// `dead_code` 是对此的显式记账；不能整段按平台 cfg 掉，否则三平台共用的阈值用例
+/// `low_end_thresholds_match_renderer` 在 macOS / Windows 上就编不进来。
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn is_low_end(memory: Option<u64>, cores: usize) -> bool {
     const LOW_MEMORY_BYTES: u64 = 4 * 1024 * 1024 * 1024;
     if let Some(bytes) = memory {
@@ -48,6 +55,7 @@ fn is_low_end(memory: Option<u64>, cores: usize) -> bool {
 }
 
 /// 本机是否低端设备。宿主侧只有 Linux 的 WebKitGTK 兜底会消费它（见 lib.rs）。
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub fn is_low_end_device() -> bool {
     is_low_end(total_memory_bytes(), cpu_count())
 }

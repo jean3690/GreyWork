@@ -1109,9 +1109,11 @@ mod tests {
 
         let binary = root.join("blob.bin");
         std::fs::write(&binary, [0x00, 0x01, 0x02, 0x03, 0x00, 0xFF]).expect("写二进制");
-        assert!(probe_file(&access, &binary.to_string_lossy())
-            .expect("探测二进制")
-            .binary);
+        assert!(
+            probe_file(&access, &binary.to_string_lossy())
+                .expect("探测二进制")
+                .binary
+        );
 
         // 授权面与其它读命令一致：越界路径拿不到探测结果。
         let outside = temp_dir("probe-outside");
@@ -1288,7 +1290,10 @@ mod tests {
         delete_path(&access, &dir.to_string_lossy()).expect("删目录");
         assert!(!dir.exists());
 
-        assert!(delete_path(&access, &root.to_string_lossy()).is_err(), "授权根不可删");
+        assert!(
+            delete_path(&access, &root.to_string_lossy()).is_err(),
+            "授权根不可删"
+        );
         assert!(delete_path(&access, "/").is_err(), "文件系统根不可删");
         let outside = temp_dir("delete-outside");
         let ghost = outside.join("x.txt");
@@ -1303,7 +1308,10 @@ mod tests {
             let link = root.join("link.txt");
             std::os::unix::fs::symlink(&target, &link).unwrap();
             delete_path(&access, &link.to_string_lossy()).expect("删软链");
-            assert!(std::fs::symlink_metadata(&link).is_err(), "链接条目应被删掉");
+            assert!(
+                std::fs::symlink_metadata(&link).is_err(),
+                "链接条目应被删掉"
+            );
             assert!(target.exists(), "目标文件必须还在");
         }
 
@@ -1321,11 +1329,21 @@ mod tests {
         create_file(&access, &created.to_string_lossy()).expect("新建中文名文件");
 
         let renamed = root.join("总结.md");
-        rename_path(&access, &created.to_string_lossy(), &renamed.to_string_lossy()).expect("改名");
+        rename_path(
+            &access,
+            &created.to_string_lossy(),
+            &renamed.to_string_lossy(),
+        )
+        .expect("改名");
         assert!(renamed.is_file());
 
         let copied = root.join("总结 副本.md");
-        copy_path(&access, &renamed.to_string_lossy(), &copied.to_string_lossy()).expect("复制");
+        copy_path(
+            &access,
+            &renamed.to_string_lossy(),
+            &copied.to_string_lossy(),
+        )
+        .expect("复制");
         assert!(copied.is_file());
 
         delete_path(&access, &renamed.to_string_lossy()).expect("删除");

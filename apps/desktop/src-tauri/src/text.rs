@@ -143,7 +143,12 @@ fn looks_utf16(prefix: &[u8]) -> bool {
     if sample.len() < 4 {
         return false;
     }
-    let odd_nul = sample.iter().skip(1).step_by(2).filter(|byte| **byte == 0).count();
+    let odd_nul = sample
+        .iter()
+        .skip(1)
+        .step_by(2)
+        .filter(|byte| **byte == 0)
+        .count();
     let even_nul = sample.iter().step_by(2).filter(|byte| **byte == 0).count();
     let side = sample.len() / 2;
     odd_nul * 10 >= side * 9 || even_nul * 10 >= side * 9
