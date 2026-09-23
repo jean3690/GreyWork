@@ -12,6 +12,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { isTauriRuntime } from "@greywork/core";
 
+import type { MediaRef } from "../types";
+
 /** 宿主侧网关状态机。 */
 export type QqState = "stopped" | "connecting" | "connected" | "error";
 
@@ -37,6 +39,8 @@ export interface QqInbound {
   /** 发送者 openid（群聊里用来判归属人）。 */
   senderId: string;
   text: string;
+  /** 随消息到达的富媒体（图片 / 文件）；字节在宿主 inbox，凭 `path` 取走。 */
+  media?: MediaRef[];
   at: number;
 }
 

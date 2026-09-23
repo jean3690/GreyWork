@@ -11,18 +11,27 @@
 //!   msg_seq` 只能发一次），所以回发凭据（msg_id）与序号都留在宿主，渲染端不碰。
 
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
+use md5::Md5;
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, State};
+use sha1::Sha1;
+use sha2::Digest as _;
+use tauri::{AppHandle, Manager, State};
 use tokio::sync::Mutex;
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::channel_common::{
     app_sink, channel_dir, now_ms, read_json, sleep_or_stop, write_private, EventSink,
+};
+use crate::channel_media::{
+    inbox_dir, prune_inbox, sniff_image, store_inbound_media, MediaKind, MediaRefDto,
+    OutboundMedia, MAX_MEDIA_BYTES,
 };
 use crate::http::{read_text, shared_client, RESPONSE_READ_TIMEOUT};
 use crate::log;
@@ -45,6 +54,13 @@ const INTENTS_PUBLIC_MESSAGES: i64 = 1 << 25;
 const FALLBACK_HEARTBEAT: Duration = Duration::from_secs(30);
 /// 单条文本上限（QQ 文本消息 1000 字符量级，这里取保守值）。
 const MAX_TEXT_CHARS: usize = 1000;
+/// 单条消息最多收几条媒体（防止一条消息拖垮一整轮下载）。
+const MAX_INBOUND_MEDIA: usize = 4;
+/// 分片预上传要求的 `md5_10m`：文件前 10002432 字节（约 10MB）的 MD5。
+const MD5_10M_LEN: usize = 10_002_432;
+/// 富媒体业务类型：1 图片（仅 png/jpg），4 文件。视频（2）/语音（3）本版不发。
+const FILE_TYPE_IMAGE: i64 = 1;
+const FILE_TYPE_FILE: i64 = 4;
 /// access_token 提前刷新窗口（官方说明：到期前 60s 内取会拿到新 token）。
 const TOKEN_REFRESH_MARGIN_SECS: i64 = 60;
 
@@ -81,6 +97,28 @@ struct GatewayFrame {
     d: Option<serde_json::Value>,
 }
 
+/// 分片预上传（`upload_prepare`）的响应。
+///
+/// `block_size` 官方给的是字符串，这里按值收，交给 `size_of` 兼容字符串 / 数字两种形状。
+#[derive(Debug, Clone, Default, Deserialize)]
+struct UploadPrepareResponse {
+    #[serde(default)]
+    upload_id: String,
+    #[serde(default)]
+    parts: Vec<UploadPart>,
+}
+
+/// 一片预签名上传信息。
+#[derive(Debug, Clone, Default, Deserialize)]
+struct UploadPart {
+    #[serde(default)]
+    index: u64,
+    #[serde(default)]
+    presigned_url: String,
+    #[serde(default)]
+    block_size: serde_json::Value,
+}
+
 /// `C2C_MESSAGE_CREATE` / `GROUP_AT_MESSAGE_CREATE` 的消息体（只取用得到的字段）。
 #[derive(Debug, Clone, Default, Deserialize)]
 struct MessagePayload {
@@ -95,6 +133,22 @@ struct MessagePayload {
     group_openid: Option<String>,
     #[serde(default)]
     author: Author,
+    /// 富媒体消息带附件（图片 / 语音 / 视频 / 文件），`url` 是可直接下载的地址。
+    #[serde(default)]
+    attachments: Vec<AttachmentPayload>,
+}
+
+/// 富媒体附件描述（只取下载所需字段）。
+#[derive(Debug, Clone, Default, Deserialize)]
+struct AttachmentPayload {
+    #[serde(default)]
+    content_type: Option<String>,
+    #[serde(default)]
+    filename: Option<String>,
+    #[serde(default)]
+    size: Option<u64>,
+    #[serde(default)]
+    url: String,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -154,15 +208,38 @@ pub struct QqInboundDto {
     /// 发送者 openid（群聊里用来判归属人）。
     pub sender_id: String,
     pub text: String,
+    /// 随消息到达的图片 / 文件；字节在宿主 inbox，凭 `path` 取走。
+    pub media: Vec<MediaRefDto>,
     pub at: i64,
 }
 
-/// 归一条 dispatch 事件；不认识的 `t` 返回 None。
-pub fn normalize_dispatch(
+/// 归一后的入站草稿：附件还是「待下载」的 CDN 直链，等异步取字节落盘后再产 DTO。
+#[derive(Debug, Clone)]
+pub(crate) struct QqInboundDraft {
+    pub message_id: String,
+    pub peer_id: String,
+    pub nick: String,
+    pub sender_id: String,
+    pub text: String,
+    pub at: i64,
+    pub media: Vec<PendingAttachment>,
+}
+
+/// 待下载的一条入站附件（QQ 给的是 CDN 直链，直接 GET）。
+#[derive(Debug, Clone)]
+pub(crate) struct PendingAttachment {
+    url: String,
+    kind: MediaKind,
+    name: String,
+    declared_size: Option<u64>,
+}
+
+/// 归一条 dispatch 事件；不认识的 `t`、空正文且无附件都返回 None。
+pub(crate) fn normalize_dispatch(
     event: &str,
     data: &serde_json::Value,
     received_at: i64,
-) -> Option<QqInboundDto> {
+) -> Option<QqInboundDraft> {
     let payload: MessagePayload = serde_json::from_value(data.clone()).ok()?;
     if payload.id.trim().is_empty() {
         return None;
@@ -184,6 +261,11 @@ pub fn normalize_dispatch(
         }
         _ => return None,
     };
+    let media = pending_attachments(&payload.attachments);
+    let text = payload.content.unwrap_or_default();
+    if text.trim().is_empty() && media.is_empty() {
+        return None;
+    }
     let at = payload
         .timestamp
         .as_deref()
@@ -192,14 +274,42 @@ pub fn normalize_dispatch(
         .map(|seconds| seconds.saturating_mul(1000))
         .unwrap_or(received_at);
     let peer_id = encode_peer(&scope, &openid);
-    Some(QqInboundDto {
+    Some(QqInboundDraft {
         message_id: payload.id,
         nick: peer_id.clone(),
         peer_id,
         sender_id,
-        text: payload.content.unwrap_or_default(),
+        text,
         at,
+        media,
     })
+}
+
+/// 附件归一：`image/*` 按图片收，其余按文件收；无直链的丢掉；最多 4 条。
+fn pending_attachments(attachments: &[AttachmentPayload]) -> Vec<PendingAttachment> {
+    let mut out: Vec<PendingAttachment> = attachments
+        .iter()
+        .filter(|item| !item.url.trim().is_empty())
+        .map(|item| {
+            let name = item
+                .filename
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty());
+            let kind = match item.content_type.as_deref() {
+                Some(mime) if mime.starts_with("image/") => MediaKind::Image,
+                _ => MediaKind::File,
+            };
+            PendingAttachment {
+                url: item.url.trim().to_string(),
+                kind,
+                name: name.unwrap_or("attachment").to_string(),
+                declared_size: item.size,
+            }
+        })
+        .collect();
+    out.truncate(MAX_INBOUND_MEDIA);
+    out
 }
 
 /// 被动回复的请求体：`msg_id` + 自增 `msg_seq`（同一对不能重复发）。
@@ -210,6 +320,71 @@ pub fn reply_payload(text: &str, msg_id: &str, msg_seq: u64) -> serde_json::Valu
         "msg_id": msg_id,
         "msg_seq": msg_seq,
     })
+}
+
+/// 富媒体消息的请求体：`msg_type=7` + `media.file_info`（先上传换来的凭据）。
+pub fn rich_media_payload(file_info: &str, msg_id: &str, msg_seq: u64) -> serde_json::Value {
+    serde_json::json!({
+        "msg_type": 7,
+        "media": { "file_info": file_info },
+        "msg_id": msg_id,
+        "msg_seq": msg_seq,
+    })
+}
+
+/// 单聊 / 群聊的资源根（`upload_prepare` / `files` / `messages` 都挂在它下面）。
+fn base_url(scope: &ChatScope, openid: &str) -> String {
+    match scope {
+        ChatScope::C2c => format!("{API_BASE}/v2/users/{openid}"),
+        ChatScope::Group => format!("{API_BASE}/v2/groups/{openid}"),
+    }
+}
+
+/// 回发消息的端点。
+fn messages_url(scope: &ChatScope, openid: &str) -> String {
+    format!("{}/messages", base_url(scope, openid))
+}
+
+/// QQ 的业务类型：图片只认 png/jpg，其余一律按文件（4）发，免得撞 850019「不支持的文件格式」。
+fn qq_file_type(media: &OutboundMedia) -> i64 {
+    if media.kind == MediaKind::Image {
+        if let Some((mime, _)) = sniff_image(&media.bytes) {
+            if mime == "image/png" || mime == "image/jpeg" {
+                return FILE_TYPE_IMAGE;
+            }
+        }
+    }
+    FILE_TYPE_FILE
+}
+
+/// 小写十六进制（md5 / sha1 摘要的文本形状）。
+fn hex(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        let _ = write!(out, "{byte:02x}");
+    }
+    out
+}
+
+fn md5_hex(bytes: &[u8]) -> String {
+    let mut hasher = Md5::new();
+    hasher.update(bytes);
+    hex(&hasher.finalize())
+}
+
+fn sha1_hex(bytes: &[u8]) -> String {
+    let mut hasher = Sha1::new();
+    hasher.update(bytes);
+    hex(&hasher.finalize())
+}
+
+/// 分片大小兼容字符串 / 数字两种形状（官方给字符串，这里不赌）。
+fn size_of(value: &serde_json::Value) -> Option<u64> {
+    match value {
+        serde_json::Value::String(text) => text.trim().parse::<u64>().ok(),
+        serde_json::Value::Number(number) => number.as_u64(),
+        _ => None,
+    }
 }
 
 /// 文本净化：空文本拒绝，超长截断（截断也要发出去）。
@@ -712,15 +887,21 @@ pub(crate) struct GatewayDeps {
     persist: Arc<dyn Fn(&PeerBook) + Send + Sync>,
     /// 除归属人外是否也答复其他人（连接建立时定下，改设置后重连生效）。
     allow_other_senders: bool,
+    /// 入站媒体收件目录（连上时解析一次；不可用时入站附件整体丢弃并记日志）。
+    inbox: Option<PathBuf>,
 }
 
 impl GatewayDeps {
     fn for_app(app: &AppHandle) -> Self {
         let handle = app.clone();
+        let inbox = inbox_dir(app, DIR_NAME)
+            .inspect_err(|error| log::warn("qq", format!("收件目录不可用: {error}")))
+            .ok();
         Self {
             sink: app_sink(app),
             persist: Arc::new(move |peers: &PeerBook| persist_peers(&handle, peers)),
             allow_other_senders: false,
+            inbox,
         }
     }
 
@@ -829,6 +1010,43 @@ pub(crate) async fn gateway_url(client: &reqwest::Client, token: &str) -> Result
         })
 }
 
+/// POST 一个 JSON 请求并做「HTTP 状态 + 业务 code」双重检查，返回解析后的响应体。
+///
+/// QQ 的业务错误也走 200 + `code`：只判 HTTP 状态会把「消息被拒」当成成功。
+async fn post_api(
+    client: &reqwest::Client,
+    token: &str,
+    url: &str,
+    body: &serde_json::Value,
+    action: &str,
+) -> Result<serde_json::Value, String> {
+    let response = client
+        .post(url)
+        .header("Authorization", auth_header(token))
+        .json(body)
+        .send()
+        .await
+        .map_err(|error| format!("{action}请求失败: {error}"))?;
+    let status = response.status();
+    let text = read_text(response, RESPONSE_READ_TIMEOUT)
+        .await
+        .map_err(|error| format!("{action}响应读取失败: {error}"))?;
+    if !status.is_success() {
+        return Err(format!("{action}返回 {status}: {}", brief(&text)));
+    }
+    let parsed: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::Value::Null);
+    if let Some(code) = parsed.get("code").and_then(serde_json::Value::as_i64) {
+        if code != 0 {
+            let message = parsed
+                .get("message")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("unknown error");
+            return Err(format!("QQ 拒绝了{action}（{code}）：{message}"));
+        }
+    }
+    Ok(parsed)
+}
+
 /// 被动回复一条文本（5 分钟窗口内、同一 msg_id 至多 5 条）。
 pub(crate) async fn send_text(
     client: &reqwest::Client,
@@ -840,36 +1058,177 @@ pub(crate) async fn send_text(
 ) -> Result<(), String> {
     let (scope, openid) =
         decode_peer(peer_id).ok_or_else(|| format!("对端 id 无法解析: {peer_id:?}"))?;
-    let path = match scope {
-        ChatScope::C2c => format!("{API_BASE}/v2/users/{openid}/messages"),
-        ChatScope::Group => format!("{API_BASE}/v2/groups/{openid}/messages"),
-    };
+    post_api(
+        client,
+        token,
+        &messages_url(&scope, &openid),
+        &reply_payload(text, msg_id, msg_seq),
+        "发送消息",
+    )
+    .await
+    .map(|_| ())
+}
+
+/// 把一条本地媒体传到 QQ 并换回 `file_info`（富媒体消息必填）。
+///
+/// 本地字节没有可给的 `url`，所以走官方的**分片上传**四步：
+/// 1. `upload_prepare`（带整文件 md5/sha1/前 10MB md5）→ `upload_id` + 预签名分片
+/// 2. 每片 `PUT` 到 `presigned_url`
+/// 3. 每片 `upload_part_finish`（回 upload_id + 片序号 + 片大小 + 片 md5）
+/// 4. `files` 带 `upload_id` 合并 → `file_info`
+async fn upload_rich_media(
+    client: &reqwest::Client,
+    token: &str,
+    scope: &ChatScope,
+    openid: &str,
+    media: &OutboundMedia,
+) -> Result<String, String> {
+    if media.bytes.is_empty() {
+        return Err("不能发送空文件".into());
+    }
+    let base = base_url(scope, openid);
+    let file_type = qq_file_type(media);
+    let file_size = media.bytes.len();
+    let head_len = file_size.min(MD5_10M_LEN);
+    let prepare_body = serde_json::json!({
+        "file_type": file_type,
+        "file_name": media.name,
+        "file_size": file_size.to_string(),
+        "md5": md5_hex(&media.bytes),
+        "sha1": sha1_hex(&media.bytes),
+        "md5_10m": md5_hex(&media.bytes[..head_len]),
+    });
+    let prepared: UploadPrepareResponse = serde_json::from_value(
+        post_api(
+            client,
+            token,
+            &format!("{base}/upload_prepare"),
+            &prepare_body,
+            "申请上传",
+        )
+        .await?,
+    )
+    .map_err(|error| format!("申请上传响应解析失败: {error}"))?;
+    let upload_id = prepared.upload_id.trim().to_string();
+    if upload_id.is_empty() {
+        return Err("申请上传响应缺少 upload_id".into());
+    }
+    let mut parts = prepared.parts;
+    if parts.is_empty() {
+        return Err("申请上传响应没有分片信息".into());
+    }
+    parts.sort_by_key(|part| part.index);
+
+    let mut offset = 0usize;
+    for part in &parts {
+        // 按服务端下发的片大小切；最后一片可能更小，用 min 收口。
+        let end = (offset + size_of(&part.block_size).unwrap_or(0) as usize).min(file_size);
+        if end <= offset {
+            return Err(format!("分片 {} 大小异常", part.index));
+        }
+        let chunk = media.bytes[offset..end].to_vec();
+        let chunk_md5 = md5_hex(&chunk);
+        put_part(client, &part.presigned_url, chunk).await?;
+        let finish_body = serde_json::json!({
+            "upload_id": upload_id,
+            "part_index": part.index,
+            "block_size": (end - offset).to_string(),
+            "md5": chunk_md5,
+        });
+        post_api(
+            client,
+            token,
+            &format!("{base}/upload_part_finish"),
+            &finish_body,
+            "完成分片",
+        )
+        .await?;
+        offset = end;
+    }
+    if offset != file_size {
+        return Err("分片上传未覆盖整个文件".into());
+    }
+
+    let merged = post_api(
+        client,
+        token,
+        &format!("{base}/files"),
+        &serde_json::json!({
+            "file_type": file_type,
+            "file_name": media.name,
+            "upload_id": upload_id,
+            "srv_send_msg": false,
+        }),
+        "合并文件",
+    )
+    .await?;
+    merged
+        .get("file_info")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "合并文件响应缺少 file_info".to_string())
+}
+
+/// 把一个分片的字节 PUT 到预签名地址（对象存储直传，不带鉴权头）。
+async fn put_part(client: &reqwest::Client, url: &str, chunk: Vec<u8>) -> Result<(), String> {
+    if url.trim().is_empty() {
+        return Err("分片预签名地址为空".into());
+    }
     let response = client
-        .post(path)
-        .header("Authorization", auth_header(token))
-        .json(&reply_payload(text, msg_id, msg_seq))
+        .put(url)
+        .body(chunk)
         .send()
         .await
-        .map_err(|error| format!("发送消息失败: {error}"))?;
+        .map_err(|error| format!("上传分片请求失败: {error}"))?;
     let status = response.status();
+    if status.is_success() {
+        return Ok(());
+    }
     let body = read_text(response, RESPONSE_READ_TIMEOUT)
         .await
-        .map_err(|error| format!("发送响应读取失败: {error}"))?;
-    if !status.is_success() {
-        return Err(format!("发送消息返回 {status}: {}", brief(&body)));
+        .unwrap_or_default();
+    Err(format!("上传分片返回 {status}: {}", brief(&body)))
+}
+
+/// 发一条媒体：先分片上传换 `file_info`，再以 `msg_type=7` 被动回复出去。
+///
+/// token 与被动回复凭据都不出宿主：渲染端只传对端 id 与授权面内的本地路径。
+pub(crate) async fn send_media_impl(
+    app: &AppHandle,
+    peer_id: &str,
+    media: OutboundMedia,
+) -> Result<(), String> {
+    let (scope, openid) =
+        decode_peer(peer_id).ok_or_else(|| format!("对端 id 无法解析: {peer_id:?}"))?;
+    let client = shared_client(10)?;
+    let host = app.state::<QqHost>();
+    {
+        // 只做首次装载，随后立刻放锁：下面几步各自加锁，不能套着锁等网络。
+        let mut inner = host.lock().await;
+        ensure_loaded(app, &mut inner)?;
     }
-    // 业务错误也走 200 + 错误码：能解析出 code 就按错误处理，否则视为成功。
-    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&body) {
-        if let Some(code) = parsed.get("code").and_then(serde_json::Value::as_i64) {
-            if code != 0 {
-                let message = parsed
-                    .get("message")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("unknown error");
-                return Err(format!("QQ 拒绝了这条消息（{code}）：{message}"));
-            }
-        }
-    }
+    let token = ensure_token(&client, &host.inner).await?;
+    let (msg_id, msg_seq) = {
+        let mut inner = host.lock().await;
+        let reply = inner.peers.next_reply(peer_id).ok_or(
+            "会话凭据不可用：等对方再发一条消息（QQ 要求带回该消息的 msg_id，且只有 5 分钟窗口）",
+        )?;
+        let snapshot = inner.peers.clone();
+        persist_peers(app, &snapshot);
+        reply
+    };
+    let file_info = upload_rich_media(&client, &token, &scope, &openid, &media).await?;
+    post_api(
+        &client,
+        &token,
+        &messages_url(&scope, &openid),
+        &rich_media_payload(&file_info, &msg_id, msg_seq),
+        "发送媒体",
+    )
+    .await?;
+    let kind = media.kind.as_str();
+    log::info("qq", format!("已发送{kind}"));
     Ok(())
 }
 
@@ -1067,25 +1426,25 @@ async fn handle_dispatch(
     deps: &GatewayDeps,
     inner: &Mutex<Inner>,
 ) {
-    let Some(message) = normalize_dispatch(event, data, now_ms()) else {
+    let Some(draft) = normalize_dispatch(event, data, now_ms()) else {
         return;
     };
     let (peers, allowed) = {
         let mut guard = inner.lock().await;
-        guard.peers.claim_owner(&message.sender_id);
+        guard.peers.claim_owner(&draft.sender_id);
         guard
             .peers
-            .remember(&message.peer_id, &message.message_id, message.at);
+            .remember(&draft.peer_id, &draft.message_id, draft.at);
         if guard
             .last_message_at
-            .map(|last| message.at > last)
+            .map(|last| draft.at > last)
             .unwrap_or(true)
         {
-            guard.last_message_at = Some(message.at);
+            guard.last_message_at = Some(draft.at);
         }
         let allowed = guard
             .peers
-            .allows(&message.sender_id, deps.allow_other_senders);
+            .allows(&draft.sender_id, deps.allow_other_senders);
         emit_state(&guard, deps);
         (guard.peers.clone(), allowed)
     };
@@ -1095,15 +1454,105 @@ async fn handle_dispatch(
             "qq",
             format!(
                 "忽略非授权发送者 {}（可在设置中允许其他联系人）",
-                message.sender_id
+                draft.sender_id
             ),
         );
         return;
     }
+    // 附件字节下载进 inbox 后再广播（渲染端凭 path 取走）。
+    let message = materialize_inbound(deps, draft).await;
     deps.emit(
         INBOUND_EVENT,
         serde_json::to_value(message).unwrap_or(serde_json::Value::Null),
     );
+}
+
+/// 下载一条入站附件（QQ 给的是 CDN 直链），读入后卡 20MB 上限。
+async fn download_attachment(
+    client: &reqwest::Client,
+    pending: &PendingAttachment,
+) -> Result<Vec<u8>, String> {
+    if pending
+        .declared_size
+        .is_some_and(|size| size > MAX_MEDIA_BYTES)
+    {
+        return Err(format!(
+            "附件超过 {} MB 上限",
+            MAX_MEDIA_BYTES / (1024 * 1024)
+        ));
+    }
+    let response = client
+        .get(&pending.url)
+        .send()
+        .await
+        .map_err(|error| format!("下载附件请求失败: {error}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("下载附件返回 {status}"));
+    }
+    let bytes = tokio::time::timeout(RESPONSE_READ_TIMEOUT, response.bytes())
+        .await
+        .map_err(|_| "下载附件读取超时".to_string())?
+        .map_err(|error| format!("读取附件字节失败: {error}"))?;
+    if bytes.len() as u64 > MAX_MEDIA_BYTES {
+        return Err(format!(
+            "附件超过 {} MB 上限",
+            MAX_MEDIA_BYTES / (1024 * 1024)
+        ));
+    }
+    Ok(bytes.to_vec())
+}
+
+/// 把入站草稿的附件下载进 inbox（单条失败只记日志，不中断整轮）。
+async fn materialize_inbound(deps: &GatewayDeps, draft: QqInboundDraft) -> QqInboundDto {
+    let QqInboundDraft {
+        message_id,
+        peer_id,
+        nick,
+        sender_id,
+        text,
+        at,
+        media,
+    } = draft;
+    let mut refs = Vec::new();
+    if !media.is_empty() {
+        match deps.inbox.as_deref() {
+            None => log::warn("qq", "收件目录不可用，丢弃入站附件"),
+            Some(inbox) => match shared_client(10) {
+                Err(error) => log::warn("qq", format!("下载附件前建客户端失败: {error}")),
+                Ok(client) => {
+                    let received_at = now_ms();
+                    for (index, pending) in media.iter().enumerate() {
+                        match download_attachment(&client, pending).await {
+                            Ok(bytes) => {
+                                if let Some(dto) = store_inbound_media(
+                                    inbox,
+                                    DIR_NAME,
+                                    received_at,
+                                    index,
+                                    pending.kind,
+                                    &pending.name,
+                                    bytes,
+                                ) {
+                                    refs.push(dto);
+                                }
+                            }
+                            Err(error) => log::warn("qq", format!("入站附件下载失败: {error}")),
+                        }
+                    }
+                }
+            },
+        }
+    }
+    QqInboundDto {
+        message_id,
+        peer_id,
+        nick,
+        sender_id,
+        text,
+        at,
+        media: refs,
+    }
 }
 
 /// 指数退避（1s → 60s）。
@@ -1348,6 +1797,7 @@ pub async fn qq_clear_credentials(
         }
     }
     log::info("qq", "凭证已清除");
+    prune_inbox(&app, DIR_NAME, true);
     Ok(inner.status())
 }
 
@@ -1368,6 +1818,8 @@ pub async fn qq_connect(
         inner.detail = None;
     }
     let epoch = host.epoch.fetch_add(1, Ordering::SeqCst) + 1;
+    // 上次会话遗留的未取走收件文件先清掉（渲染端崩溃 / 未取走）。
+    prune_inbox(&app, DIR_NAME, false);
     let inner = host.inner.clone();
     let epochs = host.epoch.clone();
     let mut deps = GatewayDeps::for_app(&app);
@@ -1650,5 +2102,97 @@ mod tests {
         let ok: BindEnvelope =
             serde_json::from_str(r#"{"retcode":0,"data":{"task_id":"T1"}}"#).unwrap();
         assert_eq!(ok.into_data("发起扫码").unwrap()["task_id"], "T1");
+    }
+
+    #[test]
+    fn normalize_accepts_attachment_only_and_labels_kinds() {
+        let data = json!({
+            "id": "msg-9",
+            "author": { "user_openid": "U9" },
+            "attachments": [
+                { "content_type": "image/png", "filename": "图.png", "size": 12, "url": "https://cdn/1" },
+                { "content_type": "application/pdf", "filename": "报表.pdf", "url": "https://cdn/2" },
+                { "content_type": "application/octet-stream", "url": "https://cdn/3" },
+                { "url": "   " }
+            ],
+        });
+        let inbound = normalize_dispatch("C2C_MESSAGE_CREATE", &data, 1).expect("纯附件消息也要收");
+        assert_eq!(inbound.text, "");
+        assert_eq!(inbound.media.len(), 3, "空直链的丢掉");
+        assert_eq!(inbound.media[0].kind, MediaKind::Image, "image/* 按图片");
+        assert_eq!(inbound.media[0].name, "图.png");
+        assert_eq!(inbound.media[0].declared_size, Some(12));
+        assert_eq!(inbound.media[1].kind, MediaKind::File, "其余按文件");
+        assert_eq!(inbound.media[2].name, "attachment", "缺文件名回落");
+    }
+
+    #[test]
+    fn pending_attachments_caps_at_max() {
+        let items: Vec<AttachmentPayload> = (0..(MAX_INBOUND_MEDIA + 3))
+            .map(|index| AttachmentPayload {
+                url: format!("https://cdn/{index}"),
+                ..AttachmentPayload::default()
+            })
+            .collect();
+        assert_eq!(pending_attachments(&items).len(), MAX_INBOUND_MEDIA);
+    }
+
+    #[test]
+    fn file_type_falls_back_to_file_for_unsupported_images() {
+        let png = OutboundMedia {
+            bytes: vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a],
+            name: "a.png".into(),
+            kind: MediaKind::Image,
+        };
+        assert_eq!(qq_file_type(&png), FILE_TYPE_IMAGE);
+        // 嗅探得出是 gif：QQ 图片只认 png/jpg，降级为文件，免得撞 850019。
+        let gif = OutboundMedia {
+            bytes: b"GIF89a....".to_vec(),
+            name: "a.gif".into(),
+            kind: MediaKind::Image,
+        };
+        assert_eq!(qq_file_type(&gif), FILE_TYPE_FILE);
+        let doc = OutboundMedia {
+            bytes: b"hello".to_vec(),
+            name: "a.txt".into(),
+            kind: MediaKind::File,
+        };
+        assert_eq!(qq_file_type(&doc), FILE_TYPE_FILE);
+    }
+
+    #[test]
+    fn digests_match_known_vectors() {
+        assert_eq!(md5_hex(b"abc"), "900150983cd24fb0d6963f7d28e17f72");
+        assert_eq!(sha1_hex(b"abc"), "a9993e364706816aba3e25717850c26c9cd0d89d");
+        assert_eq!(hex(&[0x00, 0x0f, 0xff]), "000fff");
+    }
+
+    #[test]
+    fn size_of_accepts_string_and_number() {
+        assert_eq!(size_of(&json!("1048576")), Some(1_048_576));
+        assert_eq!(size_of(&json!(2048)), Some(2048));
+        assert_eq!(size_of(&json!(null)), None);
+        assert_eq!(size_of(&json!("oops")), None);
+    }
+
+    #[test]
+    fn rich_media_payload_uses_msg_type_seven() {
+        let payload = rich_media_payload("FILE_INFO", "msg-1", 2);
+        assert_eq!(payload["msg_type"], 7);
+        assert_eq!(payload["media"]["file_info"], "FILE_INFO");
+        assert_eq!(payload["msg_id"], "msg-1");
+        assert_eq!(payload["msg_seq"], 2);
+    }
+
+    #[test]
+    fn resource_urls_split_by_scope() {
+        assert_eq!(
+            messages_url(&ChatScope::C2c, "U1"),
+            format!("{API_BASE}/v2/users/U1/messages")
+        );
+        assert_eq!(
+            messages_url(&ChatScope::Group, "G1"),
+            format!("{API_BASE}/v2/groups/G1/messages")
+        );
     }
 }

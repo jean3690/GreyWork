@@ -56,6 +56,10 @@ encoding_rs = "0.8"
 chardetng = "1"
 
 sha2 = "0.10"
+# QQ 富媒体文件上传的「申请上传」步骤要求带上文件 md5 / sha1（分片合并时的校验依据）。
+# 两者都已是 wechatbot / 其他依赖的传递依赖，这里只是显式声明直接使用。
+md-5 = "0.10"
+sha1 = "0.10"
 # 企业微信 / QQ 扫码创建：AstrBot 逆向出的 q.qq.com 绑定流程把 AppSecret 以 AES-256-GCM
 # 密文下发（12B nonce + 密文 + 16B tag），绑定用的对称密钥由本机生成并只留在宿主内存。
 aes-gcm = "0.10"
