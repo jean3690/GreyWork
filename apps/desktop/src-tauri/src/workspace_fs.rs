@@ -188,6 +188,41 @@ impl WorkspaceFsAccess {
             Err(format!("写入目录未获用户授权: {}", path.display()))
         }
     }
+
+    /// 解析**条目本身**（不跟随符号链接），并要求它的父目录在某个授权根内。
+    ///
+    /// `resolve_existing` 会 `canonicalize`，也就是把符号链接解析成目标 —— 对「读这个
+    /// 文件的内容」是对的，对「删除 / 改名这个条目」是错的：删一条指向根内某文件的软链，
+    /// 删掉的是那个目标文件。这里改用 `list_dir` 的同款技巧（`:398`）：规范化**父目录**
+    /// 并校验它在授权根内，再把文件名原样接回去，于是拿到的始终是条目自己。
+    ///
+    /// 顺带把「CRUD 只作用于授权根内」这条语义落在这里：父目录必须在 root 之下，
+    /// 于是 `paths.files` 里那些**单独授权**的散文件不会被 CRUD 消费（它们的父目录不是
+    /// root，`resolve_write` 也必拒 —— 若允许删除就会出现「能删但不能改名」的割裂）。
+    fn resolve_entry(&self, raw: &str) -> Result<PathBuf, String> {
+        let requested = validate_absolute(Path::new(raw))?;
+        let name = requested
+            .file_name()
+            .ok_or_else(|| "路径缺少文件名".to_string())?;
+        let parent = requested
+            .parent()
+            .ok_or_else(|| "路径缺少父目录".to_string())?;
+        let canonical_parent = canonical_existing(parent)?;
+        self.require_authorized_root(&canonical_parent)?;
+        Ok(canonical_parent.join(name))
+    }
+
+    /// 该路径是否是某个已授权的工作区根。
+    ///
+    /// `path_safety::is_filesystem_root` 只认 `/`、`C:\`、UNC 这类**文件系统**根，
+    /// 认不出用户绑定进来的工作区目录；而 roots 集合是私有的，所以这里补一个只读判据。
+    pub fn is_authorized_root(&self, path: &Path) -> bool {
+        self.paths
+            .read()
+            .roots
+            .iter()
+            .any(|root| crate::path_safety::same_path(root, path))
+    }
 }
 
 fn validate_absolute(path: &Path) -> Result<PathBuf, String> {
@@ -233,6 +268,221 @@ pub fn fs_ensure_dir(
 ) -> Result<(), String> {
     let path = access.resolve_write(&path)?;
     std::fs::create_dir_all(&path).map_err(|error| format!("创建目录失败: {error}"))
+}
+
+/* ===================== 文件树增删改 =====================
+ *
+ * 全部只作用于**授权根内**、且**操作条目本身而不是符号链接目标**（见 resolve_entry）。
+ * 破坏性操作（删除、覆盖式改名）在 UI 侧还有一道确认，宿主这里只守住路径边界与
+ * 「不静默覆盖」这两条。
+ */
+
+/// 该条目本身是否是符号链接 / Windows 重解析点（不跟随）。
+///
+/// `list_dir` 里的 `is_link_like` 吃的是 `DirEntry`，按路径判断的场景要单独一份。
+fn entry_is_link(path: &Path) -> bool {
+    let Ok(metadata) = std::fs::symlink_metadata(path) else {
+        return false;
+    };
+    if metadata.file_type().is_symlink() {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+        return metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0;
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
+/// 新建路径的公共前置：名字安全 + 父目录已存在且在授权根内。返回**条目自身**的路径。
+fn resolve_new_entry(access: &WorkspaceFsAccess, raw: &str) -> Result<PathBuf, String> {
+    let requested = validate_absolute(Path::new(raw))?;
+    let name = requested
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| "路径缺少文件名".to_string())?;
+    // 渲染端已校验一次；这里再兜一次，免得别处（或手改过的前端）塞进非法名。
+    if !crate::path_safety::is_safe_path_segment(name) {
+        return Err(format!("名称不可用: {name}"));
+    }
+    let parent = requested
+        .parent()
+        .ok_or_else(|| "路径缺少父目录".to_string())?;
+    if !parent.exists() {
+        return Err("父目录不存在".into());
+    }
+    let canonical_parent = canonical_existing(parent)?;
+    access.require_authorized_root(&canonical_parent)?;
+    if !canonical_parent.is_dir() {
+        return Err("父目录不是文件夹".into());
+    }
+    Ok(canonical_parent.join(name))
+}
+
+/// 可删除 / 可改名 / 可移动的源条目及其守卫。
+fn movable_source(access: &WorkspaceFsAccess, raw: &str) -> Result<PathBuf, String> {
+    let requested = validate_absolute(Path::new(raw))?;
+    if crate::path_safety::is_filesystem_root(&requested) {
+        return Err("不能操作文件系统根目录".into());
+    }
+    // 绑定进来的工作区根同样不许动：删掉它会让授权账本指向一个不存在的目录，
+    // 而且树里本来就点不到根自身（只列它的子项），这条防的是被构造出来的调用。
+    if access.is_authorized_root(&requested) {
+        return Err("不能移动或删除已授权的工作区根目录".into());
+    }
+    let entry = access.resolve_entry(raw)?;
+    // 断链的符号链接 `exists()` 是 false，但条目确实在 —— 用 symlink_metadata 兜住。
+    if !entry.exists() && std::fs::symlink_metadata(&entry).is_err() {
+        return Err(format!("路径不存在: {}", entry.display()));
+    }
+    Ok(entry)
+}
+
+/// 新建空文件。父目录必须已存在（不做递归创建，避免手滑造出一串目录）。
+fn create_file(access: &WorkspaceFsAccess, raw: &str) -> Result<(), String> {
+    let path = resolve_new_entry(access, raw)?;
+    // create_new = O_EXCL：撞名会失败而不是覆盖；目标是指向别处的悬空链接同样失败。
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .map_err(|error| format!("新建文件失败: {error}"))?;
+    Ok(())
+}
+
+/// 新建文件夹（`create_dir` 而非 `create_dir_all`：父目录不存在就报错）。
+fn create_dir(access: &WorkspaceFsAccess, raw: &str) -> Result<(), String> {
+    let path = resolve_new_entry(access, raw)?;
+    std::fs::create_dir(&path).map_err(|error| format!("新建文件夹失败: {error}"))
+}
+
+/// 改名 / 移动（同一个操作：改名是同目录换名，移动是新目录加原名）。
+fn rename_path(access: &WorkspaceFsAccess, from: &str, to: &str) -> Result<(), String> {
+    let source = movable_source(access, from)?;
+    let target = resolve_new_entry(access, to)?;
+    if crate::path_safety::same_path(&source, &target) {
+        return Err("新名称与原名称相同".into());
+    }
+    // Path::starts_with 按组件比较，所以 `/w/a.txt` 不会被 `/w/a.txt.bak` 命中；
+    // 这里要拦的是「把目录挪进它自己的子树」。
+    if target.starts_with(&source) {
+        return Err("不能把文件夹移动到它自己内部".into());
+    }
+    // 显式挡撞名：Unix 的 rename 会**静默覆盖**普通文件，用户会丢数据。
+    if target.exists() {
+        return Err(format!("目标已存在: {}", target.display()));
+    }
+    std::fs::rename(&source, &target).map_err(|error| {
+        // EXDEV：源与目标在不同挂载点。降级成「复制 + 删除」对目录代价太大且有半途失败
+        // 的中间态，所以明确报错让用户自己决定。
+        if error.raw_os_error() == Some(18) {
+            "跨磁盘分区移动暂不支持，请改用复制后删除".into()
+        } else {
+            format!("移动失败: {error}")
+        }
+    })
+}
+
+/// 复制条目（文件或目录，递归）。目标必须不存在。
+fn copy_path(access: &WorkspaceFsAccess, from: &str, to: &str) -> Result<(), String> {
+    let source = movable_source(access, from)?;
+    if entry_is_link(&source) {
+        // 复制链接会跟随到目标（`fs::copy` 读的是目标内容），链接指向根外时
+        // 等于把授权面外的内容搬进树里。不做，也不假装能复刻链接本身。
+        return Err("不支持复制符号链接".into());
+    }
+    let target = resolve_new_entry(access, to)?;
+    if target.starts_with(&source) {
+        return Err("不能把文件夹复制到它自己内部".into());
+    }
+    if target.exists() {
+        return Err(format!("目标已存在: {}", target.display()));
+    }
+    copy_entry(&source, &target).map_err(|error| format!("复制失败: {error}"))
+}
+
+/// 递归复制。**目录内的符号链接 / 重解析点一律跳过**，不跟随。
+///
+/// 跟随会把授权根之外的内容搬进来（`list_dir` 之所以只用根内条目，也是因为它对每个
+/// 条目单独判链接），环状链接还会让递归无限展开。
+fn copy_entry(source: &Path, target: &Path) -> std::io::Result<()> {
+    if entry_is_link(source) {
+        return Ok(());
+    }
+    if std::fs::symlink_metadata(source)?.is_dir() {
+        std::fs::create_dir(target)?;
+        for entry in std::fs::read_dir(source)? {
+            let entry = entry?;
+            copy_entry(&entry.path(), &target.join(entry.file_name()))?;
+        }
+        return Ok(());
+    }
+    std::fs::copy(source, target).map(|_| ())
+}
+
+/// 删除条目。文件夹递归删除（`remove_dir_all` 删的是条目本身，不跟随链接）。
+fn delete_path(access: &WorkspaceFsAccess, raw: &str) -> Result<(), String> {
+    let entry = movable_source(access, raw)?;
+    // 用 symlink_metadata：指向目录的符号链接要被当成「文件」删掉链接本身，
+    // 而不是递归删掉它指向的目录内容。
+    let metadata = std::fs::symlink_metadata(&entry).map_err(|error| format!("读取条目失败: {error}"))?;
+    if metadata.is_dir() {
+        std::fs::remove_dir_all(&entry).map_err(|error| format!("删除文件夹失败: {error}"))
+    } else {
+        std::fs::remove_file(&entry).map_err(|error| format!("删除文件失败: {error}"))
+    }
+}
+
+/// 新建空文件（工作区文件树「新建文件」）。
+#[tauri::command]
+pub fn fs_create_file(
+    access: tauri::State<'_, WorkspaceFsAccess>,
+    path: String,
+) -> Result<(), String> {
+    create_file(&access, &path)
+}
+
+/// 新建文件夹（工作区文件树「新建文件夹」）。
+#[tauri::command]
+pub fn fs_create_dir(
+    access: tauri::State<'_, WorkspaceFsAccess>,
+    path: String,
+) -> Result<(), String> {
+    create_dir(&access, &path)
+}
+
+/// 改名 / 移动（工作区文件树「重命名 / 剪切后粘贴」）。
+#[tauri::command]
+pub fn fs_rename_path(
+    access: tauri::State<'_, WorkspaceFsAccess>,
+    from: String,
+    to: String,
+) -> Result<(), String> {
+    rename_path(&access, &from, &to)
+}
+
+/// 复制（工作区文件树「复制后粘贴」，目录递归）。
+#[tauri::command]
+pub fn fs_copy_path(
+    access: tauri::State<'_, WorkspaceFsAccess>,
+    from: String,
+    to: String,
+) -> Result<(), String> {
+    copy_path(&access, &from, &to)
+}
+
+/// 删除文件或文件夹（工作区文件树「删除」）。
+#[tauri::command]
+pub fn fs_delete_path(
+    access: tauri::State<'_, WorkspaceFsAccess>,
+    path: String,
+) -> Result<(), String> {
+    delete_path(&access, &path)
 }
 
 /// 写二进制文件（base64 载荷，≤20MB），产物默认落盘通道。
@@ -808,5 +1058,215 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(root);
         let _ = std::fs::remove_dir_all(outside);
+    }
+
+    /// 新建：落在授权根内、撞名与非法名被拒、父目录必须存在、不覆盖既有内容。
+    #[test]
+    fn create_refuses_collisions_illegal_names_and_missing_parents() {
+        let root = temp_dir("create");
+        let access = access(&root);
+
+        let file = root.join("notes.txt");
+        create_file(&access, &file.to_string_lossy()).expect("新建文件");
+        assert!(file.is_file());
+        assert!(std::fs::read(&file).unwrap().is_empty());
+
+        // 撞名不再新建，更不清空已有内容
+        std::fs::write(&file, b"keep").unwrap();
+        assert!(create_file(&access, &file.to_string_lossy()).is_err());
+        assert_eq!(std::fs::read(&file).unwrap(), b"keep");
+
+        let dir = root.join("sub");
+        create_dir(&access, &dir.to_string_lossy()).expect("新建文件夹");
+        assert!(dir.is_dir());
+        assert!(create_dir(&access, &dir.to_string_lossy()).is_err());
+
+        // 父目录不存在（不做递归创建）
+        assert!(create_file(&access, &root.join("nope/a.txt").to_string_lossy()).is_err());
+        // 非法名：保留设备名 / 结尾点 / Windows ADS 的冒号
+        for bad in ["CON", "foo.", "a:b"] {
+            assert!(
+                create_file(&access, &root.join(bad).to_string_lossy()).is_err(),
+                "{bad:?} 应被拒绝"
+            );
+        }
+        // 授权根之外 / 相对路径
+        let outside = temp_dir("create-outside");
+        assert!(create_file(&access, &outside.join("x.txt").to_string_lossy()).is_err());
+        assert!(create_file(&access, "relative.txt").is_err());
+
+        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_dir_all(outside);
+    }
+
+    /// 改名 / 移动：同路径、撞名、自身子树、授权根、根外源全部被拒；成功时旧路径消失。
+    #[test]
+    fn rename_guards_collisions_subtrees_and_roots() {
+        let root = temp_dir("rename");
+        let access = access(&root);
+        let dir = root.join("sub");
+        std::fs::create_dir(&dir).unwrap();
+        let from = dir.join("a.txt");
+        std::fs::write(&from, b"one").unwrap();
+
+        let to = dir.join("b.txt");
+        rename_path(&access, &from.to_string_lossy(), &to.to_string_lossy()).expect("改名");
+        assert!(!from.exists() && to.is_file());
+
+        // 同路径
+        assert!(rename_path(&access, &to.to_string_lossy(), &to.to_string_lossy()).is_err());
+        // 撞名（且不能覆盖目标内容）
+        std::fs::write(&from, b"two").unwrap();
+        assert!(rename_path(&access, &to.to_string_lossy(), &from.to_string_lossy()).is_err());
+        assert_eq!(std::fs::read(&from).unwrap(), b"two");
+
+        // 目录挪进自己的子树
+        assert!(rename_path(
+            &access,
+            &dir.to_string_lossy(),
+            &dir.join("inner/sub").to_string_lossy()
+        )
+        .is_err());
+
+        // 跨目录移动
+        let moved = root.join("b.txt");
+        rename_path(&access, &to.to_string_lossy(), &moved.to_string_lossy()).expect("移动");
+        assert!(moved.is_file() && !to.exists());
+
+        // 授权根本身
+        let outer = temp_dir("rename-outer");
+        assert!(rename_path(
+            &access,
+            &root.to_string_lossy(),
+            &outer.join("renamed").to_string_lossy()
+        )
+        .is_err());
+        // 根之外的源
+        let outside = temp_dir("rename-outside");
+        let ghost = outside.join("x.txt");
+        std::fs::write(&ghost, b"x").unwrap();
+        assert!(rename_path(
+            &access,
+            &ghost.to_string_lossy(),
+            &root.join("x.txt").to_string_lossy()
+        )
+        .is_err());
+
+        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_dir_all(outside);
+        let _ = std::fs::remove_dir_all(outer);
+    }
+
+    /// 复制：目录递归；目录内的符号链接被跳过（不把根外内容搬进来）；链接源被明确拒绝。
+    #[test]
+    fn copy_is_recursive_and_skips_symlinked_entries() {
+        let root = temp_dir("copy");
+        let access = access(&root);
+        let src = root.join("src");
+        std::fs::create_dir_all(src.join("nested")).unwrap();
+        std::fs::write(src.join("a.txt"), b"a").unwrap();
+        std::fs::write(src.join("nested/b.txt"), b"b").unwrap();
+
+        let dst = root.join("dst");
+        copy_path(&access, &src.to_string_lossy(), &dst.to_string_lossy()).expect("复制目录");
+        assert_eq!(std::fs::read(dst.join("a.txt")).unwrap(), b"a");
+        assert_eq!(std::fs::read(dst.join("nested/b.txt")).unwrap(), b"b");
+
+        // 撞名 / 复制进自己内部
+        assert!(copy_path(&access, &src.to_string_lossy(), &dst.to_string_lossy()).is_err());
+        assert!(copy_path(
+            &access,
+            &src.to_string_lossy(),
+            &src.join("inner").to_string_lossy()
+        )
+        .is_err());
+
+        #[cfg(unix)]
+        {
+            let outside = temp_dir("copy-outside");
+            std::fs::write(outside.join("secret.txt"), b"secret").unwrap();
+            std::os::unix::fs::symlink(outside.join("secret.txt"), src.join("link.txt")).unwrap();
+
+            let dst2 = root.join("dst2");
+            copy_path(&access, &src.to_string_lossy(), &dst2.to_string_lossy())
+                .expect("复制目录（含链接）");
+            assert!(!dst2.join("link.txt").exists(), "链接不该被复制过去");
+
+            // 源自身是链接：拒绝而不是跟随到目标
+            let linked = root.join("linked.txt");
+            std::os::unix::fs::symlink(src.join("a.txt"), &linked).unwrap();
+            assert!(copy_path(
+                &access,
+                &linked.to_string_lossy(),
+                &root.join("copied.txt").to_string_lossy()
+            )
+            .is_err());
+
+            let _ = std::fs::remove_dir_all(outside);
+        }
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// 删除：文件与目录（递归）都能删；授权根、文件系统根、根外被拒；软链删的是链接本身。
+    #[test]
+    fn delete_rejects_roots_and_removes_entries() {
+        let root = temp_dir("delete");
+        let access = access(&root);
+        let file = root.join("a.txt");
+        std::fs::write(&file, b"a").unwrap();
+        let dir = root.join("d");
+        std::fs::create_dir_all(dir.join("inner")).unwrap();
+        std::fs::write(dir.join("inner/b.txt"), b"b").unwrap();
+
+        delete_path(&access, &file.to_string_lossy()).expect("删文件");
+        assert!(!file.exists());
+        delete_path(&access, &dir.to_string_lossy()).expect("删目录");
+        assert!(!dir.exists());
+
+        assert!(delete_path(&access, &root.to_string_lossy()).is_err(), "授权根不可删");
+        assert!(delete_path(&access, "/").is_err(), "文件系统根不可删");
+        let outside = temp_dir("delete-outside");
+        let ghost = outside.join("x.txt");
+        std::fs::write(&ghost, b"x").unwrap();
+        assert!(delete_path(&access, &ghost.to_string_lossy()).is_err());
+        assert!(ghost.exists(), "越界删除不该真的删掉");
+
+        #[cfg(unix)]
+        {
+            let target = root.join("target.txt");
+            std::fs::write(&target, b"keep").unwrap();
+            let link = root.join("link.txt");
+            std::os::unix::fs::symlink(&target, &link).unwrap();
+            delete_path(&access, &link.to_string_lossy()).expect("删软链");
+            assert!(std::fs::symlink_metadata(&link).is_err(), "链接条目应被删掉");
+            assert!(target.exists(), "目标文件必须还在");
+        }
+
+        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_dir_all(outside);
+    }
+
+    /// 非 ASCII 名称往返：新建 → 改名 → 复制 → 删除。
+    #[test]
+    fn crud_round_trips_non_ascii_names() {
+        let root = temp_dir("unicode");
+        let access = access(&root);
+
+        let created = root.join("报告 2026.txt");
+        create_file(&access, &created.to_string_lossy()).expect("新建中文名文件");
+
+        let renamed = root.join("总结.md");
+        rename_path(&access, &created.to_string_lossy(), &renamed.to_string_lossy()).expect("改名");
+        assert!(renamed.is_file());
+
+        let copied = root.join("总结 副本.md");
+        copy_path(&access, &renamed.to_string_lossy(), &copied.to_string_lossy()).expect("复制");
+        assert!(copied.is_file());
+
+        delete_path(&access, &renamed.to_string_lossy()).expect("删除");
+        assert!(!renamed.exists() && copied.exists());
+
+        let _ = std::fs::remove_dir_all(root);
     }
 }
