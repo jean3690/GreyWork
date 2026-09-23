@@ -28,12 +28,26 @@ pub struct GitStatusDto {
     pub staged: bool,
 }
 
-#[derive(Debug, Serialize)]
+/// 变更条目。
+///
+/// **两侧分开报**：同一个文件可以同时有「已暂存」和「未暂存」的改动（porcelain 里的 `MM`），
+/// 而提交只吃 index 侧、行数也只该按侧统计 —— 旧的单 `staged` 布尔 + 两侧相加既表达不了
+/// 这种状态，也让变更面板无法分区展示。
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitChangeDto {
     pub path: String,
-    pub status: String,
-    pub staged: bool,
+    /// 重命名 / 复制的旧路径。取消暂存要成对处理，否则索引里会留下一条
+    /// 「旧路径已删除」的幽灵变更。
+    pub old_path: Option<String>,
+    /// index（已暂存）侧的状态；`None` = 这一侧没有改动。
+    pub index: Option<String>,
+    /// worktree（未暂存）侧的状态；`None` = 这一侧没有改动。
+    pub worktree: Option<String>,
+    /// index 侧的行级增删。
+    pub staged_add: u32,
+    pub staged_del: u32,
+    /// worktree 侧的行级增删。
     pub add: u32,
     pub del: u32,
 }
@@ -96,28 +110,35 @@ fn letter_to_status(letter: char) -> Option<String> {
     )
 }
 
+/// 一条 porcelain 记录：路径 + （重命名 / 复制时的）旧路径 + XY 两个位置码。
+#[derive(Debug)]
+struct StatusRecord {
+    path: String,
+    old_path: Option<String>,
+    /// X：index（已暂存）侧的位置码。
+    index: char,
+    /// Y：worktree（未暂存）侧的位置码。
+    worktree: char,
+}
+
 /// 解析 `git status --porcelain -z` 的一条记录头（`XY <路径>`）。
 ///
-/// 返回 (路径, 状态, 是否 staged)；无法识别的情况返回 None。
+/// 只解析这一条；重命名 / 复制的**旧路径是紧随其后的另一条记录**，由 `collect_records` 拼上。
 ///
 /// 用 `-z` 形态而不是默认的行形态：`-z` 下路径**原样输出**（不引号、不转义），
 /// 重命名/复制的两条路径以 NUL 分隔而不是 ` -> ` 拼接。这样既省掉一整套 C 风格解转义
 /// （`core.quotepath=false` 只关掉非 ASCII 的八进制转义，含 `"` / `\` 的路径仍会被
 /// 引号包裹），也不会被文件名里恰好含 ` -> ` 的情况骗到。
-fn parse_status_record(record: &str) -> Option<(String, String, bool)> {
+fn parse_status_record(record: &str) -> Option<(char, char, String)> {
     let bytes = record.as_bytes();
     if bytes.len() < 3 || bytes[2] != b' ' {
         return None;
     }
-    let index = bytes[0] as char;
-    let worktree = bytes[1] as char;
     let path = record[3..].to_string();
     if path.is_empty() {
         return None;
     }
-    let staged = !matches!(index, ' ' | '?' | '!');
-    let status = letter_to_status(index).or_else(|| letter_to_status(worktree))?;
-    Some((path, status, staged))
+    Some((bytes[0] as char, bytes[1] as char, path))
 }
 
 /// `-z` 下重命名/复制的 index 字母：后面还会跟一条「旧路径」记录，必须跳过。
@@ -125,8 +146,8 @@ fn record_carries_old_path(record: &str) -> bool {
     matches!(record.as_bytes().first(), Some(b'R' | b'C'))
 }
 
-/// `git status --porcelain` 全部条目的类型化列表。
-fn collect_status(root: &Path) -> Result<Vec<GitStatusDto>, String> {
+/// `git status --porcelain -z` 的全部记录（含重命名配对）。
+fn collect_records(root: &Path) -> Result<Vec<StatusRecord>, String> {
     let out = run_git(root, &["status", "--porcelain", "-z"])?;
     let mut records = out.split('\0');
     let mut entries = Vec::new();
@@ -136,35 +157,69 @@ fn collect_status(root: &Path) -> Result<Vec<GitStatusDto>, String> {
         }
         // 先决定要不要吃掉下一条（旧路径），再做状态校验 —— 校验失败时也不能让
         // 旧路径被当成一条独立记录（那样会凭空多出一个文件）。
-        if record_carries_old_path(record) {
-            let _ = records.next();
-        }
-        if let Some((path, status, staged)) = parse_status_record(record) {
-            entries.push(GitStatusDto {
+        let old_path = if record_carries_old_path(record) {
+            records.next().map(str::to_string)
+        } else {
+            None
+        };
+        if let Some((index, worktree, path)) = parse_status_record(record) {
+            entries.push(StatusRecord {
                 path,
-                status,
-                staged,
+                old_path,
+                index,
+                worktree,
             });
         }
     }
     Ok(entries)
 }
 
-/// 解析 `--numstat` 的一行（`added\tdeleted\tpath`；重命名路径含 `=>` 取后段）。
+/// `git status --porcelain` 全部条目的类型化列表。
+fn collect_status(root: &Path) -> Result<Vec<GitStatusDto>, String> {
+    Ok(collect_records(root)?
+        .into_iter()
+        .filter_map(|record| {
+            let status =
+                letter_to_status(record.index).or_else(|| letter_to_status(record.worktree))?;
+            Some(GitStatusDto {
+                path: record.path,
+                status,
+                staged: !matches!(record.index, ' ' | '?' | '!'),
+            })
+        })
+        .collect())
+}
+
+/// 解析 `--numstat` 的一行（`added\tdeleted\tpath`）。
+///
+/// 重命名时路径有两种形态，都要取到**新路径**：
+/// - `old => new.txt`（前后缀无公共部分）
+/// - `dir/{old => new}.txt`（git 把公共前后缀抽到花括号外 —— 这是最容易切错的一种，
+///   直接按 `=>` 切会得到 `new}.txt`）
 fn parse_numstat_line(line: &str) -> Option<(u32, u32, String)> {
     let mut parts = line.split('\t');
     let add = parts.next()?.parse().ok()?;
     let del = parts.next()?.parse().ok()?;
-    let path = parts.next()?;
-    let path = path
-        .split_once("=>")
-        .map(|(_, new)| new)
-        .unwrap_or(path)
-        .trim();
+    let path = parts.next()?.trim();
     if path.is_empty() {
         return None;
     }
-    Some((add, del, path.to_string()))
+    Some((add, del, rename_target(path)))
+}
+
+/// 行式 numstat 的路径 → 新路径。非重命名原样返回。
+fn rename_target(path: &str) -> String {
+    let Some((before, after)) = path.split_once(" => ") else {
+        return path.to_string();
+    };
+    let Some(open) = before.rfind('{') else {
+        return after.trim().to_string();
+    };
+    match after.find('}') {
+        Some(close) => format!("{}{}{}", &before[..open], &after[..close], &after[close + 1..]),
+        // 花括号没闭合：不猜，退化成「取箭头右边」。
+        None => after.trim().to_string(),
+    }
 }
 
 fn collect_numstat(root: &Path, cached: bool) -> Result<Vec<(u32, u32, String)>, String> {
@@ -175,6 +230,14 @@ fn collect_numstat(root: &Path, cached: bool) -> Result<Vec<(u32, u32, String)>,
     };
     let out = run_git(root, args)?;
     Ok(out.lines().filter_map(parse_numstat_line).collect())
+}
+
+/// 从一张 numstat 表里取某路径的行级增删；没有就返回 0。
+fn numstat_of(list: &[(u32, u32, String)], path: &str) -> (u32, u32) {
+    list.iter()
+        .find(|(_, _, candidate)| candidate == path)
+        .map(|(add, del, _)| (*add, *del))
+        .unwrap_or((0, 0))
 }
 
 /* ===== 命令实现 ===== */
@@ -194,63 +257,192 @@ fn status(access: &WorkspaceFsAccess, root: &str) -> Result<Vec<GitStatusDto>, S
     collect_status(&resolve_root(access, root)?)
 }
 
-/// status + 每文件行级增删（未暂存 + 已暂存两张 numstat 合并）。
+/// status + 每文件**分侧**的行级增删。
 fn changes(access: &WorkspaceFsAccess, root: &str) -> Result<Vec<GitChangeDto>, String> {
     let root = resolve_root(access, root)?;
-    let statuses = collect_status(&root)?;
+    let records = collect_records(&root)?;
     let unstaged = collect_numstat(&root, false)?;
     let staged = collect_numstat(&root, true)?;
-    let sum = |path: &str, cached: bool| -> (u32, u32) {
-        let list = if cached { &staged } else { &unstaged };
-        list.iter()
-            .find(|(_, _, p)| p == path)
-            .map(|(add, del, _)| (*add, *del))
-            .unwrap_or((0, 0))
-    };
-    Ok(statuses
+    Ok(records
         .into_iter()
-        .map(|entry| {
-            let (staged_add, staged_del) = sum(&entry.path, true);
-            let (work_add, work_del) = sum(&entry.path, false);
+        .map(|record| {
+            let (work_add, work_del) = numstat_of(&unstaged, &record.path);
+            let (staged_add, staged_del) = numstat_of(&staged, &record.path);
             GitChangeDto {
-                path: entry.path,
-                status: entry.status,
-                staged: entry.staged,
-                add: staged_add + work_add,
-                del: staged_del + work_del,
+                path: record.path,
+                old_path: record.old_path,
+                // `??`（未跟踪）只在 worktree 侧有意义：index 侧的 `?` 不是「已暂存」。
+                index: if record.index == '?' {
+                    None
+                } else {
+                    letter_to_status(record.index)
+                },
+                worktree: letter_to_status(record.worktree),
+                staged_add,
+                staged_del,
+                add: work_add,
+                del: work_del,
             }
         })
         .collect())
 }
 
-/// 单文件或全量统一 diff（未暂存 + 已暂存拼在一起；`path` 缺省为全量）。
-fn diff(access: &WorkspaceFsAccess, root: &str, path: Option<&str>) -> Result<String, String> {
-    let root = resolve_root(access, root)?;
-    let mut out = String::new();
-    let (part_a, part_b): (&[&str], &[&str]) = match path {
-        Some(path) => (&["diff", "--", path], &["diff", "--cached", "--", path]),
-        None => (&["diff"], &["diff", "--cached"]),
-    };
-    out.push_str(&run_git(&root, part_a)?);
-    if !out.is_empty() && !out.ends_with('\n') {
-        out.push('\n');
+/// 渲染端传来的**仓库相对路径**校验：必须相对、不含 `..`、不以 `-` 开头。
+///
+/// 参数走 argv 数组，不存在 shell 解释；这里防的是「`-` 开头被 git 当成选项」以及
+/// 「路径越出仓库」这两件事。非 ASCII 不受影响（argv 按字节传，`core.quotepath`
+/// 只影响输出）。
+fn validate_rel_path(path: &str) -> Result<(), String> {
+    if path.is_empty() {
+        return Err("路径不能为空".into());
     }
-    out.push_str(&run_git(&root, part_b)?);
+    if path.starts_with('-') {
+        return Err(format!("非法路径: {path}"));
+    }
+    let candidate = Path::new(path);
+    if candidate.is_absolute()
+        || candidate
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return Err(format!("非法路径: {path}"));
+    }
+    Ok(())
+}
+
+/// 统一 diff：`staged` 为真看 index（已暂存）侧，否则看 worktree（未暂存）侧；
+/// `path` 缺省为全量。
+///
+/// **两侧不再拼接**：变更面板现在按「已暂存 / 未暂存」分区展示，拼在一起就分不清
+/// 哪段属于哪一侧了（旧实现把两段 diff 直接接起来，正是这个问题的来源）。
+fn diff(
+    access: &WorkspaceFsAccess,
+    root: &str,
+    path: Option<&str>,
+    staged: bool,
+) -> Result<String, String> {
+    let root = resolve_root(access, root)?;
+    let mut args: Vec<&str> = vec!["diff"];
+    if staged {
+        args.push("--cached");
+    }
+    if let Some(path) = path {
+        validate_rel_path(path)?;
+        args.push("--");
+        args.push(path);
+    }
+    run_git(&root, &args)
+}
+
+/// index 里有没有已暂存的改动。
+///
+/// 用「`--name-only` 输出是否为空」判断，而不是去匹配 git 的英文报错
+/// （`no changes added to commit` 这类文案随版本变，也被 locale 影响）。
+fn has_staged_changes(root: &Path) -> Result<bool, String> {
+    Ok(!run_git(root, &["diff", "--cached", "--name-only"])?
+        .trim()
+        .is_empty())
+}
+
+/// 暂存：`all` 走 `add -A`，否则只 add 指定路径（**必须带 `--`**，防 `-` 开头被当选项）。
+fn stage(
+    access: &WorkspaceFsAccess,
+    root: &str,
+    paths: &[String],
+    all: bool,
+) -> Result<(), String> {
+    let root = resolve_root(access, root)?;
+    if all {
+        run_git(&root, &["add", "-A"]).map_err(|error| format!("暂存变更失败: {error}"))?;
+        return Ok(());
+    }
+    if paths.is_empty() {
+        return Err("没有指定要暂存的文件".into());
+    }
+    let mut args: Vec<&str> = vec!["add", "--"];
+    for path in paths {
+        validate_rel_path(path)?;
+        args.push(path);
+    }
+    run_git(&root, &args).map_err(|error| format!("暂存变更失败: {error}"))?;
+    Ok(())
+}
+
+/// 取消暂存。
+///
+/// 两个坑：
+/// - **未提交仓库（unborn HEAD）没有 HEAD 可 reset**，`git restore --staged` 会报
+///   `could not resolve HEAD`；这种仓库回落 `git rm --cached -r`（本来就什么都还没进过提交，
+///   「取消暂存」等价于「从索引里拿掉」）。
+/// - **重命名要成对处理**：只 reset 新路径会留下一条「旧路径已删除」的索引条目，
+///   界面上就是一个删不掉的幽灵变更。
+fn unstage(
+    access: &WorkspaceFsAccess,
+    root: &str,
+    paths: &[String],
+    all: bool,
+) -> Result<(), String> {
+    let root = resolve_root(access, root)?;
+    let has_head = run_git(&root, &["rev-parse", "--verify", "HEAD"]).is_ok();
+    let mut targets: Vec<String> = Vec::new();
+    if !all {
+        if paths.is_empty() {
+            return Err("没有指定要取消暂存的文件".into());
+        }
+        targets = expand_renames(&root, paths)?;
+    }
+
+    let mut args: Vec<&str> = if has_head {
+        vec!["restore", "--staged"]
+    } else {
+        vec!["rm", "--cached", "-r", "-q"]
+    };
+    args.push("--");
+    if all {
+        args.push(".");
+    } else {
+        for path in &targets {
+            args.push(path);
+        }
+    }
+    run_git(&root, &args).map_err(|error| format!("取消暂存失败: {error}"))?;
+    Ok(())
+}
+
+/// 把要取消暂存的路径补成「新路径 + 重命名前的旧路径」，并按同一套规则校验。
+fn expand_renames(root: &Path, paths: &[String]) -> Result<Vec<String>, String> {
+    let records = collect_records(root)?;
+    let mut out: Vec<String> = Vec::new();
+    for path in paths {
+        validate_rel_path(path)?;
+        out.push(path.clone());
+        if let Some(record) = records.iter().find(|record| &record.path == path) {
+            if let Some(old) = &record.old_path {
+                out.push(old.clone());
+            }
+        }
+    }
     Ok(out)
 }
 
-/// 提交全部工作区变更（add -A 后 commit）。非 git 仓库 / 无变更时返回错误文案。
+/// 提交。`all: true` = 先 `add -A` 再提交（旧的「提交全部」行为）；
+/// `all: false` = 只提交已暂存的内容，索引为空时给出中文文案而不是 git 的英文报错。
 fn commit(
     access: &WorkspaceFsAccess,
     root: &str,
     message: &str,
+    all: bool,
 ) -> Result<CommitResultDto, String> {
     let root = resolve_root(access, root)?;
     let message = message.trim();
     if message.is_empty() {
         return Err("提交信息不能为空".into());
     }
-    run_git(&root, &["add", "-A"]).map_err(|error| format!("暂存变更失败: {error}"))?;
+    if all {
+        run_git(&root, &["add", "-A"]).map_err(|error| format!("暂存变更失败: {error}"))?;
+    } else if !has_staged_changes(&root)? {
+        return Err("没有已暂存的变更".into());
+    }
     run_git(&root, &["commit", "-m", message]).map_err(|error| {
         if error.contains("nothing to commit") {
             "没有可提交的变更".into()
@@ -310,22 +502,48 @@ pub fn git_changes(
     changes(&access, &root)
 }
 
+/// `staged` 缺省视为 false（看未暂存侧）：旧前端只传 root/path 时不会因为少一个字段而整条命令失败。
 #[tauri::command]
 pub fn git_diff(
     access: tauri::State<'_, WorkspaceFsAccess>,
     root: String,
     path: Option<String>,
+    staged: Option<bool>,
 ) -> Result<String, String> {
-    diff(&access, &root, path.as_deref())
+    diff(&access, &root, path.as_deref(), staged.unwrap_or(false))
 }
 
+/// 暂存指定路径；`all` 为真时暂存全部。
+#[tauri::command]
+pub fn git_stage(
+    access: tauri::State<'_, WorkspaceFsAccess>,
+    root: String,
+    paths: Vec<String>,
+    all: bool,
+) -> Result<(), String> {
+    stage(&access, &root, &paths, all)
+}
+
+/// 取消暂存指定路径；`all` 为真时取消全部。
+#[tauri::command]
+pub fn git_unstage(
+    access: tauri::State<'_, WorkspaceFsAccess>,
+    root: String,
+    paths: Vec<String>,
+    all: bool,
+) -> Result<(), String> {
+    unstage(&access, &root, &paths, all)
+}
+
+/// 提交；`all` 为真时先 `add -A`（旧的「提交全部」），否则只提交已暂存的内容。
 #[tauri::command]
 pub fn git_commit(
     access: tauri::State<'_, WorkspaceFsAccess>,
     root: String,
     message: String,
+    all: Option<bool>,
 ) -> Result<CommitResultDto, String> {
-    commit(&access, &root, &message)
+    commit(&access, &root, &message, all.unwrap_or(false))
 }
 
 #[tauri::command]
@@ -418,17 +636,20 @@ mod tests {
 
     #[test]
     fn status_parses_letters_and_staged_flag() {
-        assert_eq!(parse_status_record("M  a.txt").unwrap().1, "modified");
-        assert_eq!(parse_status_record(" M a.txt").unwrap().1, "modified");
-        assert_eq!(parse_status_record("A  a.txt").unwrap().1, "added");
-        assert_eq!(parse_status_record("?? a.txt").unwrap().1, "untracked");
+        // 新签名返回 (index 位置码, worktree 位置码, 路径)
+        assert_eq!(parse_status_record("M  a.txt").unwrap().0, 'M');
+        assert_eq!(parse_status_record(" M a.txt").unwrap().1, 'M');
+        assert_eq!(parse_status_record("A  a.txt").unwrap().0, 'A');
+        assert_eq!(parse_status_record("?? a.txt").unwrap().0, '?');
+        assert!(
+            letter_to_status(' ').is_none(),
+            "空白位置码表示这一侧没有改动"
+        );
+        assert_eq!(letter_to_status('M').unwrap(), "modified");
+        assert_eq!(letter_to_status('?').unwrap(), "untracked");
         // 重命名记录在 -z 形态下就是 `R  <新路径>`，旧路径是下一条记录
-        assert_eq!(parse_status_record("R  new.txt").unwrap().0, "new.txt");
-        assert_eq!(parse_status_record("RM new.txt").unwrap().0, "new.txt");
-        let (_, _, staged) = parse_status_record("M  a.txt").unwrap();
-        assert!(staged);
-        let (_, _, staged) = parse_status_record(" M a.txt").unwrap();
-        assert!(!staged);
+        assert_eq!(parse_status_record("R  new.txt").unwrap().2, "new.txt");
+        assert_eq!(parse_status_record("RM new.txt").unwrap().2, "new.txt");
         assert!(parse_status_record("not a status").is_none());
     }
 
@@ -436,16 +657,16 @@ mod tests {
     #[test]
     fn status_keeps_paths_verbatim_without_unescaping() {
         assert_eq!(
-            parse_status_record(" M with\"quote.txt").unwrap().0,
+            parse_status_record(" M with\"quote.txt").unwrap().2,
             "with\"quote.txt"
         );
         assert_eq!(
-            parse_status_record(" M with\\back.txt").unwrap().0,
+            parse_status_record(" M with\\back.txt").unwrap().2,
             "with\\back.txt"
         );
         // 文件名里含 ` -> ` 也不会被切错（旧实现按 ` -> ` 切）
         assert_eq!(
-            parse_status_record(" M a -> b.txt").unwrap().0,
+            parse_status_record(" M a -> b.txt").unwrap().2,
             "a -> b.txt"
         );
     }
@@ -507,7 +728,41 @@ mod tests {
             parse_numstat_line("2\t0\told => new.txt").unwrap(),
             (2, 0, "new.txt".into())
         );
+        // 花括号压缩形态：git 把公共前后缀抽到外面，直接按 `=>` 切会得到 `new}.txt`
+        assert_eq!(
+            parse_numstat_line("4\t2\tsrc/{old => new}.txt").unwrap(),
+            (4, 2, "src/new.txt".into())
+        );
+        assert_eq!(
+            parse_numstat_line("1\t0\t{a => b}.md").unwrap(),
+            (1, 0, "b.md".into())
+        );
         assert!(parse_numstat_line("x\ty\tz").is_none());
+    }
+
+    /// 分侧上报：同一个文件在 index 与 worktree 两侧各有改动时两边都要有状态与行数，
+    /// 且**不再相加**（旧实现把两侧行数求和，面板无法分区）。
+    #[test]
+    fn changes_reports_both_sides_separately() {
+        let root = init_repo("changes-sides");
+        std::fs::write(root.join("a.txt"), "one\ntwo\n").expect("改 a");
+        Command::new("git")
+            .current_dir(&root)
+            .args(["add", "a.txt"])
+            .status()
+            .expect("git add");
+        // 暂存之后再改一次：porcelain 变成 `MM`
+        std::fs::write(root.join("a.txt"), "one\ntwo\nthree\n").expect("再改 a");
+        let access = access(&root);
+
+        let result = changes(&access, &root.to_string_lossy()).expect("采集变更");
+        let a = result.iter().find(|e| e.path == "a.txt").expect("a 在变更里");
+        assert_eq!(a.index.as_deref(), Some("modified"), "已跟踪文件改动后暂存 → M");
+        assert_eq!(a.worktree.as_deref(), Some("modified"));
+        assert_eq!(a.staged_add, 1, "index 侧 1 行");
+        assert_eq!(a.add, 1, "worktree 侧 1 行（不是两侧相加的 2）");
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
@@ -521,15 +776,16 @@ mod tests {
             .iter()
             .find(|e| e.path == "a.txt")
             .expect("a 在变更里");
-        assert_eq!(a.status, "modified");
-        assert!(!a.staged);
+        assert_eq!(a.worktree.as_deref(), Some("modified"));
+        assert_eq!(a.index, None, "没暂存过，index 侧应无状态");
         assert_eq!(a.add, 1);
         assert_eq!(a.del, 0);
         let n = result
             .iter()
             .find(|e| e.path == "new.txt")
             .expect("new 在变更里");
-        assert_eq!(n.status, "untracked");
+        assert_eq!(n.worktree.as_deref(), Some("untracked"));
+        assert_eq!(n.index, None, "`??` 不是「已暂存」");
         // untracked 不进 `git diff --numstat`（那是对已跟踪内容的统计），行数给 0，
         // 新增语义靠「新增(U)」徽标表达 —— 照实呈现，不猜行数。
         assert_eq!(n.add, 0);
@@ -557,7 +813,7 @@ mod tests {
     }
 
     #[test]
-    fn diff_returns_unified_text_and_touches_both_indexes() {
+    fn diff_reads_the_requested_side_only() {
         let root = init_repo("diff-arg");
         std::fs::write(root.join("a.txt"), "one\ntwo\n").expect("改 a");
         std::fs::write(root.join("b.txt"), "hello\nworld\n").expect("改 b");
@@ -567,14 +823,132 @@ mod tests {
             .status()
             .expect("git add");
         let access = access(&root);
-        let full = diff(&access, &root.to_string_lossy(), None).expect("全量 diff");
-        assert!(full.contains("a.txt"));
-        assert!(full.contains("b.txt"));
-        let single = diff(&access, &root.to_string_lossy(), Some("a.txt")).expect("单文件 diff");
+        let root_text = root.to_string_lossy().to_string();
+
+        // 未暂存侧：只有 a（b 已进 index，不该出现在这一侧）
+        let work = diff(&access, &root_text, None, false).expect("未暂存 diff");
+        assert!(work.contains("a.txt"));
+        assert!(!work.contains("b.txt"), "已暂存的文件不该出现在未暂存 diff 里");
+
+        // 已暂存侧：只有 b
+        let staged = diff(&access, &root_text, None, true).expect("已暂存 diff");
+        assert!(staged.contains("b.txt"));
+        assert!(!staged.contains("a.txt"));
+
+        // 单文件 + 指定侧
+        let single = diff(&access, &root_text, Some("a.txt"), false).expect("单文件 diff");
         assert!(single.contains("a.txt"));
         assert!(!single.contains("b.txt"));
-        let staged = diff(&access, &root.to_string_lossy(), Some("b.txt")).expect("b diff");
-        assert!(staged.contains("b.txt"));
+
+        // 越界路径与「- 开头」被拒（后者会被 git 当成选项）
+        assert!(diff(&access, &root_text, Some("../outside.txt"), false).is_err());
+        assert!(diff(&access, &root_text, Some("-p"), false).is_err());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn relative_path_validation_rejects_escapes_and_options() {
+        assert!(validate_rel_path("a/b.txt").is_ok());
+        assert!(validate_rel_path("带 空格/中文.md").is_ok());
+        for bad in ["", "../x", "a/../../x", "/abs/x", "-p"] {
+            assert!(validate_rel_path(bad).is_err(), "{bad:?} 应被拒绝");
+        }
+    }
+
+    #[test]
+    fn stage_and_unstage_move_changes_between_sides() {
+        let root = init_repo("stage-unstage");
+        std::fs::write(root.join("a.txt"), "one\none\n").expect("改 a");
+        let access = access(&root);
+        let root_text = root.to_string_lossy().to_string();
+
+        let read_a = || -> GitChangeDto {
+            changes(&access, &root_text)
+                .expect("变更")
+                .into_iter()
+                .find(|entry| entry.path == "a.txt")
+                .expect("a 在变更里")
+        };
+
+        stage(&access, &root_text, &["a.txt".into()], false).expect("暂存 a");
+        let staged = read_a();
+        assert_eq!(staged.index.as_deref(), Some("modified"));
+        assert_eq!(staged.worktree, None, "暂存后 worktree 侧应干净");
+
+        unstage(&access, &root_text, &["a.txt".into()], false).expect("取消暂存");
+        let unstaged = read_a();
+        assert_eq!(unstaged.index, None);
+        assert_eq!(unstaged.worktree.as_deref(), Some("modified"));
+
+        // 全部暂存 / 全部取消
+        stage(&access, &root_text, &[], true).expect("全部暂存");
+        assert!(changes(&access, &root_text)
+            .expect("变更")
+            .iter()
+            .all(|entry| entry.worktree.is_none()));
+        unstage(&access, &root_text, &[], true).expect("全部取消");
+        assert!(changes(&access, &root_text)
+            .expect("变更")
+            .iter()
+            .all(|entry| entry.index.is_none()));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// 没有任何提交的仓库：`git restore --staged` 会报 `could not resolve HEAD`，
+    /// 必须回落 `git rm --cached`。
+    #[test]
+    fn unstage_works_on_a_repo_without_commits() {
+        git_available();
+        let root = temp_dir("unborn");
+        Command::new("git")
+            .current_dir(&root)
+            .args(["init", "-q", "-b", "main"])
+            .status()
+            .expect("git init");
+        std::fs::write(root.join("a.txt"), "a\n").expect("写文件");
+        let access = access(&root);
+        let root_text = root.to_string_lossy().to_string();
+
+        stage(&access, &root_text, &["a.txt".into()], false).expect("暂存");
+        unstage(&access, &root_text, &["a.txt".into()], false).expect("取消暂存（unborn HEAD）");
+
+        let entry = changes(&access, &root_text)
+            .expect("变更")
+            .into_iter()
+            .find(|entry| entry.path == "a.txt")
+            .expect("a 在变更里");
+        assert_eq!(entry.index, None, "索引里应已拿掉");
+        assert_eq!(entry.worktree.as_deref(), Some("untracked"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// 重命名要成对取消暂存：只 reset 新路径会在索引里留下一条「旧路径已删除」的幽灵。
+    #[test]
+    fn unstage_pairs_the_old_path_of_a_rename() {
+        let root = init_repo("unstage-rename");
+        Command::new("git")
+            .current_dir(&root)
+            .args(["mv", "a.txt", "renamed.txt"])
+            .status()
+            .expect("git mv");
+        let access = access(&root);
+        let root_text = root.to_string_lossy().to_string();
+
+        let entry = changes(&access, &root_text)
+            .expect("变更")
+            .into_iter()
+            .find(|entry| entry.path == "renamed.txt")
+            .expect("重命名条目");
+        assert_eq!(entry.index.as_deref(), Some("renamed"));
+        assert_eq!(entry.old_path.as_deref(), Some("a.txt"));
+
+        unstage(&access, &root_text, &["renamed.txt".into()], false).expect("取消暂存重命名");
+        let remaining = changes(&access, &root_text).expect("变更");
+        assert!(
+            remaining.iter().all(|entry| entry.index.is_none()),
+            "索引侧应彻底干净: {remaining:?}"
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -583,7 +957,8 @@ mod tests {
         let root = init_repo("commit");
         std::fs::write(root.join("a.txt"), "one\none\none\n").expect("改 a");
         let access = access(&root);
-        let result = commit(&access, &root.to_string_lossy(), "改动 a").expect("提交");
+        // all = true：保留旧的「提交全部」语义（先 add -A）
+        let result = commit(&access, &root.to_string_lossy(), "改动 a", true).expect("提交");
         assert_eq!(result.message, "改动 a");
         assert!(!result.hash.is_empty());
         assert!(!result.timestamp.is_empty());
@@ -596,7 +971,26 @@ mod tests {
     fn commit_rejects_blank_message() {
         let root = init_repo("blank-msg");
         let access = access(&root);
-        assert!(commit(&access, &root.to_string_lossy(), "   ").is_err());
+        assert!(commit(&access, &root.to_string_lossy(), "   ", true).is_err());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// 只提交已暂存：索引为空时给中文文案（而不是转发 git 的英文
+    /// `no changes added to commit`），暂存之后才提交得了。
+    #[test]
+    fn commit_staged_only_requires_a_staged_index() {
+        let root = init_repo("commit-staged");
+        std::fs::write(root.join("a.txt"), "one\none\n").expect("改 a");
+        let access = access(&root);
+        let root_text = root.to_string_lossy().to_string();
+
+        let error = commit(&access, &root_text, "只提交暂存", false).expect_err("索引为空应被拒");
+        assert_eq!(error, "没有已暂存的变更");
+
+        stage(&access, &root_text, &["a.txt".into()], false).expect("暂存");
+        let result = commit(&access, &root_text, "只提交暂存", false).expect("提交");
+        assert_eq!(result.message, "只提交暂存");
+        assert!(status(&access, &root_text).expect("提交后状态").is_empty());
         let _ = std::fs::remove_dir_all(root);
     }
 
