@@ -18,6 +18,7 @@ import { applyAppearance as applyAppearanceToDom } from "@/lib/theme";
 import { modeOfShortcut, visibilityOf, type LayoutMode } from "@/lib/layout-modes";
 import { syncCloseToTray, syncTrayLabels, useTrayBridge, type TrayLabels } from "@/lib/tray-bridge";
 import { useCloseGuard } from "@/lib/close-guard";
+import { hasDirtyPreviewTabs, pendingDiscard, requestLeave } from "@/lib/preview-edit-guard";
 import { bootPlugins } from "@/plugins/runtime";
 import Sider from "@/features/shell/Sider.vue";
 import Titlebar from "@/features/shell/Titlebar.vue";
@@ -107,6 +108,49 @@ function applyLayoutMode(next: LayoutMode): void {
   if (preview.available) preview.setCollapsed(!target.preview);
 }
 
+/**
+ * 窄屏收拢右栏：**先把未保存的改动存下来再卸载**。
+ *
+ * 模板里 `PreviewSider` 是 `v-if="preview.available"` —— 变窄就整个卸载，而卸载会注销
+ * 预览编辑器的 saver，未保存的改动随之消失。所以「从桌面变窄」这一步在面板还挂着的
+ * 状态下先走一遍守卫：flush 全部成功才真的收起来；写不进去会挂起确认弹层（由
+ * PreviewSider 渲染），在用户答复之前面板继续留着。
+ *
+ * 留在窄屏不会挤坏布局：窄屏下面板本就会被自动折叠成宽度 0（stores/preview 的
+ * shouldAutoCollapse），差别只是实例还在、编辑器与滚动位置都还在。
+ *
+ * 两个模块级标志：`narrowFlushInFlight` 挡 resize storm 期间的并发 flush（requestLeave
+ * 只在已有待确认弹层时才早退，flush 途中没有互斥）；`narrowDeferred` 记下「用户这次选了
+ * 取消」，此后不再反复追问，直到视口回到桌面重新武装。
+ */
+let narrowFlushInFlight = false;
+let narrowDeferred = false;
+
+function collapsePreviewForNarrow(): void {
+  // 没有脏改动（或本来就没开着）：照旧直接卸载。
+  if (!hasDirtyPreviewTabs()) {
+    preview.setAvailable(false);
+    return;
+  }
+  // 正在 flush、用户已拒绝过一次、或关窗守卫的弹层正挂着 → 这一轮不动它。
+  if (narrowFlushInFlight || narrowDeferred || pendingDiscard.value) return;
+  narrowFlushInFlight = true;
+  requestLeave(() => {
+    narrowFlushInFlight = false;
+    // flush 期间用户可能已经拉回桌面：那就不该再卸（syncViewport 已经把它打开了）。
+    if (window.innerWidth >= MOBILE_BREAKPOINT) return;
+    preview.setAvailable(false);
+  });
+}
+
+// 弹层关掉但 run 没执行 = 用户选了「取消」：清掉 inFlight（否则会永久卡住，之后再窄也不收），
+// 并记下这次不收，等回到桌面重新武装。
+watch(pendingDiscard, (pending) => {
+  if (pending || !narrowFlushInFlight) return;
+  narrowFlushInFlight = false;
+  narrowDeferred = true;
+});
+
 function syncViewport(): void {
   if (typeof window === "undefined") return;
   const mobile = window.innerWidth < MOBILE_BREAKPOINT;
@@ -116,7 +160,13 @@ function syncViewport(): void {
   collapsed.value = mobile ? true : layout.sidebarCollapsed;
   // 右栏在窄屏不渲染。这个判断只在这里做一次，Titlebar 的开关按钮读同一个 store 字段，
   // 不再各自写一个断点（那正是 640–768px 之间「按钮可见但面板不存在」的来源）。
-  preview.setAvailable(!mobile);
+  // 但卸载前要先兜住未保存的编辑，见 collapsePreviewForNarrow。
+  if (mobile) {
+    collapsePreviewForNarrow();
+  } else {
+    narrowDeferred = false;
+    preview.setAvailable(true);
+  }
   workspace.setAvailable(!mobile);
   // 底部活动面板与右栏同源同断点：产物点开进右栏预览，窄屏两条都没意义。
   activity.setAvailable(!mobile);

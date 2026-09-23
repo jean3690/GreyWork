@@ -28,6 +28,9 @@ import { appEvents } from "@/events";
 import { useLayoutStore } from "@/stores/layout";
 import { usePreviewStore } from "@/stores/preview";
 import { useWorkspacePanelStore } from "@/stores/workspacePanel";
+import { registerPreviewSaver } from "@/lib/preview-save";
+import { cancelDiscard, pendingDiscard } from "@/lib/preview-edit-guard";
+import { ref } from "vue";
 
 const Titlebar = {
   props: ["collapsed", "showSiderToggle"],
@@ -203,5 +206,133 @@ describe("Shell", () => {
 
     keydown({ key: "n", ctrlKey: true });
     expect(h.push).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * 窄屏会把右栏整个卸载（模板 `v-if`），而卸载会注销编辑器 saver —— 未保存的改动就此消失。
+ * 这组用例守住「先保存再卸载」这条路径，以及它失败 / 被取消 / 中途回桌面时的落点。
+ */
+describe("Shell 窄屏收拢右栏：先保存再卸载", () => {
+  function setWidth(px: number): void {
+    Object.defineProperty(window, "innerWidth", { value: px, configurable: true });
+  }
+
+  /** 打开一个 tab 并挂一个可控的假 saver；返回 save 的调用计数与手动 resolve 的钩子。 */
+  function armDirtyTab(options: { fail?: boolean; manual?: boolean } = {}) {
+    const id = usePreviewStore().open("reports/a.md");
+    const dirty = ref(true);
+    let saves = 0;
+    let release: (() => void) | null = null;
+    registerPreviewSaver(id, {
+      dirty,
+      save: async () => {
+        saves += 1;
+        if (options.manual) await new Promise<void>((resolve) => (release = resolve));
+        if (options.fail) throw new Error("写盘失败");
+        dirty.value = false;
+      },
+    });
+    return {
+      dirty,
+      count: () => saves,
+      finish: () => release?.(),
+    };
+  }
+
+  /** 让守卫那串 await 与 Vue 的 watcher 都落地。 */
+  async function settle(): Promise<void> {
+    await nextTick();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await nextTick();
+  }
+
+  beforeEach(() => {
+    setWidth(1024);
+    cancelDiscard();
+  });
+
+  afterEach(() => {
+    setWidth(1024);
+    cancelDiscard();
+  });
+
+  it("有脏改动：先保存，成功后才卸载", async () => {
+    mountShell();
+    const saver = armDirtyTab();
+    const preview = usePreviewStore();
+    expect(preview.available).toBe(true);
+
+    setWidth(500);
+    window.dispatchEvent(new Event("resize"));
+    await settle();
+
+    expect(saver.count()).toBe(1);
+    expect(saver.dirty.value).toBe(false);
+    expect(preview.available).toBe(false);
+  });
+
+  it("保存失败：面板留着不卸载，等用户答复", async () => {
+    mountShell();
+    const saver = armDirtyTab({ fail: true });
+    const preview = usePreviewStore();
+
+    setWidth(500);
+    window.dispatchEvent(new Event("resize"));
+    await settle();
+
+    expect(saver.count()).toBe(1);
+    expect(pendingDiscard.value?.failed).toHaveLength(1);
+    expect(preview.available).toBe(true);
+  });
+
+  it("用户取消：继续留着面板，且不再反复追问", async () => {
+    mountShell();
+    const saver = armDirtyTab({ fail: true });
+    const preview = usePreviewStore();
+
+    setWidth(500);
+    window.dispatchEvent(new Event("resize"));
+    await settle();
+    cancelDiscard();
+    await settle();
+
+    expect(preview.available).toBe(true);
+    // 再触发一次 resize：不该再发起新一轮 flush
+    window.dispatchEvent(new Event("resize"));
+    await settle();
+    expect(saver.count()).toBe(1);
+    expect(pendingDiscard.value).toBeNull();
+  });
+
+  it("flush 期间拉回桌面：不再卸载面板", async () => {
+    mountShell();
+    const saver = armDirtyTab({ manual: true });
+    const preview = usePreviewStore();
+
+    setWidth(500);
+    window.dispatchEvent(new Event("resize"));
+    await settle();
+    expect(saver.count()).toBe(1);
+
+    // 保存还没写完就拉回桌面
+    setWidth(1200);
+    window.dispatchEvent(new Event("resize"));
+    saver.finish();
+    await settle();
+
+    expect(preview.available).toBe(true);
+  });
+
+  it("没有脏改动：照旧直接卸载，不做无谓的保存", async () => {
+    mountShell();
+    const preview = usePreviewStore();
+    expect(preview.available).toBe(true);
+
+    setWidth(500);
+    window.dispatchEvent(new Event("resize"));
+    await settle();
+
+    expect(preview.available).toBe(false);
   });
 });
