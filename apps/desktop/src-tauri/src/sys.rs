@@ -32,6 +32,26 @@ fn cpu_count() -> usize {
     std::thread::available_parallelism().map(|n| n.get()).unwrap_or(0)
 }
 
+/// 低端设备判据（纯函数，便于单测）：物理内存 ≤ 4 GiB 或逻辑核数 ≤ 2。
+///
+/// 阈值与渲染端 `lib/device-tier.ts` 保持一致 —— 两侧对"低端"的定义必须同源，否则会出现
+/// 宿主按低端关了 GPU 渲染、渲染端却按标准档跑动效的分裂状态。
+/// 内存取不到（None）时不据此判低端，只留核数这一条，避免在拿不到信息的平台上误伤。
+fn is_low_end(memory: Option<u64>, cores: usize) -> bool {
+    const LOW_MEMORY_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+    if let Some(bytes) = memory {
+        if bytes > 0 && bytes <= LOW_MEMORY_BYTES {
+            return true;
+        }
+    }
+    cores > 0 && cores <= 2
+}
+
+/// 本机是否低端设备。宿主侧只有 Linux 的 WebKitGTK 兜底会消费它（见 lib.rs）。
+pub fn is_low_end_device() -> bool {
+    is_low_end(total_memory_bytes(), cpu_count())
+}
+
 /// 物理内存总量（字节）。跨平台各读各的：Linux 走 /proc/meminfo，macOS 走 sysctl，
 /// 其余平台返回 None 由渲染端兜底 —— 不为一个诊断字段引入 sysinfo 这类重依赖。
 fn total_memory_bytes() -> Option<u64> {
@@ -142,5 +162,22 @@ mod tests {
     fn cpu_count_is_positive() {
         // 任何真实运行环境都至少有一个可用核；0 只作为"取不到"的哨兵。
         assert!(cpu_count() >= 1);
+    }
+
+    #[test]
+    fn low_end_thresholds_match_renderer() {
+        let gib = |n: u64| n * 1024 * 1024 * 1024;
+        // 内存 ≤ 4GiB 判低端（对齐 lib/device-tier.ts 的 LOW_MEMORY_GIB）
+        assert!(is_low_end(Some(gib(4)), 8));
+        assert!(is_low_end(Some(gib(1)), 8));
+        assert!(!is_low_end(Some(gib(8)), 8));
+        // 核数 ≤ 2 判低端
+        assert!(is_low_end(Some(gib(16)), 2));
+        assert!(!is_low_end(Some(gib(16)), 4));
+        // 内存取不到时只看核数，不误判
+        assert!(!is_low_end(None, 8));
+        assert!(is_low_end(None, 2));
+        // 两项都取不到（0）时按标准档走，不无端降级
+        assert!(!is_low_end(None, 0));
     }
 }

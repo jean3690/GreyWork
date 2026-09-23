@@ -38,8 +38,37 @@ mod worktree;
 
 use tauri::Manager;
 
+/// Linux 低端设备的 WebKitGTK 渲染兜底：关掉 DMABUF 渲染器。
+///
+/// webkit2gtk 的 DMABUF 渲染路径在低显存 / 老驱动的机器上会渲染出黑块、花屏，甚至整窗空白
+/// 或直接崩掉 —— 低内存设备上尤其常见。退回共享内存渲染（`WEBKIT_DISABLE_DMABUF_RENDERER=1`）
+/// 代价是合成性能略降，但换来能正常显示，这是"WebView 渲染崩溃"最直接的宿主侧处置：
+/// 渲染端再怎么优化 JS/CSS 都到不了这一层。
+///
+/// **必须在建窗口之前设置**：该变量只在 webkit 初始化时读一次，晚于 Builder 就无效。
+///
+/// 只在用户**没有显式设置**时兜底 —— 显式设置代表用户/发行版封装脚本已经知道自己在做什么，
+/// 不该被覆盖；这也是自动判定万一误伤正常机器时唯一的逃生口（自行设成 0 即可关掉）。
+#[cfg(target_os = "linux")]
+fn apply_low_end_webkit_fallback() {
+    if !sys::is_low_end_device() {
+        return;
+    }
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        // 这里用 eprintln 而非 crate::log：日志目录在 setup 里才 init，而本函数必须在建窗口
+        // 之前跑，此刻 log 还是 no-op，写了也会被丢掉（同 log.rs 处理自身轮转失败的取舍）。
+        eprintln!(
+            "[greywork] 低端设备：已关闭 DMABUF 渲染器（WEBKIT_DISABLE_DMABUF_RENDERER=1）以规避渲染异常"
+        );
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(target_os = "linux")]
+    apply_low_end_webkit_fallback();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
