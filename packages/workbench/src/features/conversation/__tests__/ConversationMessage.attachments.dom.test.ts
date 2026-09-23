@@ -78,6 +78,33 @@ describe("ConversationMessage · 附件", () => {
     expect(chips[1].attributes("disabled")).toBeDefined();
   });
 
+  it("视频 / 语音出内联播放器，读不到源时落到文件 chip", async () => {
+    const video: Attachment = { id: "v1", kind: "video", name: "clip.mp4", mime: "video/mp4", size: 1024, path: "/tmp/clip.mp4" };
+    const audio: Attachment = { id: "s1", kind: "audio", name: "voice.ogg", mime: "audio/ogg", size: 64, path: "/tmp/voice.ogg" };
+
+    const { wrapper } = mountMessage(userMessage([video, audio]));
+    await vi.waitFor(() => {
+      expect(wrapper.find('[data-testid="message-attachment-video"]').exists()).toBe(true);
+    });
+    expect(wrapper.get('[data-testid="message-attachment-video"]').attributes("src")).toBe("blob:preview");
+    expect(wrapper.get('[data-testid="message-attachment-video"]').attributes("controls")).toBeDefined();
+    expect(wrapper.get('[data-testid="message-attachment-audio"]').attributes("src")).toBe("blob:preview");
+    // 播放器不套「点开预览」按钮，因此不产生 preview:request。
+    expect(wrapper.find('[data-testid="message-attachment-file"]').exists()).toBe(false);
+  });
+
+  it("视频源不可读时退化为文件 chip，不渲染空播放器", async () => {
+    h.attachmentObjectUrl.mockResolvedValue(null);
+    const video: Attachment = { id: "v2", kind: "video", name: "clip.mp4", mime: "video/mp4", size: 1024, path: "/tmp/clip.mp4" };
+
+    const { wrapper } = mountMessage(userMessage([video]));
+    await vi.waitFor(() => {
+      expect(wrapper.find('[data-testid="message-attachment-file"]').exists()).toBe(true);
+    });
+    expect(wrapper.find('[data-testid="message-attachment-video"]').exists()).toBe(false);
+    expect(wrapper.get('[data-testid="message-attachment-file"]').text()).toContain("clip.mp4");
+  });
+
   it("缩略图读不到（文件被移走）时退化为占位，不抛错", async () => {
     h.attachmentObjectUrl.mockResolvedValue(null);
     const { wrapper } = mountMessage(userMessage([image]));

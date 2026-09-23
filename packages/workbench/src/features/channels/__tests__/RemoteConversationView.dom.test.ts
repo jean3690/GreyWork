@@ -41,12 +41,14 @@ const mediaMocks = vi.hoisted(() => ({
 const attachmentMocks = vi.hoisted(() => ({
   pick: vi.fn<() => Promise<Attachment[]>>(),
   materialize: vi.fn<(sessionId: string, items: readonly Attachment[]) => Promise<Attachment[]>>(),
+  objectUrl: vi.fn<(item: Attachment) => Promise<string | null>>(),
 }));
 
 vi.mock("@/state/attachment-library", async (importOriginal) => ({
   ...(await importOriginal<typeof AttachmentLibrary>()),
   pickAttachments: () => attachmentMocks.pick(),
   materializeAttachments: (sessionId: string, items: readonly Attachment[]) => attachmentMocks.materialize(sessionId, items),
+  attachmentObjectUrl: (item: Attachment) => attachmentMocks.objectUrl(item),
 }));
 
 vi.mock("@/lib/wechat-backend", () => ({ wechatBackend: mocks.backend }));
@@ -132,6 +134,7 @@ beforeEach(() => {
   mocks.backend.sendTyping.mockResolvedValue(undefined);
   mediaMocks.sendMedia.mockResolvedValue(undefined);
   attachmentMocks.pick.mockResolvedValue([]);
+  attachmentMocks.objectUrl.mockResolvedValue(null);
   attachmentMocks.materialize.mockImplementation((_sessionId, items) =>
     Promise.resolve(
       items.map((item) => ({ id: item.id, kind: item.kind, name: item.name, mime: item.mime, size: item.size, path: `/tmp/${item.id}` })),
@@ -189,6 +192,27 @@ describe("RemoteConversationView", () => {
 
     await vi.waitFor(() => expect(wrapper.find('[data-testid="remote-attachment-file"]').exists()).toBe(true));
     expect(wrapper.get('[data-testid="remote-attachment-file"]').text()).toContain("报表.xlsx");
+  });
+
+  it("消息里的视频 / 语音出内联播放器", async () => {
+    attachmentMocks.objectUrl.mockResolvedValue("blob:remote");
+    const { wrapper } = await mountPage(true, { contextToken: "ctx-1" });
+    const sessionId = useRemoteAssistantStore().peerById(`wechat:${PEER}`)!.sessionId;
+    useSessionStore().appendMessage(sessionId, {
+      id: "m4",
+      role: "user",
+      content: "",
+      ts: 4,
+      attachments: [
+        { id: "att-v", kind: "video", name: "clip.mp4", mime: "video/mp4", size: 9, path: "/tmp/clip.mp4" },
+        { id: "att-a", kind: "audio", name: "voice.ogg", mime: "audio/ogg", size: 9, path: "/tmp/voice.ogg" },
+      ],
+    });
+
+    await vi.waitFor(() => expect(wrapper.find('[data-testid="remote-attachment-video"]').exists()).toBe(true));
+    expect(wrapper.get('[data-testid="remote-attachment-video"]').attributes("src")).toBe("blob:remote");
+    expect(wrapper.get('[data-testid="remote-attachment-audio"]').attributes("src")).toBe("blob:remote");
+    expect(wrapper.find('[data-testid="remote-attachment-file"]').exists()).toBe(false);
   });
 
   it("只有附件没有文字也能发：走 sendMedia，不发文本", async () => {

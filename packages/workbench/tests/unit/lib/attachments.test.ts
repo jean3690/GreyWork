@@ -45,6 +45,14 @@ describe("attachmentKind", () => {
     expect(attachmentKind("deck.pptx", "")).toBe("file");
   });
 
+  it("视频 / 语音按 mime 或扩展名识别", () => {
+    expect(attachmentKind("clip.mp4", "")).toBe("video");
+    expect(attachmentKind("clip", "video/quicktime")).toBe("video");
+    expect(attachmentKind("note.ogg", "")).toBe("audio");
+    expect(attachmentKind("voice", "audio/mpeg")).toBe("audio");
+    expect(attachmentKind("song.m4a", "")).toBe("audio");
+  });
+
   it("既无扩展名又无 mime → null", () => {
     expect(attachmentKind("noext", "")).toBeNull();
     expect(attachmentKind("noext", "   ")).toBeNull();
@@ -81,6 +89,15 @@ describe("validateAttachment", () => {
     const zip = { name: "a.zip", mime: "application/zip", size: 1024 };
     expect(validateAttachment(zip, [], true)).toBeNull();
     expect(validateAttachment(zip, [], false)?.key).toBe("chat.attachUnsupported");
+  });
+
+  it("视频 / 语音：桌面态放行、浏览器态拒", () => {
+    const video = { name: "clip.mp4", mime: "video/mp4", size: 1024 };
+    expect(validateAttachment(video, [], true)).toBeNull();
+    expect(validateAttachment(video, [], false)?.key).toBe("chat.attachUnsupported");
+    const audio = { name: "note.ogg", mime: "audio/ogg", size: 1024 };
+    expect(validateAttachment(audio, [], true)).toBeNull();
+    expect(validateAttachment(audio, [], false)?.key).toBe("chat.attachUnsupported");
   });
 
   it("通用文件超 20MB 被拒", () => {
@@ -154,17 +171,31 @@ describe("normalizeAttachments", () => {
     ]);
   });
 
+  it("视频 / 语音 kind 被保留", () => {
+    expect(
+      normalizeAttachments([
+        { id: "att-5", kind: "video", name: "v.mp4", mime: "video/mp4", size: 5, path: "/tmp/v.mp4" },
+        { id: "att-6", kind: "audio", name: "a.ogg", mime: "audio/ogg", size: 5, path: "/tmp/a.ogg" },
+      ]),
+    ).toEqual([
+      { id: "att-5", kind: "video", name: "v.mp4", mime: "video/mp4", size: 5, path: "/tmp/v.mp4" },
+      { id: "att-6", kind: "audio", name: "a.ogg", mime: "audio/ogg", size: 5, path: "/tmp/a.ogg" },
+    ]);
+  });
+
   it("未知 kind 被丢弃", () => {
-    expect(normalizeAttachments([{ id: "att-5", kind: "video", name: "v.mp4", path: "/tmp/v.mp4" }])).toEqual([]);
+    expect(normalizeAttachments([{ id: "att-7", kind: "weird", name: "v.mp4", path: "/tmp/v.mp4" }])).toEqual([]);
   });
 });
 
 describe("isAttachmentKind", () => {
-  it("只认三个已知 kind", () => {
+  it("认已知的五个 kind", () => {
     expect(isAttachmentKind("image")).toBe(true);
+    expect(isAttachmentKind("video")).toBe(true);
+    expect(isAttachmentKind("audio")).toBe(true);
     expect(isAttachmentKind("text")).toBe(true);
     expect(isAttachmentKind("file")).toBe(true);
-    expect(isAttachmentKind("video")).toBe(false);
+    expect(isAttachmentKind("weird")).toBe(false);
     expect(isAttachmentKind(undefined)).toBe(false);
   });
 });

@@ -106,33 +106,55 @@ function timeLabel(ts: number): string {
     >
       <div class="flex flex-col gap-2">
         <div v-if="attachmentList.length" data-testid="message-attachments" class="flex flex-wrap items-center gap-2">
-          <Hint v-for="item in attachmentList" :key="item.id" :text="item.name" multiline>
-            <button
-              type="button"
-              class="cursor-pointer overflow-hidden rounded-[8px] border border-line-2 text-left transition-opacity hover:opacity-90 disabled:cursor-default disabled:hover:opacity-100"
+          <template v-for="item in attachmentList" :key="item.id">
+            <!-- 视频 / 语音：内联播放器（自身可交互，不套「点开预览」按钮）。读不到源时落到下面的文件 chip。 -->
+            <video
+              v-if="item.kind === 'video' && thumbs[item.id]"
+              :src="thumbs[item.id] as string"
               :aria-label="item.name"
-              :disabled="!canOpenAttachment(item)"
-              :data-testid="item.kind === 'image' ? 'message-attachment-image' : 'message-attachment-file'"
-              @click="openAttachment(item)"
-            >
-              <img
-                v-if="item.kind === 'image' && thumbs[item.id]"
-                :src="thumbs[item.id] as string"
-                :alt="item.name"
-                class="max-h-[180px] max-w-[240px] object-cover"
-              />
-              <span
-                v-else-if="item.kind === 'image'"
-                class="grid h-[72px] w-[96px] place-items-center bg-panel-2 px-2 text-center text-[10px] leading-tight text-dim2"
+              data-testid="message-attachment-video"
+              class="max-h-[240px] max-w-[280px] rounded-[8px] border border-line-2 bg-black"
+              controls
+              playsinline
+              preload="metadata"
+            />
+            <audio
+              v-else-if="item.kind === 'audio' && thumbs[item.id]"
+              :src="thumbs[item.id] as string"
+              :aria-label="item.name"
+              data-testid="message-attachment-audio"
+              class="w-[240px]"
+              controls
+              preload="metadata"
+            />
+            <Hint v-else :text="item.name" multiline>
+              <button
+                type="button"
+                class="cursor-pointer overflow-hidden rounded-[8px] border border-line-2 text-left transition-opacity hover:opacity-90 disabled:cursor-default disabled:hover:opacity-100"
+                :aria-label="item.name"
+                :disabled="!canOpenAttachment(item)"
+                :data-testid="item.kind === 'image' ? 'message-attachment-image' : 'message-attachment-file'"
+                @click="openAttachment(item)"
               >
-                {{ t("chat.attachUnavailable") }}
-              </span>
-              <span v-else class="flex max-w-[220px] items-center gap-1.5 bg-panel px-2 py-1.5">
-                <Icon name="file" :size="12" class="shrink-0 text-dim" />
-                <span class="truncate text-[11.5px] text-foreground">{{ item.name }}</span>
-              </span>
-            </button>
-          </Hint>
+                <img
+                  v-if="item.kind === 'image' && thumbs[item.id]"
+                  :src="thumbs[item.id] as string"
+                  :alt="item.name"
+                  class="max-h-[180px] max-w-[240px] object-cover"
+                />
+                <span
+                  v-else-if="item.kind === 'image'"
+                  class="grid h-[72px] w-[96px] place-items-center bg-panel-2 px-2 text-center text-[10px] leading-tight text-dim2"
+                >
+                  {{ t("chat.attachUnavailable") }}
+                </span>
+                <span v-else class="flex max-w-[220px] items-center gap-1.5 bg-panel px-2 py-1.5">
+                  <Icon name="file" :size="12" class="shrink-0 text-dim" />
+                  <span class="truncate text-[11.5px] text-foreground">{{ item.name }}</span>
+                </span>
+              </button>
+            </Hint>
+          </template>
         </div>
         <p v-if="message.content" class="whitespace-pre-wrap text-[13.5px] leading-[1.7] text-foreground [overflow-wrap:anywhere]">
           {{ message.content }}

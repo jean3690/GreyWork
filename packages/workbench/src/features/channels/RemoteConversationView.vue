@@ -222,6 +222,26 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
                     class="max-h-[160px] max-w-[200px] rounded-[8px] object-cover"
                     data-testid="remote-attachment-image"
                   />
+                  <!-- 视频 / 语音：内联播放器；读不到源时落到下面的文件 chip。 -->
+                  <video
+                    v-else-if="item.kind === 'video' && thumbs[item.id]"
+                    :src="thumbs[item.id] as string"
+                    :aria-label="item.name"
+                    class="max-h-[160px] max-w-[200px] rounded-[8px] border border-line-2 bg-black"
+                    data-testid="remote-attachment-video"
+                    controls
+                    playsinline
+                    preload="metadata"
+                  />
+                  <audio
+                    v-else-if="item.kind === 'audio' && thumbs[item.id]"
+                    :src="thumbs[item.id] as string"
+                    :aria-label="item.name"
+                    class="w-[200px]"
+                    data-testid="remote-attachment-audio"
+                    controls
+                    preload="metadata"
+                  />
                   <span
                     v-else
                     class="flex max-w-[200px] items-center gap-1.5 rounded-[8px] bg-panel px-2 py-1 text-[11.5px] text-foreground"

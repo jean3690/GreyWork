@@ -11,7 +11,7 @@
 import type { LlmChatParams } from "@greywork/llm";
 import type { AgentProviderConfig } from "@greywork/shell";
 import { basename } from "@greywork/core";
-import type { Attachment, ChannelMediaCapability, MediaRef, ThreadMessage } from "../../types";
+import type { Attachment, ChannelMediaCapability, MediaKind, MediaRef, ThreadMessage } from "../../types";
 import { dingtalkBackend, type DingTalkInbound } from "../../lib/dingtalk-backend";
 import { feishuBackend, type FeishuInbound } from "../../lib/feishu-backend";
 import { discordBackend, type DiscordInbound } from "../../lib/discord-backend";
@@ -107,7 +107,16 @@ export function createPipelineSlice({ state, getStatus, getPeers }: PipelineDeps
   function mediaLabel(refs: readonly MediaRef[]): string {
     const [only] = refs;
     if (refs.length === 1 && only) {
-      return only.kind === "image" ? t("remoteAssist.media.imageInbound") : t("remoteAssist.media.fileInbound", { name: only.name });
+      switch (only.kind) {
+        case "image":
+          return t("remoteAssist.media.imageInbound");
+        case "video":
+          return t("remoteAssist.media.videoInbound", { name: only.name });
+        case "audio":
+          return t("remoteAssist.media.audioInbound", { name: only.name });
+        default:
+          return t("remoteAssist.media.fileInbound", { name: only.name });
+      }
     }
     return t("remoteAssist.media.inbound", { count: refs.length });
   }
@@ -457,9 +466,15 @@ export function createPipelineSlice({ state, getStatus, getPeers }: PipelineDeps
 
   /* ===== 出站媒体 ===== */
 
-  /** 按文件名猜媒体类型：图片走 image 端点，其余（含 md / csv 等文本产物）走 file 端点。 */
-  function mediaKindOfName(name: string): "image" | "file" {
-    return attachmentKind(name, "") === "image" ? "image" : "file";
+  /** 按文件名猜媒体类别：图片 / 视频 / 语音走各自端点，其余（含 md / csv 等文本产物）走文件端点。 */
+  function mediaKindOfName(name: string): MediaKind {
+    const kind = attachmentKind(name, "");
+    return kind === "image" || kind === "video" || kind === "audio" ? kind : "file";
+  }
+
+  /** 附件类别 → 通道媒体类别（`text` 按文件发）。 */
+  function mediaKindOfAttachment(item: Attachment): MediaKind {
+    return item.kind === "image" || item.kind === "video" || item.kind === "audio" ? item.kind : "file";
   }
 
   /** 能力不允许时的说明文案（宿主侧另有一份兜底，这里负责界面可读）。 */
@@ -481,7 +496,7 @@ export function createPipelineSlice({ state, getStatus, getPeers }: PipelineDeps
   async function sendMediaViaChannel(
     peer: RemotePeer,
     path: string,
-    kind: "image" | "file",
+    kind: MediaKind,
     contextToken: string | null = peer.contextToken,
   ): Promise<void> {
     const cap = state.mediaCapabilities.value[peer.channel];
@@ -507,7 +522,7 @@ export function createPipelineSlice({ state, getStatus, getPeers }: PipelineDeps
    */
   async function relayMedia(
     peer: RemotePeer,
-    items: readonly { path: string; name: string; kind: "image" | "file" }[],
+    items: readonly { path: string; name: string; kind: MediaKind }[],
     contextToken: string | null = peer.contextToken,
   ): Promise<void> {
     if (!items.length) return;
@@ -586,11 +601,11 @@ export function createPipelineSlice({ state, getStatus, getPeers }: PipelineDeps
   }
 
   /** 附件 → 可回发的媒体项；没有 path（落库失败的降级态）的条目直接丢掉并记一笔。 */
-  function mediaOf(peer: RemotePeer, items: readonly Attachment[]): { path: string; name: string; kind: "image" | "file" }[] {
-    const out: { path: string; name: string; kind: "image" | "file" }[] = [];
+  function mediaOf(peer: RemotePeer, items: readonly Attachment[]): { path: string; name: string; kind: MediaKind }[] {
+    const out: { path: string; name: string; kind: MediaKind }[] = [];
     for (const item of items) {
       if (item.path) {
-        out.push({ path: item.path, name: item.name, kind: item.kind === "image" ? "image" : "file" });
+        out.push({ path: item.path, name: item.name, kind: mediaKindOfAttachment(item) });
         continue;
       }
       getStatus().recordActivity({

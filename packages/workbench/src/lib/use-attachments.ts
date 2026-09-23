@@ -23,9 +23,12 @@ import {
 import { ATTACHMENT_LIMITS, buildTextAttachment } from "./attachments";
 import { i18n } from "../i18n";
 import { notify } from "../stores/notice";
-import type { Attachment } from "../types";
+import type { Attachment, AttachmentKind } from "../types";
 
 const t = i18n.global.t;
+
+/** 需要读盘拿对象 URL 的类别（缩略图 / 播放源）；文本与通用文件不读。 */
+const PREVIEWABLE_KINDS: ReadonlySet<AttachmentKind> = new Set(["image", "video", "audio"]);
 
 /** 输入卡根元素的标记属性：拖放命中判定两边都认它。 */
 export const DROPZONE_ATTR = "data-attachment-dropzone";
@@ -84,17 +87,17 @@ export interface AttachmentsOptions {
 }
 
 /**
- * 图片附件缩略图：id → URL（null = 读取失败）。
+ * 图片 / 视频 / 语音附件的对象 URL：id → URL（null = 读取失败）。
  *
  * 输入卡与已发送消息共用同一份缓存（attachmentObjectUrl 内的模块级 LRU），
- * 同一条消息重渲染不会重复读盘。文本附件与失败项不进表，由调用方渲染占位。
+ * 同一条消息重渲染不会重复读盘。文本与通用文件不进表，由调用方渲染占位。
  */
 export function useAttachmentThumbs(items: () => readonly Attachment[]): Ref<Record<string, string | null>> {
   const thumbs = ref<Record<string, string | null>>({});
   const pending = new Set<string>();
 
   async function load(item: Attachment): Promise<void> {
-    if (item.kind !== "image" || item.id in thumbs.value || pending.has(item.id)) return;
+    if (!PREVIEWABLE_KINDS.has(item.kind) || item.id in thumbs.value || pending.has(item.id)) return;
     pending.add(item.id);
     const url = await attachmentObjectUrl(item);
     pending.delete(item.id);

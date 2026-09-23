@@ -1,5 +1,5 @@
 /**
- * 附件（图片 / 文本文件 / 通用文件）的纯逻辑：类型判定、限额校验、旧数据归一化、内联格式。
+ * 附件（图片 / 视频 / 语音 / 文本文件 / 通用文件）的纯逻辑：类型判定、限额校验、旧数据归一化、内联格式。
  *
  * 与 IO 分离的理由：限额与内联格式是发送链路的关键判定，必须在无 Tauri / 无 DOM 的
  * 单测里可验证。落盘、采集、剪贴板等副作用都在 `state/attachment-library.ts`。
@@ -31,6 +31,12 @@ export const IMAGE_MIMES: ReadonlySet<string> = new Set(["image/png", "image/jpe
 
 /** 图片扩展名（文件选择器过滤器 + 拖放路径的 mime 推断）。 */
 export const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp", "bmp"] as const;
+
+/** 视频扩展名。 */
+export const VIDEO_EXTENSIONS = ["mp4", "mov", "m4v", "webm", "mkv", "avi"] as const;
+
+/** 语音 / 音频扩展名。 */
+export const AUDIO_EXTENSIONS = ["mp3", "ogg", "opus", "m4a", "wav", "aac", "flac", "amr", "silk"] as const;
 
 /** 文本类扩展名（同上）。比工作区导入的白名单宽：这里只是「能不能作为文本内联」。 */
 export const TEXT_EXTENSIONS = [
@@ -70,6 +76,20 @@ const EXT_TO_MIME: Record<string, string> = {
   gif: "image/gif",
   webp: "image/webp",
   bmp: "image/bmp",
+  mp4: "video/mp4",
+  mov: "video/quicktime",
+  m4v: "video/x-m4v",
+  webm: "video/webm",
+  mkv: "video/x-matroska",
+  avi: "video/x-msvideo",
+  mp3: "audio/mpeg",
+  ogg: "audio/ogg",
+  opus: "audio/ogg",
+  m4a: "audio/mp4",
+  wav: "audio/wav",
+  aac: "audio/aac",
+  flac: "audio/flac",
+  amr: "audio/amr",
   txt: "text/plain",
   md: "text/markdown",
   markdown: "text/markdown",
@@ -138,9 +158,13 @@ export function mimeForFile(name: string, fallback = ""): string {
 export function attachmentKind(name: string, mime: string): AttachmentKind | null {
   const normalized = mime.trim().toLowerCase();
   if (IMAGE_MIMES.has(normalized)) return "image";
+  if (normalized.startsWith("video/")) return "video";
+  if (normalized.startsWith("audio/")) return "audio";
   if (normalized.startsWith("text/") || normalized === "application/json") return "text";
   const ext = extOf(name);
   if ((IMAGE_EXTENSIONS as readonly string[]).includes(ext)) return "image";
+  if ((VIDEO_EXTENSIONS as readonly string[]).includes(ext)) return "video";
+  if ((AUDIO_EXTENSIONS as readonly string[]).includes(ext)) return "audio";
   if (TEXT_EXT_SET.has(ext)) return "text";
   if (ext || normalized) return "file";
   return null;
@@ -148,7 +172,7 @@ export function attachmentKind(name: string, mime: string): AttachmentKind | nul
 
 /** 归一化历史数据时用的 kind 判定（避免把任意字符串当成合法 kind 收下）。 */
 export function isAttachmentKind(value: unknown): value is AttachmentKind {
-  return value === "image" || value === "text" || value === "file";
+  return value === "image" || value === "video" || value === "audio" || value === "text" || value === "file";
 }
 
 /** 采集期拒绝原因：i18n key + 插值参数（UI 自行翻译，模块不碰 i18n 实例）。 */
@@ -170,9 +194,11 @@ export function validateAttachment(
 ): AttachmentRejection | null {
   const kind = attachmentKind(meta.name, meta.mime);
   if (!kind) return { key: "chat.attachUnsupported", params: { name: meta.name } };
-  // 通用文件必须落盘才发得出去，浏览器态没有文件系统，收下等于把 base64 塞进
-  // localStorage —— 直接按「不支持」拒掉，别让用户以为选上了。
-  if (kind === "file" && !isDesktop) return { key: "chat.attachUnsupported", params: { name: meta.name } };
+  // 通用文件 / 视频 / 语音必须落盘才发得出去，浏览器态没有文件系统，收下等于把 base64
+  // 塞进 localStorage —— 直接按「不支持」拒掉，别让用户以为选上了。
+  if ((kind === "file" || kind === "video" || kind === "audio") && !isDesktop) {
+    return { key: "chat.attachUnsupported", params: { name: meta.name } };
+  }
   if (existing.length >= ATTACHMENT_LIMITS.maxCount) {
     return { key: "chat.attachTooMany", params: { max: ATTACHMENT_LIMITS.maxCount } };
   }

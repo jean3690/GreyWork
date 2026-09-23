@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 const invokeMock = vi.mocked((await import("@tauri-apps/api/core")).invoke);
 
-import { materializeAttachments, readAttachmentBase64, readAttachmentBytes } from "@/state/attachment-library";
+import { attachmentsFromPaths, materializeAttachments, readAttachmentBase64, readAttachmentBytes } from "@/state/attachment-library";
 import type { Attachment } from "@/types";
 
 /** "ABC" 的字节与 base64 —— 与别处用例里的 "QUJD" 同源。 */
@@ -97,6 +97,30 @@ describe("按路径读取附件", () => {
 
     expect(Array.from(await readAttachmentBytes(draft))).toEqual(ABC);
     expect(invokeMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("采集草稿：视频 / 语音按类别收下", () => {
+  it("视频路径收成 video 草稿并保留字节（不落进文本分支被解码成乱码）", async () => {
+    enableTauri();
+    invokeMock.mockResolvedValue(new Uint8Array(ABC).buffer);
+
+    const [draft] = await attachmentsFromPaths(["/tmp/clip.mp4"]);
+
+    expect(draft.kind).toBe("video");
+    expect(draft.mime).toBe("video/mp4");
+    expect(Array.from(draft.bytes ?? [])).toEqual(ABC);
+    expect(draft.text).toBeUndefined();
+  });
+
+  it("语音路径收成 audio 草稿", async () => {
+    enableTauri();
+    invokeMock.mockResolvedValue(new Uint8Array(ABC).buffer);
+
+    const [draft] = await attachmentsFromPaths(["/tmp/voice.ogg"]);
+
+    expect(draft.kind).toBe("audio");
+    expect(draft.mime).toBe("audio/ogg");
   });
 });
 

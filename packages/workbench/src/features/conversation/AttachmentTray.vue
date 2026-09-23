@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 输入卡附件托盘：图片出缩略图，文本出文件名 chip，右上角可移除。
+ * 输入卡附件托盘：图片出缩略图、视频出首帧、文本与语音 / 通用文件出文件名 chip，右上角可移除。
  *
  * 缩略图经 attachmentObjectUrl 读取（磁盘附件 → blob URL，走模块级 LRU），
  * 读不到（文件被移动/删除）时不报错，退化为「已不可用」占位 —— 已发送的历史消息
@@ -49,6 +49,15 @@ const thumbs = useAttachmentThumbs(() => props.items);
       >
         {{ t("chat.attachUnavailable") }}
       </span>
+      <video
+        v-else-if="item.kind === 'video' && thumbs[item.id]"
+        :src="thumbs[item.id] as string"
+        data-testid="attachment-video-thumb"
+        class="size-12 shrink-0 rounded-[7px] bg-black object-cover"
+        muted
+        playsinline
+        preload="metadata"
+      />
       <span v-else class="flex min-w-0 max-w-[200px] items-center gap-1.5">
         <Icon name="file" :size="13" class="text-dim" />
         <span class="min-w-0">

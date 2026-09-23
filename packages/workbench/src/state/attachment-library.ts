@@ -131,12 +131,12 @@ async function toDraft(candidate: Candidate, isDesktop: boolean): Promise<Attach
       dataUrl: `data:${mime};base64,${bytesToBase64(bytes)}`,
     });
   }
-  if (kind === "file") {
-    // 通用文件只能落盘（浏览器态在 validateAttachment 已被拒），草稿必须带上原始字节，
-    // 否则落库那一刻已经没有数据源了。
+  if (kind === "file" || kind === "video" || kind === "audio") {
+    // 通用文件 / 视频 / 语音只能落盘（浏览器态在 validateAttachment 已被拒），草稿必须带上
+    // 原始字节，否则落库那一刻已经没有数据源了。
     const bytes = candidate.bytes;
     if (!isDesktop || !bytes?.length) return null;
-    return createAttachment({ kind: "file", name: candidate.name, mime, size: bytes.length, bytes });
+    return createAttachment({ kind, name: candidate.name, mime, size: bytes.length, bytes });
   }
   const text = candidate.text ?? decodeUtf8(candidate.bytes);
   if (text == null) return null;
