@@ -5,19 +5,23 @@
  * 渲染用**展平 + 单层 v-for**，不用自引用递归组件：递归组件在深目录下会叠出几十层
  * 组件实例，而展平后只有一个列表，缩进靠 padding。行为完全一样，代价低一个量级。
  */
-import { computed, onMounted, ref } from "vue";
+import { computed, nextTick, onMounted, ref } from "vue";
 import { isTauriRuntime } from "@greywork/core";
 import { useVirtualizer } from "@tanstack/vue-virtual";
 import Icon from "@/features/shared/Icon.vue";
 import Hint from "@/features/shared/Hint.vue";
 import ContextMenuRegion from "@/features/shared/ContextMenuRegion.vue";
+import NewEntryDialog from "@/features/preview/NewEntryDialog.vue";
+import ConfirmDialog from "@/features/settings/ConfirmDialog.vue";
 import { fileIconUrl, folderIconUrl } from "@/lib/file-icons";
 import { deviceTier } from "@/lib/device-tier";
 import { observeNonZeroRect } from "@/lib/virtual-rect";
-import { buildFileTreeItems, type ContextMenuItem, type ContextTarget } from "@/lib/context-menu";
+import { buildFileTreeItems, type ContextMenuItem, type ContextTarget, type FileEntryRef } from "@/lib/context-menu";
+import { nameProblem } from "@/lib/file-name";
 import { copyText } from "@/lib/clipboard";
 import { openWithSystemApp } from "@/lib/open-external";
 import { revealInFolder } from "@/lib/reveal";
+import { requestLeave } from "@/lib/preview-edit-guard";
 import { i18n } from "@/i18n";
 import { notify } from "@/stores/notice";
 import { useFileTreeStore, type FileTreeNode } from "@/stores/fileTree";
@@ -33,8 +37,8 @@ const canBind = isTauriRuntime();
 const binding = ref(false);
 
 const rootTitle = computed(() => {
-  if (tree.mode !== "disk") return "内存虚拟文件系统";
-  return tree.bound ? `已绑定：${tree.root}` : `未绑定文件夹，兜底目录：${tree.root}`;
+  if (tree.mode !== "disk") return t("preview.fileTree.vfsTitle");
+  return tree.bound ? t("preview.fileTree.boundTitle", { path: tree.root }) : t("preview.fileTree.fallbackTitle", { path: tree.root });
 });
 
 async function bind(): Promise<void> {
@@ -133,19 +137,104 @@ const slots = computed<RowSlot[]>(() => {
 /** 容器总高：两条路径都必须显式给，否则绝对定位的行撑不起滚动条。 */
 const totalHeight = computed(() => (virtual.value ? virtualizer.value.getTotalSize() : rows.value.length * ROW_STRIDE));
 
+/* ===== 文件操作（新建 / 重命名 / 复制剪切粘贴 / 删除） =====
+ * 宿主的 5 个命令只认授权根内的条目，所以 vfs 模式整组不出现在菜单里（见
+ * lib/context-menu.ts 的 canUseDisk 分支）。 */
+
+/** 内联重命名：目标路径 + 草稿名。**放组件级而不是行内 ref** —— 虚拟化会卸载屏外行，
+ *  行内状态一滚就没了。 */
+const renamingPath = ref<string | null>(null);
+const renameDraft = ref("");
+/** v-for 里的 ref 会是数组，这里统一收敛成单个 input（同时只有一行在改名）。 */
+const renameInputRef = ref<HTMLInputElement | HTMLInputElement[] | null>(null);
+/** 新建对话框的目标目录与类型；null = 不显示。 */
+const newEntry = ref<{ dir: string; kind: "file" | "directory" } | null>(null);
+/** 待确认的删除目标；null = 不显示。 */
+const pendingDelete = ref<FileTreeNode | null>(null);
+
+/** 统一的文件操作包装：失败弹通知，不让异常冒到事件处理器外面。 */
+async function runFileOp(action: () => Promise<void>): Promise<void> {
+  try {
+    await action();
+  } catch (cause) {
+    notify({
+      kind: "warning",
+      key: "file-tree-op",
+      title: t("fileOp.opFailed"),
+      detail: cause instanceof Error ? cause.message : String(cause),
+    });
+  }
+}
+
+function startRename(node: FileTreeNode): void {
+  renamingPath.value = node.path;
+  renameDraft.value = node.name;
+  void nextTick(() => {
+    const input = Array.isArray(renameInputRef.value) ? renameInputRef.value[0] : renameInputRef.value;
+    input?.focus();
+    input?.select();
+  });
+}
+
+function cancelRename(): void {
+  renamingPath.value = null;
+  renameDraft.value = "";
+}
+
+/** 提交改名；名字没变或非法就当作取消（非法名给一条提示，不然用户不知道为什么不生效）。 */
+async function commitRename(node: FileTreeNode): Promise<void> {
+  if (renamingPath.value !== node.path) return;
+  const name = renameDraft.value.trim();
+  renamingPath.value = null;
+  if (!name || name === node.name) return;
+  if (nameProblem(name)) {
+    notify({ kind: "warning", key: "file-tree-rename", title: t("preview.fileTree.nameProblem.invalid"), detail: name });
+    return;
+  }
+  await runFileOp(() => tree.renameEntry(node.path, name));
+}
+
+/** 删除入口：先过守卫（这个文件可能正开着且有未保存改动），存完再删。 */
+function confirmDelete(): void {
+  const node = pendingDelete.value;
+  pendingDelete.value = null;
+  if (!node) return;
+  requestLeave(() => void runFileOp(() => tree.deleteEntry(node.path)));
+}
+
 /* ===== 右键菜单 =====
  * 整棵树只挂一个 reka root，靠 data-ctx 认目标；逐行挂 root 会在深目录下叠出成百个
  * 组件实例。虚拟化后行会随滚动进出 DOM，菜单仍按 data-path 回查 rows，与挂载无关。
  * 条目构建在 lib/context-menu（可单测）。 */
+function nodeOf(path: string): FileTreeNode | undefined {
+  return rows.value.find((row) => row.node.path === path)?.node;
+}
+
 function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
+  // 菜单只给路径，按路径回查节点补出 name / kind（与 activateByPath 同一手法）。
   return buildFileTreeItems(target, t, {
     activate: activateByPath,
     refresh: () => void tree.refresh(),
-    // 只有磁盘源才有磁盘孪生路径；vfs 产物不给「系统应用打开 / 在文件夹中显示」。
+    // 只有磁盘源才有磁盘孪生路径；vfs 产物不给「系统应用打开 / 在文件夹中显示」，也不能增删改。
     canUseDisk: tree.mode === "disk",
+    rootPath: tree.root,
     openExternal: (path) => void openExternal(path),
     reveal: (path) => void reveal(path),
     copyPath: (path) => void copyText(path),
+    createFile: (dir) => (newEntry.value = { dir, kind: "file" }),
+    createFolder: (dir) => (newEntry.value = { dir, kind: "directory" }),
+    rename: (path) => {
+      const node = nodeOf(path);
+      if (node) startRename(node);
+    },
+    remove: (path) => {
+      const node = nodeOf(path);
+      if (node) pendingDelete.value = node;
+    },
+    copy: (entry: FileEntryRef) => tree.copyToClipboard(entry),
+    cut: (entry: FileEntryRef) => tree.cutToClipboard(entry),
+    paste: (dir) => void runFileOp(() => tree.pasteInto(dir)),
+    canPaste: tree.clipboard !== null,
   });
 }
 
@@ -191,14 +280,10 @@ onMounted(() => {
       <div class="flex shrink-0 items-center gap-1.5 border-b border-line px-3 py-1.5">
         <Hint :text="rootTitle" multiline>
           <span class="min-w-0 flex-1 truncate font-mono text-[10.5px] text-dim2">
-            {{ tree.mode === "disk" ? tree.root : "内存文件系统（产物与种子文件）" }}
+            {{ tree.mode === "disk" ? tree.root : t("preview.fileTree.vfsLabel") }}
           </span>
         </Hint>
-        <Hint
-          v-if="canBind"
-          :text="tree.bound ? '换绑工作区文件夹：既有会话文件一并搬到新目录' : '绑定工作区文件夹：文件树与产物都以该文件夹为根'"
-          multiline
-        >
+        <Hint v-if="canBind" :text="tree.bound ? t('preview.fileTree.rebindHint') : t('preview.fileTree.bindHint')" multiline>
           <button
             type="button"
             data-testid="file-tree-bind"
@@ -207,14 +292,14 @@ onMounted(() => {
             :disabled="binding"
             @click="bind()"
           >
-            {{ binding ? "选择中…" : tree.bound ? "换绑" : "绑定文件夹" }}
+            {{ binding ? t("preview.fileTree.binding") : tree.bound ? t("preview.fileTree.rebind") : t("preview.fileTree.bind") }}
           </button>
         </Hint>
         <button
           type="button"
           data-testid="file-tree-refresh"
           class="grid size-[24px] shrink-0 cursor-pointer place-items-center rounded-[5px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
-          aria-label="刷新文件树"
+          :aria-label="t('contextMenu.fileTree.refresh')"
           @click="tree.refresh()"
         >
           <Icon name="refresh" :size="12" />
@@ -223,12 +308,12 @@ onMounted(() => {
 
       <!-- 未绑定时说清「这不是你的项目目录」：否则一棵 home 目录树看起来就像 bug -->
       <p v-if="canBind && tree.mode === 'disk' && !tree.bound" class="shrink-0 px-3 py-1.5 text-[10.5px] text-dim2">
-        当前工作区未绑定文件夹，显示的是兜底目录。绑定后文件树、产物落盘与 agent 读写都以该文件夹为根。
+        {{ t("preview.fileTree.unboundNotice") }}
       </p>
 
-      <p v-if="tree.loadingRoot" class="px-3 py-2 text-[12px] text-dim2">读取目录中…</p>
+      <p v-if="tree.loadingRoot" class="px-3 py-2 text-[12px] text-dim2">{{ t("preview.fileTree.loading") }}</p>
       <p v-else-if="tree.error" role="alert" class="px-3 py-2 text-[12px] text-orange">{{ tree.error }}</p>
-      <p v-else-if="rows.length === 0" class="px-3 py-2 text-[12px] text-dim2">这个目录是空的</p>
+      <p v-else-if="rows.length === 0" class="px-3 py-2 text-[12px] text-dim2">{{ t("preview.fileTree.empty") }}</p>
 
       <div v-else ref="scrollEl" class="min-h-0 flex-1 overflow-auto py-1">
         <!-- 相对容器 + 显式总高：行一律绝对定位在 translateY 处，虚拟与非虚拟共用一套模板 -->
@@ -239,14 +324,29 @@ onMounted(() => {
             :data-index="slot.index"
             class="absolute left-0 top-0 w-full"
             :style="{ transform: `translateY(${slot.start}px)` }"
+            data-ctx="file-row"
+            :data-path="slot.row.node.path"
+            :data-kind="slot.row.node.kind"
           >
-            <Hint :text="slot.row.node.path" multiline>
+            <!-- 改名时整行换成 input：**不能把 input 塞进 button**（HTML 内容模型非法），
+                 所以两个分支是平级的整行二选一。data-ctx 也因此上移到这一层 ——
+                 `closest("[data-ctx]")` 在改名期间仍要命中这一行。 -->
+            <input
+              v-if="renamingPath === slot.row.node.path"
+              ref="renameInputRef"
+              v-model="renameDraft"
+              type="text"
+              data-testid="file-tree-rename"
+              class="h-[26px] w-full rounded-[4px] border border-cyan bg-panel-2 pe-2 text-[12px] text-foreground outline-none"
+              :style="{ paddingInlineStart: `${8 + slot.row.depth * 12}px` }"
+              @keydown.enter.prevent="commitRename(slot.row.node)"
+              @keydown.esc.prevent="cancelRename()"
+              @blur="commitRename(slot.row.node)"
+            />
+            <Hint v-else :text="slot.row.node.path" multiline>
               <button
                 type="button"
                 data-testid="file-tree-row"
-                data-ctx="file-row"
-                :data-path="slot.row.node.path"
-                :data-kind="slot.row.node.kind"
                 class="flex h-[26px] w-full cursor-pointer items-center gap-1 pe-2 text-start text-[12px] transition-colors hover:bg-panel focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
                 :class="slot.row.node.kind === 'directory' ? 'text-foreground' : 'text-dim hover:text-foreground'"
                 :style="{ paddingInlineStart: `${8 + slot.row.depth * 12}px` }"
@@ -263,7 +363,8 @@ onMounted(() => {
                 <template v-if="slot.row.node.kind === 'directory'">
                   <img
                     :src="folderIconUrl(slot.row.node.name, tree.isExpanded(slot.row.node.path))"
-                    :alt="tree.isExpanded(slot.row.node.path) ? '展开的文件夹' : '文件夹'"
+                    alt=""
+                    aria-hidden="true"
                     class="size-3.5 shrink-0 object-contain"
                     :class="{ 'animate-spin opacity-60': tree.isLoading(slot.row.node.path) }"
                     loading="lazy"
@@ -274,7 +375,8 @@ onMounted(() => {
                 <img
                   v-else
                   :src="fileIconUrl(slot.row.node.name)"
-                  alt="文件"
+                  alt=""
+                  aria-hidden="true"
                   class="size-3.5 shrink-0 object-contain"
                   loading="lazy"
                   decoding="async"
@@ -288,4 +390,16 @@ onMounted(() => {
       </div>
     </div>
   </ContextMenuRegion>
+
+  <!-- 两个弹层挂在 ContextMenuRegion **之外**：region 的 trigger 是 `as-child`，
+       塞多一个根节点进去会让它拿不到唯一的子元素（见 lib/context-menu.ts 顶部约定）。 -->
+  <NewEntryDialog v-if="newEntry" :dir="newEntry.dir" :kind="newEntry.kind" @close="newEntry = null" />
+  <ConfirmDialog
+    v-if="pendingDelete"
+    :title="t('preview.fileTree.deleteTitle', { name: pendingDelete.name })"
+    :message="t('preview.fileTree.deleteMessage')"
+    :confirm-label="t('common.delete')"
+    @confirm="confirmDelete"
+    @cancel="pendingDelete = null"
+  />
 </template>

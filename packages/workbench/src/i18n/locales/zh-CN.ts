@@ -52,6 +52,13 @@ export const zhCN = {
       reveal: "在文件夹中显示",
       copyPath: "复制路径",
       refresh: "刷新文件树",
+      createFile: "新建文件",
+      createFolder: "新建文件夹",
+      rename: "重命名",
+      copy: "复制",
+      cut: "剪切",
+      paste: "粘贴",
+      delete: "删除",
     },
     previewTab: {
       activate: "切换到此标签",
@@ -108,6 +115,7 @@ export const zhCN = {
     openFailedDetail: "{path} 可能已被移动或删除，也可能是系统里没有能打开它的程序。",
     revealFailed: "无法在文件夹中显示",
     revealFailedDetail: "{path} 可能已被移动或删除。",
+    opFailed: "操作失败",
   },
   /* 系统托盘（宿主原生菜单，不是 settings.tray）：宿主不持有语言，文案由渲染端推送，
      见 lib/tray-bridge.ts 与 src-tauri/src/tray.rs。 */
@@ -218,6 +226,36 @@ export const zhCN = {
       readFailed: "读取失败：{detail}",
       openExternal: "用系统应用打开",
     },
+    /* 文件树面板自身的文案（菜单标签在 contextMenu.fileTree.*）。 */
+    fileTree: {
+      vfsTitle: "内存虚拟文件系统",
+      boundTitle: "已绑定：{path}",
+      fallbackTitle: "未绑定文件夹，兜底目录：{path}",
+      vfsLabel: "内存文件系统（产物与种子文件）",
+      bind: "绑定文件夹",
+      rebind: "换绑",
+      binding: "选择中…",
+      bindHint: "绑定工作区文件夹：文件树与产物都以该文件夹为根",
+      rebindHint: "换绑工作区文件夹：既有会话文件一并搬到新目录",
+      unboundNotice: "当前工作区未绑定文件夹，显示的是兜底目录。绑定后文件树、产物落盘与 agent 读写都以该文件夹为根。",
+      loading: "读取目录中…",
+      empty: "这个目录是空的",
+      newFile: "新建文件",
+      newFolder: "新建文件夹",
+      filePlaceholder: "例如 notes.md",
+      folderPlaceholder: "例如 assets",
+      nameProblem: {
+        empty: "请输入名称",
+        dot: "不能用 . 或 ..",
+        illegal: '名称不能包含 / \\ < > : " | ? *',
+        trailing: "名称不能以 . 结尾",
+        reserved: "该名称是系统保留名",
+        invalid: "名称不可用",
+      },
+      deleteTitle: "删除「{name}」？",
+      deleteMessage: "文件夹会连同里面的内容一起删除，此操作不可撤销。",
+    },
+
     /* 离开可编辑预览（切区段 / 切标签 / 关标签 / 关窗）前先自动保存；
        只有保存失败才弹这个确认。names 是未能保存的文件名，顿号连接。 */
     guard: {

@@ -16,11 +16,18 @@ const treeStub = {
   nodes: [] as { name: string; path: string; kind: "file" | "directory"; children?: unknown[] }[],
   error: null as string | null,
   loadingRoot: false,
+  clipboard: null as { path: string; name: string; kind: "file" | "directory"; mode: "copy" | "cut" } | null,
   refresh: vi.fn(),
   bindFolder: vi.fn(),
   toggle: vi.fn(),
   isExpanded: () => true,
   isLoading: () => false,
+  createEntry: vi.fn(),
+  renameEntry: vi.fn(),
+  pasteInto: vi.fn(),
+  deleteEntry: vi.fn(),
+  copyToClipboard: vi.fn(),
+  cutToClipboard: vi.fn(),
 };
 vi.mock("@/stores/fileTree", () => ({ useFileTreeStore: () => treeStub }));
 
@@ -62,6 +69,13 @@ beforeEach(() => {
   ];
   treeStub.refresh.mockReset();
   treeStub.toggle.mockReset();
+  treeStub.createEntry.mockReset();
+  treeStub.renameEntry.mockReset();
+  treeStub.pasteInto.mockReset();
+  treeStub.deleteEntry.mockReset();
+  treeStub.copyToClipboard.mockReset();
+  treeStub.cutToClipboard.mockReset();
+  treeStub.clipboard = null;
   openWithSystemApp.mockReset().mockResolvedValue(true);
   revealInFolder.mockReset().mockResolvedValue(true);
   copyText.mockReset().mockResolvedValue(undefined);
@@ -112,7 +126,7 @@ describe("文件树右键菜单", () => {
     expect(treeStub.refresh).toHaveBeenCalled();
   });
 
-  it("磁盘源的文件行：多出「用系统应用打开 / 在文件夹中显示」，分别接到对应工具函数", async () => {
+  it("磁盘源的文件行：多出「用系统应用打开 / 在文件夹中显示」与增删改，前两项接到对应工具函数", async () => {
     treeStub.mode = "disk";
     treeStub.nodes = [{ name: "a.ts", path: "/w/a.ts", kind: "file" }];
     const wrapper = mount(FileTree);
@@ -123,6 +137,13 @@ describe("文件树右键菜单", () => {
       t("contextMenu.fileTree.open"),
       t("contextMenu.fileTree.openExternal"),
       t("contextMenu.fileTree.reveal"),
+      t("contextMenu.fileTree.createFile"),
+      t("contextMenu.fileTree.createFolder"),
+      t("contextMenu.fileTree.paste"),
+      t("contextMenu.fileTree.rename"),
+      t("contextMenu.fileTree.copy"),
+      t("contextMenu.fileTree.cut"),
+      t("contextMenu.fileTree.delete"),
       t("contextMenu.fileTree.copyPath"),
       t("contextMenu.fileTree.refresh"),
     ]);
@@ -136,6 +157,90 @@ describe("文件树右键菜单", () => {
     await menuItems()[2].trigger("click");
     await flushPromises();
     expect(revealInFolder).toHaveBeenCalledWith("/w/a.ts");
+  });
+
+  it("磁盘源的目录行：「复制」把条目（含 name）交给剪贴板", async () => {
+    treeStub.mode = "disk";
+    treeStub.nodes = [{ name: "src", path: "/w/src", kind: "directory" }];
+    const wrapper = mount(FileTree);
+    await wrapper.get('[data-testid="file-tree-row"]').trigger("contextmenu");
+    await flushPromises();
+
+    const copyIndex = menuLabels().indexOf(t("contextMenu.fileTree.copy"));
+    await menuItems()[copyIndex].trigger("click");
+    await flushPromises();
+    expect(treeStub.copyToClipboard).toHaveBeenCalledWith({ path: "/w/src", name: "src", kind: "directory" });
+  });
+
+  it("磁盘源：「新建文件」打开对话框并把目标目录带过去", async () => {
+    treeStub.mode = "disk";
+    treeStub.nodes = [{ name: "src", path: "/w/src", kind: "directory" }];
+    const wrapper = mount(FileTree);
+    await wrapper.get('[data-testid="file-tree-row"]').trigger("contextmenu");
+    await flushPromises();
+
+    const index = menuLabels().indexOf(t("contextMenu.fileTree.createFile"));
+    await menuItems()[index].trigger("click");
+    await flushPromises();
+
+    // 弹层 Portal 到 body，够不到 wrapper
+    expect(document.body.querySelector('[data-testid="new-entry-name"]')).not.toBeNull();
+    expect(document.body.textContent).toContain("/w/src");
+
+    // 填入名字提交 → 走 store.createEntry(dir, name, "file")
+    const input = document.body.querySelector<HTMLInputElement>('[data-testid="new-entry-name"]')!;
+    input.value = "notes.md";
+    input.dispatchEvent(new Event("input"));
+    await flushPromises();
+    document.body.querySelector<HTMLButtonElement>('[data-testid="new-entry-submit"]')!.click();
+    await flushPromises();
+    expect(treeStub.createEntry).toHaveBeenCalledWith("/w/src", "notes.md", "file");
+  });
+
+  it("磁盘源：「重命名」把该行换成输入框，提交后改名", async () => {
+    treeStub.mode = "disk";
+    treeStub.nodes = [{ name: "a.ts", path: "/w/a.ts", kind: "file" }];
+    const wrapper = mount(FileTree);
+    await wrapper.get('[data-testid="file-tree-row"]').trigger("contextmenu");
+    await flushPromises();
+
+    const index = menuLabels().indexOf(t("contextMenu.fileTree.rename"));
+    await menuItems()[index].trigger("click");
+    await flushPromises();
+
+    const input = wrapper.get('[data-testid="file-tree-rename"]');
+    expect((input.element as HTMLInputElement).value).toBe("a.ts");
+    // 整行替换：按钮让位给 input，且 input 必须锁在 26px 行高内（虚拟列表按恒高布局）
+    expect(wrapper.find('[data-testid="file-tree-row"]').exists()).toBe(false);
+    expect(input.classes()).toContain("h-[26px]");
+    // data-ctx 挂在行外层，改名期间右键仍能命中同一行
+    expect(wrapper.get('[data-ctx="file-row"]').attributes("data-path")).toBe("/w/a.ts");
+
+    await input.setValue("b.ts");
+    await input.trigger("keydown.enter");
+    await flushPromises();
+    expect(treeStub.renameEntry).toHaveBeenCalledWith("/w/a.ts", "b.ts");
+  });
+
+  it("磁盘源：「删除」弹确认，确认后才真的删", async () => {
+    treeStub.mode = "disk";
+    treeStub.nodes = [{ name: "a.ts", path: "/w/a.ts", kind: "file" }];
+    const wrapper = mount(FileTree);
+    await wrapper.get('[data-testid="file-tree-row"]').trigger("contextmenu");
+    await flushPromises();
+
+    const index = menuLabels().indexOf(t("contextMenu.fileTree.delete"));
+    await menuItems()[index].trigger("click");
+    await flushPromises();
+
+    const dialog = document.body.querySelector('[data-slot="alert-dialog-content"]');
+    expect(dialog?.textContent).toContain(t("preview.fileTree.deleteTitle", { name: "a.ts" }));
+    expect(treeStub.deleteEntry).not.toHaveBeenCalled();
+
+    // 弹层按钮顺序：[取消, 确认]
+    [...document.body.querySelectorAll<HTMLButtonElement>('[data-slot="alert-dialog-content"] button')][1].click();
+    await flushPromises();
+    expect(treeStub.deleteEntry).toHaveBeenCalledWith("/w/a.ts");
   });
 
   it("磁盘源目录行：「用系统应用打开」禁用", async () => {

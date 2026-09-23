@@ -1,13 +1,14 @@
 import { defineStore } from "pinia";
 import { computed, ref, watch } from "vue";
 import { basename, isTauriRuntime, joinPath, normalizePath } from "@greywork/core";
-import { listDir } from "../state/workspaceFiles";
+import { listDir, copyPath, createDir, createFile, deletePath, renamePath } from "../state/workspaceFiles";
 import { resolveWorkspaceRoot } from "../lib/workspace-dir";
 import { activeWorkspaceFolder } from "../lib/artifact-dir";
 import { activeConversationFolder } from "../lib/conversation-folder";
 import { pickWorkspaceFolder } from "../lib/workspace-picker";
 import { bindWorkspaceFolder } from "../lib/workspace-bind";
 import { buildFileTree, useVfsStore } from "./vfs";
+import { usePreviewStore } from "./preview";
 import { useWorkspaceStore } from "./workspace";
 
 /**
@@ -30,6 +31,19 @@ export interface FileTreeNode {
   kind: "file" | "directory";
   /** 目录：`undefined` = 尚未展开过；数组 = 已加载（空数组是「空目录」这个事实）。 */
   children?: FileTreeNode[];
+}
+
+/**
+ * 应用内剪贴板条目（复制 / 剪切）。
+ *
+ * **放 store 而不是组件 state**：`FileTree` 在两处挂载（右栏「文件」区段与最右的工作区栏
+ * `WorkspacePanel.vue`），组件各自的剪贴板会让「这栏复制、那栏粘贴」直接失效。
+ */
+export interface ClipboardEntry {
+  path: string;
+  name: string;
+  kind: FileTreeNode["kind"];
+  mode: "copy" | "cut";
 }
 
 export const useFileTreeStore = defineStore("fileTree", () => {
@@ -180,6 +194,142 @@ export const useFileTreeStore = defineStore("fileTree", () => {
     return loadingPaths.value.has(path);
   }
 
+  /* ===== 文件树增删改 =====
+   * 目标目录与源路径由调用方（菜单 / 行内改名）给出，这里只负责编排：
+   * 调宿主 → 重列受影响目录 → 同步已打开的预览 tab。
+   * 全部只支持磁盘工作区（vfs 是内存产物视图，宿主那 5 个命令也要求授权根）。
+   */
+
+  const clipboard = ref<ClipboardEntry | null>(null);
+
+  function assertDiskMode(): void {
+    if (mode.value !== "disk") throw new Error("只有已绑定文件夹的工作区支持文件操作");
+  }
+
+  /** 取某目录当前已加载的子节点（根目录不在 diskNodes 里，要特判）。 */
+  function childrenOf(dir: string): FileTreeNode[] {
+    if (normalizePath(dir) === normalizePath(root.value)) return diskNodes.value;
+    return findNode(dir)?.children ?? [];
+  }
+
+  /**
+   * 重列**单个目录**并就地替换它的子节点，**保留其余部分的展开态**。
+   *
+   * 增删改之后不能用 `refresh()`：它会把 `expanded` 清空（见上），用户刚整理过的树整棵
+   * 折回去。这里还把**仍然存在**的旧节点对象按 path 接回去，于是已展开的子目录连同它们
+   * 的子节点缓存都留着 —— 列表里只是多了 / 少了一个条目。
+   */
+  async function reloadDir(dir: string): Promise<void> {
+    if (mode.value !== "disk") return; // vfs 由路径清单派生，写入即刷新
+    try {
+      const entries = await listDir(dir);
+      const previous = new Map(childrenOf(dir).map((node) => [normalizePath(node.path), node]));
+      const merged = sortEntries(
+        entries.map((entry) => {
+          const path = entry.origin ?? joinPath(dir, entry.name);
+          const old = previous.get(normalizePath(path));
+          return old && old.kind === entry.kind ? old : { name: entry.name, path, kind: entry.kind };
+        }),
+      );
+      if (normalizePath(dir) === normalizePath(root.value)) {
+        diskNodes.value = merged;
+        return;
+      }
+      const node = findNode(dir);
+      if (!node) return;
+      node.children = merged;
+      // 触发响应式：node 是深层对象，直接改 children 不一定被 computed 感知。
+      diskNodes.value = [...diskNodes.value];
+    } catch (cause: unknown) {
+      error.value = cause instanceof Error ? cause.message : String(cause);
+    }
+  }
+
+  /** 丢弃某路径及其下级的展开 / 加载态（条目已被改名或移动走，这些标记会变成悬空项）。 */
+  function forgetPath(path: string): void {
+    const base = normalizePath(path);
+    const stale = (item: string): boolean => {
+      const current = normalizePath(item);
+      return current === base || current.startsWith(`${base}/`);
+    };
+    expanded.value = new Set([...expanded.value].filter((item) => !stale(item)));
+    loadingPaths.value = new Set([...loadingPaths.value].filter((item) => !stale(item)));
+  }
+
+  /**
+   * 父目录。用 `normalizePath` 的形态找切点（分隔符已统一），再按**原串**截断 ——
+   * 这样回给宿主的路径仍保留它给的那套分隔符（Windows 上是反斜杠）。
+   */
+  function parentOf(path: string): string {
+    const normalized = normalizePath(path);
+    const cut = normalized.lastIndexOf("/");
+    if (cut < 0) return "";
+    return cut === 0 ? normalized.slice(0, 1) : path.slice(0, cut);
+  }
+
+  /** 新建文件 / 文件夹；成功后展开父目录，让新条目立刻可见。 */
+  async function createEntry(parent: string, name: string, kind: FileTreeNode["kind"]): Promise<void> {
+    assertDiskMode();
+    const path = joinPath(parent, name);
+    if (kind === "file") await createFile(path);
+    else await createDir(path);
+    expanded.value = new Set(expanded.value).add(parent);
+    await reloadDir(parent);
+  }
+
+  /** 改名 / 移动；同步已打开的预览 tab（它们持有旧路径，下次保存会写错地方）。 */
+  async function moveEntry(from: string, to: string): Promise<void> {
+    assertDiskMode();
+    await renamePath(from, to);
+    forgetPath(from);
+    const targetParent = parentOf(to);
+    await reloadDir(targetParent);
+    const sourceParent = parentOf(from);
+    if (normalizePath(sourceParent) !== normalizePath(targetParent)) await reloadDir(sourceParent);
+    usePreviewStore().retargetPath(from, to);
+  }
+
+  /** 就地改名：目标路径由「父目录 + 新名」拼出，调用方不必自己切路径。 */
+  async function renameEntry(path: string, newName: string): Promise<void> {
+    await moveEntry(path, joinPath(parentOf(path), newName));
+  }
+
+  /** 把剪贴板里的条目粘贴进目录；剪切是移动，复制是复制。 */
+  async function pasteInto(dir: string): Promise<void> {
+    const entry = clipboard.value;
+    if (!entry) return;
+    assertDiskMode();
+    const target = joinPath(dir, entry.name);
+    if (entry.mode === "copy") {
+      await copyPath(entry.path, target);
+      await reloadDir(dir);
+      return;
+    }
+    await moveEntry(entry.path, target);
+    clipboard.value = null; // 剪切只生效一次（失败时抛在上面，剪贴板保留，用户可重试）
+  }
+
+  /** 删除条目；受影响的预览 tab 一并关掉。调用方负责先兜住未保存的编辑。 */
+  async function deleteEntry(path: string): Promise<void> {
+    assertDiskMode();
+    await deletePath(path);
+    forgetPath(path);
+    await reloadDir(parentOf(path));
+    usePreviewStore().closeUnder(path);
+  }
+
+  function cutToClipboard(entry: Omit<ClipboardEntry, "mode">): void {
+    clipboard.value = { ...entry, mode: "cut" };
+  }
+
+  function copyToClipboard(entry: Omit<ClipboardEntry, "mode">): void {
+    clipboard.value = { ...entry, mode: "copy" };
+  }
+
+  function clearClipboard(): void {
+    clipboard.value = null;
+  }
+
   /**
    * 绑定的文件夹变化（切换工作区 / 换绑 / 切对话）就重载树。
    *
@@ -199,10 +349,20 @@ export const useFileTreeStore = defineStore("fileTree", () => {
     error,
     loadingRoot,
     boundFolder,
+    clipboard,
     refresh,
     bindFolder,
     toggle,
     isExpanded,
     isLoading,
+    reloadDir,
+    createEntry,
+    renameEntry,
+    moveEntry,
+    pasteInto,
+    deleteEntry,
+    cutToClipboard,
+    copyToClipboard,
+    clearClipboard,
   };
 });

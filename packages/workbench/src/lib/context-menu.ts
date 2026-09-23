@@ -14,6 +14,7 @@
  * 区域切分的硬约束：ContextMenuTrigger 不做 stopPropagation，嵌套的两层会**同时**打开。
  * 所以一个区域只放一个 root，且各区域的 root 之间不得互相包含（见各组件里的 data-ctx 标注）。
  */
+import { basename } from "@greywork/core";
 
 /** i18n 翻译函数的最小面；组件传 `t` 进来，构建器本身不碰 i18n 实例。 */
 export type Translate = (key: string) => string;
@@ -70,26 +71,55 @@ function hitOf(target: ContextTarget | null, ctx: string): HTMLElement | null {
 
 /* ===================== 文件树 ===================== */
 
+/** 剪贴板 / 改名要的条目引用（路径 + 展示名 + 类型）。 */
+export interface FileEntryRef {
+  path: string;
+  name: string;
+  kind: "file" | "directory";
+}
+
 export interface FileTreeMenuActions {
   /** 打开：目录展开/收起，文件进预览。 */
   activate: (path: string, kind: "file" | "directory") => void;
   refresh: () => void;
   /** 只有磁盘源才有磁盘孪生路径；vfs 产物不给「系统应用打开 / 在文件夹中显示」。 */
   canUseDisk: boolean;
+  /** 树的根路径：空白处右键时「新建 / 粘贴」的落点。 */
+  rootPath: string;
   openExternal: (path: string) => void;
   reveal: (path: string) => void;
   copyPath: (path: string) => void;
+  createFile: (dir: string) => void;
+  createFolder: (dir: string) => void;
+  rename: (path: string) => void;
+  remove: (path: string) => void;
+  copy: (entry: FileEntryRef) => void;
+  cut: (entry: FileEntryRef) => void;
+  paste: (dir: string) => void;
+  /** 剪贴板里有没有东西（决定「粘贴」是否可用）。 */
+  canPaste: boolean;
 }
 
 export function buildFileTreeItems(target: ContextTarget | null, t: Translate, actions: FileTreeMenuActions): ContextMenuItem[] {
   const row = hitOf(target, "file-row");
-  // 空白区（含根提示条）：只给「刷新」，不给一堆对不上目标的项。
-  if (!row) return [item(t("contextMenu.fileTree.refresh"), actions.refresh, { icon: "refresh" })];
+  // 空白处（含根提示条）：新建与粘贴都落到根目录，再给一个刷新。
+  if (!row) {
+    const dir = actions.rootPath;
+    if (!actions.canUseDisk || !dir) return [item(t("contextMenu.fileTree.refresh"), actions.refresh, { icon: "refresh" })];
+    return [
+      item(t("contextMenu.fileTree.createFile"), () => actions.createFile(dir), { icon: "file" }),
+      item(t("contextMenu.fileTree.createFolder"), () => actions.createFolder(dir), { icon: "folder" }),
+      item(t("contextMenu.fileTree.paste"), () => actions.paste(dir), { icon: "file", disabled: !actions.canPaste }),
+      separator(),
+      item(t("contextMenu.fileTree.refresh"), actions.refresh, { icon: "refresh" }),
+    ];
+  }
 
   const path = row.dataset.path ?? "";
   const isDirectory = row.dataset.kind === "directory";
+  const entry: FileEntryRef = { path, name: basename(path), kind: isDirectory ? "directory" : "file" };
   const entries: ContextMenuItem[] = [
-    item(t("contextMenu.fileTree.open"), () => actions.activate(path, isDirectory ? "directory" : "file"), {
+    item(t("contextMenu.fileTree.open"), () => actions.activate(path, entry.kind), {
       icon: isDirectory ? "folder" : "file",
     }),
   ];
@@ -98,6 +128,17 @@ export function buildFileTreeItems(target: ContextTarget | null, t: Translate, a
       // 目录交给系统文件管理器更自然，这里只对文件提供「用系统应用打开」。
       item(t("contextMenu.fileTree.openExternal"), () => actions.openExternal(path), { icon: "external", disabled: isDirectory }),
       item(t("contextMenu.fileTree.reveal"), () => actions.reveal(path), { icon: "folder" }),
+      separator(),
+      // 新建 / 粘贴都要求目标是目录：文件行上禁掉，而不是偷偷落到它的父目录去。
+      item(t("contextMenu.fileTree.createFile"), () => actions.createFile(path), { icon: "file", disabled: !isDirectory }),
+      item(t("contextMenu.fileTree.createFolder"), () => actions.createFolder(path), { icon: "folder", disabled: !isDirectory }),
+      item(t("contextMenu.fileTree.paste"), () => actions.paste(path), { icon: "file", disabled: !isDirectory || !actions.canPaste }),
+      separator(),
+      item(t("contextMenu.fileTree.rename"), () => actions.rename(path), { icon: "edit" }),
+      item(t("contextMenu.fileTree.copy"), () => actions.copy(entry), { icon: "file" }),
+      item(t("contextMenu.fileTree.cut"), () => actions.cut(entry), { icon: "file" }),
+      separator(),
+      item(t("contextMenu.fileTree.delete"), () => actions.remove(path), { icon: "delete", destructive: true }),
     );
   }
   entries.push(

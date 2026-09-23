@@ -15,11 +15,18 @@ const treeStub = {
   nodes: [] as { name: string; path: string; kind: "file" | "directory"; children?: unknown[] }[],
   error: null as string | null,
   loadingRoot: false,
+  clipboard: null as unknown,
   refresh: vi.fn(),
   bindFolder: vi.fn(),
   toggle: vi.fn(),
   isExpanded: () => true,
   isLoading: () => false,
+  createEntry: vi.fn(),
+  renameEntry: vi.fn(),
+  pasteInto: vi.fn(),
+  deleteEntry: vi.fn(),
+  copyToClipboard: vi.fn(),
+  cutToClipboard: vi.fn(),
 };
 vi.mock("@/stores/fileTree", () => ({ useFileTreeStore: () => treeStub }));
 vi.mock("@/lib/open-external", () => ({ openWithSystemApp: vi.fn() }));

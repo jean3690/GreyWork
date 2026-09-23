@@ -187,6 +187,33 @@ export function ensureDir(path: string): Promise<void> {
   return invoke("fs_ensure_dir", { path });
 }
 
+/* ===== 文件树增删改（宿主侧只认授权根内的条目，见 workspace_fs.rs） ===== */
+
+/** 新建空文件；父目录必须已存在（不递归创建）。 */
+export function createFile(path: string): Promise<void> {
+  return invoke("fs_create_file", { path });
+}
+
+/** 新建文件夹；父目录必须已存在。 */
+export function createDir(path: string): Promise<void> {
+  return invoke("fs_create_dir", { path });
+}
+
+/** 改名 / 移动（宿主是同一个命令：改名是同目录换名，移动是新目录加原名）；目标必须不存在。 */
+export function renamePath(from: string, to: string): Promise<void> {
+  return invoke("fs_rename_path", { from, to });
+}
+
+/** 复制条目（目录递归，目录内的符号链接会被跳过）；目标必须不存在。 */
+export function copyPath(from: string, to: string): Promise<void> {
+  return invoke("fs_copy_path", { from, to });
+}
+
+/** 删除文件或文件夹（文件夹递归；软链删的是链接本身）。 */
+export function deletePath(path: string): Promise<void> {
+  return invoke("fs_delete_path", { path });
+}
+
 /** 把二进制内容写入磁盘（Rust fs_write_binary，base64 载荷 ≤20MB）。 */
 export function writeBinaryFile(path: string, data: Uint8Array): Promise<void> {
   return invoke("fs_write_binary", { path, dataBase64: bytesToBase64(data) });

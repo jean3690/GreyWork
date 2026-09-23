@@ -401,3 +401,63 @@ describe("伙伴面板预留（reservedPx）", () => {
     expect(preview.collapsed).toBe(true);
   });
 });
+
+/**
+ * 文件树里改名 / 移动 / 删除之后，已打开的 tab 必须跟着走 —— 它们持有旧路径，
+ * editor 保存用的就是 `tab.path`，不同步的话下一次保存会写回一个不存在的位置。
+ */
+describe("路径重定向与关闭（文件树增删改的联动）", () => {
+  it("retargetPath：单个文件改名，path/name/diskPath 一起换", () => {
+    const preview = usePreviewStore();
+    const id = preview.open("/ws/a.md", "a.md", "disk");
+    preview.retargetPath("/ws/a.md", "/ws/b.md");
+
+    const tab = preview.tabs.find((candidate) => candidate.id === id);
+    expect(tab?.path).toBe("/ws/b.md");
+    expect(tab?.name).toBe("b.md");
+  });
+
+  it("retargetPath：目录整体移动，其下的 tab 按前缀一起搬", () => {
+    const preview = usePreviewStore();
+    const inner = preview.open("/ws/src/deep/a.ts", "a.ts", "disk");
+    const outside = preview.open("/ws/other/b.md", "b.md", "disk");
+
+    preview.retargetPath("/ws/src", "/ws/moved");
+
+    expect(preview.tabs.find((candidate) => candidate.id === inner)?.path).toBe("/ws/moved/deep/a.ts");
+    expect(preview.tabs.find((candidate) => candidate.id === inner)?.name).toBe("a.ts");
+    // 不在子树里的不受影响
+    expect(preview.tabs.find((candidate) => candidate.id === outside)?.path).toBe("/ws/other/b.md");
+  });
+
+  it("retargetPath 不动 revision（内容没变，重读没有意义）", () => {
+    const preview = usePreviewStore();
+    const id = preview.open("/ws/a.md", "a.md", "disk");
+    preview.retargetPath("/ws/a.md", "/ws/b.md");
+    expect(preview.tabs.find((candidate) => candidate.id === id)?.revision).toBe(0);
+  });
+
+  it("closeUnder：关掉该路径及其子路径下的 tab，其余保留", () => {
+    const preview = usePreviewStore();
+    const inside = preview.open("/ws/src/a.ts", "a.ts", "disk");
+    const nested = preview.open("/ws/src/deep/b.ts", "b.ts", "disk");
+    const sibling = preview.open("/ws/src2/c.ts", "c.ts", "disk");
+
+    preview.closeUnder("/ws/src");
+
+    expect(preview.tabs.map((tab) => tab.id)).toEqual([sibling]);
+    expect(preview.tabs.some((tab) => tab.id === inside || tab.id === nested)).toBe(false);
+  });
+
+  it("closeUnder 关掉当前激活项时把焦点交给剩下的（不清空）", () => {
+    const preview = usePreviewStore();
+    preview.open("/ws/a.md", "a.md", "disk");
+    const active = preview.open("/ws/b.md", "b.md", "disk");
+
+    preview.closeUnder("/ws/b.md");
+
+    expect(preview.tabs).toHaveLength(1);
+    expect(preview.activeId).not.toBe(active);
+    expect(preview.activeId).toBe(preview.tabs[0].id);
+  });
+});

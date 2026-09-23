@@ -229,6 +229,39 @@ export const usePreviewStore = defineStore("preview", () => {
     setCollapsed(true);
   }
 
+  /**
+   * 文件树里改名 / 移动之后，把已打开 tab 的路径跟着改过来。
+   *
+   * **不改 revision**：内容没变，重读一次没有意义；但 editor 保存用的是 `tab.path`，
+   * 不同步的话下一次保存会写回一个已经不存在的旧路径。目录整体移动时，其下的 tab
+   * 也要按前缀一起搬。
+   */
+  function retargetPath(from: string, to: string): void {
+    const prefix = `${from}/`;
+    tabs.value = tabs.value.map((tab) => {
+      if (tab.path === from) return { ...tab, path: to, name: basename(to), diskPath: retargetValue(tab.diskPath, from, to) };
+      if (tab.path.startsWith(prefix)) {
+        const next = `${to}${tab.path.slice(from.length)}`;
+        return { ...tab, path: next, name: basename(next), diskPath: retargetValue(tab.diskPath, from, to) };
+      }
+      return tab;
+    });
+  }
+
+  /** 单个磁盘孪生路径的同步（与 tab.path 同一套规则）；没有或不匹配时原样返回。 */
+  function retargetValue(value: string | undefined, from: string, to: string): string | undefined {
+    if (!value) return value;
+    if (value === from) return to;
+    return value.startsWith(`${from}/`) ? `${to}${value.slice(from.length)}` : value;
+  }
+
+  /** 关闭路径等于 `prefix` 或位于其下的 tab（文件 / 文件夹被删除之后）。 */
+  function closeUnder(prefix: string): void {
+    for (const tab of tabs.value.filter((candidate) => candidate.path === prefix || candidate.path.startsWith(`${prefix}/`))) {
+      close(tab.id);
+    }
+  }
+
   function setCollapsed(value: boolean): void {
     collapsed.value = value;
     persist();
@@ -293,6 +326,8 @@ export const usePreviewStore = defineStore("preview", () => {
     close,
     closeOthers,
     closeAll,
+    retargetPath,
+    closeUnder,
     setCollapsed,
     toggle,
     setWidth,

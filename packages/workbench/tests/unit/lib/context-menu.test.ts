@@ -61,17 +61,33 @@ describe("buildFileTreeItems", () => {
     activate: vi.fn(),
     refresh: vi.fn(),
     canUseDisk: true,
+    rootPath: "/w",
     openExternal: vi.fn(),
     reveal: vi.fn(),
     copyPath: vi.fn(),
+    createFile: vi.fn(),
+    createFolder: vi.fn(),
+    rename: vi.fn(),
+    remove: vi.fn(),
+    copy: vi.fn(),
+    cut: vi.fn(),
+    paste: vi.fn(),
+    canPaste: false,
   };
 
-  it("磁盘源的文件行：打开 / 系统应用 / 文件夹 / 复制路径 / 刷新", () => {
+  it("磁盘源的文件行：打开 / 系统应用 / 文件夹 + 增删改 + 复制路径 / 刷新", () => {
     const entries = buildFileTreeItems(hit("file-row", { path: "/w/a.ts", kind: "file" }), t, actions);
     expect(labels(entries)).toEqual([
       "contextMenu.fileTree.open",
       "contextMenu.fileTree.openExternal",
       "contextMenu.fileTree.reveal",
+      "contextMenu.fileTree.createFile",
+      "contextMenu.fileTree.createFolder",
+      "contextMenu.fileTree.paste",
+      "contextMenu.fileTree.rename",
+      "contextMenu.fileTree.copy",
+      "contextMenu.fileTree.cut",
+      "contextMenu.fileTree.delete",
       "contextMenu.fileTree.copyPath",
       "contextMenu.fileTree.refresh",
     ]);
@@ -81,14 +97,38 @@ describe("buildFileTreeItems", () => {
     expect(actions.copyPath).toHaveBeenCalledWith("/w/a.ts");
   });
 
-  it("目录行：系统应用打开禁用（交给文件管理器更自然）", () => {
-    const entries = buildFileTreeItems(hit("file-row", { path: "/w/src", kind: "directory" }), t, actions);
-    expect(findItem(entries, "contextMenu.fileTree.openExternal").disabled).toBe(true);
-    findItem(entries, "contextMenu.fileTree.open").onSelect();
-    expect(actions.activate).toHaveBeenCalledWith("/w/src", "directory");
+  it("文件行：新建 / 粘贴禁用（目标是文件，不是目录）", () => {
+    const entries = buildFileTreeItems(hit("file-row", { path: "/w/a.ts", kind: "file" }), t, actions);
+    for (const key of ["createFile", "createFolder", "paste"]) {
+      expect(findItem(entries, `contextMenu.fileTree.${key}`).disabled, key).toBe(true);
+    }
   });
 
-  it("vfs 源：不出现系统应用 / 文件夹两项（没有磁盘孪生路径）", () => {
+  it("目录行：系统应用打开禁用（交给文件管理器更自然），新建 / 粘贴可用", () => {
+    const entries = buildFileTreeItems(hit("file-row", { path: "/w/src", kind: "directory" }), t, {
+      ...actions,
+      canPaste: true,
+    });
+    expect(findItem(entries, "contextMenu.fileTree.openExternal").disabled).toBe(true);
+    for (const key of ["createFile", "createFolder", "paste"]) {
+      expect(findItem(entries, `contextMenu.fileTree.${key}`).disabled, key).toBe(false);
+    }
+    findItem(entries, "contextMenu.fileTree.open").onSelect();
+    expect(actions.activate).toHaveBeenCalledWith("/w/src", "directory");
+
+    // 动作带上条目引用（剪贴板要 name）
+    findItem(entries, "contextMenu.fileTree.cut").onSelect();
+    expect(actions.cut).toHaveBeenCalledWith({ path: "/w/src", name: "src", kind: "directory" });
+    findItem(entries, "contextMenu.fileTree.delete").onSelect();
+    expect(actions.remove).toHaveBeenCalledWith("/w/src");
+  });
+
+  it("剪贴板为空时「粘贴」禁用", () => {
+    const entries = buildFileTreeItems(hit("file-row", { path: "/w/src", kind: "directory" }), t, actions);
+    expect(findItem(entries, "contextMenu.fileTree.paste").disabled).toBe(true);
+  });
+
+  it("vfs 源：不出现系统应用 / 增删改（没有磁盘孪生路径）", () => {
     const entries = buildFileTreeItems(hit("file-row", { path: "out.md", kind: "file" }), t, {
       ...actions,
       canUseDisk: false,
@@ -96,8 +136,21 @@ describe("buildFileTreeItems", () => {
     expect(labels(entries)).toEqual(["contextMenu.fileTree.open", "contextMenu.fileTree.copyPath", "contextMenu.fileTree.refresh"]);
   });
 
-  it("空白处只给刷新", () => {
-    expect(labels(buildFileTreeItems(null, t, actions))).toEqual(["contextMenu.fileTree.refresh"]);
+  it("空白处：新建 / 粘贴落在根目录，再给刷新", () => {
+    const entries = buildFileTreeItems(null, t, actions);
+    expect(labels(entries)).toEqual([
+      "contextMenu.fileTree.createFile",
+      "contextMenu.fileTree.createFolder",
+      "contextMenu.fileTree.paste",
+      "contextMenu.fileTree.refresh",
+    ]);
+    findItem(entries, "contextMenu.fileTree.createFolder").onSelect();
+    expect(actions.createFolder).toHaveBeenCalledWith("/w");
+  });
+
+  it("空白处且没有绑定目录（或 vfs）：只给刷新", () => {
+    expect(labels(buildFileTreeItems(null, t, { ...actions, rootPath: "" }))).toEqual(["contextMenu.fileTree.refresh"]);
+    expect(labels(buildFileTreeItems(null, t, { ...actions, canUseDisk: false }))).toEqual(["contextMenu.fileTree.refresh"]);
   });
 });
 

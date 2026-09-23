@@ -52,6 +52,13 @@ export const enUS: MessageSchema = {
       reveal: "Show in folder",
       copyPath: "Copy path",
       refresh: "Refresh file tree",
+      createFile: "New file",
+      createFolder: "New folder",
+      rename: "Rename",
+      copy: "Copy",
+      cut: "Cut",
+      paste: "Paste",
+      delete: "Delete",
     },
     previewTab: {
       activate: "Switch to this tab",
@@ -109,6 +116,7 @@ export const enUS: MessageSchema = {
     openFailedDetail: "{path} may have been moved or deleted, or no app on this system can open it.",
     revealFailed: "Could not show in folder",
     revealFailedDetail: "{path} may have been moved or deleted.",
+    opFailed: "Operation failed",
   },
   /* System tray (the host-native menu, not settings.tray): the host holds no language, so
      labels are pushed from the renderer — see lib/tray-bridge.ts and src-tauri/src/tray.rs. */
@@ -218,6 +226,36 @@ export const enUS: MessageSchema = {
       loading: "Loading…",
       readFailed: "Failed to read: {detail}",
       openExternal: "Open with system app",
+    },
+    /* The file-tree panel's own copy (menu labels live under contextMenu.fileTree.*). */
+    fileTree: {
+      vfsTitle: "In-memory virtual file system",
+      boundTitle: "Bound: {path}",
+      fallbackTitle: "No folder bound, using fallback: {path}",
+      vfsLabel: "In-memory file system (artifacts and seed files)",
+      bind: "Bind folder",
+      rebind: "Rebind",
+      binding: "Choosing…",
+      bindHint: "Bind a workspace folder: the file tree and artifacts are rooted there",
+      rebindHint: "Rebind the workspace folder: existing session files move to the new one",
+      unboundNotice:
+        "This workspace has no folder bound, so the fallback directory is shown. Once bound, the file tree, artifact output and agent reads/writes are all rooted there.",
+      loading: "Reading directory…",
+      empty: "This directory is empty",
+      newFile: "New file",
+      newFolder: "New folder",
+      filePlaceholder: "e.g. notes.md",
+      folderPlaceholder: "e.g. assets",
+      nameProblem: {
+        empty: "Enter a name",
+        dot: ". and .. are not allowed",
+        illegal: 'A name cannot contain / \\ < > : " | ? *',
+        trailing: "A name cannot end with a dot",
+        reserved: "That name is reserved by the system",
+        invalid: "That name cannot be used",
+      },
+      deleteTitle: "Delete “{name}”?",
+      deleteMessage: "A folder is deleted together with everything inside it. This cannot be undone.",
     },
     guard: {
       title: "Save failed — discard changes anyway?",
