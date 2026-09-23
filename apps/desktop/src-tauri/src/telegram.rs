@@ -17,11 +17,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use tokio::sync::Mutex;
 
 use crate::channel_common::{
     app_sink, channel_dir, now_ms, read_json, sleep_or_stop, write_private, EventSink,
+};
+use crate::channel_media::{
+    inbox_dir, prune_inbox, store_inbound_media, MediaKind, MediaRefDto, OutboundMedia,
+    MAX_MEDIA_BYTES,
 };
 use crate::http::{shared_client, RESPONSE_READ_TIMEOUT};
 use crate::log;
@@ -38,6 +42,8 @@ const API_BASE: &str = "https://api.telegram.org";
 const POLL_TIMEOUT_SECS: u64 = 25;
 /// Telegram 单条文本上限。
 const MAX_TEXT_CHARS: usize = 4096;
+/// 单条消息最多收几条媒体（图片 + 文件混排时防止一条消息拖垮一整轮下载）。
+const MAX_INBOUND_MEDIA: usize = 4;
 /// token 长度上限（防止把别的东西粘进来）。
 const MAX_TOKEN_CHARS: usize = 200;
 const TOKEN_PREFIX_MAX_DIGITS: usize = 20;
@@ -70,9 +76,45 @@ struct Message {
     chat: Chat,
     #[serde(default)]
     text: Option<String>,
+    /// 图片 / 文件消息的配文（与 text 互斥）；有它就该当正文喂给模型。
+    #[serde(default)]
+    caption: Option<String>,
+    /// 图片消息：同一张图的多个尺寸（递增），取最后一个（最大）。
+    #[serde(default)]
+    photo: Option<Vec<PhotoSize>>,
+    /// 以「文件」方式发出的附件（含被压成文件的图片）。
+    #[serde(default)]
+    document: Option<Document>,
+    /// 语音 / 音频 / 视频：形状同 Document（file_id + 可选名 / mime），按文件收。
+    #[serde(default)]
+    voice: Option<Document>,
+    #[serde(default)]
+    audio: Option<Document>,
+    #[serde(default)]
+    video: Option<Document>,
     /// 服务端时间（unix 秒）。
     #[serde(default)]
     date: Option<i64>,
+}
+
+/// 图片尺寸档（只取下载所需字段）。
+#[derive(Debug, Clone, Deserialize)]
+struct PhotoSize {
+    file_id: String,
+    #[serde(default)]
+    file_size: Option<u64>,
+}
+
+/// 附件 / 媒体文件描述（document / voice / audio / video 共用形状，多余字段忽略）。
+#[derive(Debug, Clone, Deserialize)]
+struct Document {
+    file_id: String,
+    #[serde(default)]
+    file_name: Option<String>,
+    #[serde(default)]
+    mime_type: Option<String>,
+    #[serde(default)]
+    file_size: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -124,6 +166,22 @@ struct BotUser {
     first_name: String,
     #[serde(default)]
     username: Option<String>,
+}
+
+/// `getFile` 回包：拿到可下载的 `file_path`（再拼 `/file/bot<token>/<file_path>` 下载）。
+#[derive(Debug, Clone, Deserialize)]
+struct FileResponse {
+    ok: bool,
+    #[serde(default)]
+    result: Option<FileInfo>,
+    #[serde(default)]
+    description: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct FileInfo {
+    #[serde(default)]
+    file_path: Option<String>,
 }
 
 /// 扫码绑定用的机器人链接（渲染端只负责把它编成二维码）。
@@ -189,7 +247,7 @@ pub fn clamp_text(raw: &str) -> Result<String, String> {
 /* ===== 协议归一（纯函数，可单测） ===== */
 
 /// 一条入站消息的归一形状（渲染端只认这一份）。
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TelegramInboundDto {
     pub message_id: String,
@@ -197,9 +255,32 @@ pub struct TelegramInboundDto {
     pub peer_id: String,
     /// 发送者展示名（first + last；缺失回落 username / chat id）。
     pub nick: String,
-    /// 文本正文；非文本消息为空串（渲染端如实说明只认文字）。
+    /// 文本正文（图片 / 文件的配文也算正文）；非文本消息为空串。
     pub text: String,
+    /// 随消息到达的图片 / 文件（语音、视频按文件收）；字节在宿主 inbox，凭 `path` 取走。
+    pub media: Vec<MediaRefDto>,
     pub at: i64,
+}
+
+/// 归一后的入站草稿：媒体还是「待下载」的 file_id，等异步取字节落盘后再产 DTO。
+#[derive(Debug, Clone)]
+struct InboundDraft {
+    message_id: String,
+    peer_id: String,
+    nick: String,
+    text: String,
+    at: i64,
+    media: Vec<PendingMedia>,
+}
+
+/// 待下载的一条入站媒体：Telegram 只给 file_id，字节要再经 getFile + 文件下载取回。
+#[derive(Debug, Clone)]
+struct PendingMedia {
+    file_id: String,
+    kind: MediaKind,
+    /// 展示名（图片给 "photo"，由 `finalize_media` 按魔数补后缀）。
+    name: String,
+    declared_size: Option<u64>,
 }
 
 fn user_nick(user: &Option<User>, chat: &Chat, peer_id: &str) -> String {
@@ -245,8 +326,56 @@ fn user_nick(user: &Option<User>, chat: &Chat, peer_id: &str) -> String {
     peer_id.to_string()
 }
 
-/// `Update` → 归一消息；无消息体（编辑 / 回调查询等）返回 None。
-fn normalize_update(update: &Update, received_at: i64) -> Option<TelegramInboundDto> {
+/// 一条消息里可收的媒体：图片取最大档，文件 / 语音 / 音频 / 视频按文件收，最多 4 条。
+fn pending_media(message: &Message) -> Vec<PendingMedia> {
+    let mut out = Vec::new();
+    if let Some(largest) = message.photo.as_ref().and_then(|sizes| sizes.last()) {
+        out.push(PendingMedia {
+            file_id: largest.file_id.clone(),
+            kind: MediaKind::Image,
+            name: "photo".into(),
+            declared_size: largest.file_size,
+        });
+    }
+    if let Some(document) = message.document.as_ref() {
+        out.push(document_media(document, "document"));
+    }
+    for (slot, fallback) in [
+        (message.voice.as_ref(), "voice"),
+        (message.audio.as_ref(), "audio"),
+        (message.video.as_ref(), "video"),
+    ] {
+        if let Some(item) = slot {
+            out.push(document_media(item, fallback));
+        }
+    }
+    out.truncate(MAX_INBOUND_MEDIA);
+    out
+}
+
+/// document / voice / audio / video 归一：mime 是 `image/*` 的按图片收（以文件方式发的图也走图片端点）。
+fn document_media(document: &Document, fallback: &str) -> PendingMedia {
+    let name = document
+        .file_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(fallback)
+        .to_string();
+    let kind = match document.mime_type.as_deref() {
+        Some(mime) if mime.starts_with("image/") => MediaKind::Image,
+        _ => MediaKind::File,
+    };
+    PendingMedia {
+        file_id: document.file_id.clone(),
+        kind,
+        name,
+        declared_size: document.file_size,
+    }
+}
+
+/// `Update` → 归一草稿；无消息体（编辑 / 回调查询等）返回 None。
+fn normalize_update(update: &Update, received_at: i64) -> Option<InboundDraft> {
     let message = update.message.as_ref()?;
     let peer_id = message.chat.id.to_string();
     let at = message
@@ -254,12 +383,19 @@ fn normalize_update(update: &Update, received_at: i64) -> Option<TelegramInbound
         .filter(|seconds| *seconds > 0)
         .map(|seconds| seconds.saturating_mul(1000))
         .unwrap_or(received_at);
-    Some(TelegramInboundDto {
+    // 图片 / 文件的配文也算正文：只发图配一句话时，那句话是模型最需要的上下文。
+    let text = message
+        .text
+        .clone()
+        .or_else(|| message.caption.clone())
+        .unwrap_or_default();
+    Some(InboundDraft {
         message_id: message.message_id.to_string(),
         nick: user_nick(&message.from, &message.chat, &peer_id),
-        text: message.text.clone().unwrap_or_default(),
+        text,
         peer_id,
         at,
+        media: pending_media(message),
     })
 }
 
@@ -466,12 +602,12 @@ fn api_url(token: &str, method: &str) -> String {
     format!("{API_BASE}/bot{token}/{method}")
 }
 
-/// 一次 `getUpdates`：长轮询 `timeout` 秒；返回归一后的入站消息与本轮最大 update_id。
-pub(crate) async fn poll_once(
+/// 一次 `getUpdates`：长轮询 `timeout` 秒；返回归一后的入站草稿与本轮最大 update_id。
+async fn poll_once(
     client: &reqwest::Client,
     token: &str,
     offset: i64,
-) -> Result<(Vec<TelegramInboundDto>, Option<i64>), String> {
+) -> Result<(Vec<InboundDraft>, Option<i64>), String> {
     let response = client
         .get(api_url(token, "getUpdates"))
         .query(&[
@@ -528,6 +664,151 @@ pub(crate) async fn send_text(
         ));
     }
     Ok(())
+}
+
+/// `getFile`：把 file_id 换成可下载的 `file_path`（再拼 `/file/bot<token>/<file_path>`）。
+pub(crate) async fn get_file_path(
+    client: &reqwest::Client,
+    token: &str,
+    file_id: &str,
+) -> Result<String, String> {
+    let response = client
+        .get(api_url(token, "getFile"))
+        .query(&[("file_id", file_id)])
+        .send()
+        .await
+        .map_err(|error| format!("getFile 请求失败: {error}"))?;
+    let status = response.status();
+    let body = crate::http::read_text(response, RESPONSE_READ_TIMEOUT)
+        .await
+        .map_err(|error| format!("getFile 响应读取失败: {error}"))?;
+    if !status.is_success() {
+        return Err(format!("getFile 返回 {status}: {}", brief(&body)));
+    }
+    let parsed: FileResponse =
+        serde_json::from_str(&body).map_err(|error| format!("getFile 响应解析失败: {error}"))?;
+    if !parsed.ok {
+        return Err(format!(
+            "Telegram 拒绝了 getFile：{}",
+            parsed.description.unwrap_or_else(|| "unknown error".into())
+        ));
+    }
+    parsed
+        .result
+        .and_then(|info| info.file_path)
+        .map(|path| path.trim().to_string())
+        .filter(|path| !path.is_empty())
+        .ok_or_else(|| "getFile 回包里没有 file_path".to_string())
+}
+
+/// 下载一条媒体字节（`/file/bot<token>/<file_path>`），读入后卡 20MB 上限。
+pub(crate) async fn download_file(
+    client: &reqwest::Client,
+    token: &str,
+    file_path: &str,
+) -> Result<Vec<u8>, String> {
+    let url = format!("{API_BASE}/file/bot{token}/{file_path}");
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|error| format!("下载媒体请求失败: {error}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        let body = crate::http::read_text(response, RESPONSE_READ_TIMEOUT)
+            .await
+            .unwrap_or_default();
+        return Err(format!("下载媒体返回 {status}: {}", brief(&body)));
+    }
+    let bytes = tokio::time::timeout(RESPONSE_READ_TIMEOUT, response.bytes())
+        .await
+        .map_err(|_| "下载媒体读取超时".to_string())?
+        .map_err(|error| format!("读取媒体字节失败: {error}"))?;
+    if bytes.len() as u64 > MAX_MEDIA_BYTES {
+        return Err(format!(
+            "媒体超过 {} MB 上限",
+            MAX_MEDIA_BYTES / (1024 * 1024)
+        ));
+    }
+    Ok(bytes.to_vec())
+}
+
+/// 取一条待下载媒体的字节：先按声明的 size 预筛，再 getFile + 下载。
+async fn fetch_media(
+    client: &reqwest::Client,
+    token: &str,
+    pending: &PendingMedia,
+) -> Result<Vec<u8>, String> {
+    if pending
+        .declared_size
+        .is_some_and(|size| size > MAX_MEDIA_BYTES)
+    {
+        return Err(format!(
+            "媒体超过 {} MB 上限",
+            MAX_MEDIA_BYTES / (1024 * 1024)
+        ));
+    }
+    let file_path = get_file_path(client, token, &pending.file_id).await?;
+    download_file(client, token, &file_path).await
+}
+
+/// 把入站草稿的媒体下载进 inbox，产出渲染端可取的引用（单条失败只记日志，不中断整轮）。
+async fn materialize_inbound(
+    app: &AppHandle,
+    client: &reqwest::Client,
+    token: &str,
+    draft: InboundDraft,
+) -> TelegramInboundDto {
+    let InboundDraft {
+        message_id,
+        peer_id,
+        nick,
+        text,
+        at,
+        media,
+    } = draft;
+    let inbox = match inbox_dir(app, DIR_NAME) {
+        Ok(inbox) => inbox,
+        Err(error) => {
+            log::warn("telegram", format!("收件目录不可用，丢弃入站媒体: {error}"));
+            return TelegramInboundDto {
+                message_id,
+                peer_id,
+                nick,
+                text,
+                at,
+                media: Vec::new(),
+            };
+        }
+    };
+    let received_at = now_ms();
+    let mut refs = Vec::new();
+    for (index, pending) in media.iter().enumerate() {
+        match fetch_media(client, token, pending).await {
+            Ok(bytes) => {
+                if let Some(dto) = store_inbound_media(
+                    &inbox,
+                    DIR_NAME,
+                    received_at,
+                    index,
+                    pending.kind,
+                    &pending.name,
+                    bytes,
+                ) {
+                    refs.push(dto);
+                }
+            }
+            Err(error) => log::warn("telegram", format!("入站媒体下载失败: {error}")),
+        }
+    }
+    TelegramInboundDto {
+        message_id,
+        peer_id,
+        nick,
+        text,
+        at,
+        media: refs,
+    }
 }
 
 /// 取机器人自身的公开身份并拼出扫码链接。
@@ -641,6 +922,7 @@ pub async fn telegram_clear_credentials(
             let _ = std::fs::remove_file(&path);
         }
     }
+    prune_inbox(&app, DIR_NAME, true);
     log::info("telegram", "凭证已清除");
     Ok(inner.status())
 }
@@ -664,6 +946,8 @@ pub async fn telegram_connect(
         credentials.token
     };
     let epoch = host.epoch.fetch_add(1, Ordering::SeqCst) + 1;
+    // 上次会话遗留的未取走收件文件先清掉（渲染端崩溃 / 未取走）。
+    prune_inbox(&app, DIR_NAME, false);
     let inner = host.inner.clone();
     let epochs = host.epoch.clone();
     let deps = PollDeps::for_app(&app);
@@ -747,6 +1031,61 @@ pub async fn telegram_send(
     send_text(&client, &token, chat_id, &text).await
 }
 
+/// 回一条媒体：图片走 `sendPhoto`、其余走 `sendDocument`（multipart 直传字节，不落临时文件）。
+///
+/// token 不出宿主：与文本同一条路径，渲染端只传对端 id 与授权面内的本地路径。
+pub(crate) async fn send_media_impl(
+    app: &AppHandle,
+    peer_id: &str,
+    media: OutboundMedia,
+) -> Result<(), String> {
+    let chat_id: i64 = peer_id
+        .trim()
+        .parse()
+        .map_err(|_| format!("对端 id 不是合法的 chat id: {peer_id:?}"))?;
+    let token = {
+        let host = app.state::<TelegramHost>();
+        let mut inner = host.lock().await;
+        ensure_loaded(app, &mut inner)?;
+        inner
+            .credentials
+            .as_ref()
+            .map(|credentials| credentials.token.clone())
+            .ok_or("尚未配置 Telegram bot token")?
+    };
+    let (method, field) = match media.kind {
+        MediaKind::Image => ("sendPhoto", "photo"),
+        MediaKind::File => ("sendDocument", "document"),
+    };
+    let part = reqwest::multipart::Part::bytes(media.bytes).file_name(media.name);
+    let form = reqwest::multipart::Form::new()
+        .text("chat_id", chat_id.to_string())
+        .part(field, part);
+    let client = shared_client(10)?;
+    let response = client
+        .post(api_url(&token, method))
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|error| format!("{method} 请求失败: {error}"))?;
+    let status = response.status();
+    let body = crate::http::read_text(response, RESPONSE_READ_TIMEOUT)
+        .await
+        .map_err(|error| format!("{method} 响应读取失败: {error}"))?;
+    if !status.is_success() {
+        return Err(format!("{method} 返回 {status}: {}", brief(&body)));
+    }
+    let parsed: SendResponse =
+        serde_json::from_str(&body).map_err(|error| format!("{method} 响应解析失败: {error}"))?;
+    if !parsed.ok {
+        return Err(format!(
+            "Telegram 拒绝了这条媒体：{}",
+            parsed.description.unwrap_or_else(|| "unknown error".into())
+        ));
+    }
+    Ok(())
+}
+
 /* ===== 宿主层：长轮询主循环（带重连退避） ===== */
 
 async fn run_poll(
@@ -788,7 +1127,9 @@ async fn run_poll(
                     }
                     emit_state(&guard, &deps);
                 } else {
-                    for message in inbound {
+                    for draft in inbound {
+                        // 先把媒体字节下载进 inbox（渲染端凭 path 取走），再广播归一消息。
+                        let message = materialize_inbound(&app, &client, &token, draft).await;
                         handle_inbound(&deps, &inner, message, allow_other_senders).await;
                     }
                 }
@@ -804,7 +1145,6 @@ async fn run_poll(
             }
         }
     }
-    let _ = app;
     log::info("telegram", "长轮询已停止");
 }
 
@@ -880,7 +1220,22 @@ mod tests {
                 title: None,
             },
             text: text.map(str::to_string),
+            caption: None,
+            photo: None,
+            document: None,
+            voice: None,
+            audio: None,
+            video: None,
             date: Some(1_700_000_000),
+        }
+    }
+
+    fn document(file_id: &str, name: Option<&str>, mime: Option<&str>) -> Document {
+        Document {
+            file_id: file_id.into(),
+            file_name: name.map(str::to_string),
+            mime_type: mime.map(str::to_string),
+            file_size: None,
         }
     }
 
@@ -952,6 +1307,71 @@ mod tests {
             normalize_update(&update, 1).is_none(),
             "编辑/回调类更新不入流"
         );
+    }
+
+    #[test]
+    fn normalize_update_uses_caption_as_text() {
+        let mut msg = message(7, None);
+        msg.caption = Some("看这张图".into());
+        msg.photo = Some(vec![PhotoSize {
+            file_id: "p".into(),
+            file_size: Some(5),
+        }]);
+        let update = Update {
+            update_id: 14,
+            message: Some(msg),
+        };
+        let draft = normalize_update(&update, 1).expect("有消息体");
+        assert_eq!(draft.text, "看这张图", "配文当正文");
+        assert_eq!(draft.media.len(), 1);
+        assert_eq!(draft.media[0].file_id, "p");
+    }
+
+    #[test]
+    fn pending_media_picks_largest_photo_and_labels_files() {
+        let mut msg = message(9, None);
+        msg.photo = Some(vec![
+            PhotoSize {
+                file_id: "small".into(),
+                file_size: Some(10),
+            },
+            PhotoSize {
+                file_id: "big".into(),
+                file_size: Some(999),
+            },
+        ]);
+        msg.document = Some(document(
+            "doc-1",
+            Some("报表.xlsx"),
+            Some("application/vnd.ms-excel"),
+        ));
+
+        let media = pending_media(&msg);
+        assert_eq!(media.len(), 2);
+        assert_eq!(media[0].file_id, "big", "图片取最大档");
+        assert_eq!(media[0].kind, MediaKind::Image);
+        assert_eq!(media[0].name, "photo");
+        assert_eq!(media[1].kind, MediaKind::File);
+        assert_eq!(media[1].name, "报表.xlsx");
+    }
+
+    #[test]
+    fn pending_media_treats_image_mime_as_image_and_caps_count() {
+        let mut msg = message(10, None);
+        msg.photo = Some(vec![PhotoSize {
+            file_id: "p".into(),
+            file_size: None,
+        }]);
+        // image/* 的 document 按图片收（以文件方式发的图）。
+        msg.document = Some(document("d", None, Some("image/jpeg")));
+        msg.voice = Some(document("v", None, None));
+        msg.audio = Some(document("a", None, None));
+        msg.video = Some(document("m", None, None));
+
+        let media = pending_media(&msg);
+        assert_eq!(media.len(), MAX_INBOUND_MEDIA, "超出上限截断");
+        assert_eq!(media[1].kind, MediaKind::Image, "image/* 按图片收");
+        assert_eq!(media[1].name, "document", "无名回落固定标签");
     }
 
     #[test]
