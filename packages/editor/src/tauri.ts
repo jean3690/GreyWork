@@ -11,13 +11,13 @@
  */
 
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
-import type { CommitResult, GitChange, GitStatusEntry, StagingGitService } from "./types";
+import type { CommitResult, GitChange, GitCommit, GitStatusEntry, HistoryGitService } from "./types";
 
 /** 可注入的 IPC 调用形态（收窄自 Tauri invoke，测试好替换）。 */
 export type IpclessInvoke = (command: string, args?: Record<string, unknown>) => Promise<unknown>;
 
 /** 磁盘态 Git 服务：命令名即宿主命令，root 回填为第一个参数。 */
-export function createTauriGitService(root: string, invokeImpl: IpclessInvoke = tauriInvoke): StagingGitService {
+export function createTauriGitService(root: string, invokeImpl: IpclessInvoke = tauriInvoke): HistoryGitService {
   const call = <T>(command: string, args: Record<string, unknown> = {}): Promise<T> => invokeImpl(command, { root, ...args }) as Promise<T>;
   return {
     async status(): Promise<GitStatusEntry[]> {
@@ -50,6 +50,16 @@ export function createTauriGitService(root: string, invokeImpl: IpclessInvoke = 
     },
     async branches(): Promise<string[]> {
       return call<string[]>("git_branch_list");
+    },
+    async log(options?: { limit?: number; skip?: number }): Promise<GitCommit[]> {
+      // 没传的键不带过去（宿主是 Option，多余的 null 在 Tauri 侧会变成解析失败的参数）。
+      const args: Record<string, unknown> = {};
+      if (options?.limit !== undefined) args.limit = options.limit;
+      if (options?.skip !== undefined) args.skip = options.skip;
+      return call<GitCommit[]>("git_log", args);
+    },
+    async show(hash: string, path?: string): Promise<string> {
+      return call<string>("git_show", path === undefined ? { hash } : { hash, path });
     },
   };
 }

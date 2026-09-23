@@ -68,6 +68,25 @@ describe("createTauriGitService", () => {
     expect(calls[1].args).toEqual({ root: "/ws", message: "全部", all: true });
   });
 
+  it("log 只在显式给了 limit/skip 时才带上（宿主是 Option）", async () => {
+    const { calls, invoke } = invoker();
+    await service(invoke).log();
+    await service(invoke).log({ limit: 20 });
+    await service(invoke).log({ limit: 20, skip: 40 });
+    expect(calls[0]).toEqual({ command: "git_log", args: { root: "/ws" } });
+    expect(calls[1].args).toEqual({ root: "/ws", limit: 20 });
+    expect(calls[2].args).toEqual({ root: "/ws", limit: 20, skip: 40 });
+  });
+
+  it("show 带 path 时传 path，不带时整体缺省", async () => {
+    const { calls, invoke } = invoker();
+    await service(invoke).show("abc123");
+    await service(invoke).show("abc123", "a.txt");
+    expect(calls[0]).toEqual({ command: "git_show", args: { root: "/ws", hash: "abc123" } });
+    expect("path" in calls[0].args).toBe(false);
+    expect(calls[1].args).toEqual({ root: "/ws", hash: "abc123", path: "a.txt" });
+  });
+
   it("currentBranch 去掉宿主尾换行", async () => {
     const invoke = vi.fn<IpclessInvoke>(async () => "feature/x\n");
     expect(await service(invoke).currentBranch()).toBe("feature/x");

@@ -31,6 +31,20 @@ export interface CommitResult {
   timestamp: string;
 }
 
+/** 一条历史提交的元信息（不含 diff 正文 —— 正文由 `HistoryGitService.show` 按需取）。 */
+export interface GitCommit {
+  hash: string;
+  shortHash: string;
+  author: string;
+  email: string;
+  /** committer date，ISO 8601（带时区偏移）。 */
+  timestamp: string;
+  /** 提交主题（消息首行）。 */
+  subject: string;
+  /** 指向这条提交的引用装饰（如 `HEAD -> main, tag: v1`）；空串 = 无。 */
+  refs: string;
+}
+
 export interface WorkspaceFileSystem {
   readFile(path: string): Promise<string>;
   writeFile(path: string, content: string): Promise<void>;
@@ -98,6 +112,19 @@ export interface StagingGitService extends GitService {
   diff(path?: string, staged?: boolean): Promise<string>;
   /** `options.all` 为真时先 `add -A`（提交全部），否则只提交已暂存的内容。 */
   commit(message: string, options?: { all?: boolean }): Promise<CommitResult>;
+}
+
+/**
+ * 带提交历史查询的 Git 服务：同样**只有真实宿主 git 提供**。
+ *
+ * 内存工作区（`createMemoryGitService`）只在 commit 时把当前快照换成新基线，压根不留历史，
+ * 硬凑一份假列表没有意义；需要历史的调用方（变更面板的「历史」页）显式向上取这一层。
+ */
+export interface HistoryGitService extends StagingGitService {
+  /** 历史提交（新 → 旧）。`limit` 缺省 50，`skip` 用于翻页。 */
+  log(options?: { limit?: number; skip?: number }): Promise<GitCommit[]>;
+  /** 单次提交引入的 unified diff 文本；`path` 限定时只看该路径。 */
+  show(hash: string, path?: string): Promise<string>;
 }
 
 export interface PreviewCapabilities {
