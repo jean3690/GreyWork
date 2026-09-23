@@ -217,11 +217,16 @@ export const enUS: MessageSchema = {
     common: {
       loading: "Loading…",
       readFailed: "Failed to read: {detail}",
+      openExternal: "Open with system app",
     },
     guard: {
       title: "Save failed — discard changes anyway?",
       message: "Changes to {names} could not be saved; continuing will lose them.",
       confirm: "Discard and continue",
+    },
+    text: {
+      binary: "Binary file — cannot be previewed as text",
+      notUtf8: "This file is not UTF-8, so it is read-only: saving would re-encode the whole file.",
     },
     table: {
       empty: "Empty file",

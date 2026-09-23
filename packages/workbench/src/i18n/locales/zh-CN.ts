@@ -216,6 +216,7 @@ export const zhCN = {
     common: {
       loading: "读取中…",
       readFailed: "读取失败：{detail}",
+      openExternal: "用系统应用打开",
     },
     /* 离开可编辑预览（切区段 / 切标签 / 关标签 / 关窗）前先自动保存；
        只有保存失败才弹这个确认。names 是未能保存的文件名，顿号连接。 */
@@ -223,6 +224,11 @@ export const zhCN = {
       title: "保存失败，仍要放弃改动？",
       message: "{names} 的改动未能保存，继续操作将丢失这些改动。",
       confirm: "放弃并继续",
+    },
+    /* 文本 / 代码预览（可就地编辑）。 */
+    text: {
+      binary: "二进制文件，无法以文本预览",
+      notUtf8: "此文件不是 UTF-8 编码，只作只读预览；保存会把整份文件转码，故不提供编辑。",
     },
     table: {
       empty: "空文件",

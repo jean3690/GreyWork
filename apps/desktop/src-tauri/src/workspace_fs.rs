@@ -303,6 +303,48 @@ pub fn fs_read_binary(
     Ok(tauri::ipc::Response::new(bytes))
 }
 
+/// 文件探测结果：预览面板据此决定「当文本视图还是二进制占位」以及「能不能就地编辑」。
+///
+/// 单独一个命令而不是让渲染端嗅探内容，有两个理由：字节在宿主手上（渲染端拿到的
+/// 已经是解码后的字符串，乱码里看不出 NUL）；以及大小/编码这些判断只该有一处实现。
+#[derive(Debug, Serialize)]
+pub struct FileProbe {
+    pub size: u64,
+    /// 前缀像二进制（NUL / 控制字符占比过高）→ 预览给占位，而不是一屏 U+FFFD。
+    pub binary: bool,
+    /// 前缀可按 UTF-8 解码。非 UTF-8 只读 —— 写回命令只会写 UTF-8，
+    /// 放开编辑等于静默把整份文件转码。
+    pub utf8: bool,
+    /// 带 UTF-8 BOM；保存时按原样补回（解码时已剥掉）。
+    pub bom: bool,
+    /// 首个换行是 CRLF；保存时把 `\n` 还原回 `\r\n`，避免整文件行尾被改写。
+    pub crlf: bool,
+}
+
+/// 探测的实现（与 `#[tauri::command]` 解耦，便于单测）。
+fn probe_file(access: &WorkspaceFsAccess, raw: &str) -> Result<FileProbe, String> {
+    let path = access.resolve_existing(raw)?;
+    let metadata = std::fs::metadata(&path).map_err(|error| format!("读取元数据失败: {error}"))?;
+    let prefix = crate::text::read_prefix(&path, crate::text::PROBE_PREFIX_BYTES)
+        .map_err(|error| format!("读取文件失败: {error}"))?;
+    Ok(FileProbe {
+        size: metadata.len(),
+        binary: crate::text::looks_binary(&prefix),
+        utf8: crate::text::is_utf8_prefix(&prefix),
+        bom: crate::text::has_utf8_bom(&prefix),
+        crlf: crate::text::uses_crlf(&prefix).unwrap_or(false),
+    })
+}
+
+/// 探测文件能否按文本预览 / 编辑（只读前 8KB，不把大文件整个读进来）。
+#[tauri::command]
+pub fn fs_probe_file(
+    access: tauri::State<'_, WorkspaceFsAccess>,
+    path: String,
+) -> Result<FileProbe, String> {
+    probe_file(&access, &path)
+}
+
 /// 写回文本文件（单次 ≤10MB），供编辑器保存时同步到工作区存放文件夹。
 #[tauri::command]
 pub fn fs_write_text_file(
@@ -725,6 +767,45 @@ mod tests {
         assert!(access
             .resolve_write(&root.join("link/new.txt").to_string_lossy())
             .is_err());
+        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_dir_all(outside);
+    }
+
+    /// 探测：文本 / 二进制 / 行尾 / 越界四条一起钉住 —— 预览面板据此决定当文本还是占位。
+    #[test]
+    fn probe_reports_text_binary_and_newline_style() {
+        let root = temp_dir("probe");
+        let access = access(&root);
+
+        let text = root.join("notes.txt");
+        std::fs::write(&text, "第一行\r\n第二行\r\n").expect("写文本");
+        let info = probe_file(&access, &text.to_string_lossy()).expect("探测文本");
+        assert!(!info.binary);
+        assert!(info.utf8);
+        assert!(!info.bom);
+        assert!(info.crlf);
+        assert_eq!(info.size, "第一行\r\n第二行\r\n".len() as u64);
+
+        let bom = root.join("bom.txt");
+        std::fs::write(&bom, [0xEF, 0xBB, 0xBF, b'a']).expect("写 BOM 文件");
+        let info = probe_file(&access, &bom.to_string_lossy()).expect("探测 BOM");
+        assert!(info.bom);
+        assert!(info.utf8);
+        assert!(!info.crlf);
+
+        let binary = root.join("blob.bin");
+        std::fs::write(&binary, [0x00, 0x01, 0x02, 0x03, 0x00, 0xFF]).expect("写二进制");
+        assert!(probe_file(&access, &binary.to_string_lossy())
+            .expect("探测二进制")
+            .binary);
+
+        // 授权面与其它读命令一致：越界路径拿不到探测结果。
+        let outside = temp_dir("probe-outside");
+        let sibling = outside.join("secret.txt");
+        std::fs::write(&sibling, b"secret").expect("写外部文件");
+        assert!(probe_file(&access, &sibling.to_string_lossy()).is_err());
+        assert!(probe_file(&access, &root.join("ghost.txt").to_string_lossy()).is_err());
+
         let _ = std::fs::remove_dir_all(root);
         let _ = std::fs::remove_dir_all(outside);
     }

@@ -235,6 +235,7 @@ pub fn run() {
             wecom::wecom_send,
             workspace_fs::fs_read_text_file,
             workspace_fs::fs_read_binary,
+            workspace_fs::fs_probe_file,
             sheet::fs_read_sheet,
             workspace_fs::fs_write_text_file,
             workspace_fs::fs_write_binary,

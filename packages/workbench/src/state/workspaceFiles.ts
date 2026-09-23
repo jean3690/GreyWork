@@ -162,6 +162,26 @@ export function writeTextFile(path: string, content: string): Promise<void> {
   return invoke("fs_write_text_file", { path, content });
 }
 
+/**
+ * 磁盘文件的探测结果（Rust `fs_probe_file`，只读前 8KB）。
+ *
+ * - `binary`：像二进制 → 预览给占位，不当文本读（否则是一屏乱码且不报错）；
+ * - `utf8`：可按 UTF-8 解码。非 UTF-8 **只读**，因为写回只会写 UTF-8，放开编辑等于静默转码；
+ * - `bom` / `crlf`：保存时按原样还原（解码已剥 BOM，CodeMirror 一律用 `\n`）。
+ */
+export interface FileProbeInfo {
+  size: number;
+  binary: boolean;
+  utf8: boolean;
+  bom: boolean;
+  crlf: boolean;
+}
+
+/** 探测磁盘文件能否按文本预览 / 编辑。 */
+export function probeWorkspaceFile(path: string): Promise<FileProbeInfo> {
+  return invoke<FileProbeInfo>("fs_probe_file", { path });
+}
+
 /** 确保目录存在（产物默认目录等落盘前置）。 */
 export function ensureDir(path: string): Promise<void> {
   return invoke("fs_ensure_dir", { path });

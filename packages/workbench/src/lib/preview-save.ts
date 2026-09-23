@@ -10,7 +10,7 @@
  */
 import { ref, type Ref } from "vue";
 import { useVfsStore } from "../stores/vfs";
-import { writeBinaryFile } from "../state/workspaceFiles";
+import { writeBinaryFile, writeTextFile } from "../state/workspaceFiles";
 import type { PreviewTab } from "../stores/preview";
 
 export interface PreviewSaver {
@@ -66,6 +66,24 @@ export async function writePreviewBytes(tab: PreviewTab, bytes: Uint8Array): Pro
   }
   if (tab.source === "vfs") {
     await useVfsStore().writeBinary(tab.path, bytes);
+    return;
+  }
+  throw new Error("网页预览没有可写回的文件");
+}
+
+/**
+ * 文本通道的写回（可编辑 TextViewer 用）。与 `writePreviewBytes` 同构，只是走文本命令。
+ *
+ * **编码 / 换行保真不在这里**：BOM 与 CRLF 由 TextViewer 按宿主探测结果还原后再调本函数，
+ * 因为那两份信息只有它持有时才知道（见 features/preview/TextViewer.vue）。
+ */
+export async function writePreviewText(tab: PreviewTab, text: string): Promise<void> {
+  if (tab.source === "disk") {
+    await writeTextFile(tab.path, text);
+    return;
+  }
+  if (tab.source === "vfs") {
+    await useVfsStore().write(tab.path, text);
     return;
   }
   throw new Error("网页预览没有可写回的文件");

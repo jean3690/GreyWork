@@ -15,6 +15,7 @@
  */
 import { computed, onBeforeUnmount, ref, toRef, watch } from "vue";
 import DocxBlocks from "@/features/preview/DocxBlocks.vue";
+import PreviewExternalButton from "@/features/preview/PreviewExternalButton.vue";
 import { usePreviewBinary } from "@/lib/preview-content";
 import { parseDocx, type ParsedDocx } from "@/lib/docx-parse";
 import { patchDocxText } from "@/lib/docx-serialize";
@@ -98,10 +99,14 @@ onBeforeUnmount(() => unregisterPreviewSaver(props.tab.id));
     </div>
 
     <p v-if="loading" class="px-4 py-3 text-[12px] text-dim2">读取中…</p>
-    <p v-else-if="error" role="alert" class="px-4 py-3 text-[12px] text-red-400">读取失败：{{ error }}</p>
-    <p v-else-if="parseError" role="alert" class="px-4 py-3 text-[12px] text-red-400">
-      无法解析该文档：{{ parseError }}。可点上方工具栏的「用系统应用打开」看原文件。
-    </p>
+    <div v-else-if="error" role="alert" class="flex flex-wrap items-center gap-2 px-4 py-3">
+      <span class="text-[12px] text-red-400">读取失败：{{ error }}</span>
+      <PreviewExternalButton :tab="tab" />
+    </div>
+    <div v-else-if="parseError" role="alert" class="flex flex-wrap items-center gap-2 px-4 py-3">
+      <span class="text-[12px] text-red-400">无法解析该文档：{{ parseError }}</span>
+      <PreviewExternalButton :tab="tab" />
+    </div>
     <p v-else-if="doc && blockCount === 0" class="px-4 py-3 text-[12px] text-dim2">这份文档没有正文内容。</p>
 
     <div v-show="!loading && !error && !parseError" data-testid="doc-viewer" data-scroll-root class="min-h-0 flex-1 overflow-y-auto p-3">
