@@ -238,6 +238,16 @@ export const zhCN = {
       rotateLeft: "左转 90°",
       rotateRight: "右转 90°",
     },
+    pdf: {
+      rendered: "已渲染 {done} / 共 {total} 页",
+      prev: "上一页",
+      next: "下一页",
+      pageLabel: "页码",
+      zoomIn: "放大",
+      zoomOut: "缩小",
+      fitWidth: "适应宽度",
+      renderFailed: "无法渲染该 PDF：{detail}",
+    },
     table: {
       empty: "空文件",
       truncated: "仅显示前 {limit} 行，共 {total} 行",

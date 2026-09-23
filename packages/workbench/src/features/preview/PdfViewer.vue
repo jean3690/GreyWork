@@ -18,9 +18,12 @@ import { useI18n } from "vue-i18n";
 // 非 min 版 2.2MB 会原封不动躺进安装包。
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { buildTextLayer, layoutTextItems, type MeasureText } from "@/lib/pdf-text-layer";
+import { clampPage, clampZoom, zoomBy } from "@/lib/pdf-zoom";
+import Icon from "@/features/shared/Icon.vue";
 import { deviceTier } from "@/lib/device-tier";
 import { recallPdfProgress, rememberPdfProgress } from "@/lib/preview-scroll";
 import { usePreviewBinary } from "@/lib/preview-content";
+import PreviewExternalButton from "@/features/preview/PreviewExternalButton.vue";
 import type { PreviewTab } from "@/stores/preview";
 
 /**
@@ -74,6 +77,10 @@ const pagesHost = ref<HTMLElement | null>(null);
 const totalPages = ref(0);
 const renderedPages = ref(0);
 const renderError = ref<string | null>(null);
+/** 缩放倍率：1 = 适应宽度（基准）。见 lib/pdf-zoom.ts。 */
+const zoom = ref(1);
+/** 当前视口顶部的页码（工具栏显示 + 上一页/下一页的基准）。 */
+const currentPage = ref(1);
 
 let doc: PdfDocument | null = null;
 let activeTasks: PdfRenderTask[] = [];
@@ -157,7 +164,10 @@ async function renderNextBatch(mine: number): Promise<void> {
     const page = await document_.getPage(pageNumber);
     if (mine !== generation) return;
     const base = page.getViewport({ scale: 1 });
-    const scale = fitScaleOf(host, base.width);
+    // 渲染缩放 = 「按容器宽度的基准」× 用户缩放。
+    // 缩放落在渲染阶段而不是给容器套 CSS transform：canvas 的 CSS 宽高跟着变，布局高度
+    // 才是真实高度 —— transform 不改变布局，放大后滚动区不会变长，底部内容根本滚不到。
+    const scale = fitScaleOf(host, base.width) * zoom.value;
     const viewport = page.getViewport({ scale });
     const canvas = document.createElement("canvas");
     canvas.className = "block shadow";
@@ -184,6 +194,76 @@ async function renderNextBatch(mine: number): Promise<void> {
     await appendTextLayer(page, pageNumber, viewport, wrapper, mine).catch(() => undefined);
   }
 }
+
+/** 视口顶部的页码：已渲染页里最后一个顶部不超过容器的那个。 */
+function updateCurrentPage(): void {
+  const host = pagesHost.value;
+  const element = scroller.value;
+  if (!host || !element || totalPages.value === 0) return;
+  const top = element.getBoundingClientRect().top;
+  let page = 1;
+  for (let index = 0; index < host.children.length; index += 1) {
+    const child = host.children[index] as HTMLElement;
+    if (child.getBoundingClientRect().top - top <= 8) page = index + 1;
+    else break;
+  }
+  currentPage.value = clampPage(page, totalPages.value);
+}
+
+/** 补渲染到目标页（复用追加渲染的循环），再滚到那一页。 */
+async function goToPage(target: number): Promise<void> {
+  const page = clampPage(target, totalPages.value);
+  const mine = generation;
+  while (renderedPages.value < page && renderedPages.value < totalPages.value) {
+    const before = renderedPages.value;
+    await renderNextBatch(mine);
+    if (mine !== generation) return; // 内容已换，这轮作废
+    if (renderedPages.value === before) break;
+  }
+  const child = pagesHost.value?.children[page - 1] as HTMLElement | undefined;
+  child?.scrollIntoView({ block: "start" });
+  currentPage.value = page;
+}
+
+/**
+ * 缩放变化后按新倍率重渲染已渲染过的那几页，并回到同一页。
+ *
+ * 只重画、不重解析：`renderNextBatch` 从第 1 页开始填，填完按页号还原阅读位置。
+ */
+async function rerenderAtZoom(): Promise<void> {
+  if (!doc) return;
+  const mine = generation;
+  const keep = renderedPages.value;
+  // 在跑的任务按新倍率作废：它们的 viewport 是旧缩放算出来的。
+  for (const task of activeTasks) task.cancel();
+  activeTasks = [];
+  renderedPages.value = 0;
+  pagesHost.value?.replaceChildren();
+  while (renderedPages.value < keep && renderedPages.value < totalPages.value) {
+    const before = renderedPages.value;
+    await renderNextBatch(mine);
+    if (mine !== generation) return;
+    if (renderedPages.value === before) break;
+  }
+  await goToPage(keep || 1);
+}
+
+/** 缩放入口：改倍率 → 重渲染 → 回到同一页。 */
+function applyZoom(next: number): void {
+  const value = clampZoom(next);
+  if (value === zoom.value) return;
+  zoom.value = value;
+  void rerenderAtZoom();
+}
+
+/** 页码输入框（change / Enter 才提交，不做 v-model：每敲一位都补渲染太吵）。 */
+function onPageInput(event: Event): void {
+  const target = event.target as HTMLInputElement | null;
+  if (target) void goToPage(Number(target.value));
+}
+
+const toolButtonClass =
+  "grid size-5 shrink-0 cursor-pointer place-items-center rounded-[5px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-dim2";
 
 /**
  * 还原上次的阅读位置。
@@ -256,6 +336,7 @@ async function load(bytes: Uint8Array): Promise<void> {
       restored = true;
       await restoreProgress(mine).catch(() => undefined);
     }
+    updateCurrentPage();
   } catch (cause: unknown) {
     if (mine !== generation) return;
     renderError.value = cause instanceof Error ? cause.message : String(cause);
@@ -263,6 +344,7 @@ async function load(bytes: Uint8Array): Promise<void> {
 }
 
 function onScroll(): void {
+  updateCurrentPage();
   const element = scroller.value;
   if (!element || !doc) return;
   if (renderedPages.value >= totalPages.value) return;
@@ -287,7 +369,9 @@ onBeforeUnmount(() => {
   // 一页都没渲染出来时不记（没有还原意义）。
   const element = scroller.value;
   if (element && renderedPages.value > 0) {
-    rememberPdfProgress(props.tab.id, { pages: renderedPages.value, top: element.scrollTop });
+    // 像素偏移随缩放线性变化，换算回「适应宽度」下的等价位置 —— 还原一律从基准缩放
+    // 开始，存放大态下的原始 scrollTop 会对不上。
+    rememberPdfProgress(props.tab.id, { pages: renderedPages.value, top: element.scrollTop / zoom.value });
   }
 });
 
@@ -299,14 +383,85 @@ onUnmounted(() => {
 
 <template>
   <div class="flex size-full min-h-0 flex-col overflow-hidden">
-    <div class="flex shrink-0 items-center gap-2 border-b border-line px-3 py-1 text-[11px] text-dim2">
-      <span>{{ totalPages > 0 ? `已渲染 ${renderedPages} / 共 ${totalPages} 页` : "PDF" }}</span>
+    <div class="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-line px-3 py-1 text-[11px] text-dim2">
+      <span class="min-w-0 flex-1 truncate">
+        {{ totalPages > 0 ? t("preview.pdf.rendered", { done: renderedPages, total: totalPages }) : "PDF" }}
+      </span>
+
+      <!-- 跳页 -->
+      <button
+        type="button"
+        data-testid="pdf-prev"
+        :class="toolButtonClass"
+        :aria-label="t('preview.pdf.prev')"
+        :disabled="currentPage <= 1"
+        @click="goToPage(currentPage - 1)"
+      >
+        <Icon name="left" :size="11" />
+      </button>
+      <input
+        data-testid="pdf-page-input"
+        type="number"
+        min="1"
+        :value="currentPage"
+        :aria-label="t('preview.pdf.pageLabel')"
+        class="h-5 w-10 shrink-0 rounded-[5px] border border-line-2 bg-panel px-1 text-center text-[11px] text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+        @change="onPageInput"
+        @keydown.enter="onPageInput"
+      />
+      <span class="shrink-0 tabular-nums">/ {{ totalPages || "–" }}</span>
+      <button
+        type="button"
+        data-testid="pdf-next"
+        :class="toolButtonClass"
+        :aria-label="t('preview.pdf.next')"
+        :disabled="totalPages > 0 && currentPage >= totalPages"
+        @click="goToPage(currentPage + 1)"
+      >
+        <Icon name="right" :size="11" />
+      </button>
+
+      <!-- 缩放：1 倍 = 适应宽度 -->
+      <button
+        type="button"
+        data-testid="pdf-zoom-out"
+        :class="toolButtonClass"
+        :aria-label="t('preview.pdf.zoomOut')"
+        @click="applyZoom(zoomBy(zoom, -1))"
+      >
+        <Icon name="minus" :size="11" />
+      </button>
+      <span class="w-9 shrink-0 text-center tabular-nums" data-testid="pdf-zoom-level">{{ Math.round(zoom * 100) }}%</span>
+      <button
+        type="button"
+        data-testid="pdf-zoom-in"
+        :class="toolButtonClass"
+        :aria-label="t('preview.pdf.zoomIn')"
+        @click="applyZoom(zoomBy(zoom, 1))"
+      >
+        <Icon name="plus" :size="11" />
+      </button>
+      <button
+        type="button"
+        data-testid="pdf-fit"
+        class="h-5 shrink-0 cursor-pointer rounded-[5px] px-1.5 text-[11px] transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+        :class="zoom === 1 ? 'bg-panel text-foreground' : 'text-dim2 hover:bg-panel hover:text-foreground'"
+        :aria-label="t('preview.pdf.fitWidth')"
+        :aria-pressed="zoom === 1"
+        @click="applyZoom(1)"
+      >
+        {{ t("preview.pdf.fitWidth") }}
+      </button>
     </div>
-    <p v-if="loading" class="px-4 py-3 text-[12px] text-dim2">读取中…</p>
-    <p v-else-if="error" role="alert" class="px-4 py-3 text-[12px] text-orange">读取失败：{{ error }}</p>
-    <p v-else-if="renderError" role="alert" class="px-4 py-3 text-[12px] text-orange">
-      无法渲染该 PDF：{{ renderError }}。可点上方工具栏的「用系统应用打开」看原文件。
-    </p>
+    <p v-if="loading" class="px-4 py-3 text-[12px] text-dim2">{{ t("preview.common.loading") }}</p>
+    <div v-else-if="error" role="alert" class="flex flex-wrap items-center gap-2 px-4 py-3">
+      <span class="text-[12px] text-orange">{{ t("preview.common.readFailed", { detail: error }) }}</span>
+      <PreviewExternalButton :tab="tab" />
+    </div>
+    <div v-else-if="renderError" role="alert" class="flex flex-wrap items-center gap-2 px-4 py-3">
+      <span class="text-[12px] text-orange">{{ t("preview.pdf.renderFailed", { detail: renderError }) }}</span>
+      <PreviewExternalButton :tab="tab" />
+    </div>
     <div
       v-show="!loading && !error && !renderError"
       ref="scroller"

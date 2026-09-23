@@ -236,6 +236,16 @@ export const enUS: MessageSchema = {
       rotateLeft: "Rotate left 90°",
       rotateRight: "Rotate right 90°",
     },
+    pdf: {
+      rendered: "Rendered {done} / {total} pages",
+      prev: "Previous page",
+      next: "Next page",
+      pageLabel: "Page number",
+      zoomIn: "Zoom in",
+      zoomOut: "Zoom out",
+      fitWidth: "Fit width",
+      renderFailed: "Cannot render this PDF: {detail}",
+    },
     table: {
       empty: "Empty file",
       truncated: "Showing the first {limit} of {total} rows",
