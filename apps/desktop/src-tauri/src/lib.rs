@@ -1,6 +1,7 @@
 mod acp_host;
 mod acp_process;
 mod channel_common;
+mod channel_media;
 mod cron;
 mod db;
 pub mod dingtalk;
@@ -150,6 +151,9 @@ pub fn run() {
             wechat::wechat_logout,
             wechat::wechat_send,
             wechat::wechat_send_typing,
+            channel_media::channel_take_media,
+            channel_media::channel_send_media,
+            channel_media::channel_media_capabilities,
             dingtalk::dingtalk_status,
             dingtalk::dingtalk_save_credentials,
             dingtalk::dingtalk_clear_credentials,
