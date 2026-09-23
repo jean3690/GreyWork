@@ -176,7 +176,7 @@ async function renderNextBatch(mine: number): Promise<void> {
     canvas.style.width = `${Math.floor(viewport.width)}px`;
     canvas.style.height = `${Math.floor(viewport.height)}px`;
     const context = canvas.getContext("2d");
-    if (!context) throw new Error("无法获取 canvas 2d 上下文");
+    if (!context) throw new Error(t("preview.viewer.pdf.canvasFailed"));
     const task = page.render({ canvasContext: context, viewport: page.getViewport({ scale: scale * dpr }) });
     activeTasks.push(task);
     await task.promise;

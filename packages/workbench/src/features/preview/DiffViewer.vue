@@ -6,12 +6,16 @@
 import { computed, toRef } from "vue";
 import { parseUnifiedDiff, type DiffLineKind } from "@/lib/unified-diff";
 import { usePreviewText } from "@/lib/preview-content";
+import { i18n } from "@/i18n";
 import type { PreviewTab } from "@/stores/preview";
 
 /** 单文件段的渲染行上限：超大 patch 一次性铺开会卡死渲染。 */
 const LINE_LIMIT = 5000;
 
 const props = defineProps<{ tab: PreviewTab }>();
+
+/** 查看器可能被直接 mount（测试），不依赖宿主的 i18n 插件，故用全局实例。 */
+const t = i18n.global.t;
 
 const { data, loading, error } = usePreviewText(toRef(props, "tab"));
 
@@ -39,9 +43,11 @@ const MARKER: Record<DiffLineKind, string> = {
 
 <template>
   <div data-selection-scope data-scroll-root class="size-full overflow-auto font-mono text-[12px]">
-    <p v-if="loading" class="px-4 py-3 text-dim2">读取中…</p>
-    <p v-else-if="error" role="alert" class="px-4 py-3 text-orange">读取失败：{{ error }}</p>
-    <p v-else-if="files.length === 0" class="px-4 py-3 text-dim2">没有可显示的变更</p>
+    <p v-if="loading" class="px-4 py-3 text-dim2">{{ t("preview.common.loading") }}</p>
+    <p v-else-if="error" role="alert" class="px-4 py-3 text-orange">
+      {{ t("preview.common.readFailed", { detail: error }) }}
+    </p>
+    <p v-else-if="files.length === 0" class="px-4 py-3 text-dim2">{{ t("preview.viewer.diff.empty") }}</p>
     <template v-else>
       <section v-for="file in files" :key="file.path" data-testid="diff-file" class="mb-2">
         <header class="sticky top-0 z-10 flex items-center gap-2 border-y border-line bg-panel-2 px-3 py-1.5 text-[11.5px]">
@@ -61,7 +67,7 @@ const MARKER: Record<DiffLineKind, string> = {
           <span class="min-w-0 flex-1 whitespace-pre-wrap break-all pe-3">{{ line.text }}</span>
         </div>
         <p v-if="file.lines.length > LINE_LIMIT" class="px-3 py-1.5 text-[11px] text-dim2">
-          仅显示前 {{ LINE_LIMIT }} 行，该文件段共 {{ file.lines.length }} 行
+          {{ t("preview.viewer.diff.lineLimit", { limit: LINE_LIMIT, total: file.lines.length }) }}
         </p>
       </section>
     </template>

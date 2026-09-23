@@ -230,9 +230,14 @@ async function saveActive(): Promise<void> {
   saving.value = true;
   try {
     await saver.save();
-    notify({ kind: "success", key: "preview-save", title: "已保存", detail: tab.name });
+    notify({ kind: "success", key: "preview-save", title: t("common.saved"), detail: tab.name });
   } catch (cause) {
-    notify({ kind: "warning", key: "preview-save", title: "保存失败", detail: cause instanceof Error ? cause.message : String(cause) });
+    notify({
+      kind: "warning",
+      key: "preview-save",
+      title: t("preview.sider.saveFailed"),
+      detail: cause instanceof Error ? cause.message : String(cause),
+    });
   } finally {
     saving.value = false;
   }
@@ -305,7 +310,7 @@ const sectionClass = (active: boolean): string =>
       data-testid="preview-resize-handle"
       role="separator"
       aria-orientation="vertical"
-      aria-label="调整预览面板宽度"
+      :aria-label="t('preview.sider.resize')"
       :aria-valuemin="MIN_PREVIEW_PANEL_PX"
       :aria-valuemax="MAX_PREVIEW_PANEL_PX"
       :aria-valuenow="preview.widthPx"
@@ -329,7 +334,7 @@ const sectionClass = (active: boolean): string =>
         :aria-current="section === 'files' ? 'true' : undefined"
         @click="switchSection('files')"
       >
-        文件
+        {{ t("preview.sider.sectionFiles") }}
       </button>
       <button
         type="button"
@@ -338,7 +343,7 @@ const sectionClass = (active: boolean): string =>
         :aria-current="section === 'preview' ? 'true' : undefined"
         @click="switchSection('preview')"
       >
-        预览<span v-if="preview.tabs.length" class="ms-1 text-dim2">{{ preview.tabs.length }}</span>
+        {{ t("preview.sider.sectionPreview") }}<span v-if="preview.tabs.length" class="ms-1 text-dim2">{{ preview.tabs.length }}</span>
       </button>
       <button
         type="button"
@@ -347,7 +352,7 @@ const sectionClass = (active: boolean): string =>
         :aria-current="section === 'git' ? 'true' : undefined"
         @click="switchSection('git')"
       >
-        变更
+        {{ t("preview.sider.sectionGit") }}
       </button>
 
       <div class="ms-auto flex shrink-0 items-center gap-0.5">
@@ -357,7 +362,7 @@ const sectionClass = (active: boolean): string =>
           data-testid="preview-save"
           :aria-disabled="saving || undefined"
           class="grid size-6 cursor-pointer place-items-center rounded-[6px] text-cyan transition-colors hover:bg-panel focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan aria-disabled:cursor-not-allowed aria-disabled:text-dim2"
-          aria-label="保存当前预览"
+          :aria-label="t('preview.sider.saveCurrent')"
           @click="saveActive()"
         >
           <Icon name="save" :size="13" />
@@ -366,7 +371,7 @@ const sectionClass = (active: boolean): string =>
           type="button"
           data-testid="web-fetch-open"
           class="grid size-6 cursor-pointer place-items-center rounded-[6px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
-          aria-label="抓取网页"
+          :aria-label="t('preview.sider.fetchWeb')"
           @click="fetchDialogOpen = true"
         >
           <Icon name="earth" :size="13" />
@@ -376,17 +381,17 @@ const sectionClass = (active: boolean): string =>
           type="button"
           data-testid="preview-reload"
           class="grid size-6 cursor-pointer place-items-center rounded-[6px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
-          aria-label="重新加载当前预览"
+          :aria-label="t('preview.sider.reloadCurrent')"
           @click="reloadTab(preview.activeTab.path)"
         >
           <Icon name="refresh" :size="13" />
         </button>
-        <Hint v-if="externalPath" :text="`用系统应用打开 ${externalPath}`" multiline>
+        <Hint v-if="externalPath" :text="t('preview.sider.openExternalHint', { path: externalPath })" multiline>
           <button
             type="button"
             data-testid="preview-open-external"
             class="grid size-6 cursor-pointer place-items-center rounded-[6px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
-            aria-label="用系统应用打开"
+            :aria-label="t('preview.common.openExternal')"
             @click="openExternal()"
           >
             <Icon name="external" :size="13" />
@@ -397,7 +402,7 @@ const sectionClass = (active: boolean): string =>
           type="button"
           data-testid="preview-close-all"
           class="grid size-6 cursor-pointer place-items-center rounded-[6px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
-          aria-label="关闭全部预览"
+          :aria-label="t('preview.sider.closeAll')"
           @click="requestClose({ kind: 'all' })"
         >
           <Icon name="close-one" :size="13" />
@@ -406,7 +411,7 @@ const sectionClass = (active: boolean): string =>
           type="button"
           data-testid="preview-collapse"
           class="grid size-6 cursor-pointer place-items-center rounded-[6px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
-          aria-label="折叠预览面板"
+          :aria-label="t('preview.sider.collapse')"
           @click="preview.setCollapsed(true)"
         >
           <Icon name="expand-right" :size="13" />
@@ -444,7 +449,7 @@ const sectionClass = (active: boolean): string =>
               <button
                 type="button"
                 class="max-w-[160px] cursor-pointer truncate focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
-                :aria-label="`查看 ${tab.name}`"
+                :aria-label="t('preview.sider.viewTab', { name: tab.name })"
                 :aria-current="tab.id === preview.activeId ? 'true' : undefined"
                 @click="activateTab(tab.id)"
               >
@@ -456,13 +461,13 @@ const sectionClass = (active: boolean): string =>
               data-testid="preview-tab-dirty"
               class="size-1.5 shrink-0 rounded-full bg-cyan"
               aria-hidden="true"
-              title="有未保存改动"
+              :title="t('preview.sider.dirty')"
             />
             <button
               type="button"
               data-testid="preview-tab-close"
               class="grid size-4 cursor-pointer place-items-center rounded-[4px] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
-              :aria-label="`关闭 ${tab.name}`"
+              :aria-label="t('preview.sider.closeTab', { name: tab.name })"
               @click.stop="requestClose({ kind: 'one', id: tab.id })"
             >
               <Icon name="close" :size="10" />
@@ -475,8 +480,8 @@ const sectionClass = (active: boolean): string =>
         <PreviewSurface v-if="preview.activeTab" :tab="preview.activeTab" />
         <ContextMenuRegion v-else :build="buildEmptyMenu">
           <div data-testid="preview-empty" class="flex size-full flex-col items-center justify-center gap-2 px-4 text-center">
-            <span class="text-[12px] text-dim2">暂无预览内容</span>
-            <span class="text-[11px] text-dim2">从「文件」里点一个文件，或等产物生成后自动打开</span>
+            <span class="text-[12px] text-dim2">{{ t("preview.sider.emptyTitle") }}</span>
+            <span class="text-[11px] text-dim2">{{ t("preview.sider.emptyHint") }}</span>
             <div class="mt-1 flex items-center gap-2">
               <button
                 type="button"
@@ -484,7 +489,7 @@ const sectionClass = (active: boolean): string =>
                 class="cursor-pointer rounded-[6px] border border-line-2 bg-panel px-2.5 py-1 text-[11.5px] text-dim transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
                 @click="switchSection('files')"
               >
-                打开文件树
+                {{ t("preview.sider.openFiles") }}
               </button>
               <button
                 type="button"
@@ -492,7 +497,7 @@ const sectionClass = (active: boolean): string =>
                 class="cursor-pointer rounded-[6px] border border-line-2 bg-panel px-2.5 py-1 text-[11.5px] text-dim transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
                 @click="fetchDialogOpen = true"
               >
-                抓取网页
+                {{ t("preview.sider.fetchWeb") }}
               </button>
             </div>
           </div>

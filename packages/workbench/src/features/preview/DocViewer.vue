@@ -20,9 +20,13 @@ import { usePreviewBinary } from "@/lib/preview-content";
 import { parseDocx, type ParsedDocx } from "@/lib/docx-parse";
 import { patchDocxText } from "@/lib/docx-serialize";
 import { registerPreviewSaver, unregisterPreviewSaver, writePreviewBytes } from "@/lib/preview-save";
+import { i18n } from "@/i18n";
 import type { PreviewTab } from "@/stores/preview";
 
 const props = defineProps<{ tab: PreviewTab }>();
+
+/** 查看器可能被直接 mount（测试），不依赖宿主的 i18n 插件，故用全局实例。 */
+const t = i18n.global.t;
 
 const { data, loading, error } = usePreviewBinary(toRef(props, "tab"));
 
@@ -71,6 +75,13 @@ watch(
 const blockCount = computed(() => doc.value?.blocks.length ?? 0);
 const tableCount = computed(() => doc.value?.blocks.filter((block) => block.kind === "table").length ?? 0);
 
+/** 工具条摘要：段数 + （有表格时）表格数；还没有正文时退化成「文档」这个词本身。 */
+const summary = computed(() => {
+  if (blockCount.value === 0) return t("preview.viewer.doc.label");
+  const blocks = t("preview.viewer.doc.blocks", { count: blockCount.value });
+  return tableCount.value ? blocks + t("preview.viewer.doc.tables", { count: tableCount.value }) : blocks;
+});
+
 /** 某个 run 改字：记进缓冲并标脏（编号是 w:t 的文档序，保存时定位到原 XML 节点）。 */
 function onRunEdit(editId: number, text: string): void {
   edits.set(editId, text);
@@ -95,19 +106,21 @@ onBeforeUnmount(() => unregisterPreviewSaver(props.tab.id));
 <template>
   <div class="flex size-full min-h-0 flex-col overflow-hidden">
     <div class="flex shrink-0 items-center gap-2 border-b border-line px-3 py-1 text-[11px] text-dim2">
-      <span>{{ blockCount > 0 ? `${blockCount} 个段落块${tableCount ? ` · ${tableCount} 张表格` : ""}` : "文档" }}</span>
+      <span>{{ summary }}</span>
     </div>
 
-    <p v-if="loading" class="px-4 py-3 text-[12px] text-dim2">读取中…</p>
+    <p v-if="loading" class="px-4 py-3 text-[12px] text-dim2">{{ t("preview.common.loading") }}</p>
     <div v-else-if="error" role="alert" class="flex flex-wrap items-center gap-2 px-4 py-3">
-      <span class="text-[12px] text-red-400">读取失败：{{ error }}</span>
+      <span class="text-[12px] text-red-400">{{ t("preview.common.readFailed", { detail: error }) }}</span>
       <PreviewExternalButton :tab="tab" />
     </div>
     <div v-else-if="parseError" role="alert" class="flex flex-wrap items-center gap-2 px-4 py-3">
-      <span class="text-[12px] text-red-400">无法解析该文档：{{ parseError }}</span>
+      <span class="text-[12px] text-red-400">{{ t("preview.viewer.doc.parseFailed", { detail: parseError }) }}</span>
       <PreviewExternalButton :tab="tab" />
     </div>
-    <p v-else-if="doc && blockCount === 0" class="px-4 py-3 text-[12px] text-dim2">这份文档没有正文内容。</p>
+    <p v-else-if="doc && blockCount === 0" class="px-4 py-3 text-[12px] text-dim2">
+      {{ t("preview.viewer.doc.empty") }}
+    </p>
 
     <div v-show="!loading && !error && !parseError" data-testid="doc-viewer" data-scroll-root class="min-h-0 flex-1 overflow-y-auto p-3">
       <!-- 纸张：文档是深色底上的浅色页，和 Word 的观感一致；正文颜色交给 run 自己的 color。

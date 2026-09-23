@@ -251,9 +251,9 @@ function sendSelectionToChat(): void {
  * 保存：Univer 快照 → xlsx 回写来源。含图纸 / 图表 / 媒体的表在此拦下（见文件头注释）。
  */
 async function save(): Promise<void> {
-  if (!currentWorkbook || !originalBytes) throw new Error("表格尚未加载完成");
+  if (!currentWorkbook || !originalBytes) throw new Error(t("preview.viewer.sheet.notLoaded"));
   if (await hasGraphicsParts(originalBytes)) {
-    throw new Error("此表含图表或图片，保存会丢失它们；请用「用系统应用打开」编辑原文件");
+    throw new Error(t("preview.viewer.sheet.chartLoss"));
   }
   const { univerWorkbookToXlsx } = await import("@/lib/univer-xlsx");
   const bytes = await univerWorkbookToXlsx(currentWorkbook.save());
@@ -298,7 +298,7 @@ onBeforeUnmount(() => unregisterPreviewSaver(props.tab.id));
         {{ t("preview.common.readFailed", { detail: error }) }}
       </p>
       <p v-else-if="bootError" role="alert" class="px-4 py-3 text-[12px] text-orange">
-        无法渲染该表格：{{ bootError }}。可点上方工具栏的「用系统应用打开」看原文件。
+        {{ t("preview.viewer.sheet.renderFailed", { detail: bootError }) }}
       </p>
       <div v-show="!loading && !error && !bootError" ref="host" data-testid="sheet-viewer" class="min-h-0 flex-1" />
     </template>

@@ -17,6 +17,7 @@ import { usePreviewBinary } from "@/lib/preview-content";
 import { paragraphFontPt, parsePptx, type ParsedDeck, type PptxParagraph, type PptxRun, type PptxTextRef } from "@/lib/pptx-parse";
 import { patchPptxText } from "@/lib/pptx-serialize";
 import { registerPreviewSaver, unregisterPreviewSaver, writePreviewBytes } from "@/lib/preview-save";
+import { i18n } from "@/i18n";
 import type { PreviewTab } from "@/stores/preview";
 
 /** pt → px（CSS 参考像素：96dpi / 72pt）。 */
@@ -242,6 +243,14 @@ function cellStyle(fill: string | null, slideBackground: string | null): Record<
 
 const slideCount = computed(() => deck.value?.slides.length ?? 0);
 
+/** 查看器可能被直接 mount（测试），不依赖宿主的 i18n 插件，故用全局实例。 */
+const t = i18n.global.t;
+
+/** 工具条摘要：有页数就报页数，还没有内容时退化成「演示文稿」这个词本身。 */
+const summary = computed(() =>
+  slideCount.value > 0 ? t("preview.viewer.slide.count", { n: slideCount.value }) : t("preview.viewer.slide.label"),
+);
+
 /** 某个 run 改字：按 `${slide}:${ord}` 记进缓冲并标脏。 */
 function onRunInput(event: Event, ref: PptxTextRef | null | undefined): void {
   if (!ref) return;
@@ -272,15 +281,19 @@ registerPreviewSaver(props.tab.id, { dirty, save });
 <template>
   <div class="flex size-full min-h-0 flex-col overflow-hidden">
     <div class="flex shrink-0 items-center gap-2 border-b border-line px-3 py-1 text-[11px] text-dim2">
-      <span>{{ slideCount > 0 ? `共 ${slideCount} 页` : "演示文稿" }}</span>
+      <span>{{ summary }}</span>
     </div>
 
-    <p v-if="loading" class="px-4 py-3 text-[12px] text-dim2">读取中…</p>
-    <p v-else-if="error" role="alert" class="px-4 py-3 text-[12px] text-orange">读取失败：{{ error }}</p>
-    <p v-else-if="parseError" role="alert" class="px-4 py-3 text-[12px] text-orange">
-      无法解析该演示文稿：{{ parseError }}。可点上方工具栏的「用系统应用打开」看原文件。
+    <p v-if="loading" class="px-4 py-3 text-[12px] text-dim2">{{ t("preview.common.loading") }}</p>
+    <p v-else-if="error" role="alert" class="px-4 py-3 text-[12px] text-orange">
+      {{ t("preview.common.readFailed", { detail: error }) }}
     </p>
-    <p v-else-if="deck && slideCount === 0" class="px-4 py-3 text-[12px] text-dim2">这份演示文稿没有幻灯片。</p>
+    <p v-else-if="parseError" role="alert" class="px-4 py-3 text-[12px] text-orange">
+      {{ t("preview.viewer.slide.parseFailed", { detail: parseError }) }}
+    </p>
+    <p v-else-if="deck && slideCount === 0" class="px-4 py-3 text-[12px] text-dim2">
+      {{ t("preview.viewer.slide.empty") }}
+    </p>
 
     <div
       v-show="!loading && !error && !parseError"
@@ -369,9 +382,11 @@ registerPreviewSaver(props.tab.id, { dirty, save });
           </div>
 
           <div class="mt-1 flex items-baseline gap-2 px-0.5">
-            <span class="shrink-0 text-[10.5px] text-dim2">第 {{ slide.index }} 页</span>
+            <span class="shrink-0 text-[10.5px] text-dim2">{{ t("preview.viewer.slide.page", { n: slide.index }) }}</span>
             <!-- 备注是 pptx 里真实存在的内容，藏起来同样算「看不到完整内容」 -->
-            <span v-if="slide.notes" class="min-w-0 flex-1 whitespace-pre-wrap text-[10.5px] text-dim2"> 备注：{{ slide.notes }} </span>
+            <span v-if="slide.notes" class="min-w-0 flex-1 whitespace-pre-wrap text-[10.5px] text-dim2">
+              {{ t("preview.viewer.slide.notes", { notes: slide.notes }) }}
+            </span>
           </div>
         </section>
       </template>

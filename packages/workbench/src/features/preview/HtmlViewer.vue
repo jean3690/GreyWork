@@ -9,9 +9,13 @@
 import { computed, ref, toRef } from "vue";
 import TextViewer from "@/features/preview/TextViewer.vue";
 import { usePreviewText } from "@/lib/preview-content";
+import { i18n } from "@/i18n";
 import type { PreviewTab } from "@/stores/preview";
 
 const props = defineProps<{ tab: PreviewTab }>();
+
+/** 查看器可能被直接 mount（测试），不依赖宿主的 i18n 插件，故用全局实例。 */
+const t = i18n.global.t;
 
 const { data, loading, error } = usePreviewText(toRef(props, "tab"));
 
@@ -29,19 +33,35 @@ const tabClass = (active: boolean): string =>
 <template>
   <div class="flex size-full min-h-0 flex-col overflow-hidden">
     <div class="flex shrink-0 items-center gap-1 border-b border-line px-2 py-1">
-      <button type="button" :class="tabClass(mode === 'render')" aria-label="渲染视图" @click="mode = 'render'">渲染</button>
-      <button type="button" :class="tabClass(mode === 'source')" aria-label="源码视图" @click="mode = 'source'">源码</button>
+      <button
+        type="button"
+        :class="tabClass(mode === 'render')"
+        :aria-label="t('preview.viewer.html.renderLabel')"
+        @click="mode = 'render'"
+      >
+        {{ t("preview.viewer.html.render") }}
+      </button>
+      <button
+        type="button"
+        :class="tabClass(mode === 'source')"
+        :aria-label="t('preview.viewer.html.sourceLabel')"
+        @click="mode = 'source'"
+      >
+        {{ t("preview.viewer.html.source") }}
+      </button>
     </div>
 
-    <p v-if="loading" class="px-4 py-3 text-[12px] text-dim2">读取中…</p>
-    <p v-else-if="error" role="alert" class="px-4 py-3 text-[12px] text-orange">读取失败：{{ error }}</p>
+    <p v-if="loading" class="px-4 py-3 text-[12px] text-dim2">{{ t("preview.common.loading") }}</p>
+    <p v-else-if="error" role="alert" class="px-4 py-3 text-[12px] text-orange">
+      {{ t("preview.common.readFailed", { detail: error }) }}
+    </p>
     <!-- 纸张化：外层是主题底，里面这张才是文档本身。被预览的 HTML 多半自带排版，
          把整个面板涂白会在暗色里糊出一大块眩光；不给脚本也改不了它的正文色，
          所以只能像 DocViewer 那样把它收成一张纸，而不是翻成深底。 -->
     <div v-else-if="mode === 'render'" class="min-h-0 flex-1 overflow-hidden bg-panel p-3">
       <iframe
         data-testid="html-viewer-frame"
-        title="HTML 预览"
+        :title="t('preview.viewer.html.title')"
         sandbox="allow-same-origin"
         :srcdoc="srcdoc"
         class="size-full rounded-[6px] border border-line-2 bg-paper"

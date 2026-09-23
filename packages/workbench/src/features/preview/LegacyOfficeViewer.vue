@@ -22,7 +22,7 @@ import { i18n } from "@/i18n";
 import type { PreviewTab } from "@/stores/preview";
 import { notify } from "@/stores/notice";
 
-/** 本组件只对「打开失败」这条共享提示走 i18n（文案与 fileOp.* 同源）；其余文案尚未 i18n。 */
+/** 面板文案全部走 i18n（含这条查看器自己的说明文字）。 */
 const t = i18n.global.t;
 
 const props = defineProps<{ tab: PreviewTab }>();
@@ -61,20 +61,20 @@ const extension = computed(() => {
 const actualFormat = computed(() => (container.value?.kind === "ooxml" ? container.value.format : null));
 
 const headline = computed(() => {
-  if (actualFormat.value) return `这个文件其实是 .${actualFormat.value}`;
-  if (container.value?.kind === "ole2") return `不支持预览 .${extension.value} 老格式`;
-  if (container.value?.kind === "zip") return "认不出这个文件的具体格式";
-  return "认不出这个文件";
+  if (actualFormat.value) return t("preview.viewer.legacyOffice.actualFormat", { format: actualFormat.value });
+  if (container.value?.kind === "ole2") return t("preview.viewer.legacyOffice.unsupportedLegacy", { ext: extension.value });
+  if (container.value?.kind === "zip") return t("preview.viewer.legacyOffice.unknownFormat");
+  return t("preview.viewer.legacyOffice.unknown");
 });
 
 const detail = computed(() => {
   if (actualFormat.value) {
-    return `扩展名被改成了 .${extension.value}，内容却是 .${actualFormat.value}。把文件改名成 .${actualFormat.value} 就能在预览里打开。`;
+    return t("preview.viewer.legacyOffice.renamed", { ext: extension.value, format: actualFormat.value });
   }
   if (container.value?.kind === "ole2") {
-    return `.${extension.value} 是 OLE2 复合文档，需要在 Word / Excel / PowerPoint 或 LibreOffice 里打开。如需在预览中查看，可先将其另存为对应的 .docx / .xlsx / .pptx 新格式。`;
+    return t("preview.viewer.legacyOffice.ole2", { ext: extension.value });
   }
-  return "文件内容与扩展名对不上，无法判断格式。";
+  return t("preview.viewer.legacyOffice.mismatch");
 });
 
 /** 字节已加载后的人类可读体积；web 源不存在老格式文档，大小照常显示无妨。 */
@@ -82,8 +82,10 @@ const sizeText = computed(() => (data.value ? formatBytes(data.value.byteLength)
 
 /** 工具条摘要：内容其实是可渲染的 OOXML 时不能说「不支持预览」，否则与正文自相矛盾。 */
 const summary = computed(() => {
-  const label = extension.value ? `.${extension.value}` : "老格式文档";
-  const status = actualFormat.value ? `实为 .${actualFormat.value}` : "不支持预览";
+  const label = extension.value ? `.${extension.value}` : t("preview.viewer.legacyOffice.fallbackLabel");
+  const status = actualFormat.value
+    ? t("preview.viewer.legacyOffice.realFormat", { format: actualFormat.value })
+    : t("preview.viewer.legacyOffice.unsupported");
   return sizeText.value ? `${label} · ${status} · ${sizeText.value}` : `${label} · ${status}`;
 });
 
@@ -119,15 +121,19 @@ async function openExternal(): Promise<void> {
       <span>{{ summary }}</span>
     </div>
 
-    <p v-if="loading" class="px-4 py-3 text-[12px] text-dim2">读取中…</p>
-    <p v-else-if="error" role="alert" class="px-4 py-3 text-[12px] text-red-400">读取失败：{{ error }}</p>
+    <p v-if="loading" class="px-4 py-3 text-[12px] text-dim2">{{ t("preview.common.loading") }}</p>
+    <p v-else-if="error" role="alert" class="px-4 py-3 text-[12px] text-red-400">
+      {{ t("preview.common.readFailed", { detail: error }) }}
+    </p>
 
     <div v-else data-testid="legacy-office-viewer" class="min-h-0 flex-1 overflow-y-auto p-4">
       <div class="rounded-[8px] border border-line-2 bg-panel-2 p-4">
         <p class="text-[13px] text-foreground">{{ headline }}</p>
         <p class="mt-1.5 text-[12px] leading-relaxed text-dim2">{{ detail }}</p>
         <template v-if="showSystemAppHint">
-          <p class="mt-2.5 text-[12px] leading-relaxed text-dim2">可以点下面的「用系统应用打开」用本机的 Office 查看原文件。</p>
+          <p class="mt-2.5 text-[12px] leading-relaxed text-dim2">
+            {{ t("preview.viewer.legacyOffice.systemAppHint") }}
+          </p>
           <button
             v-if="externalPath"
             type="button"
@@ -135,7 +141,7 @@ async function openExternal(): Promise<void> {
             class="mt-3 cursor-pointer rounded-[8px] border border-line bg-panel px-3 py-1.5 text-[12px] text-dim transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
             @click="openExternal()"
           >
-            用系统应用打开
+            {{ t("preview.common.openExternal") }}
           </button>
         </template>
       </div>
