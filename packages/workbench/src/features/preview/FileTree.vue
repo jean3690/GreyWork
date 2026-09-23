@@ -6,7 +6,7 @@
  * 组件实例，而展平后只有一个列表，缩进靠 padding。行为完全一样，代价低一个量级。
  */
 import { computed, nextTick, onMounted, ref } from "vue";
-import { isTauriRuntime } from "@greywork/core";
+import { isTauriRuntime, joinPath, normalizePath } from "@greywork/core";
 import { useVirtualizer } from "@tanstack/vue-virtual";
 import Icon from "@/features/shared/Icon.vue";
 import Hint from "@/features/shared/Hint.vue";
@@ -202,6 +202,213 @@ function confirmDelete(): void {
   requestLeave(() => void runFileOp(() => tree.deleteEntry(node.path)));
 }
 
+/* ===== 键盘导航 =====
+ * 行本来就是 `<button>`，键盘焦点天然落在某一行上；这里只补浏览器没给的那些：
+ * 方向键在行之间移动焦点、右 / 左进出一层、Home/End 跳到首尾、F2 改名、Delete 删除、
+ * Ctrl+C/X/V 走应用内剪贴板。
+ *
+ * **Enter / Space 刻意不接**：button 原生就会把它们变成 click（= activate），自己再处理
+ * 一遍就成了「展开又立刻收起」。所以这里也不 preventDefault，让原生行为照常发生。
+ */
+/** 最后一次落到的那一行（点击 / 聚焦 / 方向键都会更新），供 rowIndexAt 兜底。 */
+const anchorPath = ref<string | null>(null);
+
+/** 当前按键落在第几行（-1 = 焦点不在任何行上，例如还在容器里）。 */
+function rowIndexAt(event: KeyboardEvent): number {
+  const host = (event.target as HTMLElement | null)?.closest?.("[data-index]");
+  const raw = host?.getAttribute("data-index");
+  if (raw !== null && raw !== undefined) return Number(raw);
+  // 焦点不在某一行上（例如落在容器、或整行被改名输入框替掉）时，用最后一次落到的那行兜底。
+  const anchor = anchorPath.value;
+  if (anchor === null) return -1;
+  return rows.value.findIndex((row) => row.node.path === anchor);
+}
+
+function ensureRowVisible(index: number): void {
+  if (virtual.value) {
+    virtualizer.value.scrollToIndex(index, { align: "auto" });
+    return;
+  }
+  const el = scrollEl.value;
+  // 无布局环境（测试）里 clientHeight 为 0：算不出可视窗口，别把滚动位置搅乱。
+  if (!el || el.clientHeight === 0) return;
+  const top = index * ROW_STRIDE;
+  const bottom = top + ROW_STRIDE;
+  if (top < el.scrollTop) el.scrollTop = top;
+  else if (bottom > el.scrollTop + el.clientHeight) el.scrollTop = bottom - el.clientHeight;
+}
+
+/** 把焦点挪到第 index 行；目标行可能在虚拟窗口之外，先滚过去再聚焦。 */
+async function focusRowAt(index: number): Promise<void> {
+  const list = rows.value;
+  if (list.length === 0) return;
+  const clamped = Math.max(0, Math.min(list.length - 1, index));
+  anchorPath.value = list[clamped].node.path;
+  ensureRowVisible(clamped);
+  await nextTick();
+  scrollEl.value?.querySelector<HTMLElement>(`[data-index="${clamped}"] [data-testid="file-tree-row"]`)?.focus();
+}
+
+/** 点行：先记下焦点行再激活，这样接着按方向键从这一行继续。 */
+function onRowClick(node: FileTreeNode): void {
+  anchorPath.value = node.path;
+  activate(node);
+}
+
+/** 右方向键：折叠态目录先展开；已展开则进入第一个子项。 */
+async function stepInto(index: number): Promise<void> {
+  const row = rows.value[index];
+  if (!row) return;
+  if (row.node.kind === "directory" && !tree.isExpanded(row.node.path)) {
+    await tree.toggle(row.node.path);
+    return;
+  }
+  const next = rows.value[index + 1];
+  if (next && next.depth > row.depth) await focusRowAt(index + 1);
+}
+
+/** 左方向键：展开态目录先收起；否则跳到父行（上一个更浅的行）。 */
+async function stepOut(index: number): Promise<void> {
+  const row = rows.value[index];
+  if (!row) return;
+  if (row.node.kind === "directory" && tree.isExpanded(row.node.path)) {
+    await tree.toggle(row.node.path);
+    return;
+  }
+  for (let i = index - 1; i >= 0; i -= 1) {
+    if (rows.value[i].depth < row.depth) {
+      await focusRowAt(i);
+      return;
+    }
+  }
+}
+
+function entryOf(node: FileTreeNode): FileEntryRef {
+  return { path: node.path, name: node.name, kind: node.kind };
+}
+
+function onTreeKeydown(event: KeyboardEvent): void {
+  // 改名输入框里的按键归它自己（含文本选择与粘贴）。
+  if ((event.target as HTMLElement | null)?.closest?.("input, textarea, [contenteditable]")) return;
+
+  const list = rows.value;
+  const index = rowIndexAt(event);
+  const node = index >= 0 ? list[index]?.node : undefined;
+  const disk = tree.mode === "disk";
+
+  if (event.ctrlKey || event.metaKey) {
+    const key = event.key.toLowerCase();
+    if (key === "c" && node && disk) tree.copyToClipboard(entryOf(node));
+    else if (key === "x" && node && disk) tree.cutToClipboard(entryOf(node));
+    else if (key === "v" && disk) void runFileOp(() => tree.pasteInto(dropDirOf(node ?? null)));
+    else return;
+    event.preventDefault();
+    return;
+  }
+
+  switch (event.key) {
+    case "ArrowDown":
+      void focusRowAt(index < 0 ? 0 : index + 1);
+      break;
+    case "ArrowUp":
+      void focusRowAt(index < 0 ? list.length - 1 : index - 1);
+      break;
+    case "ArrowRight":
+      if (index < 0) return;
+      void stepInto(index);
+      break;
+    case "ArrowLeft":
+      if (index < 0) return;
+      void stepOut(index);
+      break;
+    case "Home":
+      void focusRowAt(0);
+      break;
+    case "End":
+      void focusRowAt(list.length - 1);
+      break;
+    case "F2":
+      if (!node || !disk) return;
+      startRename(node);
+      break;
+    case "Delete":
+      if (!node || !disk) return;
+      pendingDelete.value = node;
+      break;
+    default:
+      return;
+  }
+  event.preventDefault();
+}
+
+/* ===== 拖拽移动 =====
+ * 落点目录：目录行 = 它自己，文件行 = 它所在的目录（拖到文件上等价于拖到那个目录）。
+ * 树根不在 rows 里，所以空白区单独接一层（拖进根目录）。 */
+const dragSource = ref<FileTreeNode | null>(null);
+const dropTarget = ref<string | null>(null);
+
+function dropDirOf(node: FileTreeNode | null): string {
+  if (!node) return tree.root;
+  return node.kind === "directory" ? node.path : tree.parentOf(node.path);
+}
+
+/** 拖进自己的子树会把目录搬丢；同目录内移动没有意义（宿主会报「目标已存在」）。 */
+function canDropInto(source: FileTreeNode, targetDir: string): boolean {
+  if (tree.mode !== "disk") return false;
+  const from = normalizePath(source.path);
+  const to = normalizePath(targetDir);
+  if (to === from || to.startsWith(`${from}/`)) return false;
+  return normalizePath(tree.parentOf(source.path)) !== to;
+}
+
+function onRowDragStart(event: DragEvent, node: FileTreeNode): void {
+  if (tree.mode !== "disk") return;
+  dragSource.value = node;
+  // 有的浏览器要求 dragstart 里写点数据才肯启动拖拽。
+  event.dataTransfer?.setData("text/plain", node.path);
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+}
+
+function onRowDragOver(event: DragEvent, node: FileTreeNode): void {
+  const source = dragSource.value;
+  if (!source) return;
+  const dir = dropDirOf(node);
+  if (!canDropInto(source, dir)) return;
+  // 只有 preventDefault 之后才允许放置；不设 dropTarget 就不会亮。
+  event.preventDefault();
+  dropTarget.value = dir;
+}
+
+function onRowDrop(event: DragEvent, node: FileTreeNode): void {
+  const source = dragSource.value;
+  const dir = dropDirOf(node);
+  endDrag();
+  if (!source || !canDropInto(source, dir)) return;
+  event.preventDefault();
+  void runFileOp(() => tree.moveEntry(source.path, joinPath(dir, source.name)));
+}
+
+/** 空白区 = 树的根目录：允许把条目拖到根下。 */
+function onBlankDragOver(event: DragEvent): void {
+  const source = dragSource.value;
+  if (!source || !canDropInto(source, tree.root)) return;
+  event.preventDefault();
+  dropTarget.value = tree.root;
+}
+
+function onBlankDrop(event: DragEvent): void {
+  const source = dragSource.value;
+  endDrag();
+  if (!source || !canDropInto(source, tree.root)) return;
+  event.preventDefault();
+  void runFileOp(() => tree.moveEntry(source.path, joinPath(tree.root, source.name)));
+}
+
+function endDrag(): void {
+  dragSource.value = null;
+  dropTarget.value = null;
+}
+
 /* ===== 右键菜单 =====
  * 整棵树只挂一个 reka root，靠 data-ctx 认目标；逐行挂 root 会在深目录下叠出成百个
  * 组件实例。虚拟化后行会随滚动进出 DOM，菜单仍按 data-path 回查 rows，与挂载无关。
@@ -315,18 +522,29 @@ onMounted(() => {
       <p v-else-if="tree.error" role="alert" class="px-3 py-2 text-[12px] text-orange">{{ tree.error }}</p>
       <p v-else-if="rows.length === 0" class="px-3 py-2 text-[12px] text-dim2">{{ t("preview.fileTree.empty") }}</p>
 
-      <div v-else ref="scrollEl" class="min-h-0 flex-1 overflow-auto py-1">
+      <div
+        v-else
+        ref="scrollEl"
+        class="min-h-0 flex-1 overflow-auto py-1"
+        data-testid="file-tree-scroll"
+        @keydown="onTreeKeydown"
+        @dragover="onBlankDragOver"
+        @drop="onBlankDrop"
+      >
         <!-- 相对容器 + 显式总高：行一律绝对定位在 translateY 处，虚拟与非虚拟共用一套模板 -->
-        <div class="relative" :style="{ height: `${totalHeight}px` }">
+        <div class="relative" :class="dropTarget === tree.root ? 'bg-cyan/5' : ''" :style="{ height: `${totalHeight}px` }">
           <div
             v-for="slot in slots"
             :key="slot.key"
             :data-index="slot.index"
             class="absolute left-0 top-0 w-full"
+            :class="dropTarget !== null && dropTarget === dropDirOf(slot.row.node) ? 'bg-cyan/10' : ''"
             :style="{ transform: `translateY(${slot.start}px)` }"
             data-ctx="file-row"
             :data-path="slot.row.node.path"
             :data-kind="slot.row.node.kind"
+            @dragover.stop="onRowDragOver($event, slot.row.node)"
+            @drop.stop="onRowDrop($event, slot.row.node)"
           >
             <!-- 改名时整行换成 input：**不能把 input 塞进 button**（HTML 内容模型非法），
                  所以两个分支是平级的整行二选一。data-ctx 也因此上移到这一层 ——
@@ -351,7 +569,11 @@ onMounted(() => {
                 :class="slot.row.node.kind === 'directory' ? 'text-foreground' : 'text-dim hover:text-foreground'"
                 :style="{ paddingInlineStart: `${8 + slot.row.depth * 12}px` }"
                 :aria-expanded="slot.row.node.kind === 'directory' ? tree.isExpanded(slot.row.node.path) : undefined"
-                @click="activate(slot.row.node)"
+                :draggable="tree.mode === 'disk'"
+                @click="onRowClick(slot.row.node)"
+                @focus="anchorPath = slot.row.node.path"
+                @dragstart="onRowDragStart($event, slot.row.node)"
+                @dragend="endDrag()"
               >
                 <span class="grid size-3.5 shrink-0 place-items-center text-dim2">
                   <Icon

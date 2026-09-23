@@ -355,6 +355,7 @@ export const useFileTreeStore = defineStore("fileTree", () => {
     toggle,
     isExpanded,
     isLoading,
+    parentOf,
     reloadDir,
     createEntry,
     renameEntry,

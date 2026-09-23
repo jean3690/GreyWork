@@ -22,8 +22,13 @@ const treeStub = {
   toggle: vi.fn(),
   isExpanded: () => true,
   isLoading: () => false,
+  parentOf: (path: string) => {
+    const cut = path.lastIndexOf("/");
+    return cut <= 0 ? "/w" : path.slice(0, cut);
+  },
   createEntry: vi.fn(),
   renameEntry: vi.fn(),
+  moveEntry: vi.fn(),
   pasteInto: vi.fn(),
   deleteEntry: vi.fn(),
   copyToClipboard: vi.fn(),
@@ -71,6 +76,7 @@ beforeEach(() => {
   treeStub.toggle.mockReset();
   treeStub.createEntry.mockReset();
   treeStub.renameEntry.mockReset();
+  treeStub.moveEntry.mockReset();
   treeStub.pasteInto.mockReset();
   treeStub.deleteEntry.mockReset();
   treeStub.copyToClipboard.mockReset();
