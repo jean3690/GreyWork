@@ -15,6 +15,20 @@ const FALLBACK_FONT = '"PingFang SC", "Microsoft YaHei", "Noto Sans SC", system-
 
 defineProps<{ blocks: DocxBlock[] }>();
 
+const emit = defineEmits<{ edit: [editId: number, text: string] }>();
+
+/** contenteditable 输入 → 上报 (editId, 纯文本)。单个 run 是普通 DOM，textContent 即其正文。 */
+function onRunInput(event: Event, editId: number | null | undefined): void {
+  if (editId == null) return;
+  emit("edit", editId, (event.target as HTMLElement).textContent ?? "");
+}
+
+/** 只允许纯文本编辑：拦掉富文本粘贴，保结构只改字。 */
+function onPlainPaste(event: ClipboardEvent): void {
+  event.preventDefault();
+  document.execCommand("insertText", false, event.clipboardData?.getData("text/plain") ?? "");
+}
+
 function px(value: number): string {
   return `${value}px`;
 }
@@ -131,6 +145,17 @@ function isDark(color: string): boolean {
           :style="runStyle(run)"
           >{{ run.text }}</a
         >
+        <span
+          v-else-if="run.editId != null"
+          data-testid="docx-editable"
+          contenteditable="true"
+          class="rounded-[2px] outline-none focus:bg-cyan/10"
+          :style="runStyle(run)"
+          @input="onRunInput($event, run.editId)"
+          @keydown.enter.prevent
+          @paste="onPlainPaste"
+          >{{ run.text }}</span
+        >
         <span v-else :style="runStyle(run)">{{ run.text }}</span>
       </template>
       <!-- 空段落要占一行高，否则原文的空行间距全部塌掉 -->
@@ -150,7 +175,7 @@ function isDark(color: string): boolean {
               :rowspan="cell.rowSpan > 1 ? cell.rowSpan : undefined"
               :style="cellStyle(cell.fill)"
             >
-              <DocxBlocks :blocks="cell.blocks" />
+              <DocxBlocks :blocks="cell.blocks" @edit="(id, text) => emit('edit', id, text)" />
             </td>
           </template>
         </tr>

@@ -8,7 +8,7 @@
  *
  * 单位约定：Excel 列宽是「字符宽度」，行高是磅；Univer 两者都要 px。
  */
-import type { Cell, Worksheet } from "exceljs";
+import type { Alignment, Border, Borders, Cell, Worksheet } from "exceljs";
 import type { IWorkbookData, IWorksheetData, ICellData, IStyleData, IColorStyle, IBorderData } from "@univerjs/core";
 import { sanitizeXlsxGraphics } from "./xlsx-sanitize";
 import { isRecord } from "./guards";
@@ -313,4 +313,174 @@ export async function xlsxToUniverWorkbook(data: Uint8Array): Promise<IWorkbookD
     sheetOrder,
     sheets,
   };
+}
+
+/* ===== 反向：Univer → xlsx（保存回写用） ===== */
+
+/**
+ * Univer 样式枚举名 → excel 对齐串。style 里存的是枚举**数值**，靠 enums 反查名字再落到
+ * excel 的字符串。`H_ALIGN` 把多个 excel 值折到同一个 Univer 枚举（distributed→JUSTIFIED），
+ * 反向只取一个规范值即可 —— 往返成 justify 而非 distributed 是可接受的近似。
+ */
+function excelHorizontal(ht: number | null | undefined | void, enums: UniverEnums): Alignment["horizontal"] | undefined {
+  if (ht == null) return undefined;
+  if (ht === enums.HorizontalAlign.LEFT) return "left";
+  if (ht === enums.HorizontalAlign.CENTER) return "center";
+  if (ht === enums.HorizontalAlign.RIGHT) return "right";
+  if (ht === enums.HorizontalAlign.JUSTIFIED) return "justify";
+  return undefined;
+}
+
+function excelVertical(vt: number | null | undefined | void, enums: UniverEnums): Alignment["vertical"] | undefined {
+  if (vt == null) return undefined;
+  if (vt === enums.VerticalAlign.TOP) return "top";
+  if (vt === enums.VerticalAlign.MIDDLE) return "middle";
+  if (vt === enums.VerticalAlign.BOTTOM) return "bottom";
+  return undefined;
+}
+
+/** Univer 枚举名 → excel 边框粗细名。`BORDER_STYLE` 是 excel→Univer 名，这里取其首个逆映射。 */
+const BORDER_STYLE_TO_EXCEL: Record<string, Border["style"]> = (() => {
+  const out: Record<string, Border["style"]> = {};
+  for (const [excel, univer] of Object.entries(BORDER_STYLE)) if (!(univer in out)) out[univer] = excel as Border["style"];
+  return out;
+})();
+
+function excelBorderStyle(s: number | null | undefined | void, enums: UniverEnums): Border["style"] | undefined {
+  if (s == null) return undefined;
+  for (const [name, value] of Object.entries(enums.BorderStyleTypes)) {
+    if (value === s) return BORDER_STYLE_TO_EXCEL[name] ?? "thin";
+  }
+  return undefined;
+}
+
+/** Univer 颜色（`#RRGGBB`）→ exceljs argb（`FFRRGGBB`）。非法值不给，宁缺毋错。 */
+function toArgb(color: IColorStyle | null | undefined | void): string | undefined {
+  const rgb = color?.rgb;
+  if (typeof rgb !== "string") return undefined;
+  const hex = rgb.replace(/^#/, "");
+  return /^[0-9A-Fa-f]{6}$/.test(hex) ? `FF${hex.toUpperCase()}` : undefined;
+}
+
+/** IStyleData → exceljs 单元格样式的逆映射（`toStyle` 的对应还原，缺项即用默认，不抛）。 */
+function applyUniverStyle(cell: Cell, style: IStyleData, enums: UniverEnums): void {
+  const font: Partial<Cell["font"]> = {};
+  if (typeof style.ff === "string") font.name = style.ff;
+  if (typeof style.fs === "number") font.size = style.fs;
+  if (style.bl === enums.BooleanNumber.TRUE) font.bold = true;
+  if (style.it === enums.BooleanNumber.TRUE) font.italic = true;
+  if (style.ul?.s === enums.BooleanNumber.TRUE) font.underline = true;
+  if (style.st?.s === enums.BooleanNumber.TRUE) font.strike = true;
+  const fontColor = toArgb(style.cl);
+  if (fontColor) font.color = { argb: fontColor };
+  if (Object.keys(font).length > 0) cell.font = font as Cell["font"];
+
+  const bg = toArgb(style.bg);
+  if (bg) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bg } };
+
+  const alignment: Partial<Alignment> = {};
+  const horizontal = excelHorizontal(style.ht, enums);
+  if (horizontal) alignment.horizontal = horizontal;
+  const vertical = excelVertical(style.vt, enums);
+  if (vertical) alignment.vertical = vertical;
+  if (style.tb === enums.WrapStrategy.WRAP) alignment.wrapText = true;
+  if (Object.keys(alignment).length > 0) cell.alignment = alignment;
+
+  const border = style.bd;
+  if (border) {
+    const sides: [keyof IBorderData, keyof Borders][] = [
+      ["t", "top"],
+      ["r", "right"],
+      ["b", "bottom"],
+      ["l", "left"],
+    ];
+    const out: Partial<Borders> = {};
+    for (const [key, excelSide] of sides) {
+      const side = border[key];
+      if (!side) continue;
+      const styleName = excelBorderStyle(side.s, enums);
+      if (!styleName) continue;
+      out[excelSide] = { style: styleName, color: { argb: toArgb(side.cl) ?? "FF000000" } };
+    }
+    if (Object.keys(out).length > 0) cell.border = out;
+  }
+
+  if (style.n?.pattern) cell.numFmt = style.n.pattern;
+}
+
+/** cell.s：可能是样式池 id，也可能是内联 IStyleData。 */
+function resolveStyle(ref: ICellData["s"], styles: IWorkbookData["styles"]): IStyleData | undefined {
+  if (!ref) return undefined;
+  if (typeof ref === "string") return isRecord(styles) ? (styles[ref] as IStyleData | undefined) : undefined;
+  return isRecord(ref) ? (ref as IStyleData) : undefined;
+}
+
+/**
+ * Univer workbook 快照 → xlsx 二进制（`xlsxToUniverWorkbook` 的反向，保存回写用）。
+ *
+ * **只重建单元格层**：值 / 公式 / 样式 / 合并 / 冻结 / 行列尺寸。图纸图表媒体在读入时已被
+ * `sanitizeXlsxGraphics` 剥掉、exceljs 的 dist 写入器本也不写回，故含图元的表由保存入口
+ * （SheetViewer）用 `hasGraphicsParts` 拦下，绝不静默丢弃。日期在读入时已存成序列号 + 数字格式，
+ * 这里原样写回数字即可，Excel 靠 numFmt 仍显示成日期。
+ */
+export async function univerWorkbookToXlsx(workbook: IWorkbookData): Promise<Uint8Array> {
+  const [core, ExcelJS] = await Promise.all([import("@univerjs/core"), import("exceljs")]);
+  const enums: UniverEnums = {
+    BooleanNumber: core.BooleanNumber as unknown as UniverEnums["BooleanNumber"],
+    HorizontalAlign: core.HorizontalAlign as unknown as UniverEnums["HorizontalAlign"],
+    VerticalAlign: core.VerticalAlign as unknown as UniverEnums["VerticalAlign"],
+    WrapStrategy: core.WrapStrategy as unknown as UniverEnums["WrapStrategy"],
+    BorderStyleTypes: core.BorderStyleTypes as unknown as UniverEnums["BorderStyleTypes"],
+  };
+
+  const out = new ExcelJS.Workbook();
+  const order = workbook.sheetOrder.length > 0 ? workbook.sheetOrder : Object.keys(workbook.sheets);
+  for (const sheetId of order) {
+    const sheet = workbook.sheets[sheetId];
+    if (!sheet) continue;
+    const ws = out.addWorksheet(sheet.name || sheetId);
+
+    const cellData = sheet.cellData ?? {};
+    for (const [rowKey, columns] of Object.entries(cellData)) {
+      const rowIndex = Number(rowKey);
+      if (!isRecord(columns)) continue;
+      for (const [colKey, uCell] of Object.entries(columns)) {
+        if (!isRecord(uCell)) continue;
+        const cell = ws.getCell(rowIndex + 1, Number(colKey) + 1);
+        const formula = typeof uCell.f === "string" && uCell.f.startsWith("=") ? uCell.f.slice(1) : null;
+        const value = uCell.v;
+        if (formula) {
+          cell.value = { formula, result: (value ?? undefined) as number | string | boolean | undefined };
+        } else if (value !== undefined && value !== null) {
+          cell.value = value as number | string | boolean;
+        }
+        const style = resolveStyle(uCell.s as ICellData["s"], workbook.styles);
+        if (style) applyUniverStyle(cell, style, enums);
+      }
+    }
+
+    for (const merge of sheet.mergeData ?? []) {
+      ws.mergeCells(merge.startRow + 1, merge.startColumn + 1, merge.endRow + 1, merge.endColumn + 1);
+    }
+
+    for (const [colKey, dim] of Object.entries(sheet.columnData ?? {})) {
+      if (!isRecord(dim)) continue;
+      const column = ws.getColumn(Number(colKey) + 1);
+      if (typeof dim.w === "number") column.width = Math.max((dim.w - COLUMN_PADDING_PX) / PX_PER_CHAR, 1);
+      if (dim.hd === enums.BooleanNumber.TRUE) column.hidden = true;
+    }
+    for (const [rowKey, dim] of Object.entries(sheet.rowData ?? {})) {
+      if (!isRecord(dim)) continue;
+      const row = ws.getRow(Number(rowKey) + 1);
+      if (typeof dim.h === "number") row.height = dim.h / PX_PER_PT;
+      if (dim.hd === enums.BooleanNumber.TRUE) row.hidden = true;
+    }
+
+    if (sheet.freeze && (sheet.freeze.xSplit > 0 || sheet.freeze.ySplit > 0)) {
+      ws.views = [{ state: "frozen", xSplit: sheet.freeze.xSplit, ySplit: sheet.freeze.ySplit }];
+    }
+  }
+
+  const buffer = await out.xlsx.writeBuffer();
+  return new Uint8Array(buffer as ArrayBuffer);
 }

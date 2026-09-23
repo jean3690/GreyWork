@@ -13,7 +13,7 @@
  * 用户或管线刚打开一个文件，就该看见它，而不是停在文件列表上。`artifact:updated`
  * 不改 activeId，所以后台就地更新不会把人从文件树里拽走。
  */
-import { computed, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { isTauriRuntime } from "@greywork/core";
 import Icon from "@/features/shared/Icon.vue";
 import Hint from "@/features/shared/Hint.vue";
@@ -31,6 +31,8 @@ import { usePreviewBridge } from "@/lib/preview-bridge";
 import { useResizableSplit } from "@/lib/resizable-split";
 import { usePreviewStore, type PreviewTab } from "@/stores/preview";
 import { notify } from "@/stores/notice";
+import { isPreviewDirty, previewSaver } from "@/lib/preview-save";
+import ConfirmDialog from "@/features/settings/ConfirmDialog.vue";
 import { i18n } from "@/i18n";
 
 type Section = "files" | "preview" | "git";
@@ -112,9 +114,9 @@ function buildTabMenu(target: ContextTarget | null): ContextMenuItem[] {
       const tab = tabById(id);
       if (tab) preview.reload(tab.path);
     },
-    close: (id) => preview.close(id),
-    closeOthers: (id) => preview.closeOthers(id),
-    closeAll: () => preview.closeAll(),
+    close: (id) => requestClose({ kind: "one", id }),
+    closeOthers: (id) => requestClose({ kind: "others", id }),
+    closeAll: () => requestClose({ kind: "all" }),
     copyPath: (text) => void copyText(text),
     openExternal: (path) => void openExternal(path),
     reveal: (path) => void revealPath(path),
@@ -128,7 +130,7 @@ function buildEmptyMenu(): ContextMenuItem[] {
   return buildPreviewEmptyItems(t, {
     openFiles: () => (section.value = "files"),
     fetchWeb: () => (fetchDialogOpen.value = true),
-    closeAll: () => preview.closeAll(),
+    closeAll: () => requestClose({ kind: "all" }),
     hasTabs: preview.tabs.length > 0,
   });
 }
@@ -142,8 +144,81 @@ function resetWidth(): void {
 function onTabAuxclick(event: MouseEvent, id: string): void {
   if (event.button !== 1) return;
   event.preventDefault();
-  preview.close(id);
+  requestClose({ kind: "one", id });
 }
+
+/* ===== 保存 / 关闭前兜住未保存改动 ===== */
+
+/** 关闭动作：单个 / 除某个外全部 / 全部。confirm 弹层据此算出会丢弃哪些 tab。 */
+type CloseAction = { kind: "one"; id: string } | { kind: "others"; id: string } | { kind: "all" };
+
+/** 待确认的关闭动作（会丢弃脏 tab 时才置位）；null = 无弹层。 */
+const pendingClose = ref<CloseAction | null>(null);
+/** 保存在途：禁用保存按钮防重复点击，也让 Ctrl+S 在写盘期间空转。 */
+const saving = ref(false);
+
+/** 某个关闭动作会连带关掉的 tab 集合。 */
+function tabsClosedBy(action: CloseAction): PreviewTab[] {
+  if (action.kind === "one") return preview.tabs.filter((tab) => tab.id === action.id);
+  if (action.kind === "others") return preview.tabs.filter((tab) => tab.id !== action.id);
+  return [...preview.tabs];
+}
+
+function performClose(action: CloseAction): void {
+  if (action.kind === "one") preview.close(action.id);
+  else if (action.kind === "others") preview.closeOthers(action.id);
+  else preview.closeAll();
+}
+
+/** 关闭入口：会丢弃未保存改动时先弹确认，否则直接关。 */
+function requestClose(action: CloseAction): void {
+  if (tabsClosedBy(action).some((tab) => isPreviewDirty(tab.id))) {
+    pendingClose.value = action;
+    return;
+  }
+  performClose(action);
+}
+
+function confirmClose(): void {
+  if (pendingClose.value) performClose(pendingClose.value);
+  pendingClose.value = null;
+}
+
+/** 待确认关闭里会被丢弃的脏 tab 数（弹层文案用）。 */
+const pendingDirtyCount = computed(() =>
+  pendingClose.value ? tabsClosedBy(pendingClose.value).filter((tab) => isPreviewDirty(tab.id)).length : 0,
+);
+
+/** 当前激活 tab 是否有未保存改动（保存按钮可用态、Ctrl+S 拦截判据）。 */
+const activeDirty = computed(() => (preview.activeTab ? isPreviewDirty(preview.activeTab.id) : false));
+
+/** 保存当前激活 tab；失败弹通知 —— 吞掉会让用户误以为存住了。 */
+async function saveActive(): Promise<void> {
+  const tab = preview.activeTab;
+  if (!tab || saving.value) return;
+  const saver = previewSaver(tab.id);
+  if (!saver || !saver.dirty.value) return;
+  saving.value = true;
+  try {
+    await saver.save();
+    notify({ kind: "success", key: "preview-save", title: "已保存", detail: tab.name });
+  } catch (cause) {
+    notify({ kind: "warning", key: "preview-save", title: "保存失败", detail: cause instanceof Error ? cause.message : String(cause) });
+  } finally {
+    saving.value = false;
+  }
+}
+
+/** Ctrl/Cmd+S 保存当前 tab；只在有脏编辑器时拦截，不抢走其它场景的 Ctrl+S。 */
+function onWindowKeydown(event: KeyboardEvent): void {
+  if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "s") return;
+  if (!activeDirty.value) return;
+  event.preventDefault();
+  void saveActive();
+}
+
+onMounted(() => window.addEventListener("keydown", onWindowKeydown));
+onUnmounted(() => window.removeEventListener("keydown", onWindowKeydown));
 
 /**
  * tab 拖拽排序：dragstart 记下被拖的 tab，dragover 只是允许放置，
@@ -248,6 +323,17 @@ const sectionClass = (active: boolean): string =>
 
       <div class="ms-auto flex shrink-0 items-center gap-0.5">
         <button
+          v-if="section === 'preview' && activeDirty"
+          type="button"
+          data-testid="preview-save"
+          :aria-disabled="saving || undefined"
+          class="grid size-6 cursor-pointer place-items-center rounded-[6px] text-cyan transition-colors hover:bg-panel focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan aria-disabled:cursor-not-allowed aria-disabled:text-dim2"
+          aria-label="保存当前预览"
+          @click="saveActive()"
+        >
+          <Icon name="save" :size="13" />
+        </button>
+        <button
           type="button"
           data-testid="web-fetch-open"
           class="grid size-6 cursor-pointer place-items-center rounded-[6px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
@@ -283,7 +369,7 @@ const sectionClass = (active: boolean): string =>
           data-testid="preview-close-all"
           class="grid size-6 cursor-pointer place-items-center rounded-[6px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
           aria-label="关闭全部预览"
-          @click="preview.closeAll()"
+          @click="requestClose({ kind: 'all' })"
         >
           <Icon name="close-one" :size="13" />
         </button>
@@ -336,12 +422,19 @@ const sectionClass = (active: boolean): string =>
                 {{ tab.name }}
               </button>
             </Hint>
+            <span
+              v-if="isPreviewDirty(tab.id)"
+              data-testid="preview-tab-dirty"
+              class="size-1.5 shrink-0 rounded-full bg-cyan"
+              aria-hidden="true"
+              title="有未保存改动"
+            />
             <button
               type="button"
               data-testid="preview-tab-close"
               class="grid size-4 cursor-pointer place-items-center rounded-[4px] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
               :aria-label="`关闭 ${tab.name}`"
-              @click.stop="preview.close(tab.id)"
+              @click.stop="requestClose({ kind: 'one', id: tab.id })"
             >
               <Icon name="close" :size="10" />
             </button>
@@ -379,5 +472,14 @@ const sectionClass = (active: boolean): string =>
     </template>
 
     <WebFetchDialog v-if="fetchDialogOpen" @close="fetchDialogOpen = false" />
+
+    <ConfirmDialog
+      v-if="pendingClose"
+      title="放弃未保存的改动？"
+      :message="`有 ${pendingDirtyCount} 个文件的改动尚未保存，关闭后将丢失。`"
+      confirm-label="关闭不保存"
+      @confirm="confirmClose"
+      @cancel="pendingClose = null"
+    />
   </aside>
 </template>

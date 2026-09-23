@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import ExcelJS from "exceljs";
-import { xlsxToUniverWorkbook } from "@/lib/univer-xlsx";
+import { univerWorkbookToXlsx, xlsxToUniverWorkbook } from "@/lib/univer-xlsx";
+import type { IWorkbookData } from "@univerjs/core";
 
 async function buildXlsx(): Promise<Uint8Array> {
   const workbook = new ExcelJS.Workbook();
@@ -129,5 +130,48 @@ describe("xlsxToUniverWorkbook", () => {
     const entry = parsed.sheets["sheet-1"]?.cellData?.[1]?.[1];
     expect(entry?.v).toBeUndefined();
     expect(parsed.styles?.[entry?.s as string]?.bg).toEqual({ rgb: "#FF0000" });
+  });
+});
+
+describe("univerWorkbookToXlsx（回写往返）", () => {
+  it("值 / 数字 / 合并经 Univer 往返后不变", async () => {
+    const src = new ExcelJS.Workbook();
+    const sheet = src.addWorksheet("数据");
+    sheet.getCell("A1").value = "跨列";
+    sheet.addRow(["甲", 10, 20]);
+    sheet.mergeCells("A1:C1");
+    const original = new Uint8Array((await src.xlsx.writeBuffer()) as ArrayBuffer);
+
+    const univer = await xlsxToUniverWorkbook(original);
+    const bytes = await univerWorkbookToXlsx(univer);
+    const round = await xlsxToUniverWorkbook(bytes);
+
+    const cells = round.sheets["sheet-1"]?.cellData;
+    expect(round.sheets["sheet-1"]?.name).toBe("数据");
+    expect(cells?.[0]?.[0]?.v).toBe("跨列");
+    expect(cells?.[1]?.[0]?.v).toBe("甲");
+    expect(cells?.[1]?.[1]?.v).toBe(10);
+    expect(cells?.[1]?.[2]?.v).toBe(20);
+    expect(round.sheets["sheet-1"]?.mergeData).toEqual([{ startRow: 0, endRow: 0, startColumn: 0, endColumn: 2 }]);
+  });
+
+  it("用户输入的 = 公式落盘保留为 exceljs formula", async () => {
+    const workbook = {
+      id: "wb",
+      name: "t",
+      appVersion: "1",
+      locale: "zhCN",
+      styles: {},
+      sheetOrder: ["s1"],
+      sheets: {
+        s1: { id: "s1", name: "Sheet1", cellData: { 0: { 0: { v: 1 }, 1: { v: 2 }, 2: { f: "=A1+B1", v: 3 } } }, mergeData: [] },
+      },
+    } as unknown as IWorkbookData;
+
+    const bytes = await univerWorkbookToXlsx(workbook);
+    const reload = new ExcelJS.Workbook();
+    await reload.xlsx.load(Buffer.from(bytes));
+    const value = reload.getWorksheet("Sheet1")?.getCell("C1").value as { formula?: string } | undefined;
+    expect(value?.formula).toBe("A1+B1");
   });
 });

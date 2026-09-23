@@ -20,10 +20,13 @@
  * 代价是预览启动多拉 ~9M 的懒加载子包（只在打开预览 tab 时才 load，不影响主包体积）。
  * numfmt 两件套保留是刻意的：转换器写 `style.n` 的日期/数字 pattern，显示靠它。
  *
- * **只预览，不落盘**：保存功能已移除 —— Univer 表格里改的格子不会写回文件，也没有
- * 草稿 / 脏标记兜底，切 tab、关 tab 即丢弃。要真正编辑请用上方工具栏的「用系统应用打开」。
+ * **可编辑并回写**：双击改格子后走上方工具栏 / Ctrl+S 保存，Univer 快照经
+ * `univerWorkbookToXlsx` 序列化回写来源（磁盘或 VFS）。**含图表/图片的表会拒绝保存** ——
+ * 读入时 `sanitizeXlsxGraphics` 已剥掉图元、exceljs 写入器也不写回，存下去会静默丢失，
+ * 故由 `hasGraphicsParts` 拦下并提示用「用系统应用打开」。脏标记 / 保存按钮 / 关闭前确认
+ * 由外壳（PreviewSider）统一提供，本组件只负责标脏与序列化。
  */
-import { computed, defineAsyncComponent, ref, toRef } from "vue";
+import { computed, defineAsyncComponent, onBeforeUnmount, ref, toRef } from "vue";
 import { useI18n } from "vue-i18n";
 import Icon from "@/features/shared/Icon.vue";
 import Hint from "@/features/shared/Hint.vue";
@@ -43,6 +46,8 @@ import { injectSelectionIntoChat, sheetSelectionPrompt } from "@/lib/selection-i
 import { isDarkMode, watchTheme } from "@/lib/theme";
 import type { IWorkbookData, Workbook } from "@univerjs/core";
 import { usePreviewStore, type PreviewMode, type PreviewTab } from "@/stores/preview";
+import { registerPreviewSaver, unregisterPreviewSaver, writePreviewBytes } from "@/lib/preview-save";
+import { hasGraphicsParts } from "@/lib/xlsx-sanitize";
 
 const props = defineProps<{ tab: PreviewTab }>();
 
@@ -77,9 +82,18 @@ let readSelection: (() => SheetRangeSelection | null) | null = null;
  */
 const selectionLabel = ref<string | null>(null);
 
+/**
+ * 当前 workbook 与原始字节：保存时序列化 `workbook.save()` 回写；原始字节既用于图元守卫，
+ * 也是回写后的新基线。boot 闭包写入、dispose 归零。
+ */
+let currentWorkbook: Workbook | null = null;
+let originalBytes: Uint8Array | null = null;
+/** 有未保存改动（Univer 里改过格子）。外壳据此显示脏点 / 启用保存。 */
+const dirty = ref(false);
+
 const { host, loading, error, bootError } = useUniverHost(toRef(props, "tab"), async (container, bytes) => {
   const [
-    { Univer, UniverInstanceType, ThemeService, ICommandService },
+    { Univer, UniverInstanceType, ThemeService, ICommandService, CommandType },
     { UniverDocsPlugin },
     { UniverRenderEnginePlugin },
     { UniverUIPlugin },
@@ -130,6 +144,8 @@ const { host, loading, error, bootError } = useUniverHost(toRef(props, "tab"), a
     UniverSheetsFormulaUIPlugin,
   ]);
   const workbook = univer.createUnit<IWorkbookData, Workbook>(UniverInstanceType.UNIVER_SHEET, await xlsxToUniverWorkbook(bytes));
+  currentWorkbook = workbook;
+  originalBytes = bytes;
 
   // 构造参数里的 darkMode 只管首帧：Univer 没有跟随宿主的配置项，切换外观只能事后
   // 推给它。ThemeService 是它自己的明暗真源，setDarkMode 会重刷 canvas 与 UI 皮肤，
@@ -170,9 +186,13 @@ const { host, loading, error, bootError } = useUniverHost(toRef(props, "tab"), a
   const subscription = injector.get(ICommandService).onCommandExecuted((info) => {
     if (info.id === SetSelectionsOperation.id) refreshSelectionLabel();
     else if (info.id === SetWorksheetActiveOperation.id) syncActiveSheet();
+    // 真正改数据的命令都是 MUTATION（改值 / 数字格式 / 插行）；选区与切表是 OPERATION，不算脏。
+    if (info.type === CommandType.MUTATION) dirty.value = true;
   });
 
   syncActiveSheet();
+  // 载入过程可能触发若干建单元 mutation；用户还没动手，先把脏标记归零。
+  dirty.value = false;
 
   return {
     dispose: () => {
@@ -180,6 +200,9 @@ const { host, loading, error, bootError } = useUniverHost(toRef(props, "tab"), a
       stopWatchTheme();
       readSelection = null;
       selectionLabel.value = null;
+      currentWorkbook = null;
+      originalBytes = null;
+      dirty.value = false;
       // `activeSheet` 故意不清：切到分析模式时 Univer 容器正是被这个 dispose 拆掉的，
       // 清掉就等于把「用户刚才在看哪张表」一起丢了，分析面板只能退回首张表。
       // 换文件时新实例的 `syncActiveSheet()` 会覆盖它。
@@ -223,6 +246,25 @@ function sendSelectionToChat(): void {
     location: selection.label,
   });
 }
+
+/**
+ * 保存：Univer 快照 → xlsx 回写来源。含图纸 / 图表 / 媒体的表在此拦下（见文件头注释）。
+ */
+async function save(): Promise<void> {
+  if (!currentWorkbook || !originalBytes) throw new Error("表格尚未加载完成");
+  if (await hasGraphicsParts(originalBytes)) {
+    throw new Error("此表含图表或图片，保存会丢失它们；请用「用系统应用打开」编辑原文件");
+  }
+  const { univerWorkbookToXlsx } = await import("@/lib/univer-xlsx");
+  const bytes = await univerWorkbookToXlsx(currentWorkbook.save());
+  await writePreviewBytes(props.tab, bytes);
+  // 回写后新字节成为下次守卫与保存的基线（已确保不含图元）。
+  originalBytes = bytes;
+  dirty.value = false;
+}
+
+registerPreviewSaver(props.tab.id, { dirty, save });
+onBeforeUnmount(() => unregisterPreviewSaver(props.tab.id));
 </script>
 
 <template>

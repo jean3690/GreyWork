@@ -32,6 +32,13 @@ export interface PptxRect {
   rotation: number;
 }
 
+export interface PptxTextRef {
+  /** 1 基幻灯片序号（slidePaths 顺序）。 */
+  slide: number;
+  /** 该 a:t 在本页的文档序序号。 */
+  ord: number;
+}
+
 export interface PptxRun {
   text: string;
   bold: boolean;
@@ -43,6 +50,11 @@ export interface PptxRun {
   color: string | null;
   /** 字体名（latin typeface）；null = 用渲染端兜底字族。 */
   font: string | null;
+  /**
+   * 可编辑回写用：此 run 对应哪一页的第几个 a:t（见 `forEachSlideTextNode`）。仅 a:r 的文本 run
+   * 有值；域（a:fld，页码/日期）、换行等为 null（渲染只读，不参与就地文本修改）。
+   */
+  editId?: PptxTextRef | null;
 }
 
 export type PptxAlign = "start" | "center" | "end" | "justify";
@@ -314,15 +326,24 @@ function runOf(node: Element, theme: ThemeColors, text: string): PptxRun {
   };
 }
 
-function paragraphOf(p: Element, theme: ThemeColors): PptxParagraph {
+function paragraphOf(p: Element, ctx: SlideContext): PptxParagraph {
   const pPr = kid(p, "pPr");
   const runs: PptxRun[] = [];
   for (const child of Array.from(p.children)) {
     const name = local(child);
     // a:fld 是域（页码、日期），结构与 a:r 相同，同样带可见文字
     if (name === "r" || name === "fld") {
-      const text = kid(child, "t")?.textContent ?? "";
-      if (text) runs.push(runOf(child, theme, text));
+      const textEl = kid(child, "t");
+      const text = textEl?.textContent ?? "";
+      if (text) {
+        const run = runOf(child, ctx.theme, text);
+        // 仅真正的文本 run（a:r 的单个 a:t）可编辑；域与换行不可改。
+        if (name === "r" && textEl) {
+          const ord = ctx.textNodeIds.get(textEl);
+          run.editId = ord === undefined ? null : { slide: ctx.slide, ord };
+        }
+        runs.push(run);
+      }
     } else if (name === "br") {
       // 段内换行：交给 CSS 的 pre-wrap，不另建段落（否则会多出一次段间距）
       runs.push({ text: "\n", bold: false, italic: false, underline: false, sizePt: null, color: null, font: null });
@@ -338,8 +359,8 @@ function paragraphOf(p: Element, theme: ThemeColors): PptxParagraph {
   };
 }
 
-function paragraphsOf(txBody: Element | null, theme: ThemeColors): PptxParagraph[] {
-  return kids(txBody, "p").map((p) => paragraphOf(p, theme));
+function paragraphsOf(txBody: Element | null, ctx: SlideContext): PptxParagraph[] {
+  return kids(txBody, "p").map((p) => paragraphOf(p, ctx));
 }
 
 function hasText(paragraphs: PptxParagraph[]): boolean {
@@ -386,9 +407,13 @@ interface SlideContext {
   placeholders: PlaceholderRects;
   /** rId → data URL（已解码的图片）。 */
   images: Map<string, string>;
+  /** 1 基幻灯片序号（与 slidePaths 顺序一致），编辑回写的定位维度之一。 */
+  slide: number;
+  /** 本页 a:t 元素 → 文档序序号（与序列化端共用 `forEachSlideTextNode`）。 */
+  textNodeIds: Map<Element, number>;
 }
 
-function parseTable(frame: Element, theme: ThemeColors, transform: Transform): PptxTable | null {
+function parseTable(frame: Element, ctx: SlideContext, transform: Transform): PptxTable | null {
   const tbl = pick(frame, "graphic", "graphicData", "tbl");
   if (!tbl) return null;
   const rect = rectOf(kid(frame, "xfrm"));
@@ -399,8 +424,8 @@ function parseTable(frame: Element, theme: ThemeColors, transform: Transform): P
     cells: kids(tr, "tc").map((tc) => {
       const tcPr = kid(tc, "tcPr");
       return {
-        paragraphs: paragraphsOf(kid(tc, "txBody"), theme),
-        fill: solidFill(tcPr, theme),
+        paragraphs: paragraphsOf(kid(tc, "txBody"), ctx),
+        fill: solidFill(tcPr, ctx.theme),
         colSpan: Number(attr(tc, "gridSpan") ?? 1) || 1,
         rowSpan: Number(attr(tc, "rowSpan") ?? 1) || 1,
         // hMerge/vMerge 标记的是「被前一格吃掉」的续格，渲染时必须跳过
@@ -416,7 +441,7 @@ function parseShape(sp: Element, ctx: SlideContext, transform: Transform): PptxE
   const spPr = kid(sp, "spPr");
   const rect = rectOf(kid(spPr, "xfrm")) ?? inheritedRect(sp, ctx.placeholders);
   if (!rect) return null;
-  const paragraphs = paragraphsOf(kid(sp, "txBody"), ctx.theme);
+  const paragraphs = paragraphsOf(kid(sp, "txBody"), ctx);
   const fill = solidFill(spPr, ctx.theme);
   const line = lineColor(spPr, ctx.theme);
   const geometry = geometryOf(spPr);
@@ -460,7 +485,7 @@ function collectElements(tree: Element | null, ctx: SlideContext, transform: Tra
         break;
       }
       case "graphicFrame": {
-        const table = parseTable(node, ctx.theme, transform);
+        const table = parseTable(node, ctx, transform);
         if (table) out.push(table);
         break;
       }
@@ -493,7 +518,14 @@ function notesOf(notes: Element | null, theme: ThemeColors): string | null {
   for (const sp of kids(pick(notes, "cSld", "spTree"), "sp")) {
     const type = attr(pick(sp, "nvSpPr", "nvPr", "ph"), "type");
     if (type && NOTES_SKIP_PLACEHOLDERS.has(type)) continue;
-    for (const p of paragraphsOf(kid(sp, "txBody"), theme)) {
+    // 备注只取文字，不参与编辑：给一份空编号的临时 ctx（editId 全为 null）。
+    for (const p of paragraphsOf(kid(sp, "txBody"), {
+      theme,
+      placeholders: new Map(),
+      images: new Map(),
+      slide: 0,
+      textNodeIds: new Map(),
+    })) {
       const text = p.runs
         .map((run) => run.text)
         .join("")
@@ -528,6 +560,26 @@ function slidePaths(presentation: Element | null, rels: Rels, zip: JSZip): strin
     if (!ordered.includes(path)) ordered.push(path);
   }
   return ordered;
+}
+
+/** 遍历一页 slideN.xml 里所有 a:t（按文档序），逐个回调序号。解析与序列化共用，编号必然一致。 */
+export function forEachSlideTextNode(root: Element, visit: (el: Element, ordinal: number) => void): void {
+  let ordinal = 0;
+  const walk = (el: Element): void => {
+    for (const child of Array.from(el.children)) {
+      if (local(child) === "t") visit(child, ordinal++);
+      else walk(child);
+    }
+  };
+  walk(root);
+}
+
+/** 按 sldIdLst 顺序取幻灯片路径（回写端据此把 1 基页号映射回 slideN.xml）。 */
+export async function slidePathsOf(zip: JSZip): Promise<string[]> {
+  const presentationPath = "ppt/presentation.xml";
+  const presentation = await readXml(zip, presentationPath);
+  const rels = await readRels(zip, presentationPath);
+  return slidePaths(presentation, rels, zip);
 }
 
 /** 解析 pptx 二进制为幻灯片模型。 */
@@ -568,7 +620,9 @@ export async function parsePptx(data: Uint8Array): Promise<ParsedDeck> {
     // 图片按需解码：只取本页真正引用到的 rId，避免整包 media 都转成 base64
     const images = await decodeImages(zip, rels);
 
-    const ctx: SlideContext = { theme, placeholders, images };
+    const textNodeIds = new Map<Element, number>();
+    forEachSlideTextNode(slide, (el, ord) => textNodeIds.set(el, ord));
+    const ctx: SlideContext = { theme, placeholders, images, slide: i + 1, textNodeIds };
     const elements: PptxElement[] = [];
     collectElements(pick(slide, "cSld", "spTree"), ctx, IDENTITY, elements);
 

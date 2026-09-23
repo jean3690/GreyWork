@@ -9,11 +9,16 @@
  *
  * **按正文宽度重排而不是整页缩放**（与 pptx 相反）：幻灯片是定版式的，缩放才对；
  * 文档是流式的，缩放会把字缩到读不清，让它在面板宽度内重排才是对的。
+ *
+ * **可就地编辑文本**：正文 run 是 contenteditable，改字经 `patchDocxText` 只补 word/document.xml
+ * 里对应 w:t、其余字节原样保留（不改结构 / 不动样式）。脏标记、保存、关闭前确认由外壳统一提供。
  */
-import { computed, ref, toRef, watch } from "vue";
+import { computed, onBeforeUnmount, ref, toRef, watch } from "vue";
 import DocxBlocks from "@/features/preview/DocxBlocks.vue";
 import { usePreviewBinary } from "@/lib/preview-content";
 import { parseDocx, type ParsedDocx } from "@/lib/docx-parse";
+import { patchDocxText } from "@/lib/docx-serialize";
+import { registerPreviewSaver, unregisterPreviewSaver, writePreviewBytes } from "@/lib/preview-save";
 import type { PreviewTab } from "@/stores/preview";
 
 const props = defineProps<{ tab: PreviewTab }>();
@@ -22,6 +27,13 @@ const { data, loading, error } = usePreviewBinary(toRef(props, "tab"));
 
 const doc = ref<ParsedDocx | null>(null);
 const parseError = ref<string | null>(null);
+
+/** 编辑缓冲：w:t 序号 → 新文本；保存时对基线字节做就地补丁。 */
+const edits = new Map<number, string>();
+/** 有未保存改动。外壳据此显示脏点 / 启用保存。 */
+const dirty = ref(false);
+/** 回写基线：初次为读入字节，保存后替换为刚写出的字节（w:t 编号不变，可继续编辑）。 */
+let baseline: Uint8Array | null = null;
 
 /** 解析代次：切 tab 时自增，让还在 await 的旧解析自我放弃，避免把上一份内容画上去。 */
 let generation = 0;
@@ -33,12 +45,19 @@ watch(
     parseError.value = null;
     if (!bytes) {
       doc.value = null;
+      baseline = null;
+      edits.clear();
+      dirty.value = false;
       return;
     }
     try {
       const parsed = await parseDocx(bytes);
       if (mine !== generation) return;
       doc.value = parsed;
+      // 载入新内容即重置编辑态：基线换成这份字节，旧编辑作废。
+      baseline = bytes;
+      edits.clear();
+      dirty.value = false;
     } catch (cause: unknown) {
       if (mine !== generation) return;
       doc.value = null;
@@ -50,6 +69,26 @@ watch(
 
 const blockCount = computed(() => doc.value?.blocks.length ?? 0);
 const tableCount = computed(() => doc.value?.blocks.filter((block) => block.kind === "table").length ?? 0);
+
+/** 某个 run 改字：记进缓冲并标脏（编号是 w:t 的文档序，保存时定位到原 XML 节点）。 */
+function onRunEdit(editId: number, text: string): void {
+  edits.set(editId, text);
+  dirty.value = true;
+}
+
+/** 保存：对基线字节就地补丁后回写来源；随后以新字节为基线重解析（w:t 编号不变）。 */
+async function save(): Promise<void> {
+  if (!baseline || edits.size === 0) return;
+  const bytes = await patchDocxText(baseline, edits);
+  await writePreviewBytes(props.tab, bytes);
+  baseline = bytes;
+  doc.value = await parseDocx(bytes);
+  edits.clear();
+  dirty.value = false;
+}
+
+registerPreviewSaver(props.tab.id, { dirty, save });
+onBeforeUnmount(() => unregisterPreviewSaver(props.tab.id));
 </script>
 
 <template>
@@ -74,7 +113,7 @@ const tableCount = computed(() => doc.value?.blocks.filter((block) => block.kind
         class="mx-auto rounded-[6px] border border-line-2 bg-paper px-6 py-7 text-[14px] text-paper-ink shadow-sm"
         :style="{ maxWidth: `${doc.contentWidth}px` }"
       >
-        <DocxBlocks :blocks="doc.blocks" />
+        <DocxBlocks :blocks="doc.blocks" @edit="onRunEdit" />
       </article>
     </div>
   </div>

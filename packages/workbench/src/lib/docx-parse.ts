@@ -48,6 +48,12 @@ export interface DocxRun {
   image: DocxImage | null;
   /** 外部超链接目标。 */
   link: string | null;
+  /**
+   * 可编辑回写用：此 run 的文本对应 word/document.xml 里第几个 w:t（文档序，见
+   * `forEachDocumentTextNode`）。仅当 run 恰好由单个 w:t 组成才有值；含 tab/br 的复合 run
+   * 与图片 run 为 null（渲染只读，不参与就地文本修改）。
+   */
+  editId?: number | null;
 }
 
 export type DocxAlign = "start" | "center" | "end" | "justify";
@@ -245,6 +251,8 @@ interface DocxContext {
   links: Map<string, string>;
   /** 有序列表的计数器：`numId:ilvl` → 已出现次数。 */
   counters: Map<string, number>;
+  /** w:t 元素 → 文档序序号（可编辑回写的定位锚，与序列化端共用 `forEachDocumentTextNode`）。 */
+  textNodeIds: Map<Element, number>;
 }
 
 /* ===== run ===== */
@@ -381,11 +389,47 @@ function findDescendant(root: Element | null, name: string): Element | null {
   return null;
 }
 
+/**
+ * 遍历 word/document.xml 里所有 w:t（按文档序），逐个回调其序号。
+ * **解析与序列化两端共用此函数**：只要喂同一份 XML，编号顺序就一致 —— 就地文本回写据此定位节点。
+ */
+export function forEachDocumentTextNode(root: Element, visit: (el: Element, ordinal: number) => void): void {
+  let ordinal = 0;
+  const walk = (el: Element): void => {
+    for (const child of Array.from(el.children)) {
+      if (local(child) === "t") visit(child, ordinal++);
+      else walk(child);
+    }
+  };
+  walk(root);
+}
+
+/** 可编辑正文单元 = 恰好一个 w:t 的 run；含 tab/br/换行的复合 run 不可编辑（返回 null）。 */
+function runEditId(r: Element, ctx: DocxContext): number | null {
+  let textEl: Element | null = null;
+  for (const child of Array.from(r.children)) {
+    const name = local(child);
+    if (name === "t") {
+      if (textEl) return null;
+      textEl = child;
+    } else if (name === "tab" || name === "br" || name === "cr" || name === "noBreakHyphen") {
+      return null;
+    }
+  }
+  return textEl ? (ctx.textNodeIds.get(textEl) ?? null) : null;
+}
+
 function buildRun(r: Element, ctx: DocxContext, inherited: (Element | null)[], link: string | null): DocxRun | null {
   const image = runImage(r, ctx);
   const text = runText(r);
   if (!image && !text) return null;
-  return { ...mergeRunProps([...inherited, kid(r, "rPr")]), text: image ? "" : text, image, link };
+  return {
+    ...mergeRunProps([...inherited, kid(r, "rPr")]),
+    text: image ? "" : text,
+    image,
+    link,
+    editId: image ? null : runEditId(r, ctx),
+  };
 }
 
 /* ===== 段落 ===== */
@@ -660,6 +704,10 @@ export async function parseDocx(data: Uint8Array): Promise<ParsedDocx> {
   const root = await readXml(zip, documentPath);
   if (!root) return { blocks: [], contentWidth: DEFAULT_CONTENT_WIDTH };
 
+  // w:t 文档序编号：解析与序列化共用，回写据此定位节点。先建表，buildRun 再按元素身份查号。
+  const textNodeIds = new Map<Element, number>();
+  forEachDocumentTextNode(root, (el, ordinal) => textNodeIds.set(el, ordinal));
+
   const rels = await readRels(zip, documentPath);
   const links = new Map<string, string>();
   // 外部超链接被 parseRels 过滤掉了（它只留包内文件），这里单独扫一遍拿 URL
@@ -677,6 +725,7 @@ export async function parseDocx(data: Uint8Array): Promise<ParsedDocx> {
     images: await decodeImages(zip, rels),
     links,
     counters: new Map(),
+    textNodeIds,
   };
 
   const body = kid(root, "body");

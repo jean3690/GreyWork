@@ -8,11 +8,15 @@
  * 于是改成自己解析（`lib/pptx-parse.ts`）+ 用 DOM 绝对定位还原，和 PdfViewer 的页栈一致。
  *
  * **缩放靠一次 transform**：内容按幻灯片自身的 px 尺寸布局，外层只加一个 `scale()`。
- * 这样字号、间距、表格列宽都不用逐个换算，也不会因为四舍五入而错位。
+ *
+ * **可就地编辑文本**：a:r 文本 run 是 contenteditable，改字经 `patchPptxText` 只补对应 slideN.xml
+ * 里的 a:t、其余字节原样保留（不改版式 / 母版 / 媒体）。脏标记、保存、关闭前确认由外壳统一提供。
  */
 import { computed, onUnmounted, ref, toRef, watch } from "vue";
 import { usePreviewBinary } from "@/lib/preview-content";
-import { paragraphFontPt, parsePptx, type ParsedDeck, type PptxParagraph, type PptxRun } from "@/lib/pptx-parse";
+import { paragraphFontPt, parsePptx, type ParsedDeck, type PptxParagraph, type PptxRun, type PptxTextRef } from "@/lib/pptx-parse";
+import { patchPptxText } from "@/lib/pptx-serialize";
+import { registerPreviewSaver, unregisterPreviewSaver, writePreviewBytes } from "@/lib/preview-save";
 import type { PreviewTab } from "@/stores/preview";
 
 /** pt → px（CSS 参考像素：96dpi / 72pt）。 */
@@ -27,6 +31,13 @@ const FALLBACK_FONT = '"PingFang SC", "Microsoft YaHei", "Noto Sans SC", system-
 const props = defineProps<{ tab: PreviewTab }>();
 
 const { data, loading, error } = usePreviewBinary(toRef(props, "tab"));
+
+/** 编辑缓冲：`${slide}:${ord}` → 新文本；保存时对基线字节做就地补丁。 */
+const edits = new Map<string, string>();
+/** 有未保存改动。外壳据此显示脏点 / 启用保存。 */
+const dirty = ref(false);
+/** 回写基线：初次为读入字节，保存后替换为刚写出的字节（a:t 编号不变，可继续编辑）。 */
+let baseline: Uint8Array | null = null;
 
 const deck = ref<ParsedDeck | null>(null);
 const parseError = ref<string | null>(null);
@@ -44,12 +55,19 @@ watch(
     parseError.value = null;
     if (!bytes) {
       deck.value = null;
+      baseline = null;
+      edits.clear();
+      dirty.value = false;
       return;
     }
     try {
       const parsed = await parsePptx(bytes);
       if (mine !== generation) return;
       deck.value = parsed;
+      // 载入新内容即重置编辑态：基线换成这份字节，旧编辑作废。
+      baseline = bytes;
+      edits.clear();
+      dirty.value = false;
     } catch (cause: unknown) {
       if (mine !== generation) return;
       deck.value = null;
@@ -74,6 +92,7 @@ watch(scroller, (host) => {
 onUnmounted(() => {
   observer?.disconnect();
   observer = null;
+  unregisterPreviewSaver(props.tab.id);
 });
 
 /**
@@ -222,6 +241,32 @@ function cellStyle(fill: string | null, slideBackground: string | null): Record<
 }
 
 const slideCount = computed(() => deck.value?.slides.length ?? 0);
+
+/** 某个 run 改字：按 `${slide}:${ord}` 记进缓冲并标脏。 */
+function onRunInput(event: Event, ref: PptxTextRef | null | undefined): void {
+  if (!ref) return;
+  edits.set(`${ref.slide}:${ref.ord}`, (event.target as HTMLElement).textContent ?? "");
+  dirty.value = true;
+}
+
+/** 只允许纯文本编辑：拦掉富文本粘贴，保结构只改字。 */
+function onPlainPaste(event: ClipboardEvent): void {
+  event.preventDefault();
+  document.execCommand("insertText", false, event.clipboardData?.getData("text/plain") ?? "");
+}
+
+/** 保存：对基线字节就地补丁后回写来源；随后以新字节为基线重解析（a:t 编号不变）。 */
+async function save(): Promise<void> {
+  if (!baseline || edits.size === 0) return;
+  const bytes = await patchPptxText(baseline, edits);
+  await writePreviewBytes(props.tab, bytes);
+  baseline = bytes;
+  deck.value = await parsePptx(bytes);
+  edits.clear();
+  dirty.value = false;
+}
+
+registerPreviewSaver(props.tab.id, { dirty, save });
 </script>
 
 <template>
@@ -264,7 +309,20 @@ const slideCount = computed(() => deck.value?.slides.length ?? 0);
                   <p v-for="(paragraph, pIndex) in element.paragraphs" :key="pIndex" :style="paragraphStyle(paragraph)">
                     <!-- 间距用 margin，不靠插值里的空格：Vue 会把文本节点尾部空白吃掉 -->
                     <span v-if="paragraph.bullet" aria-hidden="true" class="me-[0.4em]">{{ paragraph.bullet }}</span>
-                    <span v-for="(run, rIndex) in paragraph.runs" :key="rIndex" :style="runStyle(run)">{{ run.text }}</span>
+                    <template v-for="(run, rIndex) in paragraph.runs" :key="rIndex">
+                      <span
+                        v-if="run.editId != null"
+                        data-testid="slide-editable"
+                        contenteditable="true"
+                        class="outline-none focus:bg-cyan/20"
+                        :style="runStyle(run)"
+                        @input="onRunInput($event, run.editId)"
+                        @keydown.enter.prevent
+                        @paste="onPlainPaste"
+                        >{{ run.text }}</span
+                      >
+                      <span v-else :style="runStyle(run)">{{ run.text }}</span>
+                    </template>
                   </p>
                 </div>
 
@@ -286,7 +344,20 @@ const slideCount = computed(() => deck.value?.slides.length ?? 0);
                           :style="cellStyle(cell.fill, slide.background)"
                         >
                           <p v-for="(paragraph, pIndex) in cell.paragraphs" :key="pIndex" :style="paragraphStyle(paragraph)">
-                            <span v-for="(run, rIndex) in paragraph.runs" :key="rIndex" :style="runStyle(run)">{{ run.text }}</span>
+                            <template v-for="(run, rIndex) in paragraph.runs" :key="rIndex">
+                              <span
+                                v-if="run.editId != null"
+                                data-testid="slide-editable"
+                                contenteditable="true"
+                                class="outline-none focus:bg-cyan/20"
+                                :style="runStyle(run)"
+                                @input="onRunInput($event, run.editId)"
+                                @keydown.enter.prevent
+                                @paste="onPlainPaste"
+                                >{{ run.text }}</span
+                              >
+                              <span v-else :style="runStyle(run)">{{ run.text }}</span>
+                            </template>
                           </p>
                         </td>
                       </template>
