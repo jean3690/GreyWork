@@ -260,6 +260,10 @@ export const enUS: MessageSchema = {
     /* The change (git) panel. Status badge copy lives under status.*; staging and committing are
        separate steps, so their copy is separate too. */
     git: {
+      tab: {
+        changes: "Changes",
+        history: "History",
+      },
       loading: "Reading changes…",
       readFailed: "This directory is not a git repository, or reading failed: {detail}",
       empty: "No uncommitted changes in this workspace",
@@ -286,6 +290,13 @@ export const enUS: MessageSchema = {
         deleted: "Deleted",
         renamed: "Renamed",
         untracked: "Untracked",
+      },
+      history: {
+        loading: "Reading commit history…",
+        readFailed: "Failed to read commit history: {detail}",
+        empty: "No commits yet",
+        loadMore: "Load older commits",
+        noSubject: "(no commit message)",
       },
     },
     guard: {

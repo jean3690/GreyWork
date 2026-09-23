@@ -1,4 +1,4 @@
-import { createTauriGitService, type GitChange, type StagingGitService } from "@greywork/editor";
+import { createTauriGitService, type GitChange, type GitCommit, type HistoryGitService } from "@greywork/editor";
 import { isTauriRuntime } from "@greywork/core";
 import { defineStore } from "pinia";
 import { computed, ref, watch } from "vue";
@@ -71,8 +71,28 @@ export const useGitStore = defineStore("git", () => {
   const commitError = ref<string | null>(null);
   const lastCommitId = ref<string | null>(null);
 
+  /* ===== 提交历史（面板「历史」页） =====
+   * 惰性加载：切到「历史」页才拉第一页，免得每次开面板都多打一次 IPC。
+   */
+
+  /** 单页条数（与宿主的默认上限对齐）。 */
+  const HISTORY_PAGE = 50;
+
+  const history = ref<GitCommit[]>([]);
+  const historyLoading = ref(false);
+  const historyError = ref<string | null>(null);
+  /** 已经拉过至少一页。用于「切到历史页要不要自动加载」的判断，区别于「列表为空」。 */
+  const historyLoaded = ref(false);
+  /** 还有更早的提交可拉（上一页取满了一整页）。 */
+  const historyHasMore = ref(false);
+  /** 展开的提交 hash；null = 没展开。 */
+  const historySelected = ref<string | null>(null);
+  const historyDiffCache = ref<Record<string, string>>({});
+  const historyDiffLoading = ref(false);
+  const historyDiffError = ref<string | null>(null);
+
   /** 当前工作区根的 Git 服务。**不初始化就调用**：refresh 里先解析根再建。 */
-  let service: StagingGitService | null = null;
+  let service: HistoryGitService | null = null;
 
   const activeEntries = () => entries.value;
   /** 两侧都算：头部那行给的是「这份工作区一共改了多少行」。 */
@@ -104,6 +124,18 @@ export const useGitStore = defineStore("git", () => {
     stagingError.value = null;
     service = null;
     error.value = null;
+    resetHistory();
+  }
+
+  /** 清空历史页的全部状态（换工作区 / 回落到浏览器态时用）。 */
+  function resetHistory(): void {
+    history.value = [];
+    historyError.value = null;
+    historyLoaded.value = false;
+    historyHasMore.value = false;
+    historySelected.value = null;
+    historyDiffCache.value = {};
+    historyDiffError.value = null;
   }
 
   async function refresh(): Promise<void> {
@@ -128,6 +160,8 @@ export const useGitStore = defineStore("git", () => {
         error.value = changesResult.reason instanceof Error ? changesResult.reason.message : String(changesResult.reason);
       }
       branch.value = branchResult.status === "fulfilled" ? branchResult.value : null;
+      // 历史页已经打开过就顺手刷新（提交/暂存后调用 refresh 时，历史也得跟着变）。
+      if (historyLoaded.value) await loadHistory(true);
     } catch (cause) {
       error.value = cause instanceof Error ? cause.message : String(cause);
       entries.value = [];
@@ -164,7 +198,7 @@ export const useGitStore = defineStore("git", () => {
    * 成功后**清空 diff 缓存并收起展开项**：条目换了侧，旧键下的 diff 内容已经不对了
    * （比如「未暂存」那一版的 diff 在暂存后就不该再显示）。
    */
-  async function runStaging(action: (target: StagingGitService) => Promise<void>): Promise<void> {
+  async function runStaging(action: (target: HistoryGitService) => Promise<void>): Promise<void> {
     if (!service) return;
     staging.value = true;
     stagingError.value = null;
@@ -209,6 +243,56 @@ export const useGitStore = defineStore("git", () => {
   const commitStaged = () => commitWith(false);
   const commitAll = () => commitWith(true);
 
+  /* ===== 历史页动作 ===== */
+
+  /**
+   * 拉取提交历史。`reset = true` 从最新一页重来（切页/提交后），否则接着往下翻。
+   *
+   * 翻页用「已加载条数」当 `skip`，不在前端合并去重 —— 宿主按 `--skip/--max-count`
+   * 顺序返回，同一分支上不会重叠；`reset` 时的整体替换也顺手丢掉了已消失的提交（如 amend）。
+   */
+  async function loadHistory(reset = false): Promise<void> {
+    if (!service || historyLoading.value) return;
+    historyLoading.value = true;
+    historyError.value = null;
+    try {
+      const skip = reset ? 0 : history.value.length;
+      const page = await service.log({ limit: HISTORY_PAGE, skip });
+      history.value = reset ? page : [...history.value, ...page];
+      // 取满一整页就假定还有更早的（不额外查 count：`rev-list --count` 在大仓库里很贵）。
+      historyHasMore.value = page.length === HISTORY_PAGE;
+      historyLoaded.value = true;
+    } catch (cause) {
+      historyError.value = cause instanceof Error ? cause.message : String(cause);
+    } finally {
+      historyLoading.value = false;
+    }
+  }
+
+  /** 展开某次提交的 diff（缓存一次，重开同一提交不再打 IPC）。 */
+  async function selectCommit(hash: string): Promise<void> {
+    if (historyDiffCache.value[hash] !== undefined) {
+      historySelected.value = hash;
+      return;
+    }
+    if (!service) return;
+    historySelected.value = hash;
+    historyDiffLoading.value = true;
+    historyDiffError.value = null;
+    try {
+      const text = await service.show(hash);
+      historyDiffCache.value = { ...historyDiffCache.value, [hash]: text };
+    } catch (cause) {
+      historyDiffError.value = cause instanceof Error ? cause.message : String(cause);
+    } finally {
+      historyDiffLoading.value = false;
+    }
+  }
+
+  function deselectCommit(): void {
+    historySelected.value = null;
+  }
+
   // 绑定的工作区文件夹变化（切换工作区 / 换绑 / 切对话）就重载 git 状态。
   const boundFolder = () => activeConversationFolder() ?? activeWorkspaceFolder();
   watch(boundFolder, () => {
@@ -233,6 +317,15 @@ export const useGitStore = defineStore("git", () => {
     committing,
     commitError,
     lastCommitId,
+    history,
+    historyLoading,
+    historyError,
+    historyLoaded,
+    historyHasMore,
+    historySelected,
+    historyDiffCache,
+    historyDiffLoading,
+    historyDiffError,
     activeEntries,
     totalAdds,
     totalDels,
@@ -248,6 +341,9 @@ export const useGitStore = defineStore("git", () => {
     unstageAll,
     commitStaged,
     commitAll,
+    loadHistory,
+    selectCommit,
+    deselectCommit,
     clearError,
   };
 });

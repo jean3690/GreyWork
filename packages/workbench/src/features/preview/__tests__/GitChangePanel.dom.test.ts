@@ -1,6 +1,7 @@
 /**
  * 预览侧栏「变更」区段的可观察行为：分区渲染、点条目展开那一侧的 diff、
- * 逐文件暂存 / 取消暂存、只提交已暂存（外加「提交全部」）。
+ * 逐文件暂存 / 取消暂存、只提交已暂存（外加「提交全部」），以及「历史」页的
+ * 惰性加载、翻页、展开单次提交的 diff 与错误/空态。
  *
  * store 走真实路径（isTauriRuntime 为真），宿主调用经 mock 的 invoke 断言命令契约；
  * 组件不 mock pinia —— 行为即数据流，换实现还得看这批测试的脸色。
@@ -234,5 +235,139 @@ describe("GitChangePanel", () => {
     expect(wrapper.find('[role="alert"]').exists()).toBe(true);
     expect(wrapper.text()).toContain("不是 git 仓库");
     expect(wrapper.find('[data-testid="git-retry"]').exists()).toBe(true);
+  });
+
+  /* ===== 历史页 ===== */
+
+  const COMMITS = [
+    {
+      hash: "abc123def",
+      shortHash: "abc123d",
+      author: "Ana",
+      email: "a@x.com",
+      timestamp: "2026-01-02T10:30:00+08:00",
+      subject: "第二次提交",
+      refs: "HEAD -> main",
+    },
+    {
+      hash: "999000fff",
+      shortHash: "999000f",
+      author: "Bob",
+      email: "b@x.com",
+      timestamp: "2026-01-01T09:00:00+08:00",
+      subject: "初始提交",
+      refs: "",
+    },
+  ];
+
+  it("切到历史页才拉提交列表；点提交展开它的 diff", async () => {
+    h.invoke.mockImplementation((command: string) => {
+      if (command === "git_changes") return Promise.resolve(CHANGES);
+      if (command === "git_current_branch") return Promise.resolve("main\n");
+      if (command === "git_log") return Promise.resolve(COMMITS);
+      if (command === "git_show") return Promise.resolve(DIFF);
+      return Promise.reject(new Error(`意外的命令 ${command}`));
+    });
+    const wrapper = mount(GitChangePanel);
+    await flushPromises();
+
+    // 变更页不碰历史（惰性加载）
+    expect(h.invoke.mock.calls.some(([command]) => command === "git_log")).toBe(false);
+    expect(wrapper.find('[data-testid="git-history-list"]').exists()).toBe(false);
+
+    await wrapper.get('[data-testid="git-mode-history"]').trigger("click");
+    await flushPromises();
+
+    expect(h.invoke).toHaveBeenCalledWith("git_log", { root: "/ws", limit: 50, skip: 0 });
+    const rows = wrapper.findAll('[data-testid="git-commit-row"]');
+    expect(rows).toHaveLength(2);
+    expect(rows[0].text()).toContain("第二次提交");
+    expect(rows[0].text()).toContain("abc123d");
+    expect(rows[0].text()).toContain("2026-01-02 10:30");
+    expect(rows[0].text()).toContain("HEAD -> main");
+
+    await rows[0].trigger("click");
+    await flushPromises();
+    expect(h.invoke).toHaveBeenCalledWith("git_show", { root: "/ws", hash: "abc123def" });
+    expect(wrapper.get('[data-testid="git-commit-diff"]').text()).toContain("+two");
+
+    // 再点一次收起
+    await rows[0].trigger("click");
+    await flushPromises();
+    expect(wrapper.find('[data-testid="git-commit-diff"]').exists()).toBe(false);
+  });
+
+  it("历史取满一页出现「加载更早的提交」，按 skip 翻页", async () => {
+    const page1 = Array.from({ length: 50 }, (_, i) => ({
+      hash: `h${String(i).padStart(4, "0")}`,
+      shortHash: `s${i}`,
+      author: "Ana",
+      email: "a@x.com",
+      timestamp: "2026-01-01T00:00:00+08:00",
+      subject: `提交 ${i}`,
+      refs: "",
+    }));
+    const page2 = [
+      {
+        hash: "older",
+        shortHash: "olde",
+        author: "Bob",
+        email: "b@x.com",
+        timestamp: "2025-12-31T00:00:00+08:00",
+        subject: "更早的提交",
+        refs: "",
+      },
+    ];
+    h.invoke.mockImplementation((command: string, args?: Record<string, unknown>) => {
+      if (command === "git_changes") return Promise.resolve([]);
+      if (command === "git_current_branch") return Promise.resolve("main\n");
+      if (command === "git_log") return Promise.resolve(args?.skip === 0 ? page1 : page2);
+      return Promise.reject(new Error(`意外的命令 ${command}`));
+    });
+    const wrapper = mount(GitChangePanel);
+    await flushPromises();
+    await wrapper.get('[data-testid="git-mode-history"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.findAll('[data-testid="git-commit-row"]')).toHaveLength(50);
+    await wrapper.get('[data-testid="git-history-more"]').trigger("click");
+    await flushPromises();
+
+    expect(h.invoke).toHaveBeenCalledWith("git_log", { root: "/ws", limit: 50, skip: 50 });
+    expect(wrapper.findAll('[data-testid="git-commit-row"]')).toHaveLength(51);
+    // 第二页不满一页 → 没有更早的了，按钮消失
+    expect(wrapper.find('[data-testid="git-history-more"]').exists()).toBe(false);
+  });
+
+  it("仓库还没有提交时历史页给出空态", async () => {
+    h.invoke.mockImplementation((command: string) => {
+      if (command === "git_changes") return Promise.resolve([]);
+      if (command === "git_current_branch") return Promise.resolve("main\n");
+      if (command === "git_log") return Promise.resolve([]);
+      return Promise.reject(new Error(`意外的命令 ${command}`));
+    });
+    const wrapper = mount(GitChangePanel);
+    await flushPromises();
+    await wrapper.get('[data-testid="git-mode-history"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.text()).toContain(t("preview.git.history.empty"));
+    expect(wrapper.find('[data-testid="git-history-list"]').exists()).toBe(false);
+  });
+
+  it("历史读取失败给出原因与重试按钮", async () => {
+    h.invoke.mockImplementation((command: string) => {
+      if (command === "git_changes") return Promise.resolve([]);
+      if (command === "git_current_branch") return Promise.resolve("main\n");
+      if (command === "git_log") return Promise.reject("不是 git 仓库");
+      return Promise.reject(new Error("意外"));
+    });
+    const wrapper = mount(GitChangePanel);
+    await flushPromises();
+    await wrapper.get('[data-testid="git-mode-history"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("不是 git 仓库");
+    expect(wrapper.find('[data-testid="git-history-retry"]').exists()).toBe(true);
   });
 });

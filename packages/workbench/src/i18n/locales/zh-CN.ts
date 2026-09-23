@@ -258,6 +258,10 @@ export const zhCN = {
 
     /* 变更面板（git）。状态徽标文案在 status.*；提交与暂存分开。 */
     git: {
+      tab: {
+        changes: "变更",
+        history: "历史",
+      },
       loading: "正在读取变更…",
       readFailed: "当前目录不是 git 仓库或读取失败：{detail}",
       empty: "工作区没有未提交的变更",
@@ -284,6 +288,13 @@ export const zhCN = {
         deleted: "删除",
         renamed: "重命名",
         untracked: "未跟踪",
+      },
+      history: {
+        loading: "正在读取提交历史…",
+        readFailed: "读取提交历史失败：{detail}",
+        empty: "暂无提交记录",
+        loadMore: "加载更早的提交",
+        noSubject: "（无提交信息）",
       },
     },
     /* 离开可编辑预览（切区段 / 切标签 / 关标签 / 关窗）前先自动保存；
