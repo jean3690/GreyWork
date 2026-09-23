@@ -9,9 +9,12 @@
  * diff 复用 `lib/unified-diff`（与 DiffViewer 同一解析器）：行级着色 + 双列行号，
  * 不另写一套 patch 渲染。二进制或纯删除场景没有 numstat 行数，靠徽标兜语义。
  */
-import { computed, onMounted } from "vue";
+import { computed, onMounted, ref } from "vue";
+import { useVirtualizer } from "@tanstack/vue-virtual";
 import Icon from "@/features/shared/Icon.vue";
 import Hint from "@/features/shared/Hint.vue";
+import { deviceTier } from "@/lib/device-tier";
+import { observeNonZeroRect } from "@/lib/virtual-rect";
 import { parseUnifiedDiff } from "@/lib/unified-diff";
 import { useGitStore } from "@/stores/git";
 
@@ -58,6 +61,57 @@ function toggle(path: string): void {
   if (git.selected === path) git.deselect();
   else void git.select(path);
 }
+
+/* ===== 行虚拟化 =====
+ * 条目数 = 改动文件数，脏工作区里可达上千。行高**不固定**：选中行内联展开整份 diff，
+ * 所以走动态测量 —— 每行挂 measureElement，用实际渲染高度校正（同 ConversationView）。
+ *
+ * 这里刻意**不给行内叠 content-visibility**：那会把屏外子树压成 contain-intrinsic-size
+ * 的估算高度，动态测量拿到的就是偏小的错值，滚动条会跳。两种技术在同一棵子树里互斥。
+ */
+const scrollEl = ref<HTMLElement | null>(null);
+const entries = computed(() => git.entries);
+const virtualizer = useVirtualizer(
+  computed(() => {
+    // 先读一次 ref 再闭包捕获：`getScrollElement` 内部读不算依赖，模板 ref 赋值就不会让
+    // 这份 options 失效。而滚动容器在 loading/空态分支之后，首帧根本不存在 —— 不显式建立
+    // 依赖的话 virtualizer 会一直拿着 null，永远算不出可视行。
+    const element = scrollEl.value;
+    return {
+      getScrollElement: () => element,
+      // 丢弃 0×0 视口读数：容器刚挂上时还没布局，0 会覆盖 initialRect 让整列算空（见 lib/virtual-rect.ts）。
+      observeElementRect: observeNonZeroRect,
+      count: entries.value.length,
+      // 首帧视口：RO 就位前先按它渲染窗口，避免空首屏（测试环境无布局时也靠它出内容）。
+      initialRect: { top: 0, left: 0, width: 300, height: 600 },
+      /** 收起态行高：一行 button 约 26px，留点余量，测量后会被真实高度覆盖。 */
+      estimateSize: () => 28,
+      overscan: deviceTier.value === "low" ? 3 : 8,
+      getItemKey: (index: number) => entries.value[index]?.path ?? index,
+    };
+  }),
+);
+
+/** 可视行 + 它对应的条目；`entry` 直接带上，模板里不必再按下标回查。 */
+const slots = computed(() =>
+  virtualizer.value.getVirtualItems().map((item) => ({
+    index: item.index,
+    key: String(item.key),
+    start: item.start,
+    entry: entries.value[item.index],
+  })),
+);
+
+const totalHeight = computed(() => virtualizer.value.getTotalSize());
+
+function measureRow(element: unknown): void {
+  if (!(element instanceof HTMLElement)) return;
+  // 高度为 0 时**不要**上报：无布局环境（happy-dom）与「元素刚进 DOM 还没布局」这两种情况
+  // 量到的都是 0，而 0 会被写进尺寸缓存 —— 整列被压成 0 高，可视行算出来是空的，行随即
+  // 全部卸载。真实浏览器里行总是有高度，所以这条守卫只在量不出高度时生效。
+  if (element.getBoundingClientRect().height === 0) return;
+  virtualizer.value.measureElement(element);
+}
 </script>
 
 <template>
@@ -102,33 +156,41 @@ function toggle(path: string): void {
 
     <!-- 变更列表 + 选中项的 diff -->
     <template v-else>
-      <div class="min-h-0 flex-1 overflow-y-auto" data-scroll-root>
-        <ul class="flex flex-col py-1">
-          <li v-for="entry in git.entries" :key="entry.path">
+      <div ref="scrollEl" class="min-h-0 flex-1 overflow-y-auto py-1" data-scroll-root>
+        <!-- 相对容器 + 显式总高：行绝对定位在 translateY 处，高度由 measureElement 校正 -->
+        <ul class="relative" :style="{ height: `${totalHeight}px` }">
+          <li
+            v-for="slot in slots"
+            :key="slot.key"
+            :ref="measureRow"
+            :data-index="slot.index"
+            class="absolute left-0 top-0 w-full"
+            :style="{ transform: `translateY(${slot.start}px)` }"
+          >
             <button
               type="button"
               class="flex w-full cursor-pointer items-center gap-2 px-3 py-1 text-left transition-colors hover:bg-panel"
               data-testid="git-entry"
-              :aria-expanded="git.selected === entry.path ? 'true' : 'false'"
-              @click="toggle(entry.path)"
+              :aria-expanded="git.selected === slot.entry.path ? 'true' : 'false'"
+              @click="toggle(slot.entry.path)"
             >
-              <Hint :text="badgeFor(entry.status).label">
+              <Hint :text="badgeFor(slot.entry.status).label">
                 <span
                   class="grid size-4 shrink-0 place-items-center rounded-[4px] bg-panel text-[10px] font-semibold"
-                  :class="badgeFor(entry.status).cls"
+                  :class="badgeFor(slot.entry.status).cls"
                 >
-                  {{ badgeFor(entry.status).letter }}
+                  {{ badgeFor(slot.entry.status).letter }}
                 </span>
               </Hint>
               <!-- 已暂存指示：小实心点，不参与徽标配色（状态色归字母）。
                    aria-label 已是「已暂存」，重复的 title 不再留。 -->
-              <span v-if="entry.staged" class="size-1.5 shrink-0 rounded-full bg-cyan" aria-label="已暂存" />
-              <span class="min-w-0 flex-1 truncate text-[11.5px] text-foreground">{{ entry.path }}</span>
-              <span v-if="entry.add > 0" class="shrink-0 text-[10.5px] tabular-nums text-mint">+{{ entry.add }}</span>
-              <span v-if="entry.del > 0" class="shrink-0 text-[10.5px] tabular-nums text-orange">-{{ entry.del }}</span>
+              <span v-if="slot.entry.staged" class="size-1.5 shrink-0 rounded-full bg-cyan" aria-label="已暂存" />
+              <span class="min-w-0 flex-1 truncate text-[11.5px] text-foreground">{{ slot.entry.path }}</span>
+              <span v-if="slot.entry.add > 0" class="shrink-0 text-[10.5px] tabular-nums text-mint">+{{ slot.entry.add }}</span>
+              <span v-if="slot.entry.del > 0" class="shrink-0 text-[10.5px] tabular-nums text-orange">-{{ slot.entry.del }}</span>
             </button>
 
-            <div v-if="git.selected === entry.path" class="border-l-2 border-cyan bg-panel-2" data-testid="git-entry-diff">
+            <div v-if="git.selected === slot.entry.path" class="border-l-2 border-cyan bg-panel-2" data-testid="git-entry-diff">
               <p v-if="git.diffLoading" class="px-3 py-2 text-[11px] text-dim2">读取 diff…</p>
               <p v-else-if="git.diffError" class="break-all px-3 py-2 text-[11px] text-orange">{{ git.diffError }}</p>
               <p v-else-if="selectedEmpty" class="px-3 py-2 text-[11px] text-dim2">二进制或没有文本变化</p>

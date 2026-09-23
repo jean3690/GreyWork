@@ -7,10 +7,13 @@
  */
 import { computed, onMounted, ref } from "vue";
 import { isTauriRuntime } from "@greywork/core";
+import { useVirtualizer } from "@tanstack/vue-virtual";
 import Icon from "@/features/shared/Icon.vue";
 import Hint from "@/features/shared/Hint.vue";
 import ContextMenuRegion from "@/features/shared/ContextMenuRegion.vue";
 import { fileIconUrl, folderIconUrl } from "@/lib/file-icons";
+import { deviceTier } from "@/lib/device-tier";
+import { observeNonZeroRect } from "@/lib/virtual-rect";
 import { buildFileTreeItems, type ContextMenuItem, type ContextTarget } from "@/lib/context-menu";
 import { copyText } from "@/lib/clipboard";
 import { openWithSystemApp } from "@/lib/open-external";
@@ -72,9 +75,68 @@ function activate(node: FileTreeNode): void {
   preview.open(node.path, node.name, tree.mode === "disk" ? "disk" : "vfs");
 }
 
+/* ===== 行虚拟化 =====
+ * 展平后的行数 = 展开的目录数 + 文件数，大仓库下轻松上千。整列渲染意味着上千个
+ * button + Hint 常驻 DOM，低端机上光是样式计算就够呛。超过阈值切成虚拟窗口：行高恒定
+ * （26px、无行间距），只挂载可视窗口 ± overscan。
+ * 阈值以下保持整列渲染 —— 短树做虚拟化只是白搭一层绝对定位与测量。
+ * 低端设备（lib/device-tier.ts）：阈值减半、overscan 收到 3。 */
+const scrollEl = ref<HTMLElement | null>(null);
+const VIRTUAL_THRESHOLD = computed(() => (deviceTier.value === "low" ? 30 : 60));
+/** 行步长：与 button 的 h-[26px] 一致，树列表无行间距。 */
+const ROW_STRIDE = 26;
+const virtual = computed(() => rows.value.length > VIRTUAL_THRESHOLD.value);
+const virtualOptions = computed(() => {
+  // 先读一次 ref 再闭包捕获：`getScrollElement` 内部读不算依赖，模板 ref 赋值就不会让这份
+  // options 失效。滚动容器在 loading/错误/空态分支之后，首帧还不存在 —— 不显式建立依赖的话
+  // virtualizer 会一直拿着 null，永远算不出可视行。
+  const element = scrollEl.value;
+  return {
+    getScrollElement: () => element,
+    // 丢弃 0×0 视口读数：容器刚挂上时还没布局，0 会覆盖 initialRect 让整列算空（见 lib/virtual-rect.ts）。
+    observeElementRect: observeNonZeroRect,
+    count: virtual.value ? rows.value.length : 0,
+    // 首帧视口：RO 就位前先按它渲染窗口，避免空首屏（测试环境无布局时也靠它出内容）。
+    initialRect: { top: 0, left: 0, width: 300, height: 600 },
+    estimateSize: () => ROW_STRIDE,
+    overscan: deviceTier.value === "low" ? 3 : 8,
+    getItemKey: (index: number) => rows.value[index]?.node.path ?? index,
+  };
+});
+const virtualizer = useVirtualizer(virtualOptions);
+
+/** 一行在容器里的落位。`row` 直接带上，省得模板里再按下标回查（越界时类型上也拿不到保护）。 */
+interface RowSlot {
+  index: number;
+  key: string;
+  start: number;
+  row: FlatRow;
+}
+
+/**
+ * 实际渲染的行。两条路径产出同一种「绝对定位 + translateY」形状，模板只写一遍：
+ * - 短树：整列（start = index × 行步长），不做测量；
+ * - 长树：虚拟窗口给出的可视行。
+ */
+const slots = computed<RowSlot[]>(() => {
+  if (!virtual.value) {
+    return rows.value.map((row, index) => ({ index, key: row.node.path, start: index * ROW_STRIDE, row }));
+  }
+  return virtualizer.value.getVirtualItems().map((item) => ({
+    index: item.index,
+    key: String(item.key),
+    start: item.start,
+    row: rows.value[item.index],
+  }));
+});
+
+/** 容器总高：两条路径都必须显式给，否则绝对定位的行撑不起滚动条。 */
+const totalHeight = computed(() => (virtual.value ? virtualizer.value.getTotalSize() : rows.value.length * ROW_STRIDE));
+
 /* ===== 右键菜单 =====
- * 行不虚拟化（展平单层 v-for），所以整棵树只挂一个 reka root，靠 data-ctx 认目标；
- * 逐行挂 root 会在深目录下叠出成百个组件实例。条目构建在 lib/context-menu（可单测）。 */
+ * 整棵树只挂一个 reka root，靠 data-ctx 认目标；逐行挂 root 会在深目录下叠出成百个
+ * 组件实例。虚拟化后行会随滚动进出 DOM，菜单仍按 data-path 回查 rows，与挂载无关。
+ * 条目构建在 lib/context-menu（可单测）。 */
 function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
   return buildFileTreeItems(target, t, {
     activate: activateByPath,
@@ -168,40 +230,61 @@ onMounted(() => {
       <p v-else-if="tree.error" role="alert" class="px-3 py-2 text-[12px] text-orange">{{ tree.error }}</p>
       <p v-else-if="rows.length === 0" class="px-3 py-2 text-[12px] text-dim2">这个目录是空的</p>
 
-      <div v-else class="min-h-0 flex-1 overflow-auto py-1">
-        <Hint v-for="row in rows" :key="row.node.path" :text="row.node.path" multiline>
-          <button
-            type="button"
-            data-testid="file-tree-row"
-            data-ctx="file-row"
-            :data-path="row.node.path"
-            :data-kind="row.node.kind"
-            class="flex h-[26px] w-full cursor-pointer items-center gap-1 pe-2 text-start text-[12px] transition-colors hover:bg-panel focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
-            :class="row.node.kind === 'directory' ? 'text-foreground' : 'text-dim hover:text-foreground'"
-            :style="{ paddingInlineStart: `${8 + row.depth * 12}px` }"
-            :aria-expanded="row.node.kind === 'directory' ? tree.isExpanded(row.node.path) : undefined"
-            @click="activate(row.node)"
+      <div v-else ref="scrollEl" class="min-h-0 flex-1 overflow-auto py-1">
+        <!-- 相对容器 + 显式总高：行一律绝对定位在 translateY 处，虚拟与非虚拟共用一套模板 -->
+        <div class="relative" :style="{ height: `${totalHeight}px` }">
+          <div
+            v-for="slot in slots"
+            :key="slot.key"
+            :data-index="slot.index"
+            class="absolute left-0 top-0 w-full"
+            :style="{ transform: `translateY(${slot.start}px)` }"
           >
-            <span class="grid size-3.5 shrink-0 place-items-center text-dim2">
-              <Icon
-                v-if="row.node.kind === 'directory'"
-                :name="tree.isLoading(row.node.path) ? 'refresh' : tree.isExpanded(row.node.path) ? 'down' : 'right'"
-                :size="11"
-              />
-            </span>
-            <template v-if="row.node.kind === 'directory'">
-              <img
-                :src="folderIconUrl(row.node.name, tree.isExpanded(row.node.path))"
-                :alt="tree.isExpanded(row.node.path) ? '展开的文件夹' : '文件夹'"
-                class="size-3.5 shrink-0 object-contain"
-                :class="{ 'animate-spin opacity-60': tree.isLoading(row.node.path) }"
-                draggable="false"
-              />
-            </template>
-            <img v-else :src="fileIconUrl(row.node.name)" alt="文件" class="size-3.5 shrink-0 object-contain" draggable="false" />
-            <span class="min-w-0 flex-1 truncate">{{ row.node.name }}</span>
-          </button>
-        </Hint>
+            <Hint :text="slot.row.node.path" multiline>
+              <button
+                type="button"
+                data-testid="file-tree-row"
+                data-ctx="file-row"
+                :data-path="slot.row.node.path"
+                :data-kind="slot.row.node.kind"
+                class="flex h-[26px] w-full cursor-pointer items-center gap-1 pe-2 text-start text-[12px] transition-colors hover:bg-panel focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+                :class="slot.row.node.kind === 'directory' ? 'text-foreground' : 'text-dim hover:text-foreground'"
+                :style="{ paddingInlineStart: `${8 + slot.row.depth * 12}px` }"
+                :aria-expanded="slot.row.node.kind === 'directory' ? tree.isExpanded(slot.row.node.path) : undefined"
+                @click="activate(slot.row.node)"
+              >
+                <span class="grid size-3.5 shrink-0 place-items-center text-dim2">
+                  <Icon
+                    v-if="slot.row.node.kind === 'directory'"
+                    :name="tree.isLoading(slot.row.node.path) ? 'refresh' : tree.isExpanded(slot.row.node.path) ? 'down' : 'right'"
+                    :size="11"
+                  />
+                </span>
+                <template v-if="slot.row.node.kind === 'directory'">
+                  <img
+                    :src="folderIconUrl(slot.row.node.name, tree.isExpanded(slot.row.node.path))"
+                    :alt="tree.isExpanded(slot.row.node.path) ? '展开的文件夹' : '文件夹'"
+                    class="size-3.5 shrink-0 object-contain"
+                    :class="{ 'animate-spin opacity-60': tree.isLoading(slot.row.node.path) }"
+                    loading="lazy"
+                    decoding="async"
+                    draggable="false"
+                  />
+                </template>
+                <img
+                  v-else
+                  :src="fileIconUrl(slot.row.node.name)"
+                  alt="文件"
+                  class="size-3.5 shrink-0 object-contain"
+                  loading="lazy"
+                  decoding="async"
+                  draggable="false"
+                />
+                <span class="min-w-0 flex-1 truncate">{{ slot.row.node.name }}</span>
+              </button>
+            </Hint>
+          </div>
+        </div>
       </div>
     </div>
   </ContextMenuRegion>
