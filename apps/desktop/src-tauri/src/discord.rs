@@ -18,18 +18,23 @@
 //!   URL 路径，不校验就等于把路径交给渲染端。
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use tokio::sync::Mutex;
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::channel_common::{
     app_sink, channel_dir, now_ms, read_json, sleep_or_stop, write_private, EventSink,
+};
+use crate::channel_media::{
+    inbox_dir, prune_inbox, store_inbound_media, MediaKind, MediaRefDto, OutboundMedia,
+    MAX_MEDIA_BYTES,
 };
 use crate::http::{read_text, shared_client, RESPONSE_READ_TIMEOUT};
 use crate::log;
@@ -54,6 +59,8 @@ const INTENTS_DIRECT_MESSAGES: i64 = 1 << 12;
 const FALLBACK_HEARTBEAT: Duration = Duration::from_secs(41);
 /// 单条文本上限（Discord 消息正文 2000 字符）。
 const MAX_TEXT_CHARS: usize = 2000;
+/// 单条消息最多收几条附件（防止一条消息拖垮一整轮下载）。
+const MAX_INBOUND_MEDIA: usize = 4;
 /// token 长度上限（官方 token 约 72 字符，留足余量）。
 const MAX_TOKEN_CHARS: usize = 200;
 /// 雪花 id 的十进制长度上限（Discord id 是 64 位，最长 20 位）。
@@ -116,9 +123,25 @@ struct MessagePayload {
     content: String,
     #[serde(default)]
     author: Author,
+    /// 随消息上传的附件（图片 / 文件）；`url` 是带签名的 CDN 直链，下载无需鉴权。
+    #[serde(default)]
+    attachments: Vec<AttachmentPayload>,
     /// RFC3339（`2024-01-01T00:00:00.000000+00:00`）。
     #[serde(default)]
     timestamp: Option<String>,
+}
+
+/// `MESSAGE_CREATE` 的附件描述（只取下载所需字段）。
+#[derive(Debug, Clone, Default, Deserialize)]
+struct AttachmentPayload {
+    #[serde(default)]
+    filename: String,
+    #[serde(default)]
+    content_type: Option<String>,
+    #[serde(default)]
+    size: Option<u64>,
+    #[serde(default)]
+    url: String,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -187,15 +210,38 @@ pub struct DiscordInboundDto {
     /// 发送者用户 id（判归属人用）。
     pub sender_id: String,
     pub text: String,
+    /// 随消息到达的图片 / 文件；字节在宿主 inbox，凭 `path` 取走。
+    pub media: Vec<MediaRefDto>,
     pub at: i64,
 }
 
-/// 归一条 dispatch 事件；不认识的 `t`、服务器消息、机器人消息、空正文都返回 None。
-pub fn normalize_dispatch(
+/// 归一后的入站草稿：附件还是「待下载」的 CDN 直链，等异步取字节落盘后再产 DTO。
+#[derive(Debug, Clone)]
+pub(crate) struct DiscordInboundDraft {
+    pub message_id: String,
+    pub peer_id: String,
+    pub nick: String,
+    pub sender_id: String,
+    pub text: String,
+    pub at: i64,
+    pub media: Vec<PendingAttachment>,
+}
+
+/// 待下载的一条入站附件（Discord 给的是带签名的 CDN 直链，直接 GET）。
+#[derive(Debug, Clone)]
+pub(crate) struct PendingAttachment {
+    url: String,
+    kind: MediaKind,
+    name: String,
+    declared_size: Option<u64>,
+}
+
+/// 归一条 dispatch 事件；不认识的 `t`、服务器消息、机器人消息、空正文且无附件都返回 None。
+pub(crate) fn normalize_dispatch(
     event: &str,
     data: &serde_json::Value,
     received_at: i64,
-) -> Option<DiscordInboundDto> {
+) -> Option<DiscordInboundDraft> {
     if event != "MESSAGE_CREATE" {
         return None;
     }
@@ -215,9 +261,10 @@ pub fn normalize_dispatch(
     if payload.author.bot || payload.author.id.trim().is_empty() {
         return None;
     }
-    // 附件 / 贴纸 / 纯 embed 没有正文，渲染端只认文字。
+    let media = pending_attachments(&payload.attachments);
+    // 既没有正文也没有可下载附件（贴纸 / 纯 embed）：丢弃。
     let text = payload.content.trim();
-    if text.is_empty() {
+    if text.is_empty() && media.is_empty() {
         return None;
     }
     let nick = payload
@@ -231,14 +278,42 @@ pub fn normalize_dispatch(
             (!username.is_empty()).then(|| username.to_string())
         })
         .unwrap_or_else(|| payload.author.id.clone());
-    Some(DiscordInboundDto {
+    Some(DiscordInboundDraft {
         message_id: payload.id,
         peer_id: encode_peer(payload.channel_id.trim()),
         nick,
         sender_id: payload.author.id.trim().to_string(),
         text: text.to_string(),
         at: parse_timestamp(payload.timestamp.as_deref(), received_at),
+        media,
     })
+}
+
+/// 附件归一：`image/*` 按图片收，其余按文件收；无直链的丢掉；最多 4 条。
+fn pending_attachments(attachments: &[AttachmentPayload]) -> Vec<PendingAttachment> {
+    let mut out: Vec<PendingAttachment> = attachments
+        .iter()
+        .filter(|item| !item.url.trim().is_empty())
+        .map(|item| {
+            let name = item.filename.trim();
+            let kind = match item.content_type.as_deref() {
+                Some(mime) if mime.starts_with("image/") => MediaKind::Image,
+                _ => MediaKind::File,
+            };
+            PendingAttachment {
+                url: item.url.trim().to_string(),
+                kind,
+                name: if name.is_empty() {
+                    "attachment".to_string()
+                } else {
+                    name.to_string()
+                },
+                declared_size: item.size,
+            }
+        })
+        .collect();
+    out.truncate(MAX_INBOUND_MEDIA);
+    out
 }
 
 /// Discord 时间戳是 RFC3339；解析不出来就用收包时间（不猜）。
@@ -545,15 +620,21 @@ pub(crate) struct GatewayDeps {
     persist: Arc<dyn Fn(&PeerBook) + Send + Sync>,
     /// 除归属人外是否也答复其他人（连接建立时定下，改设置后重连生效）。
     allow_other_senders: bool,
+    /// 入站媒体收件目录（连上时解析一次；不可用时入站附件整体丢弃并记日志）。
+    inbox: Option<PathBuf>,
 }
 
 impl GatewayDeps {
     fn for_app(app: &AppHandle) -> Self {
         let handle = app.clone();
+        let inbox = inbox_dir(app, DIR_NAME)
+            .inspect_err(|error| log::warn("discord", format!("收件目录不可用: {error}")))
+            .ok();
         Self {
             sink: app_sink(app),
             persist: Arc::new(move |peers: &PeerBook| persist_peers(&handle, peers)),
             allow_other_senders: false,
+            inbox,
         }
     }
 
@@ -668,6 +749,53 @@ pub(crate) async fn send_text(
         );
     }
     Err(format!("发送消息返回 {status}: {}", brief(&body)))
+}
+
+/// 发一条媒体：multipart 直传字节（`payload_json` 空对象 = 只发附件、不带正文）。
+///
+/// 图片与文件走同一条附件通道（Discord 不区分端点），所以不需要按 kind 分叉。
+pub(crate) async fn send_media_impl(
+    app: &AppHandle,
+    peer_id: &str,
+    media: OutboundMedia,
+) -> Result<(), String> {
+    let channel_id =
+        decode_peer(peer_id).ok_or_else(|| format!("对端 id 无法解析: {peer_id:?}"))?;
+    let token = {
+        let host = app.state::<DiscordHost>();
+        let mut inner = host.lock().await;
+        ensure_loaded(app, &mut inner)?;
+        inner.token()?
+    };
+    let part = reqwest::multipart::Part::bytes(media.bytes).file_name(media.name);
+    let form = reqwest::multipart::Form::new()
+        .text("payload_json", "{}")
+        .part("files[0]", part);
+    let client = shared_client(10)?;
+    let response = client
+        .post(format!("{API_BASE}/channels/{channel_id}/messages"))
+        .header("Authorization", auth_header(&token))
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|error| format!("发送媒体失败: {error}"))?;
+    let status = response.status();
+    let body = read_text(response, RESPONSE_READ_TIMEOUT)
+        .await
+        .map_err(|error| format!("发送媒体响应读取失败: {error}"))?;
+    if status.is_success() {
+        return Ok(());
+    }
+    if status == reqwest::StatusCode::FORBIDDEN {
+        return Err(
+            "Discord 拒绝了这条媒体（403）：私聊需要对方先发起过会话，且不能给已拉黑机器人的用户发"
+                .into(),
+        );
+    }
+    if status == reqwest::StatusCode::PAYLOAD_TOO_LARGE {
+        return Err("Discord 拒绝了这条媒体（413）：超过该频道的附件大小上限".into());
+    }
+    Err(format!("发送媒体返回 {status}: {}", brief(&body)))
 }
 
 /// 错误体只留一段摘要。
@@ -871,6 +999,96 @@ async fn next_text(
     }
 }
 
+/// 下载一条入站附件（带签名的 CDN 直链，无需鉴权），读入后卡 20MB 上限。
+async fn download_attachment(
+    client: &reqwest::Client,
+    pending: &PendingAttachment,
+) -> Result<Vec<u8>, String> {
+    if pending
+        .declared_size
+        .is_some_and(|size| size > MAX_MEDIA_BYTES)
+    {
+        return Err(format!(
+            "附件超过 {} MB 上限",
+            MAX_MEDIA_BYTES / (1024 * 1024)
+        ));
+    }
+    let response = client
+        .get(&pending.url)
+        .send()
+        .await
+        .map_err(|error| format!("下载附件请求失败: {error}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("下载附件返回 {status}"));
+    }
+    let bytes = tokio::time::timeout(RESPONSE_READ_TIMEOUT, response.bytes())
+        .await
+        .map_err(|_| "下载附件读取超时".to_string())?
+        .map_err(|error| format!("读取附件字节失败: {error}"))?;
+    if bytes.len() as u64 > MAX_MEDIA_BYTES {
+        return Err(format!(
+            "附件超过 {} MB 上限",
+            MAX_MEDIA_BYTES / (1024 * 1024)
+        ));
+    }
+    Ok(bytes.to_vec())
+}
+
+/// 把入站草稿的附件下载进 inbox（单条失败只记日志，不中断整轮）。
+async fn materialize_inbound(deps: &GatewayDeps, draft: DiscordInboundDraft) -> DiscordInboundDto {
+    let DiscordInboundDraft {
+        message_id,
+        peer_id,
+        nick,
+        sender_id,
+        text,
+        at,
+        media,
+    } = draft;
+    let mut refs = Vec::new();
+    if !media.is_empty() {
+        match deps.inbox.as_deref() {
+            None => log::warn("discord", "收件目录不可用，丢弃入站附件"),
+            Some(inbox) => match shared_client(10) {
+                Err(error) => log::warn("discord", format!("下载附件前建客户端失败: {error}")),
+                Ok(client) => {
+                    let received_at = now_ms();
+                    for (index, pending) in media.iter().enumerate() {
+                        match download_attachment(&client, pending).await {
+                            Ok(bytes) => {
+                                if let Some(dto) = store_inbound_media(
+                                    inbox,
+                                    DIR_NAME,
+                                    received_at,
+                                    index,
+                                    pending.kind,
+                                    &pending.name,
+                                    bytes,
+                                ) {
+                                    refs.push(dto);
+                                }
+                            }
+                            Err(error) => {
+                                log::warn("discord", format!("入站附件下载失败: {error}"))
+                            }
+                        }
+                    }
+                }
+            },
+        }
+    }
+    DiscordInboundDto {
+        message_id,
+        peer_id,
+        nick,
+        sender_id,
+        text,
+        at,
+        media: refs,
+    }
+}
+
 /// 一条业务事件：归属人判定 → 更新档案 → 允许则广播。
 async fn handle_dispatch(
     event: &str,
@@ -878,9 +1096,11 @@ async fn handle_dispatch(
     deps: &GatewayDeps,
     inner: &Mutex<Inner>,
 ) {
-    let Some(message) = normalize_dispatch(event, data, now_ms()) else {
+    let Some(draft) = normalize_dispatch(event, data, now_ms()) else {
         return;
     };
+    // 附件字节下载进 inbox 后再广播（渲染端凭 path 取走）。
+    let message = materialize_inbound(deps, draft).await;
     let (peers, allowed) = {
         let mut guard = inner.lock().await;
         guard.peers.claim_owner(&message.sender_id);
@@ -1068,6 +1288,7 @@ pub async fn discord_clear_credentials(
             let _ = std::fs::remove_file(&path);
         }
     }
+    prune_inbox(&app, DIR_NAME, true);
     log::info("discord", "凭证已清除");
     Ok(inner.status())
 }
@@ -1089,6 +1310,8 @@ pub async fn discord_connect(
         inner.detail = None;
     }
     let epoch = host.epoch.fetch_add(1, Ordering::SeqCst) + 1;
+    // 上次会话遗留的未取走收件文件先清掉（渲染端崩溃 / 未取走）。
+    prune_inbox(&app, DIR_NAME, false);
     let inner = host.inner.clone();
     let epochs = host.epoch.clone();
     let mut deps = GatewayDeps::for_app(&app);
@@ -1192,6 +1415,28 @@ mod tests {
         assert_eq!(inbound.nick, "Jean", "优先全局名");
         assert_eq!(inbound.text, "你好");
         assert_eq!(inbound.at, 1_704_164_645_000, "RFC3339 转毫秒");
+    }
+
+    #[test]
+    fn normalize_accepts_attachment_only_and_labels_kinds() {
+        let data = json!({
+            "id": "111",
+            "channel_id": "222",
+            "content": "",
+            "author": { "id": "333", "username": "jean" },
+            "attachments": [
+                { "filename": "pic.png", "content_type": "image/png", "size": 10, "url": "https://cdn.example/pic" },
+                { "filename": "报表.xlsx", "content_type": "application/vnd.ms-excel", "size": 20, "url": "https://cdn.example/report" },
+                { "filename": "no-url.bin", "url": "" },
+            ],
+        });
+        let draft = normalize_dispatch("MESSAGE_CREATE", &data, 1).expect("附件消息也是消息");
+        assert_eq!(draft.text, "");
+        assert_eq!(draft.media.len(), 2, "无直链的附件丢掉");
+        assert_eq!(draft.media[0].kind, MediaKind::Image);
+        assert_eq!(draft.media[0].name, "pic.png");
+        assert_eq!(draft.media[1].kind, MediaKind::File);
+        assert_eq!(draft.media[1].name, "报表.xlsx");
     }
 
     #[test]
@@ -1425,6 +1670,7 @@ mod tests {
             }),
             persist: Arc::new(|_peers: &PeerBook| {}),
             allow_other_senders: false,
+            inbox: None,
         };
         let inner = Mutex::new(Inner::default());
 
