@@ -8,11 +8,17 @@
  * - 扫码登录：`get_bot_qrcode` 取二维码内容 → `get_qrcode_status` 长轮询等确认；
  * - 收消息：`getupdates` 长轮询（服务端最多持有 ~35s），游标 `get_updates_buf` 由宿主持久化；
  * - 回消息：`sendmessage`，必须原样带上入站消息的 `contextToken`，否则关联不到会话。
+ *
+ * 媒体（图片 / 文件）不进事件载荷：宿主下载解密后落在自己的 inbox 目录，事件只带路径，
+ * 渲染端凭通用命令 `channel_take_media` 取原始字节（取走即删）；出站走 `channel_send_media`，
+ * 加密上传全在宿主侧。两者都在 `lib/channel-media.ts`，不由本模块暴露。
  */
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { isTauriRuntime } from "@greywork/core";
+
+import type { MediaRef } from "../types";
 
 /** 宿主侧通道状态机；`paused` = 服务端判会话过期（errcode -14）后的一小时冷却。 */
 export type WechatState = "stopped" | "connecting" | "connected" | "paused" | "error";
@@ -38,7 +44,11 @@ export interface WechatQrStart {
   content: string;
 }
 
-/** `wechat_login_poll` 的返回；`expired` 且带 qrContent = 宿主已自动刷新出新码。 */
+/**
+ * `wechat_login_poll` 的返回；`expired` 且带 qrContent = 宿主已自动刷新出新码。
+ *
+ * `scaned`（已扫码待确认）由 SDK 的登录回路内部消化、不对外暴露，故宿主不会产出该状态。
+ */
 export interface WechatLoginPoll {
   status: "wait" | "scaned" | "confirmed" | "expired";
   qrContent?: string;
@@ -50,13 +60,14 @@ export interface WechatLoginPoll {
 
 /** 入站消息：宿主已按「只放行本人（或用户显式允许）的发送者」过滤。 */
 export interface WechatInbound {
-  messageId: number | null;
   fromUserId: string;
   contextToken: string;
   /** 文本内容；语音会取云端转写文本。非文本消息为空串。 */
   text: string;
   /** item_list 的类型集合（1 文本 / 2 图片 / 3 语音 / 4 文件 / 5 视频）。 */
   itemTypes: number[];
+  /** 已下载解密的媒体（图片 / 文件）。下载失败或未支持的类型不在其中。 */
+  media?: MediaRef[];
   createTimeMs: number | null;
   /** 宿主收到消息的时刻（epoch ms）。 */
   at: number;
@@ -108,9 +119,9 @@ export const wechatBackend = {
     await invoke("wechat_send", { toUserId, contextToken, text });
   },
 
-  /** 「正在输入」指示（失败可忽略：它只是体验增强）。 */
-  async sendTyping(toUserId: string, contextToken: string, typing: boolean): Promise<void> {
-    await invoke("wechat_send_typing", { toUserId, contextToken, typing });
+  /** 「正在输入」指示（失败可忽略：它只是体验增强）。取消由微信自行超时，宿主侧是 no-op。 */
+  async sendTyping(toUserId: string, typing: boolean): Promise<void> {
+    await invoke("wechat_send_typing", { toUserId, typing });
   },
 
   /** 订阅宿主状态变化；返回解绑函数。 */

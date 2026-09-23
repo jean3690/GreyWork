@@ -310,7 +310,14 @@ export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi 
           state.acpBusy.value = false;
           state.chat.runningSessionId = null;
           locals.turnHooks = null;
-          hooks.onPromptDone?.({ threadId, messageId });
+          // 本回合工作区产物：普通对话路径下面会发 preview:request 开预览面板，但 hooked 回合
+          // （远程助手 / planner）在这行就 return 了，面板那套跑不到。产物改经钩子上下文直连
+          // 递出——远程助手据此把文件回传给聊天通道，不靠事件总线（preview:request 用户点附件也发）。
+          const files =
+            !errorText && Array.isArray(payload.files)
+              ? payload.files.filter((raw): raw is string => typeof raw === "string" && raw.trim() !== "").map((raw) => raw.trim())
+              : [];
+          hooks.onPromptDone?.({ threadId, messageId, files });
           return;
         }
         // 3) 普通全局回合（既有逻辑）
@@ -405,6 +412,8 @@ export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi 
     locals.acpSessionThreadId = threadId;
     // 新会话没有上下文：schedule 围栏说明需要随下个回合重新注入一次
     locals.scheduleHintInjectedFor = null;
+    // 同理：调用方宿主能力提示（远程文件发送）也要重注。
+    locals.hostHintInjectedFor = null;
     state.acpConfigOptions.value = opened.configOptions;
     state.acpMcpServers.value = opened.mcpServers ?? [];
     state.acpMcpSkipped.value = opened.skippedMcpServers ?? [];

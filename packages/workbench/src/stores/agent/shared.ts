@@ -212,6 +212,8 @@ export interface GlobalTurnEndContext {
   threadId: string;
   messageId: string;
   error?: unknown;
+  /** 本回合宿主扫到的工作区产物绝对路径（仅成功回合；失败回合为空）。 */
+  files?: string[];
 }
 
 /** sendGlobalTurn 的回合收尾钩子：编排 planner 回合与普通对话走同一全局回合机制，差异经钩子表达。 */
@@ -231,12 +233,19 @@ export interface GlobalTurnOptions {
   reuseGlobalSession?: boolean;
   /** 复用已入流的支架（计划门确认路径：user + assistant 已由 beginAcpPlan 推入，不再重复入流）。 */
   reuseScaffold?: { threadId: string; message: ThreadMessage };
-  /** 随本轮 prompt 发出的附件（图片走 image 内容块，文本内联为 text 块）。 */
+  /** 随本轮 prompt 发出的附件（图片走 image 内容块，文本内联内容，通用文件只递路径）。 */
   attachments?: readonly Attachment[];
+  /**
+   * 调用方追加的宿主能力提示（远程助手据此告诉模型「对方不在本机，怎么把文件发过去」）。
+   * 与 schedule 提示不同：**hooks 存在时也注入** —— 远程回合本身就带 hooks。
+   * 每个 ACP 会话只注入一次（会话跨回合保留上下文）。
+   */
+  hostHint?: string;
 }
 
 /**
- * 附件 → ACP prompt 单元：图片读成 base64 走 image 块，文本内联为 text 块。
+ * 附件 → ACP prompt 单元：图片读成 base64 走 image 块，文本内联为 text 块，
+ * 通用文件只递一条路径引用（内容读不了）。
  *
  * 单条读失败（附件文件被删/移走）只跳过该条并提示，不让整轮派发失败 ——
  * 文字部分照常送达，用户至少知道发生了什么。`imageSupported` 为 false 时过滤图片

@@ -156,6 +156,53 @@ describe("schedule 围栏（AI 提议定时任务）", () => {
   });
 });
 
+describe("hostHint 注入（远程文件发送）", () => {
+  const HINT = "【宿主能力提示 · 远程文件发送】用户不在本机。";
+
+  async function flush(): Promise<void> {
+    await vi.waitFor(() => expect(useAgentStore().acpBusy).toBe(false));
+  }
+
+  async function sendTurn(text: string): Promise<void> {
+    await useAgentStore().sendGlobalTurn(text, "ACP", { hostHint: HINT, hooks: { onPromptDone: () => undefined } });
+  }
+
+  beforeEach(() => {
+    h.startAgent.mockResolvedValue(7);
+    h.openSession.mockResolvedValue({ sessionId: "s1", configOptions: [] });
+    h.prompt.mockResolvedValue({ turnId: 1 });
+  });
+
+  it("首回合注入 hostHint（带 hooks 也注入），同会话第二回合不再注入", async () => {
+    const chat = useChatStore();
+    useSessionStore().createSession(null, "hostHint 测试");
+    chat.activeThreadId = useSessionStore().activeSessionId!;
+
+    await sendTurn("第一轮");
+    expect(h.prompt).toHaveBeenNthCalledWith(1, 7, expect.stringContaining("远程文件发送"));
+    emit({ kind: "prompt-done", payload: { turnId: 1, response: {} } });
+    await flush();
+
+    await sendTurn("第二轮");
+    expect(h.prompt).toHaveBeenNthCalledWith(2, 7, "第二轮");
+  });
+
+  it("换新 ACP 会话后重新注入", async () => {
+    const chat = useChatStore();
+    const sessions = useSessionStore();
+    sessions.createSession(null, "会话甲");
+    chat.activeThreadId = sessions.activeSessionId!;
+    await sendTurn("第一轮");
+    emit({ kind: "prompt-done", payload: { turnId: 1, response: {} } });
+    await flush();
+
+    sessions.createSession(null, "会话乙");
+    chat.activeThreadId = sessions.activeSessionId!;
+    await sendTurn("新会话第一轮");
+    expect(h.prompt).toHaveBeenLastCalledWith(7, expect.stringContaining("远程文件发送"));
+  });
+});
+
 describe("dispatchToAcp 写入对话流", () => {
   it("user 消息与 assistant 支架进入当前线程，chunk 流式续写 content", async () => {
     h.startAgent.mockResolvedValue(7);

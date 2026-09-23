@@ -160,3 +160,39 @@ describe("真实 ACP 回合产物自动开预览", () => {
     expect(usePreviewStore().tabs).toHaveLength(0);
   });
 });
+
+describe("hooked 回合（远程助手 / planner）产物经钩子上下文递出", () => {
+  /** 带 hooks 派发一轮：hooked 分支在开预览面板那行之前就 return 了，产物只能走 onPromptDone。 */
+  async function runHookedTurn(onFiles: (files: string[] | undefined) => void): Promise<void> {
+    useSessionStore().createSession(null, "钩子回合");
+    await useAgentStore().sendGlobalTurn("写个文件", "ACP", {
+      hooks: { onPromptDone: (ctx) => onFiles(ctx.files) },
+    });
+  }
+
+  it("prompt-done 的 files 传给 onPromptDone，且不弹预览面板", async () => {
+    const seen: (string[] | undefined)[] = [];
+    await runHookedTurn((files) => seen.push(files));
+
+    emit({
+      kind: "prompt-done",
+      payload: { turnId: 1, response: {}, files: ["/home/test/out/a.xlsx", 7, "", "  "] },
+    });
+
+    expect(seen).toEqual([["/home/test/out/a.xlsx"]]);
+    // 面板那套只在普通回合走：hooked 回合不该抢焦点
+    expect(usePreviewStore().tabs).toHaveLength(0);
+  });
+
+  it("失败回合不带产物", async () => {
+    const seen: (string[] | undefined)[] = [];
+    await runHookedTurn((files) => seen.push(files));
+
+    emit({
+      kind: "prompt-done",
+      payload: { turnId: 1, error: "boom", files: ["/home/test/out/a.xlsx"] },
+    });
+
+    expect(seen).toEqual([[]]);
+  });
+});

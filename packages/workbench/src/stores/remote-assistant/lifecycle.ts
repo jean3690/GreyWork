@@ -13,6 +13,7 @@ import { qqBackend } from "../../lib/qq-backend";
 import { telegramBackend } from "../../lib/telegram-backend";
 import { wecomBackend } from "../../lib/wecom-backend";
 import { t } from "./shared";
+import { ensureRemoteWorkspace, ensureRemoteWorkspaceFolder } from "../../lib/remote-workspace";
 import type { RemoteAssistantState } from "./state";
 import type { StatusApi } from "./status";
 import type { ConnectApi } from "./connect";

@@ -10,6 +10,7 @@ import type { QqStatus } from "../../lib/qq-backend";
 import type { TelegramStatus } from "../../lib/telegram-backend";
 import type { WecomStatus } from "../../lib/wecom-backend";
 import type { WechatStatus } from "../../lib/wechat-backend";
+import type { MediaRef } from "../../types";
 import { i18n } from "../../i18n";
 
 const t = i18n.global.t;
@@ -140,7 +141,8 @@ export function dingtalkChannelStatus(status: DingTalkStatus | undefined): Chann
   };
 }
 
-export type RemoteActivityKind = "text" | "unsupported" | "error" | "system";
+/** 活动流条目类别：`media` 是「只有图片 / 文件、没有文字」的入站消息。 */
+export type RemoteActivityKind = "text" | "media" | "unsupported" | "error" | "system";
 export interface RemoteActivity {
   id: string;
   direction: "in" | "out";
@@ -351,6 +353,8 @@ export interface InboundMessage {
   contextToken: string | null;
   /** 非文本消息的类型说明（微信给数字类型集合，钉钉给 msgtype）。 */
   unsupportedLabel: string;
+  /** 随消息一起到达的媒体（图片 / 文件）；字节还在宿主 inbox，凭 `path` 取走。 */
+  mediaRefs?: MediaRef[];
   at: number;
 }
 

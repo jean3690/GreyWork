@@ -166,6 +166,31 @@ export interface Attachment {
 }
 
 /**
+ * 远程通道入站消息带过来的媒体引用：字节还在宿主侧的收件目录里，渲染端凭 `path` 取走。
+ *
+ * 与 `Attachment` 的区别：这是**入站原始引用**，尚未落进会话附件库（取走后由宿主删除）。
+ * 七条通道共用同一形状（宿主 `channel_media::MediaRefDto` 直出）。
+ */
+export interface MediaRef {
+  kind: "image" | "file";
+  name: string;
+  mime: string;
+  size: number;
+  /** 宿主收件目录里的绝对路径（`channel_take_media` 取走后由宿主删除）。 */
+  path: string;
+}
+
+/**
+ * 一条通道的媒体能力。**协议事实**，宿主 `channel_media::capability_of` 是唯一来源，
+ * 渲染端只做「提前告知」：
+ * - `both`：收发图片与文件；
+ * - `imageOnly`：只能发图片（企业微信的被动回复没有文件出口）；
+ * - `inboundOnly`：只能收、不能发（钉钉 sessionWebhook 没有媒体通道）；
+ * - `none`：完全不支持媒体。
+ */
+export type MediaCapability = "both" | "imageOnly" | "inboundOnly" | "none";
+
+/**
  * 待确认的定时任务提案（AI 回复中的 ```schedule 围栏解析产物）。
  * 随会话整条持久化：回合结束/重启后仍可确认；`createdId` 非空 = 已收口
  * （卡片转只读，回放渲染也不会重复建任务）。

@@ -115,6 +115,11 @@ export function createTurnSlice({ state, getRuntime }: TurnDeps): TurnApi {
         locals.scheduleHintInjectedFor = sessionId;
         promptText = `${SCHEDULE_HINT}\n\n${text}`;
       }
+      // 调用方宿主能力提示（远程文件发送）：hooks 存在时也要注入——远程回合走的就是 hooked 分支。
+      if (options.hostHint && sessionId && locals.hostHintInjectedFor !== sessionId) {
+        locals.hostHintInjectedFor = sessionId;
+        promptText = `${options.hostHint}\n\n${promptText}`;
+      }
       const { turnId } = await acp.prompt(state.acpHandle.value as number, promptText, units);
       state.activeTurnId.value = turnId;
       // 注意：成功后不清 acpStream —— prompt 只是 ack，回合增量经事件异步回流，支架必须活到 prompt-done / stopped。

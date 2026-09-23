@@ -1012,6 +1012,11 @@ export const zhCN = {
       noContextToken: "对方还没发过消息，无法主动发起会话（协议要求带上对方消息的凭据）。",
       unknownPeer: "找不到这个联系人。",
       emptyDraft: "消息不能为空。",
+      attach: "添加附件",
+      mediaNoPath: "这个附件还没落盘，发送不了。",
+      mediaInboundOnly: "这条通道只能接收文件，不能发送。",
+      mediaImageOnly: "这条通道只能发送图片，发不了文件。",
+      mediaUnsupported: "这条通道不支持发送图片或文件。",
     },
     status: {
       stopped: "未连接",
@@ -1049,6 +1054,14 @@ export const zhCN = {
       sessionTitle: "微信 · {peer}",
       loggedInAs: "已登录：{user}",
       requirement: "这条通道走腾讯官方 ClawBot（iLink）接口，手机微信需带 ClawBot 插件入口（iOS ≥ 8.0.70 / Android ≥ 8.0.69）。",
+    },
+    media: {
+      inbound: "收到 {count} 个媒体文件",
+      imageInbound: "收到一张图片",
+      fileInbound: "收到文件：{name}",
+      takeFailed: "接收媒体失败（{name}）：{detail}",
+      sendFailed: "发送媒体失败（{name}）：{detail}",
+      artifactSent: "已回传产物：{name}",
     },
     dingtalk: {
       requirement: "在钉钉开放平台创建「企业内部机器人」并开启 Stream 模式推送；凭证填在下面。",

@@ -12,6 +12,8 @@ import { qqBackend, type QqStatus } from "../../lib/qq-backend";
 import { telegramBackend, type TelegramBotLink, type TelegramStatus } from "../../lib/telegram-backend";
 import { wecomBackend, type WecomStatus } from "../../lib/wecom-backend";
 import { wechatBackend, type WechatStatus } from "../../lib/wechat-backend";
+import { channelMediaBackend, defaultMediaCapability } from "../../lib/channel-media";
+import type { MediaCapability } from "../../types";
 import {
   ACTIVITY_LIMIT,
   aid,
@@ -20,6 +22,7 @@ import {
   feishuChannelStatus,
   discordChannelStatus,
   qqChannelStatus,
+  REMOTE_CHANNELS,
   telegramChannelStatus,
   wecomChannelStatus,
   wechatChannelStatus,
@@ -42,6 +45,8 @@ export interface StatusApi {
   refreshDiscordStatus(): Promise<DiscordStatus>;
   refreshWecomStatus(): Promise<WecomStatus>;
   refreshTelegramBotLink(): Promise<TelegramBotLink | null>;
+  /** 拉取各通道的媒体能力矩阵（宿主直出；取不到时保留默认矩阵）。 */
+  refreshMediaCapabilities(): Promise<void>;
   recordActivity(entry: Omit<RemoteActivity, "id" | "at">): void;
 }
 
@@ -133,6 +138,28 @@ export function createStatusSlice({ state }: { state: RemoteAssistantState }): S
     }
   }
 
+  /**
+   * 拉取各通道的媒体能力矩阵。
+   *
+   * 宿主是协议事实的唯一来源；取不到（浏览器态、命令缺失、宿主半截响应）时保留默认矩阵 ——
+   * 能力提示只影响「提前告知」，真正的拦截在宿主侧，兜底偏保守即可。
+   */
+  async function refreshMediaCapabilities(): Promise<void> {
+    if (!state.available.value) return;
+    try {
+      const caps = await channelMediaBackend.capabilities();
+      const next = {} as Record<RemoteChannel, MediaCapability>;
+      for (const channel of REMOTE_CHANNELS) {
+        const cap = caps[channel];
+        next[channel] =
+          cap === "both" || cap === "imageOnly" || cap === "inboundOnly" || cap === "none" ? cap : defaultMediaCapability(channel);
+      }
+      state.mediaCapabilities.value = next;
+    } catch (error) {
+      console.warn("[remote-assistant] 媒体能力矩阵未取到，沿用默认", error);
+    }
+  }
+
   /** 活动流只保留最近一屏，越新的排越前。 */
   function recordActivity(entry: Omit<RemoteActivity, "id" | "at">): void {
     state.activity.value.unshift({ id: aid(), at: Date.now(), ...entry });
@@ -148,6 +175,7 @@ export function createStatusSlice({ state }: { state: RemoteAssistantState }): S
     refreshFeishuStatus,
     refreshTelegramStatus,
     refreshTelegramBotLink,
+    refreshMediaCapabilities,
     refreshQqStatus,
     refreshDiscordStatus,
     refreshWecomStatus,

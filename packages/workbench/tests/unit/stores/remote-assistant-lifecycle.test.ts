@@ -92,6 +92,7 @@ function build(): LifecycleFixture {
     refreshQqStatus: vi.fn(() => Promise.resolve({})),
     refreshDiscordStatus: vi.fn(() => Promise.resolve({})),
     refreshWecomStatus: vi.fn(() => Promise.resolve({})),
+    refreshMediaCapabilities: vi.fn(() => Promise.resolve()),
   };
   const connect: Record<string, Mock<() => Promise<void>>> = {
     connect: vi.fn(() => Promise.resolve()),
@@ -187,6 +188,7 @@ describe("init 门禁", () => {
     }
     expect(h.refresh.refreshStatus).toHaveBeenCalledTimes(1);
     expect(h.refresh.refreshWecomStatus).toHaveBeenCalledTimes(1);
+    expect(h.refresh.refreshMediaCapabilities).toHaveBeenCalledTimes(1);
   });
 });
 

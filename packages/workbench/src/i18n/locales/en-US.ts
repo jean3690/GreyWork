@@ -1058,6 +1058,11 @@ export const enUS: MessageSchema = {
         "This contact has not messaged us yet, so we cannot start the conversation (the protocol requires their message credential).",
       unknownPeer: "Unknown contact.",
       emptyDraft: "Message cannot be empty.",
+      attach: "Add attachment",
+      mediaNoPath: "This attachment hasn't been saved to disk yet, so it can't be sent.",
+      mediaInboundOnly: "This channel can only receive files — it can't send them.",
+      mediaImageOnly: "This channel can only send images, not files.",
+      mediaUnsupported: "This channel doesn't support sending images or files.",
     },
     status: {
       stopped: "Offline",
@@ -1096,6 +1101,14 @@ export const enUS: MessageSchema = {
       loggedInAs: "Signed in as {user}",
       requirement:
         "This channel uses Tencent's official ClawBot (iLink) API; your phone's WeChat needs the ClawBot entry (iOS ≥ 8.0.70 / Android ≥ 8.0.69).",
+    },
+    media: {
+      inbound: "Received {count} media items",
+      imageInbound: "Received an image",
+      fileInbound: "Received file: {name}",
+      takeFailed: "Failed to receive media ({name}): {detail}",
+      sendFailed: "Failed to send media ({name}): {detail}",
+      artifactSent: "Sent back artifact: {name}",
     },
     dingtalk: {
       requirement: "Create an internal enterprise bot in the DingTalk open platform with Stream-mode push; put its credentials below.",

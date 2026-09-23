@@ -112,6 +112,8 @@ export const useRemoteAssistantStore = defineStore("remote-assistant", () => {
     qrError: state.qrError,
     activity: state.activity,
     peers: state.peers,
+    mediaCapabilities: state.mediaCapabilities,
+    refreshMediaCapabilities: status.refreshMediaCapabilities,
     peerList: peers.peerList,
     peerById: peers.peerByKey,
     markPeerRead: peers.markPeerRead,

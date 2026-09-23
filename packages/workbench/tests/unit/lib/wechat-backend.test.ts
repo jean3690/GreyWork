@@ -57,11 +57,10 @@ describe("wechatBackend", () => {
     });
   });
 
-  it("输入状态：typing 开关映射为 status 字段", async () => {
-    await wechatBackend.sendTyping("peer@im.wechat", "ctx-1", false);
+  it("输入状态：只下发 typing 开关（回信凭据由宿主/SDK 自己记着）", async () => {
+    await wechatBackend.sendTyping("peer@im.wechat", false);
     expect(mocks.invoke).toHaveBeenCalledWith("wechat_send_typing", {
       toUserId: "peer@im.wechat",
-      contextToken: "ctx-1",
       typing: false,
     });
   });

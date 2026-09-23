@@ -2,6 +2,7 @@
 // 空快照不覆盖）/ botLink 成败分支 / 活动流上限。切片经 createStatusSlice({ state }) 直接注入。
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ACTIVITY_LIMIT, type RemoteChannel } from "@/stores/remote-assistant/shared";
+import type * as ChannelMedia from "@/lib/channel-media";
 
 const backends = vi.hoisted(() => ({
   wechatStatus: vi.fn<() => Promise<unknown>>(() => Promise.resolve({})),
@@ -12,6 +13,7 @@ const backends = vi.hoisted(() => ({
   discordStatus: vi.fn<() => Promise<unknown>>(() => Promise.resolve({})),
   wecomStatus: vi.fn<() => Promise<unknown>>(() => Promise.resolve({})),
   botLink: vi.fn<() => Promise<unknown>>(() => Promise.resolve({ username: "gw_bot" })),
+  capabilities: vi.fn<() => Promise<Record<string, string>>>(() => Promise.resolve({})),
 }));
 
 vi.mock("@/lib/wechat-backend", () => ({ wechatBackend: { status: () => backends.wechatStatus() } }));
@@ -23,6 +25,18 @@ vi.mock("@/lib/wecom-backend", () => ({ wecomBackend: { status: () => backends.w
 vi.mock("@/lib/telegram-backend", () => ({
   telegramBackend: { status: () => backends.telegramStatus(), botLink: () => backends.botLink() },
 }));
+// 能力矩阵：保留纯函数（默认矩阵 / 能力判定），只把命令换成可断言的桩。
+vi.mock("@/lib/channel-media", async (importOriginal) => {
+  const actual = await importOriginal<typeof ChannelMedia>();
+  return {
+    ...actual,
+    channelMediaBackend: {
+      capabilities: () => backends.capabilities(),
+      takeMedia: vi.fn(),
+      sendMedia: vi.fn(),
+    },
+  };
+});
 
 import { createStatusSlice, type StatusApi } from "@/stores/remote-assistant/status";
 import type { RemoteAssistantState } from "@/stores/remote-assistant/state";
@@ -48,6 +62,7 @@ interface StatusHarness {
   wecomStatus: { value: WecomStatus | null };
   telegramBotLink: { value: { link: TelegramBotLink | null; error: string | null } };
   activity: { value: unknown[] };
+  mediaCapabilities: { value: Record<string, string> };
 }
 
 function build(): StatusHarness {
@@ -61,6 +76,7 @@ function build(): StatusHarness {
   const wecomStatus = { value: null };
   const telegramBotLink = { value: { link: null, error: null } };
   const activity = { value: [] as unknown[] };
+  const mediaCapabilities = { value: {} as Record<string, string> };
   const api = createStatusSlice({
     state: {
       available,
@@ -73,6 +89,7 @@ function build(): StatusHarness {
       wecomStatus,
       telegramBotLink,
       activity,
+      mediaCapabilities,
     } as unknown as RemoteAssistantState,
   });
   return {
@@ -87,6 +104,7 @@ function build(): StatusHarness {
     wecomStatus,
     telegramBotLink,
     activity,
+    mediaCapabilities,
   };
 }
 
@@ -100,6 +118,7 @@ beforeEach(() => {
     backends.discordStatus,
     backends.wecomStatus,
     backends.botLink,
+    backends.capabilities,
   ]) {
     fn.mockClear();
   }
@@ -114,6 +133,7 @@ beforeEach(() => {
   ]) {
     fn.mockImplementation(() => Promise.resolve({ state: "connected" }));
   }
+  backends.capabilities.mockImplementation(() => Promise.resolve({}));
 });
 
 describe("通道状态归一", () => {
@@ -266,6 +286,34 @@ describe("刷新门禁", () => {
     expect(await h.api.refreshTelegramBotLink()).toBeNull();
     expect(h.telegramBotLink.value.link).toBeNull();
     expect(h.telegramBotLink.value.error).toBe("token 无效");
+  });
+
+  it("媒体能力：宿主直出的矩阵写回（缺项与非法值回落默认口径）", async () => {
+    const h = build();
+    backends.capabilities.mockResolvedValue({ wechat: "both", wecom: "imageOnly", dingtalk: "bogus" });
+    await h.api.refreshMediaCapabilities();
+    expect(h.mediaCapabilities.value).toEqual({
+      wechat: "both",
+      dingtalk: "inboundOnly", // 非法值回落默认
+      feishu: "both", // 宿主没给 → 默认
+      telegram: "both",
+      qq: "both",
+      discord: "both",
+      wecom: "imageOnly",
+    });
+  });
+
+  it("媒体能力：浏览器态不碰宿主；宿主抛错时保留现有矩阵", async () => {
+    const h = build();
+    h.available.value = false;
+    await h.api.refreshMediaCapabilities();
+    expect(backends.capabilities).not.toHaveBeenCalled();
+
+    h.available.value = true;
+    h.mediaCapabilities.value = { wechat: "both" };
+    backends.capabilities.mockRejectedValue(new Error("命令缺失"));
+    await h.api.refreshMediaCapabilities();
+    expect(h.mediaCapabilities.value).toEqual({ wechat: "both" });
   });
 });
 

@@ -1,5 +1,5 @@
 // 微信会话页契约：两侧消息分列、能从桌面端手发（走 sendmessage 命令）、
-// 没有对方凭据 / 通道未连接时如实禁用并说明。
+// 没有对方凭据 / 通道未连接时如实禁用并说明；附件走 send media 命令。
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { mount } from "@vue/test-utils";
 import { createPinia, setActivePinia, type Pinia } from "pinia";
@@ -8,6 +8,9 @@ import { i18n } from "@/i18n";
 import { createAppRouter } from "@/router";
 import { useRemoteAssistantStore } from "@/stores/remote-assistant";
 import { useSessionStore } from "@/stores/session";
+import type * as AttachmentLibrary from "@/state/attachment-library";
+import type * as ChannelMedia from "@/lib/channel-media";
+import type { Attachment } from "@/types";
 
 const mocks = vi.hoisted(() => ({
   backend: {
@@ -26,7 +29,39 @@ const mocks = vi.hoisted(() => ({
   },
 }));
 
+// 出站媒体已收进通用层（按 channel 分发），断言打在这里。
+const mediaMocks = vi.hoisted(() => ({
+  capabilities: vi.fn<() => Promise<Record<string, string>>>(async () => ({})),
+  sendMedia: vi.fn<(channel: string, peerId: string, path: string, kind?: string, token?: string) => Promise<void>>(),
+  takeMedia: vi.fn<(channel: string, path: string) => Promise<Uint8Array>>(),
+}));
+
+// 附件采集要弹系统选择器（DOM 环境里点不出来），只把这两处替换掉，
+// 其余（缩略图 / 字节读取）仍走真实实现。
+const attachmentMocks = vi.hoisted(() => ({
+  pick: vi.fn<() => Promise<Attachment[]>>(),
+  materialize: vi.fn<(sessionId: string, items: readonly Attachment[]) => Promise<Attachment[]>>(),
+}));
+
+vi.mock("@/state/attachment-library", async (importOriginal) => ({
+  ...(await importOriginal<typeof AttachmentLibrary>()),
+  pickAttachments: () => attachmentMocks.pick(),
+  materializeAttachments: (sessionId: string, items: readonly Attachment[]) => attachmentMocks.materialize(sessionId, items),
+}));
+
 vi.mock("@/lib/wechat-backend", () => ({ wechatBackend: mocks.backend }));
+vi.mock("@/lib/channel-media", async (importOriginal) => {
+  const actual = await importOriginal<typeof ChannelMedia>();
+  return {
+    ...actual,
+    channelMediaBackend: {
+      capabilities: () => mediaMocks.capabilities(),
+      takeMedia: (channel: string, path: string) => mediaMocks.takeMedia(channel, path),
+      sendMedia: (channel: string, peerId: string, path: string, kind?: string, token?: string) =>
+        mediaMocks.sendMedia(channel, peerId, path, kind, token),
+    },
+  };
+});
 vi.mock("@/lib/dingtalk-backend", () => ({
   dingtalkBackend: {
     supported: () => true,
@@ -95,6 +130,13 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.backend.send.mockResolvedValue(undefined);
   mocks.backend.sendTyping.mockResolvedValue(undefined);
+  mediaMocks.sendMedia.mockResolvedValue(undefined);
+  attachmentMocks.pick.mockResolvedValue([]);
+  attachmentMocks.materialize.mockImplementation((_sessionId, items) =>
+    Promise.resolve(
+      items.map((item) => ({ id: item.id, kind: item.kind, name: item.name, mime: item.mime, size: item.size, path: `/tmp/${item.id}` })),
+    ),
+  );
   // 联系人档案要能被 store 读到：pinia 先立起来，seed 才能在挂载前写档案
   pinia = createPinia();
   setActivePinia(pinia);
@@ -132,5 +174,61 @@ describe("RemoteConversationView", () => {
     const { wrapper } = await mountPage(false, { contextToken: "ctx-1" });
     expect(wrapper.get('[data-testid="remote-composer-send"]').attributes("disabled")).toBeDefined();
     expect(wrapper.get('[data-testid="remote-composer-hint"]').text()).toContain("通道未连接");
+  });
+
+  it("消息里的附件也渲染：文件出文件名 chip", async () => {
+    const { wrapper } = await mountPage(true, { contextToken: "ctx-1" });
+    const sessionId = useRemoteAssistantStore().peerById(`wechat:${PEER}`)!.sessionId;
+    useSessionStore().appendMessage(sessionId, {
+      id: "m3",
+      role: "user",
+      content: "",
+      ts: 3,
+      attachments: [{ id: "att-1", kind: "file", name: "报表.xlsx", mime: "application/vnd.ms-excel", size: 9, path: "/tmp/报表.xlsx" }],
+    });
+
+    await vi.waitFor(() => expect(wrapper.find('[data-testid="remote-attachment-file"]').exists()).toBe(true));
+    expect(wrapper.get('[data-testid="remote-attachment-file"]').text()).toContain("报表.xlsx");
+  });
+
+  it("只有附件没有文字也能发：走 sendMedia，不发文本", async () => {
+    const { wrapper } = await mountPage(true, { contextToken: "ctx-1" });
+    attachmentMocks.pick.mockResolvedValue([
+      { id: "att-1", kind: "file", name: "report.pdf", mime: "application/pdf", size: 9, bytes: new Uint8Array([1, 2]) },
+    ]);
+
+    await wrapper.get('[data-testid="remote-composer-attach"]').trigger("click");
+    await vi.waitFor(() => expect(wrapper.find('[data-testid="composer-attachments"]').exists()).toBe(true));
+
+    const send = wrapper.get('[data-testid="remote-composer-send"]');
+    expect(send.attributes("disabled")).toBeUndefined();
+    await send.trigger("click");
+
+    await vi.waitFor(() => expect(mediaMocks.sendMedia).toHaveBeenCalledWith("wechat", PEER, "/tmp/att-1", "file", "ctx-1"));
+    expect(mocks.backend.send).not.toHaveBeenCalled();
+  });
+
+  it("附件未落盘（草稿没有 path）时发送不发 sendMedia", async () => {
+    const { wrapper } = await mountPage(true, { contextToken: "ctx-1" });
+    attachmentMocks.pick.mockResolvedValue([{ id: "att-2", kind: "file", name: "ghost.pdf", mime: "application/pdf", size: 1 }]);
+    attachmentMocks.materialize.mockResolvedValue([{ id: "att-2", kind: "file", name: "ghost.pdf", mime: "application/pdf", size: 1 }]);
+
+    await wrapper.get('[data-testid="remote-composer-attach"]').trigger("click");
+    await vi.waitFor(() => expect(wrapper.find('[data-testid="composer-attachments"]').exists()).toBe(true));
+
+    await wrapper.get('[data-testid="remote-composer-send"]').trigger("click");
+
+    await vi.waitFor(() => expect(useRemoteAssistantStore().activity.some((entry) => entry.kind === "error")).toBe(true));
+    expect(mediaMocks.sendMedia).not.toHaveBeenCalled();
+  });
+
+  it("通道只能接收媒体（inboundOnly）：禁用附件入口并说明原因", async () => {
+    const { wrapper } = await mountPage(true, { contextToken: "ctx-1" });
+    mediaMocks.capabilities.mockResolvedValueOnce({ wechat: "inboundOnly" });
+    await useRemoteAssistantStore().refreshMediaCapabilities();
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.get('[data-testid="remote-composer-attach"]').attributes("disabled")).toBeDefined();
+    expect(wrapper.get('[data-testid="remote-composer-hint"]').text()).toContain("只能接收文件");
   });
 });
