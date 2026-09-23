@@ -1,7 +1,7 @@
-import { createTauriGitService, type GitChange, type GitService } from "@greywork/editor";
+import { createTauriGitService, type GitChange, type StagingGitService } from "@greywork/editor";
 import { isTauriRuntime } from "@greywork/core";
 import { defineStore } from "pinia";
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { resolveWorkspaceRoot } from "../lib/workspace-dir";
 import { activeConversationFolder } from "../lib/conversation-folder";
 import { activeWorkspaceFolder } from "../lib/artifact-dir";
@@ -25,10 +25,26 @@ export const useGitStore = defineStore("git", () => {
   const error = ref<string | null>(null);
 
   const entries = ref<GitChange[]>([]);
+  /** 选中项的缓存键（`index:path` / `work:path`）；null = 没展开。 */
   const selected = ref<string | null>(null);
   const diffCache = ref<Record<string, string>>({});
   const diffLoading = ref(false);
   const diffError = ref<string | null>(null);
+  /** 暂存 / 取消暂存的在途态与失败文案（与提交分开，面板上的位置也不同）。 */
+  const staging = ref(false);
+  const stagingError = ref<string | null>(null);
+
+  /**
+   * 同一路径可能在两侧各有一条（porcelain 的 `MM`），所以缓存键必须带侧别 ——
+   * 只用路径会让「已暂存那一版」的 diff 覆盖掉「未暂存那一版」。
+   */
+  function keyOf(path: string, staged: boolean): string {
+    return `${staged ? "index" : "work"}:${path}`;
+  }
+
+  /** 已暂存 / 未暂存两个分区；同一文件两侧都有改动时两个分区各出现一次（各家 git UI 的通行做法）。 */
+  const stagedEntries = computed(() => entries.value.filter((entry) => entry.index !== null));
+  const unstagedEntries = computed(() => entries.value.filter((entry) => entry.worktree !== null));
 
   /**
    * diff 缓存上限：一条是整份 unified diff 文本，大仓库里单个文件就上百 KB。
@@ -56,12 +72,23 @@ export const useGitStore = defineStore("git", () => {
   const lastCommitId = ref<string | null>(null);
 
   /** 当前工作区根的 Git 服务。**不初始化就调用**：refresh 里先解析根再建。 */
-  let service: GitService | null = null;
+  let service: StagingGitService | null = null;
 
   const activeEntries = () => entries.value;
-  const totalAdds = () => entries.value.reduce((sum, entry) => sum + entry.add, 0);
-  const totalDels = () => entries.value.reduce((sum, entry) => sum + entry.del, 0);
+  /** 两侧都算：头部那行给的是「这份工作区一共改了多少行」。 */
+  const totalAdds = () => entries.value.reduce((sum, entry) => sum + entry.add + entry.stagedAdd, 0);
+  const totalDels = () => entries.value.reduce((sum, entry) => sum + entry.del + entry.stagedDel, 0);
   const dirtyCount = () => entries.value.length;
+
+  /** 某条变更在指定侧的状态（面板按侧渲染徽标）。 */
+  function statusOf(entry: GitChange, side: "index" | "work"): string | null {
+    return side === "index" ? entry.index : entry.worktree;
+  }
+
+  /** 某条变更是否正展开着（键带侧别，两侧同路径各自独立）。 */
+  function isSelected(path: string, staged: boolean): boolean {
+    return selected.value === keyOf(path, staged);
+  }
 
   function clearError(): void {
     error.value = null;
@@ -74,6 +101,7 @@ export const useGitStore = defineStore("git", () => {
     selected.value = null;
     diffCache.value = {};
     diffError.value = null;
+    stagingError.value = null;
     service = null;
     error.value = null;
   }
@@ -108,16 +136,17 @@ export const useGitStore = defineStore("git", () => {
     }
   }
 
-  /** 选中某条变更并取回它的统一 diff（缓存按路径留一次）。 */
-  async function select(path: string): Promise<void> {
-    if (selected.value === path && diffCache.value[path] !== undefined) return;
-    selected.value = path;
-    if (diffCache.value[path] !== undefined) return;
+  /** 选中某条变更并取回它**那一侧**的统一 diff（缓存按 `侧:路径` 留一次）。 */
+  async function select(path: string, staged: boolean): Promise<void> {
+    const key = keyOf(path, staged);
+    if (selected.value === key && diffCache.value[key] !== undefined) return;
+    selected.value = key;
+    if (diffCache.value[key] !== undefined) return;
     if (!service) return;
     diffLoading.value = true;
     diffError.value = null;
     try {
-      putDiff(path, await service.diff(path));
+      putDiff(key, await service.diff(path, staged));
     } catch (cause) {
       diffError.value = cause instanceof Error ? cause.message : String(cause);
     } finally {
@@ -129,17 +158,46 @@ export const useGitStore = defineStore("git", () => {
     selected.value = null;
   }
 
-  /** 提交全部工作区变更；成功后清空提交框并刷新状态。 */
-  async function commitAll(): Promise<void> {
+  /**
+   * 暂存 / 取消暂存的公共编排。
+   *
+   * 成功后**清空 diff 缓存并收起展开项**：条目换了侧，旧键下的 diff 内容已经不对了
+   * （比如「未暂存」那一版的 diff 在暂存后就不该再显示）。
+   */
+  async function runStaging(action: (target: StagingGitService) => Promise<void>): Promise<void> {
+    if (!service) return;
+    staging.value = true;
+    stagingError.value = null;
+    try {
+      await action(service);
+      diffCache.value = {};
+      selected.value = null;
+      await refresh();
+    } catch (cause) {
+      stagingError.value = cause instanceof Error ? cause.message : String(cause);
+    } finally {
+      staging.value = false;
+    }
+  }
+
+  const stage = (path: string) => runStaging((target) => target.stage([path]));
+  const unstage = (path: string) => runStaging((target) => target.unstage([path]));
+  const stageAll = () => runStaging((target) => target.stageAll());
+  const unstageAll = () => runStaging((target) => target.unstageAll());
+
+  /** 提交：`all = false` 只提交已暂存，`true` 先 `add -A`（旧的「提交全部」）。 */
+  async function commitWith(all: boolean): Promise<void> {
     if (!service) return;
     const message = commitMessage.value.trim();
     if (!message) return;
     committing.value = true;
     commitError.value = null;
     try {
-      const result = await service.commit(message);
+      const result = await service.commit(message, { all });
       lastCommitId.value = result.hash;
       commitMessage.value = "";
+      diffCache.value = {};
+      selected.value = null;
       await refresh();
     } catch (cause) {
       commitError.value = cause instanceof Error ? cause.message : String(cause);
@@ -147,6 +205,9 @@ export const useGitStore = defineStore("git", () => {
       committing.value = false;
     }
   }
+
+  const commitStaged = () => commitWith(false);
+  const commitAll = () => commitWith(true);
 
   // 绑定的工作区文件夹变化（切换工作区 / 换绑 / 切对话）就重载 git 状态。
   const boundFolder = () => activeConversationFolder() ?? activeWorkspaceFolder();
@@ -164,6 +225,10 @@ export const useGitStore = defineStore("git", () => {
     diffCache,
     diffLoading,
     diffError,
+    staging,
+    stagingError,
+    stagedEntries,
+    unstagedEntries,
     commitMessage,
     committing,
     commitError,
@@ -172,9 +237,16 @@ export const useGitStore = defineStore("git", () => {
     totalAdds,
     totalDels,
     dirtyCount,
+    statusOf,
+    isSelected,
     refresh,
     select,
     deselect,
+    stage,
+    unstage,
+    stageAll,
+    unstageAll,
+    commitStaged,
     commitAll,
     clearError,
   };

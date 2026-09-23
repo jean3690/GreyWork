@@ -256,6 +256,36 @@ export const zhCN = {
       deleteMessage: "文件夹会连同里面的内容一起删除，此操作不可撤销。",
     },
 
+    /* 变更面板（git）。状态徽标文案在 status.*；提交与暂存分开。 */
+    git: {
+      loading: "正在读取变更…",
+      readFailed: "当前目录不是 git 仓库或读取失败：{detail}",
+      empty: "工作区没有未提交的变更",
+      refresh: "刷新变更",
+      files: "{n} 个文件",
+      stagedGroup: "已暂存 {n}",
+      unstagedGroup: "未暂存 {n}",
+      stage: "暂存",
+      unstage: "取消暂存",
+      stageAll: "全部暂存",
+      unstageAll: "全部取消暂存",
+      commitHint: "提交已暂存的变更",
+      commitPlaceholder: "提交信息…",
+      commitStaged: "提交已暂存",
+      commitAll: "提交全部变更",
+      committing: "提交中…",
+      committed: "已提交",
+      diffLoading: "读取 diff…",
+      diffEmpty: "二进制或没有文本变化",
+      lineLimit: "仅显示前 {limit} 行",
+      status: {
+        modified: "修改",
+        added: "新增",
+        deleted: "删除",
+        renamed: "重命名",
+        untracked: "未跟踪",
+      },
+    },
     /* 离开可编辑预览（切区段 / 切标签 / 关标签 / 关窗）前先自动保存；
        只有保存失败才弹这个确认。names 是未能保存的文件名，顿号连接。 */
     guard: {

@@ -60,7 +60,7 @@ describe("内存 git · 行差集是多重集语义", () => {
     const git = createMemoryGitService(fs);
     await fs.writeFile("a.ts", "x\ny\nz");
     const change = (await git.changes()).find((entry) => entry.path === "a.ts");
-    expect(change).toMatchObject({ status: "modified", add: 1, del: 1 });
+    expect(change).toMatchObject({ worktree: "modified", add: 1, del: 1 });
   });
 
   it("只看重数不看顺序：行序调换被多重集语义吞掉（这是已知限制，不是期望行为）", async () => {
@@ -72,7 +72,7 @@ describe("内存 git · 行差集是多重集语义", () => {
     // 变更面板会列出一个「改了但没差」的文件。内存 git 只服务于演示面板，够用；
     // 接真实 git 时这条要一起换掉。
     const change = (await git.changes()).find((entry) => entry.path === "a.ts");
-    expect(change).toMatchObject({ status: "modified", add: 0, del: 0 });
+    expect(change).toMatchObject({ worktree: "modified", add: 0, del: 0 });
     expect(await git.diff()).toBe("无变更。");
   });
 });

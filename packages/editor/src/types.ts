@@ -16,9 +16,12 @@ export interface EditorDocument {
   kind: EditorDocumentKind;
 }
 
+/** 变更状态；与宿主 `git.rs` 的 `letter_to_status` 映射一致。 */
+export type GitChangeStatus = "modified" | "added" | "deleted" | "renamed" | "untracked";
+
 export interface GitStatusEntry {
   path: string;
-  status: "modified" | "added" | "deleted" | "renamed" | "untracked";
+  status: GitChangeStatus;
   staged?: boolean;
 }
 
@@ -45,21 +48,56 @@ export interface WorkspaceFileSystem {
   snapshot(): Record<string, string>;
 }
 
-export interface GitChange extends GitStatusEntry {
-  /** 相对基线新增行数。 */
+/**
+ * 变更条目（**分侧**）。
+ *
+ * 同一个文件可以同时有「已暂存」和「未暂存」的改动（porcelain 的 `MM`），所以两侧各自
+ * 带状态与行数 —— `null` 表示这一侧没有改动。提交只吃 index 侧，行数也只按侧统计。
+ */
+export interface GitChange {
+  path: string;
+  /** 重命名 / 复制的旧路径（index 侧），没有则为 null。 */
+  oldPath: string | null;
+  /** index（已暂存）侧的状态。 */
+  index: GitChangeStatus | null;
+  /** worktree（未暂存）侧的状态。 */
+  worktree: GitChangeStatus | null;
+  stagedAdd: number;
+  stagedDel: number;
+  /** worktree 侧行级增删。 */
   add: number;
-  /** 相对基线删除行数。 */
   del: number;
 }
 
 export interface GitService {
   status(): Promise<GitStatusEntry[]>;
-  /** status + 每文件行级增删统计（供变更面板一次取全）。 */
+  /** status + 每文件分侧行级增删统计（供变更面板一次取全）。 */
   changes(): Promise<GitChange[]>;
   diff(path?: string): Promise<string>;
   commit(message: string): Promise<CommitResult>;
   currentBranch(): Promise<string>;
   branches(): Promise<string[]>;
+}
+
+/**
+ * 带暂存能力的 Git 服务：**只有真实宿主 git 提供**。
+ *
+ * 内存工作区（`createMemoryGitService`）根本没有 index 概念，把 stage/unstage 塞进
+ * 基接口只会逼它假装实现；需要暂存的调用方（变更面板）显式向上取这一层。
+ */
+export interface StagingGitService extends GitService {
+  /** 暂存指定路径（相对仓库根）。 */
+  stage(paths: string[]): Promise<void>;
+  /** 暂存全部（含未跟踪文件）。 */
+  stageAll(): Promise<void>;
+  /** 取消暂存指定路径（重命名的旧路径由宿主自动成对处理）。 */
+  unstage(paths: string[]): Promise<void>;
+  /** 取消暂存全部。 */
+  unstageAll(): Promise<void>;
+  /** `staged = false` 看未暂存侧，`true` 看已暂存侧；缺省为未暂存侧。 */
+  diff(path?: string, staged?: boolean): Promise<string>;
+  /** `options.all` 为真时先 `add -A`（提交全部），否则只提交已暂存的内容。 */
+  commit(message: string, options?: { all?: boolean }): Promise<CommitResult>;
 }
 
 export interface PreviewCapabilities {

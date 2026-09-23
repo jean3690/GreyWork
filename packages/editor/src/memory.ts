@@ -132,18 +132,29 @@ export function createMemoryGitService(fs: WorkspaceFileSystem): GitService {
     async changes() {
       const now = fs.snapshot();
       const result: GitChange[] = [];
+      // 内存工作区没有 index（暂存区）概念：所有改动一律记在 worktree 侧，index 恒为 null。
+      const entry = (path: string, status: GitChange["worktree"], add: number, del: number): GitChange => ({
+        path,
+        oldPath: null,
+        index: null,
+        worktree: status,
+        stagedAdd: 0,
+        stagedDel: 0,
+        add,
+        del,
+      });
       for (const [path, content] of Object.entries(now)) {
         const base = baseline[path];
         if (base === undefined) {
-          result.push({ path, status: "untracked", add: diffLines("", content).add, del: 0 });
+          result.push(entry(path, "untracked", diffLines("", content).add, 0));
         } else if (base !== content) {
           const stats = diffLines(base, content);
-          result.push({ path, status: "modified", add: stats.add, del: stats.del });
+          result.push(entry(path, "modified", stats.add, stats.del));
         }
       }
       for (const path of Object.keys(baseline)) {
         if (!(path in now)) {
-          result.push({ path, status: "deleted", add: 0, del: diffLines(baseline[path], "").del });
+          result.push(entry(path, "deleted", 0, diffLines(baseline[path], "").del));
         }
       }
       return result.sort((a, b) => a.path.localeCompare(b.path));

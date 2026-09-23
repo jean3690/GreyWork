@@ -67,13 +67,13 @@ describe("memory git on vfs", () => {
 
     let changes = await git.changes();
     const byPath = new Map(changes.map((change) => [change.path, change]));
-    expect(byPath.get("keep.ts")).toMatchObject({ status: "modified", add: 2, del: 1 });
-    expect(byPath.get("new.md")).toMatchObject({ status: "untracked", add: 2, del: 0 });
-    expect(byPath.get("gone.txt")?.status).toBeUndefined();
+    expect(byPath.get("keep.ts")).toMatchObject({ worktree: "modified", add: 2, del: 1 });
+    expect(byPath.get("new.md")).toMatchObject({ worktree: "untracked", add: 2, del: 0 });
+    expect(byPath.get("gone.txt")?.worktree).toBeUndefined();
 
     await fs.delete("gone.txt");
     changes = await git.changes();
-    expect(changes.find((change) => change.path === "gone.txt")).toMatchObject({ status: "deleted", add: 0, del: 1 });
+    expect(changes.find((change) => change.path === "gone.txt")).toMatchObject({ worktree: "deleted", add: 0, del: 1 });
 
     const diff = await git.diff("new.md");
     expect(diff).toContain("--- a/new.md");
@@ -103,7 +103,7 @@ describe("vfs store", () => {
     await vfs.saveActive();
     expect(vfs.dirty).toBe(false);
     await expect(workspaceFs.readFile("packages/shell/src/reasoning.ts")).resolves.toContain("// edited");
-    expect(vfs.changes.some((change) => change.path === "packages/shell/src/reasoning.ts" && change.status === "modified")).toBe(true);
+    expect(vfs.changes.some((change) => change.path === "packages/shell/src/reasoning.ts" && change.worktree === "modified")).toBe(true);
   });
 
   it("writes pipeline files and refreshes changes", async () => {
@@ -113,7 +113,7 @@ describe("vfs store", () => {
     await vfs.write(path, "# 生成物");
     expect(vfs.paths).toContain(path);
     const change = vfs.changes.find((entry) => entry.path === path);
-    expect(change).toMatchObject({ status: "untracked", add: 1, del: 0 });
+    expect(change).toMatchObject({ worktree: "untracked", add: 1, del: 0 });
     await workspaceGit.commit("test: consume");
     await vfs.refreshStatus();
     expect(vfs.changes.find((entry) => entry.path === path)).toBeUndefined();

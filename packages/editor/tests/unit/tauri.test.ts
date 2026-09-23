@@ -33,17 +33,39 @@ describe("createTauriGitService", () => {
     expect(calls[1]).toEqual({ command: "git_changes", args: { root: "/ws" } });
     expect(calls[2]).toEqual({
       command: "git_commit",
-      args: { root: "/ws", message: "改 a" },
+      args: { root: "/ws", message: "改 a", all: false },
     });
   });
 
-  it("diff 带 path 时传 path，不带时整体缺省（Option 语义）", async () => {
+  it("diff 带 path 时传 path，不带时整体缺省（Option 语义）；side 一起带上", async () => {
     const { calls, invoke } = invoker();
     await service(invoke).diff("a.txt");
     await service(invoke).diff();
-    expect(calls[0].args).toEqual({ root: "/ws", path: "a.txt" });
-    expect(calls[1].args).toEqual({ root: "/ws" });
+    await service(invoke).diff("a.txt", true);
+    expect(calls[0].args).toEqual({ root: "/ws", path: "a.txt", staged: false });
+    expect(calls[1].args).toEqual({ root: "/ws", staged: false });
     expect("path" in calls[1].args).toBe(false);
+    expect(calls[2].args).toEqual({ root: "/ws", path: "a.txt", staged: true });
+  });
+
+  it("暂存 / 取消暂存的命令形参（单个与全部）", async () => {
+    const { calls, invoke } = invoker();
+    await service(invoke).stage(["a.txt", "b.txt"]);
+    await service(invoke).stageAll();
+    await service(invoke).unstage(["a.txt"]);
+    await service(invoke).unstageAll();
+    expect(calls[0]).toEqual({ command: "git_stage", args: { root: "/ws", paths: ["a.txt", "b.txt"], all: false } });
+    expect(calls[1]).toEqual({ command: "git_stage", args: { root: "/ws", paths: [], all: true } });
+    expect(calls[2]).toEqual({ command: "git_unstage", args: { root: "/ws", paths: ["a.txt"], all: false } });
+    expect(calls[3]).toEqual({ command: "git_unstage", args: { root: "/ws", paths: [], all: true } });
+  });
+
+  it("commit 的 all 开关", async () => {
+    const { calls, invoke } = invoker();
+    await service(invoke).commit("只提交暂存");
+    await service(invoke).commit("全部", { all: true });
+    expect(calls[0].args).toEqual({ root: "/ws", message: "只提交暂存", all: false });
+    expect(calls[1].args).toEqual({ root: "/ws", message: "全部", all: true });
   });
 
   it("currentBranch 去掉宿主尾换行", async () => {
@@ -52,7 +74,7 @@ describe("createTauriGitService", () => {
   });
 
   it("结果按接口类型原样透传（camelCase 由宿主保证）", async () => {
-    const entries = [{ path: "a.txt", status: "modified", staged: false }];
+    const entries = [{ path: "a.txt", status: "modified" as const, staged: false }];
     const invoke = vi.fn<IpclessInvoke>(async () => entries);
     expect(await service(invoke).status()).toEqual(entries);
 

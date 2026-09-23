@@ -11,13 +11,13 @@
  */
 
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
-import type { CommitResult, GitChange, GitService, GitStatusEntry } from "./types";
+import type { CommitResult, GitChange, GitStatusEntry, StagingGitService } from "./types";
 
 /** 可注入的 IPC 调用形态（收窄自 Tauri invoke，测试好替换）。 */
 export type IpclessInvoke = (command: string, args?: Record<string, unknown>) => Promise<unknown>;
 
 /** 磁盘态 Git 服务：命令名即宿主命令，root 回填为第一个参数。 */
-export function createTauriGitService(root: string, invokeImpl: IpclessInvoke = tauriInvoke): GitService {
+export function createTauriGitService(root: string, invokeImpl: IpclessInvoke = tauriInvoke): StagingGitService {
   const call = <T>(command: string, args: Record<string, unknown> = {}): Promise<T> => invokeImpl(command, { root, ...args }) as Promise<T>;
   return {
     async status(): Promise<GitStatusEntry[]> {
@@ -26,11 +26,24 @@ export function createTauriGitService(root: string, invokeImpl: IpclessInvoke = 
     async changes(): Promise<GitChange[]> {
       return call<GitChange[]>("git_changes");
     },
-    async diff(path?: string): Promise<string> {
-      return call<string>("git_diff", path === undefined ? {} : { path });
+    async diff(path?: string, staged = false): Promise<string> {
+      // 没有 path 时不带 path 键（宿主那边是 Option，多余的 null 会被当成字符串）。
+      return call<string>("git_diff", path === undefined ? { staged } : { path, staged });
     },
-    async commit(message: string): Promise<CommitResult> {
-      return call<CommitResult>("git_commit", { message });
+    async stage(paths: string[]): Promise<void> {
+      await call("git_stage", { paths, all: false });
+    },
+    async stageAll(): Promise<void> {
+      await call("git_stage", { paths: [], all: true });
+    },
+    async unstage(paths: string[]): Promise<void> {
+      await call("git_unstage", { paths, all: false });
+    },
+    async unstageAll(): Promise<void> {
+      await call("git_unstage", { paths: [], all: true });
+    },
+    async commit(message: string, options?: { all?: boolean }): Promise<CommitResult> {
+      return call<CommitResult>("git_commit", { message, all: options?.all ?? false });
     },
     async currentBranch(): Promise<string> {
       return (await call<string>("git_current_branch")).trim();
