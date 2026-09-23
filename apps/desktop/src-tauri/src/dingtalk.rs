@@ -14,6 +14,7 @@
 //! 0600），不经过渲染端；渲染端只拿得到联系人 id 与文本。
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -27,12 +28,17 @@ use tokio_tungstenite::tungstenite::Message;
 use crate::channel_common::{
     app_sink, channel_dir, now_ms, read_json, sleep_or_stop, write_private, EventSink,
 };
+use crate::channel_media::{inbox_dir, prune_inbox, store_inbound_media, MediaKind, MediaRefDto};
 use crate::log;
 
 /// Stream 建连入口（钉钉开放平台）。
 pub const STREAM_OPEN_URL: &str = "https://api.dingtalk.com/v1.0/gateway/connections/open";
 /// 机器人单聊/群聊消息的订阅 topic。
 pub const CHATBOT_TOPIC: &str = "/v1.0/im/bot/messages/get";
+/// 取企业内部应用 accessToken（换下载链接要带它）。
+const ACCESS_TOKEN_URL: &str = "https://api.dingtalk.com/v1.0/oauth2/accessToken";
+/// 用 `downloadCode` 换临时下载链接。
+const FILE_DOWNLOAD_URL: &str = "https://api.dingtalk.com/v1.0/robot/messageFiles/download";
 /// `ua` 上报串：官方 SDK 也带，服务端据此放行/统计。
 const UA: &str = "greywork-desktop/1.0";
 /// 普通请求超时。
@@ -43,6 +49,10 @@ const PING_INTERVAL: Duration = Duration::from_secs(60);
 const RECONNECT_MAX_DELAY: Duration = Duration::from_secs(60);
 /// sessionWebhook 兜底有效期（协议给绝对时间戳，这里只用作缺失时的默认值）。
 const DEFAULT_WEBHOOK_TTL_MS: i64 = 30 * 60 * 1000;
+/// 单条消息最多收几张图（防止一条消息拖垮一整轮下载）。
+const MAX_INBOUND_MEDIA: usize = 4;
+/// accessToken 提前刷新窗口（官方 7200s 有效，到期前重取）。
+const TOKEN_REFRESH_MARGIN_SECS: i64 = 60;
 
 pub const STATE_EVENT: &str = "dingtalk://state";
 pub const INBOUND_EVENT: &str = "dingtalk://inbound";
@@ -110,12 +120,45 @@ pub struct ChatbotMessage {
     pub msgtype: Option<String>,
     #[serde(default)]
     pub text: Option<MessageText>,
+    /// 机器人编码（换下载链接要带它；自定义机器人没有这个字段）。
+    #[serde(default)]
+    pub robot_code: Option<String>,
+    /// 图片 / 语音 / 视频 / 文件的临时下载码（顶层字段，与 msgtype 平级）。
+    #[serde(default)]
+    pub download_code: Option<String>,
+    /// 文件消息的文件名。
+    #[serde(default)]
+    pub file_name: Option<String>,
+    /// 富文本消息的 `content`（里面可能有 richText 图片列表）。
+    #[serde(default)]
+    pub content: Option<serde_json::Value>,
+    /// 富文本消息的 richText 列表（有的下发形状把它放在顶层）。
+    #[serde(default)]
+    pub rich_text: Option<Vec<serde_json::Value>>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct MessageText {
     #[serde(default)]
     pub content: Option<String>,
+}
+
+/// 取 accessToken 的响应。
+#[derive(Debug, Clone, Default, Deserialize)]
+struct AccessTokenResponse {
+    #[serde(default, rename = "accessToken")]
+    access_token: Option<String>,
+    #[serde(default, rename = "expireIn")]
+    expire_in: Option<i64>,
+    #[serde(default)]
+    message: Option<String>,
+}
+
+/// 换下载链接的响应。
+#[derive(Debug, Clone, Default, Deserialize)]
+struct DownloadUrlResponse {
+    #[serde(default, rename = "downloadUrl")]
+    download_url: Option<String>,
 }
 
 impl ChatbotMessage {
@@ -155,6 +198,58 @@ impl ChatbotMessage {
             .unwrap_or(raw);
         stripped.trim().to_string()
     }
+
+    /// 本条消息里可下载的图片下载码（picture 的顶层下载码 + 富文本里的图片项），最多 4 张。
+    ///
+    /// 钉钉的富文本下发形状有两种（`content.richText` 或顶层 `richText`），都兼容。
+    pub fn pending_images(&self) -> Vec<String> {
+        let mut codes = Vec::new();
+        if self.msgtype.as_deref() == Some("picture") {
+            if let Some(code) = self
+                .download_code
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                codes.push(code.to_string());
+            }
+        }
+        if self.msgtype.as_deref() == Some("richText") {
+            for item in self.rich_text_items() {
+                if let Some(code) = rich_text_image_code(&item) {
+                    codes.push(code);
+                }
+            }
+        }
+        codes.truncate(MAX_INBOUND_MEDIA);
+        codes
+    }
+
+    /// 富文本项列表：优先顶层 `richText`，否则取 `content.richText`。
+    fn rich_text_items(&self) -> Vec<serde_json::Value> {
+        if let Some(items) = self.rich_text.clone() {
+            return items;
+        }
+        self.content
+            .as_ref()
+            .and_then(|content| content.get("richText"))
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+    }
+}
+
+/// 富文本项里的图片下载码：兼容 `{downloadCode}` 与 `{picture:{downloadCode}}` 两种形状。
+fn rich_text_image_code(item: &serde_json::Value) -> Option<String> {
+    item.get("downloadCode")
+        .or_else(|| {
+            item.get("picture")
+                .and_then(|picture| picture.get("downloadCode"))
+        })
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
 }
 
 /* ===== 协议层：请求构造 ===== */
@@ -685,9 +780,11 @@ pub struct DingTalkInboundDto {
     pub peer_id: String,
     pub nick: String,
     pub text: String,
-    /// 消息类型：text / picture / audio …（非文本由渲染端如实说明只认文字）。
+    /// 消息类型：text / picture / audio …（其余非文本由渲染端如实说明）。
     pub msg_type: Option<String>,
     pub conversation_type: Option<String>,
+    /// 随消息到达的图片；字节在宿主 inbox，凭 `path` 取走。
+    pub media: Vec<MediaRefDto>,
     pub at: i64,
 }
 
@@ -701,6 +798,9 @@ pub(crate) struct Inner {
     last_message_at: Option<i64>,
     /// 进行中的扫码创建应用会话（device_code 只在内存里，不落盘）。
     registration: Option<RegisterSession>,
+    /// accessToken 缓存（含过期时间戳，秒）—— 换图片下载链接要用。
+    access_token: Option<String>,
+    token_expires_at: i64,
 }
 
 impl Inner {
@@ -784,18 +884,24 @@ fn persist_peers(app: &AppHandle, peers: &PeerBook) {
     }
 }
 
-/// 长连接的对外出口：事件广播 + 联系人凭据落盘。
+/// 长连接的对外出口：事件广播 + 联系人凭据落盘 + 入站图片收件目录。
 pub(crate) struct StreamDeps {
     sink: EventSink,
     persist: Arc<dyn Fn(&PeerBook) + Send + Sync>,
+    /// 入站图片收件目录（连上时解析一次；不可用时入站图片整体丢弃并记日志）。
+    inbox: Option<PathBuf>,
 }
 
 impl StreamDeps {
     fn for_app(app: &AppHandle) -> Self {
         let handle = app.clone();
+        let inbox = inbox_dir(app, DIR_NAME)
+            .inspect_err(|error| log::warn("dingtalk", format!("收件目录不可用: {error}")))
+            .ok();
         Self {
             sink: app_sink(app),
             persist: Arc::new(move |peers: &PeerBook| persist_peers(&handle, peers)),
+            inbox,
         }
     }
 
@@ -896,6 +1002,183 @@ pub(crate) async fn stream_once(
     }
 }
 
+/// 取/复用企业内应用 accessToken：到期前 `TOKEN_REFRESH_MARGIN_SECS` 内重新取。
+async fn ensure_access_token(
+    client: &reqwest::Client,
+    inner: &Mutex<Inner>,
+) -> Result<String, String> {
+    let (app_key, app_secret, cached, expires_at) = {
+        let guard = inner.lock().await;
+        let credentials = guard.credentials.clone().ok_or("尚未配置钉钉应用凭证")?;
+        (
+            credentials.client_id,
+            credentials.client_secret,
+            guard.access_token.clone(),
+            guard.token_expires_at,
+        )
+    };
+    if let Some(token) = cached {
+        if expires_at - TOKEN_REFRESH_MARGIN_SECS > chrono::Utc::now().timestamp() {
+            return Ok(token);
+        }
+    }
+    let response = client
+        .post(ACCESS_TOKEN_URL)
+        .header("Content-Type", "application/json")
+        .json(&serde_json::json!({ "appKey": app_key, "appSecret": app_secret }))
+        .timeout(API_TIMEOUT)
+        .send()
+        .await
+        .map_err(|error| format!("取钉钉 accessToken 失败: {error}"))?;
+    let status = response.status();
+    let text = response
+        .text()
+        .await
+        .map_err(|error| format!("accessToken 响应读取失败: {error}"))?;
+    if !status.is_success() {
+        return Err(format!("取 accessToken 返回 {status}: {}", brief(&text)));
+    }
+    let parsed: AccessTokenResponse = serde_json::from_str(&text)
+        .map_err(|error| format!("accessToken 响应解析失败: {error}"))?;
+    let token = parsed
+        .access_token
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            format!(
+                "取 accessToken 被拒：{}",
+                parsed
+                    .message
+                    .unwrap_or_else(|| "响应里没有 accessToken".into())
+            )
+        })?;
+    let ttl = parsed.expire_in.filter(|value| *value > 0).unwrap_or(7200);
+    let mut guard = inner.lock().await;
+    guard.access_token = Some(token.clone());
+    guard.token_expires_at = chrono::Utc::now().timestamp() + ttl;
+    Ok(token)
+}
+
+/// 用 `downloadCode` 换临时链接，再把图片字节取回来。
+async fn download_robot_image(
+    client: &reqwest::Client,
+    token: &str,
+    download_code: &str,
+    robot_code: &str,
+) -> Result<Vec<u8>, String> {
+    let response = client
+        .post(FILE_DOWNLOAD_URL)
+        .header("x-acs-dingtalk-access-token", token)
+        .header("Content-Type", "application/json")
+        .json(&serde_json::json!({
+            "downloadCode": download_code,
+            "robotCode": robot_code,
+        }))
+        .timeout(API_TIMEOUT)
+        .send()
+        .await
+        .map_err(|error| format!("换下载链接请求失败: {error}"))?;
+    let status = response.status();
+    let text = response
+        .text()
+        .await
+        .map_err(|error| format!("换下载链接响应读取失败: {error}"))?;
+    if !status.is_success() {
+        return Err(format!("换下载链接返回 {status}: {}", brief(&text)));
+    }
+    let parsed: DownloadUrlResponse =
+        serde_json::from_str(&text).map_err(|error| format!("换下载链接响应解析失败: {error}"))?;
+    let url = parsed
+        .download_url
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "换下载链接响应缺少 downloadUrl".to_string())?;
+
+    let response = client
+        .get(&url)
+        .timeout(API_TIMEOUT)
+        .send()
+        .await
+        .map_err(|error| format!("下载图片请求失败: {error}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("下载图片返回 {status}"));
+    }
+    let bytes = tokio::time::timeout(crate::http::RESPONSE_READ_TIMEOUT, response.bytes())
+        .await
+        .map_err(|_| "下载图片读取超时".to_string())?
+        .map_err(|error| format!("读取图片字节失败: {error}"))?;
+    Ok(bytes.to_vec())
+}
+
+/// 把入站图片下载进 inbox（单张失败只记日志，不中断整轮）。
+async fn materialize_inbound(
+    deps: &StreamDeps,
+    inner: &Mutex<Inner>,
+    message: &ChatbotMessage,
+    codes: Vec<String>,
+) -> Vec<MediaRefDto> {
+    if codes.is_empty() {
+        return Vec::new();
+    }
+    let Some(inbox) = deps.inbox.as_deref() else {
+        log::warn("dingtalk", "收件目录不可用，丢弃入站图片");
+        return Vec::new();
+    };
+    let client = match crate::http::shared_client(10) {
+        Ok(client) => client,
+        Err(error) => {
+            log::warn("dingtalk", format!("下载图片前建客户端失败: {error}"));
+            return Vec::new();
+        }
+    };
+    // robotCode 优先取消息自带的；自定义机器人没有它时回落应用 clientId（企业内应用同值）。
+    let fallback_code = {
+        let guard = inner.lock().await;
+        guard
+            .credentials
+            .as_ref()
+            .map(|credentials| credentials.client_id.clone())
+    };
+    let robot_code = message
+        .robot_code
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or(fallback_code)
+        .unwrap_or_default();
+    let token = match ensure_access_token(&client, inner).await {
+        Ok(token) => token,
+        Err(error) => {
+            log::warn(
+                "dingtalk",
+                format!("取 accessToken 失败，丢弃入站图片: {error}"),
+            );
+            return Vec::new();
+        }
+    };
+    let received_at = now_ms();
+    let mut refs = Vec::new();
+    for (index, code) in codes.iter().enumerate() {
+        match download_robot_image(&client, &token, code, &robot_code).await {
+            Ok(bytes) => {
+                if let Some(dto) = store_inbound_media(
+                    inbox,
+                    DIR_NAME,
+                    received_at,
+                    index,
+                    MediaKind::Image,
+                    "image",
+                    bytes,
+                ) {
+                    refs.push(dto);
+                }
+            }
+            Err(error) => log::warn("dingtalk", format!("入站图片下载失败: {error}")),
+        }
+    }
+    refs
+}
+
 async fn handle_chatbot_frame(
     frame: &StreamFrame,
     deps: &StreamDeps,
@@ -939,6 +1222,8 @@ async fn handle_chatbot_frame(
         );
         return;
     }
+    // 图片下载进 inbox 后再广播（渲染端凭 path 取走）；文本消息这里为空。
+    let media = materialize_inbound(deps, inner, &message, message.pending_images()).await;
     let payload = DingTalkInboundDto {
         msg_id: message.msg_id.clone(),
         peer_id,
@@ -946,6 +1231,7 @@ async fn handle_chatbot_frame(
         text,
         msg_type: message.msgtype.clone(),
         conversation_type: message.conversation_type.clone(),
+        media,
         at,
     };
     deps.emit(
@@ -1001,6 +1287,9 @@ pub async fn dingtalk_save_credentials(
     };
     store_credentials(&app, &credentials)?;
     inner.credentials = Some(credentials);
+    // 换了凭证就作废 accessToken：旧票据属于上一个应用。
+    inner.access_token = None;
+    inner.token_expires_at = 0;
     inner.detail = None;
     log::info("dingtalk", "应用凭证已保存");
     Ok(inner.status())
@@ -1018,6 +1307,8 @@ pub async fn dingtalk_clear_credentials(
     inner.credentials = None;
     inner.peers = PeerBook::default();
     inner.registration = None;
+    inner.access_token = None;
+    inner.token_expires_at = 0;
     inner.state = "stopped".into();
     inner.detail = None;
     inner.last_message_at = None;
@@ -1029,6 +1320,7 @@ pub async fn dingtalk_clear_credentials(
         }
     }
     log::info("dingtalk", "凭证已清除");
+    prune_inbox(&app, DIR_NAME, true);
     Ok(inner.status())
 }
 
@@ -1143,6 +1435,8 @@ pub async fn dingtalk_connect(
         (credentials.client_id, credentials.client_secret)
     };
     let epoch = host.epoch.fetch_add(1, Ordering::SeqCst) + 1;
+    // 上次会话遗留的未取走收件图片先清掉（渲染端崩溃 / 未取走）。
+    prune_inbox(&app, DIR_NAME, false);
     let inner = host.inner.clone();
     let epochs = host.epoch.clone();
     let deps = StreamDeps::for_app(&app);
@@ -1280,6 +1574,7 @@ fn reconnect_delay(attempt: u32) -> Duration {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn stream_url_percent_encodes_ticket() {
@@ -1443,6 +1738,7 @@ mod tests {
                     *persisted.lock() = Some(peers.clone());
                 })
             },
+            inbox: None,
         };
         let inner = Mutex::new(Inner::default());
 
@@ -1767,5 +2063,71 @@ mod tests {
             .await
             .expect_err("非 JSON 响应应当报错");
         assert!(error.contains("bad gateway"), "{error}");
+    }
+
+    /* ===== 入站图片：下载码提取 ===== */
+
+    #[test]
+    fn pending_images_reads_picture_and_richtext() {
+        let picture: ChatbotMessage = serde_json::from_value(json!({
+            "msgtype": "picture",
+            "downloadCode": "DC-1",
+        }))
+        .expect("图片消息");
+        assert_eq!(picture.pending_images(), vec!["DC-1".to_string()]);
+
+        // 富文本：content.richText 形状，混着文本项与图片项。
+        let rich: ChatbotMessage = serde_json::from_value(json!({
+            "msgtype": "richText",
+            "content": { "richText": [
+                { "text": "看这两张" },
+                { "downloadCode": "DC-2" },
+                { "picture": { "downloadCode": "DC-3" } },
+            ] },
+        }))
+        .expect("富文本消息");
+        assert_eq!(
+            rich.pending_images(),
+            vec!["DC-2".to_string(), "DC-3".to_string()]
+        );
+
+        // 顶层 richText 形状也认。
+        let top: ChatbotMessage = serde_json::from_value(json!({
+            "msgtype": "richText",
+            "richText": [ { "downloadCode": "DC-4" } ],
+        }))
+        .expect("富文本消息");
+        assert_eq!(top.pending_images(), vec!["DC-4".to_string()]);
+
+        // 文本消息 / 语音 / 空下载码都不产出图片。
+        let text: ChatbotMessage = serde_json::from_value(json!({
+            "msgtype": "text",
+            "text": { "content": "你好" },
+        }))
+        .expect("文本消息");
+        assert!(text.pending_images().is_empty());
+        let audio: ChatbotMessage = serde_json::from_value(json!({
+            "msgtype": "audio",
+            "downloadCode": "DC-AUDIO",
+        }))
+        .expect("语音消息");
+        assert!(audio.pending_images().is_empty(), "本版只收图片");
+        let blank: ChatbotMessage = serde_json::from_value(json!({
+            "msgtype": "picture",
+            "downloadCode": "   ",
+        }))
+        .expect("空下载码");
+        assert!(blank.pending_images().is_empty());
+    }
+
+    #[test]
+    fn pending_images_caps_at_max() {
+        let items: Vec<serde_json::Value> = (0..(MAX_INBOUND_MEDIA + 3))
+            .map(|index| json!({ "downloadCode": format!("DC-{index}") }))
+            .collect();
+        let message: ChatbotMessage =
+            serde_json::from_value(json!({ "msgtype": "richText", "richText": items }))
+                .expect("富文本消息");
+        assert_eq!(message.pending_images().len(), MAX_INBOUND_MEDIA);
     }
 }

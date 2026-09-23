@@ -12,6 +12,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { isTauriRuntime } from "@greywork/core";
 
+import type { MediaRef } from "../types";
+
 /** 宿主侧长连接状态机。 */
 export type DingTalkState = "stopped" | "connecting" | "connected" | "error";
 
@@ -38,6 +40,8 @@ export interface DingTalkInbound {
   /** 消息类型：text / picture / audio …（非文本由界面如实说明）。 */
   msgType: string | null;
   conversationType: string | null;
+  /** 随消息到达的图片（钉钉只收图片）；字节在宿主 inbox，凭 `path` 取走。 */
+  media?: MediaRef[];
   at: number;
 }
 
