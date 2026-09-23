@@ -255,6 +255,8 @@ pub fn run() {
             git::git_commit,
             git::git_current_branch,
             git::git_branch_list,
+            git::git_log,
+            git::git_show,
             store_fs::store_sessions_load,
             store_fs::store_sessions_sync,
             store_fs::store_default_root,
