@@ -377,14 +377,72 @@ fn rename_path(access: &WorkspaceFsAccess, from: &str, to: &str) -> Result<(), S
     if target.exists() {
         return Err(format!("目标已存在: {}", target.display()));
     }
-    std::fs::rename(&source, &target).map_err(|error| {
-        // EXDEV：源与目标在不同挂载点。降级成「复制 + 删除」对目录代价太大且有半途失败
-        // 的中间态，所以明确报错让用户自己决定。
-        if error.raw_os_error() == Some(18) {
-            "跨磁盘分区移动暂不支持，请改用复制后删除".into()
-        } else {
-            format!("移动失败: {error}")
-        }
+    match std::fs::rename(&source, &target) {
+        Ok(()) => Ok(()),
+        // EXDEV / ERROR_NOT_SAME_DEVICE：源与目标在不同挂载点，rename 不跨设备。降级为
+        // 「复制 + 删除」（见 move_across_devices）。
+        Err(error) if is_cross_device(&error) => move_across_devices(&source, &target),
+        Err(error) => Err(format!("移动失败: {error}")),
+    }
+}
+
+/// 是否是「跨挂载点 / 跨卷」错误。Unix 为 `EXDEV`(18)，Windows 为
+/// `ERROR_NOT_SAME_DEVICE`(17)，两套 errno 都得认，否则 Windows 上只会笼统报「移动失败」。
+fn is_cross_device(error: &std::io::Error) -> bool {
+    #[cfg(windows)]
+    {
+        error.raw_os_error() == Some(17)
+    }
+    #[cfg(not(windows))]
+    {
+        error.raw_os_error() == Some(18)
+    }
+}
+
+/// 跨挂载点移动的降级路径：复制 → 成功后删源。
+///
+/// 顺序刻意是「先复制、成了再删源」：`rename` 的原子性在这里拿不到，中间态无法完全避免，
+/// 但这样中途失败最多留下一个多余的副本，绝不会出现「源已删、目标残缺」的丢数据形态。
+/// 复制失败时清掉半成品目标，别让它冒充成功结果。
+///
+/// **含符号链接的条目拒绝降级**：`copy_entry` 刻意不跟随链接（不把根外内容搬进来），
+/// 若照常删源，那些链接会被一并抹掉 —— 那是静默丢数据。宁可报错让用户自己处置。
+fn move_across_devices(source: &Path, target: &Path) -> Result<(), String> {
+    if has_link_inside(source) {
+        return Err("条目内含符号链接，跨磁盘分区移动会丢失这些链接；请改用复制后手动删除".into());
+    }
+    if let Err(error) = copy_entry(source, target) {
+        let _ = remove_entry(target);
+        return Err(format!("跨磁盘分区移动失败（复制阶段）: {error}"));
+    }
+    remove_entry(source).map_err(|error| {
+        format!(
+            "已复制到目标，但删除源失败: {error} —— 请手动删除 {}",
+            source.display()
+        )
+    })
+}
+
+/// 条目自身、或（目录递归地）其内任一条目是否是符号链接 / 重解析点。
+///
+/// 读不到就当作「有」（保守拒绝）：宁可让用户走复制后手动删除，也不在信息不全时
+/// 赌一把把链接删掉。`entry_is_link` 不跟随链接，所以不会顺着链接递归进根外。
+fn has_link_inside(path: &Path) -> bool {
+    if entry_is_link(path) {
+        return true;
+    }
+    let Ok(metadata) = std::fs::symlink_metadata(path) else {
+        return true;
+    };
+    if !metadata.is_dir() {
+        return false;
+    }
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return true;
+    };
+    entries.into_iter().any(|entry| match entry {
+        Ok(entry) => has_link_inside(&entry.path()),
+        Err(_) => true,
     })
 }
 
@@ -425,17 +483,23 @@ fn copy_entry(source: &Path, target: &Path) -> std::io::Result<()> {
     std::fs::copy(source, target).map(|_| ())
 }
 
+/// 删除条目（文件 / 目录 / 链接本身，不跟随链接）。
+///
+/// 用 symlink_metadata：指向目录的符号链接要被当成「文件」删掉链接本身，
+/// 而不是递归删掉它指向的目录内容。跨设备移动降级也复用它删源。
+fn remove_entry(entry: &Path) -> std::io::Result<()> {
+    let metadata = std::fs::symlink_metadata(entry)?;
+    if metadata.is_dir() {
+        std::fs::remove_dir_all(entry)
+    } else {
+        std::fs::remove_file(entry)
+    }
+}
+
 /// 删除条目。文件夹递归删除（`remove_dir_all` 删的是条目本身，不跟随链接）。
 fn delete_path(access: &WorkspaceFsAccess, raw: &str) -> Result<(), String> {
     let entry = movable_source(access, raw)?;
-    // 用 symlink_metadata：指向目录的符号链接要被当成「文件」删掉链接本身，
-    // 而不是递归删掉它指向的目录内容。
-    let metadata = std::fs::symlink_metadata(&entry).map_err(|error| format!("读取条目失败: {error}"))?;
-    if metadata.is_dir() {
-        std::fs::remove_dir_all(&entry).map_err(|error| format!("删除文件夹失败: {error}"))
-    } else {
-        std::fs::remove_file(&entry).map_err(|error| format!("删除文件失败: {error}"))
-    }
+    remove_entry(&entry).map_err(|error| format!("删除失败: {error}"))
 }
 
 /// 新建空文件（工作区文件树「新建文件」）。
@@ -1268,5 +1332,78 @@ mod tests {
         assert!(!renamed.exists() && copied.exists());
 
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// 跨设备降级：内容整棵搬过去，源被删掉。直接测降级函数本身 —— 单元测试里造不出
+    /// 第二个挂载点，而这段逻辑与真实设备无关（只有 EXDEV 触发时机依赖设备）。
+    #[test]
+    fn move_across_devices_copies_then_removes_source() {
+        let root = temp_dir("xdev");
+        let source = root.join("src");
+        std::fs::create_dir_all(source.join("nested")).expect("建源目录");
+        std::fs::write(source.join("a.txt"), "hello").expect("写 a");
+        std::fs::write(source.join("nested/b.txt"), "world").expect("写 b");
+        let target = root.join("dst");
+
+        move_across_devices(&source, &target).expect("跨设备移动降级");
+
+        assert!(!source.exists(), "源应已删除");
+        assert_eq!(
+            std::fs::read_to_string(target.join("a.txt")).expect("读 a"),
+            "hello"
+        );
+        assert_eq!(
+            std::fs::read_to_string(target.join("nested/b.txt")).expect("读 b"),
+            "world"
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// 目录内含符号链接时拒绝降级，且源保持原样（不静默丢链接）。
+    #[cfg(unix)]
+    #[test]
+    fn move_across_devices_refuses_directory_with_symlink() {
+        use std::os::unix::fs::symlink;
+        let root = temp_dir("xdev-link");
+        let source = root.join("src");
+        std::fs::create_dir_all(&source).expect("建源目录");
+        std::fs::write(source.join("a.txt"), "hi").expect("写 a");
+        symlink("a.txt", source.join("link.txt")).expect("建链接");
+        let target = root.join("dst");
+
+        let error = move_across_devices(&source, &target).expect_err("含链接应拒绝");
+        assert!(error.contains("符号链接"), "{error}");
+        assert!(source.exists(), "拒绝时源必须原样保留");
+        assert!(!target.exists(), "拒绝时不该留下目标");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// 源本身是符号链接同样拒绝（`copy_entry` 对链接是空操作，删源会直接把链接抹掉）。
+    #[cfg(unix)]
+    #[test]
+    fn move_across_devices_refuses_symlink_source() {
+        use std::os::unix::fs::symlink;
+        let root = temp_dir("xdev-self-link");
+        std::fs::write(root.join("real.txt"), "data").expect("写实体文件");
+        let link = root.join("link.txt");
+        symlink("real.txt", &link).expect("建链接");
+        let target = root.join("dst");
+
+        let error = move_across_devices(&link, &target).expect_err("链接源应拒绝");
+        assert!(error.contains("符号链接"), "{error}");
+        assert!(std::fs::symlink_metadata(&link).is_ok(), "链接应仍在");
+        assert!(root.join("real.txt").exists(), "链接目标应未被牵连");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// 跨设备判定按平台 errno：Unix 认 EXDEV(18)，Windows 认 ERROR_NOT_SAME_DEVICE(17)。
+    #[test]
+    fn is_cross_device_matches_platform_errno() {
+        #[cfg(unix)]
+        assert!(is_cross_device(&std::io::Error::from_raw_os_error(18)));
+        #[cfg(windows)]
+        assert!(is_cross_device(&std::io::Error::from_raw_os_error(17)));
+        // 无关 errno（ENOENT）不应被误判成跨设备。
+        assert!(!is_cross_device(&std::io::Error::from_raw_os_error(2)));
     }
 }
