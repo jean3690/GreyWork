@@ -619,12 +619,17 @@ fn sanitize_env(
 /// 在 bwrap 可用时启用 fs，不可用时记录明确告警后直启。
 /// `env` 是该后端的启动环境变量（设置里配的 API key 之类），净化后注入子进程；
 /// 沙盒开启时同样生效（bwrap 不清空环境，只覆盖 HOME）。
+///
+/// `extra_programs` 是「在 [`ALLOWED_AGENT_PROGRAMS`] 之外额外放行」的程序名，由**调用方**
+/// 决定来源：桌面端传 `db.enabled_agent_programs()`（用户自配后端目录），服务端传配置里
+/// 冻结的列表（不读 DB —— DB 可被客户端经 `db_agents_sync` 改写，是 RCE 面）。
+/// 放在入参而非在本函数内查库，正是为了让两侧各自决定信任来源。
 // Tauri 将每个 IPC 字段与宿主 State 分别注入；合并为 DTO 会无收益地改写稳定命令协议。
 #[allow(clippy::too_many_arguments)]
 pub async fn acp_start(
     host: Arc<dyn HostContext>,
     state: &Arc<AcpHost>,
-    db: &crate::db::Db,
+    extra_programs: &[String],
     access: &crate::workspace_fs::WorkspaceFsAccess,
     agent_cmd: String,
     tier: Option<String>,
@@ -635,8 +640,7 @@ pub async fn acp_start(
     // 但仅限「用户已在目录里启用」的程序（目录真源归 Rust，渲染端不可自封）。
     // shell 元字符拒绝不受影响，仍是配置注入的最后防线。
     let mut allowed: Vec<&str> = ALLOWED_AGENT_PROGRAMS.to_vec();
-    let custom_programs = db.enabled_agent_programs();
-    allowed.extend(custom_programs.iter().map(String::as_str));
+    allowed.extend(extra_programs.iter().map(String::as_str));
     let command = process_guard::validate_spawn_command(&agent_cmd, &allowed)?;
     // 冷启动窗口按「用户原始命令」判断：npx 型后端首次运行要下载包，需放宽到 120s。
     // 之后的包装会把首 token 换掉（沙盒是 bwrap、Windows 是 cmd），拿包装后的串判断会失准。
@@ -2303,9 +2307,16 @@ mod tests {
         assert!(blocked_paths(root, &[]).is_empty());
     }
 
+    /// 复刻 `acp_start` 的放行面组装：内置白名单 ∪ `extra_programs`。
+    fn allowlist(extra: &[String]) -> Vec<&str> {
+        let mut allowed: Vec<&str> = ALLOWED_AGENT_PROGRAMS.to_vec();
+        allowed.extend(extra.iter().map(String::as_str));
+        allowed
+    }
+
+    /// 桌面语义：`extra_programs` 来自 `db.enabled_agent_programs()`，用户启用的自配程序放行。
     #[test]
     fn spawn_gate_accepts_user_enabled_custom_programs() {
-        // 复刻 acp_start 的放行面组装：内置白名单 ∪ 用户启用的自配后端程序名。
         let db = crate::db::Db::open_in_memory().expect("open");
         db.sync_agent_providers(&[
             crate::db::AgentProviderDto {
@@ -2326,9 +2337,8 @@ mod tests {
             },
         ])
         .unwrap();
-        let mut allowed: Vec<&str> = ALLOWED_AGENT_PROGRAMS.to_vec();
-        let custom_programs = db.enabled_agent_programs();
-        allowed.extend(custom_programs.iter().map(String::as_str));
+        let programs = db.enabled_agent_programs();
+        let allowed = allowlist(&programs);
 
         // 用户启用的自配程序可 spawn；禁用项不进入放行面
         assert_eq!(
@@ -2341,5 +2351,31 @@ mod tests {
         assert!(
             process_guard::validate_spawn_command("my-agent acp && rm -rf ~", &allowed).is_err()
         );
+    }
+
+    /// 服务端语义：`acp_start` 不再读 DB，`extra_programs` 为空时 DB 里启用的自配程序
+    /// **不得**放行 —— 这是「服务端冻结白名单」的结构性保证（DB 可被 `db_agents_sync`
+    /// 改写，若 acp_start 仍读 DB，客户端就能自行扩大 spawn 面）。
+    #[test]
+    fn frozen_allowlist_ignores_db_enabled_programs() {
+        let db = crate::db::Db::open_in_memory().expect("open");
+        db.sync_agent_providers(&[crate::db::AgentProviderDto {
+            id: "custom-1".to_string(),
+            name: "My Agent".to_string(),
+            kind: "acp".to_string(),
+            command: "my-agent acp".to_string(),
+            enabled: true,
+            env: None,
+        }])
+        .unwrap();
+        // DB 里确实有可放行的程序……
+        assert_eq!(db.enabled_agent_programs(), vec!["my-agent".to_string()]);
+        // ……但只要调用方不给 extra_programs（服务端即如此），它就被拒。
+        let frozen = allowlist(&[]);
+        assert!(process_guard::validate_spawn_command("my-agent acp", &frozen).is_err());
+        // 配置显式放行时才通过。
+        let extra = ["my-agent".to_string()];
+        let configured = allowlist(&extra);
+        assert!(process_guard::validate_spawn_command("my-agent acp", &configured).is_ok());
     }
 }

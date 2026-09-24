@@ -89,6 +89,12 @@ pub struct CommandContext {
     pub discord: Arc<DiscordHost>,
     pub qq: Arc<QqHost>,
     pub wecom: Arc<WecomHost>,
+    /// 在 [`crate::acp_host`] 内置白名单之外额外放行的 agent 程序名。
+    ///
+    /// 桌面端不构造 `CommandContext`（该值由桌面包装自行从 `db.enabled_agent_programs()`
+    /// 取）；服务端填配置里**冻结**的列表，不读 DB —— DB 可被客户端经 `db_agents_sync`
+    /// 改写，是 RCE 面（见 `acp_host::acp_start` 的 `extra_programs` 说明）。
+    pub agent_programs: Arc<Vec<String>>,
 }
 
 /// 零参命令的占位入参：`null` / `{}` / 缺失都接受。
@@ -251,7 +257,7 @@ command_table! {
         run: |ctx, a| async move { acp_host::acp_permission_respond(&ctx.acp, a.request_id, a.option_id).await.map(Json) } }
     { "acp_start", auth: Auth::Required, desktop: false, binary: false,
         args: acp_host::StartArgs,
-        run: |ctx, a| async move { acp_host::acp_start(Arc::clone(&ctx.host), &ctx.acp, &ctx.db, &ctx.workspace, a.agent_cmd, a.tier, a.sandbox, a.workspace, a.env).await.map(Json) } }
+        run: |ctx, a| async move { acp_host::acp_start(Arc::clone(&ctx.host), &ctx.acp, &ctx.agent_programs, &ctx.workspace, a.agent_cmd, a.tier, a.sandbox, a.workspace, a.env).await.map(Json) } }
     { "acp_new_session", auth: Auth::Required, desktop: false, binary: false,
         args: acp_host::NewSessionArgs,
         run: |ctx, a| async move { acp_host::acp_new_session(Arc::clone(&ctx.host), &ctx.acp, a.handle, a.cwd, a.mcp_servers).await.map(Json) } }
@@ -724,6 +730,8 @@ mod tests {
             discord: Arc::new(DiscordHost::default()),
             qq: Arc::new(QqHost::default()),
             wecom: Arc::new(WecomHost::default()),
+            // 空列表 = 只放行内置白名单（headless 语义）。
+            agent_programs: Arc::new(Vec::new()),
         }
     }
 

@@ -28,10 +28,12 @@ pub async fn acp_start(
     workspace: Option<String>,
     env: Option<std::collections::HashMap<String, String>>,
 ) -> Result<u64, String> {
+    // 桌面语义：用户在目录里启用的自配后端同样放行（服务端则用冻结配置，不读 DB）。
+    let extra_programs = db.enabled_agent_programs();
     greywork_host::acp_host::acp_start(
         Arc::clone(&host),
         &state,
-        &db,
+        &extra_programs,
         &access,
         agent_cmd,
         tier,
