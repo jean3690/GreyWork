@@ -95,14 +95,14 @@ fn total_memory_bytes() -> Option<u64> {
 /// 系统信息快照。
 #[tauri::command]
 pub async fn sys_info(
-    db: tauri::State<'_, crate::db::Db>,
-    acp: tauri::State<'_, crate::acp_host::AcpHost>,
+    db: tauri::State<'_, greywork_host::db::Db>,
+    acp: tauri::State<'_, std::sync::Arc<crate::acp_host::AcpHost>>,
     tray: tauri::State<'_, crate::tray::TrayState>,
 ) -> Result<SysInfo, String> {
     Ok(SysInfo {
         version: env!("CARGO_PKG_VERSION").to_string(),
         schema_version: db.schema_version()?,
-        log_dir: crate::log::dir().map(|path| path.to_string_lossy().into_owned()),
+        log_dir: greywork_host::log::dir().map(|path| path.to_string_lossy().into_owned()),
         active_agents: acp.session_count().await,
         os: std::env::consts::OS.to_string(),
         tray_available: tray.available(),

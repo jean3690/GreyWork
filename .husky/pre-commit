@@ -5,7 +5,10 @@ pnpm exec lint-staged
 # 肉眼看没超宽的行 rustfmt 也要求换行）会一路漏到 CI 才变红。所以这里补一道。
 #
 # 只在有 .rs 暂存时跑：纯前端提交不必付这份开销。cargo fmt 不受暂存区限制，检查的是
-# 整个 crate —— 与 CI 的命令一致，不该出现「本地过、CI 红」的另一半。
+# 整个 workspace —— 与 CI 的命令一致，不该出现「本地过、CI 红」的另一半。
+#
+# 从仓库根跑：Cargo.lock 在根（workspace 单一锁文件），`cd apps/desktop/src-tauri`
+# 会让 cargo 向上找到根 manifest，但 fmt 仍覆盖整个 workspace，不如直接在根跑直白。
 if git diff --cached --name-only --diff-filter=ACM | grep -q '\.rs$'; then
-  (cd apps/desktop/src-tauri && cargo fmt --check)
+  cargo fmt --check
 fi

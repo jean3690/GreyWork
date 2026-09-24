@@ -14,7 +14,7 @@
 //! - **单轮语义**：intent 视为完整指令（cron 每次独立执行），不带多轮历史。
 //! - 无可用 LLM 配置（settings 未初始化/无供应商）→ finish failed，下个 cron 再试。
 
-use crate::db::{AutomationDueDto, Db};
+use crate::db::{AutomationDueDto, AutomationRunInputDto, Db};
 use crate::llm;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -53,8 +53,27 @@ pub async fn claim_and_run(db: &Db) -> Vec<Outcome> {
         if let Err(error) = db.automation_due_finish(item.id, status) {
             crate::log::error("host-exec", format!("回执失败 id={}: {error}", item.id));
         }
+        // 运行记录（mode=host）：成功挂上宿主新建会话 id，失败留错误文案。
+        let (detail, session_id) = match &result {
+            Ok((reply, conversation_id)) => (preview(reply), Some(conversation_id.clone())),
+            Err(error) => (error.clone(), None),
+        };
+        if let Err(error) = db.automation_record_run(&AutomationRunInputDto {
+            task_id: item.task_id.clone(),
+            name: item.name.clone(),
+            status: status.to_string(),
+            detail: Some(detail),
+            session_id,
+            mode: "host".to_string(),
+            ran_at: chrono::Utc::now().timestamp_millis(),
+        }) {
+            crate::log::error(
+                "host-exec",
+                format!("运行记录写入失败 id={}: {error}", item.id),
+            );
+        }
         let outcome = match result {
-            Ok(reply) => {
+            Ok((reply, _)) => {
                 crate::log::info(
                     "host-exec",
                     format!("宿主执行完成: {} ({})", item.name, item.task_id),
@@ -97,8 +116,8 @@ fn preview(reply: &str) -> String {
 }
 
 /// 执行单条：默认 LLM 配置 → 单轮 chat_complete → 新会话落库 → last_run 回写。
-/// 成功返回模型回复全文（供通知预览）。
-async fn run_one(db: &Db, item: &AutomationDueDto) -> Result<String, String> {
+/// 成功返回 (模型回复全文, 新建会话 id)（供通知预览与运行记录会话链接）。
+async fn run_one(db: &Db, item: &AutomationDueDto) -> Result<(String, String), String> {
     if item.acp_provider_id.is_some() {
         return Err("任务绑定 ACP 后端：兜底执行只支持本机模型，需在应用内执行".to_string());
     }
@@ -145,7 +164,7 @@ async fn run_one(db: &Db, item: &AutomationDueDto) -> Result<String, String> {
         &assistant_message,
     )?;
     db.automation_mark_last_run(&item.task_id, now)?;
-    Ok(reply)
+    Ok((reply, conversation_id))
 }
 
 /// 从 settings 快照解析默认 LLM 端点：selectedModelProviderId 优先，

@@ -1,34 +1,38 @@
+// 领域逻辑在 `crates/greywork-host`（与 headless 服务端共用），此处只保留桌面专属模块。
+// 已搬走：cron / http / log / path_safety / process_guard / sandbox / text /
+// acp_process / channel_common / mcp / mcp_registry / web_fetch / skills_market /
+// plugin_market / db / llm / host_exec / scheduler / workspace_fs / git / sheet /
+// store_fs / worktree / acp_host / channel_media + 7 条通道 —— 引用一律写成
+// `greywork_host::<mod>::…`，一眼能看出逻辑不在本 crate。
+// 下列模块是只含 `#[tauri::command]` 薄包装（或薄启动入口）的桌面文件：
+// `mcp` / `mcp_registry` / `web_fetch` / `skills_market` / `plugin_market` / `update` /
+// `db` / `llm` / `scheduler` / `workspace_fs` / `git` / `sheet` / `store_fs` / `worktree` /
+// `acp_host` / `channel_media` / `wechat` / `dingtalk` / `feishu` / `telegram` /
+// `discord` / `qq` / `wecom`。
+// 仍留桌面（真·宿主专属）：`sys` / `tray` / `notify` / `close_guard` / `plugin_window` /
+// `host`（`TauriHost` 实现）。
 mod acp_host;
-mod acp_process;
-mod channel_common;
 mod channel_media;
 mod close_guard;
-mod cron;
 mod db;
 pub mod dingtalk;
 pub mod discord;
 pub mod feishu;
 mod git;
-mod host_exec;
-mod http;
+mod host;
 mod llm;
-mod log;
 pub mod mcp;
 mod mcp_registry;
 mod notify;
-mod path_safety;
 mod plugin_market;
 mod plugin_window;
-mod process_guard;
 pub mod qq;
-mod sandbox;
 mod scheduler;
 mod sheet;
 mod skills_market;
 mod store_fs;
 mod sys;
 pub mod telegram;
-mod text;
 mod tray;
 mod update;
 mod web_fetch;
@@ -38,6 +42,14 @@ mod workspace_fs;
 mod worktree;
 
 use tauri::Manager;
+
+use greywork_host::host::HostContext;
+use std::sync::Arc;
+
+// 本文件此前靠 crate 根上的 `mod log;` / `mod process_guard;` 直接写裸 `log::`、
+// `process_guard::`；模块搬进 greywork-host 后需要显式 use 才解析得到。
+// 其余文件走的是 `use greywork_host::<mod>;`，形态一致。
+use greywork_host::{log, process_guard};
 
 /// Linux 低端设备的 WebKitGTK 渲染兜底：关掉 DMABUF 渲染器。
 ///
@@ -57,7 +69,7 @@ fn apply_low_end_webkit_fallback() {
     }
     if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
         std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
-        // 这里用 eprintln 而非 crate::log：日志目录在 setup 里才 init，而本函数必须在建窗口
+        // 这里用 eprintln 而非 greywork_host::log：日志目录在 setup 里才 init，而本函数必须在建窗口
         // 之前跑，此刻 log 还是 no-op，写了也会被丢掉（同 log.rs 处理自身轮转失败的取舍）。
         eprintln!(
             "[greywork] 低端设备：已关闭 DMABUF 渲染器（WEBKIT_DISABLE_DMABUF_RENDERER=1）以规避渲染异常"
@@ -76,8 +88,8 @@ pub fn run() {
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_clipboard_manager::init())
-        .manage(acp_host::AcpHost::default())
-        .manage(llm::LlmHost::default())
+        .manage(Arc::new(acp_host::AcpHost::default()))
+        .manage(greywork_host::llm::LlmHost::default())
         .manage(wechat::WechatHost::default())
         .manage(dingtalk::DingTalkHost::default())
         .manage(feishu::FeishuHost::default())
@@ -123,14 +135,20 @@ pub fn run() {
             )
             .map_err(|err| -> Box<dyn std::error::Error> { err.into() })?;
             app.manage(workspace_access);
+            // 宿主出口：领域逻辑只认 `HostContext`，桌面实现把事件/通知接到 Tauri。
+            // 先于 log::init 建立即可 —— TauriHost 自身不写日志。
+            let host: Arc<dyn HostContext> = host::TauriHost::new(app.handle().clone())
+                .map_err(|err| -> Box<dyn std::error::Error> { err.into() })?
+                .into_arc();
+            app.manage(Arc::clone(&host));
             log::init(data_dir.join("logs"));
             // GUI 启动（Finder/Dock、.desktop）继承的 PATH 是极简的，这里补一次登录
             // shell 解析，供程序探测与子进程注入使用。后台线程跑，失败即退回继承 PATH。
             process_guard::init_login_path();
-            let database = db::Db::open_at(&data_dir.join("greywork.db"))
+            let database = greywork_host::db::Db::open_at(&data_dir.join("greywork.db"))
                 .map_err(|err| -> Box<dyn std::error::Error> { err.into() })?;
             app.manage(database);
-            scheduler::spawn_ticker(app.handle().clone(), data_dir.join("greywork.db"));
+            scheduler::spawn_ticker(host, data_dir.join("greywork.db"));
             // 系统托盘：构建失败不该拦启动（例如 Linux 缺 AppIndicator 宿主），
             // 记一条日志后继续 —— 没有托盘，其余功能照常。失败时 TrayState.available
             // 保持 false，关闭行为随之回落到「关闭即退出」，不会把用户锁在隐藏窗口里。
@@ -272,6 +290,8 @@ pub fn run() {
             db::db_automations_sync,
             db::db_automations_due_list,
             db::db_automations_due_finish,
+            db::db_automation_runs_load,
+            db::db_automation_run_record,
             db::db_team_runs_load,
             db::db_team_runs_sync,
             db::db_agents_load,

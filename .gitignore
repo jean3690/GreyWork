@@ -1,6 +1,8 @@
 node_modules/
 dist/
-apps/desktop/src-tauri/target/
+# cargo workspace 的构建产物：workspace 根在仓库根，target 也随之在根
+# （此前在 apps/desktop/src-tauri/target，随 workspace 化搬走）。
+/target/
 .playwright*
 .agents/
 AGENTS.md

@@ -9,21 +9,18 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::host::{self, HostContext};
 use serde::Deserialize;
-use tauri::{AppHandle, Emitter, Manager};
 
 /// 事件出口：把 (事件名, 载荷) 交给宿主广播。
-pub type EventSink = Arc<dyn Fn(&str, serde_json::Value) + Send + Sync>;
+///
+/// 真身在 `crate::host`；这里再导出一次，让通道模块 `use crate::channel_common::EventSink`
+/// 就能拿到，不必各自 import 两个模块。
+pub use crate::host::EventSink;
 
 /// 通道数据目录：`<应用数据>/<channel>`（凭证、游标、联系人凭据都落这里）。
-pub fn channel_dir(app: &AppHandle, channel: &str) -> Result<PathBuf, String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| format!("应用数据目录不可用: {error}"))?
-        .join(channel);
-    std::fs::create_dir_all(&dir).map_err(|error| format!("创建通道目录失败: {error}"))?;
-    Ok(dir)
+pub fn channel_dir(host: &dyn HostContext, channel: &str) -> Result<PathBuf, String> {
+    host::ensure_channel_dir(host, channel)
 }
 
 /// 写私有文件：内容敏感（bot token / 会话 webhook）。
@@ -78,10 +75,7 @@ pub async fn sleep_or_stop(epochs: &AtomicU64, epoch: u64, total: Duration) -> b
     }
 }
 
-/// 把 AppHandle 包成事件出口。
-pub fn app_sink(app: &AppHandle) -> EventSink {
-    let emitter = app.clone();
-    Arc::new(move |event, payload| {
-        let _ = emitter.emit(event, payload);
-    })
+/// 把宿主包成事件出口。
+pub fn app_sink(host: Arc<dyn HostContext>) -> EventSink {
+    host::event_sink(host)
 }

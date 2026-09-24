@@ -8,7 +8,7 @@
 use agent_client_protocol::schema::v1::{InitializeRequest, NewSessionRequest};
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::{AcpAgent, Agent as AgentRole, Client, ConnectionTo};
-use greywork_lib::mcp::{plan_servers, McpHeader, McpServerConfig};
+use greywork_host::mcp::{plan_servers, McpHeader, McpServerConfig};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::str::FromStr;

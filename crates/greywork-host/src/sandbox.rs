@@ -10,6 +10,8 @@
 //! 包裹命令以 JSON 交给 `AcpAgent::from_str`，避免命令路径再经 shell 解释。
 
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+use std::time::Duration;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SandboxMode {
@@ -51,27 +53,134 @@ impl SandboxMode {
     }
 }
 
-/// 沙盒可用性 = 平台是 Linux **且** PATH 里有可用的 bwrap。
+/// 沙盒可用性 = 平台是 Linux **且** bwrap 能真正建出沙盒。
 ///
 /// 平台门控抽成参数化纯函数，是为了能在 Linux CI 上把「macOS/Windows 上就算装了
 /// bwrap 也不算可用」这条钉住：bwrap 及其参数（`--ro-bind` / `--unshare-net` /
 /// `--setenv`）都是 Linux-only，误判为可用会跳过降级、把 agent 直接起不来。
-fn sandbox_supported_on(os: &str, bwrap_found: bool) -> bool {
-    os == "linux" && bwrap_found
+fn sandbox_supported_on(os: &str, bwrap_usable: bool) -> bool {
+    os == "linux" && bwrap_usable
 }
 
 /// 沙盒能力探测。
 pub fn sandbox_available() -> bool {
-    sandbox_supported_on(std::env::consts::OS, bwrap_available())
+    sandbox_supported_on(std::env::consts::OS, bwrap_functional())
 }
 
-/// PATH 里有没有能跑起来的 bwrap。
-fn bwrap_available() -> bool {
+/// PATH 里有没有 bwrap 这个二进制（只看存在，不代表能用）。
+fn bwrap_installed() -> bool {
     std::process::Command::new("bwrap")
         .arg("--version")
         .output()
         .map(|output| output.status.success())
         .unwrap_or(false)
+}
+
+/// 探针单次超时：正常建沙盒是毫秒级；挂住说明命名空间/挂载被内核或容器运行时拦住。
+const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// bwrap 是否**真能建出沙盒**（结果进程内缓存一次）。
+///
+/// 不能用 `bwrap --version` 代替：该命令不建命名空间，因此在默认 `docker run`
+/// 里照样返回 0 —— 而真实沙盒必然失败（seccomp 拦 `clone/unshare`，且缺
+/// `CAP_SYS_ADMIN`）。误判为可用的后果是 `resolve()` 不做降级、照常产出
+/// `SandboxMode::Filesystem`，直到 spawn 时才报「Creating new namespace failed」，
+/// 前端把它误译成 agent 自身的问题。
+///
+/// 实测矩阵（`bwrap` + `--unshare-net`，即 `fs` 档；宿主为 WSL2 + Docker Desktop）：
+/// - 默认 / 仅 `seccomp=unconfined` / 仅 `--cap-add SYS_ADMIN`：**全部失败**；
+/// - `seccomp=unconfined` + `SYS_ADMIN`：`full` 可用，`fs` 因 loopback
+///   `RTM_NEWADDR` 失败；
+/// - 再加 `NET_ADMIN`：两档都可用（推荐，比 `--privileged` 温和）；
+/// - `--privileged`：两档都可用（兜底）。
+fn bwrap_functional() -> bool {
+    static CACHE: OnceLock<bool> = OnceLock::new();
+    *CACHE.get_or_init(|| {
+        let functional = probe_bwrap_functional();
+        if !functional {
+            // 只在首次探测失败时记一条，避免每次 acp_start 刷屏。
+            if bwrap_installed() {
+                crate::log::warn(
+                    "sandbox",
+                    "bwrap 已安装但无法建立沙盒，agent 将以无沙盒方式启动（降级为 off）。\
+                     容器内通常是缺命名空间权限：加 --security-opt seccomp=unconfined \
+                     --cap-add SYS_ADMIN --cap-add NET_ADMIN（兜底 --privileged）",
+                );
+            } else {
+                crate::log::warn(
+                    "sandbox",
+                    "未找到 bwrap，agent 将以无沙盒方式启动（降级为 off）",
+                );
+            }
+        }
+        functional
+    })
+}
+
+/// 跑一次与 `wrap_command(Filesystem, ..)` **同形**的最小沙盒，成功即视为可用。
+///
+/// 复用 `wrap_command` 而不是手拼参数，是为了让探针与生产路径不漂移：一旦
+/// `wrap_command` 加了新的必需 flag（例如新的 `--ro-bind`），探针会跟着覆盖到。
+fn probe_bwrap_functional() -> bool {
+    // 探针工作区必须是已存在目录（`wrap_command` 会校验）；用独立子目录而不是
+    // `temp_dir()` 本身 —— 否则会与 `wrap_command` 注入的 `--tmpfs /tmp` 叠加成
+    // 「先 tmpfs 再 bind 到同一路径」。
+    let workspace = std::env::temp_dir().join("greywork-sandbox-probe");
+    if std::fs::create_dir_all(&workspace).is_err() {
+        return false;
+    }
+    let Ok(config) = wrap_command(SandboxMode::Filesystem, &workspace, None, "/bin/true") else {
+        return false;
+    };
+    let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&config) else {
+        return false;
+    };
+    let command = parsed["command"].as_str().unwrap_or("bwrap");
+    let args: Vec<String> = parsed["args"]
+        .as_array()
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|value| value.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    if args.is_empty() {
+        return false;
+    }
+    run_with_timeout(command, &args, PROBE_TIMEOUT)
+}
+
+/// 跑一个子进程并等它结束；超时则杀掉并返回 false。
+///
+/// 手写轮询而不是引 `wait-timeout`：探针是一次性启动路径，多一个依赖不划算。
+/// stdout/stderr 全部丢弃 —— 探针只关心退出码。
+fn run_with_timeout(program: &str, args: &[String], timeout: Duration) -> bool {
+    use std::process::{Command, Stdio};
+    let Ok(mut child) = Command::new(program)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return false;
+    };
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return status.success(),
+            Ok(None) => {
+                if std::time::Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return false;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(_) => return false,
+        }
+    }
 }
 
 /// Linux 下常见需要只读绑定的系统目录（按需合并）。
@@ -268,6 +377,77 @@ mod tests {
         assert!(!sandbox_supported_on("macos", true));
         assert!(!sandbox_supported_on("windows", true));
         assert!(!sandbox_supported_on("freebsd", true));
+    }
+
+    /// 回归：可用性判据必须是「bwrap 真能建沙盒」，不是「bwrap 装没装」。
+    ///
+    /// 此前 `sandbox_available()` 喂的是 `bwrap --version` 的结果，而该命令不建
+    /// 命名空间，默认 `docker run` 里照样返回 0 —— 于是容器内恒判为「可用」，
+    /// 降级被跳过，直到 spawn 才炸。本用例钉住：装了但不可用 ⇒ 判为不可用。
+    #[test]
+    fn installed_but_non_functional_bwrap_is_not_available() {
+        assert!(!sandbox_supported_on("linux", false));
+    }
+
+    /// 功能性探针必然蕴含 bwrap 已安装——否则说明探针在把垃圾当成功。
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn functional_probe_implies_installed() {
+        if probe_bwrap_functional() {
+            assert!(bwrap_installed(), "探针通过 ⇒ bwrap 必然已安装");
+        }
+    }
+
+    /// 探针必须在超时内返回，不能挂住启动路径。
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn functional_probe_terminates() {
+        let started = std::time::Instant::now();
+        let _ = probe_bwrap_functional();
+        assert!(
+            started.elapsed() < PROBE_TIMEOUT + Duration::from_secs(2),
+            "探针耗时超过超时上限"
+        );
+    }
+
+    /// `run_with_timeout` 的三条路径：正常退出 / 非零退出 / 超时被杀。
+    #[cfg(unix)]
+    #[test]
+    fn run_with_timeout_handles_exit_codes_and_timeout() {
+        let ok = run_with_timeout(
+            "/bin/sh",
+            &["-c".to_string(), "exit 0".to_string()],
+            Duration::from_secs(5),
+        );
+        assert!(ok, "退出码 0 ⇒ true");
+        let failed = run_with_timeout(
+            "/bin/sh",
+            &["-c".to_string(), "exit 1".to_string()],
+            Duration::from_secs(5),
+        );
+        assert!(!failed, "非零退出码 ⇒ false");
+        // 超时：必须被 kill 掉而不是等它自己睡完。
+        let started = std::time::Instant::now();
+        let hung = run_with_timeout(
+            "/bin/sh",
+            &["-c".to_string(), "sleep 30".to_string()],
+            Duration::from_millis(300),
+        );
+        assert!(!hung, "超时 ⇒ false");
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "超时必须真的杀掉子进程"
+        );
+    }
+
+    /// 不存在的程序：spawn 失败 ⇒ false（不 panic）。
+    #[test]
+    fn run_with_timeout_returns_false_for_missing_program() {
+        assert!(!run_with_timeout(
+            "gw-definitely-missing-program-xyz",
+            &[],
+            Duration::from_secs(1)
+        ));
     }
 
     /// 非 Linux（无 bwrap）上显式选 fs/full 也要降级为 off：让 agent 起得来，

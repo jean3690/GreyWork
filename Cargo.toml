@@ -1,0 +1,23 @@
+# GreyWork Rust workspace。
+#
+# 存在意义：桌面壳（`apps/desktop/src-tauri`）与 headless 服务端（`apps/server`，见
+# docs/architecture.md）共用同一份领域逻辑。领域逻辑收在 `crates/greywork-host`，
+# 两侧只做薄包装 —— 避免命令面出现两份会漂移的实现。
+#
+# 单一 `Cargo.lock` 在仓库根：CI 与 husky 的 `--locked` 都指向它，所以那两处的
+# cargo 调用必须从仓库根发起（用 `-p` 选包），不能再 `cd apps/desktop/src-tauri`。
+[workspace]
+resolver = "2"
+members = [
+  "apps/desktop/src-tauri",
+  "crates/greywork-host",
+]
+
+# 依赖的调试信息是 target/debug 体积与重编时间的大头：本机同一棵依赖树，release（debug=0）
+# 的 target 是 3.6GB，dev（默认 debug=2）是 66GB。依赖里的变量几乎不会用调试器去看，
+# 但**回溯还需要文件和行号**，所以降到 1（limited，保留行表）而不是 0。
+# 自己的 crate 不受影响（这里只匹配依赖），本地开发照旧能单步。
+#
+# 放在 workspace 根：cargo 只认根 manifest 的 profile，成员里的会被忽略（并告警）。
+[profile.dev.package."*"]
+debug = 1

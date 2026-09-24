@@ -16,7 +16,7 @@ use tauri_plugin_notification::NotificationExt;
 /// 发一条系统通知；失败只记日志。
 pub fn send(app: &AppHandle, title: &str, body: &str) {
     match app.notification().builder().title(title).body(body).show() {
-        Ok(()) => crate::log::info("notify", format!("已发送: {title}")),
-        Err(error) => crate::log::warn("notify", format!("发送失败（{title}）: {error}")),
+        Ok(()) => greywork_host::log::info("notify", format!("已发送: {title}")),
+        Err(error) => greywork_host::log::warn("notify", format!("发送失败（{title}）: {error}")),
     }
 }

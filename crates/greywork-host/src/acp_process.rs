@@ -82,7 +82,7 @@ impl Drop for ProcessTreeGuard {
 pub fn drain_stderr(stream: impl AsyncRead + Send + 'static) -> StderrTail {
     let tail: StderrTail = Arc::new(Mutex::new(String::new()));
     let sink = tail.clone();
-    tauri::async_runtime::spawn(async move {
+    tokio::spawn(async move {
         // 装箱换 Unpin：`lines()` 的 `next()` 要求 `Self: Unpin`。
         let mut lines = Box::pin(futures_util::io::BufReader::new(stream).lines());
         while let Some(Ok(line)) = lines.next().await {

@@ -16,7 +16,9 @@ use std::path::PathBuf;
 use tauri::Manager;
 use tauri::{WebviewUrl, WebviewWindowBuilder};
 
-use crate::plugin_market::{MarketPluginManifest, PluginKind, PluginPackage, PluginWindowDecl};
+use greywork_host::plugin_market::{
+    MarketPluginManifest, PluginKind, PluginPackage, PluginWindowDecl,
+};
 
 /// 窗口 label 前缀：`plugin-window-<plugin-id>`，前端按 label 反查插件 id。
 const PLUGIN_WINDOW_PREFIX: &str = "plugin-window-";
@@ -34,7 +36,7 @@ fn load_window_plugin(
     app: &tauri::AppHandle,
     plugin_id: &str,
 ) -> Result<(PluginPackage, PluginWindowDecl), String> {
-    crate::plugin_market::validate_dir_key(plugin_id, "plugin id")?;
+    greywork_host::plugin_market::validate_dir_key(plugin_id, "plugin id")?;
     let root = plugins_root(app)?.join(plugin_id);
     let bytes = std::fs::read(root.join("plugin.json"))
         .map_err(|_| format!("plugin not installed: {plugin_id}"))?;
@@ -107,13 +109,13 @@ pub fn can_open_plugin_window(manifest: &MarketPluginManifest) -> bool {
             .as_ref()
             .and_then(|runtime| runtime.render.as_ref())
             .is_some()
-        && crate::plugin_market::declares_window_floating(manifest)
+        && greywork_host::plugin_market::declares_window_floating(manifest)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plugin_market::{
+    use greywork_host::plugin_market::{
         CapabilityRequirement, CodePluginRuntime, DeclarativeContributions, DeclarativeMode,
         DeclarativePage, RenderLoop,
     };
@@ -137,8 +139,9 @@ mod tests {
                 }),
             }),
             requires: vec![CapabilityRequirement::Plain("window.floating".into())],
-            window: window
-                .map(|(width, height)| crate::plugin_market::PluginWindowDecl { width, height }),
+            window: window.map(
+                |(width, height)| greywork_host::plugin_market::PluginWindowDecl { width, height },
+            ),
             contributes: DeclarativeContributions {
                 modes: vec![DeclarativeMode {
                     id: "pet".into(),
