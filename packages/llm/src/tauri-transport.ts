@@ -1,15 +1,14 @@
-import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { isTauriRuntime, type LlmChatParams, type LlmClient, type LlmEventEnvelope } from "./transports";
+import { hasHostCommands, invoke, listen, type UnlistenFn } from "@greywork/host-ipc";
+import type { LlmChatParams, LlmClient, LlmEventEnvelope } from "./transports";
 
 const EVENT_NAME = "llm://event";
 
-/** 桌面端传输：经 Tauri IPC 调用 Rust LLM 宿主（llm.rs，密钥宿主侧解析）。 */
+/** 宿主传输：经 @greywork/host-ipc 门面调用 Rust LLM 宿主（llm.rs，密钥宿主侧解析）——桌面走 Tauri IPC，服务端走 HTTP。 */
 export class TauriLlmTransport implements LlmClient {
   readonly available = true;
 
   isAvailable(): boolean {
-    return isTauriRuntime();
+    return hasHostCommands();
   }
 
   async chat(params: LlmChatParams): Promise<number> {

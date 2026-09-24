@@ -4,8 +4,7 @@
  * - 浏览器态：没有宿主，列表恒空、释放直接抛错 —— 不静默假装成功。
  */
 
-import { invoke } from "@tauri-apps/api/core";
-import { isTauriRuntime } from "@greywork/core";
+import { hasHostCommands, invoke } from "@greywork/host-ipc";
 import type { WorktreeProvision } from "./workspace-dir";
 
 /** `worktree_list` 的一行，与 provision 返回的 kind 同域（同一套宿主契约）。 */
@@ -23,18 +22,18 @@ export interface WorktreeEntry {
 
 export const worktreeBackend = {
   active(): boolean {
-    return isTauriRuntime();
+    return hasHostCommands();
   },
 
   /** 列出已派生的隔离快照；浏览器态返回空列表。 */
   async list(): Promise<WorktreeEntry[]> {
-    if (!isTauriRuntime()) return [];
+    if (!hasHostCommands()) return [];
     return await invoke<WorktreeEntry[]>("worktree_list");
   },
 
   /** 释放（删除）一个快照目录。宿主侧只接受 `~/.greyWork/worktrees` 之下的路径。 */
   async release(root: string): Promise<void> {
-    if (!isTauriRuntime()) throw new Error("浏览器预览态无法释放隔离快照：需要桌面版（Tauri）");
+    if (!hasHostCommands()) throw new Error("浏览器预览态无法释放隔离快照：需要桌面版（Tauri）");
     await invoke("worktree_release", { root });
   },
 };

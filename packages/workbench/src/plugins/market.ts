@@ -1,5 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
-import { isTauriRuntime } from "@greywork/core";
+import { hasHostCommands, invoke } from "@greywork/host-ipc";
 import { computed, ref } from "vue";
 import { adaptInstalledPlugin } from "./declarative";
 import { createWorkerCodePluginRuntime, type CodePluginRuntime, type CodePluginRuntimeFactory } from "./code-runtime";
@@ -17,9 +16,15 @@ import { useCapabilityLoader } from "./current";
 import { setNetFetchTransportForHost } from "./capabilities";
 import { closePluginWindow } from "./plugin-window";
 
-if (isTauriRuntime()) {
-  // net.fetch 能力走宿主 IPC：Rust 侧对 hosts 白名单做二次校验（纵深防御），
-  // 且不受 webview 静态 CSP 的域名限制。
+/**
+ * 把 net.fetch 能力挂到宿主 IPC：Rust 侧对 hosts 白名单做二次校验（纵深防御），
+ * 且不受 webview 静态 CSP 的域名限制。没有宿主时保持 webview fetch 兜底。
+ *
+ * **必须在 runtime 判定之后调用**（见 bootInstalledMarketPlugins），不能在模块顶层按运行时
+ * 分流：本模块经 workbench/index.ts 在入口求值，早于 initRuntimeMode()，那一刻恒为 browser-preview。
+ */
+export function initPluginHostTransport(): void {
+  if (!hasHostCommands()) return;
   setNetFetchTransportForHost(async (request) => {
     const response = await invoke<{ status: number; ok: boolean; headers: [string, string][]; body?: string }>("plugin_net_fetch", {
       request: {
@@ -45,7 +50,15 @@ export const marketLoading = ref(false);
 export const marketBusyId = ref<string | null>(null);
 export const marketError = ref("");
 export const pluginRegistryUrl = ref(localStorage.getItem(REGISTRY_URL_KEY) ?? DEFAULT_REGISTRY_URL);
-export const pluginMarketHostAvailable = isTauriRuntime();
+/**
+ * 当前运行时能否走宿主安装通道。
+ *
+ * 刻意是**函数**而不是模块常量：本模块经 workbench/index.ts 在入口求值，早于 initRuntimeMode()，
+ * 那一刻 runtimeMode() 还是 browser-preview —— 常量会永久冻结为 false，服务端模式下插件市场静默失效。
+ */
+export function pluginMarketHostAvailable(): boolean {
+  return hasHostCommands();
+}
 
 const registeredInstalledIds = new Set<string>();
 const codeRuntimes = new Map<string, CodePluginRuntime>();
@@ -117,14 +130,15 @@ export function setCodePluginRuntimeFactoryForTest(factory: CodePluginRuntimeFac
 }
 
 /**
- * 桌面态扫描 app_data/plugins，并把已安装包接入同一 loader。
+ * 有宿主时扫描 app_data/plugins，并把已安装包接入同一 loader；顺带挂上 net.fetch 的宿主通道。
  *
  * **不必等它落地再挂载**：注册是纯追加（重复 id 由 pluginManifests 去重跳过），
  * 插件贡献的导航项走响应式快照，晚一帧到会自己补上。调用方（main.ts）因此与
  * mount 并发发起、不 await —— 别把这次读盘 IPC 重新串回首帧前面。
  */
 export async function bootInstalledMarketPlugins(): Promise<void> {
-  if (!isTauriRuntime()) return;
+  if (!hasHostCommands()) return;
+  initPluginHostTransport();
   installedMarketPlugins.value = await invoke<InstalledPluginPackage[]>("plugin_market_list_installed");
   registerInstalled(installedMarketPlugins.value);
 }
@@ -139,7 +153,7 @@ export async function refreshPluginCatalog(): Promise<void> {
   marketLoading.value = true;
   marketError.value = "";
   try {
-    if (pluginMarketHostAvailable) {
+    if (pluginMarketHostAvailable()) {
       const registry = await invoke<{ schemaVersion: 1; plugins: PluginRegistryEntry[] }>("plugin_market_catalog", { registryUrl: url });
       marketCatalog.value = registry.plugins;
     } else {
@@ -162,7 +176,7 @@ export async function refreshPluginCatalog(): Promise<void> {
  * 返回 manifest 供确认弹窗展示能力语义（requires + 危险等级 + 域名白名单）。
  */
 export async function previewMarketPlugin(id: string): Promise<MarketPluginManifest> {
-  if (!pluginMarketHostAvailable) throw new Error("plugin preview requires the desktop app");
+  if (!pluginMarketHostAvailable()) throw new Error("plugin preview requires the desktop app");
   marketBusyId.value = id;
   marketError.value = "";
   try {
@@ -178,7 +192,7 @@ export async function previewMarketPlugin(id: string): Promise<MarketPluginManif
   }
 }
 export async function installMarketPlugin(id: string): Promise<PluginInstallReport> {
-  if (!pluginMarketHostAvailable) throw new Error("plugin installation requires the desktop app");
+  if (!pluginMarketHostAvailable()) throw new Error("plugin installation requires the desktop app");
   marketBusyId.value = id;
   marketError.value = "";
   try {
@@ -203,7 +217,7 @@ export async function installMarketPlugin(id: string): Promise<PluginInstallRepo
  * 按原状态恢复。安装校验失败时旧版本仍在盘上，重放注册即可回滚。
  */
 export async function upgradeMarketPlugin(id: string): Promise<PluginInstallReport> {
-  if (!pluginMarketHostAvailable) throw new Error("plugin upgrade requires the desktop app");
+  if (!pluginMarketHostAvailable()) throw new Error("plugin upgrade requires the desktop app");
   marketBusyId.value = id;
   marketError.value = "";
   const wasEnabled = isPluginEnabled(id);
@@ -235,7 +249,7 @@ export async function upgradeMarketPlugin(id: string): Promise<PluginInstallRepo
 }
 
 export async function uninstallMarketPlugin(id: string): Promise<void> {
-  if (!pluginMarketHostAvailable) throw new Error("plugin uninstallation requires the desktop app");
+  if (!pluginMarketHostAvailable()) throw new Error("plugin uninstallation requires the desktop app");
   marketBusyId.value = id;
   marketError.value = "";
   try {

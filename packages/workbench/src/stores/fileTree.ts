@@ -1,6 +1,7 @@
 import { defineStore } from "pinia";
 import { computed, ref, watch } from "vue";
-import { basename, isTauriRuntime, joinPath, normalizePath } from "@greywork/core";
+import { hasHostCommands } from "@greywork/host-ipc";
+import { basename, joinPath, normalizePath } from "@greywork/core";
 import { listDir, copyPath, createDir, createFile, deletePath, renamePath } from "../state/workspaceFiles";
 import { resolveWorkspaceRoot } from "../lib/workspace-dir";
 import { activeWorkspaceFolder } from "../lib/artifact-dir";
@@ -91,7 +92,7 @@ export const useFileTreeStore = defineStore("fileTree", () => {
   async function refresh(): Promise<void> {
     error.value = null;
     expanded.value = new Set();
-    if (!isTauriRuntime()) {
+    if (!hasHostCommands()) {
       mode.value = "vfs";
       root.value = "";
       bound.value = false;

@@ -13,8 +13,7 @@
  * 浏览器态一律空转（没有 IPC 宿主，invoke / listen 必然失败）。
  */
 import { isTauriRuntime } from "@greywork/core";
-import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { invoke, listen, type UnlistenFn } from "@greywork/host-ipc";
 
 /** 与 src-tauri/src/tray.rs 的事件名常量同名 —— 改一边必须改另一边。 */
 const EVENT_NEW_CHAT = "tray:new-chat";

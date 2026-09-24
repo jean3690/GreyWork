@@ -10,7 +10,7 @@
  */
 import { computed, onMounted, ref } from "vue";
 import { i18n } from "@/i18n";
-import { isTauriRuntime } from "@greywork/core";
+import { hasHostCommands } from "@greywork/host-ipc";
 import { useSettingsStore } from "@/stores/settings";
 import { registryEntryToDraft, searchMcpRegistry, type McpRegistryDraft, type McpRegistryEntry } from "@/lib/mcp-registry";
 import Icon from "@/features/shared/Icon.vue";
@@ -19,7 +19,7 @@ import McpFormDialog, { type McpDraftPayload, type McpFormPreset } from "@/featu
 
 const t = i18n.global.t;
 const settings = useSettingsStore();
-const hostAvailable = isTauriRuntime();
+const hostAvailable = hasHostCommands();
 
 const query = ref("");
 const results = ref<McpRegistryEntry[]>([]);

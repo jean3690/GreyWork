@@ -1,5 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
-import { isTauriRuntime } from "@greywork/core";
+import { hasHostCommands, invoke } from "@greywork/host-ipc";
 
 /**
  * MCP 官方注册表（registry.modelcontextprotocol.io）只读浏览。
@@ -84,7 +83,7 @@ export function registryEntryToDraft(entry: McpRegistryEntry): McpRegistryDraft 
 
 /** 搜索官方注册表。仅桌面态可用（宿主命令 mcp_search；浏览器态无代理直连）。 */
 export async function searchMcpRegistry(query: string, limit = 40): Promise<McpRegistryEntry[]> {
-  if (!isTauriRuntime()) {
+  if (!hasHostCommands()) {
     throw new Error("MCP registry browsing requires the desktop host");
   }
   const trimmed = query.trim();

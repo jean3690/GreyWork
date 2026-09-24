@@ -1,4 +1,5 @@
 import { isTauriRuntime } from "@greywork/core";
+import { invoke } from "@greywork/host-ipc";
 
 /**
  * 插件悬浮窗的宿主桥。
@@ -17,9 +18,9 @@ let hostOverride: PluginWindowHost | null = null;
 
 async function resolveHost(): Promise<PluginWindowHost | null> {
   if (hostOverride) return hostOverride;
+  // 守卫必须留在 isTauriRuntime 而非 hasHostCommands：plugin_window_* 是**仅桌面端**命令，
+  // 服务端会以 403 拒绝，服务端模式下这里就该是 no-op。
   if (!isTauriRuntime()) return null;
-  // 动态 import：浏览器预览 / 单测不加载 Tauri 客户端，避免把宿主依赖焊进包。
-  const { invoke } = await import("@tauri-apps/api/core");
   return {
     open: (pluginId) => invoke("plugin_window_open", { pluginId }),
     close: (pluginId) => invoke("plugin_window_close", { pluginId }),

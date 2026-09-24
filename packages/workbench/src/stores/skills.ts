@@ -1,6 +1,7 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
-import { isTauriRuntime, joinPath } from "@greywork/core";
+import { hasHostCommands } from "@greywork/host-ipc";
+import { joinPath } from "@greywork/core";
 import {
   createSkillsShSource,
   createSkillsTransport,
@@ -133,7 +134,7 @@ export const useSkillsStore = defineStore("skills", () => {
     description: "skills.sh 全量聚合索引",
   });
 
-  const hostAvailable = isTauriRuntime();
+  const hostAvailable = hasHostCommands();
   const workspace = ref<SkillsWorkspace | null>(null);
   const workspaceResolved = ref(false);
 

@@ -11,8 +11,9 @@
  * 浏览器态没有文件系统，只能保留内联副本（限额由 attachments.ts 单独收紧，
  * 通用文件在浏览器态直接不收）。
  */
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@greywork/host-ipc";
 import { isTauriRuntime, joinPath } from "@greywork/core";
+import { hasHostCommands } from "@greywork/host-ipc";
 
 import { readImage } from "@tauri-apps/plugin-clipboard-manager";
 import {
@@ -51,14 +52,14 @@ let rootPromise: Promise<string | null> | null = null;
 
 /** `~/.greyWork`（只解析一次；与 lib/artifact-dir.ts 同款缓存策略，互不共享）。 */
 function defaultRoot(): Promise<string | null> {
-  if (!isTauriRuntime()) return Promise.resolve(null);
+  if (!hasHostCommands()) return Promise.resolve(null);
   rootPromise ??= invoke<string>("store_default_root").catch(() => null);
   return rootPromise;
 }
 
-/** 会话附件目录（不存在则创建）；浏览器态或失败 → null。 */
+/** 会话附件目录（不存在则创建）；浏览器预览态或失败 → null。 */
 export async function ensureAttachmentLibrary(sessionId: string): Promise<string | null> {
-  if (!isTauriRuntime() || !sessionId) return null;
+  if (!hasHostCommands() || !sessionId) return null;
   const root = await defaultRoot();
   if (!root) return null;
   const dir = joinPath(root, "attachments", sessionId);
@@ -75,7 +76,7 @@ export async function ensureAttachmentLibrary(sessionId: string): Promise<string
  * 且目录不存在按已删处理，所以这里可以放心「删了不存在的会话」也不报错。
  */
 export async function pruneAttachmentLibrary(sessionId: string): Promise<void> {
-  if (!isTauriRuntime() || !sessionId) return;
+  if (!hasHostCommands() || !sessionId) return;
   try {
     await invoke("attachments_prune_session", { sessionId });
   } catch (error) {
@@ -114,14 +115,14 @@ function decodeUtf8(bytes: Uint8Array | undefined): string | null {
  * 必须压住体积）；文本一律按内联上限截断 —— 桌面态落库写的也是这份截断文本，
  * 但发送时同样只发这一份，所以不改变模型看到的内容。
  */
-async function toDraft(candidate: Candidate, isDesktop: boolean): Promise<Attachment | null> {
+async function toDraft(candidate: Candidate, hasStorage: boolean): Promise<Attachment | null> {
   const mime = candidate.mime || mimeForFile(candidate.name);
   const kind = attachmentKind(candidate.name, mime);
   if (!kind) return null;
   if (kind === "image") {
     let bytes = candidate.bytes;
     if (!bytes?.length) return null;
-    if (!isDesktop && bytes.length > ATTACHMENT_LIMITS.maxBrowserImageBytes) {
+    if (!hasStorage && bytes.length > ATTACHMENT_LIMITS.maxBrowserImageBytes) {
       bytes = (await reencodeImage(bytes, mime)) ?? bytes;
     }
     return createAttachment({
@@ -136,7 +137,7 @@ async function toDraft(candidate: Candidate, isDesktop: boolean): Promise<Attach
     // 通用文件 / 视频 / 语音只能落盘（浏览器态在 validateAttachment 已被拒），草稿必须带上
     // 原始字节，否则落库那一刻已经没有数据源了。
     const bytes = candidate.bytes;
-    if (!isDesktop || !bytes?.length) return null;
+    if (!hasStorage || !bytes?.length) return null;
     return createAttachment({ kind, name: candidate.name, mime, size: bytes.length, bytes });
   }
   const text = candidate.text ?? decodeUtf8(candidate.bytes);
@@ -153,15 +154,15 @@ async function toDraft(candidate: Candidate, isDesktop: boolean): Promise<Attach
 }
 
 /** 逐条草稿化并按限额过滤（超限即刻提示，不进入输入卡）。 */
-async function accept(candidates: readonly Candidate[], existing: readonly Attachment[], isDesktop: boolean): Promise<Attachment[]> {
+async function accept(candidates: readonly Candidate[], existing: readonly Attachment[], hasStorage: boolean): Promise<Attachment[]> {
   const accepted: Attachment[] = [];
   for (const candidate of candidates) {
-    const draft = await toDraft(candidate, isDesktop);
+    const draft = await toDraft(candidate, hasStorage);
     if (!draft) {
       notifyRejection({ key: "chat.attachUnsupported", params: { name: candidate.name } });
       continue;
     }
-    const rejection = validateAttachment({ name: draft.name, mime: draft.mime, size: draft.size }, [...existing, ...accepted], isDesktop);
+    const rejection = validateAttachment({ name: draft.name, mime: draft.mime, size: draft.size }, [...existing, ...accepted], hasStorage);
     if (rejection) {
       notifyRejection(rejection);
       continue;
@@ -175,10 +176,13 @@ async function accept(candidates: readonly Candidate[], existing: readonly Attac
 
 /** 打开文件选择器（多选，图片 + 文本）。取消/失败 → 空数组。 */
 export async function pickAttachments(existing: readonly Attachment[] = []): Promise<Attachment[]> {
-  const isDesktop = isTauriRuntime();
+  // 两个判断必须分开：原生选择器（fs_pick_files）是桌面专属命令，服务端态只能用
+  // 浏览器 input 兜底；但「落盘存储」在服务端同样可用，所以校验/限额按 hasHostCommands 走。
+  const nativePicker = isTauriRuntime();
+  const hasStorage = hasHostCommands();
   try {
-    const candidates = isDesktop ? await candidatesFromDialog() : await candidatesFromInput();
-    return await accept(candidates, existing, isDesktop);
+    const candidates = nativePicker ? await candidatesFromDialog() : await candidatesFromInput();
+    return await accept(candidates, existing, hasStorage);
   } catch (error) {
     notifyReadFailed(t("chat.attachPickerFailed"), error instanceof Error ? error.message : String(error));
     return [];
@@ -419,7 +423,7 @@ async function attachmentBytes(item: Attachment): Promise<Uint8Array> {
   // 草稿期的原始字节优先：通用文件只在这一段存在数据（无 dataUrl / text），
   // 微信入站媒体也是先拿字节再落库，避免绕一圈 base64。
   if (item.bytes?.length) return item.bytes;
-  if (item.path && isTauriRuntime()) return readBinaryFile(item.path);
+  if (item.path && hasHostCommands()) return readBinaryFile(item.path);
   if (item.dataUrl) return base64ToBytes(dataUrlPayload(item.dataUrl));
   if (item.text != null) return new TextEncoder().encode(item.text);
   throw new Error(`附件「${item.name}」没有可读的数据源`);
@@ -433,7 +437,7 @@ export function readAttachmentBytes(item: Attachment): Promise<Uint8Array> {
 export async function readAttachmentBase64(item: Attachment): Promise<string> {
   // 走 readBinaryFile 再在本地编码：fs_read_binary 现在回原始字节（预览那条高频路径
   // 因此省掉 base64 的 33% 膨胀与解码）。发图片是低频动作，这里多一次 JS 编码可接受。
-  if (item.path && isTauriRuntime()) return bytesToBase64(await readBinaryFile(item.path));
+  if (item.path && hasHostCommands()) return bytesToBase64(await readBinaryFile(item.path));
   if (item.dataUrl) return dataUrlPayload(item.dataUrl);
   throw new Error(`附件「${item.name}」没有可读的图片数据`);
 }
@@ -441,7 +445,7 @@ export async function readAttachmentBase64(item: Attachment): Promise<string> {
 /** 文本附件 → 内容（统一按内联上限截断）。 */
 export async function readAttachmentText(item: Attachment): Promise<{ text: string; truncated: boolean }> {
   if (item.text != null) return clipText(item.text);
-  if (item.path && isTauriRuntime()) return clipText(await readTextFile(item.path));
+  if (item.path && hasHostCommands()) return clipText(await readTextFile(item.path));
   throw new Error(`附件「${item.name}」没有可读的文本内容`);
 }
 

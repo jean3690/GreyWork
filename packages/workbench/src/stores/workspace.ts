@@ -1,5 +1,5 @@
+import { hasHostCommands } from "@greywork/host-ipc";
 import { createJsonStorage } from "@greywork/core";
-import { isTauriRuntime } from "@greywork/core";
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { writeTextFile } from "../state/workspaceFiles";
@@ -240,7 +240,7 @@ export const useWorkspaceStore = defineStore("workspace", () => {
     if (writerBound) return;
     writerBound = true;
     setDiskWriter(async (vfsPath, content) => {
-      if (!isTauriRuntime()) return;
+      if (!hasHostCommands()) return;
       for (const workspace of workspaces.value) {
         const file = workspace.files.find((candidate) => candidate.vfsPath === vfsPath && candidate.origin);
         if (file?.origin) {

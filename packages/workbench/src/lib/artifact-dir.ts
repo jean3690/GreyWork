@@ -1,5 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
-import { isAbsolutePath, isTauriRuntime, joinPath } from "@greywork/core";
+import { hasHostCommands, invoke } from "@greywork/host-ipc";
+import { isAbsolutePath, joinPath } from "@greywork/core";
 import { useWorkspaceStore } from "../stores/workspace";
 import { ensureDir, writeBinaryFile, writeTextFile } from "../state/workspaceFiles";
 
@@ -13,7 +13,7 @@ import { ensureDir, writeBinaryFile, writeTextFile } from "../state/workspaceFil
 let defaultRootPromise: Promise<string | null> | null = null;
 
 function defaultArtifactsRoot(): Promise<string | null> {
-  if (!isTauriRuntime()) return Promise.resolve(null);
+  if (!hasHostCommands()) return Promise.resolve(null);
   defaultRootPromise ??= invoke<string>("store_default_root").catch(() => null);
   return defaultRootPromise;
 }
@@ -27,7 +27,7 @@ export function activeWorkspaceFolder(): string | null {
 
 /** 产物目标目录（不存在则创建）；浏览器态返回 null。 */
 export async function resolveArtifactsDir(): Promise<string | null> {
-  if (!isTauriRuntime()) return null;
+  if (!hasHostCommands()) return null;
   const bound = activeWorkspaceFolder();
   const root = bound ?? (await defaultArtifactsRoot());
   if (!root) return null;

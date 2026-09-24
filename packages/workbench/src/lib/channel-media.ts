@@ -6,7 +6,7 @@
  * （协议事实的唯一来源），渲染端只用它做提前告知，真正的拦截在宿主侧。
  */
 
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@greywork/host-ipc";
 
 import { i18n } from "../i18n";
 import { binaryPayload } from "../state/workspaceFiles";

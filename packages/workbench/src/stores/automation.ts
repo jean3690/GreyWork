@@ -1,7 +1,7 @@
 import { createJsonStorage } from "@greywork/core";
 import { defineStore } from "pinia";
 import { ref, watch } from "vue";
-import { listen } from "@tauri-apps/api/event";
+import { listen } from "@greywork/host-ipc";
 import {
   automationsBackend,
   type AutomationDuePayload,

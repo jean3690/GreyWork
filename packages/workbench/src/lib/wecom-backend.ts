@@ -8,9 +8,7 @@
  * 被动回复凭据（回调的 req_id）同样留在宿主，渲染端只传文本与对端 id。
  */
 
-import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { isTauriRuntime } from "@greywork/core";
+import { hasHostCommands, invoke, listen, type UnlistenFn } from "@greywork/host-ipc";
 
 import type { MediaRef } from "../types";
 
@@ -50,7 +48,7 @@ export const WECOM_INBOUND_EVENT = "wecom://inbound";
 
 export const wecomBackend = {
   /** 仅桌面端可用；浏览器态调用方据此给出提示而非静默失败。 */
-  supported: (): boolean => isTauriRuntime(),
+  supported: (): boolean => hasHostCommands(),
 
   async status(): Promise<WecomStatus> {
     return invoke<WecomStatus>("wecom_status");

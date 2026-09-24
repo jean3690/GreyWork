@@ -15,8 +15,7 @@
  * 浏览器态整体空转（没有 IPC 宿主）。
  */
 import { isTauriRuntime } from "@greywork/core";
-import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { invoke, listen, type UnlistenFn } from "@greywork/host-ipc";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { onUnmounted } from "vue";
 import { clearDirtyPreviewTabs, hasDirtyPreviewTabs, requestLeave } from "./preview-edit-guard";

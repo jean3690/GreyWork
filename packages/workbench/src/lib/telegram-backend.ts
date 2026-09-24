@@ -8,9 +8,7 @@
  * 渲染端只传对端 chat id / 文本，拿回状态与事件。
  */
 
-import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { isTauriRuntime } from "@greywork/core";
+import { hasHostCommands, invoke, listen, type UnlistenFn } from "@greywork/host-ipc";
 
 import type { MediaRef } from "../types";
 
@@ -54,7 +52,7 @@ export const TELEGRAM_INBOUND_EVENT = "telegram://inbound";
 
 export const telegramBackend = {
   /** 仅桌面端可用；浏览器态调用方据此给出提示而非静默失败。 */
-  supported: (): boolean => isTauriRuntime(),
+  supported: (): boolean => hasHostCommands(),
 
   async status(): Promise<TelegramStatus> {
     return invoke<TelegramStatus>("telegram_status");

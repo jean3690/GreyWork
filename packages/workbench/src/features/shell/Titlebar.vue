@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { isTauriRuntime } from "@greywork/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import type { UnlistenFn } from "@tauri-apps/api/event";
+import type { UnlistenFn } from "@greywork/host-ipc";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { usePreviewStore } from "@/stores/preview";
 import { useWorkspacePanelStore } from "@/stores/workspacePanel";

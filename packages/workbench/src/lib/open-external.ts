@@ -6,7 +6,7 @@
  * 浏览器态没有磁盘通道，返回 false 让调用方给出说明，而不是抛错打断渲染。
  */
 
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@greywork/host-ipc";
 import { isTauriRuntime } from "@greywork/core";
 import type { PreviewTab } from "../stores/preview";
 

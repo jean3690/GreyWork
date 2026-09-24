@@ -14,9 +14,7 @@
  * 加密上传全在宿主侧。两者都在 `lib/channel-media.ts`，不由本模块暴露。
  */
 
-import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { isTauriRuntime } from "@greywork/core";
+import { hasHostCommands, invoke, listen, type UnlistenFn } from "@greywork/host-ipc";
 
 import type { MediaRef } from "../types";
 
@@ -78,7 +76,7 @@ export const WECHAT_INBOUND_EVENT = "wechat://inbound";
 
 export const wechatBackend = {
   /** 仅桌面端可用；浏览器态调用方据此给出提示而非静默失败。 */
-  supported: (): boolean => isTauriRuntime(),
+  supported: (): boolean => hasHostCommands(),
 
   async status(): Promise<WechatStatus> {
     return invoke<WechatStatus>("wechat_status");

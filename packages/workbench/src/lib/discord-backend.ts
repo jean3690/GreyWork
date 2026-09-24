@@ -8,9 +8,7 @@
  * 所以只申请 `DIRECT_MESSAGES`）；bot token 只留在宿主（`<应用数据>/discord/`，0600）。
  */
 
-import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { isTauriRuntime } from "@greywork/core";
+import { hasHostCommands, invoke, listen, type UnlistenFn } from "@greywork/host-ipc";
 
 import type { MediaRef } from "../types";
 
@@ -49,7 +47,7 @@ export const DISCORD_INBOUND_EVENT = "discord://inbound";
 
 export const discordBackend = {
   /** 仅桌面端可用；浏览器态调用方据此给出提示而非静默失败。 */
-  supported: (): boolean => isTauriRuntime(),
+  supported: (): boolean => hasHostCommands(),
 
   async status(): Promise<DiscordStatus> {
     return invoke<DiscordStatus>("discord_status");

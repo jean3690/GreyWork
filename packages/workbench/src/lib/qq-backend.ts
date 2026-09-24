@@ -8,9 +8,7 @@
  * 回发凭据（入站消息的 msg_id）同样留在宿主——QQ 要求被动回复带回它，5 分钟有效。
  */
 
-import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { isTauriRuntime } from "@greywork/core";
+import { hasHostCommands, invoke, listen, type UnlistenFn } from "@greywork/host-ipc";
 
 import type { MediaRef } from "../types";
 
@@ -65,7 +63,7 @@ export interface QqRegisterPoll {
 
 export const qqBackend = {
   /** 仅桌面端可用；浏览器态调用方据此给出提示而非静默失败。 */
-  supported: (): boolean => isTauriRuntime(),
+  supported: (): boolean => hasHostCommands(),
 
   async status(): Promise<QqStatus> {
     return invoke<QqStatus>("qq_status");

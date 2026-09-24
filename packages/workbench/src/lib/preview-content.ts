@@ -1,4 +1,4 @@
-import { isTauriRuntime } from "@greywork/core";
+import { hasHostCommands } from "@greywork/host-ipc";
 import { ref, watch, type Ref } from "vue";
 import { readBinaryFile, readTextFile } from "../state/workspaceFiles";
 import { isBinaryKind } from "./viewer";
@@ -70,7 +70,7 @@ export function usePreviewLoader<T>(
  * 而不是让 `invoke` 抛一个「command not found」这种对用户毫无意义的错。
  */
 function assertDiskAvailable(): void {
-  if (!isTauriRuntime()) throw new Error("浏览器态没有磁盘通道，无法预览工作区文件");
+  if (!hasHostCommands()) throw new Error("浏览器态没有磁盘通道，无法预览工作区文件");
 }
 
 /**

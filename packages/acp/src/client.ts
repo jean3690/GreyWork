@@ -35,6 +35,7 @@ import type {
 import type { PermissionTier } from "./permissions";
 import { boundedPermissionRawInput } from "./permissions";
 import { isTauriRuntime } from "./transports";
+import { hasHostCommands } from "@greywork/host-ipc";
 import { TauriIpcTransport } from "./tauri-transport";
 export class RemoteAcpUnsupportedError extends Error {
   constructor(message = "remote ACP WebSocket endpoint is not configured") {
@@ -395,13 +396,15 @@ export function createAcpClient(transport: AcpTransport = defaultTransport()): A
 }
 
 function defaultTransport(): AcpTransport {
-  return isTauriRuntime() ? new TauriIpcTransport() : new WebSocketTransport();
+  return hasHostCommands() ? new TauriIpcTransport() : new WebSocketTransport();
 }
 
 export { isTauriRuntime };
 
 /** 桌面端默认工作区目录（用户主目录）；Web 环境返回 null。 */
 export async function desktopHomeDir(): Promise<string | null> {
+  // 刻意保留 isTauriRuntime 而非 hasHostCommands：homeDir 来自 @tauri-apps/api/path，
+  // 服务端没有对应的「用户主目录」概念，这里必须只在桌面端取值。
   if (!isTauriRuntime()) return null;
   return homeDir();
 }

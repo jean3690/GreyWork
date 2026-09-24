@@ -9,7 +9,7 @@
  * 检查/打开链接都走宿主：渲染端 CSP 的 connect-src 只放行 self+ipc，直连 GitHub 会被拦。
  */
 
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@greywork/host-ipc";
 import { getVersion } from "@tauri-apps/api/app";
 import { isTauriRuntime } from "@greywork/core";
 

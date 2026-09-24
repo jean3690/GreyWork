@@ -1,4 +1,5 @@
-import { fetchJson, isTauriRuntime } from "@greywork/core";
+import { fetchJson } from "@greywork/core";
+import { hasHostCommands } from "@greywork/host-ipc";
 import type { SkillSnapshotFile, SkillsMarketTransport } from "./types";
 import { HostSkillsTransport } from "./host-transport";
 
@@ -48,7 +49,7 @@ export class WebSkillsTransport implements SkillsMarketTransport {
   }
 }
 
-/** 运行时自适应工厂：桌面态走宿主 IPC（搜索/下载/安装/卸载全可用），浏览器态退回 Web 直连通道。 */
+/** 运行时自适应工厂：有宿主（桌面 / 服务端）走宿主 IPC（搜索/下载/安装/卸载全可用），浏览器预览退回 Web 直连通道。 */
 export function createSkillsTransport(): SkillsMarketTransport {
-  return isTauriRuntime() ? new HostSkillsTransport() : new WebSkillsTransport();
+  return hasHostCommands() ? new HostSkillsTransport() : new WebSkillsTransport();
 }

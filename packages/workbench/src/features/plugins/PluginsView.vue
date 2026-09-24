@@ -310,7 +310,7 @@ function saveRegistry(): void {
 async function installFromMarket(id: string): Promise<void> {
   // 宿主不可用时按钮只标 aria-disabled（保持可聚焦，"仅桌面端可安装"的提示才弹得出来），
   // 点击真正的兜底在这里 —— 否则会走到 requestInstall 再报错。
-  if (!pluginMarketHostAvailable) return;
+  if (!pluginMarketHostAvailable()) return;
   notice.value = null;
   try {
     await requestInstall(id, marketCatalog.value.find((entry) => entry.id === id)?.name ?? id);
@@ -477,18 +477,18 @@ async function confirmUninstall(): Promise<void> {
               v-if="installedMarketIds.has(entry.id)"
               type="button"
               class="h-7 shrink-0 cursor-pointer rounded-[7px] border border-line px-2.5 text-[11px] text-dim transition-colors hover:border-orange/40 hover:text-orange disabled:opacity-40"
-              :disabled="!pluginMarketHostAvailable || marketBusyId === entry.id"
+              :disabled="!pluginMarketHostAvailable() || marketBusyId === entry.id"
               :data-testid="`market-uninstall-${entry.id}`"
               @click="uninstallTarget = { id: entry.id, name: entry.name }"
             >
               {{ marketBusyId === entry.id ? "…" : t("market.uninstall") }}
             </button>
-            <Hint v-else :text="!pluginMarketHostAvailable ? t('market.desktopInstallOnly') : null" multiline>
+            <Hint v-else :text="!pluginMarketHostAvailable() ? t('market.desktopInstallOnly') : null" multiline>
               <button
                 type="button"
                 class="h-7 shrink-0 cursor-pointer rounded-[7px] bg-accent px-3 text-[11px] font-medium text-accent-ink transition-colors hover:bg-accent-hi disabled:cursor-not-allowed disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
                 :disabled="marketBusyId !== null"
-                :aria-disabled="!pluginMarketHostAvailable || undefined"
+                :aria-disabled="!pluginMarketHostAvailable() || undefined"
                 :data-testid="`market-install-${entry.id}`"
                 @click="installFromMarket(entry.id)"
               >
@@ -510,7 +510,7 @@ async function confirmUninstall(): Promise<void> {
         </div>
       </div>
 
-      <p v-if="!pluginMarketHostAvailable" class="mt-3 text-center text-[10.5px] text-dim2">{{ t("market.desktopInstallOnly") }}</p>
+      <p v-if="!pluginMarketHostAvailable()" class="mt-3 text-center text-[10.5px] text-dim2">{{ t("market.desktopInstallOnly") }}</p>
     </section>
 
     <section v-else-if="activeSection === 'mcp'" class="mt-4">

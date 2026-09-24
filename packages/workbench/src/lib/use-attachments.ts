@@ -12,6 +12,7 @@ import { computed, onMounted, onUnmounted, ref, watch, type ComputedRef, type Re
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isTauriRuntime } from "@greywork/core";
+import { hasHostCommands } from "@greywork/host-ipc";
 import {
   attachmentObjectUrl,
   attachmentsFromClipboard,
@@ -150,7 +151,7 @@ export function useAttachments(sessionId: () => string, options: AttachmentsOpti
   }
 
   function addText(input: { name: string; text: string; mime?: string }): void {
-    const result = buildTextAttachment(input.name, input.text, items.value, isTauriRuntime());
+    const result = buildTextAttachment(input.name, input.text, items.value, hasHostCommands());
     if ("rejection" in result) {
       notify({ kind: "warning", key: "attachment-text-rejected", title: t(result.rejection.key, result.rejection.params) });
       return;

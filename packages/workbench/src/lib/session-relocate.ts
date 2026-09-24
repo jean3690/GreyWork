@@ -6,7 +6,7 @@
  * 会话内的 workspaceId 字段表达，无需搬文件。
  */
 
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@greywork/host-ipc";
 import { sessionBackend } from "./session-backend";
 import { useSessionStore } from "../stores/session";
 

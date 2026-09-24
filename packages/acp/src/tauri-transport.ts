@@ -1,5 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { invoke, listen, type UnlistenFn } from "@greywork/host-ipc";
 import type {
   AcpEventEnvelope,
   AcpPromptUnit,
@@ -15,7 +14,7 @@ import type { PermissionTier } from "./permissions";
 
 const EVENT_NAME = "acp://event";
 
-/** 桌面端传输：经 Tauri IPC 调用 Rust ACP 主机（acp_host.rs）。 */
+/** 宿主传输：经 @greywork/host-ipc 门面调用 Rust ACP 主机（acp_host.rs）——桌面走 Tauri IPC，服务端走 HTTP。 */
 export class TauriIpcTransport implements AcpTransport {
   readonly id = "tauri-ipc" as const;
 

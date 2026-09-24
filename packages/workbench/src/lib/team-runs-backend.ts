@@ -7,8 +7,7 @@
  * 存档行：PlannerRun 全文不透明 JSON（Rust 只校验 id 一致，不解析内部结构）。
  */
 
-import { invoke } from "@tauri-apps/api/core";
-import { isTauriRuntime } from "@greywork/core";
+import { hasHostCommands, invoke } from "@greywork/host-ipc";
 
 export interface TeamRunRow {
   id: string;
@@ -19,18 +18,18 @@ export interface TeamRunRow {
 export const teamRunsBackend = {
   /** 当前运行时是否有后端真源（Tauri 桌面）。 */
   active(): boolean {
-    return isTauriRuntime();
+    return hasHostCommands();
   },
 
   /** 读存档；库未接管 → null（store 以本地缓存回填并首落库）。 */
   async load(): Promise<TeamRunRow[] | null> {
-    if (!isTauriRuntime()) return null;
+    if (!hasHostCommands()) return null;
     return await invoke<TeamRunRow[] | null>("db_team_runs_load");
   },
 
   /** 全量替换存档（事务幂等；运行结束后写一次）。 */
   async save(runs: TeamRunRow[]): Promise<void> {
-    if (!isTauriRuntime()) return;
+    if (!hasHostCommands()) return;
     await invoke("db_team_runs_sync", { runs });
   },
 };

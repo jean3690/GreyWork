@@ -15,8 +15,8 @@
  * 清单执行。调用方据 `SyncReport.conflicts` 决定是否回读合并。
  */
 
-import { invoke } from "@tauri-apps/api/core";
-import { isAbsolutePath, isTauriRuntime } from "@greywork/core";
+import { hasHostCommands, invoke } from "@greywork/host-ipc";
+import { isAbsolutePath } from "@greywork/core";
 import { isRemoteStoreEnabled, readRemoteStoreConfig } from "./remote-store-config";
 import { createWebdavClient } from "./webdav";
 
@@ -171,14 +171,14 @@ async function remoteSave(snapshot: SessionBackendSnapshot, deletedSessionIds: s
 /* ===== 统一后端面 ===== */
 
 export const sessionBackend = {
-  /** 当前运行时是否有落盘真源（Tauri 桌面，或浏览器态配好了远端）。 */
+  /** 当前运行时是否有落盘真源（桌面 / 服务端宿主，或浏览器预览态配好了远端）。 */
   active(): boolean {
-    return isTauriRuntime() || isRemoteStoreEnabled(readRemoteStoreConfig());
+    return hasHostCommands() || isRemoteStoreEnabled(readRemoteStoreConfig());
   },
 
-  /** 落盘侧是否按工作区分目录（只有桌面文件面才有这个概念；搬迁命令据此决定是否可用）。 */
+  /** 落盘侧是否按工作区分目录（宿主文件面的概念；搬迁命令据此决定是否可用）。 */
   hasWorkspaceDirs(): boolean {
-    return isTauriRuntime();
+    return hasHostCommands();
   },
 
   /**
@@ -186,7 +186,7 @@ export const sessionBackend = {
    * store 以本地内容为真源回填并触发首次 sync。
    */
   async load(workspaces: WorkspaceDirRef[]): Promise<SessionBackendSnapshot | null> {
-    if (isTauriRuntime()) {
+    if (hasHostCommands()) {
       return invoke<SessionBackendSnapshot | null>("store_sessions_load", { workspaces });
     }
     if (!isRemoteStoreEnabled(readRemoteStoreConfig())) return null;
@@ -195,7 +195,7 @@ export const sessionBackend = {
 
   /** 增量同步；`deletedSessionIds` 是本次要落实的删除清单（落盘侧只删它）。 */
   async save(snapshot: SessionBackendSnapshot, workspaces: WorkspaceDirRef[], deletedSessionIds: string[] = []): Promise<SyncReport> {
-    if (isTauriRuntime()) {
+    if (hasHostCommands()) {
       // 旧版宿主的 store_sessions_sync 无返回值（null）：归一化成空报告，
       // 免得新前端 + 旧二进制的组合在读 conflicts 时炸掉。
       const report = await invoke<SyncReport | null>("store_sessions_sync", { snapshot, workspaces, deletedSessionIds });

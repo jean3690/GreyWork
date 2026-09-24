@@ -6,12 +6,12 @@
  * WebDAV 才算真落盘 —— 这一页把两者的现状摊开，避免用户以为浏览器里也在写盘。
  */
 import { onMounted, ref } from "vue";
-import { isTauriRuntime } from "@greywork/core";
+import { hasHostCommands } from "@greywork/host-ipc";
 import { createWebdavClient } from "@/lib/webdav";
 import { isRemoteStoreEnabled, readRemoteStoreConfig, writeRemoteStoreConfig, type RemoteStoreConfig } from "@/lib/remote-store-config";
 import Icon from "@/features/shared/Icon.vue";
 
-const desktop = isTauriRuntime();
+const desktop = hasHostCommands();
 
 const draft = ref<RemoteStoreConfig>({ kind: "off", url: "" });
 const saved = ref(false);

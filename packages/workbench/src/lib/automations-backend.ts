@@ -9,8 +9,7 @@
  * 任务行形状与 Rust `AutomationTaskDto` 对齐（running 为运行期瞬时态不落库）。
  */
 
-import { invoke } from "@tauri-apps/api/core";
-import { isTauriRuntime } from "@greywork/core";
+import { hasHostCommands, invoke } from "@greywork/host-ipc";
 
 export interface AutomationTaskRow {
   id: string;
@@ -69,42 +68,42 @@ export interface AutomationRunRow {
 export const automationsBackend = {
   /** 当前运行时是否有后端真源（Tauri 桌面）。 */
   active(): boolean {
-    return isTauriRuntime();
+    return hasHostCommands();
   },
 
   /** 读任务清单；库未接管 → null（store 以种子回填并首落库）。 */
   async load(): Promise<AutomationTaskRow[] | null> {
-    if (!isTauriRuntime()) return null;
+    if (!hasHostCommands()) return null;
     return await invoke<AutomationTaskRow[] | null>("db_automations_load");
   },
 
   /** 全量替换任务清单（事务幂等）。 */
   async save(tasks: AutomationTaskRow[]): Promise<void> {
-    if (!isTauriRuntime()) return;
+    if (!hasHostCommands()) return;
     await invoke("db_automations_sync", { tasks });
   },
 
   /** 拉取到期执行队列：pending 且到期在最近 60min 窗口内。 */
   async dueList(): Promise<AutomationDueRow[] | null> {
-    if (!isTauriRuntime()) return null;
+    if (!hasHostCommands()) return null;
     return await invoke<AutomationDueRow[]>("db_automations_due_list");
   },
 
   /** 完成认领到期任务（pending → success/failed；库侧原子防双执行）。 */
   async dueFinish(id: number, status: "success" | "failed"): Promise<void> {
-    if (!isTauriRuntime()) return;
+    if (!hasHostCommands()) return;
     await invoke("db_automations_due_finish", { id, status });
   },
 
   /** 读运行记录（按 ranAt 倒序，默认最近 200 条）；浏览器态无后端 → 空。 */
   async runsLoad(limit = 200): Promise<AutomationRunRow[]> {
-    if (!isTauriRuntime()) return [];
+    if (!hasHostCommands()) return [];
     return (await invoke<AutomationRunRow[]>("db_automation_runs_load", { limit })) ?? [];
   },
 
   /** 记一条运行结果（每任务库侧自动裁剪保留最近 50 条）。 */
   async runRecord(run: Omit<AutomationRunRow, "id">): Promise<void> {
-    if (!isTauriRuntime()) return;
+    if (!hasHostCommands()) return;
     await invoke("db_automation_run_record", { run });
   },
 };

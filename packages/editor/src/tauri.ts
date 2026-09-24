@@ -10,7 +10,7 @@
  * 感知宿主细节，测试不碰 Tauri。
  */
 
-import { invoke as tauriInvoke } from "@tauri-apps/api/core";
+import { invoke as tauriInvoke } from "@greywork/host-ipc";
 import type { CommitResult, GitChange, GitCommit, GitStatusEntry, HistoryGitService } from "./types";
 
 /** 可注入的 IPC 调用形态（收窄自 Tauri invoke，测试好替换）。 */

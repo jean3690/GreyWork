@@ -7,8 +7,7 @@
  * 设置对象整体读写（后端不解析字段）；校验归 settings store 的 applySaved。
  */
 
-import { invoke } from "@tauri-apps/api/core";
-import { isTauriRuntime } from "@greywork/core";
+import { hasHostCommands, invoke } from "@greywork/host-ipc";
 
 /** 宽松快照形状（与 SavedSettings 同构；store 侧校验）。 */
 export type SettingsSnapshot = Record<string, unknown>;
@@ -16,18 +15,18 @@ export type SettingsSnapshot = Record<string, unknown>;
 export const settingsBackend = {
   /** 当前运行时是否有后端真源（Tauri 桌面）。 */
   active(): boolean {
-    return isTauriRuntime();
+    return hasHostCommands();
   },
 
   /** 读设置快照；从未持久化过 → null（store 以本地/默认值回填并首落库）。 */
   async load(): Promise<SettingsSnapshot | null> {
-    if (!isTauriRuntime()) return null;
+    if (!hasHostCommands()) return null;
     return await invoke<SettingsSnapshot | null>("db_settings_load");
   },
 
   /** 全量替换设置快照（单对象 upsert）。 */
   async save(settings: SettingsSnapshot): Promise<void> {
-    if (!isTauriRuntime()) return;
+    if (!hasHostCommands()) return;
     await invoke("db_settings_sync", { settings });
   },
 };

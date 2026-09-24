@@ -186,17 +186,20 @@ export interface AttachmentRejection {
  *
  * 采集时校验而非发送时：体积/数量问题要在用户刚选完文件时就地说清，
  * 而不是等到发送才发现附件被悄悄丢掉。
+ *
+ * `hasStorage` = 当前运行时有没有宿主落盘（桌面 / 服务端有，浏览器预览没有）。
+ * 它同时决定「通用文件能不能收」与图片上限走哪一档，所以不能按 isTauriRuntime 传。
  */
 export function validateAttachment(
   meta: { name: string; mime: string; size: number },
   existing: readonly Attachment[],
-  isDesktop: boolean,
+  hasStorage: boolean,
 ): AttachmentRejection | null {
   const kind = attachmentKind(meta.name, meta.mime);
   if (!kind) return { key: "chat.attachUnsupported", params: { name: meta.name } };
-  // 通用文件 / 视频 / 语音必须落盘才发得出去，浏览器态没有文件系统，收下等于把 base64
+  // 通用文件 / 视频 / 语音必须落盘才发得出去，浏览器预览态没有文件系统，收下等于把 base64
   // 塞进 localStorage —— 直接按「不支持」拒掉，别让用户以为选上了。
-  if ((kind === "file" || kind === "video" || kind === "audio") && !isDesktop) {
+  if ((kind === "file" || kind === "video" || kind === "audio") && !hasStorage) {
     return { key: "chat.attachUnsupported", params: { name: meta.name } };
   }
   if (existing.length >= ATTACHMENT_LIMITS.maxCount) {
@@ -204,7 +207,7 @@ export function validateAttachment(
   }
   const limit =
     kind === "image"
-      ? isDesktop
+      ? hasStorage
         ? ATTACHMENT_LIMITS.maxImageBytes
         : ATTACHMENT_LIMITS.maxBrowserImageBytes
       : kind === "text"
@@ -316,12 +319,12 @@ export function buildTextAttachment(
   name: string,
   content: string,
   existing: readonly Attachment[],
-  isDesktop: boolean,
+  hasStorage: boolean,
 ): { attachment: Attachment } | { rejection: AttachmentRejection } {
   const safeName = safeAttachmentName(name);
   const { text, truncated } = clipText(content);
   const size = new TextEncoder().encode(text).length;
-  const rejection = validateAttachment({ name: safeName, mime: "text/markdown", size }, existing, isDesktop);
+  const rejection = validateAttachment({ name: safeName, mime: "text/markdown", size }, existing, hasStorage);
   if (rejection) return { rejection };
   return {
     attachment: createAttachment({

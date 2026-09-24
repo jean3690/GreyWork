@@ -4,7 +4,7 @@
  * - 浏览器态：无宿主 → null（卡显示「浏览器预览」）。
  */
 
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@greywork/host-ipc";
 import { isTauriRuntime } from "@greywork/core";
 
 export interface SysInfo {

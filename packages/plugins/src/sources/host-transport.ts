@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@greywork/host-ipc";
 import type { SkillSnapshotFile, SkillsMarketTransport } from "./types";
 
 /**

@@ -5,7 +5,7 @@
  * 返回 false 让调用方给出「未落盘」的说明，而不是抛错打断渲染。
  */
 
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@greywork/host-ipc";
 import { isTauriRuntime } from "@greywork/core";
 
 export async function revealInFolder(path: string): Promise<boolean> {

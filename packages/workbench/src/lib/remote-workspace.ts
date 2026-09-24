@@ -9,7 +9,8 @@
  * 这里刻意不内部 `useWorkspaceStore()`：调用方（远程切片）拿到的是注入进来的 store，
  * 单测注入假实现即可，不必为每个用例起一个真 Pinia。
  */
-import { isTauriRuntime, joinPath } from "@greywork/core";
+import { hasHostCommands } from "@greywork/host-ipc";
+import { joinPath } from "@greywork/core";
 import { i18n } from "../i18n";
 import { ensureDir } from "../state/workspaceFiles";
 import { resolveWorkspaceDir } from "./workspace-dir";
@@ -50,7 +51,7 @@ export function defaultRemoteWorkspaceFolder(): Promise<string> {
  * **用户主动换绑**（设置页弹窗）才走 `bindWorkspaceFolder`，那里搬迁是真需要的。
  */
 export async function ensureRemoteWorkspaceFolder(store: RemoteWorkspaceStore): Promise<string | null> {
-  if (!isTauriRuntime()) return null;
+  if (!hasHostCommands()) return null;
   const workspace = ensureRemoteWorkspace(store);
   if (workspace.folder) return workspace.folder;
   const folder = await defaultRemoteWorkspaceFolder();

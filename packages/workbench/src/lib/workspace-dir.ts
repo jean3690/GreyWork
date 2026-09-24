@@ -1,5 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
-import { isTauriRuntime } from "@greywork/core";
+import { hasHostCommands, invoke } from "@greywork/host-ipc";
 import { useSettingsStore } from "../stores/settings";
 import { i18n } from "../i18n";
 import { activeConversationFolder } from "./conversation-folder";
@@ -14,7 +13,7 @@ const t = i18n.global.t;
 export async function resolveWorkspaceDir(): Promise<string> {
   const configured = useSettingsStore().workspaceDir.trim();
   if (configured) return configured;
-  if (isTauriRuntime()) return await invoke<string>("store_default_root");
+  if (hasHostCommands()) return await invoke<string>("store_default_root");
   throw new Error(t("errors.workspaceUnresolvable"));
 }
 
@@ -58,7 +57,7 @@ export interface WorktreeProvision {
  * 非桌面端、或档位不是 worktree，一律原样返回 base。
  */
 export async function isolateForRun(base: string): Promise<string> {
-  if (useSettingsStore().runMode !== "worktree" || !isTauriRuntime()) return base;
+  if (useSettingsStore().runMode !== "worktree" || !hasHostCommands()) return base;
   const provisioned = await invoke<WorktreeProvision>("worktree_provision", { source: base });
   return provisioned.root;
 }

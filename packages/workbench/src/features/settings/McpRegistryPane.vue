@@ -8,7 +8,7 @@
  * `npx -y` / `uvx` 的 stdio 草稿；其余类型不可登记。
  */
 import { computed, ref, watch } from "vue";
-import { isTauriRuntime } from "@greywork/core";
+import { hasHostCommands } from "@greywork/host-ipc";
 import { useSettingsStore } from "@/stores/settings";
 import { registryEntryToDraft, searchMcpRegistry, type McpRegistryDraft, type McpRegistryEntry } from "@/lib/mcp-registry";
 import Icon from "@/features/shared/Icon.vue";
@@ -18,7 +18,7 @@ const props = defineProps<{ open: boolean }>();
 const emit = defineEmits<{ close: []; register: [entry: McpRegistryEntry] }>();
 
 const settings = useSettingsStore();
-const hostAvailable = isTauriRuntime();
+const hostAvailable = hasHostCommands();
 
 const query = ref("");
 const results = ref<McpRegistryEntry[]>([]);

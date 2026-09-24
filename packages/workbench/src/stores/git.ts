@@ -1,5 +1,5 @@
 import { createTauriGitService, type GitChange, type GitCommit, type HistoryGitService } from "@greywork/editor";
-import { isTauriRuntime } from "@greywork/core";
+import { hasHostCommands } from "@greywork/host-ipc";
 import { defineStore } from "pinia";
 import { computed, ref, watch } from "vue";
 import { resolveWorkspaceRoot } from "../lib/workspace-dir";
@@ -139,7 +139,7 @@ export const useGitStore = defineStore("git", () => {
   }
 
   async function refresh(): Promise<void> {
-    if (!isTauriRuntime()) {
+    if (!hasHostCommands()) {
       resetHostState();
       return;
     }
@@ -296,7 +296,7 @@ export const useGitStore = defineStore("git", () => {
   // 绑定的工作区文件夹变化（切换工作区 / 换绑 / 切对话）就重载 git 状态。
   const boundFolder = () => activeConversationFolder() ?? activeWorkspaceFolder();
   watch(boundFolder, () => {
-    if (isTauriRuntime()) void refresh();
+    if (hasHostCommands()) void refresh();
   });
 
   return {
