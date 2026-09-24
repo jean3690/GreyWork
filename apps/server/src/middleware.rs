@@ -12,10 +12,16 @@ use crate::state::AppState;
 ///
 /// `no-store`：命令返回值可能含凭据/文件内容，不该被任何中间缓存留存。
 /// `nosniff`：避免浏览器把 JSON/二进制按内容猜成可执行类型。
+///
+/// 缓存头用 `or_insert`（**只在缺失时兜底**）：静态路由会先写好各自的按路径策略
+/// （`/` 与其余资源 `no-cache`、`/assets/*` `immutable`），这里是更外层的 layer，
+/// 若用 `insert` 会把它们全部冲掉。`/api/*` 不设自己的缓存头，于是仍拿到 `no-store`。
 pub async fn security_headers(request: Request, next: Next) -> Response {
     let mut response = next.run(request).await;
     let headers = response.headers_mut();
-    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    headers
+        .entry(header::CACHE_CONTROL)
+        .or_insert(HeaderValue::from_static("no-store"));
     headers.insert(
         header::X_CONTENT_TYPE_OPTIONS,
         HeaderValue::from_static("nosniff"),

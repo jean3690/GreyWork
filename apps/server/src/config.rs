@@ -41,6 +41,12 @@ pub struct ServerConfig {
     pub secure_cookie: bool,
     /// 非空时，对所有非 GET/HEAD 请求校验 `Origin` 必须在此白名单内。
     pub allowed_origins: Vec<String>,
+    /// 构建产物目录（SPA）。`None` = 不托管静态资源（仅 /api）。
+    ///
+    /// 刻意不给默认路径：`cargo run` 开发态、纯 API 部署都不该悄悄挂上一份过期的
+    /// `apps/desktop/dist`；`<exe 同目录>/dist` 这种默认对从 `target/debug` 起的人更是惊吓。
+    /// Docker 里显式设 `GREYWORK_STATIC_DIR=/app/dist`。
+    pub static_dir: Option<PathBuf>,
 }
 
 impl Default for ServerConfig {
@@ -59,6 +65,7 @@ impl Default for ServerConfig {
             tier: Some("read-only".to_string()),
             secure_cookie: false,
             allowed_origins: Vec::new(),
+            static_dir: None,
         }
     }
 }
@@ -133,6 +140,9 @@ impl ServerConfig {
         if let Some(value) = env_str("GREYWORK_ALLOWED_ORIGINS") {
             self.allowed_origins = split_list(&value, ',');
         }
+        if let Some(value) = env_str("GREYWORK_STATIC_DIR") {
+            self.static_dir = Some(PathBuf::from(value));
+        }
         Ok(())
     }
 }
@@ -165,6 +175,26 @@ pub fn resolve_home() -> Result<PathBuf, String> {
         .map(PathBuf::from)
         .filter(|path| !path.as_os_str().is_empty())
         .ok_or_else(|| format!("无法确定家目录：环境变量 {key} 未设置"))
+}
+
+/// 校验静态目录：配了就**必须**有效 —— 否则容器会「healthy 但 UI 404」。
+///
+/// 容器 `HEALTHCHECK` 打的是 `/api/health`，UI 404 时它照样绿；这里若只警告，
+/// 坏镜像就会以 healthy 状态发出去，所以必须当场硬失败。
+pub fn resolve_static_dir(config: &ServerConfig) -> Result<Option<PathBuf>, String> {
+    let Some(dir) = &config.static_dir else {
+        return Ok(None);
+    };
+    let index = dir.join("index.html");
+    if !index.is_file() {
+        return Err(format!(
+            "GREYWORK_STATIC_DIR={} 无效：未找到 {}。\
+             （配置了静态托管就必须有 index.html；只想提供 /api 请删除该配置）",
+            dir.display(),
+            index.display()
+        ));
+    }
+    Ok(Some(dir.clone()))
 }
 
 fn env_str(key: &str) -> Option<String> {
@@ -362,6 +392,47 @@ mod tests {
         let again = resolve_password(&config).unwrap();
         assert!(again.generated_plaintext.is_none());
         assert_eq!(again.hash, resolved.hash);
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn resolve_static_dir_is_none_when_unset() {
+        let config = ServerConfig::default();
+        assert!(resolve_static_dir(&config).unwrap().is_none());
+    }
+
+    #[test]
+    fn resolve_static_dir_errors_when_index_missing() {
+        let tmp = std::env::temp_dir().join(format!("gw-cfg-static-miss-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let config = ServerConfig {
+            static_dir: Some(tmp.clone()),
+            ..ServerConfig::default()
+        };
+        let error = resolve_static_dir(&config).expect_err("缺 index.html 必须报错");
+        assert!(
+            error.contains("index.html"),
+            "错误信息应点明缺什么: {error}"
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn resolve_static_dir_accepts_dir_with_index() {
+        let tmp = std::env::temp_dir().join(format!("gw-cfg-static-ok-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        std::fs::write(tmp.join("index.html"), "<div id=\"app\"></div>").unwrap();
+
+        let config = ServerConfig {
+            static_dir: Some(tmp.clone()),
+            ..ServerConfig::default()
+        };
+        assert_eq!(resolve_static_dir(&config).unwrap(), Some(tmp.clone()));
 
         let _ = std::fs::remove_dir_all(&tmp);
     }

@@ -4,6 +4,7 @@ pub mod auth;
 pub mod command;
 pub mod events;
 pub mod health;
+pub mod static_site;
 
 use axum::routing::{get, post};
 use axum::Router;

@@ -36,13 +36,21 @@ const MAX_BODY_BYTES: usize = 32 * 1024 * 1024;
 const EVENT_BUS_CAPACITY: usize = 1024;
 
 /// 组装路由（含全局中间件：安全响应头 + Origin 校验 + 体积上限）。
+///
+/// 静态子路由（`GREYWORK_STATIC_DIR` 配好时）在 merge 后、全局 layer 前，
+/// 于是它享受全部全局策略（体积上限对 GET 无害；`origin_guard` 跳过 GET/HEAD）。
 pub fn build_router(state: AppState) -> axum::Router {
     use axum::extract::DefaultBodyLimit;
     use axum::middleware as mw;
 
+    // `routes::router()` 必须保持默认 fallback：`merge` 只在一侧有自定义 fallback
+    // 时才合法，静态子路由那边带着 `ServeDir` fallback。
+    let mut app = routes::router();
+    if let Some(dir) = state.config.static_dir.as_deref() {
+        app = app.merge(routes::static_site::router(dir));
+    }
     let origin_state = state.clone();
-    routes::router()
-        .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
+    app.layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .layer(mw::from_fn_with_state(
             origin_state,
             middleware::origin_guard,
@@ -57,6 +65,10 @@ pub async fn run() -> Result<(), String> {
     std::fs::create_dir_all(&config.data_dir)
         .map_err(|error| format!("创建数据目录 {} 失败: {error}", config.data_dir.display()))?;
 
+    // 配了静态托管就当场验有效：缺 index.html 必须启动硬失败，而不是
+    // 「容器 healthy 但 UI 404」地悄悄带病运行（HEALTHCHECK 只打 /api/health）。
+    let static_dir = config::resolve_static_dir(&config)?;
+
     let home = match &config.home_dir {
         Some(home) => home.clone(),
         None => config::resolve_home()?,
@@ -64,6 +76,11 @@ pub async fn run() -> Result<(), String> {
 
     // 日志最先 init —— 其后每一步都可能写日志。
     greywork_host::log::init(config.data_dir.join("logs"));
+    if let Some(dir) = &static_dir {
+        greywork_host::log::info("server", format!("静态托管: {}", dir.display()));
+    } else {
+        greywork_host::log::info("server", "静态托管: 关闭（仅 /api）");
+    }
     // 补一次登录 shell PATH 解析（容器里通常失败即回退继承的 PATH，无副作用）。
     greywork_host::process_guard::init_login_path();
 

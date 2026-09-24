@@ -96,7 +96,8 @@ browser) are rejected server-side.
 
 Loaded as `defaults → <data_dir>/server.json → GREYWORK_* env vars` (env wins). Fields: `bind`,
 `data_dir`, `home_dir`, `session_ttl_secs`, `password_hash` / `password`, `agent_programs`,
-`workspace_roots`, `sandbox`, `tier`, `secure_cookie`, `allowed_origins`.
+`workspace_roots`, `sandbox`, `tier`, `secure_cookie`, `allowed_origins`, `static_dir`
+(`GREYWORK_STATIC_DIR`, see [Static hosting](#static-hosting-spa)).
 
 Password bootstrap, in priority order:
 
@@ -136,6 +137,36 @@ base64 attachments exceed axum's 2 MB default). The WebSocket carries the same e
 desktop renderer listens for (`acp://event`, `llm://event`, `automation://due`,
 `<channel>://state` / `<channel>://inbound`, …); `notify` becomes a `host://notify` event. Events
 are best-effort — a lagging subscriber skips old events, never replays them.
+
+### Static hosting (SPA)
+
+Set `GREYWORK_STATIC_DIR` (or `static_dir` in `server.json`) to the built frontend output
+(`apps/desktop/dist`) and the server serves the UI from the same origin. Unset, the server is
+API-only. The directory must contain `index.html`; if it doesn't, **startup fails hard** — the
+container health probe hits `/api/health`, which stays green even while the UI 404s, so a warning
+here would let a broken image ship as "healthy".
+
+| Path          | Source                       | `Cache-Control`                              |
+| ------------- | ---------------------------- | -------------------------------------------- |
+| `/`           | `index.html`                 | `no-cache` (deploys take effect immediately) |
+| `/assets/*`   | Vite content-hashed chunks   | `public, max-age=31536000, immutable`        |
+| anything else | `pdfjs/`, `vscode-icons/`, … | `no-cache` (cacheable, must revalidate)      |
+| unknown path  | —                            | plain `404`                                  |
+
+Design notes:
+
+- **No SPA catch-all.** The frontend uses hash routing (`createWebHashHistory`), so deep links
+  resolve client-side and `/` is the only HTML route the server must serve. A catch-all would turn
+  mistyped asset paths into `200` + `index.html`, polluting caches and hiding errors.
+- **Static routes are unauthenticated by construction** — auth is a per-handler extractor and the
+  static routes don't use it (the login page must load before login).
+- **Compression only on the static sub-router** (`tower_http::CompressionLayer`, gzip/brotli).
+  API responses — including 32 MB binary reads — are never compressed. This is why `tower-http`
+  entered the dependency tree; CORS is still deliberately absent (same-origin deployment).
+- **Cache-Control interaction.** The global `security_headers` middleware applies its `no-store`
+  default via `or_insert`, so the per-path static cache policies above survive; `/api/*` responses
+  set no cache header of their own and still get `no-store` — command results may contain file
+  contents and credentials.
 
 ### Security model
 
