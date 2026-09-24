@@ -100,6 +100,19 @@ export default defineConfig(async () => ({
         }
       : undefined,
     proxy: {
+      // /api/* → 本地 headless 服务端（apps/server，默认 127.0.0.1:8787）。
+      //
+      // 仅 Web 预览（浏览器 dev）需要这一段：桌面端走 Tauri IPC，不发 HTTP；生产部署时
+      // 前端由服务端同源托管，也不经过 Vite。
+      //
+      // changeOrigin 必须保持 false：服务端假定同源（不设 CORS），登录 cookie 的 Path=/
+      // 由浏览器按前端 origin 存取 —— 改写 Host 会让服务端把它当成跨站请求。
+      // ws:true 是 /api/events 那条 WebSocket 必需的，否则升级请求不会被转发。
+      "/api": {
+        target: process.env.GREYWORK_SERVER_URL ?? "http://127.0.0.1:8787",
+        changeOrigin: false,
+        ws: true,
+      },
       // /market-api/skills/* → https://www.skills.sh/*；/market-api/mcp/* → https://registry.modelcontextprotocol.io/*
       // 仅 Web 预览（非 Tauri IPC）使用；桌面端仍走 Rust 宿主代理。
       "/market-api/skills": {
