@@ -1,10 +1,16 @@
 // 桌面宿主通道（Tauri IPC）：search 形状归一 + install/uninstall 参数形状。
 import { describe, expect, it, vi } from "vitest";
+import type * as GreyworkCore from "@greywork/core";
 import { invoke } from "@tauri-apps/api/core";
 import { HostSkillsTransport, wrapHostSearch } from "../../../src/sources/host-transport";
 import { createSkillsShSource, mapSearchResponse, parseSnapshot } from "../../../src/sources/skills-sh";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+// invoke 现在经 @greywork/host-ipc 门面分派：建立桌面运行时，断言才落到被 mock 的 Tauri invoke 上。
+vi.mock("@greywork/core", async (importOriginal) => ({
+  ...(await importOriginal<typeof GreyworkCore>()),
+  isTauriRuntime: () => true,
+}));
 
 const HOST_ITEMS = [
   { ref: "mattpocock/skills/tdd", skill_id: "tdd", name: "TDD", installs: 10, source: "mattpocock/skills", downloadable: true },

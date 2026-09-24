@@ -4,11 +4,18 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type * as GreyworkCore from "@greywork/core";
 import { createPinia, setActivePinia } from "pinia";
 import { invoke } from "@tauri-apps/api/core";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 const invokeMock = vi.mocked(invoke);
+
+// invoke 现在经 @greywork/host-ipc 门面分派：建立桌面运行时，断言才落到被 mock 的 Tauri invoke 上。
+vi.mock("@greywork/core", async (importOriginal) => ({
+  ...(await importOriginal<typeof GreyworkCore>()),
+  isTauriRuntime: () => true,
+}));
 
 const h = vi.hoisted(() => ({ hasWorkspaceDirs: vi.fn(() => true) }));
 
