@@ -1,0 +1,52 @@
+[package]
+name = "greywork-server"
+version = "0.3.0"
+description = "GreyWork headless server: single-user self-hosted web host"
+authors = ["GreyWork Team"]
+edition = "2021"
+
+# lib + bin 拆分：lib 暴露 build_router / ServerConfig / AppState / ServerHost，供集成测试
+# 用 `tower::ServiceExt::oneshot` 直接驱动路由（不起真实端口）；bin 只做「读配置 → run()」。
+[lib]
+name = "greywork_server"
+path = "src/lib.rs"
+
+[[bin]]
+name = "greywork-server"
+path = "src/main.rs"
+
+[dependencies]
+# 领域逻辑（命令面唯一真源 `commands::COMMANDS` / `dispatch`、HostContext、db、各通道）全在
+# 这里。服务端只做「宿主壳」：HTTP/WS 传输 + 内置登录 + 安全策略。**严禁依赖 tauri**。
+greywork-host = { path = "../../crates/greywork-host" }
+
+# axum 0.8 与锁里既有的 hyper 1.x / tower 0.5 / http 1.x 同代，新增面最小。
+# 只显式打开 ws（WebSocket）；http1/json/tokio 必需。同源部署，无需 CORS（不引 tower-http）。
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "ws"] }
+
+# rt-multi-thread：tokio::spawn 跑 scheduler；net：TcpListener；signal：优雅退出；
+# sync：broadcast 事件总线；time：会话 TTL / WS 心跳。
+tokio = { version = "1", features = ["rt-multi-thread", "net", "signal", "macros", "sync", "time"] }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# 密码哈希：argon2 0.5 的 PasswordHash::verify_password 是常量时间校验。
+argon2 = "0.5"
+# 会话 token / 自动生成密码的随机字节（0.3 已是 greywork-host 的传递依赖）。
+getrandom = "0.3"
+# 会话 token 落内存前先 SHA-256，进程里不留明文 token。
+sha2 = "0.10"
+# token / 密码的 base64url 编码。
+base64 = "0.22"
+# 会话表 / 登录限流表用 parking_lot::Mutex（greywork-host 已用它）。
+parking_lot = "0.12"
+
+[dev-dependencies]
+# ServiceExt::oneshot 驱动 Router，不起真实端口。
+tower = { version = "0.5", features = ["util"] }
+# 读响应体。
+http-body-util = "0.1"
+# WS 集成测试要真实端口 + 真实客户端（升级无法 oneshot）。
+tokio-tungstenite = { version = "0.29", default-features = false, features = ["connect"] }
+futures-util = "0.3"

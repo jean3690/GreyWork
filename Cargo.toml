@@ -10,6 +10,7 @@
 resolver = "2"
 members = [
   "apps/desktop/src-tauri",
+  "apps/server",
   "crates/greywork-host",
 ]
 
