@@ -65,7 +65,7 @@ sha1 = "0.10"
 aes-gcm = "0.10"
 # 企业微信入站长连接的媒体是 AES-256-CBC 密文（IV 取密钥前 16 字节，PKCS#7 填充）：
 # 只要块解密 + 手工 CBC 链接，不引 cbc crate。aes 已是 aes-gcm 的传递依赖。
-aes = "0.8"
+aes = "0.9"
 ed25519-dalek = { version = "2", features = ["std"] }
 getrandom = "0.3"
 form_urlencoded = "1"
