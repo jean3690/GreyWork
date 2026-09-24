@@ -50,6 +50,22 @@ export interface AutomationDueRow {
   dueAt: number;
 }
 
+/**
+ * 运行记录行（宿主与渲染端两条执行路径共用；与 Rust AutomationRunDto 对齐）。
+ * status: 成功/失败；sessionId: 关联会话（宿主兜底执行也建会话，可点进查看）；
+ * mode: llm=本机模型 / acp=指定后端 / host=宿主无人值守兜底。
+ */
+export interface AutomationRunRow {
+  id: number;
+  taskId: string;
+  name: string;
+  status: "success" | "failed";
+  detail: string | null;
+  sessionId: string | null;
+  mode: "llm" | "acp" | "host";
+  ranAt: number;
+}
+
 export const automationsBackend = {
   /** 当前运行时是否有后端真源（Tauri 桌面）。 */
   active(): boolean {
@@ -78,5 +94,17 @@ export const automationsBackend = {
   async dueFinish(id: number, status: "success" | "failed"): Promise<void> {
     if (!isTauriRuntime()) return;
     await invoke("db_automations_due_finish", { id, status });
+  },
+
+  /** 读运行记录（按 ranAt 倒序，默认最近 200 条）；浏览器态无后端 → 空。 */
+  async runsLoad(limit = 200): Promise<AutomationRunRow[]> {
+    if (!isTauriRuntime()) return [];
+    return (await invoke<AutomationRunRow[]>("db_automation_runs_load", { limit })) ?? [];
+  },
+
+  /** 记一条运行结果（每任务库侧自动裁剪保留最近 50 条）。 */
+  async runRecord(run: Omit<AutomationRunRow, "id">): Promise<void> {
+    if (!isTauriRuntime()) return;
+    await invoke("db_automation_run_record", { run });
   },
 };

@@ -2,7 +2,13 @@ import { createJsonStorage } from "@greywork/core";
 import { defineStore } from "pinia";
 import { ref, watch } from "vue";
 import { listen } from "@tauri-apps/api/event";
-import { automationsBackend, type AutomationDuePayload, type AutomationDueRow, type AutomationTaskRow } from "../lib/automations-backend";
+import {
+  automationsBackend,
+  type AutomationDuePayload,
+  type AutomationDueRow,
+  type AutomationRunRow,
+  type AutomationTaskRow,
+} from "../lib/automations-backend";
 import { useChatStore } from "./chat";
 import { useAgentStore } from "./agent";
 import { useSessionStore } from "./session";
@@ -47,6 +53,19 @@ const automationsStorage = createJsonStorage<SavedAutomations>(
   "greywork.automations",
   (value): value is SavedAutomations => typeof value === "object" && value !== null && !Array.isArray(value),
 );
+
+interface SavedRuns {
+  runs?: AutomationRunRow[];
+}
+
+/** 运行记录本地缓存（浏览器态真源；桌面态由 SQLite 覆盖）。 */
+const runsStorage = createJsonStorage<SavedRuns>(
+  "greywork.automation-runs",
+  (value): value is SavedRuns => typeof value === "object" && value !== null && !Array.isArray(value),
+);
+
+/** 运行记录内存/缓存上限（与库侧每任务 50 条各自独立；这里是跨任务总量护栏）。 */
+const RUNS_CAP = 200;
 
 let seq = 0;
 function uid(): string {
@@ -119,11 +138,17 @@ function settleOnceTask(task: AutomationTask): AutomationTask {
 /** 自动化：任务清单持久化（桌面真源 SQLite + localStorage 缓存）+ Run Now 下发 chat 管线。 */
 export const useAutomationStore = defineStore("automation", () => {
   const list = ref<AutomationTask[]>([]);
+  /** 运行记录（新→旧）；浏览器态来自 localStorage，桌面态由 SQLite 覆盖并含宿主兜底跑。 */
+  const runs = ref<AutomationRunRow[]>([]);
+  /** 浏览器态本地记录的合成 id（负数，绝不与库侧正整数自增 id 冲突）。 */
+  let localRunSeq = -1;
 
   function loadPersisted(): void {
     const saved = automationsStorage.read();
     const base = saved?.list && Array.isArray(saved.list) && saved.list.length ? saved.list : DEFAULT_AUTOMATIONS.map((a) => ({ ...a }));
     list.value = base.map((a) => ({ ...a, running: false }));
+    const savedRuns = runsStorage.read();
+    runs.value = Array.isArray(savedRuns?.runs) ? savedRuns.runs.slice(0, RUNS_CAP) : [];
   }
   loadPersisted();
 
@@ -139,6 +164,7 @@ export const useAutomationStore = defineStore("automation", () => {
         } else {
           persist(); // 首启：种子/缓存成为库真源
         }
+        void refreshRuns(); // 库接管后运行记录以库为真源（含宿主无人值守兜底跑）
       })
       .catch((error: unknown) => {
         console.error("[automation] SQLite 加载失败，沿用本地缓存", error);
@@ -154,6 +180,39 @@ export const useAutomationStore = defineStore("automation", () => {
         console.error("[automation] SQLite 同步失败，将下次重试", error);
         notify({ kind: "error", key: "automation-sync", title: t("errors.automationSyncFailed"), detail: String(error) });
       });
+    }
+  }
+
+  /** 运行记录落盘（浏览器态真源）；库侧由 runRecord 各自裁剪，这里只维护本地缓存。 */
+  function persistRuns(): void {
+    runsStorage.write({ runs: runs.value.slice(0, RUNS_CAP) });
+  }
+
+  /** 从库重载运行记录（含宿主兜底跑）；浏览器态无后端 → 保留本地。 */
+  async function refreshRuns(): Promise<void> {
+    if (!automationsBackend.active()) return;
+    try {
+      runs.value = await automationsBackend.runsLoad();
+    } catch (error: unknown) {
+      console.error("[automation] 运行记录加载失败", error);
+    }
+  }
+
+  /**
+   * 记一条运行结果：先本地即时入列（视图立刻可见），桌面态再落库并回读规范化
+   * （库分配自增 id，且顺带并入宿主兜底跑）。失败不影响本地展示。
+   */
+  function recordRun(entry: Omit<AutomationRunRow, "id">): void {
+    runs.value = [{ ...entry, id: localRunSeq }, ...runs.value].slice(0, RUNS_CAP);
+    localRunSeq -= 1;
+    persistRuns();
+    if (automationsBackend.active()) {
+      void automationsBackend
+        .runRecord(entry)
+        .then(() => refreshRuns())
+        .catch((error: unknown) => {
+          console.error("[automation] 运行记录同步失败", error);
+        });
     }
   }
 
@@ -299,11 +358,22 @@ export const useAutomationStore = defineStore("automation", () => {
       fuseTimer = null;
       clearInflight();
     }, RUN_FUSE_MS);
+    const mode: AutomationRunRow["mode"] = task.acpProviderId ? "acp" : "llm";
     void dispatchIntent(task.acpProviderId ?? null, task.intent).then((failure) => {
       if (!failure) {
         task.lastRun = Date.now();
+        recordRun({
+          taskId: id,
+          name: task.name,
+          status: "success",
+          detail: null,
+          sessionId: lastRunSessionId.value,
+          mode,
+          ranAt: task.lastRun,
+        });
       } else {
         clearInflight();
+        recordRun({ taskId: id, name: task.name, status: "failed", detail: failure, sessionId: null, mode, ranAt: Date.now() });
         notify({
           kind: "error",
           key: "automation-run-failed",
@@ -339,8 +409,10 @@ export const useAutomationStore = defineStore("automation", () => {
     if (turnActive()) return "busy";
     const task = list.value.find((a) => a.id === row.taskId);
     if (!task) return "missing";
+    const mode: AutomationRunRow["mode"] = row.acpProviderId ? "acp" : "llm";
     const failure = await dispatchIntent(row.acpProviderId, row.intent);
     if (failure) {
+      recordRun({ taskId: row.taskId, name: row.name, status: "failed", detail: failure, sessionId: null, mode, ranAt: Date.now() });
       notify({
         kind: "error",
         key: "automation-run-failed",
@@ -351,6 +423,15 @@ export const useAutomationStore = defineStore("automation", () => {
     }
     task.enabled = true;
     task.lastRun = Date.now();
+    recordRun({
+      taskId: row.taskId,
+      name: row.name,
+      status: "success",
+      detail: null,
+      sessionId: useChatStore().activeThreadId ?? null,
+      mode,
+      ranAt: task.lastRun,
+    });
     // 一次性任务跑完即停用：宿主调度器只按 (onceAt, last_run) 判定，留 enabled=1
     // 会让界面继续显示「已启用」，下次改这条任务时也容易误以为还会再跑。
     if (task.onceAt) task.enabled = false;
@@ -380,6 +461,8 @@ export const useAutomationStore = defineStore("automation", () => {
       console.error("[automation] 到期队列消费失败", error);
       notify({ kind: "error", key: "automation-due", title: t("errors.automationRunFailed"), detail: String(error) });
     } finally {
+      // 每轮消费后从库回读运行记录，把宿主无人值守兜底跑并入视图。
+      void refreshRuns();
       consuming = false;
     }
   }
@@ -405,7 +488,10 @@ export const useAutomationStore = defineStore("automation", () => {
 
   return {
     list,
+    runs,
     lastRunSessionId,
+    recordRun,
+    refreshRuns,
     add,
     remove,
     setEnabled,

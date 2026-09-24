@@ -1,6 +1,7 @@
 // 定时任务契约：默认种子任务全量渲染；「新建任务」置顶插入一条并持久化；
 // 行内编辑器把触发时间 / 执行后端写回任务。
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { VueWrapper } from "@vue/test-utils";
 import { DOMWrapper, flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import ScheduledView from "@/features/scheduled/ScheduledView.vue";
@@ -25,7 +26,7 @@ function tooltipText(): string {
 }
 
 /** 时间选择器弹层在 body 上：开弹层 → 点时 / 分。 */
-async function pickTime(wrapper: ReturnType<typeof mount>, hour: number, minute: number): Promise<void> {
+async function pickTime(wrapper: VueWrapper, hour: number, minute: number): Promise<void> {
   await wrapper.find('[data-testid="schedule-time"]').trigger("click");
   await flushPromises();
   const popover = document.body.querySelector('[data-testid="schedule-time-popover"]');
@@ -33,6 +34,13 @@ async function pickTime(wrapper: ReturnType<typeof mount>, hour: number, minute:
   const panel = new DOMWrapper(popover);
   await panel.find(`[data-testid="schedule-time-hour-${hour}"]`).trigger("click");
   await panel.find(`[data-testid="schedule-time-minute-${minute}"]`).trigger("click");
+}
+
+/** 定位含给定任务名的卡片（分组 + 默认按「下次运行」排序会打乱 DOM 顺序，按内容定位更稳）。 */
+function articleFor(wrapper: VueWrapper, name: string): DOMWrapper<Element> {
+  const article = wrapper.findAll("article").find((a) => a.text().includes(name));
+  if (!article) throw new Error(`未找到任务卡片：${name}`);
+  return article;
 }
 
 async function mountView() {
@@ -72,7 +80,7 @@ describe("ScheduledView", () => {
     const wrapper = await mountView();
     const first = automation.list[0];
 
-    await wrapper.find('[data-testid="automation-edit"]').trigger("click");
+    await articleFor(wrapper, "整理项目状态").find('[data-testid="automation-edit"]').trigger("click");
     await wrapper.find('[data-testid="schedule-mode-weekly"]').trigger("click");
     await pickTime(wrapper, 18, 0);
     await wrapper.find('[data-testid="schedule-weekday-1"]').trigger("click");
@@ -105,7 +113,7 @@ describe("ScheduledView", () => {
     const first = automation.list[0];
     const before = { cron: first.cron, schedule: first.schedule };
 
-    await wrapper.find('[data-testid="automation-edit"]').trigger("click");
+    await articleFor(wrapper, "整理项目状态").find('[data-testid="automation-edit"]').trigger("click");
     await wrapper.find('[data-testid="schedule-mode-daily"]').trigger("click");
     await pickTime(wrapper, 23, 59);
     await wrapper.find('[data-testid="schedule-cancel"]').trigger("click");
@@ -113,5 +121,54 @@ describe("ScheduledView", () => {
     expect(first.cron).toBe(before.cron);
     expect(first.schedule).toBe(before.schedule);
     expect(wrapper.find('[data-testid="schedule-editor"]').exists()).toBe(false);
+  });
+
+  it("搜索按名称过滤卡片", async () => {
+    const wrapper = await mountView();
+    await wrapper.get('[data-testid="automation-search"]').setValue("周报");
+    const texts = wrapper.findAll("article").map((a) => a.text());
+    expect(texts.some((tx) => tx.includes("自动生成周报"))).toBe(true);
+    expect(texts.some((tx) => tx.includes("整理项目状态"))).toBe(false);
+  });
+
+  it("类型筛选：只看一次性时排除循环任务", async () => {
+    const automation = useAutomationStore();
+    automation.add({ name: "一次性巡检", cron: null, onceAt: Date.now() + 3_600_000 });
+    const wrapper = await mountView();
+    await wrapper.get('[data-testid="automation-type-once"]').trigger("click");
+    expect(wrapper.text()).toContain("一次性巡检");
+    expect(wrapper.text()).not.toContain("整理项目状态");
+  });
+
+  it("卡片显示下次运行时刻；手动任务显示无排期", async () => {
+    const automation = useAutomationStore();
+    automation.add({ name: "手动活儿", cron: null, onceAt: null });
+    const wrapper = await mountView();
+    expect(articleFor(wrapper, "整理项目状态").text()).toContain("下次");
+    expect(articleFor(wrapper, "手动活儿").text()).toContain("无排期");
+  });
+
+  it("运行记录：展开显示记录并带会话入口，卡片显示最近结果", async () => {
+    const automation = useAutomationStore();
+    const wrapper = await mountView();
+    const seed = automation.list.find((task) => task.name === "整理项目状态")!;
+    automation.recordRun({
+      taskId: seed.id,
+      name: seed.name,
+      status: "success",
+      detail: "已生成日报",
+      sessionId: "ses-x",
+      mode: "llm",
+      ranAt: Date.now(),
+    });
+    await flushPromises();
+
+    const card = articleFor(wrapper, "整理项目状态");
+    expect(card.text()).toContain("成功"); // 最近结果徽标
+    await card.get(`[data-testid="automation-history-toggle-${seed.id}"]`).trigger("click");
+    const panel = wrapper.get(`[data-testid="automation-history-${seed.id}"]`);
+    expect(panel.text()).toContain("已生成日报");
+    const openBtn = panel.findAll("button").find((b) => b.text().includes("查看会话"));
+    expect(openBtn).toBeDefined();
   });
 });
