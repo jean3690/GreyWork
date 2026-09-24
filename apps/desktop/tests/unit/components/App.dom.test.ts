@@ -16,6 +16,8 @@ const h = vi.hoisted(() => ({
 
 vi.mock("@greywork/workbench", () => ({
   Shell: { name: "ShellStub", template: '<div data-testid="shell-stub" />' },
+  // 登录门在这里是透传壳：它的分岔逻辑由 workbench 自己的 AuthGate.dom.test.ts 覆盖。
+  AuthGate: { name: "AuthGateStub", template: "<div><slot /></div>" },
   isPhysicalPointInDropzone: () => h.inDropzone(),
   usePreviewStore: () => h.preview,
 }));

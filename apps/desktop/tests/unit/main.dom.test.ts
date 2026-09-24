@@ -16,9 +16,16 @@ const h = vi.hoisted(() => ({
   initDeviceTier: vi.fn<() => void>(),
   show: vi.fn<() => Promise<void>>(),
   getWindow: vi.fn(),
+  runtimeMode: vi.fn<() => "desktop" | "server" | "browser-preview">(() => "desktop"),
+  initRuntimeMode: vi.fn<() => Promise<string>>(),
   appPlugin: (app: unknown) => {
     void app;
   },
+}));
+
+vi.mock("@greywork/host-ipc", () => ({
+  runtimeMode: h.runtimeMode,
+  initRuntimeMode: h.initRuntimeMode,
 }));
 
 vi.mock("@greywork/workbench", () => ({
@@ -30,6 +37,7 @@ vi.mock("@greywork/workbench", () => ({
   workspaceFs: {},
   appEvents: {},
   Shell: { name: "ShellStub", template: '<div data-testid="shell-stub" />' },
+  AuthGate: { name: "AuthGateStub", template: "<div><slot /></div>" },
   isPhysicalPointInDropzone: () => Promise.resolve(false),
   usePreviewStore: () => ({ open: () => undefined }),
 }));
@@ -52,6 +60,9 @@ describe("bootstrap", () => {
     h.loadHostSystem.mockResolvedValue(undefined);
     h.show.mockResolvedValue(undefined);
     h.getWindow.mockReturnValue({ show: h.show });
+    // 默认按桌面态：既有的「不挡挂载」用例都建立在 mount 同步发生之上。
+    h.runtimeMode.mockReset().mockReturnValue("desktop");
+    h.initRuntimeMode.mockReset().mockResolvedValue("desktop");
   });
 
   it("并发发起插件引导 → 挂载 App → 双 rAF 后显示原生窗口，并暴露 __gw 钩子", async () => {
@@ -130,5 +141,48 @@ describe("bootstrap", () => {
     } finally {
       infoSpy.mockRestore();
     }
+  });
+});
+
+describe("运行时判定接线", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    document.body.innerHTML = '<div id="app"></div>';
+    vi.clearAllMocks();
+    performance.clearMarks();
+    performance.clearMeasures();
+    h.boot.mockResolvedValue(undefined);
+    h.loadHostSystem.mockResolvedValue(undefined);
+    h.show.mockResolvedValue(undefined);
+    h.getWindow.mockReturnValue({ show: h.show });
+  });
+
+  it("桌面态零探测：不调 initRuntimeMode，同步挂载", async () => {
+    h.runtimeMode.mockReturnValue("desktop");
+
+    await import("../../src/main");
+
+    expect(h.initRuntimeMode).not.toHaveBeenCalled();
+    expect(document.querySelector("#app")?.childElementCount).toBeGreaterThan(0);
+  });
+
+  it("非桌面态：先探测运行时再挂载，探测未回来之前不挂载", async () => {
+    h.runtimeMode.mockReturnValue("server");
+    let settleRuntime!: (mode: string) => void;
+    h.initRuntimeMode.mockReturnValue(
+      new Promise<string>((resolve) => {
+        settleRuntime = resolve;
+      }),
+    );
+
+    await import("../../src/main");
+
+    expect(h.initRuntimeMode).toHaveBeenCalledTimes(1);
+    // 探测没回来之前不能挂载：AuthGate 与各处守卫都**同步**读 runtimeMode()，
+    // 提前挂载会把服务端态误判成 browser-preview（登录门不弹、宿主能力全禁）。
+    expect(document.querySelector("#app")?.childElementCount).toBe(0);
+
+    settleRuntime("server");
+    await vi.waitFor(() => expect(document.querySelector("#app")?.childElementCount).toBeGreaterThan(0));
   });
 });

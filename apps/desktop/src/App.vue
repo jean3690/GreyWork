@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted } from "vue";
-import { Shell } from "@greywork/workbench";
+import { AuthGate, Shell } from "@greywork/workbench";
 import { isPhysicalPointInDropzone, usePreviewStore } from "@greywork/workbench";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 
@@ -47,5 +47,9 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <Shell />
+  <!-- 登录门包住整个 Shell：服务端态未认证时它只渲染登录表单，Shell 根本不挂载，
+       也就不会先发出一批必然 401 的命令。桌面/浏览器预览态它直接透传。 -->
+  <AuthGate>
+    <Shell />
+  </AuthGate>
 </template>
