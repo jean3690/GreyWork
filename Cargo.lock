@@ -1880,29 +1880,10 @@ dependencies = [
 name = "greywork"
 version = "0.3.0"
 dependencies = [
- "aes",
- "aes-gcm",
  "agent-client-protocol",
- "base64 0.22.1",
- "bytes",
- "calamine",
- "chardetng",
- "chrono",
- "ed25519-dalek",
- "encoding_rs",
- "form_urlencoded",
- "futures-util",
- "getrandom 0.3.4",
  "greywork-host",
- "libc",
- "md-5",
- "parking_lot",
- "reqwest 0.12.28",
- "rusqlite",
  "serde",
  "serde_json",
- "sha1",
- "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-clipboard-manager",
@@ -1911,8 +1892,6 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-window-state",
  "tokio",
- "tokio-tungstenite",
- "wechatbot",
 ]
 
 [[package]]

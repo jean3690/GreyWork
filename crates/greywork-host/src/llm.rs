@@ -565,6 +565,26 @@ pub async fn llm_chat_stop(llm: &LlmHost, request_id: u64) -> Result<(), String>
     }
 }
 
+/* ===== 命令入参 ===== */
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatStartArgs {
+    pub base_url: String,
+    pub model: String,
+    pub api_key_env: String,
+    pub messages: Vec<LlmChatMessage>,
+    pub reasoning_effort: String,
+    pub headers: Option<HashMap<String, String>>,
+    pub client_token: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatStopArgs {
+    pub request_id: u64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

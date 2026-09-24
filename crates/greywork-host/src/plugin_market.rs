@@ -1088,6 +1088,34 @@ pub async fn plugin_net_fetch(request: PluginFetchRequest) -> Result<PluginFetch
     })
 }
 
+/* ===== 命令入参 ===== */
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogArgs {
+    pub registry_url: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewArgs {
+    pub registry_url: String,
+    pub plugin_id: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallArgs {
+    pub registry_url: String,
+    pub plugin_id: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UninstallArgs {
+    pub plugin_id: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

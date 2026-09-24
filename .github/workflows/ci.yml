@@ -103,11 +103,22 @@ jobs:
         run: pnpm --filter @greywork/desktop tauri build --bundles ${{ matrix.bundle }}
 
   rust:
-    name: Cargo Test (src-tauri)
+    name: Cargo Test (workspace)
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+
+      # 边界守卫：greywork-host 是桌面壳与 headless 服务端共用的领域逻辑层，一旦它依赖
+      # tauri，服务端就编不进（且这个错误在本地很难第一眼看出）。只匹配「依赖声明行」，
+      # 不匹配注释里提到的 tauri。
+      - name: Guard greywork-host has no tauri dependency
+        run: |
+          if grep -nE '^[[:space:]]*tauri(-[a-zA-Z0-9_-]+)?[[:space:]]*=' crates/greywork-host/Cargo.toml; then
+            echo "::error::crates/greywork-host/Cargo.toml 不得出现 tauri 依赖"
+            exit 1
+          fi
+
       - uses: ./.github/actions/setup-rust
         with:
           components: clippy,rustfmt

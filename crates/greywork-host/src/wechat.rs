@@ -1301,6 +1301,23 @@ pub async fn send_media_impl(
 
 /* ===== 单测（纯函数 + 宿主工具） ===== */
 
+/* ===== 命令入参 ===== */
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SendArgs {
+    pub to_user_id: String,
+    pub context_token: String,
+    pub text: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SendTypingArgs {
+    pub to_user_id: String,
+    pub typing: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

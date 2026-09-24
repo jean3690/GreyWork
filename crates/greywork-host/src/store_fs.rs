@@ -585,6 +585,28 @@ pub fn attachments_prune_session(host: &dyn HostContext, session_id: String) -> 
     prune_session_attachments(&root, &session_id)
 }
 
+/* ===== 命令入参 ===== */
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionsLoadArgs {
+    pub workspaces: Vec<WorkspaceDirDto>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionsSyncArgs {
+    pub snapshot: SessionsSnapshotDto,
+    pub workspaces: Vec<WorkspaceDirDto>,
+    pub deleted_session_ids: Vec<String>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PruneSessionArgs {
+    pub session_id: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

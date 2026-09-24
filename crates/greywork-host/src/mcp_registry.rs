@@ -148,6 +148,14 @@ pub async fn mcp_search(
     Ok(normalize_registry(&body))
 }
 
+/// `mcp_search` 入参。
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchArgs {
+    pub search: Option<String>,
+    pub limit: Option<u32>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

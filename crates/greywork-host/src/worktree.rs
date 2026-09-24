@@ -413,6 +413,20 @@ pub fn worktree_list(host: &dyn HostContext) -> Result<Vec<WorktreeEntryDto>, St
     list(&host.paths().home_dir)
 }
 
+/* ===== 命令入参 ===== */
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProvisionArgs {
+    pub source: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReleaseArgs {
+    pub root: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

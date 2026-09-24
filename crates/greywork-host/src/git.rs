@@ -775,6 +775,57 @@ pub fn git_show(
     show_commit(access, &root, &hash, path.as_deref())
 }
 
+/* ===== 命令入参 ===== */
+
+/// 仅需仓库根的命令（status / changes / current_branch / branch_list）。
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RootArg {
+    pub root: String,
+}
+
+/// `git_diff` 入参；`path` / `staged` 缺省即「未暂存侧的全量 diff」。
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffArgs {
+    pub root: String,
+    pub path: Option<String>,
+    pub staged: Option<bool>,
+}
+
+/// 暂存 / 取消暂存。
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StageArgs {
+    pub root: String,
+    pub paths: Vec<String>,
+    pub all: bool,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitArgs {
+    pub root: String,
+    pub message: String,
+    pub all: Option<bool>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogArgs {
+    pub root: String,
+    pub limit: Option<u32>,
+    pub skip: Option<u32>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShowArgs {
+    pub root: String,
+    pub hash: String,
+    pub path: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

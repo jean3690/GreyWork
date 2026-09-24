@@ -79,3 +79,51 @@ pub async fn sleep_or_stop(epochs: &AtomicU64, epoch: u64, total: Duration) -> b
 pub fn app_sink(host: Arc<dyn HostContext>) -> EventSink {
     host::event_sink(host)
 }
+
+/* ===== 通道命令的公共入参（dispatch 用；与前端扁平入参对齐） ===== */
+
+/// 发文本消息（6 条通道共用）。
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PeerTextArgs {
+    pub peer_id: String,
+    pub text: String,
+}
+
+/// 连接时是否允许非本人发送者（6 条通道共用）。
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectArgs {
+    pub allow_other_senders: bool,
+}
+
+/// 单 token 凭据（telegram / discord）。
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TokenArg {
+    pub token: String,
+}
+
+/// `app_id` + 可选 `app_secret`（feishu / qq）。
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppSecretArg {
+    pub app_id: String,
+    pub app_secret: Option<String>,
+}
+
+/// `client_id` + 可选 `client_secret`（dingtalk）。
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientSecretArg {
+    pub client_id: String,
+    pub client_secret: Option<String>,
+}
+
+/// `bot_id` + 可选 `secret`（wecom）。
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BotSecretArg {
+    pub bot_id: String,
+    pub secret: Option<String>,
+}

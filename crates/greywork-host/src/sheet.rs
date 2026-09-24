@@ -154,6 +154,15 @@ pub fn fs_read_sheet(
     read_sheet_from_bytes(bytes, sheet.as_deref(), limit)
 }
 
+/// `fs_read_sheet` 入参。
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadSheetArgs {
+    pub path: String,
+    pub sheet: Option<String>,
+    pub max_rows: Option<usize>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

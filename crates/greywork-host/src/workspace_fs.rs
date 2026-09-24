@@ -711,6 +711,39 @@ pub fn fs_list_dir(access: &WorkspaceFsAccess, path: String) -> Result<Vec<DirEn
     list_dir(access, &path)
 }
 
+/* ===== 命令入参（dispatch 用；与前端扁平入参对齐） ===== */
+
+/// 单路径入参（读 / 探测 / 新建 / 删除 / 列目录等）。
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PathArg {
+    pub path: String,
+}
+
+/// 写文本文件入参。
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WriteTextArg {
+    pub path: String,
+    pub content: String,
+}
+
+/// 写二进制文件入参（base64 载荷）。
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WriteBinaryArg {
+    pub path: String,
+    pub data_base64: String,
+}
+
+/// 改名 / 复制入参。
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferArg {
+    pub from: String,
+    pub to: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

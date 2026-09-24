@@ -594,6 +594,19 @@ async fn wait_for_response(
     }
 }
 
+/// `mcp_probe` 入参。
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProbeArgs {
+    pub transport: String,
+    pub url: Option<String>,
+    pub command: Option<String>,
+    pub args: Option<Vec<String>>,
+    pub env: Option<HashMap<String, String>>,
+    pub headers: Option<Vec<McpHeader>>,
+    pub timeout_secs: Option<u64>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

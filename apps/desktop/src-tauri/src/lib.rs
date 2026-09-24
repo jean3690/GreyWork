@@ -64,7 +64,7 @@ use greywork_host::{log, process_guard};
 /// 不该被覆盖；这也是自动判定万一误伤正常机器时唯一的逃生口（自行设成 0 即可关掉）。
 #[cfg(target_os = "linux")]
 fn apply_low_end_webkit_fallback() {
-    if !sys::is_low_end_device() {
+    if !greywork_host::sys::is_low_end_device() {
         return;
     }
     if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
@@ -326,5 +326,87 @@ fn on_run_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
         if close_guard::handle_exit_requested(app) {
             api.prevent_exit();
         }
+    }
+}
+
+#[cfg(test)]
+mod drift_tests {
+    //! 命令面漂移守卫。
+    //!
+    //! `generate_handler!` 运行期不可内省，所以这里在编译期把本文件的源码读进来，
+    //! 抠出 `generate_handler![ … ]` 里的命令名，与 `greywork_host::commands::COMMANDS`
+    //! 逐一比对。任一侧增、删、改名都会让这条测试变红 —— 这正是共享命令表的价值所在
+    //! （否则服务端 `dispatch` 会悄悄少一条或多一条命令）。
+
+    /// 从本文件源码里解析 `generate_handler!` 的命令名集合。
+    fn handler_command_names() -> Vec<String> {
+        let source = include_str!("lib.rs");
+        let start = source
+            .find("generate_handler![")
+            .expect("lib.rs 必须有 generate_handler!");
+        let rest = &source[start..];
+        let end = rest.find("])").expect("generate_handler! 必须有收尾的 ])");
+        rest[..end]
+            .lines()
+            .filter_map(|line| {
+                let line = line.trim().trim_end_matches(',');
+                // 形如 `sys::sys_info`；`tauri::generate_handler![` 因含非标识符字符被过滤。
+                let (_, name) = line.rsplit_once("::")?;
+                let ok =
+                    !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+                ok.then(|| name.to_string())
+            })
+            .collect()
+    }
+
+    #[test]
+    fn desktop_handler_matches_shared_command_table() {
+        let mut from_handler = handler_command_names();
+        from_handler.sort_unstable();
+        let unique = {
+            let mut names = from_handler.clone();
+            names.dedup();
+            names.len()
+        };
+        assert_eq!(unique, from_handler.len(), "generate_handler! 有重复命令");
+
+        let mut from_table: Vec<String> = greywork_host::commands::COMMANDS
+            .iter()
+            .map(|meta| meta.name.to_string())
+            .collect();
+        from_table.sort_unstable();
+
+        assert_eq!(
+            from_handler, from_table,
+            "桌面 generate_handler! 与 greywork_host::commands::COMMANDS 漂移"
+        );
+    }
+
+    #[test]
+    fn shared_table_has_expected_desktop_only_set() {
+        // 与 greywork_host 侧的命令表断言互为镜像：任一侧漏改都会红。
+        let mut desktop_only: Vec<&str> = greywork_host::commands::COMMANDS
+            .iter()
+            .filter(|meta| meta.desktop_only)
+            .map(|meta| meta.name)
+            .collect();
+        desktop_only.sort_unstable();
+        assert_eq!(
+            desktop_only,
+            vec![
+                "confirm_exit",
+                "fs_pick_files",
+                "open_external",
+                "open_path",
+                "pick_workspace_folder",
+                "plugin_window_close",
+                "plugin_window_open",
+                "reveal_path",
+                "set_close_to_tray",
+                "set_tray_labels",
+                "set_unsaved_changes",
+                "sys_info",
+            ],
+        );
     }
 }

@@ -302,6 +302,37 @@ pub async fn skills_uninstall(workspace_root: String, skill_id: String) -> Resul
     std::fs::remove_dir_all(&target).map_err(|error| format!("remove failed: {error}"))
 }
 
+/* ===== 命令入参 ===== */
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchArgs {
+    pub origin: Option<String>,
+    pub query: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DownloadArgs {
+    pub origin: Option<String>,
+    pub entry_ref: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallArgs {
+    pub workspace_root: String,
+    pub skill_id: String,
+    pub files: Vec<SkillSnapshotFile>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UninstallArgs {
+    pub workspace_root: String,
+    pub skill_id: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
