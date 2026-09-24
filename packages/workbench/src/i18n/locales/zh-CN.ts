@@ -2,6 +2,15 @@
 // 模板/组件用 t("...") 引用；新增 key 时同步补充 en-US.ts,保证两语言 key 集合对等。
 // 注意：不使用 as const——MessageSchema 需要字段为 string 宽类型，en-US 才能以同型结构赋值。
 export const zhCN = {
+  auth: {
+    title: "登录",
+    subtitle: "此实例已启用访问密码，输入后即可继续。",
+    passwordLabel: "访问密码",
+    passwordPlaceholder: "请输入密码",
+    submit: "登录",
+    submitting: "登录中…",
+    failed: "登录失败，请重试",
+  },
   reasoning: {
     auto: { label: "自动", description: "跟随模型与服务端默认，不强制传推理参数" },
     low: { label: "低", description: "快速响应，适合简单问答与改写" },

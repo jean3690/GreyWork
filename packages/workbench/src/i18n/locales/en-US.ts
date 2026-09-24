@@ -2,6 +2,15 @@
 import type { MessageSchema } from "./zh-CN";
 
 export const enUS: MessageSchema = {
+  auth: {
+    title: "Sign in",
+    subtitle: "This instance is password-protected. Enter the password to continue.",
+    passwordLabel: "Password",
+    passwordPlaceholder: "Enter password",
+    submit: "Sign in",
+    submitting: "Signing in…",
+    failed: "Sign-in failed, please try again",
+  },
   reasoning: {
     auto: { label: "Auto", description: "Follow model/server defaults; no reasoning parameter sent" },
     low: { label: "Low", description: "Fast responses for simple Q&A and rewrites" },

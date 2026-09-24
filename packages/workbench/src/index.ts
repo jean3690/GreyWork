@@ -1,6 +1,9 @@
 // 外壳为唯一前端。旧工作台（WorkbenchShell / createWorkbenchRouter 及其视图、
 // 组件、registry、pluginMarket）已删除；此处只导出外壳、能力缝、i18n 与 e2e 调试钩子。
 export { default as Shell } from "@/features/shell/Shell.vue";
+// 登录门：服务端态未认证时挡在 Shell 之前（桌面/浏览器预览态直接放行）。宿主壳把它套在
+// Shell 外层，入口负责在 mount 前 await initRuntimeMode()。
+export { default as AuthGate } from "@/features/auth/AuthGate.vue";
 export { createAppRouter } from "./router";
 export { ICONS, getIconShapes, iconNames } from "./lib/icons";
 export type { IconShape } from "./lib/icons";
