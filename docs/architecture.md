@@ -7,7 +7,10 @@ GreyWork is a monorepo implementing a desktop-first AI agent application. It use
 ```
 greyWork/
 ├── apps/
-│   └── desktop/              # Tauri shell: Vite + Vue renderer + Rust host
+│   ├── desktop/              # Tauri shell: Vite + Vue renderer + thin Rust wrappers
+│   └── server/               # Headless axum server: HTTP command endpoint + WS events + login
+├── crates/
+│   └── greywork-host/        # Shared domain logic (Tauri-free) used by both hosts
 ├── packages/
 │   ├── core/                 # Shared types & math (no deps)
 │   ├── editor/               # File system, Git, CodeMirror abstractions
@@ -63,15 +66,97 @@ desktop     ← workbench (+ Tauri Rust host)
 
 - All packages use source-direct execution (TypeScript via Vite/vue-tsc), no separate build step for packages.
 - The desktop app builds via Tauri: `pnpm build` runs `vue-tsc --noEmit && vite build` as `beforeBuildCommand`, then Tauri compiles the Rust binary.
-- Rust host code lives in `apps/desktop/src-tauri/src/`. Major host domains: `llm.rs` (OpenAI-compatible stream -> IPC), `acp_host.rs`, `mcp*.rs`, `host_exec.rs` (sandboxed process exec), `http.rs` / `web_fetch.rs`, `workspace_fs.rs` (authorized workspace root resolution) and `git.rs` (git CLI surfaced as `git_*` commands, scoped to the authorized root).
+- Domain logic lives in `crates/greywork-host/` (a single Cargo workspace at the repo root, one `Cargo.lock`), shared by both hosts. Major domains: `llm.rs` (OpenAI-compatible stream -> events), `acp_host.rs`, `mcp*.rs`, `host_exec.rs` (sandboxed process exec), `http.rs` / `web_fetch.rs`, `workspace_fs.rs` (authorized workspace root resolution) and `git.rs` (git CLI surfaced as `git_*` commands, scoped to the authorized root). The command face has a single source of truth: `commands::COMMANDS` + `commands::dispatch`.
+- `apps/desktop/src-tauri/src/` keeps only `#[tauri::command]` wrappers and truly host-specific modules (`sys` / `tray` / `notify` / `close_guard` / `plugin_window` / `TauriHost`).
+- `apps/server/` is the headless host (see below).
 - Patches are applied to dependencies via `patches/` directory (e.g., `@univerjs/engine-render`, `exceljs`).
 
 ## Testing
 
 - Each package with testable logic has a `tests/` directory using Vitest.
 - `pnpm -r test` runs all tests across packages with coverage enabled where configured.
-- Rust tests run via `cargo test` in `apps/desktop/src-tauri`.
+- Rust tests run via `cargo test --locked` from the **repo root** (single workspace: desktop shell + `greywork-host` + server).
 - Coverage thresholds are configured per-package in `vitest.config.ts`.
+
+## Headless Server (`apps/server`)
+
+A single-user, self-hosted web host for GreyWork. It reuses **all** of `greywork-host`'s domain
+logic and adds only the host shell: HTTP transport, WebSocket event delivery, built-in login, and
+the server-side security policy. It never depends on `tauri`.
+
+### Reuse boundary
+
+The command face has one source of truth: `greywork_host::commands::COMMANDS` (metadata) and
+`commands::dispatch(name, args, ctx)`. The desktop shell registers the same commands with Tauri's
+`generate_handler!` (a drift test asserts the two name sets are identical); the server routes
+`POST /api/command` into `dispatch`. Commands marked `desktop_only` (native pickers, tray, system
+browser) are rejected server-side.
+
+### Configuration
+
+Loaded as `defaults → <data_dir>/server.json → GREYWORK_* env vars` (env wins). Fields: `bind`,
+`data_dir`, `home_dir`, `session_ttl_secs`, `password_hash` / `password`, `agent_programs`,
+`workspace_roots`, `sandbox`, `tier`, `secure_cookie`, `allowed_origins`.
+
+Password bootstrap, in priority order:
+
+1. `GREYWORK_PASSWORD_HASH` — an argon2 PHC string.
+2. `<data_dir>/auth.json` — written by `greywork-server set-password` (mode 0600).
+3. `GREYWORK_PASSWORD` — plaintext, hashed in memory at startup (dev convenience).
+4. Otherwise a random password is generated, written to `auth.json` (0600), and printed **once** to
+   stderr.
+
+`greywork-server hash-password` prints an argon2 PHC string from stdin.
+
+### Authentication
+
+Password → opaque session token, carried either as an `HttpOnly; SameSite=Strict` cookie
+(`gw_session`) or as `Authorization: Bearer <token>` — the two are equivalent. Sessions live in an
+in-memory table keyed by `SHA-256(token)` (the plaintext token is never stored), so a restart
+invalidates every session. Wrong password, invalid token, and expired session all return the same
+`401 {"error":"未认证"}`. Repeated login failures from one IP are throttled (5 failures → 60s
+cooldown → `429`). CSRF rests on `SameSite=Strict` plus an optional `allowed_origins` allow-list.
+
+### HTTP / WebSocket contract
+
+| Method | Path            | Auth | Notes                                                    |
+| ------ | --------------- | ---- | -------------------------------------------------------- |
+| GET    | `/api/health`   | no   | `{status, version}`                                      |
+| POST   | `/api/login`    | no   | `{password}` → `{token}` + `Set-Cookie`                  |
+| POST   | `/api/logout`   | yes  | clears cookie + server session                           |
+| GET    | `/api/session`  | yes  | `{authenticated, expiresAt}`                             |
+| GET    | `/api/commands` | yes  | command metadata (`auth` / `desktopOnly` / `binary`)     |
+| POST   | `/api/command`  | yes  | `{command, args}` → the command's return value, verbatim |
+| GET    | `/api/events`   | yes  | WebSocket; frames are `{event, payload}`                 |
+
+Successful `/api/command` responses carry the command's return value directly (JSON, or raw bytes
+for the two `binary` commands with `Content-Type: application/octet-stream`). Failures are a
+non-2xx status plus `{"error": "..."}`. Request bodies are capped at 32 MB (session snapshots and
+base64 attachments exceed axum's 2 MB default). The WebSocket carries the same event names the
+desktop renderer listens for (`acp://event`, `llm://event`, `automation://due`,
+`<channel>://state` / `<channel>://inbound`, …); `notify` becomes a `host://notify` event. Events
+are best-effort — a lagging subscriber skips old events, never replays them.
+
+### Security model
+
+The **authentication boundary is the security boundary**: a valid session can spawn agent
+processes, so the controls below limit what the _web UI_ can be tricked into doing.
+
+- **Frozen agent allow-list.** `acp_start` resolves its extra allowed programs from the server
+  config (`agent_programs`), never from `db.enabled_agent_programs()` — that table is client-writable
+  and would otherwise let a request widen the spawn surface. `db_agents_sync` is rejected outright
+  (`403`).
+- **Sandbox / tier clamping.** The server overwrites the caller-supplied `sandbox` and `tier`
+  arguments on `acp_start` (and pins `tier` on `acp_set_permission_tier`) with the configured
+  values, so a remote caller cannot request `sandbox="off"` or `tier="full"`. The default tier is
+  `read-only` (fail-closed).
+- **Pre-seeded authorized roots.** A headless host has no native folder picker, so authorized
+  workspace roots come only from config (`workspace_roots`); `WorkspaceFsAccess` still enforces
+  them for every `fs_*` / `git_*` call. No new path resolution is introduced by the server.
+
+Known residual surface (documented, not yet hardened): the built-in allow-list still contains
+general-purpose runtimes (`node` / `npx` / `python3` / `uvx`) that are themselves arbitrary code
+executors, and `acp_start`'s `env` argument is caller-controlled.
 
 ## CI/CD
 
@@ -87,8 +172,10 @@ single home.
 2. **Tauri Bundle (deb / NSIS / dmg)** — three-platform matrix that installs the Tauri system deps,
    compiles Rust, and packages the app; the renderer is built inside `tauri build` via
    `beforeBuildCommand`.
-3. **Cargo Test (src-tauri)** — `cargo fmt --check`, `cargo clippy --locked --all-targets -- -D warnings`, `cargo test --locked`.
-   The pre-push hook runs these same three commands, in this order, when a push touches `apps/desktop/src-tauri`.
+3. **Cargo Test (workspace)** — from the repo root: `cargo fmt --check`,
+   `cargo clippy --locked --all-targets -- -D warnings`, `cargo test --locked`, plus a guard that
+   `crates/greywork-host/Cargo.toml` declares no `tauri` dependency. The pre-push hook runs the same
+   three commands when a push touches Rust files.
 
 Rust dependency caches come from `Swatinem/rust-cache` and are keyed with `shared-key: tauri`, so the
 CI bundle matrix and the release workflow restore the same dependency artifacts (the key still

@@ -127,13 +127,13 @@ jobs:
       # 拆开反而各自从缓存恢复一遍、各自重编一遍本地 crate。
       # 三条命令都在仓库根跑（不加 working-directory）：Cargo.lock 与 workspace 根
       # manifest 都在根，从子目录跑会让 `--locked` 找不到锁文件。fmt/clippy/test
-      # 默认覆盖整个 workspace（桌面壳 + greywork-host），正是我们要的。
+      # 默认覆盖整个 workspace（桌面壳 + greywork-host + apps/server），正是我们要的。
       - name: Rustfmt
         run: cargo fmt --check
 
       # --locked：Cargo.lock 与 Cargo.toml 不一致时立刻失败，而不是在 CI 里静默改锁文件。
       # --all-targets：不加就只检查 lib/bin，tests/ 与 examples/ 里的代码不受 lint
-      # 覆盖（本仓 tests/ 下有 7 个集成测试文件）。实测本地全量通过，加上不产生新告警。
+      # 覆盖（本仓 tests/ 下有多个集成测试文件）。实测本地全量通过，加上不产生新告警。
       - name: Clippy
         run: cargo clippy --locked --all-targets -- -D warnings
 
@@ -156,9 +156,10 @@ jobs:
       - uses: ./.github/actions/setup-node
 
       # 与 rust job 相同的 --locked：Cargo.lock 与 Cargo.toml 不一致时立刻失败。
-      # tests/ 下 7 个集成测试里有 4 个会真的拉起 mock agent（node 脚本），
-      # 走的就是「宿主拼命令行 → 交 shell 执行」这条路径，Windows 上最容易踩坑。
-      # 在仓库根跑，覆盖整个 workspace（桌面壳 + greywork-host）。
+      # 桌面壳的集成测试里有多个会真的拉起 mock agent（node 脚本），走的就是
+      # 「宿主拼命令行 → 交 shell 执行」这条路径，Windows 上最容易踩坑。
+      # 在仓库根跑，覆盖整个 workspace（桌面壳 + greywork-host + apps/server）——
+      # 因此服务端也必须跨平台可编译（unix-only 代码要 cfg 包裹）。
       - name: Cargo Test (workspace)
         run: cargo test --locked
 
