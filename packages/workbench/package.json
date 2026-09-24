@@ -44,6 +44,7 @@
     "@greywork/core": "workspace:*",
     "@greywork/cowork": "workspace:*",
     "@greywork/editor": "workspace:*",
+    "@greywork/host-ipc": "workspace:*",
     "@greywork/llm": "workspace:*",
     "@greywork/plugins": "workspace:*",
     "@greywork/shell": "workspace:*",

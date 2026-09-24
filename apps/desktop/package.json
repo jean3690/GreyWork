@@ -16,6 +16,7 @@
     "e2e": "node e2e/smoke.e2e.mjs"
   },
   "dependencies": {
+    "@greywork/host-ipc": "workspace:*",
     "@greywork/workbench": "workspace:*",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",

@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@greywork/core": "workspace:*",
+    "@greywork/host-ipc": "workspace:*",
     "@agentclientprotocol/sdk": "^1.4.0",
     "@tauri-apps/api": "^2"
   },

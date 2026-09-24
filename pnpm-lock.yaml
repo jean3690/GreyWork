@@ -45,6 +45,9 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@greywork/host-ipc':
+        specifier: workspace:*
+        version: link:../../packages/host-ipc
       '@greywork/workbench':
         specifier: workspace:*
         version: link:../../packages/workbench
@@ -115,6 +118,9 @@ importers:
       '@greywork/core':
         specifier: workspace:*
         version: link:../core
+      '@greywork/host-ipc':
+        specifier: workspace:*
+        version: link:../host-ipc
       '@tauri-apps/api':
         specifier: ^2
         version: 2.11.1
@@ -180,8 +186,30 @@ importers:
 
   packages/editor:
     dependencies:
+      '@greywork/host-ipc':
+        specifier: workspace:*
+        version: link:../host-ipc
       '@tauri-apps/api':
         specifier: ^2.11.1
+        version: 2.11.1
+    devDependencies:
+      '@vitest/coverage-v8':
+        specifier: ^3.2.7
+        version: 3.2.7(supports-color@7.1.0)(vitest@3.2.7(@types/debug@4.1.13)(@types/node@22.20.1)(happy-dom@20.11.12)(jiti@2.7.0)(lightningcss@1.32.0)(supports-color@7.1.0)(yaml@2.9.0))
+      typescript:
+        specifier: ~5.6.2
+        version: 5.6.2
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/debug@4.1.13)(@types/node@22.20.1)(happy-dom@20.11.12)(jiti@2.7.0)(lightningcss@1.32.0)(supports-color@7.1.0)(yaml@2.9.0)
+
+  packages/host-ipc:
+    dependencies:
+      '@greywork/core':
+        specifier: workspace:*
+        version: link:../core
+      '@tauri-apps/api':
+        specifier: ^2
         version: 2.11.1
     devDependencies:
       '@vitest/coverage-v8':
@@ -199,6 +227,9 @@ importers:
       '@greywork/core':
         specifier: workspace:*
         version: link:../core
+      '@greywork/host-ipc':
+        specifier: workspace:*
+        version: link:../host-ipc
       '@tauri-apps/api':
         specifier: ^2
         version: 2.11.1
@@ -221,6 +252,9 @@ importers:
       '@greywork/core':
         specifier: workspace:*
         version: link:../core
+      '@greywork/host-ipc':
+        specifier: workspace:*
+        version: link:../host-ipc
       '@tauri-apps/api':
         specifier: ^2.11.1
         version: 2.11.1
@@ -343,6 +377,9 @@ importers:
       '@greywork/editor':
         specifier: workspace:*
         version: link:../editor
+      '@greywork/host-ipc':
+        specifier: workspace:*
+        version: link:../host-ipc
       '@greywork/llm':
         specifier: workspace:*
         version: link:../llm
