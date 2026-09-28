@@ -52,7 +52,8 @@ export default defineConfig({
       // 数值重新测量后在此登记（见 2026-09-02 迁移说明）。
       // 2026-09-05 实测 statements 77.8 / branches 82.2 / functions 80.3 —— 原先 statements
       // 49 留了 ~29pt 死空间等于没设闸，收紧到 70 仍是余量充足的闸门。
-      thresholds: { statements: 70, lines: 70, branches: 79, functions: 72 },
+      // vitest 5 的 coverage-v8 改用 AST 精确重映射，数值较 v3 偏低；门槛按 5.x 实测重校（2026-09-28）。
+      thresholds: { statements: 70, lines: 74, branches: 64, functions: 70 },
     },
   },
 });

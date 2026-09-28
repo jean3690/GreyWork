@@ -25,24 +25,8 @@ vi.mock("@greywork/core", async (importOriginal) => {
   return { ...actual, isTauriRuntime: () => true };
 });
 
-const storageHolder = globalThis as { localStorage?: Storage };
-
 function injectStorage(): void {
-  const backing: Record<string, string> = {};
-  storageHolder.localStorage = {
-    getItem: (key: string) => backing[key] ?? null,
-    setItem: (key: string, value: string) => {
-      backing[key] = value;
-    },
-    removeItem: (key: string) => delete backing[key],
-    clear: () => {
-      for (const key of Object.keys(backing)) delete backing[key];
-    },
-    key: (index: number) => Object.keys(backing)[index] ?? null,
-    get length() {
-      return Object.keys(backing).length;
-    },
-  } as Storage;
+  window.localStorage.clear();
 }
 
 /** 构造一个已安装的 market 包（worker 形态，走升级热路径）。 */

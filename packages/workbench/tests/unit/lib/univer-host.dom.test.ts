@@ -4,18 +4,18 @@
  * 覆盖：字节与容器就绪才 boot、boot 失败落 bootError、代次自增丢弃过期实例、
  * 卸载时销毁句柄，以及 registerPresetPlugins 对 [Ctor, config] 元组的逐项注册。
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { defineComponent, h, toRef, type PropType } from "vue";
 
 import type { PreviewTab } from "@/stores/preview";
-import { registerPresetPlugins, useUniverHost, type UniverInstance } from "@/lib/univer-host";
+import { registerPresetPlugins, useUniverHost, type UniverBoot, type UniverInstance } from "@/lib/univer-host";
 
 const h_ = vi.hoisted(() => ({ readBinary: vi.fn<(path: string) => Promise<Uint8Array | null>>() }));
 vi.mock("@/stores/vfs", () => ({ useVfsStore: () => ({ readBinary: h_.readBinary }) }));
 
-let bootSpy: ReturnType<typeof vi.fn>;
+let bootSpy: Mock<UniverBoot>;
 
 function disposeSpy(): UniverInstance & { disposed: () => boolean } {
   const dispose = vi.fn();
@@ -53,7 +53,7 @@ beforeEach(() => {
   localStorage.clear();
   setActivePinia(createPinia());
   h_.readBinary.mockReset();
-  bootSpy = vi.fn();
+  bootSpy = vi.fn<UniverBoot>();
 });
 
 describe("useUniverHost", () => {
