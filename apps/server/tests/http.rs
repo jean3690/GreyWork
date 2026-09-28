@@ -190,6 +190,34 @@ async fn list_commands_exposes_metadata() {
         .map(|meta| meta["name"].as_str().unwrap())
         .collect();
     assert_eq!(binary, vec!["channel_take_media", "fs_read_binary"]);
+
+    // available 如实回传「本宿主可不可调」：桌面专属与黑名单都是 false，
+    // 普通命令是 true —— 渲染端据此灰显，而不是调了 403 后自己踩坑。
+    let available_of = |name: &str| {
+        commands
+            .iter()
+            .find(|meta| meta["name"] == name)
+            .map(|meta| meta["available"].clone())
+            .unwrap_or_else(|| panic!("命令表里应有 {name}"))
+    };
+    assert_eq!(
+        available_of("db_agents_sync"),
+        json!(false),
+        "黑名单命令不可用"
+    );
+    assert_eq!(
+        json_body(&body)
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|meta| meta["name"] == "db_agents_sync")
+            .map(|meta| meta["desktopOnly"].clone())
+            .unwrap(),
+        json!(false),
+        "db_agents_sync 不是桌面专属，只是被服务端禁用 —— 两个标记必须区分开"
+    );
+    assert_eq!(available_of("reveal_path"), json!(false), "桌面专属不可用");
+    assert_eq!(available_of("fs_list_dir"), json!(true), "普通命令可用");
 }
 
 #[tokio::test]

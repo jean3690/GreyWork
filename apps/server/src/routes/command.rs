@@ -34,9 +34,11 @@ pub struct CommandMetaView {
     pub auth: &'static str,
     pub desktop_only: bool,
     pub binary: bool,
+    /// 在**本宿主**是否可调用（非桌面专属且不在服务端黑名单）。
+    pub available: bool,
 }
 
-/// 列出全部命令元数据（含桌面专属，供前端灰显）。
+/// 列出全部命令元数据（含桌面专属与被禁命令，供前端灰显并说明）。
 pub async fn list_commands(_session: AuthSession) -> Json<Vec<CommandMetaView>> {
     Json(
         COMMANDS
@@ -49,6 +51,7 @@ pub async fn list_commands(_session: AuthSession) -> Json<Vec<CommandMetaView>> 
                 },
                 desktop_only: meta.desktop_only,
                 binary: meta.binary,
+                available: policy::is_available(meta),
             })
             .collect(),
     )

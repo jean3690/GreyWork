@@ -23,6 +23,15 @@ pub fn is_denied(command: &str) -> bool {
     DENIED.contains(&command)
 }
 
+/// 该命令在**本宿主**是否可调用：非桌面专属且不在黑名单。
+///
+/// 暴露给 `GET /api/commands`，让渲染端知道「这条命令调了也是 403」—— 此前
+/// `DENIED` 只活在服务端内存里，`db_agents_sync` 对外报 `desktopOnly:false`，
+/// 渲染端无从得知它不可用，只能每次调用失败后自己踩坑。
+pub fn is_available(meta: &greywork_host::commands::CommandMeta) -> bool {
+    !meta.desktop_only && !is_denied(meta.name)
+}
+
 /// 用服务端策略覆盖客户端可控的沙箱/档位参数。
 ///
 /// - `acp_start`：`sandbox`/`tier` 一律取配置值 —— 否则远端可传 `sandbox="off"` 关掉
@@ -63,6 +72,22 @@ mod tests {
         assert!(!is_denied("db_settings_sync"));
         assert!(!is_denied("db_automations_sync"));
         assert!(!is_denied("acp_start"));
+    }
+
+    #[test]
+    fn availability_excludes_desktop_only_and_denied() {
+        let find = |name: &str| {
+            greywork_host::commands::COMMANDS
+                .iter()
+                .find(|meta| meta.name == name)
+                .unwrap()
+        };
+        assert!(is_available(find("fs_list_dir")), "普通命令可用");
+        assert!(!is_available(find("reveal_path")), "桌面专属不可用");
+        assert!(!is_available(find("db_agents_sync")), "黑名单不可用");
+        // 两个不可用来源必须区分得开：db_agents_sync 不是桌面专属，只是被禁用。
+        assert!(!find("db_agents_sync").desktop_only);
+        assert!(find("reveal_path").desktop_only);
     }
 
     #[test]
