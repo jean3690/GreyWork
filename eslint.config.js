@@ -40,6 +40,9 @@ export default defineConfigWithVueTs(
       "pnpm-lock.yaml",
       "**/src-tauri/tests/*.mjs",
       "apps/desktop/e2e/**",
+      // 原样直出的静态资源（logo / vscode-icons / 首帧引导脚本）：不经打包器、也不属于
+      // 任何 tsconfig 的 project service，交给 eslint 解析只会报 parsing error。
+      "apps/desktop/public/**",
       "**/vitest.config.ts",
       "eslint.config.js",
       // 插件市场源仓库（发布产物 JSON + worker JS），运行时经 registry URL 拉取，
