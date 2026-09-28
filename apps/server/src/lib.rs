@@ -53,6 +53,8 @@ pub fn build_router(state: AppState) -> axum::Router {
     // CSP 在这里算一次就定死（含 `frame-src`，见 `middleware::content_security_policy`），
     // 之后每个响应只是把它挂上去 —— 别放进中间件里按响应重算。
     let csp = middleware::content_security_policy(&state.config);
+    // HSTS 由 `secure_cookie` 门控：它同时是「运维已在 TLS 反代之后」的信号。
+    let hsts = state.config.secure_cookie;
     app.layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .layer(mw::from_fn_with_state(
             origin_state,
@@ -61,7 +63,7 @@ pub fn build_router(state: AppState) -> axum::Router {
         .layer(mw::from_fn(
             move |request: axum::extract::Request, next: mw::Next| {
                 let csp = csp.clone();
-                async move { middleware::security_headers(request, next, csp).await }
+                async move { middleware::security_headers(request, next, csp, hsts).await }
             },
         ))
         .with_state(state)

@@ -9,8 +9,16 @@ use axum::Json;
 use crate::config::ServerConfig;
 use crate::state::AppState;
 
+/// 权限策略：默认全关（这些能力前端一个都不用）。
+///
+/// **刻意不含 `clipboard-*`**：`lib/clipboard.ts` 与 `lib/textarea-actions.ts` 用
+/// `navigator.clipboard`，关掉会静默打断「复制」按钮。
+const PERMISSIONS_POLICY: &str = "camera=(), microphone=(), geolocation=(), payment=(), \
+usb=(), serial=(), hid=(), bluetooth=(), midi=()";
+
 /// 给所有响应加安全响应头：`Content-Security-Policy`、`X-Frame-Options: DENY`、
-/// `Referrer-Policy: no-referrer`、`X-Content-Type-Options: nosniff`，并兜底 `Cache-Control: no-store`。
+/// `Referrer-Policy: no-referrer`、`Permissions-Policy`、`X-Content-Type-Options: nosniff`，
+/// 并兜底 `Cache-Control: no-store`。
 ///
 /// `no-store`：命令返回值可能含凭据/文件内容，不该被任何中间缓存留存。
 /// `nosniff`：避免浏览器把 JSON/二进制按内容猜成可执行类型。
@@ -20,8 +28,14 @@ use crate::state::AppState;
 /// 若用 `insert` 会把它们全部冲掉。`/api/*` 不设自己的缓存头，于是仍拿到 `no-store`。
 ///
 /// `csp` 由 [`content_security_policy`] 在路由装配时算好传入 —— 每个响应都重算一遍
-/// 只是白烧 CPU（策略是启动期就定死的）。
-pub async fn security_headers(request: Request, next: Next, csp: HeaderValue) -> Response {
+/// 只是白烧 CPU（策略是启动期就定死的）。`hsts` 同理：由 `secure_cookie`（运维在 TLS
+/// 反代之后的信号）门控 —— 纯 HTTP 下发 HSTS 无意义，还可能把用户锁在外面。
+pub async fn security_headers(
+    request: Request,
+    next: Next,
+    csp: HeaderValue,
+    hsts: bool,
+) -> Response {
     let mut response = next.run(request).await;
     let headers = response.headers_mut();
     headers
@@ -39,6 +53,16 @@ pub async fn security_headers(request: Request, next: Next, csp: HeaderValue) ->
         header::REFERRER_POLICY,
         HeaderValue::from_static("no-referrer"),
     );
+    headers.insert(
+        header::HeaderName::from_static("permissions-policy"),
+        HeaderValue::from_static(PERMISSIONS_POLICY),
+    );
+    if hsts {
+        headers.insert(
+            header::STRICT_TRANSPORT_SECURITY,
+            HeaderValue::from_static("max-age=31536000; includeSubDomains"),
+        );
+    }
     response
 }
 

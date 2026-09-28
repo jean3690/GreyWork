@@ -389,6 +389,40 @@ async fn responses_carry_security_headers() {
             .and_then(|value| value.to_str().ok()),
         Some("no-referrer")
     );
+    // 权限策略：默认全关，但**不含** clipboard-*（前端「复制」按钮用 navigator.clipboard）。
+    let permissions = headers
+        .get("permissions-policy")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+    assert!(
+        permissions.contains("camera=()"),
+        "缺权限策略: {permissions}"
+    );
+    assert!(
+        !permissions.contains("clipboard"),
+        "不该关掉 clipboard（复制按钮要用）: {permissions}"
+    );
+    // 默认（纯 HTTP / 未声明 TLS 反代）不发 HSTS：下发无意义，还可能把用户锁在外面。
+    assert!(
+        headers.get(header::STRICT_TRANSPORT_SECURITY).is_none(),
+        "未开 secure_cookie 时不该发 HSTS"
+    );
+}
+
+/// `secure_cookie=true` 是「运维已在 TLS 反代之后」的信号 → 才发 HSTS。
+#[tokio::test]
+async fn hsts_is_sent_only_behind_tls() {
+    let h = harness_with("hsts", |config, _tmp| {
+        config.secure_cookie = true;
+    });
+    let (status, headers, _) = send(&h.router, get("/api/health")).await;
+    assert_eq!(status, StatusCode::OK);
+    let hsts = headers
+        .get(header::STRICT_TRANSPORT_SECURITY)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+    assert!(hsts.contains("max-age="), "缺 HSTS: {hsts}");
+    assert!(hsts.contains("includeSubDomains"), "缺 HSTS: {hsts}");
 }
 
 /// 配了 `frame_origins` 时，CSP 要真的带上 `frame-src` —— 云端 Office 的 iframe 靠它才不被拦。
