@@ -14,6 +14,7 @@ import { telegramBackend } from "../../lib/telegram-backend";
 import { wecomBackend } from "../../lib/wecom-backend";
 import { t } from "./shared";
 import { ensureRemoteWorkspace, ensureRemoteWorkspaceFolder } from "../../lib/remote-workspace";
+import { HOST_HELLO_EVENT, listen, runtimeMode } from "@greywork/host-ipc";
 import type { RemoteAssistantState } from "./state";
 import type { StatusApi } from "./status";
 import type { ConnectApi } from "./connect";
@@ -143,6 +144,55 @@ export function createLifecycleSlice({ state, getStatus, getConnect, getPipeline
       }
     });
     await wecomBackend.onInbound(getPipeline().onWecomInbound);
+
+    // 服务端态：事件走一条 /api/events WebSocket；断线重连期间的 <channel>://state 会漏掉。
+    // 宿主每次（重）连先发 host://hello —— 跳过首帧（init 已拉过状态），其后每次重连都重拉对齐。
+    if (runtimeMode() === "server") {
+      let sawFirstHello = false;
+      await listen(HOST_HELLO_EVENT, () => {
+        if (!sawFirstHello) {
+          sawFirstHello = true;
+          return;
+        }
+        void resync();
+      });
+    }
+  }
+
+  /** 拉齐各通道状态与媒体能力（init 与断线重连共用）。 */
+  async function refreshAllStatus(): Promise<void> {
+    await getStatus().refreshStatus();
+    // 钉钉等只有桌面端有宿主命令的通道：拉取失败保持初始值，不影响其余通道。
+    await getStatus()
+      .refreshDingTalkStatus()
+      .catch(() => undefined);
+    await getStatus()
+      .refreshFeishuStatus()
+      .catch(() => undefined);
+    await getStatus()
+      .refreshTelegramStatus()
+      .catch(() => undefined);
+    await getStatus()
+      .refreshQqStatus()
+      .catch(() => undefined);
+    await getStatus()
+      .refreshDiscordStatus()
+      .catch(() => undefined);
+    await getStatus()
+      .refreshWecomStatus()
+      .catch(() => undefined);
+    // 媒体能力矩阵：宿主直出，取不到就沿用默认。
+    await getStatus().refreshMediaCapabilities();
+  }
+
+  /** 断线重连后重拉状态对齐（不重连、不动用户设置）。 */
+  async function resync(): Promise<void> {
+    if (!state.available.value || !state.initialized.value) return;
+    try {
+      await refreshAllStatus();
+    } catch (error) {
+      console.error("[remote-assistant] 重连状态对齐失败", error);
+    }
   }
 
   /** 幂等启动：注册六条通道的事件、拉状态、按各自设置自动连接（由 Shell 挂载时调用）。 */
@@ -153,28 +203,7 @@ export function createLifecycleSlice({ state, getStatus, getConnect, getPipeline
     if (!state.available.value) return;
     try {
       await attachListeners();
-      await getStatus().refreshStatus();
-      // 钉钉同样只有桌面端有宿主命令；浏览器态跳过（保持状态为初始值）。
-      await getStatus()
-        .refreshDingTalkStatus()
-        .catch(() => undefined);
-      await getStatus()
-        .refreshFeishuStatus()
-        .catch(() => undefined);
-      await getStatus()
-        .refreshTelegramStatus()
-        .catch(() => undefined);
-      await getStatus()
-        .refreshQqStatus()
-        .catch(() => undefined);
-      await getStatus()
-        .refreshDiscordStatus()
-        .catch(() => undefined);
-      await getStatus()
-        .refreshWecomStatus()
-        .catch(() => undefined);
-      // 媒体能力矩阵：宿主直出，取不到就沿用默认（能力提示只是提前告知，真拦截在宿主侧）。
-      await getStatus().refreshMediaCapabilities();
+      await refreshAllStatus();
     } catch (error) {
       console.error("[remote-assistant] 初始化失败", error);
       return;

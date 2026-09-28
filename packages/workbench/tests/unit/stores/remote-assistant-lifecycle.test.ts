@@ -1,7 +1,9 @@
 // 生命周期切片的可观测契约：浏览器态早退 / init 幂等 / 状态跌线记 error 活动 /
 // 入站事件路由到管线 / autoConnect 门禁。切片经 createLifecycleSlice 直接注入。
-import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import type { RemoteChannel } from "@/stores/remote-assistant/shared";
+import { flushPromises } from "@vue/test-utils";
+import type * as HostIpc from "@greywork/host-ipc";
 
 const caps = vi.hoisted(() => {
   const make = () => {
@@ -32,6 +34,11 @@ const caps = vi.hoisted(() => {
   };
 });
 
+const hostIpc = vi.hoisted(() => ({
+  helloHandler: null as (() => void) | null,
+  mode: "browser-preview" as "desktop" | "server" | "browser-preview",
+}));
+
 vi.mock("@/lib/wechat-backend", () => ({
   wechatBackend: { supported: () => caps.supported(), onState: caps.wechat.onState, onInbound: caps.wechat.onInbound },
 }));
@@ -41,6 +48,19 @@ vi.mock("@/lib/telegram-backend", () => ({ telegramBackend: { onState: caps.tele
 vi.mock("@/lib/qq-backend", () => ({ qqBackend: { onState: caps.qq.onState, onInbound: caps.qq.onInbound } }));
 vi.mock("@/lib/discord-backend", () => ({ discordBackend: { onState: caps.discord.onState, onInbound: caps.discord.onInbound } }));
 vi.mock("@/lib/wecom-backend", () => ({ wecomBackend: { onState: caps.wecom.onState, onInbound: caps.wecom.onInbound } }));
+
+// host-ipc：覆写 runtimeMode（切到 server）与 listen（捕获 host://hello 处理器）。
+vi.mock("@greywork/host-ipc", async (importOriginal) => {
+  const actual = await importOriginal<typeof HostIpc>();
+  return {
+    ...actual,
+    runtimeMode: () => hostIpc.mode,
+    listen: vi.fn(async (event: string, handler: (payload: unknown) => void) => {
+      if (event === actual.HOST_HELLO_EVENT) hostIpc.helloHandler = () => handler({ payload: null });
+      return () => {};
+    }),
+  };
+});
 
 import { createLifecycleSlice, type LifecycleApi } from "@/stores/remote-assistant/lifecycle";
 import type { StatusApi } from "@/stores/remote-assistant/status";
@@ -160,6 +180,11 @@ beforeEach(() => {
   }
 });
 
+afterEach(() => {
+  hostIpc.helloHandler = null;
+  hostIpc.mode = "browser-preview";
+});
+
 describe("init 门禁", () => {
   it("浏览器态（不支持）：标记初始化后早退，不注册监听、不刷新状态", async () => {
     caps.supported.mockReturnValue(false);
@@ -258,5 +283,26 @@ describe("autoConnect 门禁", () => {
     h.channels.wechat.autoConnect = true;
     await h.lifecycle.init();
     expect(h.connect.connect).not.toHaveBeenCalled();
+  });
+});
+
+describe("服务端态断线重连", () => {
+  it("host://hello 跳过首帧、其后每次重连都重拉状态对齐", async () => {
+    hostIpc.mode = "server";
+    const fx = build();
+    await fx.lifecycle.init();
+    expect(fx.refresh.refreshStatus).toHaveBeenCalledTimes(1);
+    expect(hostIpc.helloHandler).toBeTypeOf("function");
+
+    // 首个 hello = 首次连接：init 已拉过状态，不重复拉。
+    hostIpc.helloHandler?.();
+    await flushPromises();
+    expect(fx.refresh.refreshStatus).toHaveBeenCalledTimes(1);
+
+    // 其后每个 hello = 重连：重拉状态与媒体能力对齐。
+    hostIpc.helloHandler?.();
+    await flushPromises();
+    expect(fx.refresh.refreshStatus).toHaveBeenCalledTimes(2);
+    expect(fx.refresh.refreshMediaCapabilities).toHaveBeenCalledTimes(2);
   });
 });
