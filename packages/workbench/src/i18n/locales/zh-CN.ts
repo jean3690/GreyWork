@@ -288,6 +288,18 @@ export const zhCN = {
         unsupported: "不支持预览",
         systemAppHint: "可以点下面的「用系统应用打开」用本机的 Office 查看原文件。",
       },
+      cloudOffice: {
+        title: "云端 Office",
+        failed: "云端预览没能取到文档地址",
+        fallbackHint: "已切回本地查看，文件内容不受影响。可在设置 → 服务里检查该服务商的配方与凭证环境变量。",
+        noProvider: "没有可用的云端 Office 服务商（需在设置 → 服务里启用并填好配方）。",
+        retry: "重试云端预览",
+        retrying: "重试云端预览…",
+        fellBack: "「{name}」已改用本地查看",
+        frameBlocked:
+          "云端预览要内嵌 {origin}，但当前宿主允许内嵌的只有 {allowed} —— 已切回本地查看。桌面端的允许列表写死在打包配置里，无法自行添加；服务端请把该 origin 加进 GREYWORK_FRAME_ORIGINS。",
+        frameBlockedNone: "（无）",
+      },
       sheet: {
         notLoaded: "表格尚未加载完成",
         chartLoss: "此表含图表或图片，保存会丢失它们；请用「用系统应用打开」编辑原文件",
@@ -727,6 +739,7 @@ export const zhCN = {
       assistant: { title: "远程助手", desc: "微信通道与助手默认行为" },
       appearance: { title: "外观", desc: "主题、深色模式与界面字号" },
       mode: { title: "运行模式", desc: "执行档位与权限策略" },
+      services: { title: "服务", desc: "第三方云端服务的接入与凭证" },
       system: { title: "系统", desc: "环境信息与沙盒" },
       mcp: { title: "MCP", desc: "外部工具服务器：声明给 agent，由 agent 连接" },
       skills: { title: "技能", desc: "工作区技能：安装 / 更新 / 卸载与官方市场" },

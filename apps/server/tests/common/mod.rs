@@ -100,6 +100,7 @@ fn make_state(tmp: &Path, config: ServerConfig) -> AppState {
         qq: Arc::new(greywork_host::qq::QqHost::default()),
         wecom: Arc::new(greywork_host::wecom::WecomHost::default()),
         agent_programs: Arc::new(config.agent_programs.clone()),
+        frame_origins: Arc::new(config.frame_origins.clone()),
     });
     let sessions = Arc::new(
         SessionStore::new(&hash_password(PASSWORD).unwrap(), Duration::from_secs(3600)).unwrap(),

@@ -35,7 +35,7 @@ use crate::wechat::WechatHost;
 use crate::wecom::WecomHost;
 use crate::workspace_fs::WorkspaceFsAccess;
 use crate::{
-    acp_host, channel_media, db, dingtalk, discord, feishu, git, llm, mcp, mcp_registry,
+    acp_host, channel_media, db, dingtalk, discord, feishu, git, llm, mcp, mcp_registry, office,
     plugin_market, qq, sheet, skills_market, store_fs, telegram, update, web_fetch, wechat, wecom,
     workspace_fs, worktree,
 };
@@ -95,6 +95,12 @@ pub struct CommandContext {
     /// 取）；服务端填配置里**冻结**的列表，不读 DB —— DB 可被客户端经 `db_agents_sync`
     /// 改写，是 RCE 面（见 `acp_host::acp_start` 的 `extra_programs` 说明）。
     pub agent_programs: Arc<Vec<String>>,
+    /// 本宿主 CSP 允许内嵌的 origin（云端 Office 的文档地址）。
+    ///
+    /// 与 `agent_programs` 同样是**宿主侧事实**：桌面端写死在 `tauri.conf.json`（由桌面包装
+    /// 自行传给 `office::host_info`），服务端填 `GREYWORK_FRAME_ORIGINS`。共享层无从得知，
+    /// 只能由宿主注入 —— 所以 `office_host_info` 是本表里少数要读 `ctx` 的「无状态」命令。
+    pub frame_origins: Arc<Vec<String>>,
 }
 
 /// 零参命令的占位入参：`null` / `{}` / 缺失都接受。
@@ -289,6 +295,17 @@ command_table! {
     { "llm_chat_stop", auth: Auth::Required, desktop: false, binary: false,
         args: llm::ChatStopArgs,
         run: |ctx, a| async move { llm::llm_chat_stop(&ctx.llm, a.request_id).await.map(Json) } }
+
+    // ---- office（第三方云端 Office 预览） ----
+    // `office` 本身无状态（配方随调用传入，凭证每次从环境变量解析），与 LlmHost / WecomHost
+    // 那种「持有连接与请求句柄」的不同；`office_host_info` 读 `ctx.frame_origins` 只是为了
+    // 把宿主自己的 CSP 白名单如实回给渲染端（桌面与服务端各是一份真值）。
+    { "office_host_info", auth: Auth::Required, desktop: false, binary: false,
+        args: office::HostInfoArgs,
+        run: |ctx, a| async move { Ok::<_, String>(Json(office::host_info(&ctx.frame_origins, a))) } }
+    { "office_preview_open", auth: Auth::Required, desktop: false, binary: false,
+        args: office::PreviewOpenArgs,
+        run: |ctx, a| async move { office::open_preview(&ctx.workspace, a).await.map(Json) } }
 
     // ---- mcp ----
     { "mcp_probe", auth: Auth::Required, desktop: false, binary: false,
@@ -732,6 +749,8 @@ mod tests {
             wecom: Arc::new(WecomHost::default()),
             // 空列表 = 只放行内置白名单（headless 语义）。
             agent_programs: Arc::new(Vec::new()),
+            // 非空样例：既覆盖「宿主白名单被如实回给渲染端」，也让下面的冒烟断言有东西可断。
+            frame_origins: Arc::new(vec!["https://docs.example.com".to_string()]),
         }
     }
 
@@ -753,7 +772,7 @@ mod tests {
 
     #[test]
     fn commands_table_shape() {
-        assert_eq!(COMMANDS.len(), 139, "命令总数应为 139");
+        assert_eq!(COMMANDS.len(), 141, "命令总数应为 141");
 
         // 命令名唯一。
         let mut names: Vec<&str> = COMMANDS.iter().map(|c| c.name).collect();
@@ -810,6 +829,28 @@ mod tests {
         assert!(dispatch("no_such_command", Value::Null, &ctx)
             .await
             .is_err());
+
+        // office：零参形态的宿主事实查询经 dispatch 走得通（`office_preview_open`
+        // 的端到端在 office.rs 里，那需要真起一个 HTTP 服务）。
+        let out = dispatch(
+            "office_host_info",
+            serde_json::json!({ "envNames": ["GREYWORK_TEST_OFFICE_ABSENT3"] }),
+            &ctx,
+        )
+        .await
+        .expect("dispatch office_host_info");
+        let CommandOutput::Json(value) = out else {
+            panic!("office_host_info 应返回 JSON");
+        };
+        assert_eq!(
+            value["envMissing"],
+            serde_json::json!(["GREYWORK_TEST_OFFICE_ABSENT3"])
+        );
+        // 回的是注入给 ctx 的那份白名单，不是桌面常量 —— 服务端不再谎报。
+        assert_eq!(
+            value["embeddableFrameOrigins"],
+            serde_json::json!(["https://docs.example.com"])
+        );
 
         let _ = std::fs::remove_dir_all(&tmp);
     }

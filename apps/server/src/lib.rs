@@ -144,6 +144,9 @@ pub async fn run() -> Result<(), String> {
         wecom: Arc::new(greywork_host::wecom::WecomHost::default()),
         // 冻结白名单：来自配置，不读 DB（DB 可被客户端改写，是 RCE 面）。
         agent_programs: Arc::new(config.agent_programs.clone()),
+        // 本服务端 CSP 的 frame-src 白名单：与 middleware 拼策略用的是同一份配置，
+        // 这样 `office_host_info` 回给渲染端的白名单就是**真的**（而非桌面常量）。
+        frame_origins: Arc::new(config.frame_origins.clone()),
     });
 
     let state = AppState {

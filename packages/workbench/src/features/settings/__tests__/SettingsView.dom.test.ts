@@ -226,3 +226,15 @@ describe("SettingsView 远程助手分区", () => {
     expect(wrapper.text()).toContain("通道仅桌面端可用。");
   });
 });
+
+describe("SettingsView 服务分区", () => {
+  // 分区清单是**三处联动**（settings-sections 的 SETTINGS_SECTIONS、这里的 SECTION_KEYS、
+  // 模板的 v-if 链），漏一处不会报错、只会静默回落到 agent 分区 —— 所以用标题钉住。
+  it("渲染云端 Office 的配置面（分区注册三处联动不漏）", async () => {
+    const { wrapper } = await mountSettings("services");
+    expect(wrapper.get("h1").text()).toBe("服务");
+    expect(wrapper.text()).toContain("云端 Office 预览");
+    expect(wrapper.find('[data-testid="office-provider-add"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="office-provider-wps365"]').exists()).toBe(true);
+  });
+});

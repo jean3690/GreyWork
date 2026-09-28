@@ -1,7 +1,7 @@
 // 设置持久化验收：persist/loadPersisted 往返一致、推理等级非法值回退、损坏数据回退默认。
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
-import { agentProviderLobeIcon } from "@greywork/shell";
+import { agentProviderLobeIcon, type ServiceProviderConfig } from "@greywork/shell";
 
 const storage = new Map<string, string>();
 const localStorageStub = {
@@ -404,5 +404,95 @@ describe("关闭行为 closeToTray", () => {
       setActivePinia(createPinia());
       expect(useSettingsStore().closeToTray).toBe(true);
     }
+  });
+});
+
+describe("第三方服务配置 serviceProviders", () => {
+  it("默认只有 office 族预设，且全部未启用（= 预览走本地，行为与加这个功能之前一致）", () => {
+    const settings = useSettingsStore();
+    expect(settings.officeProviders.map((provider) => provider.id)).toEqual(["wps365", "tencent-docs", "microsoft365", "custom"]);
+    expect(settings.officeProviders.every((provider) => !provider.enabled)).toBe(true);
+    expect(settings.officeProviders.every((provider) => provider.recipe === undefined)).toBe(true);
+    expect(settings.selectedOfficeProviderId).toBeNull();
+  });
+
+  it("upsert 落库并归一化：完整配方保留，标量字段按原样存", () => {
+    const settings = useSettingsStore();
+    const ok = settings.upsertServiceProvider({
+      id: "wps365",
+      name: "WPS 365",
+      family: "office",
+      kind: "wps365",
+      enabled: true,
+      credentialEnv: "WPS365_ACCESS_TOKEN",
+      frameOrigin: "https://www.kdocs.cn",
+      recipe: { method: "POST", url: "https://open.wps.cn/upload", body: "multipart", viewUrlPointer: "/data/url" },
+    });
+    expect(ok).toBe(true);
+    const stored = settings.officeProviders.find((provider) => provider.id === "wps365");
+    expect(stored?.enabled).toBe(true);
+    expect(stored?.recipe?.viewUrlPointer).toBe("/data/url");
+    // 覆盖写而不是追加一条。
+    expect(settings.officeProviders).toHaveLength(4);
+  });
+
+  it("半填的配方被整条丢弃（宁可没有，也不留一份跑不通的配方）", () => {
+    const settings = useSettingsStore();
+    settings.upsertServiceProvider({
+      id: "custom",
+      name: "自建",
+      family: "office",
+      kind: "custom",
+      enabled: true,
+      // 缺 viewUrlPointer → 归一化判定配方不成立。
+      recipe: { method: "POST", url: "https://docs.example.com/upload", body: "multipart", viewUrlPointer: "" },
+    });
+    expect(settings.officeProviders.find((provider) => provider.id === "custom")?.recipe).toBeUndefined();
+  });
+
+  it("kind 不属于该族清单 → 拒收（拼错的值会让预览永远走不到云端）", () => {
+    const settings = useSettingsStore();
+    // 拼错的 kind 正是本用例要验的输入，只能绕过类型 —— 类型层面本就不该允许它。
+    const typo = { id: "typo", name: "拼错", family: "office", kind: "wpss365", enabled: true } as unknown as ServiceProviderConfig;
+    expect(settings.upsertServiceProvider(typo)).toBe(false);
+    expect(settings.officeProviders.some((provider) => provider.id === "typo")).toBe(false);
+  });
+
+  it("删除选中的服务商时清空选中；恢复默认回到四条预设", () => {
+    const settings = useSettingsStore();
+    settings.upsertServiceProvider({ id: "custom-office-x", name: "自建", family: "office", kind: "custom", enabled: true });
+    settings.selectOfficeProvider("custom-office-x");
+    expect(settings.selectedOfficeProviderId).toBe("custom-office-x");
+
+    settings.removeServiceProvider("custom-office-x");
+    expect(settings.selectedOfficeProviderId).toBeNull();
+    expect(settings.officeProviders.some((provider) => provider.id === "custom-office-x")).toBe(false);
+
+    settings.upsertServiceProvider({ id: "custom-office-y", name: "自建 2", family: "office", kind: "custom", enabled: true });
+    settings.resetServiceProviders();
+    expect(settings.officeProviders.map((provider) => provider.id)).toEqual(["wps365", "tencent-docs", "microsoft365", "custom"]);
+    expect(settings.selectedOfficeProviderId).toBeNull();
+  });
+
+  it("服务配置随快照持久化并跨重启保持", () => {
+    const settings = useSettingsStore();
+    settings.upsertServiceProvider({
+      id: "custom",
+      name: "自建",
+      family: "office",
+      kind: "custom",
+      enabled: true,
+      credentialEnv: "DOCS_TOKEN",
+      recipe: { method: "PUT", url: "https://docs.example.com/u", body: "raw-bytes", viewUrlPointer: "/webUrl" },
+    });
+    settings.selectOfficeProvider("custom");
+
+    setActivePinia(createPinia());
+    const reloaded = useSettingsStore();
+    const stored = reloaded.officeProviders.find((provider) => provider.id === "custom");
+    expect(stored?.enabled).toBe(true);
+    expect(stored?.credentialEnv).toBe("DOCS_TOKEN");
+    expect(stored?.recipe?.method).toBe("PUT");
+    expect(reloaded.selectedOfficeProviderId).toBe("custom");
   });
 });

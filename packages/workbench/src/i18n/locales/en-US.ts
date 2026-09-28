@@ -289,6 +289,19 @@ export const enUS: MessageSchema = {
         unsupported: "Preview unsupported",
         systemAppHint: "Use the “Open with system app” button below to view the original in the Office app on this machine.",
       },
+      cloudOffice: {
+        title: "Cloud Office",
+        failed: "The cloud viewer could not obtain a document URL",
+        fallbackHint:
+          "Fell back to the local viewer; the file itself is unaffected. Check the provider's recipe and credential environment variable under Settings → Services.",
+        noProvider: "No usable cloud Office provider (enable one and fill in its recipe under Settings → Services).",
+        retry: "Retry cloud preview",
+        retrying: "Retrying cloud preview…",
+        fellBack: "“{name}” is now shown locally",
+        frameBlocked:
+          "Cloud preview needs to embed {origin}, but this host only allows {allowed} — fell back to the local viewer. On desktop the allow-list is baked into the build; on a server, add the origin to GREYWORK_FRAME_ORIGINS.",
+        frameBlockedNone: "(none)",
+      },
       sheet: {
         notLoaded: "The spreadsheet is not loaded yet",
         chartLoss: "This sheet contains charts or images that saving would drop; edit the original with “Open with system app” instead",
@@ -735,6 +748,7 @@ export const enUS: MessageSchema = {
       assistant: { title: "Remote assistants", desc: "WeChat channel and assistant defaults" },
       appearance: { title: "Appearance", desc: "Theme, dark mode and UI scale" },
       mode: { title: "Run mode", desc: "Execution tier and permission policy" },
+      services: { title: "Services", desc: "Third-party cloud services and credentials" },
       system: { title: "System", desc: "Environment info and sandbox" },
       mcp: { title: "MCP", desc: "External tool servers: declared to the agent, connected by it" },
       skills: { title: "Skills", desc: "Workspace skills: install / update / remove and the official market" },

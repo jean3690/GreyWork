@@ -27,6 +27,7 @@ pub mod llm;
 pub mod log;
 pub mod mcp;
 pub mod mcp_registry;
+pub mod office;
 pub mod path_safety;
 pub mod plugin_market;
 pub mod process_guard;

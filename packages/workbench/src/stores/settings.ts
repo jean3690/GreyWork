@@ -1,6 +1,15 @@
 import { createJsonStorage } from "@greywork/core";
 import type { McpServerConfig } from "@greywork/acp";
-import { DEFAULT_MODEL_PROVIDERS, type ModelProviderConfig, type ReasoningEffort } from "@greywork/shell";
+import {
+  DEFAULT_MODEL_PROVIDERS,
+  DEFAULT_OFFICE_PROVIDERS,
+  SERVICE_FAMILIES,
+  SERVICE_KINDS,
+  type ModelProviderConfig,
+  type OfficeProviderConfig,
+  type ReasoningEffort,
+  type ServiceProviderConfig,
+} from "@greywork/shell";
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { settingsBackend } from "../lib/settings-backend";
@@ -28,6 +37,87 @@ function normalizeHeaders(value: unknown): Record<string, string> | undefined {
     if (typeof headerValue === "string" && headerValue !== "" && key.trim() !== "") headers[key] = headerValue;
   }
   return Object.keys(headers).length > 0 ? headers : undefined;
+}
+
+/**
+ * 服务族清单的合法值（从共享表取，避免两处各写一份）。
+ * 直接查 `SERVICE_FAMILIES` 而不是复制字面量：将来加族时这里自动跟上。
+ */
+function isServiceFamily(value: unknown): value is ServiceProviderConfig["family"] {
+  return typeof value === "string" && (SERVICE_FAMILIES as readonly string[]).includes(value);
+}
+
+/**
+ * kind 必须属于该族的清单。
+ *
+ * 只查「非空字符串」会放行 `kind: "wpss365"` 这种拼错的值：设置页下拉选不出它、宿主也不认，
+ * 表现是「列表里有这条、预览却永远不走云端」，所以按 `SERVICE_KINDS` 逐族校验。
+ */
+function isServiceKind(family: ServiceProviderConfig["family"], value: unknown): value is string {
+  return typeof value === "string" && SERVICE_KINDS[family].includes(value);
+}
+
+/**
+ * 归一化一条服务配置：形状不对就丢弃（返回 null），而不是让脏数据进快照。
+ *
+ * 与 `normalizeChannel` 同思路 —— 旧快照/手改 JSON 都可能带缺字段的条目，
+ * 拼装完整的默认值比在每个消费点各防一次省事得多。
+ *
+ * `recipe` 只做「字段类型对不对」的形状校验，**不校验语义**：配方是否真能用得跑一次才知道，
+ * 而宿主侧（`office::validate_recipe`）已经会在调用时给出明确报错。这里拦的是
+ * 「设置页表单写错类型」这种在渲染端就能发现的问题。
+ */
+function normalizeServiceProvider(raw: unknown): ServiceProviderConfig | null {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+  const record = raw as Record<string, unknown>;
+  if (typeof record.id !== "string" || record.id.trim() === "") return null;
+  if (!isServiceFamily(record.family)) return null;
+  if (!isServiceKind(record.family, record.kind)) return null;
+
+  const base = {
+    id: record.id,
+    // 名称缺失时回落 id：设置页上至少还能认出是哪一条，而不是一片空白。
+    name: typeof record.name === "string" && record.name !== "" ? record.name : record.id,
+    family: record.family,
+    kind: record.kind,
+    enabled: record.enabled === true,
+    ...(typeof record.baseUrl === "string" && record.baseUrl !== "" ? { baseUrl: record.baseUrl } : {}),
+    ...(typeof record.credentialEnv === "string" && record.credentialEnv !== "" ? { credentialEnv: record.credentialEnv } : {}),
+    ...(normalizeHeaders(record.headers) ? { headers: normalizeHeaders(record.headers) } : {}),
+    ...(typeof record.frameOrigin === "string" && record.frameOrigin !== "" ? { frameOrigin: record.frameOrigin } : {}),
+  };
+
+  if (record.family === "office") {
+    const office = base as OfficeProviderConfig;
+    if (typeof record.docsUrl === "string" && record.docsUrl !== "") office.docsUrl = record.docsUrl;
+    const recipe = normalizeOfficeRecipe(record.recipe);
+    if (recipe) office.recipe = recipe;
+    return office;
+  }
+  // 其余三族本期只有信封字段，原样返回（各自的专属字段在后面加族时补齐）。
+  return base as ServiceProviderConfig;
+}
+
+/** 归一化上传配方；形状不全一律返回 null（= 该服务商不可用，预览决策会跳过它）。 */
+function normalizeOfficeRecipe(raw: unknown): OfficeProviderConfig["recipe"] {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
+  const record = raw as Record<string, unknown>;
+  if (record.method !== "POST" && record.method !== "PUT") return undefined;
+  if (typeof record.url !== "string" || record.url.trim() === "") return undefined;
+  if (record.body !== "raw-bytes" && record.body !== "multipart") return undefined;
+  if (typeof record.viewUrlPointer !== "string" || record.viewUrlPointer.trim() === "") return undefined;
+  const recipe: NonNullable<OfficeProviderConfig["recipe"]> = {
+    method: record.method,
+    url: record.url,
+    body: record.body,
+    viewUrlPointer: record.viewUrlPointer,
+  };
+  if (typeof record.fileField === "string" && record.fileField !== "") recipe.fileField = record.fileField;
+  if (typeof record.contentType === "string" && record.contentType !== "") recipe.contentType = record.contentType;
+  if (typeof record.credentialHeader === "string" && record.credentialHeader !== "") {
+    recipe.credentialHeader = record.credentialHeader;
+  }
+  return recipe;
 }
 
 /** 权限三档（Read Only / Workspace / Full Access）。label/desc 为 i18n key，渲染处 t() 转译。 */
@@ -255,6 +345,13 @@ export interface SavedSettings {
   };
   /** 远程助手 · 遗留字段（v1 快照只存过微信通道开关）：读入时迁移进 remoteAssist。 */
   wechatChannel?: Partial<ChannelPrefs> & { replyMode?: RemoteReplyMode; replyProviderId?: string | null };
+  /**
+   * 第三方服务配置（office / model / storage / scheduler 四族共用一份清单）。
+   * 只存「去哪个环境变量取凭证」，**从不存凭证明文**（见 @greywork/shell 的 services.ts）。
+   */
+  serviceProviders?: ServiceProviderConfig[];
+  /** 云端 Office 预览选中的服务商 id；null = 用第一个可用的。 */
+  selectedOfficeProviderId?: string | null;
 }
 
 const settingsStorage = createJsonStorage<SavedSettings>(
@@ -305,6 +402,17 @@ export const useSettingsStore = defineStore("settings", () => {
   );
   /** 已声明的 MCP 服务器（含未启用项）。 */
   const mcpServers = ref<McpServerEntry[]>(DEFAULT_MCP_SERVERS.map((server) => ({ ...server })));
+  /**
+   * 第三方服务配置。默认只有 office 族的预设（全部 `enabled: false`）——
+   * 没启用 = 预览走本地 viewer，行为与加这个功能之前完全一致。
+   */
+  const serviceProviders = ref<ServiceProviderConfig[]>(DEFAULT_OFFICE_PROVIDERS.map((provider) => ({ ...provider })));
+  /** 云端 Office 选中的服务商 id；null = 取第一个可用的。 */
+  const selectedOfficeProviderId = ref<string | null>(null);
+  /** office 族配置（设置页分组与预览决策都只关心这一族）。 */
+  const officeProviders = computed<OfficeProviderConfig[]>(() =>
+    serviceProviders.value.filter((provider): provider is OfficeProviderConfig => provider.family === "office"),
+  );
   /** 用户自定义技能市场源。 */
   const skillSources = ref<SkillSourceEntry[]>(DEFAULT_SKILL_SOURCES.map((source) => ({ ...source })));
   /** 远程助手 · 各通道开关（登录凭证在宿主，不在快照里）。 */
@@ -417,6 +525,18 @@ export const useSettingsStore = defineStore("settings", () => {
         .filter((server) => server && typeof server.id === "string" && typeof server.name === "string" && MCP_TRANSPORTS[server.transport])
         .map((server) => ({ ...server, enabled: server.enabled === true }));
     }
+    // 服务配置：逐条归一化，形状不合法的整条丢弃（不是整表丢弃 —— 一条坏数据不该让其余全失效）。
+    // 空数组**不覆盖默认值**，与 skillSources 的处理相反：预设 office 服务商是用户填配方的起点，
+    // 清空后应当还能在设置页看到它们，而不是「配置页空得无从下手，只能手写 JSON」。
+    if (Array.isArray(saved.serviceProviders)) {
+      const valid = saved.serviceProviders
+        .map(normalizeServiceProvider)
+        .filter((provider): provider is ServiceProviderConfig => provider !== null);
+      if (valid.length) serviceProviders.value = valid;
+    }
+    if (typeof saved.selectedOfficeProviderId === "string" || saved.selectedOfficeProviderId === null) {
+      selectedOfficeProviderId.value = saved.selectedOfficeProviderId;
+    }
     if (Array.isArray(saved.skillSources)) {
       skillSources.value = saved.skillSources
         .filter((source) => source && typeof source.id === "string" && typeof source.label === "string" && SKILL_SOURCE_TYPES[source.type])
@@ -468,6 +588,8 @@ export const useSettingsStore = defineStore("settings", () => {
       workspaceDir: workspaceDir.value,
       mcpServers: mcpServers.value,
       skillSources: skillSources.value,
+      serviceProviders: serviceProviders.value,
+      selectedOfficeProviderId: selectedOfficeProviderId.value,
       maxParallel: maxParallel.value,
       closeToTray: closeToTray.value,
       remoteAssist: {
@@ -562,6 +684,42 @@ export const useSettingsStore = defineStore("settings", () => {
   function removeModelProvider(id: string): void {
     modelProviders.value = modelProviders.value.filter((candidate) => candidate.id !== id);
     if (selectedModelProviderId.value === id) selectedModelProviderId.value = null;
+    persist();
+  }
+
+  /* ===== 第三方服务配置（设置页「服务」分区） ===== */
+
+  /** 新增或按 id 整体覆盖一条服务配置；写前归一化，形状不合法直接拒收（不落盘脏数据）。 */
+  function upsertServiceProvider(provider: ServiceProviderConfig): boolean {
+    const normalized = normalizeServiceProvider(provider);
+    if (!normalized) return false;
+    const index = serviceProviders.value.findIndex((candidate) => candidate.id === normalized.id);
+    if (index >= 0) serviceProviders.value[index] = normalized;
+    else serviceProviders.value.push(normalized);
+    persist();
+    return true;
+  }
+
+  /** 删除一条服务配置；删的是当前选中的 office 服务商则回落空选。 */
+  function removeServiceProvider(id: string): void {
+    serviceProviders.value = serviceProviders.value.filter((candidate) => candidate.id !== id);
+    if (selectedOfficeProviderId.value === id) selectedOfficeProviderId.value = null;
+    persist();
+  }
+
+  /** 恢复 office 族预设（误删/改坏后的逃生门）；只重置这一族，不动其它族。 */
+  function resetServiceProviders(): void {
+    serviceProviders.value = [
+      ...serviceProviders.value.filter((provider) => provider.family !== "office"),
+      ...DEFAULT_OFFICE_PROVIDERS.map((provider) => ({ ...provider })),
+    ];
+    selectedOfficeProviderId.value = null;
+    persist();
+  }
+
+  /** 选中云端 Office 服务商；null = 用第一个「已启用且填了配方」的。 */
+  function selectOfficeProvider(id: string | null): void {
+    selectedOfficeProviderId.value = id;
     persist();
   }
 
@@ -681,6 +839,13 @@ export const useSettingsStore = defineStore("settings", () => {
     upsertModelProvider,
     removeModelProvider,
     resetModelProviders,
+    serviceProviders,
+    officeProviders,
+    selectedOfficeProviderId,
+    upsertServiceProvider,
+    removeServiceProvider,
+    resetServiceProviders,
+    selectOfficeProvider,
     persist,
     /** 桌面态启动接管完成信号（null = 浏览器态无后端）；await 后库内容已就位。 */
     hydrated: backendHydratePromise,

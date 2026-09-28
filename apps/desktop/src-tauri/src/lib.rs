@@ -8,7 +8,7 @@
 // `mcp` / `mcp_registry` / `web_fetch` / `skills_market` / `plugin_market` / `update` /
 // `db` / `llm` / `scheduler` / `workspace_fs` / `git` / `sheet` / `store_fs` / `worktree` /
 // `acp_host` / `channel_media` / `wechat` / `dingtalk` / `feishu` / `telegram` /
-// `discord` / `qq` / `wecom`。
+// `discord` / `qq` / `wecom` / `office`。
 // 仍留桌面（真·宿主专属）：`sys` / `tray` / `notify` / `close_guard` / `plugin_window` /
 // `host`（`TauriHost` 实现）。
 mod acp_host;
@@ -24,6 +24,7 @@ mod llm;
 pub mod mcp;
 mod mcp_registry;
 mod notify;
+mod office;
 mod plugin_market;
 mod plugin_window;
 pub mod qq;
@@ -178,6 +179,8 @@ pub fn run() {
             acp_host::acp_detect_programs,
             llm::llm_chat_start,
             llm::llm_chat_stop,
+            office::office_host_info,
+            office::office_preview_open,
             mcp::mcp_probe,
             skills_market::skills_search,
             skills_market::skills_download,
@@ -380,6 +383,39 @@ mod drift_tests {
             from_handler, from_table,
             "桌面 generate_handler! 与 greywork_host::commands::COMMANDS 漂移"
         );
+    }
+
+    /// 桌面静态 CSP 的 `frame-src` 必须与 `greywork_host::office::EMBEDDABLE_FRAME_ORIGINS`
+    /// 一致。
+    ///
+    /// 两处都写死在编译产物里：Rust 常量是渲染端决策的依据（`office_host_info` 回给它），
+    /// `tauri.conf.json` 是浏览器**实际执行**的那一份。只改一处的话，症状是「界面上说能内嵌、
+    /// iframe 却被 CSP 静默拦掉、白屏且控制台之外看不到任何报错」—— 从代码上完全看不出来，
+    /// 所以这里把它变成编译期就能发现的漂移。
+    #[test]
+    fn desktop_csp_frame_src_matches_embeddable_origins() {
+        let conf = include_str!("../tauri.conf.json");
+        for key in ["\"csp\"", "\"devCsp\""] {
+            let start = conf
+                .find(key)
+                .unwrap_or_else(|| panic!("tauri.conf.json 必须有 {key}"));
+            let policy = &conf[start..];
+            let frame_src = policy
+                .split("frame-src ")
+                .nth(1)
+                .unwrap_or_else(|| panic!("{key} 必须显式声明 frame-src（default-src 不覆盖内嵌）"))
+                .split([';', '"'])
+                .next()
+                .unwrap_or_default();
+            let mut declared: Vec<&str> = frame_src.split_whitespace().collect();
+            declared.sort_unstable();
+            let mut expected = greywork_host::office::EMBEDDABLE_FRAME_ORIGINS.to_vec();
+            expected.sort_unstable();
+            assert_eq!(
+                declared, expected,
+                "{key} 的 frame-src 与 EMBEDDABLE_FRAME_ORIGINS 漂移"
+            );
+        }
     }
 
     #[test]

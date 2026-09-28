@@ -185,7 +185,10 @@ fn content_from_completion(body: &serde_json::Value) -> Option<String> {
 /// 解析请求头值中的 `{{ENV_VAR}}` 占位符为环境变量实际值。
 /// 变量未设置/为空 → Err（指路用户补环境变量），绝不静默丢头——带占位符原样发出
 /// 等于把密钥模板发给远端。
-fn resolve_header_placeholders(value: &str) -> Result<String, String> {
+///
+/// `pub(crate)`：`office.rs` 的配方请求头用同一套占位符语义，共用一份实现
+/// （两处各写一遍迟早会在「未闭合 `{{` 怎么处理」这类边角上分叉）。
+pub(crate) fn resolve_header_placeholders(value: &str) -> Result<String, String> {
     let mut out = String::with_capacity(value.len());
     let mut rest = value;
     while let Some(start) = rest.find("{{") {
@@ -312,7 +315,8 @@ async fn send_chat_request(
 ///
 /// 写死 `export` 会让 Windows 用户照做后仍然失败（cmd 用 `set`、PowerShell 用 `$env:`）。
 /// 参数化平台是为了能在 Linux CI 上把三种写法都钉住。
-fn env_set_hint(env_name: &str, windows: bool) -> String {
+/// `pub(crate)`：`office.rs` 的凭证未设置提示复用同一句，免得两个模块给出两种引导。
+pub(crate) fn env_set_hint(env_name: &str, windows: bool) -> String {
     if windows {
         format!("set {env_name}=你的密钥（PowerShell 用 $env:{env_name}=\"你的密钥\"）")
     } else {
@@ -370,7 +374,9 @@ pub async fn chat_complete(
     Ok(text) // 无 [DONE] 的连接关闭：已收文本视为完成（与命令路径语义一致）
 }
 
-fn truncate(value: &str, max_chars: usize) -> String {
+/// 按字符（不是字节）截断，附省略号。错误体诊断用。
+/// `pub(crate)`：`office.rs` 的上传失败诊断复用（按字节截会切坏中文错误体）。
+pub(crate) fn truncate(value: &str, max_chars: usize) -> String {
     if value.chars().count() <= max_chars {
         return value.to_string();
     }

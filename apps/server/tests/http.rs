@@ -183,7 +183,7 @@ async fn list_commands_exposes_metadata() {
     assert_eq!(status, StatusCode::OK);
     let value = json_body(&body);
     let commands = value.as_array().unwrap();
-    assert_eq!(commands.len(), 139, "命令总数应与共享表一致");
+    assert_eq!(commands.len(), 141, "命令总数应与共享表一致");
     let binary: Vec<&str> = commands
         .iter()
         .filter(|meta| meta["binary"] == true)
@@ -429,4 +429,33 @@ async fn absent_frame_origins_leave_csp_without_frame_src() {
         .and_then(|value| value.to_str().ok())
         .unwrap_or_default();
     assert!(!csp.contains("frame-src"), "不该多出 frame-src: {csp}");
+}
+
+/// `office_host_info` 回的可内嵌 origin 必须是**本服务端配置**的那份，而不是桌面壳的静态常量。
+///
+/// 渲染端据此判断厂商返回的文档地址能否真的进 iframe（不在表里就是被 CSP 拦掉、白屏）。
+/// 之前这里恒回桌面那份常量 —— 服务端态据此判断必然误判，所以这条断言钉的是「不再谎报」。
+#[tokio::test]
+async fn office_host_info_reports_configured_frame_origins() {
+    let h = harness_with("office-host-info", |config, _tmp| {
+        config.frame_origins = vec![
+            "https://docs.example.com/".to_string(),
+            "https://evil.example.com; script-src *".to_string(),
+        ];
+    });
+    let token = login(&h.router, PASSWORD).await;
+    let (status, _, body) = send(
+        &h.router,
+        with_bearer(
+            command_req("office_host_info", json!({ "envNames": [] })),
+            &token,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        json_body(&body)["embeddableFrameOrigins"],
+        json!(["https://docs.example.com"]),
+        "回的是配置里归一化后的 origin（尾斜杠剥掉、非法项丢弃），不是桌面常量"
+    );
 }

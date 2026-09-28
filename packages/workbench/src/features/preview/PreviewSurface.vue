@@ -11,8 +11,14 @@ import PreviewSkeleton from "@/features/preview/PreviewSkeleton.vue";
 import SelectionLayer from "@/features/preview/SelectionLayer.vue";
 import { isTextSelectableKind } from "@/lib/selection";
 import { recallPixelScroll, rememberPixelScroll } from "@/lib/preview-scroll";
+import { cloudOfficeProviderFor } from "@/lib/office-preview";
+import { useSettingsStore } from "@/stores/settings";
+import { notify } from "@/stores/notice";
+import { i18n } from "@/i18n";
 import type { ViewerKind } from "@/lib/viewer";
 import type { PreviewTab } from "@/stores/preview";
+
+const t = i18n.global.t;
 
 const props = defineProps<{ tab: PreviewTab }>();
 
@@ -41,7 +47,48 @@ const VIEWERS: Record<ViewerKind, Component> = {
   web: makeViewer(() => import("@/features/preview/WebPageViewer.vue")),
 };
 
-const viewer = computed(() => VIEWERS[props.tab.kind]);
+/** 云端 Office viewer：走 `office_preview_open` 让宿主上传取件，再用 iframe 内嵌。 */
+const CLOUD_VIEWER = makeViewer(() => import("@/features/preview/CloudOfficeViewer.vue"));
+
+/**
+ * 云端 Office 分支：命中时顶掉该 kind 的本地 viewer。
+ *
+ * **回落是一等公民**：云端任一步失败（没配好、凭证没 export、厂商拒绝、网络不通）都要
+ * 回到本地 viewer，而不是给用户一个打不开的文件。回落是**按 tab** 记的（不是全局开关），
+ * 一个文件失败不影响其它文件；失败原因同时进通知 —— 回落之后界面上看不出发生过什么，
+ * 不告知的话用户只会觉得「配置没生效」，那是这个问题最难排查的形态。
+ */
+const settings = useSettingsStore();
+const cloudFailedTabs = ref(new Set<string>());
+
+const cloudProvider = computed(() => cloudOfficeProviderFor(props.tab, settings.officeProviders, settings.selectedOfficeProviderId));
+
+const activeViewer = computed<Component>(() => {
+  if (cloudProvider.value && !cloudFailedTabs.value.has(props.tab.id)) return CLOUD_VIEWER;
+  return VIEWERS[props.tab.kind];
+});
+
+/**
+ * 监听器**只在云端 viewer 上绑**。
+ *
+ * 本地 viewer 没声明 `fallback` 事件，而它们的根都是单个元素 —— 未声明的监听器会静默降级成
+ * 根元素上的原生监听器（`addEventListener("fallback")`），不报警告、也永远不会触发，只是每次
+ * 预览都白挂一个。用 `v-on` 传对象而不是模板里写死 `@fallback`，就是为了让它跟着 activeViewer 走。
+ */
+const viewerListeners = computed(() => (activeViewer.value === CLOUD_VIEWER ? { fallback: onCloudFallback } : {}));
+
+/** 云端失败：切回本地并如实说明原因（同一 tab 不重复刷屏，按 id 记一次）。 */
+function onCloudFallback(reason: string): void {
+  if (cloudFailedTabs.value.has(props.tab.id)) return;
+  // Set 就地改不会触发响应式，必须换一个新的（Vue 3 的 ref 浅层比较）。
+  cloudFailedTabs.value = new Set(cloudFailedTabs.value).add(props.tab.id);
+  notify({
+    kind: "warning",
+    key: `cloud-office-fallback:${props.tab.id}`,
+    title: t("preview.viewer.cloudOffice.fellBack", { name: props.tab.name }),
+    detail: reason,
+  });
+}
 
 /**
  * 是否挂划词层。
@@ -107,7 +154,7 @@ onBeforeUnmount(() => saveScrollOf(props.tab.id));
 <template>
   <div ref="surfaceEl" class="relative size-full min-h-0">
     <!-- key 用 tab.id：切 tab 必须换实例，否则 Univer / CodeMirror 会把上一份文档留在容器里 -->
-    <component :is="viewer" :key="props.tab.id" :tab="props.tab" class="size-full" />
+    <component :is="activeViewer" :key="props.tab.id" :tab="props.tab" class="size-full" v-on="viewerListeners" />
     <!-- key 同 tab.id：换 tab 时重建划词层，顺带把还挂着的浮层清掉 -->
     <SelectionLayer v-if="textSelectable" :key="props.tab.id" :tab="props.tab" :root="surfaceEl" />
   </div>
