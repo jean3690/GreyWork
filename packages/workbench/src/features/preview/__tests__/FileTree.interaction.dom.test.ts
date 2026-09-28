@@ -45,6 +45,7 @@ vi.mock("@/lib/reveal", () => ({ revealInFolder: vi.fn(async () => true) }));
 vi.mock("@/lib/clipboard", () => ({ copyText: vi.fn(async () => undefined) }));
 
 import FileTree from "@/features/preview/FileTree.vue";
+import { i18n } from "@/i18n";
 
 const SRC = {
   name: "src",
@@ -56,7 +57,8 @@ const TOP = { name: "top.md", path: "/w/top.md", kind: "file" as const };
 
 /** 挂到 body 上：焦点断言看的是 document.activeElement，脱离文档的节点拿不到焦点。 */
 function mountTree(): VueWrapper {
-  return mount(FileTree, { attachTo: document.body });
+  // i18n 是删除确认弹层（ConfirmDialog）需要的，只有 Delete 那条用例会渲染到它。
+  return mount(FileTree, { global: { plugins: [i18n] }, attachTo: document.body });
 }
 
 /** 行按钮（按渲染顺序）。 */

@@ -4,9 +4,13 @@
 // 两个测试环境注意事项：
 //   1. 弹层被 Portal 到 body，断言一律查 document.body，wrapper.find 够不到。
 //   2. reka-ui 的 Presence 在挂载后一个 tick 才把内容渲染出来，所以挂载必须 await。
+//
+// 取消/确认的文案走 i18n（common.cancel / common.confirm），所以挂载要装 i18n 插件；
+// 下面断言的是 zh-CN 的值（默认语言）。
 import { afterEach, describe, expect, it } from "vitest";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import ConfirmDialog from "@/features/settings/ConfirmDialog.vue";
+import { i18n } from "@/i18n";
 
 const mounted: VueWrapper[] = [];
 
@@ -14,6 +18,7 @@ async function mountDialog(props: Record<string, unknown> = {}, slots?: Record<s
   const wrapper = mount(ConfirmDialog, {
     props: { title: "删除 MCP 服务器？", message: "此操作不可撤销。", ...props },
     slots,
+    global: { plugins: [i18n] },
     attachTo: document.body,
   });
   mounted.push(wrapper);

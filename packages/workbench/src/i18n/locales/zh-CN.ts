@@ -11,6 +11,14 @@ export const zhCN = {
     submitting: "登录中…",
     failed: "登录失败，请重试",
   },
+  /* 侧栏底部账户行：身份展示 + 登出。单用户自托管，没有用户名字段，标签是固定文案。 */
+  account: {
+    label: "本机用户",
+    signOut: "登出",
+    signOutTitle: "确认登出？",
+    signOutMessage: "登出后需要重新输入访问密码才能继续使用。",
+    signOutConfirm: "登出",
+  },
   reasoning: {
     auto: { label: "自动", description: "跟随模型与服务端默认，不强制传推理参数" },
     low: { label: "低", description: "快速响应，适合简单问答与改写" },

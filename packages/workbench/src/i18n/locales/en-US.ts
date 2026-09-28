@@ -11,6 +11,15 @@ export const enUS: MessageSchema = {
     submitting: "Signing in…",
     failed: "Sign-in failed, please try again",
   },
+  /* Sidebar footer account row: identity display + sign-out. Single-user self-host, so the
+     label is fixed copy — there is no username field. */
+  account: {
+    label: "Local user",
+    signOut: "Sign out",
+    signOutTitle: "Sign out?",
+    signOutMessage: "You will need to enter the access password again to continue.",
+    signOutConfirm: "Sign out",
+  },
   reasoning: {
     auto: { label: "Auto", description: "Follow model/server defaults; no reasoning parameter sent" },
     low: { label: "Low", description: "Fast responses for simple Q&A and rewrites" },

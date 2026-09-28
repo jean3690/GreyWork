@@ -11,6 +11,7 @@ import { createPinia, setActivePinia } from "pinia";
 import { ref } from "vue";
 
 import PreviewSider from "@/features/preview/PreviewSider.vue";
+import { i18n } from "@/i18n";
 import { usePreviewStore } from "@/stores/preview";
 import { registerPreviewSaver } from "@/lib/preview-save";
 import { cancelDiscard, pendingDiscard } from "@/lib/preview-edit-guard";
@@ -23,7 +24,8 @@ const stubs = {
 let wrapper: VueWrapper | null = null;
 
 function mountSider(): VueWrapper {
-  wrapper = mount(PreviewSider, { global: { stubs }, attachTo: document.body });
+  // i18n 是 ConfirmDialog 需要的（守卫弹确认时才会渲染到它）。
+  wrapper = mount(PreviewSider, { global: { plugins: [i18n], stubs }, attachTo: document.body });
   return wrapper;
 }
 

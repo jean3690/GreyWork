@@ -6,7 +6,7 @@
  * 桩只提供组件实际读的字段，mode 可在 vfs / disk 之间切换以覆盖两条分支。
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DOMWrapper, flushPromises, mount } from "@vue/test-utils";
+import { DOMWrapper, flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 
 const treeStub = {
@@ -52,6 +52,14 @@ import { i18n } from "@/i18n";
 
 const t = i18n.global.t;
 
+/**
+ * 挂载文件树。i18n 是删除确认弹层（ConfirmDialog）需要的 —— 只有「删除」那条用例
+ * 会渲染到它，但统一走这个 helper 免得两条路径两套挂法。
+ */
+function mountTree(): VueWrapper {
+  return mount(FileTree, { global: { plugins: [i18n] } });
+}
+
 function menuItems(): DOMWrapper<Element>[] {
   return [...document.body.querySelectorAll('[data-testid="context-menu-item"]')].map((el) => new DOMWrapper(el));
 }
@@ -90,7 +98,7 @@ beforeEach(() => {
 
 describe("文件树右键菜单", () => {
   it("vfs 行：打开 / 复制路径 / 刷新，不含磁盘专属项", async () => {
-    const wrapper = mount(FileTree);
+    const wrapper = mountTree();
     await wrapper.get('[data-testid="file-tree-row"]').trigger("contextmenu");
     await flushPromises();
 
@@ -99,7 +107,7 @@ describe("文件树右键菜单", () => {
   });
 
   it("点「打开」：文件进预览面板", async () => {
-    const wrapper = mount(FileTree);
+    const wrapper = mountTree();
     await wrapper.get('[data-testid="file-tree-row"]').trigger("contextmenu");
     await flushPromises();
 
@@ -112,7 +120,7 @@ describe("文件树右键菜单", () => {
   });
 
   it("点「复制路径」写入剪贴板", async () => {
-    const wrapper = mount(FileTree);
+    const wrapper = mountTree();
     await wrapper.get('[data-testid="file-tree-row"]').trigger("contextmenu");
     await flushPromises();
 
@@ -122,7 +130,7 @@ describe("文件树右键菜单", () => {
   });
 
   it("空白处：只有「刷新文件树」，点了走 store.refresh", async () => {
-    const wrapper = mount(FileTree);
+    const wrapper = mountTree();
     await wrapper.get('[data-testid="file-tree"]').trigger("contextmenu");
     await flushPromises();
 
@@ -135,7 +143,7 @@ describe("文件树右键菜单", () => {
   it("磁盘源的文件行：多出「用系统应用打开 / 在文件夹中显示」与增删改，前两项接到对应工具函数", async () => {
     treeStub.mode = "disk";
     treeStub.nodes = [{ name: "a.ts", path: "/w/a.ts", kind: "file" }];
-    const wrapper = mount(FileTree);
+    const wrapper = mountTree();
     await wrapper.get('[data-testid="file-tree-row"]').trigger("contextmenu");
     await flushPromises();
 
@@ -168,7 +176,7 @@ describe("文件树右键菜单", () => {
   it("磁盘源的目录行：「复制」把条目（含 name）交给剪贴板", async () => {
     treeStub.mode = "disk";
     treeStub.nodes = [{ name: "src", path: "/w/src", kind: "directory" }];
-    const wrapper = mount(FileTree);
+    const wrapper = mountTree();
     await wrapper.get('[data-testid="file-tree-row"]').trigger("contextmenu");
     await flushPromises();
 
@@ -181,7 +189,7 @@ describe("文件树右键菜单", () => {
   it("磁盘源：「新建文件」打开对话框并把目标目录带过去", async () => {
     treeStub.mode = "disk";
     treeStub.nodes = [{ name: "src", path: "/w/src", kind: "directory" }];
-    const wrapper = mount(FileTree);
+    const wrapper = mountTree();
     await wrapper.get('[data-testid="file-tree-row"]').trigger("contextmenu");
     await flushPromises();
 
@@ -206,7 +214,7 @@ describe("文件树右键菜单", () => {
   it("磁盘源：「重命名」把该行换成输入框，提交后改名", async () => {
     treeStub.mode = "disk";
     treeStub.nodes = [{ name: "a.ts", path: "/w/a.ts", kind: "file" }];
-    const wrapper = mount(FileTree);
+    const wrapper = mountTree();
     await wrapper.get('[data-testid="file-tree-row"]').trigger("contextmenu");
     await flushPromises();
 
@@ -231,7 +239,7 @@ describe("文件树右键菜单", () => {
   it("磁盘源：「删除」弹确认，确认后才真的删", async () => {
     treeStub.mode = "disk";
     treeStub.nodes = [{ name: "a.ts", path: "/w/a.ts", kind: "file" }];
-    const wrapper = mount(FileTree);
+    const wrapper = mountTree();
     await wrapper.get('[data-testid="file-tree-row"]').trigger("contextmenu");
     await flushPromises();
 
@@ -252,7 +260,7 @@ describe("文件树右键菜单", () => {
   it("磁盘源目录行：「用系统应用打开」禁用", async () => {
     treeStub.mode = "disk";
     treeStub.nodes = [{ name: "src", path: "/w/src", kind: "directory" }];
-    const wrapper = mount(FileTree);
+    const wrapper = mountTree();
     await wrapper.get('[data-testid="file-tree-row"]').trigger("contextmenu");
     await flushPromises();
 
@@ -266,7 +274,7 @@ describe("文件树右键菜单", () => {
     treeStub.mode = "disk";
     treeStub.nodes = [{ name: "a.ts", path: "/w/a.ts", kind: "file" }];
     openWithSystemApp.mockResolvedValue(false);
-    const wrapper = mount(FileTree);
+    const wrapper = mountTree();
     await wrapper.get('[data-testid="file-tree-row"]').trigger("contextmenu");
     await flushPromises();
     await menuItems()[1].trigger("click");

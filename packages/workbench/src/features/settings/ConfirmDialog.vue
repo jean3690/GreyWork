@@ -15,6 +15,7 @@
  * 取消按钮也在，不会困住用户。
  */
 import { ref } from "vue";
+import { useI18n } from "vue-i18n";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -35,6 +36,8 @@ defineProps<{
 }>();
 
 const emit = defineEmits<{ confirm: []; cancel: [] }>();
+
+const { t } = useI18n();
 
 /**
  * 消费者用 `v-if` 挂载，所以本组件只要存在就是打开态；关闭由消费者在事件里卸载。
@@ -83,7 +86,7 @@ function onOpenChange(next: boolean): void {
         <AlertDialogCancel
           class="h-auto rounded-[8px] border border-line bg-panel-2 px-3 py-1.5 text-[12px] font-normal text-dim shadow-none transition-colors hover:bg-panel-2 hover:text-foreground dark:border-line dark:bg-panel-2 dark:hover:bg-panel-2"
         >
-          取消
+          {{ t("common.cancel") }}
         </AlertDialogCancel>
         <Button
           type="button"
@@ -91,7 +94,7 @@ function onOpenChange(next: boolean): void {
           class="h-auto rounded-[8px] bg-accent px-3 py-1.5 text-[12px] font-medium text-accent-ink transition-opacity hover:bg-accent disabled:opacity-60"
           @click="emit('confirm')"
         >
-          {{ confirmLabel ?? "确认" }}
+          {{ confirmLabel ?? t("common.confirm") }}
         </Button>
       </AlertDialogFooter>
     </AlertDialogContent>
