@@ -22,6 +22,12 @@ vi.mock("@/plugins/runtime", () => ({ bootPlugins: h.bootPlugins }));
 vi.mock("@/stores/remote-assistant", () => ({
   useRemoteAssistantStore: () => ({ init: h.remoteInit }),
 }));
+// Shell 用 defineAsyncComponent 懒加载这几个重子组件；VTU 的按名 stub 不拦 import() 的加载器，
+// vitest 5 下未决的动态导入会在环境拆除后落地，抛 EnvironmentTeardownError。直接 mock 掉模块，
+// 让加载器同步解析成轻量占位，file-icons 等重依赖根本不进图。
+vi.mock("@/features/workspace/WorkspacePanel.vue", () => ({ default: { template: "<div data-testid='workspace-panel-stub' />" } }));
+vi.mock("@/features/preview/PreviewSider.vue", () => ({ default: { template: "<div data-testid='preview-sider-stub' />" } }));
+vi.mock("@/features/activity/ActivityBand.vue", () => ({ default: { template: "<div data-testid='activity-band-stub' />" } }));
 
 import Shell from "@/features/shell/Shell.vue";
 import { appEvents } from "@/events";
