@@ -3,6 +3,7 @@
 import { computed, onMounted, ref } from "vue";
 import Icon from "@/features/shared/Icon.vue";
 import { systemBackend, type SysInfo } from "@/lib/system-backend";
+import { runtimeMode } from "@greywork/host-ipc";
 import { SANDBOX_MODES, useSettingsStore } from "@/stores/settings";
 import { PERM_TIER_LABELS, SANDBOX_DESCS, SANDBOX_LABELS, usePermissionSandbox } from "@/lib/permission-sandbox";
 import { i18n } from "@/i18n";
@@ -12,9 +13,23 @@ const settings = useSettingsStore();
 const t = i18n.global.t;
 const { suggestedSandbox, applySandboxMode } = usePermissionSandbox();
 
-/** 系统诊断快照（桌面态从 Rust 拉取；浏览器态 null）。 */
+/** 系统诊断快照（桌面与服务端态从宿主拉取；浏览器预览态 null）。 */
 const sysInfo = ref<SysInfo | null>(null);
 const sysInfoFailed = ref(false);
+
+/** 关于卡的运行形态行：服务端态以前这里只能看到「版本」，说不清是桌面还是服务端。 */
+const runtimeLabel = computed(() => (runtimeMode() === "server" ? "自托管服务端" : "桌面应用"));
+
+/** 关于卡没有数据时的占位：预览态是「本来就没有」，有宿主则只是还没拉到。 */
+const aboutPlaceholder = computed(() => (systemBackend.active() ? "读取中…" : "浏览器预览：无宿主诊断面。"));
+
+/**
+ * 宿主是否钉死了沙盒档位（服务端配了 GREYWORK_SANDBOX）。
+ *
+ * 钉住后客户端传什么都会被服务端改写成配置值 —— 这里若还让选就是一个骗人的开关，
+ * 置灰并说明。桌面端没有配置覆盖，恒 false。
+ */
+const sandboxPinned = computed(() => sysInfo.value?.pinnedSandbox === true);
 
 /**
  * 本机是否没有可用的 OS 沙盒。
@@ -56,6 +71,9 @@ onMounted(() => {
           <span>版本</span><span class="text-foreground">{{ sysInfo.version }}</span>
         </div>
         <div class="flex justify-between">
+          <span>运行形态</span><span class="text-foreground">{{ runtimeLabel }}</span>
+        </div>
+        <div class="flex justify-between">
           <span>数据 schema</span><span class="text-foreground">v{{ sysInfo.schemaVersion }}</span>
         </div>
         <div class="flex justify-between">
@@ -70,7 +88,7 @@ onMounted(() => {
         </div>
       </div>
       <div v-else class="text-[11px] text-dim2">
-        {{ sysInfoFailed ? "系统信息拉取失败（见控制台日志）" : "浏览器预览：无宿主诊断面。" }}
+        {{ sysInfoFailed ? "系统信息拉取失败（见控制台日志）" : aboutPlaceholder }}
       </div>
     </div>
     <div class="rounded-[14px] border border-line bg-panel p-4">
@@ -84,8 +102,13 @@ onMounted(() => {
         <button
           v-for="mode in SANDBOX_MODES"
           :key="mode.value"
-          class="flex cursor-pointer items-start justify-between gap-3 rounded-[10px] px-3 py-2 text-left transition-colors hover:bg-panel-2"
-          :class="settings.sandboxMode === mode.value ? 'bg-panel-2' : ''"
+          :data-testid="`sandbox-mode-${mode.value}`"
+          class="flex items-start justify-between gap-3 rounded-[10px] px-3 py-2 text-left transition-colors"
+          :class="[
+            sandboxPinned ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-panel-2',
+            settings.sandboxMode === mode.value ? 'bg-panel-2' : '',
+          ]"
+          :disabled="sandboxPinned"
           :aria-pressed="settings.sandboxMode === mode.value"
           @click="applySandboxMode(mode.value)"
         >
@@ -96,6 +119,11 @@ onMounted(() => {
           <Icon :name="settings.sandboxMode === mode.value ? 'check-one' : 'close-one'" :size="14" class="mt-0.5 shrink-0 text-dim" />
         </button>
       </div>
+      <!-- 服务端把沙盒档位钉死在配置里（客户端传什么都会被改写回配置值）：
+           这里若还让选就是一个点了没有任何效果的开关，置灰并说明。 -->
+      <p v-if="sandboxPinned" data-testid="sandbox-pinned" class="mt-3 border-t border-line-2 pt-3 text-[11px] leading-[1.6] text-dim">
+        服务端已通过配置（GREYWORK_SANDBOX）固定沙盒档位：这里的改动不会生效，实际档位以服务端为准。
+      </p>
       <p
         v-if="sandboxUnavailable"
         class="mt-3 border-t border-line-2 pt-3 text-[11px] leading-[1.6] text-dim"
@@ -104,7 +132,10 @@ onMounted(() => {
         OS 沙盒依赖 Linux 的 bwrap，当前宿主（{{ sysInfo?.os }}）不可用：任何档位都会在启动 agent 时降级为「关闭」。
         权限档位仍然生效，但进程不再有 OS 级隔离。
       </p>
-      <div v-if="settings.sandboxMode !== suggestedSandbox" class="mt-3 flex items-center gap-2 border-t border-line-2 pt-3">
+      <div
+        v-if="!sandboxPinned && settings.sandboxMode !== suggestedSandbox"
+        class="mt-3 flex items-center gap-2 border-t border-line-2 pt-3"
+      >
         <span class="min-w-0 flex-1 text-[11px] text-dim">
           当前权限档位「{{ PERM_TIER_LABELS[settings.permissionTier] }}」建议沙盒「{{ SANDBOX_LABELS[suggestedSandbox] }}」
         </span>

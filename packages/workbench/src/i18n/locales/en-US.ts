@@ -154,7 +154,7 @@ export const enUS: MessageSchema = {
     available: "A new version is available",
     upToDate: "You're on the latest version.",
     notesEmpty: "This release has no release notes.",
-    unsupported: "Checking for updates needs the desktop app (Tauri).",
+    unsupported: "No host in browser preview — update check is unavailable.",
     failed: "Update check failed: {detail}",
     download: "Go to download",
     later: "Later",

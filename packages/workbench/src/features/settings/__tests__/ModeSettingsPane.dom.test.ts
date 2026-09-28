@@ -126,3 +126,31 @@ describe("ModeSettingsPane · 浏览器态", () => {
     expect(wrapper.findAll('[data-testid="worktree-row"]')).toHaveLength(0);
   });
 });
+
+describe("ModeSettingsPane · 服务端钉住的档位", () => {
+  it("GREYWORK_TIER 钉死档位：档位按钮与临时只读禁用，说明里带档位名", async () => {
+    invokeMock.mockImplementation(async (command: string) =>
+      command === "sys_info"
+        ? { pinnedTier: "read-only", pinnedSandbox: false, trayAvailable: false }
+        : command === "worktree_list"
+          ? [SNAPSHOT]
+          : null,
+    );
+    const wrapper = await render();
+
+    expect(wrapper.get('[data-testid="tier-pinned"]').text()).toContain("固定权限档位「只读」");
+    for (const button of wrapper.findAll("button[aria-pressed]")) {
+      expect(button.attributes("disabled")).toBeDefined();
+    }
+    expect(wrapper.get('[data-testid="temp-readonly-toggle"]').attributes("disabled")).toBeDefined();
+  });
+
+  it("未钉住：档位按钮照常可点", async () => {
+    const wrapper = await render();
+
+    expect(wrapper.find('[data-testid="tier-pinned"]').exists()).toBe(false);
+    for (const button of wrapper.findAll("button[aria-pressed]")) {
+      expect(button.attributes("disabled")).toBeUndefined();
+    }
+  });
+});

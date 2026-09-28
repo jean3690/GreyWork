@@ -16,17 +16,20 @@ import { useSettingsStore } from "@/stores/settings";
 
 const mounted: VueWrapper[] = [];
 
-/** 宿主 sys_info 快照；trayAvailable 由各用例覆盖。 */
-function sysInfo(trayAvailable: boolean) {
+/** 宿主 sys_info 快照；trayAvailable 与钉住事实由各用例覆盖。 */
+function sysInfo(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     version: "0.2.0",
     schemaVersion: 7,
     logDir: "/home/test/.local/share/greywork/logs",
     activeAgents: 0,
     os: "linux",
-    trayAvailable,
+    trayAvailable: true,
     totalMemoryBytes: 16 * 1024 ** 3,
     cpuCount: 8,
+    pinnedSandbox: false,
+    pinnedTier: null,
+    ...overrides,
   };
 }
 
@@ -44,9 +47,11 @@ afterEach(() => {
   delete (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
 });
 
-async function render(trayAvailable: boolean | "browser"): Promise<VueWrapper> {
-  if (trayAvailable === "browser") delete (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
-  invokeMock.mockImplementation(async (command: string) => (command === "sys_info" ? sysInfo(trayAvailable === true) : null));
+async function render(info: boolean | "browser" | Record<string, unknown> = true): Promise<VueWrapper> {
+  if (info === "browser") delete (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+  invokeMock.mockImplementation(async (command: string) =>
+    command === "sys_info" ? sysInfo(typeof info === "object" ? info : { trayAvailable: info === true }) : null,
+  );
   const wrapper = mount(SystemSettingsPane, { global: { plugins: [i18n] }, attachTo: document.body });
   mounted.push(wrapper);
   await flushPromises();
@@ -84,5 +89,40 @@ describe("SystemSettingsPane · 托盘区块", () => {
     const wrapper = await render("browser");
     expect(wrapper.find('[data-testid="tray-close-to-tray"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="tray-unavailable"]').exists()).toBe(true);
+  });
+});
+
+describe("SystemSettingsPane · 关于卡与钉住的沙盒", () => {
+  it("桌面态有宿主：关于卡显示版本与运行形态，不再谎报「无宿主诊断面」", async () => {
+    const wrapper = await render(true);
+
+    expect(wrapper.text()).toContain("0.2.0");
+    expect(wrapper.text()).toContain("桌面应用");
+    expect(wrapper.text()).not.toContain("浏览器预览：无宿主诊断面");
+  });
+
+  it("浏览器预览态：关于卡说明没有宿主诊断面", async () => {
+    const wrapper = await render("browser");
+
+    expect(wrapper.text()).toContain("浏览器预览：无宿主诊断面");
+  });
+
+  it("服务端钉死沙盒档位：档位按钮禁用并说明，联动建议一并收起", async () => {
+    const wrapper = await render({ pinnedSandbox: true });
+
+    expect(wrapper.get('[data-testid="sandbox-pinned"]').text()).toContain("GREYWORK_SANDBOX");
+    for (const mode of ["auto", "off", "fs", "full"]) {
+      expect(wrapper.find(`[data-testid="sandbox-mode-${mode}"]`).attributes("disabled")).toBeDefined();
+    }
+    expect(wrapper.find('[data-testid="sandbox-recommend"]').exists()).toBe(false);
+  });
+
+  it("未钉住时沙盒档位照常可选", async () => {
+    const wrapper = await render({ pinnedSandbox: false });
+
+    expect(wrapper.find('[data-testid="sandbox-pinned"]').exists()).toBe(false);
+    for (const mode of ["auto", "off", "fs", "full"]) {
+      expect(wrapper.find(`[data-testid="sandbox-mode-${mode}"]`).attributes("disabled")).toBeUndefined();
+    }
   });
 });

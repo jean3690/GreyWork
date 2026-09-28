@@ -152,7 +152,7 @@ export const zhCN = {
     available: "有新版本可用",
     upToDate: "已是最新版本。",
     notesEmpty: "这个版本没有提供更新说明。",
-    unsupported: "检查更新需要桌面版（Tauri）。",
+    unsupported: "浏览器预览态没有宿主，无法检查更新。",
     failed: "检查更新失败：{detail}",
     download: "前往下载",
     later: "以后再说",
