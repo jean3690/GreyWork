@@ -23,12 +23,19 @@
   行级原子认领，双执行防护不变。注意无人值守的模型凭证取自服务端进程的环境变量，容器里需在
   compose 注入，否则任务会以「无可用模型配置」失败。
 - **服务端可容器化部署（web 端）**：新增多阶段 `Dockerfile`（Node 构建 SPA + Rust 编译
-  `greywork-server`，最小 `debian-slim` 运行时）、`docker-compose.yml` 与部署文档（docs/packaging.md）。
-  二进制内置 `healthcheck` 子命令供容器 HEALTHCHECK（镜像不带 curl / wget）；监听非环回地址却未开
-  `secure_cookie` 时启动告警——提示前置 TLS 反代，避免登录凭据明文过网。
+  `greywork-server`，最小 `debian-slim` 运行时）、`docker-compose.yml`、`.env.example` 与部署文档
+  （docs/packaging.md）。二进制内置 `healthcheck` 子命令供容器 HEALTHCHECK（镜像不带 curl / wget）；
+  监听非环回地址却未开 `secure_cookie` 时启动告警——提示前置 TLS 反代，避免登录凭据明文过网。
+  compose 默认禁提权（`no-new-privileges`）；需要 agent 沙盒的 fs / full 两档时叠加
+  `docker-compose.sandbox.yml`（代价与实测能力矩阵写在文件里）。另有独立的 Docker CI 只做
+  「镜像能不能构建、起来后探针与 UI 是否正常」的冒烟。
 - **服务端补齐安全响应头**：headless 服务端对每个响应加 `Content-Security-Policy`（对齐桌面 Tauri
   CSP，另放行入站视频 / 语音缩略图的 `media-src blob:`）、`X-Frame-Options: DENY`、
-  `Referrer-Policy: no-referrer`（此前只有 `nosniff` 与 `no-store`）——自托管 Web 端不再缺 CSP 与防点击劫持。
+  `Referrer-Policy: no-referrer`、`Permissions-Policy`（相机 / 麦克风 / 定位等一律拒绝，唯独不碰
+  `clipboard-*`——界面靠 `navigator.clipboard` 做复制按钮），并在开启 `secure_cookie`（即「已在 TLS
+  反代之后」的信号）时下发 `Strict-Transport-Security`（此前只有 `nosniff` 与 `no-store`）——
+  自托管 Web 端不再缺 CSP 与防点击劫持。策略与真实托管产物的一致性由 e2e 把关：真服务端托管
+  构建产物，走登录门并依次打开 markdown / HTML / PDF / xlsx 四类预览，断言零 CSP 违规。
 - **服务端态断线重连自动对齐状态**：web 端事件走一条 `/api/events` WebSocket 且不重放；断线重连时宿主
   先发 `host://hello`，远程助手 store 据此重拉各通道状态与媒体能力矩阵（跳过首帧连接），修掉重连后
   通道在线状态陈旧的问题（桌面端走 Tauri IPC，不受影响）。
@@ -175,6 +182,14 @@
   区段 / 标签切换是同一类问题，但那条路径当时漏了）。现在「从桌面变窄」先走一遍守卫：
   面板还挂着的状态下自动保存，全部成功才真的收起来；写不进去会挂起确认弹层。
   用户在窄屏选了「取消」之后不再反复追问，直到视口回到桌面重新武装。
+- **切走 PDF 不再抛错，也不再漏 worker**：`PDFDocumentProxy.destroy()` 在 pdfjs v6 已被移除
+  （只剩 `cleanup()`），预览关闭 / 切标签时那次调用于是抛 `destroy is not a function`，
+  worker 一直没被释放 —— 每开一次 PDF 漏一个。现在改为持有加载任务并调它的 `destroy()`。
+- **自托管 Web 端的 CSP 不再被自家脚本撞出违规**：`index.html` 里那段首帧主题脚本是内联的，
+  在桌面壳与自托管服务端都不含 `'unsafe-inline'` 的策略下会被 `script-src` 拦掉（浅色用户
+  会先闪一帧深色），已抽成同源外链 `boot.js`；ACP SDK 依赖的 zod v4 会在构造 schema 时探测
+  `new Function` 以决定是否 JIT 编译校验器，这条探测同样会报 `script-src` 违规，现显式关掉
+  JIT（校验行为不变）。两处都是「功能上会降级、但控制台与 CSP 报表里始终挂着假警报」的形态。
 
 ## [0.3.0] - 2026-09-21
 

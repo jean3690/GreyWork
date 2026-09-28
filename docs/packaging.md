@@ -241,6 +241,10 @@ ships the same Vue renderer as a same-origin SPA behind a password login. A mult
    `ca-certificates` and `git`. It runs as a non-root user and serves `0.0.0.0:8787`.
 
 ```sh
+# 0) 可选：cp .env.example .env —— 三种密码来源 / 授权面 / 安全开关 / 定时任务与
+#    模型凭证都在里面逐条注明了用途
+cp .env.example .env
+
 # 1) 生成登录密码哈希（argon2 PHC 串），填进 .env
 docker compose run --rm greywork hash-password
 echo 'GREYWORK_PASSWORD_HASH=<paste>' >> .env
@@ -272,12 +276,27 @@ Design/security notes:
   to `/api/health`); the image ships no `curl`/`wget`, keeping the runtime tool surface minimal.
 - **Security headers.** The server sends a strict `Content-Security-Policy` (mirroring the desktop
   Tauri CSP, plus `media-src blob:` for inbound video/voice thumbnails), `X-Frame-Options: DENY`,
-  `Referrer-Policy: no-referrer` and `X-Content-Type-Options: nosniff` on every response.
+  `Referrer-Policy: no-referrer`, `Permissions-Policy` (camera / microphone / geolocation / … all
+  denied; `clipboard-*` is deliberately left alone because the UI's copy buttons use
+  `navigator.clipboard`) and `X-Content-Type-Options: nosniff` on every response. `HSTS` is sent
+  **only** when `GREYWORK_SECURE_COOKIE=1` — that flag is the "there is a TLS proxy in front" signal,
+  and over plain HTTP the header is meaningless (it can even lock users out).
   `GREYWORK_FRAME_ORIGINS` **only** appends a `frame-src` directive — it cannot relax the rest of the
   policy, and entries that are not a bare `scheme://host[:port]` are dropped with a startup warning
   (anything containing `;`, quotes, wildcards or whitespace could otherwise rewrite the policy).
   This is what makes a _custom_ cloud-Office vendor usable on the web build; the desktop shell's CSP
   is baked into `tauri.conf.json`, so it can only embed the three preset vendors.
+  The policy is verified against the **real** hosted bundle by `pnpm --filter @greywork/desktop
+e2e:served`, which logs in and opens markdown / HTML / PDF / xlsx previews while asserting zero
+  `securitypolicyviolation` events — dev-server CSP is a different beast, so only the served build
+  counts.
+- **Hardened by default, sandbox opt-in.** `docker-compose.yml` sets `no-new-privileges` (so neither
+  the server nor any agent child can gain privileges via setuid) and runs as uid 10001. The agent
+  sandbox's `fs` / `full` tiers need `bwrap`, which cannot work in a default container: the probe
+  fails and the sandbox degrades to `off`. If you need those tiers, layer
+  `docker-compose.sandbox.yml` (`seccomp=unconfined` + `SYS_ADMIN` + `NET_ADMIN`) — it is a separate
+  file precisely because it materially widens the container-escape surface. The measured matrix and
+  the trade-off are documented at the top of that file.
 - **Unattended automations.** Scheduled tasks live in the **server's** database — a task created in
   the desktop app is not visible here (and vice-versa). To have a task run without any browser or
   desktop machine being open, create it in the server's web UI and set
