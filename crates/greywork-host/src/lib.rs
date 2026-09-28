@@ -14,6 +14,7 @@ pub mod channel_common;
 pub mod channel_media;
 pub mod commands;
 pub mod cron;
+pub mod csp;
 pub mod db;
 pub mod dingtalk;
 pub mod discord;

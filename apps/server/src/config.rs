@@ -41,6 +41,15 @@ pub struct ServerConfig {
     pub secure_cookie: bool,
     /// 非空时，对所有非 GET/HEAD 请求校验 `Origin` 必须在此白名单内。
     pub allowed_origins: Vec<String>,
+    /// 允许被 iframe 内嵌的额外 origin（云端 Office 的文档地址）。
+    ///
+    /// 桌面壳的 CSP 写死在打包配置里，所以桌面端只能内嵌三个预设厂商；服务端的 CSP 是
+    /// 启动时按这里拼的（见 `middleware::content_security_policy`），于是「自定义云端
+    /// Office」只在服务端态下真正可用。留空 = 不生成 `frame-src`，回落到
+    /// `default-src 'self'`（行为与加这个配置项之前完全一致）。
+    ///
+    /// 只接受 `scheme://host[:port]` 形态；非法项会被丢弃并在启动日志里点名。
+    pub frame_origins: Vec<String>,
     /// 构建产物目录（SPA）。`None` = 不托管静态资源（仅 /api）。
     ///
     /// 刻意不给默认路径：`cargo run` 开发态、纯 API 部署都不该悄悄挂上一份过期的
@@ -65,6 +74,7 @@ impl Default for ServerConfig {
             tier: Some("read-only".to_string()),
             secure_cookie: false,
             allowed_origins: Vec::new(),
+            frame_origins: Vec::new(),
             static_dir: None,
         }
     }
@@ -139,6 +149,9 @@ impl ServerConfig {
         }
         if let Some(value) = env_str("GREYWORK_ALLOWED_ORIGINS") {
             self.allowed_origins = split_list(&value, ',');
+        }
+        if let Some(value) = env_str("GREYWORK_FRAME_ORIGINS") {
+            self.frame_origins = split_list(&value, ',');
         }
         if let Some(value) = env_str("GREYWORK_STATIC_DIR") {
             self.static_dir = Some(PathBuf::from(value));

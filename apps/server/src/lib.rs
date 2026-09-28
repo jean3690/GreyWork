@@ -50,12 +50,20 @@ pub fn build_router(state: AppState) -> axum::Router {
         app = app.merge(routes::static_site::router(dir));
     }
     let origin_state = state.clone();
+    // CSP 在这里算一次就定死（含 `frame-src`，见 `middleware::content_security_policy`），
+    // 之后每个响应只是把它挂上去 —— 别放进中间件里按响应重算。
+    let csp = middleware::content_security_policy(&state.config);
     app.layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .layer(mw::from_fn_with_state(
             origin_state,
             middleware::origin_guard,
         ))
-        .layer(mw::from_fn(middleware::security_headers))
+        .layer(mw::from_fn(
+            move |request: axum::extract::Request, next: mw::Next| {
+                let csp = csp.clone();
+                async move { middleware::security_headers(request, next, csp).await }
+            },
+        ))
         .with_state(state)
 }
 
@@ -81,6 +89,7 @@ pub async fn run() -> Result<(), String> {
     } else {
         greywork_host::log::info("server", "静态托管: 关闭（仅 /api）");
     }
+
     // 补一次登录 shell PATH 解析（容器里通常失败即回退继承的 PATH，无副作用）。
     greywork_host::process_guard::init_login_path();
 

@@ -358,3 +358,75 @@ async fn login_throttles_after_repeated_failures() {
     .await;
     assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
 }
+
+#[tokio::test]
+async fn responses_carry_security_headers() {
+    let h = harness("sec-headers");
+    let (status, headers, _) = send(&h.router, get("/api/health")).await;
+    assert_eq!(status, StatusCode::OK);
+    let csp = headers
+        .get(header::CONTENT_SECURITY_POLICY)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+    assert!(csp.contains("default-src 'self'"), "缺 default-src: {csp}");
+    assert!(
+        csp.contains("frame-ancestors 'none'"),
+        "缺防点击劫持: {csp}"
+    );
+    assert!(
+        csp.contains("media-src 'self' blob:"),
+        "缺 media-src blob（视频/语音缩略图）: {csp}"
+    );
+    assert_eq!(
+        headers
+            .get(header::X_FRAME_OPTIONS)
+            .and_then(|value| value.to_str().ok()),
+        Some("DENY")
+    );
+    assert_eq!(
+        headers
+            .get(header::REFERRER_POLICY)
+            .and_then(|value| value.to_str().ok()),
+        Some("no-referrer")
+    );
+}
+
+/// 配了 `frame_origins` 时，CSP 要真的带上 `frame-src` —— 云端 Office 的 iframe 靠它才不被拦。
+///
+/// 断言的是**响应头**而不是策略构造函数：中间件从 `from_fn` 换成闭包捕获 CSP 之后，
+/// 单测全绿但头没带上的断法并不罕见。
+#[tokio::test]
+async fn configured_frame_origins_reach_the_csp_header() {
+    let h = harness_with("frame-origins", |config, _tmp| {
+        config.frame_origins = vec![
+            "https://docs.example.com".to_string(),
+            "https://evil.example.com; script-src *".to_string(),
+        ];
+    });
+    let (status, headers, _) = send(&h.router, get("/api/health")).await;
+    assert_eq!(status, StatusCode::OK);
+    let csp = headers
+        .get(header::CONTENT_SECURITY_POLICY)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+    assert!(
+        csp.contains("frame-src https://docs.example.com"),
+        "frame-src 未带上配置的 origin: {csp}"
+    );
+    assert!(
+        !csp.contains("evil.example.com"),
+        "能改写策略的 origin 必须被丢弃: {csp}"
+    );
+}
+
+/// 不配 `frame_origins` 时不许凭空多出 `frame-src`（回落 `default-src 'self'` 的既有行为）。
+#[tokio::test]
+async fn absent_frame_origins_leave_csp_without_frame_src() {
+    let h = harness("frame-origins-empty");
+    let (_, headers, _) = send(&h.router, get("/api/health")).await;
+    let csp = headers
+        .get(header::CONTENT_SECURITY_POLICY)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+    assert!(!csp.contains("frame-src"), "不该多出 frame-src: {csp}");
+}
