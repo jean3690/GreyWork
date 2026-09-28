@@ -1,3 +1,5 @@
+// 副作用 import：必须在 `@agentclientprotocol/sdk` 之前求值（见该文件说明）。
+import "./zod-jitless";
 import { homeDir } from "@tauri-apps/api/path";
 import {
   AGENT_METHODS,
