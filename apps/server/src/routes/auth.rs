@@ -81,7 +81,7 @@ pub async fn logout(
     AuthSession(token): AuthSession,
 ) -> Result<Response, ApiError> {
     state.sessions.logout(&token);
-    let cookie = HeaderValue::from_str(&auth::clear_cookie())
+    let cookie = HeaderValue::from_str(&auth::clear_cookie(state.config.secure_cookie))
         .map_err(|_| ApiError::BadRequest("会话 cookie 构造失败".to_string()))?;
     let mut response = StatusCode::NO_CONTENT.into_response();
     response.headers_mut().insert(header::SET_COOKIE, cookie);

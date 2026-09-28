@@ -126,8 +126,15 @@ pub fn session_cookie(token: &str, ttl: Duration, secure: bool) -> String {
 }
 
 /// 清空会话 cookie 的 `Set-Cookie` 值。
-pub fn clear_cookie() -> String {
-    format!("{COOKIE_NAME}=; HttpOnly; Path=/; SameSite=Strict; Max-Age=0")
+///
+/// `secure` 必须与 [`session_cookie`] 一致：带 `Secure` 的 cookie 只能被带 `Secure` 的
+/// `Set-Cookie` 覆盖（RFC 6265bis），否则 TLS 反代下登出清不掉浏览器里的会话 cookie。
+pub fn clear_cookie(secure: bool) -> String {
+    let mut cookie = format!("{COOKIE_NAME}=; HttpOnly; Path=/; SameSite=Strict; Max-Age=0");
+    if secure {
+        cookie.push_str("; Secure");
+    }
+    cookie
 }
 
 /// 从 `Cookie` 头里取出会话 token。
@@ -276,6 +283,21 @@ mod tests {
         assert!(cookie.contains("SameSite=Strict"));
         assert!(cookie.contains("Max-Age=120"));
         assert!(cookie.contains("Secure"));
+    }
+
+    #[test]
+    fn clear_cookie_matches_session_cookie_secure_flag() {
+        let plain = clear_cookie(false);
+        assert!(plain.contains("gw_session=;"));
+        assert!(plain.contains("HttpOnly"));
+        assert!(plain.contains("Path=/"));
+        assert!(plain.contains("SameSite=Strict"));
+        assert!(plain.contains("Max-Age=0"));
+        assert!(!plain.contains("Secure"));
+
+        let secure = clear_cookie(true);
+        assert!(secure.contains("Max-Age=0"));
+        assert!(secure.contains("Secure"));
     }
 
     #[test]
