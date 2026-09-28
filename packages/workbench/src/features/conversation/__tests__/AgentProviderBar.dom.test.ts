@@ -388,3 +388,49 @@ describe("AgentProviderBar · 安装状态探测与胶囊标注", () => {
     expect(gemini?.text()).toContain("未安装");
   });
 });
+
+/**
+ * 服务端只读态：agent 目录只读时不代用户「顺手启用」——静默改状态又写不进服务端，
+ * 不如让选择失败并把「尚未启用」就地说清楚。判据与设置页同一份命令能力表。
+ */
+describe("AgentProviderBar · 服务端只读态", () => {
+  /** 假服务端：/api/commands 回 available:false，/api/command 一律成功返回 null。 */
+  function installServerFetch(): void {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        void init;
+        const url = String(input);
+        if (url.endsWith("/api/commands")) {
+          return new Response(
+            JSON.stringify([{ name: "db_agents_sync", auth: "required", desktopOnly: false, binary: false, available: false }]),
+            { status: 200 },
+          );
+        }
+        return new Response(JSON.stringify(null), { status: 200 });
+      }),
+    );
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__;
+  });
+
+  it("点未启用的后端不代启用：错误就地可见，enabled 保持 false", async () => {
+    // 直接设属性而不是 stubGlobal("window", …)：整个换掉 window 会丢掉
+    // trigger() 依赖的 Event/MouseEvent 构造器。
+    (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = "server";
+    installServerFetch();
+    const { wrapper } = mountBar();
+    const store = useAgentStore();
+    await vi.waitFor(() => expect(store.agentProviders.length).toBeGreaterThan(0));
+
+    await store.setAgentProviderEnabled("opencode", false);
+    await openCodeButton(wrapper).trigger("click");
+    await flushPromises();
+
+    expect(store.agentProviders.find((p) => p.id === "opencode")?.enabled).toBe(false);
+    expect(wrapper.text()).toContain("尚未启用");
+  });
+});

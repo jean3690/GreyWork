@@ -11,7 +11,9 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { type AgentProviderConfig, REASONING_EFFORTS, type ReasoningEffort } from "@greywork/shell";
+import { runtimeMode } from "@greywork/host-ipc";
 import { useAgentStore } from "@/stores/agent";
+import { useCommandCapabilitiesStore } from "@/stores/command-capabilities";
 import { useSettingsStore } from "@/stores/settings";
 import { localReasoningOverride, resolveLocalEffort } from "@/stores/chat-llm";
 import AgentProviderIcon from "@/features/conversation/AgentProviderIcon.vue";
@@ -22,6 +24,15 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 const agent = useAgentStore();
 const settings = useSettingsStore();
 const { t } = useI18n();
+
+const capabilities = useCommandCapabilitiesStore();
+void capabilities.ensureCatalog();
+
+/**
+ * 服务端 agent 目录只读（与设置页 / 写路径同一判据）。此时不代用户「顺手启用」：
+ * 静默改状态又写不进服务端，还不如让选择失败并把「未启用」说清楚。
+ */
+const agentCatalogReadOnly = computed(() => runtimeMode() === "server" && capabilities.available("db_agents_sync") !== true);
 
 const acpOptions = computed<AgentProviderConfig[]>(() => agent.agentProviders);
 const selected = computed(() => (agent.routeToAcp ? agent.selectedProviderId : null));
@@ -86,7 +97,8 @@ async function selectAcp(id: string): Promise<void> {
   overflowOpen.value = false;
   connectError.value = null;
   const provider = agent.agentProviders.find((candidate) => candidate.id === id);
-  if (provider && !provider.enabled) await agent.setAgentProviderEnabled(id, true);
+  // 目录只读（服务端）时不代启用：让 activateAcpProvider 返回「未启用」，错误就地可见。
+  if (provider && !provider.enabled && !agentCatalogReadOnly.value) await agent.setAgentProviderEnabled(id, true);
   if (id === agent.selectedProviderId && agent.routeToAcp && agent.acpConnected) return;
   connectError.value = await agent.activateAcpProvider(id);
 }

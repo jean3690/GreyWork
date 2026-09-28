@@ -13,13 +13,26 @@ import AgentProviderFormDialog, { type AgentProviderDraftPayload } from "@/featu
 import ModelProviderFormDialog, { type ModelProviderDraftPayload } from "@/features/settings/ModelProviderFormDialog.vue";
 import { formatHeaderText, parseHeaderText } from "@/stores/agent/shared";
 import { useAgentStore } from "@/stores/agent";
+import { useCommandCapabilitiesStore } from "@/stores/command-capabilities";
 import { useSettingsStore } from "@/stores/settings";
+import { runtimeMode } from "@greywork/host-ipc";
 import { i18n } from "@/i18n";
 
 const t = i18n.global.t;
 
 const settings = useSettingsStore();
 const agent = useAgentStore();
+
+const capabilities = useCommandCapabilitiesStore();
+void capabilities.ensureCatalog();
+
+/**
+ * 服务端 agent 目录只读：db_agents_sync 在服务端被禁（后端启动命令属于不可信输入）。
+ *
+ * 与写路径同一判据 —— unknown（能力表还没拉到）也按只读，免得「先能点、过一会变灰」的
+ * 状态跳变。图标是 localStorage 覆盖层、不走这条命令，保持可改。
+ */
+const agentCatalogReadOnly = computed(() => runtimeMode() === "server" && capabilities.available("db_agents_sync") !== true);
 
 const activeProvider = computed(() => settings.modelProviders.find((provider) => provider.id === settings.selectedModelProviderId));
 
@@ -326,13 +339,25 @@ async function removeAgentDraft(): Promise<void> {
       <div class="mb-3 flex items-center justify-between gap-2">
         <span class="text-[13px] font-medium text-foreground">ACP 后端（聊天 / 自动执行）</span>
         <button
+          v-if="!agentCatalogReadOnly"
           type="button"
+          data-testid="agent-catalog-add"
           class="h-6 cursor-pointer rounded-[6px] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
           @click="startAgentAdd"
         >
           新增后端
         </button>
       </div>
+      <!-- 服务端把 agent 目录钉成只读（db_agents_sync 被禁）：新增/编辑/启停都不给点，
+           否则改动只落在浏览器本地、与服务端数据库悄悄分叉 —— 这比直接不能用更糟。 -->
+      <p
+        v-if="agentCatalogReadOnly"
+        data-testid="agent-catalog-readonly"
+        class="mb-2 rounded-[10px] bg-panel-2 px-3 py-2 text-[11px] leading-[1.6] text-dim2"
+      >
+        服务端模式下 agent 目录只读：这里的新增、编辑与启停不会生效。后端能否启动由服务端配置
+        （GREYWORK_AGENT_PROGRAMS）管理，如需调整请修改服务端配置或联系管理员。
+      </p>
       <div class="flex flex-col gap-1.5">
         <div v-for="provider in agent.agentProviders" :key="provider.id">
           <label
@@ -362,8 +387,10 @@ async function removeAgentDraft(): Promise<void> {
             </Hint>
             <input
               type="checkbox"
-              class="size-4 cursor-pointer accent-[var(--accent)]"
+              class="size-4 accent-[var(--accent)]"
+              :class="agentCatalogReadOnly ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'"
               :checked="provider.enabled"
+              :disabled="agentCatalogReadOnly"
               :aria-label="`启用 ${provider.name}`"
               @change="void agent.setAgentProviderEnabled(provider.id, ($event.target as HTMLInputElement).checked)"
             />
@@ -375,7 +402,7 @@ async function removeAgentDraft(): Promise<void> {
               </span>
             </Hint>
             <button
-              v-if="agent.isCustomAgentProvider(provider.id)"
+              v-if="agent.isCustomAgentProvider(provider.id) && !agentCatalogReadOnly"
               type="button"
               class="shrink-0 cursor-pointer rounded-[6px] border border-line bg-panel-2 px-2 py-0.5 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
               @click.stop="startAgentEdit(provider.id)"
