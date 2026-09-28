@@ -96,8 +96,11 @@ browser) are rejected server-side.
 
 Loaded as `defaults → <data_dir>/server.json → GREYWORK_* env vars` (env wins). Fields: `bind`,
 `data_dir`, `home_dir`, `session_ttl_secs`, `password_hash` / `password`, `agent_programs`,
-`workspace_roots`, `sandbox`, `tier`, `secure_cookie`, `allowed_origins`, `static_dir`
-(`GREYWORK_STATIC_DIR`, see [Static hosting](#static-hosting-spa)).
+`workspace_roots`, `sandbox`, `tier`, `secure_cookie`, `allowed_origins`,
+`frame_origins` (`GREYWORK_FRAME_ORIGINS`, see [Security headers](#security-headers)),
+`automation_host_primary` (`GREYWORK_AUTOMATION_HOST_PRIMARY`, see
+[Scheduled tasks](#scheduled-tasks)), `static_dir` (`GREYWORK_STATIC_DIR`, see
+[Static hosting](#static-hosting-spa)).
 
 Password bootstrap, in priority order:
 
@@ -168,6 +171,60 @@ Design notes:
   set no cache header of their own and still get `no-store` — command results may contain file
   contents and credentials.
 
+### Security headers
+
+Every response (API and static alike) carries a fixed set of headers from `middleware::security_headers`.
+The CSP is computed once at router-assembly time from the config, not per response:
+
+| Header                      | Value                                                                    | Why                                                                                                                                             |
+| --------------------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Content-Security-Policy`   | mirrors the desktop `tauri.conf.json` CSP, plus `media-src 'self' blob:` | the desktop policy is the strongest evidence of what the app actually needs; `media-src blob:` is for inbound video/voice thumbnails            |
+| `X-Frame-Options`           | `DENY`                                                                   | clickjacking guard for older browsers (`frame-ancestors 'none'` covers modern ones)                                                             |
+| `Referrer-Policy`           | `no-referrer`                                                            | never leak the self-hosted URL/paths to outbound links                                                                                          |
+| `Permissions-Policy`        | `camera=(), microphone=(), …` (omits `clipboard-*`)                      | the UI uses `navigator.clipboard` for its copy buttons, so `clipboard-*` is deliberately left unset; everything else is unused and denied       |
+| `X-Content-Type-Options`    | `nosniff`                                                                | don't let the browser sniff JSON/binary into an executable type                                                                                 |
+| `Strict-Transport-Security` | `max-age=31536000; includeSubDomains`                                    | **only when `secure_cookie` is set** — that flag is the "behind a TLS proxy" signal; over plain HTTP HSTS is meaningless and can lock users out |
+
+`GREYWORK_FRAME_ORIGINS` appends a `frame-src` allow-list for cloud Office viewers. Origins are
+normalized by the shared `greywork_host::csp::normalize_frame_origin` (the server CSP, the desktop
+CSP drift test, and the host-fact query all need the same form); anything that could rewrite the
+policy (whitespace, quotes, semicolons) is dropped and named in the startup log.
+
+The server does **not** add request timeouts or concurrency limits: `acp_start`, LLM streaming,
+large `web_fetch`, and 32 MB binary reads legitimately run for minutes, and long-lived WebSockets
+must stay open. The only abuse-prone entry point is `/api/login`, which `LoginThrottle` already
+covers (5 failures → `429`).
+
+### Scheduled tasks
+
+Due automations are consumed by the renderer's 30 s poll loop when a browser is present. The host
+process also consumes them, and `GREYWORK_AUTOMATION_HOST_PRIMARY=1` decides **which role** it
+plays: unset, it only claims rows that have been due for over 2 minutes (a fallback for a closed
+or busy renderer); set, the threshold is zero and the host is the primary executor — tasks run on
+the server without any browser open. Both roles share the same row-level atomic claim
+(`automation_due_finish`'s `WHERE status='pending'`), so a renderer and the host present at once
+never double-execute. The default is `false`, so upgrading an existing deployment does not make it
+start running tasks on its own. Unattended runs resolve model credentials from the **server
+process's** environment, so those variables must be injected (e.g. via compose).
+
+### Deployment (Docker)
+
+The server is packaged as a multi-stage image: `node:22-bookworm-slim` builds the SPA,
+`rust:1-bookworm` compiles `greywork-server`, and a `debian:bookworm-slim` runtime carries the
+binary plus `git`/`ca-certificates`. The runtime image deliberately ships **no** Node/Python
+toolchain — the frozen agent allow-list resolves against whatever the operator installs in a
+derived image and declares via `GREYWORK_AGENT_PROGRAMS`. The binary carries a `healthcheck`
+subcommand so the image needs no `curl`/`wget`.
+
+`docker-compose.yml` publishes `8787`, mounts a named `/data` volume, sets
+`no-new-privileges`, and runs as uid 10001. The server itself does no TLS, so production belongs
+behind a TLS reverse proxy (Caddy / nginx / Traefik) with `GREYWORK_SECURE_COOKIE=1`; binding
+non-loopback without it logs a cleartext-credential warning at startup. A separate
+`docker-compose.sandbox.yml` override adds `seccomp=unconfined` + `SYS_ADMIN`/`NET_ADMIN` for
+operators who need the agent sandbox's `fs`/`full` tiers — in a default container the `bwrap` probe
+always fails and the sandbox degrades to `off`. See [`docs/packaging.md`](./packaging.md) for the
+deployment guide, volume layout, password strategies, and the full capability trade-off matrix.
+
 ### Security model
 
 The **authentication boundary is the security boundary**: a valid session can spawn agent
@@ -218,6 +275,14 @@ entries, turning the next build into a full dependency recompile. The first run 
 `release.yml` runs on `v*` tags, extracts the release notes from `CHANGELOG.md`, and builds/uploads
 deb / NSIS / dmg to a draft Release via `tauri-action`. Branch protection ensures all checks pass
 before merge — if required check names change, update them in the branch protection settings.
+
+`docker.yml` is deliberately a separate workflow with its own `paths` filter (Dockerfile, compose
+files, server/host/renderer sources, lockfiles) so it neither runs on unrelated PRs nor perturbs
+`ci.yml`'s job set (and therefore branch protection's required-check list). It builds the image,
+starts it with a known password, polls `/api/health`, and asserts that `/` really serves the SPA
+(`<div id="app">`) and that the CSP header is present — a plain health check would pass on an image
+whose UI 404s. It does **not** use BuildKit's `type=gha` cache: the repository's 10 GB cache budget is
+already saturated by the Rust dependency caches.
 
 ## Design Principles
 
