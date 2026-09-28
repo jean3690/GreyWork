@@ -121,6 +121,9 @@ struct CallbackBody {
     /// 文件：`{url, aeskey, name?, size?}`。
     #[serde(default)]
     file: Option<FileBlock>,
+    /// 语音：`{content}`（转写文本；企业微信不下发原始音频，无 url/aeskey）。
+    #[serde(default)]
+    voice: Option<VoiceBlock>,
     /// 图文混排：`{msg_item: [{type, text?, image?}]}`。
     #[serde(default)]
     mixed: Option<MixedBlock>,
@@ -146,6 +149,14 @@ struct FileBlock {
     name: Option<String>,
     #[serde(default)]
     size: Option<u64>,
+}
+
+/// 语音块：企业微信只回「语音转文本」结果，没有可下载的原始音频。
+#[derive(Debug, Clone, Default, Deserialize)]
+struct VoiceBlock {
+    /// 语音转写文本（官方《智能机器人长连接》VoiceContent.content）。
+    #[serde(default)]
+    content: Option<String>,
 }
 
 /// 图文混排块。
@@ -229,7 +240,7 @@ pub struct WecomInboundDto {
     /// 发送者 userid（判归属人）。
     pub sender_id: String,
     pub text: String,
-    /// 收不下也转不成文本的消息类型（如 voice），其余为空串。
+    /// 收不下也转不成文本的消息类型（如无直链图片、未知类型），其余为空串。
     pub unsupported: String,
     /// 随消息到达的图片 / 视频 / 文件；字节在宿主 inbox，凭 `path` 取走。
     pub media: Vec<MediaRefDto>,
@@ -292,11 +303,21 @@ pub(crate) fn normalize_callback(
             .unwrap_or_default(),
         // 图文混排里的文本项也当正文转达，免得只有图没话。
         "mixed" => parsed.mixed.as_ref().map(mixed_text).unwrap_or_default(),
+        // 语音：企业微信直接回「语音转文本」，没有可下载的原始音频 —— 把转写当正文转达，模型即可应答。
+        "voice" => parsed
+            .voice
+            .as_ref()
+            .and_then(|block| block.content.clone())
+            .unwrap_or_default(),
         _ => String::new(),
     };
     let media = pending_media(&parsed);
-    // 文本 / 有媒体的消息都算「转达到了」；其余（voice、缺直链的 image…）如实标注类型。
-    let handled = msgtype == "text" || !media.is_empty();
+    // 文本、有转写的语音、有可下载媒体都算「转达到了」；其余（缺直链的 image…）如实标注类型。
+    let handled = match msgtype.as_str() {
+        "text" => true,
+        "voice" => !text.trim().is_empty(),
+        _ => !media.is_empty(),
+    };
     let at = parsed
         .create_time
         .filter(|seconds| *seconds > 0)
@@ -330,7 +351,8 @@ fn mixed_text(mixed: &MixedBlock) -> String {
 
 /// 从回调里挑出可下载的媒体（图片 / 视频 / 文件 / 图文混排里的图），最多 4 条。
 ///
-/// 入站语音暂缓：企业微信语音回调给的是 `media_id` 而非 `url`+`aeskey`，与现有下载路径不合。
+/// 语音不在此列：企业微信语音回调只给转写文本（`voice.content`），没有可下载的原始音频，
+/// 因此在 `normalize_callback` 里按文本转达，而不当媒体下载。
 fn pending_media(body: &CallbackBody) -> Vec<PendingMedia> {
     let mut out = Vec::new();
     if let Some(block) = body.image.as_ref() {
@@ -1597,6 +1619,33 @@ mod tests {
             .is_none(),
             "群消息缺 chatid 无从回发"
         );
+    }
+
+    #[test]
+    fn normalize_voice_transcription_becomes_text() {
+        // 企业微信语音回调只给转写文本（voice.content），没有可下载音频：当正文转达。
+        let body = json!({
+            "msgid": "MSGV",
+            "chattype": "single",
+            "from": { "userid": "zhaoliu" },
+            "msgtype": "voice",
+            "voice": { "content": "帮我订个明天的会议" },
+        });
+        let inbound = normalize_callback(&body, 1).expect("语音消息转写成正文");
+        assert_eq!(inbound.text, "帮我订个明天的会议", "语音转写当正文");
+        assert_eq!(inbound.unsupported, "", "有转写的语音不再标记为不支持");
+        assert!(inbound.media.is_empty(), "语音没有可下载媒体");
+
+        // 转写为空（异常）时如实标记不支持，而不是投递空消息。
+        let empty = json!({
+            "msgid": "MSGV2",
+            "chattype": "single",
+            "from": { "userid": "zhaoliu" },
+            "msgtype": "voice",
+            "voice": { "content": "" },
+        });
+        let inbound = normalize_callback(&empty, 1).expect("空转写仍是一条消息");
+        assert_eq!(inbound.unsupported, "voice", "空转写按不支持标记");
     }
 
     #[test]

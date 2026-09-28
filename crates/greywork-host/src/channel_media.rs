@@ -120,7 +120,8 @@ pub fn capability_of(channel: &str) -> ChannelMediaCapability {
         "feishu" => caps(&[Image, Video, Audio, File], &[Image, File]),
         // 语音端点要 SILK 编码，原生只到图片与视频（音频降级为文件）。
         "qq" => caps(&[Image, Video, Audio, File], &[Image, Video, File]),
-        // 被动回复只能把图片塞进 stream 的图文混排，没有文件出口；入站语音回调走 `media_id`，本轮未接。
+        // 被动回复只能把图片塞进 stream 的图文混排，没有文件出口；入站语音由企业微信转写成文本
+        // （无原始音频可下），按文本转达而不进媒体矩阵。
         "wecom" => caps(&[Image, Video, File], &[Image]),
         // sessionWebhook 只认 text/markdown/link/actionCard/feedCard，出站没有任何媒体通道；
         // 入站图片 / 视频 / 语音 / 文件仅单聊可收（群聊常缺 downloadCode）。

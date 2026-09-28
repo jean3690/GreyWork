@@ -36,7 +36,7 @@ export interface WecomInbound {
   /** 发送者 userid（判归属人）。 */
   senderId: string;
   text: string;
-  /** 收不下也转不成文本的消息类型（如 voice）；文本 / 图片 / 文件为空串。 */
+  /** 收不下也转不成文本的消息类型（如无直链图片 / 未知类型）；文本 / 语音转写 / 图片 / 文件为空串。 */
   unsupported: string;
   /** 随消息到达的图片 / 文件（长连接媒体已按 aeskey 解密）；字节在宿主 inbox，凭 `path` 取走。 */
   media?: MediaRef[];
