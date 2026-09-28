@@ -14,7 +14,8 @@
     "test:unit": "vitest run --project node",
     "test:dom": "vitest run --project dom",
     "e2e": "node e2e/smoke.e2e.mjs",
-    "e2e:login": "node e2e/login-gate.e2e.mjs"
+    "e2e:login": "node e2e/login-gate.e2e.mjs",
+    "e2e:served": "node e2e/served-spa.e2e.mjs"
   },
   "dependencies": {
     "@greywork/host-ipc": "workspace:*",
