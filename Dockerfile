@@ -6,8 +6,14 @@ ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH
 RUN corepack enable
 WORKDIR /src
 COPY . .
+# 可选：构建期换 registry（内网镜像 / 私有源 / 慢网环境的加速镜像）：
+#   docker build --build-arg NPM_REGISTRY=https://registry.npmmirror.com .
+# 不传就用 pnpm 的默认（registry.npmjs.org）。容器里读不到宿主 ~/.npmrc，
+# 所以镜像源必须显式给 —— 否则直连 npmjs 慢网下 pnpm 会大批请求超时。
+ARG NPM_REGISTRY
 # 只构建渲染端（vue-tsc --noEmit + vite build → apps/desktop/dist）；不跑 tauri。
 RUN --mount=type=cache,id=gw-pnpm,target=/pnpm/store \
+    if [ -n "$NPM_REGISTRY" ]; then export npm_config_registry="$NPM_REGISTRY"; fi && \
     pnpm install --frozen-lockfile && pnpm build
 
 ########## 2) 构建 headless 服务端二进制 ##########

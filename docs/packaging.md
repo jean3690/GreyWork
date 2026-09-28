@@ -233,7 +233,10 @@ The headless server (`apps/server`, see [architecture.md](architecture.md#headle
 ships the same Vue renderer as a same-origin SPA behind a password login. A multi-stage
 [`Dockerfile`](../Dockerfile) at the repo root builds it:
 
-1. **web** (`node:22`) runs `pnpm build` → `apps/desktop/dist` (renderer only, no Tauri).
+1. **web** (`node:22`) runs `pnpm build` → `apps/desktop/dist` (renderer only, no Tauri). The build
+   context has no `~/.npmrc`, so it uses the public npm registry; pass
+   `--build-arg NPM_REGISTRY=https://registry.npmmirror.com` (or your own mirror) if you are behind
+   a slow link to npmjs — otherwise pnpm's metadata requests time out mid-install.
 2. **server** (`rust:1`) runs `cargo build --release -p greywork-server` — only the server crate and
    `greywork-host`, so no WebKit/Tauri system deps are pulled. `cmake` is installed for `aws-lc-rs`
    (rustls); `rusqlite` compiles bundled SQLite with the base image's C toolchain.
