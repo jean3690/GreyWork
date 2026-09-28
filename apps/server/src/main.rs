@@ -10,6 +10,7 @@ async fn main() {
     match args.first().map(String::as_str) {
         Some("hash-password") => std::process::exit(cmd_hash_password()),
         Some("set-password") => std::process::exit(cmd_set_password()),
+        Some("healthcheck") => std::process::exit(cmd_healthcheck()),
         Some("help" | "--help" | "-h") => print_help(),
         _ => {
             if let Err(error) = greywork_server::run().await {
@@ -73,6 +74,58 @@ fn cmd_set_password() -> i32 {
     }
 }
 
+/// 探活：连本机环回的监听端口打 `/api/health`，200 则退出 0，否则 1。
+///
+/// 刻意不引 HTTP 客户端库、也不装 curl —— 运行时镜像保持无多余工具。用裸 TCP
+/// 发一个 HTTP/1.0 请求，够判活。端口取自 `bind`（`0.0.0.0:P` 也连 `127.0.0.1:P`）。
+fn cmd_healthcheck() -> i32 {
+    use std::io::{Read, Write};
+    let config = match ServerConfig::load() {
+        Ok(config) => config,
+        Err(error) => {
+            eprintln!("healthcheck: 读配置失败: {error}");
+            return 1;
+        }
+    };
+    let Some(port) = config
+        .bind
+        .rsplit_once(':')
+        .and_then(|(_, port)| port.parse::<u16>().ok())
+    else {
+        eprintln!("healthcheck: 无法从 bind={} 解析端口", config.bind);
+        return 1;
+    };
+    let addr = format!("127.0.0.1:{port}");
+    let timeout = std::time::Duration::from_secs(3);
+    let mut stream = match std::net::TcpStream::connect(&addr) {
+        Ok(stream) => stream,
+        Err(error) => {
+            eprintln!("healthcheck: 连接 {addr} 失败: {error}");
+            return 1;
+        }
+    };
+    let _ = stream.set_read_timeout(Some(timeout));
+    let _ = stream.set_write_timeout(Some(timeout));
+    if let Err(error) = stream
+        .write_all(b"GET /api/health HTTP/1.0\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+    {
+        eprintln!("healthcheck: 发送失败: {error}");
+        return 1;
+    }
+    let mut response = String::new();
+    let _ = stream.read_to_string(&mut response);
+    let healthy = response
+        .lines()
+        .next()
+        .is_some_and(|status| status.contains(" 200"));
+    if healthy {
+        0
+    } else {
+        eprintln!("healthcheck: /api/health 非 200");
+        1
+    }
+}
+
 fn read_password_twice() -> Option<String> {
     let first = read_line("请输入新密码: ")?;
     if first.is_empty() {
@@ -104,7 +157,8 @@ fn print_help() {
          用法:\n  \
            greywork-server                 启动服务（读 GREYWORK_* 与 <data_dir>/server.json）\n  \
            greywork-server hash-password   从 stdin 读密码并打印 argon2 PHC 串\n  \
-           greywork-server set-password    从 stdin 读密码并写入 <data_dir>/auth.json（0600）\n\n\
+           greywork-server set-password    从 stdin 读密码并写入 <data_dir>/auth.json（0600）\n  \
+           greywork-server healthcheck     探活本机 /api/health（容器 HEALTHCHECK 用），0=健康\n\n\
          常用环境变量:\n  \
            GREYWORK_BIND / GREYWORK_DATA_DIR / GREYWORK_HOME_DIR\n  \
            GREYWORK_PASSWORD_HASH / GREYWORK_PASSWORD\n  \

@@ -90,6 +90,18 @@ pub async fn run() -> Result<(), String> {
         greywork_host::log::info("server", "静态托管: 关闭（仅 /api）");
     }
 
+    // 非环回监听且未启用 secure_cookie：凭据会明文过网。服务端自身不做 TLS，
+    // 生产必须前置 TLS 反代并置 GREYWORK_SECURE_COOKIE=1（cookie 带 Secure）。
+    if !bind_is_loopback(&config.bind) && !config.secure_cookie {
+        greywork_host::log::warn(
+            "server",
+            format!(
+                "监听 {} 为非环回地址但未启用 secure_cookie：登录密码与会话 cookie/Bearer 将明文传输；\
+                 请在 TLS 反代之后运行并设 GREYWORK_SECURE_COOKIE=1。",
+                config.bind
+            ),
+        );
+    }
     // 补一次登录 shell PATH 解析（容器里通常失败即回退继承的 PATH，无副作用）。
     greywork_host::process_guard::init_login_path();
 
@@ -225,4 +237,38 @@ async fn shutdown_signal() {
         _ = terminate => {}
     }
     greywork_host::log::info("server", "收到退出信号，正在关闭");
+}
+
+/// 绑定地址是否为环回（localhost）——据此决定是否提示需要 TLS 反代。
+///
+/// 取 host 部分（`host:port`；IPv6 形如 `[::1]:port`）：`127.0.0.0/8`、`::1`、`localhost`
+/// 视为环回；`0.0.0.0` / `::` / 具体网卡地址视为对外可达。
+fn bind_is_loopback(bind: &str) -> bool {
+    let host = bind.rsplit_once(':').map_or(bind, |(host, _)| host);
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    host.parse::<std::net::IpAddr>()
+        .map(|ip| ip.is_loopback())
+        .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::bind_is_loopback;
+
+    #[test]
+    fn loopback_binds_are_recognized() {
+        assert!(bind_is_loopback("127.0.0.1:8787"));
+        assert!(bind_is_loopback("localhost:8787"));
+        assert!(bind_is_loopback("[::1]:8787"));
+    }
+
+    #[test]
+    fn public_binds_are_not_loopback() {
+        assert!(!bind_is_loopback("0.0.0.0:8787"));
+        assert!(!bind_is_loopback("192.168.1.10:8787"));
+        assert!(!bind_is_loopback("[::]:8787"));
+    }
 }

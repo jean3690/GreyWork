@@ -1,0 +1,48 @@
+# GreyWork headless 服务端（自托管 Web 端）。
+#
+# 首次使用：
+#   1) 生成密码哈希：docker compose run --rm greywork hash-password
+#      把输出的 argon2 PHC 串填进 .env 的 GREYWORK_PASSWORD_HASH。
+#   2) docker compose up -d
+#   3) 浏览器开 http://<host>:8787，用该密码登录。
+#
+# 生产：置于 TLS 反代（Caddy / nginx / Traefik）之后，并设 GREYWORK_SECURE_COOKIE=1。
+# 服务端自身不做 TLS；非环回监听且未开 secure_cookie 时启动会告警（凭据明文）。
+
+services:
+  greywork:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: greywork-server:latest
+    ports:
+      - "8787:8787"
+    environment:
+      # 密码来源（优先级：HASH > auth.json > 明文）。至少给一个，否则首启会生成随机密码并打印到日志。
+      GREYWORK_PASSWORD_HASH: "${GREYWORK_PASSWORD_HASH:-}"
+      # 预授权工作区根（容器内路径，冒号分隔）：只有列出的目录才允许 fs_* / git_* 访问。
+      GREYWORK_WORKSPACE_ROOTS: "${GREYWORK_WORKSPACE_ROOTS:-}"
+      # 置于 TLS 反代之后时设为 1（cookie 带 Secure）。
+      GREYWORK_SECURE_COOKIE: "${GREYWORK_SECURE_COOKIE:-0}"
+      # 可选：额外放行的 agent 程序（逗号分隔），与内置白名单取并集。
+      GREYWORK_AGENT_PROGRAMS: "${GREYWORK_AGENT_PROGRAMS:-}"
+      # 可选：允许被 iframe 内嵌的云端 Office 域名（逗号分隔，如 https://docs.example.com）。
+      # 只在服务端态生效——桌面壳的 CSP 写死在打包配置里，仅支持三个预设厂商。
+      # 非 http(s)://host[:port] 形态的项会被丢弃并在日志里点名（防它改写整条 CSP）。
+      GREYWORK_FRAME_ORIGINS: "${GREYWORK_FRAME_ORIGINS:-}"
+      # 定时任务：置 1 则**本容器**是执行者，到点即跑，不需要一直开着浏览器或自己的电脑。
+      # 注意任务建在服务端库内（桌面端建的任务不在这份库里），见 docs/packaging.md。
+      GREYWORK_AUTOMATION_HOST_PRIMARY: "${GREYWORK_AUTOMATION_HOST_PRIMARY:-0}"
+      # 无人值守执行时模型凭据从**本进程**环境变量读取（对应设置里的 apiKeyEnv），
+      # 不注入则任务会以「无可用模型配置」失败。按你实际用的供应商加：
+      # OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      # ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+    volumes:
+      # db / logs / 通道凭据 / auth.json 都落这里。
+      - greywork-data:/data
+      # 需要 agent 读写的项目目录：挂进来，并把容器内路径加进 GREYWORK_WORKSPACE_ROOTS。
+      # - /path/on/host/project:/work/project:rw
+    restart: unless-stopped
+
+volumes:
+  greywork-data:

@@ -1,0 +1,24 @@
+# 镜像内重建，不进构建上下文
+**/node_modules
+**/dist
+**/target
+.pnpm-store
+
+# VCS 与 CI 杂物
+.git
+.github
+.husky
+
+# 运行期产物 / 本地调试
+logs
+*.log
+.ui-shots
+.playwright
+.playwright-cli
+.vscode
+
+# 密钥 / 数据绝不进镜像
+**/auth.json
+**/*.pem
+.env
+.env.*

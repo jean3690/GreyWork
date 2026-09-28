@@ -226,3 +226,70 @@ Artifacts land in `src-tauri/target/release/bundle/<type>/`.
 - No OpenSSL needed: `reqwest` and `tokio-tungstenite` are both configured with
   rustls (`rustls-tls` / `rustls-tls-webpki-roots`), which vendors its own crypto.
 - WebView2 ships with Windows 10+; on older images install the Evergreen Runtime.
+
+## Self-hosting the web server (Docker)
+
+The headless server (`apps/server`, see [architecture.md](architecture.md#headless-server-appsserver))
+ships the same Vue renderer as a same-origin SPA behind a password login. A multi-stage
+[`Dockerfile`](../Dockerfile) at the repo root builds it:
+
+1. **web** (`node:22`) runs `pnpm build` → `apps/desktop/dist` (renderer only, no Tauri).
+2. **server** (`rust:1`) runs `cargo build --release -p greywork-server` — only the server crate and
+   `greywork-host`, so no WebKit/Tauri system deps are pulled. `cmake` is installed for `aws-lc-rs`
+   (rustls); `rusqlite` compiles bundled SQLite with the base image's C toolchain.
+3. **runtime** (`debian:bookworm-slim`) carries just the binary, the built SPA at `/app/web`,
+   `ca-certificates` and `git`. It runs as a non-root user and serves `0.0.0.0:8787`.
+
+```sh
+# 1) 生成登录密码哈希（argon2 PHC 串），填进 .env
+docker compose run --rm greywork hash-password
+echo 'GREYWORK_PASSWORD_HASH=<paste>' >> .env
+
+# 2) 起服务
+docker compose up -d --build
+
+# 3) 浏览器打开 http://<host>:8787 登录
+```
+
+Key environment variables (full list: `greywork-server help`):
+
+| Variable                           | Purpose                                                                          |
+| ---------------------------------- | -------------------------------------------------------------------------------- |
+| `GREYWORK_PASSWORD_HASH`           | argon2 PHC login password (best source). Else `auth.json` / `GREYWORK_PASSWORD`. |
+| `GREYWORK_WORKSPACE_ROOTS`         | Colon-separated container paths the agent may touch (`fs_*` / `git_*`).          |
+| `GREYWORK_SECURE_COOKIE`           | `1` behind a TLS reverse proxy (adds `Secure` to the session cookie).            |
+| `GREYWORK_AGENT_PROGRAMS`          | Extra allowed agent programs (frozen allow-list; DB is never trusted).           |
+| `GREYWORK_STATIC_DIR`              | SPA dir; the image sets `/app/web`. Missing `index.html` → hard startup failure. |
+| `GREYWORK_FRAME_ORIGINS`           | Comma-separated origins allowed in the CSP `frame-src` (cloud Office viewers).   |
+| `GREYWORK_AUTOMATION_HOST_PRIMARY` | `1` = the server **is** the automation executor (see below).                     |
+
+Design/security notes:
+
+- **No built-in TLS.** Put the container behind a TLS-terminating reverse proxy (Caddy / nginx /
+  Traefik) and set `GREYWORK_SECURE_COOKIE=1`. Binding a non-loopback address without `secure_cookie`
+  logs a startup warning — the password and session token would otherwise cross the wire in clear.
+- **Health probe is self-contained.** `HEALTHCHECK` runs `greywork-server healthcheck` (a raw TCP GET
+  to `/api/health`); the image ships no `curl`/`wget`, keeping the runtime tool surface minimal.
+- **Security headers.** The server sends a strict `Content-Security-Policy` (mirroring the desktop
+  Tauri CSP, plus `media-src blob:` for inbound video/voice thumbnails), `X-Frame-Options: DENY`,
+  `Referrer-Policy: no-referrer` and `X-Content-Type-Options: nosniff` on every response.
+  `GREYWORK_FRAME_ORIGINS` **only** appends a `frame-src` directive — it cannot relax the rest of the
+  policy, and entries that are not a bare `scheme://host[:port]` are dropped with a startup warning
+  (anything containing `;`, quotes, wildcards or whitespace could otherwise rewrite the policy).
+  This is what makes a _custom_ cloud-Office vendor usable on the web build; the desktop shell's CSP
+  is baked into `tauri.conf.json`, so it can only embed the three preset vendors.
+- **Unattended automations.** Scheduled tasks live in the **server's** database — a task created in
+  the desktop app is not visible here (and vice-versa). To have a task run without any browser or
+  desktop machine being open, create it in the server's web UI and set
+  `GREYWORK_AUTOMATION_HOST_PRIMARY=1`; the ticker then claims due runs immediately instead of
+  waiting out the 2-minute "renderer is probably busy" grace window that the desktop shell uses.
+  Both roles go through the same row-level atomic claim, so a renderer that _is_ attached will never
+  double-run a task it already handed over.
+  Unattended runs go straight to the model provider from `settings.modelProviders` — the API key is
+  read from **this process's** environment via `apiKeyEnv`, so inject it into the container
+  (e.g. `-e OPENAI_API_KEY=…` / `.env`) or the run fails with "no usable model config". Tasks bound
+  to an ACP backend are deliberately **not** executed host-side: swapping executors would silently
+  change what the task does. Their runs are recorded as failed and picked up by the next cron window
+  while an app is attached.
+- **Agent runtimes are not bundled.** Add `node` / `python3` / `uvx` etc. in a derived image and list
+  them in `GREYWORK_AGENT_PROGRAMS` if you need those ACP backends.
