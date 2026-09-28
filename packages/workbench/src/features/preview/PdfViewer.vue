@@ -63,7 +63,6 @@ interface PdfPage {
 interface PdfDocument {
   numPages: number;
   getPage: (pageNumber: number) => Promise<PdfPage>;
-  destroy: () => Promise<void>;
 }
 
 const props = defineProps<{ tab: PreviewTab }>();
@@ -83,6 +82,12 @@ const zoom = ref(1);
 const currentPage = ref(1);
 
 let doc: PdfDocument | null = null;
+/**
+ * 当前加载任务。**释放 worker 必须走它**：pdfjs v6 起 `PDFDocumentProxy` 上已经没有
+ * `destroy()`（只剩 `cleanup()`），文档代理本身关不掉 worker —— 旧代码调 `doc.destroy()`
+ * 会在每次切走 PDF 时抛 `destroy is not a function`，worker 也就一直漏。
+ */
+let loadingTask: { destroy: () => Promise<void> } | null = null;
 let activeTasks: PdfRenderTask[] = [];
 /** 渲染代次：内容切换时自增，旧的异步渲染据此自我放弃。 */
 let generation = 0;
@@ -115,7 +120,8 @@ function fitScaleOf(host: HTMLElement, baseWidth: number): number {
 async function teardown(): Promise<void> {
   for (const task of activeTasks) task.cancel();
   activeTasks = [];
-  const current = doc;
+  const current = loadingTask;
+  loadingTask = null;
   doc = null;
   totalPages.value = 0;
   renderedPages.value = 0;
@@ -314,7 +320,7 @@ async function load(bytes: Uint8Array): Promise<void> {
     // 缺 standard_fonts 时未嵌入字体的页面是空白。两种情况 pdf.js 都**静默降级**、不抛错，
     // 所以只能靠这里配对（资源由 vite-plugin-static-copy 从 pdfjs-dist 复制到 /pdfjs/，
     // 见 apps/desktop/vite.config.ts）。路径以 / 开头走 WebView 自身，不受 CSP 的 connect-src 影响。
-    const loadingTask = pdfjs.getDocument({
+    const task = pdfjs.getDocument({
       data: bytes.slice(),
       cMapUrl: "/pdfjs/cmaps/",
       cMapPacked: true,
@@ -322,9 +328,11 @@ async function load(bytes: Uint8Array): Promise<void> {
       wasmUrl: "/pdfjs/wasm/",
       iccUrl: "/pdfjs/iccs/",
     });
-    const opened = (await loadingTask.promise) as unknown as PdfDocument;
+    loadingTask = task;
+    const opened = (await task.promise) as unknown as PdfDocument;
     if (mine !== generation) {
-      await opened.destroy().catch(() => undefined);
+      // 这轮已被更新的一轮取代：关掉自己的 task（worker 随 transport 一起释放）。
+      await task.destroy().catch(() => undefined);
       return;
     }
     doc = opened;
