@@ -37,7 +37,8 @@ export default defineConfig({
       // 按实测留 ~10pt 余量登记（壳层小，主干全能测到，不值得留死空间）。
       include: ["src/**"],
       exclude: ["src/vite-env.d.ts"],
-      thresholds: { statements: 90, lines: 90, branches: 80, functions: 90 },
+      // vitest 5 的 coverage-v8 改用 AST 精确重映射，数值较 v3 偏低；门槛按 5.x 实测重校（2026-09-28）。
+      thresholds: { statements: 90, lines: 90, branches: 80, functions: 88 },
     },
   },
 });

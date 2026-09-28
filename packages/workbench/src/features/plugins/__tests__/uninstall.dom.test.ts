@@ -26,24 +26,8 @@ vi.mock("@greywork/core", async (importOriginal) => {
   return { ...actual, isTauriRuntime: () => true };
 });
 
-const storageHolder = globalThis as { localStorage?: Storage };
-
 function injectStorage(): void {
-  const backing: Record<string, string> = {};
-  storageHolder.localStorage = {
-    getItem: (key: string) => backing[key] ?? null,
-    setItem: (key: string, value: string) => {
-      backing[key] = value;
-    },
-    removeItem: (key: string) => delete backing[key],
-    clear: () => {
-      for (const key of Object.keys(backing)) delete backing[key];
-    },
-    key: (index: number) => Object.keys(backing)[index] ?? null,
-    get length() {
-      return Object.keys(backing).length;
-    },
-  } as Storage;
+  window.localStorage.clear();
 }
 
 function installedPackage(id: string, version: string): Record<string, unknown> {
@@ -110,7 +94,7 @@ describe("插件卸载与悬浮窗回收", () => {
     await runtime.setPluginEnabled("demo.pet", true);
 
     // 预置该插件的声明式状态与一项授权，验证卸载会一并清理。
-    storageHolder.localStorage?.setItem("greywork.plugins.declarativeState", JSON.stringify({ "demo.pet/demo-mode": { count: 3 } }));
+    window.localStorage.setItem("greywork.plugins.declarativeState", JSON.stringify({ "demo.pet/demo-mode": { count: 3 } }));
     runtime.grantPluginCapability("demo.pet", "net.fetch");
     expect(runtime.isPluginCapabilityGranted("demo.pet", "net.fetch")).toBe(true);
 
