@@ -1,0 +1,73 @@
+# 独立于 ci.yml：这条 workflow 只关心「镜像能不能构建、起来后 UI 与探针是否正常」，
+# 有自己的 paths 过滤器，不动 ci.yml 的 job 集合（也就不会碰到 branch protection 的
+# required check 名单）。
+#
+# 刻意**不加** BuildKit 的 type=gha 缓存：仓库缓存额度已顶到 10GB，镜像层的缓存会挤掉
+# Rust 依赖缓存，让 ci.yml 的 Rust job 退化成冷编译。
+name: Docker
+
+on:
+  push:
+    branches: [master, main]
+    paths: &paths
+      - Dockerfile
+      - .dockerignore
+      - docker-compose.yml
+      - docker-compose.sandbox.yml
+      - .env.example
+      - apps/server/**
+      - apps/desktop/**
+      - crates/greywork-host/**
+      - packages/**
+      - patches/**
+      - Cargo.toml
+      - Cargo.lock
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - .github/workflows/docker.yml
+  pull_request:
+    paths: *paths
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    name: Build & smoke-test image
+    runs-on: ubuntu-latest
+    # 镜像内要构建 SPA + 编译 Rust，冷缓存时偏慢。
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t greywork-server:ci .
+
+      - name: Smoke test (health + served SPA)
+        run: |
+          set -euo pipefail
+          docker run -d --name gw-ci -p 127.0.0.1:8787:8787 \
+            -e GREYWORK_PASSWORD=ci-password \
+            greywork-server:ci
+          # 首启要建库 / 写 auth.json；轮询而不是 sleep 定值。
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8787/api/health >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:8787/api/health | grep -q '"status":"ok"'
+          # 服务端托管的 SPA 必须真的出来（否则镜像「healthy 但 UI 404」）。
+          curl -fsS http://127.0.0.1:8787/ | grep -q '<div id="app">'
+          # 加固头在真实响应上生效。
+          curl -fsSI http://127.0.0.1:8787/ | grep -qi 'content-security-policy'
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker logs gw-ci || true
+
+      - name: Stop container
+        if: always()
+        run: docker rm -f gw-ci || true
