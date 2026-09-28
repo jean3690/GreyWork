@@ -996,6 +996,8 @@ export const enUS: MessageSchema = {
   automation: {
     title: "Scheduled tasks",
     sub: "Scheduled tasks run by time or rules; tasks are persisted and can be re-run any time via Run Now.",
+    whereHint:
+      "Tasks live in this server's database — the desktop app keeps a separate set. To keep them running after the browser is closed, set GREYWORK_AUTOMATION_HOST_PRIMARY=1 on the server.",
     create: "New automation",
     neverRun: "Never run",
     lastRun: "Last run: {last}",

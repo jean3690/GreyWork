@@ -1764,7 +1764,7 @@ mod tests {
         let stale_due_at = chrono::Utc::now().timestamp_millis() - 180_000;
         db.automation_due_push(&task, stale_due_at).unwrap();
 
-        crate::host_exec::claim_and_run(&db).await;
+        crate::host_exec::claim_and_run(&db, crate::host_exec::DEFAULT_STALE_AFTER_MS).await;
 
         let remaining = db.automation_due_list().unwrap();
         assert!(remaining.is_empty(), "过期行已被消费");
@@ -1807,10 +1807,29 @@ mod tests {
         db.automation_due_push(&task, chrono::Utc::now().timestamp_millis())
             .unwrap();
 
-        crate::host_exec::claim_and_run(&db).await;
+        crate::host_exec::claim_and_run(&db, crate::host_exec::DEFAULT_STALE_AFTER_MS).await;
 
         let remaining = db.automation_due_list().unwrap();
         assert_eq!(remaining.len(), 1, "fresh 行留给渲染端");
+    }
+
+    #[tokio::test]
+    async fn host_primary_claims_fresh_rows() {
+        // 服务端 `GREYWORK_AUTOMATION_HOST_PRIMARY=1` 的语义：宿主是主执行者，阈值为 0，
+        // 到点即认领 —— 与上一个用例是**同一个函数、同一份行**，只有阈值不同，
+        // 以此钉死「替补 vs 主执行者」确实由这一个参数区分。
+        let db = Db::open_in_memory().expect("open");
+        let task = task("at-host-primary", None, true);
+        db.sync_automations(std::slice::from_ref(&task)).unwrap();
+        db.automation_due_push(&task, chrono::Utc::now().timestamp_millis())
+            .unwrap();
+
+        crate::host_exec::claim_and_run(&db, crate::host_exec::HOST_PRIMARY_STALE_AFTER_MS).await;
+
+        assert!(
+            db.automation_due_list().unwrap().is_empty(),
+            "阈值 0 时刚入队的行就该被认领"
+        );
     }
 
     #[test]
@@ -2003,7 +2022,8 @@ mod tests {
         db.automation_due_push(&bound, chrono::Utc::now().timestamp_millis() - 180_000)
             .unwrap();
 
-        let outcomes = crate::host_exec::claim_and_run(&db).await;
+        let outcomes =
+            crate::host_exec::claim_and_run(&db, crate::host_exec::DEFAULT_STALE_AFTER_MS).await;
 
         assert_eq!(outcomes.len(), 1);
         assert!(!outcomes[0].ok);

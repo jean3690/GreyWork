@@ -977,6 +977,8 @@ export const zhCN = {
   automation: {
     title: "定时任务",
     sub: "按时间或规则定时执行的任务；任务已持久化，可手动 Run Now 随时复跑。",
+    whereHint:
+      "任务存在本服务端的库里，桌面端另有一份、互不可见。要让它在浏览器关掉后照跑，需服务端置 GREYWORK_AUTOMATION_HOST_PRIMARY=1。",
     create: "新建自动化",
     neverRun: "从未运行",
     lastRun: "上次运行：{last}",

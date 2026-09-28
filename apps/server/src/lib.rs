@@ -123,11 +123,29 @@ pub async fn run() -> Result<(), String> {
         config.session_ttl(),
     )?);
 
-    // 调度器：宿主兜底执行（浏览器不在场时自动化仍能跑）。本函数在 tokio runtime 里，
-    // 可直接 `tokio::spawn`（桌面壳的 setup 不在 runtime 里，故那边用 tauri 的 spawn）。
+    // 调度器：宿主执行自动化。
+    //
+    // `GREYWORK_AUTOMATION_HOST_PRIMARY=1` 时阈值归零 —— 宿主是**主执行者**，到点即跑，
+    // 不需要任何浏览器/桌面端在场；这才是「定时任务放到服务器上，不用一直开着电脑」的语义。
+    // 不配时与桌面端同语义：宿主只是替补，等渲染端 2 分钟不来才接手（用户开着浏览器用 Web UI
+    // 的形态下，让服务端抢跑会让任务在用户眼前"消失"到另一个执行者）。
+    // 两种阈值都走 `automation_due_finish` 的行级原子认领，双执行防护一致。
+    let stale_after_ms = if config.automation_host_primary {
+        greywork_host::host_exec::HOST_PRIMARY_STALE_AFTER_MS
+    } else {
+        greywork_host::host_exec::DEFAULT_STALE_AFTER_MS
+    };
+    if config.automation_host_primary {
+        greywork_host::log::info(
+            "scheduler",
+            "定时任务：宿主为主执行者（到点即执行，无需渲染端在场）",
+        );
+    }
     let ticker_host = Arc::clone(&host);
     let ticker_db = config.data_dir.join("greywork.db");
-    tokio::spawn(async move { greywork_host::scheduler::run_ticker(ticker_host, ticker_db).await });
+    tokio::spawn(async move {
+        greywork_host::scheduler::run_ticker(ticker_host, ticker_db, stale_after_ms).await
+    });
 
     let ctx = Arc::new(CommandContext {
         host: Arc::clone(&host),

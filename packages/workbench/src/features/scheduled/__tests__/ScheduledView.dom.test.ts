@@ -171,4 +171,33 @@ describe("ScheduledView", () => {
     const openBtn = panel.findAll("button").find((b) => b.text().includes("查看会话"));
     expect(openBtn).toBeDefined();
   });
+
+  // 边界：任务落在哪一侧库、以及无人值守要开哪个开关 —— 只在服务端态提示。
+  // 桌面端的任务在自己库里，浏览器预览态压根没有服务端，两种情形下提这个开关都是噪音。
+  describe("服务端态提示", () => {
+    const override = (mode: string) => {
+      (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = mode;
+    };
+
+    afterEach(() => {
+      delete (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__;
+    });
+
+    it("服务端态显示「任务在哪、怎么无人值守」的提示", async () => {
+      override("server");
+      const wrapper = await mountView();
+      const hint = wrapper.find('[data-testid="automation-where-hint"]');
+      expect(hint.exists()).toBe(true);
+      expect(hint.text()).toContain("GREYWORK_AUTOMATION_HOST_PRIMARY");
+    });
+
+    it("桌面态与浏览器预览态不显示该提示", async () => {
+      for (const mode of ["desktop", "browser-preview"]) {
+        override(mode);
+        const wrapper = await mountView();
+        expect(wrapper.find('[data-testid="automation-where-hint"]').exists(), `${mode} 态不该出现服务端提示`).toBe(false);
+        wrapper.unmount();
+      }
+    });
+  });
 });

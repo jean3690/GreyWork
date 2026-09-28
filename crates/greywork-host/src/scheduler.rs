@@ -41,10 +41,15 @@ pub struct AutomationDuePayload {
 
 /// 周期 tick 循环（**无限循环，由各宿主自行 spawn**）。
 ///
+/// `stale_after_ms` 透传给 [`host_exec::claim_and_run`]，决定宿主是「替补」还是
+/// 「主执行者」：桌面壳传 [`host_exec::DEFAULT_STALE_AFTER_MS`]（渲染端在场，宿主兜底）；
+/// 无人值守服务端传 [`host_exec::HOST_PRIMARY_STALE_AFTER_MS`]（到点即执行，不必等
+/// 一台开着的电脑）。两种角色对到期的判定（cron / once）完全一致，差别只在多晚认领。
+///
 /// 不在本函数里 spawn：桌面壳在 Tauri `setup` 阶段调用，那时还没有 tokio runtime 上下文，
 /// 裸 `tokio::spawn` 会 panic；服务端则希望用自己的 runtime。把「怎么起」留给宿主，
 /// 这里只管「跑什么」。
-pub async fn run_ticker(host: Arc<dyn HostContext>, db_path: PathBuf) {
+pub async fn run_ticker(host: Arc<dyn HostContext>, db_path: PathBuf, stale_after_ms: i64) {
     // ticker 持独立连接（只读路径：load_automations）；与 manage 的主连接
     // 经 WAL 共存。打开失败（罕见）时重试，每 30s 一次。
     let db = loop {
@@ -144,10 +149,11 @@ pub async fn run_ticker(host: Arc<dyn HostContext>, db_path: PathBuf) {
                 }
             }
         }
-        // 宿主兜底消费：渲染端超 2min 未消费的到期任务（webview 缺席/长忙），
-        // 宿主直接以默认 LLM 单轮回合并落库——不依赖渲染端在线。
+        // 宿主消费到期任务。桌面端这是**兜底**（渲染端超 2min 未消费才算它缺席）；
+        // 服务端配了 GREYWORK_AUTOMATION_HOST_PRIMARY 时阈值为 0，宿主就是主执行者。
+        // 两种情形都走同一套行级原子认领，双执行防护不变。
         // 逐条结果转系统通知：这是窗口不可见时用户唯一的感知面。
-        for outcome in host_exec::claim_and_run(&db).await {
+        for outcome in host_exec::claim_and_run(&db, stale_after_ms).await {
             let title = if outcome.ok {
                 "自动化已完成"
             } else {

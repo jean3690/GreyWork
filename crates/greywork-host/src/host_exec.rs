@@ -1,16 +1,22 @@
-//! 宿主自主执行（automation 队列兜底消费）。
+//! 宿主自主执行（automation 队列消费）。
 //!
-//! 架构：到期任务由渲染端单消费循环执行（30s 轮询）；当渲染端整体缺席
-//! （webview 崩溃/长忙）时，宿主在本模块直接以默认 LLM 配置跑单轮回合并落库，
-//! 任务不再因 60min 窗口过期而丢失。
+//! 架构：到期任务由渲染端单消费循环执行（30s 轮询）；渲染端缺席时，宿主在本模块
+//! 直接以默认 LLM 配置跑单轮回合并落库，任务不再因 60min 窗口过期而丢失。
+//!
+//! **两种角色由阈值区分**（[`claim_and_run`] 的 `stale_after_ms`）：
+//! - *兜底*（桌面壳）：只捡 due 后超过 2 分钟的 pending 行 —— 渲染端 30s 轮询正常时
+//!   不可能滞留这么久，2 分钟也覆盖渲染端短忙。宿主是替补。
+//! - *主执行者*（`GREYWORK_AUTOMATION_HOST_PRIMARY=1` 的服务端）：阈值为 0，到点即认领。
+//!   无人值守服务端的诉求就是「不用开着自己的电脑」，让宿主迟到 2 分钟才接手，
+//!   等于任务被推迟；这里宿主本就该是主执行者。
+//!
+//! 两种角色共用同一条行级原子认领（`automation_due_finish` 的 `WHERE status='pending'`），
+//! 所以「渲染端与宿主同时在场」时也不会重复执行 —— 谁先 finish 谁赢。
 //!
 //! 边界与安全：
 //! - **只走 LLM 直连**（无工具/无 ACP/无权限请求面）——无人值守不存在权限裁决问题。
-//!   绑定 ACP 后端的任务因此**不由宿主兜底**：换一个执行者跑用户明确指定的后端，
+//!   绑定 ACP 后端的任务因此**不由宿主执行**：换一个执行者跑用户明确指定的后端，
 //!   等于悄悄改了任务语义；这类行直接 finish failed，等下个 cron 由应用内执行。
-//! - **迟到认领**：只捡 due_at 早于 now-2min 的 pending 行（渲染端 30s 轮询
-//!   正常时不可能滞留 2min；2min 也覆盖渲染端短忙）。行级 finish 原子认领
-//!   兜底渲染端/宿主毫秒级竞态（重复执行同一 intent 至多一次，无害）。
 //! - **单轮语义**：intent 视为完整指令（cron 每次独立执行），不带多轮历史。
 //! - 无可用 LLM 配置（settings 未初始化/无供应商）→ finish failed，下个 cron 再试。
 
@@ -19,8 +25,10 @@ use crate::llm;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
-/// 宿主认领阈值：due 后超过该时长仍未消费视为渲染端缺席。
-const STALE_AFTER_MS: i64 = 120_000;
+/// 兜底模式的认领阈值：due 后超过该时长仍未消费视为渲染端缺席（桌面壳用）。
+pub const DEFAULT_STALE_AFTER_MS: i64 = 120_000;
+/// 主执行者模式的认领阈值：0 = 到点即可认领（无人值守服务端用）。
+pub const HOST_PRIMARY_STALE_AFTER_MS: i64 = 0;
 /// 每轮最多执行的积压数（防一次 tick 打爆限流）。
 const MAX_CLAIM_PER_TICK: u32 = 3;
 
@@ -36,10 +44,13 @@ pub struct Outcome {
 
 /// 每轮 tick 调用：捡过期 pending 逐条执行（失败 finish failed，不重试）。
 ///
+/// `stale_after_ms` 决定「多晚算渲染端缺席」：[`DEFAULT_STALE_AFTER_MS`] 是替补语义，
+/// [`HOST_PRIMARY_STALE_AFTER_MS`] 是主执行者语义。两种都走行级原子认领，双执行防护不变。
+///
 /// 返回本轮逐条结果——渲染端缺席时它是用户唯一的感知面，由 `scheduler` 转成
 /// 系统通知（本模块不碰 AppHandle，db 单测可以只喂 `&Db` 直接调）。
-pub async fn claim_and_run(db: &Db) -> Vec<Outcome> {
-    let stale = match db.automation_due_list_stale(STALE_AFTER_MS, MAX_CLAIM_PER_TICK) {
+pub async fn claim_and_run(db: &Db, stale_after_ms: i64) -> Vec<Outcome> {
+    let stale = match db.automation_due_list_stale(stale_after_ms, MAX_CLAIM_PER_TICK) {
         Ok(items) => items,
         Err(error) => {
             crate::log::error("host-exec", format!("拉取过期队列失败: {error}"));

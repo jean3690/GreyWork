@@ -50,6 +50,15 @@ pub struct ServerConfig {
     ///
     /// 只接受 `scheme://host[:port]` 形态；非法项会被丢弃并在启动日志里点名。
     pub frame_origins: Vec<String>,
+    /// 宿主是否作为定时任务的**主执行者**（`GREYWORK_AUTOMATION_HOST_PRIMARY=1`）。
+    ///
+    /// 默认 `false`：与桌面壳一致，宿主只做兜底（到期 2 分钟后才认领），适合「浏览器
+    /// 一直开着」的用法。置 `true` 后阈值归零，到点即由本进程执行 —— 这才是
+    /// 「把定时任务放到服务器上跑，不用一直开着自己的电脑」要的语义。
+    ///
+    /// 注意无人值守的模型凭证来自**本进程的环境变量**（`modelProviders[].apiKeyEnv`），
+    /// 容器里必须在 compose 注入；否则任务会以「无可用模型配置」失败。
+    pub automation_host_primary: bool,
     /// 构建产物目录（SPA）。`None` = 不托管静态资源（仅 /api）。
     ///
     /// 刻意不给默认路径：`cargo run` 开发态、纯 API 部署都不该悄悄挂上一份过期的
@@ -75,6 +84,8 @@ impl Default for ServerConfig {
             secure_cookie: false,
             allowed_origins: Vec::new(),
             frame_origins: Vec::new(),
+            // fail-safe：默认不接管执行权。升级上来的部署不会因为换了版本就突然自己跑任务。
+            automation_host_primary: false,
             static_dir: None,
         }
     }
@@ -152,6 +163,9 @@ impl ServerConfig {
         }
         if let Some(value) = env_str("GREYWORK_FRAME_ORIGINS") {
             self.frame_origins = split_list(&value, ',');
+        }
+        if let Some(value) = env_str("GREYWORK_AUTOMATION_HOST_PRIMARY") {
+            self.automation_host_primary = parse_bool(&value);
         }
         if let Some(value) = env_str("GREYWORK_STATIC_DIR") {
             self.static_dir = Some(PathBuf::from(value));
