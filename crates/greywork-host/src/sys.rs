@@ -1,9 +1,10 @@
 //! 系统诊断面（进程内形态）。设置页「关于」卡消费：版本 / DB schema / 日志目录 /
 //! 活跃 ACP 进程 / 内存 / 核数。
 //!
-//! 放在共享 crate 的依据：除「应用版本」与「是否真有托盘」外，其余字段都是纯进程信息，
-//! 与宿主无关。两项宿主相关的输入由调用方传入 —— 桌面壳传 `env!("CARGO_PKG_VERSION")`
-//! 与 `TrayState::available()`，headless 服务端传自身版本与 `false`。
+//! 放在共享 crate 的依据：除「宿主侧事实」外，其余字段都是纯进程信息，与宿主无关。
+//! 那些事实（应用版本、是否真有托盘、配置钉住的沙箱/档位）由调用方打包进
+//! [`HostFacts`] 注入 —— 桌面壳传自身 `CARGO_PKG_VERSION` 与 `TrayState::available()`，
+//! headless 服务端传自身版本、`false` 与配置钉住情况（见 apps/server）。
 //!
 //! **留桌面**的是「在文件管理器里揭示 / 打开已授权路径」—— 那是纯宿主能力
 //! （`tauri_plugin_opener`），headless 没有对应物。
@@ -12,6 +13,23 @@ use serde::Serialize;
 
 use crate::acp_host::AcpHost;
 use crate::db::Db;
+
+/// 宿主侧事实：实现本身无法得知、由宿主注入的输入。
+///
+/// 刻意是**一个结构**而不是一串参数：桌面与服务端各填各的，加字段时两侧的注入点
+/// 一眼可见（漂移靠编译器 —— 漏填任何一项都编不过）。
+#[derive(Clone, Debug)]
+pub struct HostFacts {
+    /// 应用版本（通常是其 crate 的 `CARGO_PKG_VERSION`）。
+    pub version: String,
+    /// 宿主是否真的建出了系统托盘。headless 恒 `false`。
+    pub tray_available: bool,
+    /// 宿主是否钉死了 agent 沙箱（服务端配置了 `GREYWORK_SANDBOX` 时为真，
+    /// 与 `policy::overlay_args` 的覆盖条件同源）。桌面壳没有配置覆盖，恒 `false`。
+    pub pinned_sandbox: bool,
+    /// 宿主钉死的权限档位（服务端配置了 `GREYWORK_TIER` 时有值）。桌面恒 `None`。
+    pub pinned_tier: Option<String>,
+}
 
 /// 系统诊断快照。
 #[derive(Serialize)]
@@ -34,6 +52,10 @@ pub struct SysInfo {
     pub total_memory_bytes: Option<u64>,
     /// 逻辑核数。取不到为 0（渲染端回落 `navigator.hardwareConcurrency`）。
     pub cpu_count: usize,
+    /// 宿主是否钉死了 agent 沙箱。设置页据此把沙盒卡置灰并说明。
+    pub pinned_sandbox: bool,
+    /// 宿主钉死的权限档位。设置页据此把档位卡置灰并说明。
+    pub pinned_tier: Option<String>,
 }
 
 /// 逻辑核数。`available_parallelism` 是标准库唯一的可移植入口；容器里被 cgroup 限核时
@@ -96,22 +118,19 @@ pub fn total_memory_bytes() -> Option<u64> {
     }
 }
 
-/// 系统信息快照。`version` 与 `tray_available` 由调用方提供（见模块头注释）。
-pub async fn sys_info(
-    db: &Db,
-    acp: &AcpHost,
-    tray_available: bool,
-    version: &str,
-) -> Result<SysInfo, String> {
+/// 系统信息快照。宿主侧事实见 [`HostFacts`]。
+pub async fn sys_info(db: &Db, acp: &AcpHost, facts: &HostFacts) -> Result<SysInfo, String> {
     Ok(SysInfo {
-        version: version.to_string(),
+        version: facts.version.clone(),
         schema_version: db.schema_version()?,
         log_dir: crate::log::dir().map(|path| path.to_string_lossy().into_owned()),
         active_agents: acp.session_count().await,
         os: std::env::consts::OS.to_string(),
-        tray_available,
+        tray_available: facts.tray_available,
         total_memory_bytes: total_memory_bytes(),
         cpu_count: cpu_count(),
+        pinned_sandbox: facts.pinned_sandbox,
+        pinned_tier: facts.pinned_tier.clone(),
     })
 }
 
@@ -130,6 +149,8 @@ mod tests {
             tray_available: false,
             total_memory_bytes: Some(8 * 1024 * 1024 * 1024),
             cpu_count: 8,
+            pinned_sandbox: true,
+            pinned_tier: Some("read-only".into()),
         })
         .expect("serialize");
         let map = json.as_object().expect("object");
@@ -142,7 +163,26 @@ mod tests {
         assert!(map.contains_key("trayAvailable"));
         assert!(map.contains_key("totalMemoryBytes"));
         assert!(map.contains_key("cpuCount"));
+        assert!(map.contains_key("pinnedSandbox"));
+        assert!(map.contains_key("pinnedTier"));
         assert_eq!(map["version"], "0.1.0");
+    }
+
+    #[tokio::test]
+    async fn host_facts_flow_into_sys_info() {
+        let db = Db::open_in_memory().expect("db");
+        let acp = AcpHost::default();
+        let facts = HostFacts {
+            version: "9.9.9-test".into(),
+            tray_available: true,
+            pinned_sandbox: true,
+            pinned_tier: Some("read-only".into()),
+        };
+        let info = sys_info(&db, &acp, &facts).await.expect("sys_info");
+        assert_eq!(info.version, "9.9.9-test");
+        assert!(info.tray_available);
+        assert!(info.pinned_sandbox);
+        assert_eq!(info.pinned_tier.as_deref(), Some("read-only"));
     }
 
     #[test]

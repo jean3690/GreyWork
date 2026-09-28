@@ -36,8 +36,8 @@ use crate::wecom::WecomHost;
 use crate::workspace_fs::WorkspaceFsAccess;
 use crate::{
     acp_host, channel_media, db, dingtalk, discord, feishu, git, llm, mcp, mcp_registry, office,
-    plugin_market, qq, sheet, skills_market, store_fs, telegram, update, web_fetch, wechat, wecom,
-    workspace_fs, worktree,
+    plugin_market, qq, sheet, skills_market, store_fs, sys, telegram, update, web_fetch, wechat,
+    wecom, workspace_fs, worktree,
 };
 
 /// 命令的鉴权要求。
@@ -101,6 +101,11 @@ pub struct CommandContext {
     /// 自行传给 `office::host_info`），服务端填 `GREYWORK_FRAME_ORIGINS`。共享层无从得知，
     /// 只能由宿主注入 —— 所以 `office_host_info` 是本表里少数要读 `ctx` 的「无状态」命令。
     pub frame_origins: Arc<Vec<String>>,
+    /// 宿主侧事实（版本 / 托盘有无 / 配置钉住的沙箱与档位），`sys_info` 消费。
+    ///
+    /// 与 `agent_programs` / `frame_origins` 同一注入风格。桌面端不构造
+    /// `CommandContext`（其 `#[tauri::command]` 包装自行填 [`sys::HostFacts`]）。
+    pub host_facts: sys::HostFacts,
 }
 
 /// 零参命令的占位入参：`null` / `{}` / 缺失都接受。
@@ -243,9 +248,13 @@ macro_rules! command_table {
 }
 
 command_table! {
-    // ---- sys（桌面专属） ----
-    { "sys_info", auth: Auth::Required, desktop: true, binary: false,
-        args: UnitArgs, run: |_ctx, _a| async move { Err::<Json<()>, String>("仅桌面端可用".into()) } }
+    // ---- sys ----
+    // `sys_info` 的实现本就是宿主无关的（见 `sys` 模块头注释），宿主侧事实走
+    // `ctx.host_facts` 注入 —— 服务端调用时 `tray_available` 为 false、版本是服务端自己的。
+    // 桌面壳另有一份 `#[tauri::command]` 薄包装（apps/desktop/src-tauri/src/sys.rs）。
+    { "sys_info", auth: Auth::Required, desktop: false, binary: false,
+        args: UnitArgs,
+        run: |ctx, _a| async move { sys::sys_info(&ctx.db, &ctx.acp, &ctx.host_facts).await.map(Json) } }
     { "reveal_path", auth: Auth::Required, desktop: true, binary: false,
         args: UnitArgs, run: |_ctx, _a| async move { Err::<Json<()>, String>("仅桌面端可用".into()) } }
     { "open_path", auth: Auth::Required, desktop: true, binary: false,
@@ -751,12 +760,17 @@ mod tests {
             agent_programs: Arc::new(Vec::new()),
             // 非空样例：既覆盖「宿主白名单被如实回给渲染端」，也让下面的冒烟断言有东西可断。
             frame_origins: Arc::new(vec!["https://docs.example.com".to_string()]),
+            host_facts: sys::HostFacts {
+                version: "9.9.9-test".to_string(),
+                tray_available: false,
+                pinned_sandbox: true,
+                pinned_tier: Some("read-only".to_string()),
+            },
         }
     }
 
     /// 桌面专属命令集合（与计划表一致；漂移测试的另一半在桌面壳）。
     const DESKTOP_ONLY: &[&str] = &[
-        "sys_info",
         "reveal_path",
         "open_path",
         "set_unsaved_changes",
@@ -820,10 +834,22 @@ mod tests {
         assert!(matches!(out, CommandOutput::Json(Value::Null)));
 
         // 桌面专属命令明确拒绝。
-        let error = dispatch("sys_info", Value::Null, &ctx)
+        let error = dispatch("reveal_path", Value::Null, &ctx)
             .await
-            .expect_err("sys_info 应被拒绝");
+            .expect_err("reveal_path 应被拒绝");
         assert!(error.contains("仅桌面端可用"), "实际错误：{error}");
+
+        // sys_info 走得通：宿主侧事实从 ctx 注入，如实回传（服务端不再谎报）。
+        let out = dispatch("sys_info", Value::Null, &ctx)
+            .await
+            .expect("dispatch sys_info");
+        let CommandOutput::Json(value) = out else {
+            panic!("sys_info 应返回 JSON");
+        };
+        assert_eq!(value["version"], "9.9.9-test");
+        assert_eq!(value["trayAvailable"], serde_json::json!(false));
+        assert_eq!(value["pinnedSandbox"], serde_json::json!(true));
+        assert_eq!(value["pinnedTier"], serde_json::json!("read-only"));
 
         // 未知命令。
         assert!(dispatch("no_such_command", Value::Null, &ctx)

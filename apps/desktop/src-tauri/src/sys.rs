@@ -1,7 +1,8 @@
 //! 系统诊断面的桌面命令入口 + 用系统程序揭示 / 打开已授权路径。
 //!
-//! 「系统信息」的实现收在 `greywork_host::sys`（与 headless 服务端共用）：本壳只补上
-//! 两项宿主相关输入 —— 应用版本与「是否真有托盘」。
+//! 「系统信息」的实现收在 `greywork_host::sys`（与 headless 服务端共用）：本壳注入
+//! 宿主侧事实 —— 应用版本、托盘有无，以及钉住的沙箱/档位（桌面没有配置覆盖，恒
+//! false/None）。同一实现服务端也能经命令表调到（`sys_info` 已非桌面专属）。
 //! 「揭示 / 打开」是纯宿主能力（`tauri_plugin_opener`），留在桌面壳。
 
 use tauri::State;
@@ -13,7 +14,14 @@ pub async fn sys_info(
     acp: State<'_, std::sync::Arc<crate::acp_host::AcpHost>>,
     tray: State<'_, crate::tray::TrayState>,
 ) -> Result<greywork_host::sys::SysInfo, String> {
-    greywork_host::sys::sys_info(&db, &acp, tray.available(), env!("CARGO_PKG_VERSION")).await
+    let facts = greywork_host::sys::HostFacts {
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        tray_available: tray.available(),
+        // 桌面端没有服务端那种配置覆盖：沙箱/档位始终由客户端请求决定。
+        pinned_sandbox: false,
+        pinned_tier: None,
+    };
+    greywork_host::sys::sys_info(&db, &acp, &facts).await
 }
 
 /// 在系统文件管理器中揭示已获授权的路径。

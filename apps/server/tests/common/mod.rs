@@ -101,6 +101,13 @@ fn make_state(tmp: &Path, config: ServerConfig) -> AppState {
         wecom: Arc::new(greywork_host::wecom::WecomHost::default()),
         agent_programs: Arc::new(config.agent_programs.clone()),
         frame_origins: Arc::new(config.frame_origins.clone()),
+        // 与 lib.rs 同源：钉住判定看配置有没有值（`policy::overlay_args` 的覆盖条件）。
+        host_facts: greywork_host::sys::HostFacts {
+            version: "0.0.0-test".to_string(),
+            tray_available: false,
+            pinned_sandbox: config.sandbox.is_some(),
+            pinned_tier: config.tier.clone(),
+        },
     });
     let sessions = Arc::new(
         SessionStore::new(&hash_password(PASSWORD).unwrap(), Duration::from_secs(3600)).unwrap(),

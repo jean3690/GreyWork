@@ -179,6 +179,14 @@ pub async fn run() -> Result<(), String> {
         // 本服务端 CSP 的 frame-src 白名单：与 middleware 拼策略用的是同一份配置，
         // 这样 `office_host_info` 回给渲染端的白名单就是**真的**（而非桌面常量）。
         frame_origins: Arc::new(config.frame_origins.clone()),
+        // 宿主侧事实：版本是服务端自己的 crate 版本；沙箱/档位的钉住判定与
+        // `policy::overlay_args` 的覆盖条件同源（配置有值才算钉住）。
+        host_facts: greywork_host::sys::HostFacts {
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            tray_available: false,
+            pinned_sandbox: config.sandbox.is_some(),
+            pinned_tier: config.tier.clone(),
+        },
     });
 
     let state = AppState {

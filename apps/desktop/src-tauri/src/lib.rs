@@ -441,7 +441,6 @@ mod drift_tests {
                 "set_close_to_tray",
                 "set_tray_labels",
                 "set_unsaved_changes",
-                "sys_info",
             ],
         );
     }

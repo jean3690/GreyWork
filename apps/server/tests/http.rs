@@ -115,7 +115,7 @@ async fn desktop_only_command_is_forbidden() {
     let token = login(&h.router, PASSWORD).await;
     let (status, _, body) = send(
         &h.router,
-        with_bearer(command_req("sys_info", Value::Null), &token),
+        with_bearer(command_req("reveal_path", Value::Null), &token),
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
@@ -492,4 +492,27 @@ async fn office_host_info_reports_configured_frame_origins() {
         json!(["https://docs.example.com"]),
         "回的是配置里归一化后的 origin（尾斜杠剥掉、非法项丢弃），不是桌面常量"
     );
+}
+
+/// `sys_info` 在服务端可调，且回传的钉住事实与配置同源。
+///
+/// 渲染端据此把沙盒/档位卡置灰并说明 —— 所以这里断的是「配置钉了什么就报什么」，
+/// 不是桌面常量。托盘在 headless 恒不可用。
+#[tokio::test]
+async fn sys_info_reports_config_pinned_facts() {
+    let h = harness_with("sys-info-pinned", |config, _tmp| {
+        config.sandbox = Some("fs".to_string());
+        config.tier = Some("read-only".to_string());
+    });
+    let token = login(&h.router, PASSWORD).await;
+    let (status, _, body) = send(
+        &h.router,
+        with_bearer(command_req("sys_info", json!({})), &token),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let info = json_body(&body);
+    assert_eq!(info["pinnedSandbox"], json!(true), "配置钉了沙箱要如实报");
+    assert_eq!(info["pinnedTier"], json!("read-only"));
+    assert_eq!(info["trayAvailable"], json!(false), "headless 没有托盘");
 }
