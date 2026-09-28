@@ -6,10 +6,18 @@
 发版流程：新增条目补进对应版本标题下 → 打 `v*` 标签 → `.github/workflows/release.yml` 会自动从本文件
 抽取该版本条目作为 Release 说明。**不要手改 Release 正文**，改这里。
 
-## [Unreleased]
+## [0.4.0] - 2026-09-28
 
 ### 新增
 
+- **web 端新增登出入口**：侧栏底部的占位「用户」行换成真实账户行——显示身份、点击直达助手页，
+  服务端态再给一个登出按钮（桌面态无此概念，不渲染）。登出走 `POST /api/logout` 且二次确认；
+  无论请求成败（含 401 与网络异常）本端都会把登录门重新关上——「登出的语义是本端不再持有会话」，
+  不把「服务器没收到」当成「还登着」。
+- **服务端命令目录与逐命令能力发现**：`GET /api/commands` 在既有元数据上新增 `available` 字段
+  （「本宿主禁用」与 `desktopOnly` 的「任何宿主都没有」刻意分开）；渲染端新增命令能力表 store
+  首用即拉、会话内缓存。能力值三态：`true` 放行、`false` 明确禁用、`null` 未知——读路径
+  fail-open（未知不禁），服务端写路径 fail-closed（未知不写），语义由调用方各取所需。
 - **云端 Office 预览**：新增「第三方服务」设置，可配置多家云端 Office（WPS / 腾讯文档等）的文档
   预览：选中文件由**宿主**按声明式配方上传到厂商接口，取回可内嵌的文档地址后在预览区用 iframe
   打开 —— 能看本地解析不了的大文档，且厂商凭证只经环境变量注入宿主、不进渲染端。宿主把真实的
@@ -120,6 +128,15 @@
 
 ### 变更
 
+- **服务端态的界面开始说实话**：更新检查、系统信息的门从「是不是 Tauri」换成「宿主命令可不可用」，
+  浏览器预览态专属的早退不再误伤服务端；关于卡显示运行形态与服务端版本；沙盒与权限档位卡改按
+  「钉住」判定——服务端把这两样钉在启动配置里时按钮禁用并说明「以服务端为准」，未钉住时照常可改
+  （临时只读开关与档位按钮一并禁）。`sys_info` 如实回传钉住事实与宿主版本，桌面壳传自身状态，
+  服务端取自启动配置、与沙盒覆盖逻辑同源。
+- **agent 目录在服务端态只读**：`db_agents_sync` 被服务端禁用时，设置页与对话底栏的写入面都收起来
+  （新增 / 编辑 / 启停不给点），并就地说明「改动只落在浏览器本地、会与服务端数据库悄悄分叉」；
+  对话底栏选择未启用的后端也不再代用户顺手启用，让「尚未启用」错误就地可见。判据与写路径门同源
+  （命令能力表），未来服务端放开该命令时前端零改动自动恢复可写；图标覆盖层不走这条命令，保持可改。
 - **预览查看器与右侧面板外壳的文案接入 i18n**：DiffViewer / DocViewer / HtmlViewer /
   LegacyOfficeViewer / MarkdownViewer / SheetViewer / SlideViewer / PdfViewer 的加载、
   读取失败、解析失败、空态与工具条摘要，以及 PreviewSider 的区段标签、工具栏 / 标签的
@@ -146,6 +163,13 @@
 
 ### 修复
 
+- **HTTPS 部署下登出清不掉会话 cookie**：带 `Secure` 属性的 cookie 按 RFC 6265bis 只能被同样带
+  `Secure` 的 `Set-Cookie` 覆盖，而清理用的 `Set-Cookie` 固定不带——TLS 反代之后登出后旧 cookie
+  原样留在浏览器里。现与签发共用同一份 `secure_cookie` 配置，清理属性与签发必然一致。
+- **opencode 2.0 下宿主权限裁决全线失效**：opencode 2.0 重命名了权限配置（`permission` 对象 +
+  `bash` → `permissions` 数组 + `shell`），注入的 v1 形状被静默忽略、默认策略全 allow——agent
+  对工具直接执行、从不发 `session/request_permission`，宿主的只读 / 工作区档位就没有裁决入口。
+  预设与链路测试改为同时注入 v1 / v2 两种形状（两版本各读各的键互不冲突）。
 - **git 查询不再可能永久挂起**：宿主跑 git 用的是 `Command::output()`，既没有超时窗口
   （巨型仓库 / 冷缓存 / 网络盘上的 `status`、`diff` 长时间不出结果时，渲染端会一直转圈），
   也会在管道写满而无人读时死锁。现在改成 spawn + 读线程抽干管道 + 主线程轮询退出状态：
@@ -362,7 +386,7 @@
 
 **安装包**：Linux 用 `.deb`（`sudo dpkg -i` 或 `apt install ./`），Windows 用 NSIS 安装器，macOS 用 `.dmg`。
 
-[Unreleased]: https://github.com/jean3690/GreyWork/compare/v0.3.0...HEAD
+[0.4.0]: https://github.com/jean3690/GreyWork/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/jean3690/GreyWork/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/jean3690/GreyWork/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/jean3690/GreyWork/compare/v0.1.0...v0.1.1
