@@ -1,0 +1,23 @@
+# 沙盒叠加：让 agent 的 fs / full 两档沙盒真正可用。
+#
+# 用法：
+#   docker compose -f docker-compose.yml -f docker-compose.sandbox.yml up -d
+#
+# 为什么需要它：默认容器里 bwrap 探针必失败（seccomp 拦 clone/unshare，且缺 CAP_SYS_ADMIN），
+# 宿主于是把沙盒**降级为 off** —— 意味着 agent 进程能读到 /data 里的 auth.json 与各通道凭据。
+# 实测矩阵（见 crates/greywork-host/src/sandbox.rs 的 bwrap_functional 注释）：
+#   - 默认 / 仅 seccomp=unconfined / 仅 SYS_ADMIN          → 两档都失败
+#   - seccomp=unconfined + SYS_ADMIN                        → full 可用，fs 失败（回环 RTM_NEWADDR）
+#   - seccomp=unconfined + SYS_ADMIN + NET_ADMIN（本文件）   → fs 与 full 都可用
+#   - --privileged                                          → 两档都可用（兜底，不推荐）
+#
+# 代价（必须知情）：seccomp 全关 + 授予 SYS_ADMIN / NET_ADMIN，容器逃逸面明显变大。
+# 只在「确实需要 agent 沙盒」且信任镜像来源时叠加；否则保持默认（沙盒 off）更安全。
+services:
+  greywork:
+    # no-new-privileges 由基础文件提供（compose 会追加而非替换本列表）。
+    security_opt:
+      - seccomp=unconfined
+    cap_add:
+      - SYS_ADMIN
+      - NET_ADMIN

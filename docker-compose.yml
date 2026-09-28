@@ -42,6 +42,10 @@ services:
       - greywork-data:/data
       # 需要 agent 读写的项目目录：挂进来，并把容器内路径加进 GREYWORK_WORKSPACE_ROOTS。
       # - /path/on/host/project:/work/project:rw
+    # 默认不提权：禁止进程通过 setuid/setgid 提权（对 agent 子进程同样生效）。
+    # 需要 agent 沙盒的 fs / full 档时叠加 docker-compose.sandbox.yml（它会替换本列表）。
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
 
 volumes:
