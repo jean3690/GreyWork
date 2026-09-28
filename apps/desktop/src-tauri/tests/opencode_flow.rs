@@ -175,6 +175,10 @@ async fn opencode_acp_handshake_and_prompt() {
             if message.contains("Model is disabled")
                 || message.contains("APIError")
                 || message.contains("rate limit")
+                // 代理服务配额（provider.quota）：credits 不足/在途请求占满，
+                // 同属模型服务侧故障，与协议契约无关。
+                || message.contains("provider.quota")
+                || message.contains("credits")
             {
                 println!(
                     "model service unavailable ({}); prompt assertion skipped",

@@ -77,14 +77,23 @@ export const DEFAULT_AGENT_PROVIDERS: AgentProviderConfig[] = [
     enabled: true,
     detect: ["opencode"],
     installHint: "opencode.ai 安装后加入 PATH",
-    // opencode 默认对 edit/bash/webfetch 一律「放行」且从不发 session/request_permission，
+    // opencode 默认对 edit/shell/webfetch 一律「放行」且从不发 session/request_permission，
     // 于是宿主的只读/工作区档位根本没有裁决入口（agent 不问，宿主就没机会拦）。
     // 这里把它拉回「询问」，让档位与权限卡片真正生效：全权档宿主会瞬时自动放行，
     // 只读/工作区档才走拦截或逐条确认。opencode 会把这段与用户自己的 opencode.json 合并，
     // 不会覆盖其 provider 配置；想改回默认放行，在设置里删掉这条环境变量即可。
+    // 权限配置同时注入 v1/v2 两种形状：v2 改了键名与结构（permission 对象+bash →
+    // permissions 数组+shell），只写新形状会让 v1 失去裁决入口，反之亦然；
+    // 两个版本各自只读自己的键、忽略另一个，互不冲突。
     env: {
       OPENCODE_CONFIG_CONTENT: JSON.stringify({
         permission: { edit: "ask", bash: "ask", webfetch: "ask", websearch: "ask" },
+        permissions: [
+          { action: "edit", resource: "*", effect: "ask" },
+          { action: "shell", resource: "*", effect: "ask" },
+          { action: "webfetch", resource: "*", effect: "ask" },
+          { action: "websearch", resource: "*", effect: "ask" },
+        ],
       }),
     },
   },

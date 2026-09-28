@@ -76,10 +76,17 @@ describe("DEFAULT_AGENT_PROVIDERS 结构不变量", () => {
     const opencode = DEFAULT_AGENT_PROVIDERS.find((provider) => provider.id === "opencode");
     const content = opencode?.env?.OPENCODE_CONFIG_CONTENT;
     expect(content).toBeTruthy();
-    // 必须同时满足「合法 JSON」且「四个键都是 ask」：opencode 对非法配置是整体拒绝，
-    // 少写一个键就等于静默退回全放行，权限卡片再也不会弹。
+    // 必须同时带 v1/v2 两种形状且相关动作全是 ask：v2 改了键名与结构
+    // （permission 对象+bash → permissions 数组+shell），只写一边就有版本
+    // 静默退回全放行，权限卡片再也不会弹。两版本各读各的键，互不冲突。
     expect(JSON.parse(content as string)).toEqual({
       permission: { edit: "ask", bash: "ask", webfetch: "ask", websearch: "ask" },
+      permissions: [
+        { action: "edit", resource: "*", effect: "ask" },
+        { action: "shell", resource: "*", effect: "ask" },
+        { action: "webfetch", resource: "*", effect: "ask" },
+        { action: "websearch", resource: "*", effect: "ask" },
+      ],
     });
   });
 
