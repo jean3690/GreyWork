@@ -32,7 +32,13 @@ FROM debian:bookworm-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git \
     && rm -rf /var/lib/apt/lists/*
 # 非 root 运行；挂载 /data 卷时注意宿主目录属主应为 uid=10001。
-RUN useradd --system --create-home --home-dir /home/greywork --uid 10001 greywork
+#
+# /data 必须在镜像里就存在且属于运行用户：Docker 新建（匿名或命名）卷时会**继承镜像里
+# 该路径的属主**，不预先建好就是 root:root，uid 10001 连库文件都建不出来 —— 症状是容器
+# 启动即 `打开数据库失败: unable to open database file: /data/greywork.db`。
+RUN useradd --system --create-home --home-dir /home/greywork --uid 10001 greywork \
+    && mkdir -p /data \
+    && chown greywork:greywork /data
 COPY --from=server /usr/local/bin/greywork-server /usr/local/bin/greywork-server
 COPY --from=web /src/apps/desktop/dist /app/web
 ENV GREYWORK_BIND=0.0.0.0:8787 \
