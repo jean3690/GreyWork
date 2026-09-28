@@ -3,12 +3,14 @@
  *
  * - 桌面 / 服务端：SQLite agent_providers 真源（db_agents_load / db_agents_sync）；
  *   enabled 启停由宿主持久化——渲染端内置缺省只做首次 seed。
- * - 服务端另有一条限制：db_agents_sync 在服务端被禁用（启动命令属于不可信输入，
- *   不能由浏览器改写），所以目录在服务端是**只读**的，save 会明确抛错而不是静默丢弃。
+ * - 服务端另有一条限制：db_agents_sync 通常被服务端禁用（启动命令属于不可信输入，
+ *   不能由浏览器改写），目录在服务端**只读**。是否可写由调用方先问命令能力表判定
+ *   （stores/agent 的 providers 切片，unknown 按不可写）—— 本门面不内嵌策略，这样
+ *   服务端放开禁用时前端零改动自动恢复同步；即便调用方漏判，服务端也会 403 兜底。
  * - 浏览器预览：无后端 → load null / save no-op，agent store 以 localStorage 缓存兜底。
  */
 
-import { hasHostCommands, invoke, runtimeMode } from "@greywork/host-ipc";
+import { hasHostCommands, invoke } from "@greywork/host-ipc";
 
 /** 与 Rust AgentProviderDto 对齐（camelCase）。 */
 export interface AgentProviderRow {
@@ -40,12 +42,9 @@ export const agentsBackend = {
     return await invoke<AgentProviderRow[] | null>("db_agents_load");
   },
 
-  /** 全量替换目录（事务幂等；启停切换驱动）。服务端为只读，抛错而非静默丢弃改动。 */
+  /** 全量替换目录（事务幂等；启停切换驱动）。写路径是否可用由调用方经命令能力表先行判定。 */
   async save(providers: AgentProviderRow[]): Promise<void> {
     if (!hasHostCommands()) return;
-    if (runtimeMode() === "server") {
-      throw new Error("服务端模式下 agent 目录只读：db_agents_sync 已被服务端禁用");
-    }
     await invoke("db_agents_sync", { providers });
   },
 

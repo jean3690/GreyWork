@@ -256,9 +256,10 @@ try {
     );
   }
 
-  // console.error 只提示不拦：这条流程里本来就有两条**预期内**的噪音 ——
-  // 登录前的 401（登录门就是靠它工作的）与服务端模式下 agent 目录只读的同步失败。
-  // 把它们做成硬闸等于把「预期内的降级」当成失败，会让这条 e2e 失去信号价值。
+  // console.error 只提示不拦：这条流程里本来就有**预期内**的噪音 ——
+  // 登录前的 401（登录门就是靠它工作的）。agent 目录的同步报错曾是第二条，
+  // 但写路径门（useCommandCapabilitiesStore）落地后服务端态不再尝试写库，
+  // 再见到它就是回归信号，逐条确认时别放行。
   if (consoleErrors.length > 0) {
     console.warn(`console.error ${consoleErrors.length} 条（未阻断验收，逐条确认是否预期）：`);
     for (const e of consoleErrors.slice(0, 10)) console.warn("  ", e);

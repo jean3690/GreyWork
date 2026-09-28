@@ -6,10 +6,12 @@
  * （经 getRuntime 惰性访问，运行时才绑定，避免切片间建文件时的循环）。
  */
 import type { AgentProviderConfig } from "@greywork/shell";
+import { runtimeMode } from "@greywork/host-ipc";
 import { watch } from "vue";
 import { acp } from "../../lib/acp-client";
 import { agentsBackend, type AgentProviderRow } from "../../lib/agents-backend";
 import { notify } from "../notice";
+import { useCommandCapabilitiesStore } from "../command-capabilities";
 import {
   acpDefaultConfigValues,
   detectProgramOf,
@@ -123,7 +125,25 @@ export function createProvidersSlice({ state, getRuntime }: ProvidersDeps): Prov
     return preset ? { ...provider, detect: preset.detect, installHint: preset.installHint } : provider;
   }
 
-  /** 启停持久化：本地 JSON 缓存 + 桌面端 SQLite（真源），失败仅提示不阻断。 */
+  /**
+   * 后端写路径的门（仅服务端态）：`db_agents_sync` 在服务端被禁（目录只读），
+   * unknown 也按不可写 —— 禁用是服务端的确定性行为，赌 fail-open 每次都是一次
+   * 必然的报错。`available === true` 时自动放行：未来服务端放开无需改前端。
+   * 桌面态不经此门（目录可写，直连 SQLite）。
+   */
+  async function syncProvidersToBackend(rows: AgentProviderRow[]): Promise<void> {
+    const capabilities = useCommandCapabilitiesStore();
+    await capabilities.ensureCatalog();
+    if (runtimeMode() === "server" && capabilities.available("db_agents_sync") !== true) return;
+    try {
+      await agentsBackend.save(rows);
+    } catch (error: unknown) {
+      console.error("[agent] 后端目录同步失败，将下次重试", error);
+      notify({ kind: "error", key: "agent-provider-sync", title: t("errors.providerSyncFailed"), detail: String(error) });
+    }
+  }
+
+  /** 启停持久化：本地 JSON 缓存 + 宿主端 SQLite（真源），失败仅提示不阻断。 */
   function persistProviders(): void {
     providersStorage.write({ providers: state.agentProviders.value });
     if (agentsBackend.active()) {
@@ -136,10 +156,7 @@ export function createProvidersSlice({ state, getRuntime }: ProvidersDeps): Prov
         enabled,
         env: serializeProviderEnv(env),
       }));
-      void agentsBackend.save(rows).catch((error: unknown) => {
-        console.error("[agent] 后端目录同步失败，将下次重试", error);
-        notify({ kind: "error", key: "agent-provider-sync", title: t("errors.providerSyncFailed"), detail: String(error) });
-      });
+      void syncProvidersToBackend(rows);
     }
   }
 

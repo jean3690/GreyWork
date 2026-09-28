@@ -75,6 +75,11 @@ function installInvoke(agentsLoad: unknown): void {
   });
 }
 
+/** 桌面态的目录同步改走能力表（多一个微任务跳）：断言 sync 调用前先等它落地。 */
+async function settleSync(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 const dbProviders = [
   { id: "opencode", name: "OpenCode", kind: "acp", command: "opencode acp", enabled: true },
   { id: "codex", name: "Codex", kind: "acp", command: "npx -y @agentclientprotocol/codex-acp", enabled: true },
@@ -99,6 +104,7 @@ describe("agent 后端目录（桌面态：SQLite 真源）", () => {
     installInvoke(dbProviders);
     const agentStore = useAgentStore();
     await agentStore.providersHydrated;
+    await settleSync();
 
     // 旧库只有 opencode/codex，但合并后必须把新增预设（gemini/qwen/kimi…）带出来
     const ids = agentStore.agentProviders.map((p) => p.id);
@@ -125,6 +131,7 @@ describe("agent 后端目录（桌面态：SQLite 真源）", () => {
     installInvoke(null);
     const agentStore = useAgentStore();
     await agentStore.providersHydrated;
+    await settleSync();
 
     expect(agentStore.agentProviders.length).toBeGreaterThanOrEqual(3); // 内置缺省（mock-agent 已下线）
     expect(agentStore.agentProviders.some((p) => p.id === "mock-agent")).toBe(false);
@@ -135,6 +142,7 @@ describe("agent 后端目录（桌面态：SQLite 真源）", () => {
     installInvoke(dbProviders);
     const agentStore = useAgentStore();
     await agentStore.providersHydrated;
+    await settleSync();
 
     await agentStore.setAgentProviderEnabled("codex", false);
     expect(agentStore.agentProviders.find((p) => p.id === "codex")?.enabled).toBe(false);
@@ -164,6 +172,7 @@ describe("agent 后端目录（桌面态：SQLite 真源）", () => {
     });
     const agentStore = useAgentStore();
     await agentStore.providersHydrated;
+    await settleSync();
 
     // 探测前：状态未知
     expect(agentStore.providerInstalled(agentStore.agentProviders[0]!)).toBeNull();
@@ -190,6 +199,7 @@ describe("agent 后端目录（桌面态：SQLite 真源）", () => {
     });
     const agentStore = useAgentStore();
     await agentStore.providersHydrated;
+    await settleSync();
     await agentStore.refreshAgentDetection();
 
     const qwen = agentStore.agentProviders.find((p) => p.id === "qwen-code")!;
@@ -200,6 +210,7 @@ describe("agent 后端目录（桌面态：SQLite 真源）", () => {
     installInvoke(dbProviders);
     const agentStore = useAgentStore();
     await agentStore.providersHydrated;
+    await settleSync();
 
     await agentStore.activateAcpProvider("opencode");
     expect(agentStore.routeToAcp).toBe(true);
@@ -207,5 +218,93 @@ describe("agent 后端目录（桌面态：SQLite 真源）", () => {
     await agentStore.setAgentProviderEnabled("opencode", false);
     expect(agentStore.routeToAcp).toBe(false);
     expect(JSON.parse(localStorage.getItem("greywork.acp-provider") ?? "{}")).toEqual({ providerId: null });
+  });
+});
+
+/**
+ * 服务端态：agent 目录只读（db_agents_sync 被服务端禁用）。
+ *
+ * 门装上之前，每次启动都会尝试 HTTP 同步 → 失败 → console.error + 通知，纯属噪音；
+ * 现在写路径先问命令能力表（unknown 按不可写），available === true 时自动放行。
+ */
+describe("agent 后端目录（服务端态：只读门）", () => {
+  beforeEach(() => {
+    installLocalStorage();
+    // 服务端态：显式覆盖键优先于一切探测（host-ipc 的运行时判定）。
+    vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "server" });
+    setActivePinia(createPinia());
+    h.isAvailable.mockImplementation(() => true);
+    h.listener = null;
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete storageHolder.localStorage;
+    vi.clearAllMocks();
+  });
+
+  /** 假服务端：/api/commands 回能力表，/api/command 一律成功返回 null。 */
+  function installServerFetch(catalogAvailable: boolean) {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      void init;
+      const url = String(input);
+      if (url.endsWith("/api/commands")) {
+        return new Response(
+          JSON.stringify([{ name: "db_agents_sync", auth: "required", desktopOnly: false, binary: false, available: catalogAvailable }]),
+          { status: 200 },
+        );
+      }
+      if (url.endsWith("/api/command")) return new Response(JSON.stringify(null), { status: 200 });
+      return new Response(JSON.stringify({ error: "unexpected" }), { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  function syncCalls(fetchMock: ReturnType<typeof vi.fn>): unknown[] {
+    return fetchMock.mock.calls.filter(([url, init]) => {
+      const body = init?.body ? JSON.parse(String(init.body)) : null;
+      return String(url).endsWith("/api/command") && body?.command === "db_agents_sync";
+    });
+  }
+
+  it("db_agents_sync 被禁：启动不再尝试写 agent 目录，localStorage 覆盖层照常写", async () => {
+    const fetchMock = installServerFetch(false);
+    const agentStore = useAgentStore();
+    await agentStore.providersHydrated;
+    await settleSync();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(syncCalls(fetchMock)).toHaveLength(0);
+    const cached = JSON.parse(localStorage.getItem("greywork.agent-providers") ?? "{}");
+    expect(cached.providers.length).toBe(agentStore.agentProviders.length);
+  });
+
+  it("能力表回 available=true：写路径自动放行（服务端放开即恢复同步）", async () => {
+    const fetchMock = installServerFetch(true);
+    const agentStore = useAgentStore();
+    await agentStore.providersHydrated;
+    await settleSync();
+
+    await vi.waitFor(() => expect(syncCalls(fetchMock).length).toBeGreaterThan(0));
+    const lastSync = syncCalls(fetchMock).at(-1) as [string, { body: string }];
+    const payload = JSON.parse(lastSync[1].body) as { args: { providers: unknown[] } };
+    expect(payload.args.providers.length).toBe(agentStore.agentProviders.length);
+  });
+
+  it("能力表拉不到（unknown）：同样跳过同步（fail-closed），只留 localStorage", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      void init;
+      const url = String(input);
+      if (url.endsWith("/api/command")) return new Response(JSON.stringify(null), { status: 200 });
+      return new Response(JSON.stringify({ error: "未认证" }), { status: 401 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const agentStore = useAgentStore();
+    await agentStore.providersHydrated;
+    await settleSync();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(syncCalls(fetchMock)).toHaveLength(0);
+    expect(localStorage.getItem("greywork.agent-providers")).not.toBeNull();
   });
 });
