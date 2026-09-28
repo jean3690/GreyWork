@@ -128,6 +128,49 @@ describe("initRuntimeMode", () => {
   });
 });
 
+describe("hostVersion", () => {
+  it("服务端探测后回报 /api/health 里的版本", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ status: "ok", version: "0.3.0" }), { status: 200 })),
+    );
+    stubWindow();
+    const { initRuntimeMode, hostVersion } = await freshRuntime();
+    await initRuntimeMode();
+    expect(hostVersion()).toBe("0.3.0");
+  });
+
+  it("health 无 body / 无 version 字段时回 null", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 200 })),
+    );
+    stubWindow();
+    const { initRuntimeMode, hostVersion } = await freshRuntime();
+    await initRuntimeMode();
+    expect(hostVersion()).toBeNull();
+  });
+
+  it("未探测（桌面态）恒为 null", async () => {
+    mocks.isTauriRuntime.mockReturnValue(true);
+    stubWindow();
+    const { initRuntimeMode, hostVersion } = await freshRuntime();
+    await initRuntimeMode();
+    expect(hostVersion()).toBeNull();
+  });
+
+  it("浏览器预览态为 null", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 404 })),
+    );
+    stubWindow();
+    const { initRuntimeMode, hostVersion } = await freshRuntime();
+    await initRuntimeMode();
+    expect(hostVersion()).toBeNull();
+  });
+});
+
 describe("HostUnavailableError", () => {
   it("错误信息带上被拒绝的能力名", async () => {
     const { HostUnavailableError } = await freshRuntime();

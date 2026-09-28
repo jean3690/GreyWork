@@ -92,6 +92,74 @@ describe("login", () => {
   });
 });
 
+describe("logout", () => {
+  /** 覆盖运行时为 server —— 只有服务端态才有 HTTP 会话可注销。 */
+  function stubServer(): void {
+    vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "server" });
+  }
+
+  it("服务端态 POST /api/logout 并发会话失效信号", async () => {
+    stubServer();
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { logout, onAuthRequired } = await freshSession();
+    const notified = vi.fn();
+    onAuthRequired(notified);
+
+    await expect(logout()).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledWith("/api/logout", {
+      method: "POST",
+      credentials: "same-origin",
+    });
+    expect(notified).toHaveBeenCalledTimes(1);
+  });
+
+  it("服务端返回 401 也发信号（否则界面卡在已登录态）", async () => {
+    stubServer();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => errorResponse(401, JSON.stringify({ error: "未认证" }))),
+    );
+    const { logout, onAuthRequired } = await freshSession();
+    const notified = vi.fn();
+    onAuthRequired(notified);
+
+    await expect(logout()).resolves.toBeUndefined();
+    expect(notified).toHaveBeenCalledTimes(1);
+  });
+
+  it("网络异常也发信号，不向上抛", async () => {
+    stubServer();
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("offline");
+      }),
+    );
+    const { logout, onAuthRequired } = await freshSession();
+    const notified = vi.fn();
+    onAuthRequired(notified);
+
+    await expect(logout()).resolves.toBeUndefined();
+    expect(notified).toHaveBeenCalledTimes(1);
+    expect(consoleError).toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
+  it("非服务端态不请求服务端，但仍发信号", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const { logout, onAuthRequired } = await freshSession();
+    const notified = vi.fn();
+    onAuthRequired(notified);
+
+    await logout();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(notified).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("onAuthRequired / notifyAuthRequired", () => {
   it("通知所有订阅者；解绑后不再收到", async () => {
     const { onAuthRequired, notifyAuthRequired } = await freshSession();
