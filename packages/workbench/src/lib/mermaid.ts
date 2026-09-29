@@ -10,6 +10,12 @@
  *
  * 主题：按宿主外观选 mermaid 内置主题（dark/default），每次渲染前 initialize 生效。
  * 并发与重入：单块内自增 id 保证 SVG 引用唯一；失败的调用整体抛错，不留半渲染态。
+ *
+ * **别急着升 12**：12.0.0 的布局管线（paintLayoutEdge → insertEdge）会把携带节点
+ * 标签的完整对象 `btoa(JSON.stringify(points))`，而 btoa 是 Latin1-only 的 —— 图里
+ * 只要有一个非 ASCII 标签（中文必中）就抛 InvalidCharacterError，整图渲染失败
+ * （happy-dom 与真浏览器行为一致，已实测）。等上游修掉再评估；到时它默认换
+ * ELK 布局 + neo 观感，还需要显式钉回 `layout: "dagre"` + `look: "classic"`。
  */
 import type MermaidDefault from "mermaid";
 import type { MermaidConfig } from "mermaid";
