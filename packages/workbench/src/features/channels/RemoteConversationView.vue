@@ -48,7 +48,6 @@ const {
   items: attachmentItems,
   dragging: attachmentDragging,
   full: attachmentsFull,
-  attachEl,
   pick: pickAttachmentFiles,
   remove: removeAttachment,
   take: takeAttachments,
@@ -255,7 +254,6 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
       <footer class="mt-3">
         <!-- 焦点反馈做在卡片上（文字区的 outline-none 生效后，内层不再自画描边）。 -->
         <div
-          ref="attachEl"
           data-attachment-dropzone
           data-testid="remote-composer-card"
           class="flex flex-col gap-2 rounded-[14px] border bg-panel-2 p-2.5 transition-colors focus-within:border-cyan/50"

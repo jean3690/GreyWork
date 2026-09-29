@@ -82,6 +82,23 @@ export default defineConfig(async () => ({
     },
   },
 
+  // 显式钉住渲染端的语法底线 —— 不要删，也不要以为它只是个默认值。
+  //
+  // vite 6 的默认 build.target 是 "modules"（= es2020 / chrome87 / firefox78 / safari14），
+  // vite 8 换成了 "baseline-widely-available"（= chrome111 / edge111 / firefox114 /
+  // safari16.4 / ios16.4）。不写死的话，**一次工具链升级就会把 UI 的语法底线从
+  // Safari 14（macOS 11）抬到 Safari 16.4（macOS 13.3）**，而且不会有任何测试报红。
+  // docs/packaging.md 把 bundle.macOS.minimumSystemVersion 钉在 10.13 是刻意的
+  // （防将来 Tauri 默认值悄悄移动支持底线），渲染端当然更不该由依赖的默认值顺手收窄。
+  // 下面写的就是升级前那一档，行为等价。
+  //
+  // 注意 build.target 只做**语法**转译、不带 polyfill：它保证「不比以前更严」，
+  // 不等于能在老 WebKit 上真的跑起来（例如 mermaid 一直依赖的 structuredClone 要
+  // Safari 15.4+，这条与 target 无关）。
+  build: {
+    target: ["es2020", "chrome87", "firefox78", "safari14"],
+  },
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent Vite from obscuring rust errors

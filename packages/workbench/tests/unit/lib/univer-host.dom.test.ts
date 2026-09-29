@@ -7,7 +7,7 @@
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
-import { defineComponent, h, toRef, type PropType } from "vue";
+import { defineComponent, h, ref, toRef, type PropType } from "vue";
 
 import type { PreviewTab } from "@/stores/preview";
 import { registerPresetPlugins, useUniverHost, type UniverBoot, type UniverInstance } from "@/lib/univer-host";
@@ -29,9 +29,11 @@ function disposeSpy(): UniverInstance & { disposed: () => boolean } {
 const HostTester = defineComponent({
   props: { tab: { type: Object as PropType<PreviewTab>, required: true } },
   setup(props) {
-    const state = useUniverHost(toRef(props, "tab"), bootSpy);
+    // 容器 ref 由组件自己持有（模板 / 渲染函数绑它），再交给 composable 管生命周期。
+    const host = ref<HTMLElement | null>(null);
+    const state = useUniverHost(host, toRef(props, "tab"), bootSpy);
     return () => [
-      h("div", { ref: state.host, "data-testid": "univer-host" }),
+      h("div", { ref: host, "data-testid": "univer-host" }),
       h("span", { "data-testid": "loading" }, String(state.loading.value)),
       h("span", { "data-testid": "boot-error" }, state.bootError.value ?? ""),
       h("span", { "data-testid": "load-error" }, state.error.value ?? ""),
