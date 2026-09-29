@@ -12,16 +12,14 @@ import type { FeishuRegisterPoll, FeishuStatus } from "@/lib/feishu-backend";
 const mocks = vi.hoisted(() => ({
   feishu: {
     supported: vi.fn(() => true),
-    status: vi.fn(
-      async (): Promise<FeishuStatus> => ({
-        configured: false,
-        appId: null,
-        state: "stopped",
-        detail: null,
-        lastMessageAt: null,
-        peerCount: 0,
-      }),
-    ),
+    status: vi.fn(async (): Promise<FeishuStatus> => ({
+      configured: false,
+      appId: null,
+      state: "stopped",
+      detail: null,
+      lastMessageAt: null,
+      peerCount: 0,
+    })),
     saveCredentials: vi.fn(),
     clearCredentials: vi.fn(),
     registerBegin: vi.fn(async () => ({
@@ -30,14 +28,12 @@ const mocks = vi.hoisted(() => ({
       expiresIn: 3600,
       interval: 1,
     })),
-    registerPoll: vi.fn(
-      async (): Promise<FeishuRegisterPoll> => ({
-        state: "pending",
-        detail: null,
-        appId: null,
-        intervalMs: 1000,
-      }),
-    ),
+    registerPoll: vi.fn(async (): Promise<FeishuRegisterPoll> => ({
+      state: "pending",
+      detail: null,
+      appId: null,
+      intervalMs: 1000,
+    })),
     registerCancel: vi.fn(async () => {}),
     connect: vi.fn(),
     disconnect: vi.fn(),

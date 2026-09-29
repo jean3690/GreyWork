@@ -10,10 +10,7 @@
  */
 
 export type OfficeContainer =
-  | { kind: "ole2" }
-  | { kind: "ooxml"; format: "docx" | "xlsx" | "pptx" }
-  | { kind: "zip" }
-  | { kind: "unknown" };
+  { kind: "ole2" } | { kind: "ooxml"; format: "docx" | "xlsx" | "pptx" } | { kind: "zip" } | { kind: "unknown" };
 
 const OLE2_SIGNATURE = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
 

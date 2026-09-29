@@ -13,16 +13,14 @@ import { useRemoteAssistantStore } from "@/stores/remote-assistant";
 const mocks = vi.hoisted(() => {
   const feishu = {
     supported: () => true,
-    status: vi.fn(
-      async (): Promise<FeishuStatus> => ({
-        configured: false,
-        appId: null,
-        state: "stopped",
-        detail: null,
-        lastMessageAt: null,
-        peerCount: 0,
-      }),
-    ),
+    status: vi.fn(async (): Promise<FeishuStatus> => ({
+      configured: false,
+      appId: null,
+      state: "stopped",
+      detail: null,
+      lastMessageAt: null,
+      peerCount: 0,
+    })),
     saveCredentials: vi.fn(),
     clearCredentials: vi.fn(),
     connect: vi.fn(),
@@ -33,16 +31,14 @@ const mocks = vi.hoisted(() => {
   };
   const dingtalk = {
     supported: () => true,
-    status: vi.fn(
-      async (): Promise<DingTalkStatus> => ({
-        configured: false,
-        clientId: null,
-        state: "stopped",
-        detail: null,
-        lastMessageAt: null,
-        peerCount: 0,
-      }),
-    ),
+    status: vi.fn(async (): Promise<DingTalkStatus> => ({
+      configured: false,
+      clientId: null,
+      state: "stopped",
+      detail: null,
+      lastMessageAt: null,
+      peerCount: 0,
+    })),
     saveCredentials: vi.fn(),
     clearCredentials: vi.fn(),
     connect: vi.fn(),

@@ -309,8 +309,7 @@ onUnmounted(() => {
         data-selection-scope
         data-scroll-root
         class="min-h-0 flex-1 overflow-auto whitespace-pre-wrap px-4 py-3 font-mono text-[12px] text-foreground"
-        >{{ data }}</pre
-      >
+        >{{ data }}</pre>
       <div v-else ref="host" data-testid="text-viewer" data-selection-scope class="min-h-0 flex-1 overflow-hidden" />
     </div>
   </div>

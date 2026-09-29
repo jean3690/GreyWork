@@ -37,16 +37,14 @@ const mocks = vi.hoisted(() => ({
   },
   feishu: {
     supported: vi.fn(() => true),
-    status: vi.fn(
-      async (): Promise<FeishuStatus> => ({
-        configured: false,
-        appId: null,
-        state: "stopped",
-        detail: null,
-        lastMessageAt: null,
-        peerCount: 0,
-      }),
-    ),
+    status: vi.fn(async (): Promise<FeishuStatus> => ({
+      configured: false,
+      appId: null,
+      state: "stopped",
+      detail: null,
+      lastMessageAt: null,
+      peerCount: 0,
+    })),
     saveCredentials: vi.fn(),
     clearCredentials: vi.fn(),
     registerBegin: vi.fn(async () => ({

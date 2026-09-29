@@ -8,20 +8,7 @@
 import { extname } from "@greywork/core";
 
 export type ViewerKind =
-  | "md"
-  | "html"
-  | "csv"
-  | "code"
-  | "xlsx"
-  | "xls"
-  | "docx"
-  | "pptx"
-  | "pdf"
-  | "diff"
-  | "image"
-  | "web"
-  | "raw"
-  | "legacy-office";
+  "md" | "html" | "csv" | "code" | "xlsx" | "xls" | "docx" | "pptx" | "pdf" | "diff" | "image" | "web" | "raw" | "legacy-office";
 
 const EXT_KIND: Record<string, ViewerKind> = {
   md: "md",

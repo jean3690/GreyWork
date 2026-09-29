@@ -17,9 +17,7 @@ A package file is a `PluginPackage`:
 ```jsonc
 {
   "schemaVersion": 1,
-  "manifest": {
-    /* MarketPluginManifest */
-  },
+  "manifest": {/* MarketPluginManifest */},
   // "code" is injected by the host at install time — never ship it in the package file.
 }
 ```
@@ -46,12 +44,8 @@ A package file is a `PluginPackage`:
   "window": { "width": 200, "height": 200 }, // optional; needs requires: window.floating + worker+render
 
   "contributes": {
-    "modes": [
-      /* 1-8 full-page modes */
-    ],
-    "uiRegions": [
-      /* optional persistent regions, worker+render only */
-    ],
+    "modes": [/* 1-8 full-page modes */],
+    "uiRegions": [/* optional persistent regions, worker+render only */],
   },
 }
 ```
