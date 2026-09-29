@@ -153,7 +153,7 @@ export function recommendedSandboxMode(_tier: PermTier): SandboxMode {
 }
 
 export type RunMode = "local" | "worktree" | "cloud";
-export type ThemeId = "greywork" | "night-blue" | "night-green" | "github" | "fox";
+export type ThemeId = "greywork" | "night-blue" | "night-green" | "github" | "fox" | "liquid-glass";
 export type ColorMode = "dark" | "light" | "system";
 export type FontSize = "small" | "medium" | "large";
 /** 界面圆角档位：none / small（= 改造前的原值）/ large。 */
@@ -166,6 +166,7 @@ export const THEMES: readonly { value: ThemeId; label: string; description: stri
   { value: "night-green", label: "Night Green", description: "settings.themes.nightGreen", colors: ["#040d07", "#2fbf71", "#7db894"] },
   { value: "github", label: "GitHub", description: "settings.themes.github", colors: ["#0d1117", "#2f81f7", "#8b949e"] },
   { value: "fox", label: "Fox", description: "settings.themes.fox", colors: ["#1a1210", "#fb923c", "#f1d5c5"] },
+  { value: "liquid-glass", label: "Liquid Glass", description: "settings.themes.liquidGlass", colors: ["#26324d", "#5aa8ff", "#cdd6ea"] },
 ];
 
 /** label 是 i18n key（settings.fontSizes.*，与 value 对齐）。 */
@@ -187,7 +188,14 @@ export const RADII: readonly { value: Radius; label: string; scale: number }[] =
   { value: "large", label: "settings.radii.large", scale: 1.5 },
 ];
 
-const THEME_VALUES: Record<ThemeId, true> = { greywork: true, "night-blue": true, "night-green": true, github: true, fox: true };
+const THEME_VALUES: Record<ThemeId, true> = {
+  greywork: true,
+  "night-blue": true,
+  "night-green": true,
+  github: true,
+  fox: true,
+  "liquid-glass": true,
+};
 const COLOR_MODE_VALUES: Record<ColorMode, true> = { dark: true, light: true, system: true };
 const FONT_SIZE_VALUES: Record<FontSize, true> = { small: true, medium: true, large: true };
 const RADIUS_VALUES: Record<Radius, true> = { none: true, small: true, large: true };

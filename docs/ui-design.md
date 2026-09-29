@@ -27,13 +27,14 @@ Tokens are grouped into semantic categories (mirrored in `token-contract.ts`):
 
 ### Available Palettes
 
-Four palettes are defined:
+Six palettes are defined:
 
 1. **`greywork`** (default) — Dark-first, near-black, blue primary, violet brand
 2. **`github`** — GitHub-inspired code workbench, green primary
 3. **`fox`** — Warm terracotta, orange primary
 4. **`night-blue`** — Blue-tinted dark, blue primary
 5. **`night-green`** — Green-tinted dark, green primary
+6. **`liquid-glass`** — Translucent frosted-glass surfaces, blue primary
 
 Each palette has `light` and `dark` variants.
 
@@ -172,5 +173,5 @@ Font size: 15px base.
 
 1. Add the token to `tokens.css` under the correct semantic group
 2. Add a descriptor entry to `THEME_TOKENS` in `token-contract.ts`
-3. Add values for all active palettes (greywork, github, fox, night-blue, night-green)
+3. Add values for all active palettes (greywork, github, fox, night-blue, night-green, liquid-glass)
 4. Ensure `token-contract.test.ts` passes parity validation

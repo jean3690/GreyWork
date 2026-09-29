@@ -24,7 +24,7 @@ export const APPEARANCE_EVENT = "greywork:appearance" as const;
 
 /** 广播出去的外观快照。 */
 export interface AppearanceDetail {
-  /** data-palette：greywork / night-blue / night-green / github / fox。 */
+  /** data-palette：greywork / night-blue / night-green / github / fox / liquid-glass。 */
   palette: string;
   /** 解析后的实际明暗。 */
   theme: ResolvedTheme;

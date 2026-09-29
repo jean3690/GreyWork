@@ -457,3 +457,99 @@
   --thought-gradient: linear-gradient(135deg, #101f17, #050a07);
   --workspace-btn-bg: #08120c;
 }
+
+/* Liquid Glass：磨砂玻璃材质 —— 面板表面用半透明 rgba 填充 + 背板模糊（--glass-blur），
+ * 边框改成玻璃高光（半透明白/墨），画布底 --ink 保持不透明，为模糊提供可采样的底色。
+ * --glass-* 是效果旋钮（同 --gw-*，不进 token 契约）；模糊只在 [data-palette="liquid-glass"]
+ * 的表面工具类上开启（见文件末尾的作用域规则），其余 palette 的表面保持不透明。 */
+:root[data-palette="liquid-glass"][data-theme="light"] {
+  color-scheme: light;
+  --glass-blur: 18px;
+  --glass-saturate: 140%;
+  --ink: #dbe4f2;
+  --paper: #ffffff;
+  --paper-ink: #1f2328;
+  --panel: rgba(255, 255, 255, 0.6);
+  --panel-2: rgba(255, 255, 255, 0.78);
+  --side: rgba(255, 255, 255, 0.5);
+  --line: rgba(15, 23, 42, 0.12);
+  --line-2: rgba(15, 23, 42, 0.22);
+  --text: #0b1220;
+  --dim: #3f4a5c;
+  --dim2: #566072;
+  --bubble: rgba(22, 93, 255, 0.14);
+  --amber: #ff7d00;
+  --cyan: #165dff;
+  --violet: #8b5cf6;
+  --mint: #00b42a;
+  --orange: #f53f3f;
+  --accent: #165dff;
+  --accent-ink: #ffffff;
+  --accent-hi: #3d7bff;
+  --brand: #7583b2;
+  --brand-light: #eff0f6;
+  --brand-hover: #b5bcd6;
+  --brand-1: #eff0f6;
+  --brand-2: #e5e7f0;
+  --brand-3: #d1d5e5;
+  --brand-4: #b5bcd6;
+  --brand-5: #97a0c5;
+  --brand-6: #7583b2;
+  --brand-7: #596590;
+  --brand-8: #3f4868;
+  --brand-9: #262c41;
+  --brand-10: #0d101c;
+  --message-tips-bg: rgba(22, 93, 255, 0.1);
+  --thought-gradient: linear-gradient(135deg, rgba(255, 255, 255, 0.62), rgba(240, 243, 255, 0.62));
+  --workspace-btn-bg: rgba(255, 255, 255, 0.55);
+}
+
+:root[data-palette="liquid-glass"][data-theme="dark"] {
+  color-scheme: dark;
+  --glass-blur: 18px;
+  --glass-saturate: 140%;
+  --ink: #0a0f1a;
+  --paper: #e9e9e9;
+  --paper-ink: #1f2328;
+  --panel: rgba(30, 41, 66, 0.55);
+  --panel-2: rgba(51, 65, 99, 0.6);
+  --side: rgba(18, 26, 45, 0.5);
+  --line: rgba(255, 255, 255, 0.12);
+  --line-2: rgba(255, 255, 255, 0.22);
+  --text: #f2f5fb;
+  --dim: #c3ccdd;
+  --dim2: #8b96ac;
+  --bubble: rgba(77, 159, 255, 0.22);
+  --amber: #ff9a2e;
+  --cyan: #4d9fff;
+  --violet: #8b5cf6;
+  --mint: #23c343;
+  --orange: #f76560;
+  --accent: #5aa8ff;
+  --accent-ink: #06101f;
+  --accent-hi: #7dbcff;
+  --brand: #a1aacb;
+  --brand-light: #2a3550;
+  --brand-hover: #6a749b;
+  --brand-1: #2a2a2a;
+  --brand-2: #3d4150;
+  --brand-3: #525a77;
+  --brand-4: #6a749b;
+  --brand-5: #838fba;
+  --brand-6: #a1aacb;
+  --brand-7: #b5bcd6;
+  --brand-8: #d1d5e5;
+  --brand-9: #e5e7f0;
+  --brand-10: #eff0f6;
+  --message-tips-bg: rgba(77, 159, 255, 0.12);
+  --thought-gradient: linear-gradient(135deg, rgba(51, 65, 99, 0.5), rgba(18, 26, 45, 0.5));
+  --workspace-btn-bg: rgba(51, 65, 99, 0.5);
+}
+
+/* 玻璃材质开关：只在 liquid-glass palette 下，给承载表面色的工具类叠背板模糊。
+ * 配合上面的半透明填充，采样元素背后的下层表面/画布，读作磨砂玻璃。
+ * 画布底 .bg-background(--ink) 刻意不列 —— 它在最底层，模糊无可采样内容。 */
+:root[data-palette="liquid-glass"] :is(.bg-panel, .bg-panel-2, .bg-side, .bg-card, .bg-popover, .bg-secondary, .bg-bubble) {
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+}

@@ -805,6 +805,7 @@ export const enUS: MessageSchema = {
       nightGreen: "Deep forest — near-black with a green cast",
       github: "Clean, neutral code-hosting look",
       fox: "Warm, vivid fox orange",
+      liquidGlass: "Translucent frosted glass",
     },
     /** Size tier names: keys match FONT_SIZES[].value in the store. */
     fontSizes: {

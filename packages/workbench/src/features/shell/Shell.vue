@@ -42,7 +42,7 @@ const ActivityBand = defineAsyncComponent(() => import("@/features/activity/Acti
  * GreyWork 风格外壳：标题栏 + 左侧栏 + 内容区（router-view）+ 右侧预览面板。
  *
  * 主题配色、明暗模式、字号和圆角独立持久化。DOM 约定（由 lib/theme 的 applyAppearance 落地）：
- * - data-palette：greywork / night-blue / night-green / github / fox；
+ * - data-palette：greywork / night-blue / night-green / github / fox / liquid-glass；
  * - data-theme：实际生效的 light / dark（system 在这里解析，供 CSS 与后挂载的组件判断）；
  * - data-font-size：small / medium / large；
  * - data-radius：none / small / large（theme/base.css 据此调 --gw-radius-scale）。

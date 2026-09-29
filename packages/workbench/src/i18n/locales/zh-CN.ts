@@ -795,6 +795,7 @@ export const zhCN = {
       nightGreen: "深林绿：近黑底子带一层墨绿",
       github: "清晰中性的代码托管风格",
       fox: "温暖醒目的狐橙风格",
+      liquidGlass: "半透明磨砂玻璃",
     },
     /** 字号档位名：键与 store 的 FONT_SIZES[].value 对齐。 */
     fontSizes: {
