@@ -30,7 +30,10 @@ const chipClass = computed(() => palette[props.tone]);
 </script>
 
 <template>
-  <span class="inline-flex items-center px-1.5 py-0.5 font-medium text-[9px]" :class="[pill ? 'rounded-full' : 'rounded-[5px]', chipClass]">
+  <span
+    class="inline-flex items-center px-1.5 py-0.5 font-medium text-[9px]"
+    :class="[pill ? 'rounded-full' : 'rounded-[calc(5px*var(--gw-radius-scale))]', chipClass]"
+  >
     <slot />
   </span>
 </template>

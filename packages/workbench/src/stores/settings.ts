@@ -156,6 +156,8 @@ export type RunMode = "local" | "worktree" | "cloud";
 export type ThemeId = "greywork" | "night-blue" | "night-green" | "github" | "fox";
 export type ColorMode = "dark" | "light" | "system";
 export type FontSize = "small" | "medium" | "large";
+/** 界面圆角档位：none / small（= 改造前的原值）/ large。 */
+export type Radius = "none" | "small" | "large";
 
 /** label 是专有名词（不翻译），description 是 i18n key（settings.themes.*，与 value 对齐）。 */
 export const THEMES: readonly { value: ThemeId; label: string; description: string; colors: readonly [string, string, string] }[] = [
@@ -173,9 +175,22 @@ export const FONT_SIZES: readonly { value: FontSize; label: string; scale: numbe
   { value: "large", label: "settings.fontSizes.large", scale: 1.15 },
 ];
 
+/**
+ * label 是 i18n key（settings.radii.*，与 value 对齐）。
+ *
+ * scale 乘在每一个装饰性圆角上（见 theme/base.css 的 `--gw-radius-scale`）；`small`
+ * 就是改造前的原值，所以它等价于「没有这个设置」。
+ */
+export const RADII: readonly { value: Radius; label: string; scale: number }[] = [
+  { value: "none", label: "settings.radii.none", scale: 0 },
+  { value: "small", label: "settings.radii.small", scale: 1 },
+  { value: "large", label: "settings.radii.large", scale: 1.5 },
+];
+
 const THEME_VALUES: Record<ThemeId, true> = { greywork: true, "night-blue": true, "night-green": true, github: true, fox: true };
 const COLOR_MODE_VALUES: Record<ColorMode, true> = { dark: true, light: true, system: true };
 const FONT_SIZE_VALUES: Record<FontSize, true> = { small: true, medium: true, large: true };
+const RADIUS_VALUES: Record<Radius, true> = { none: true, small: true, large: true };
 const RUN_MODE_VALUES: Record<RunMode, true> = { local: true, worktree: true, cloud: true };
 
 export const RUN_MODES: { value: RunMode; label: string; hint: string }[] = [
@@ -316,6 +331,8 @@ export interface SavedSettings {
   theme?: ThemeId | ColorMode;
   colorMode?: ColorMode;
   fontSize?: FontSize;
+  /** 界面圆角档位；缺失（旧快照）回落 small = 改造前的原值。 */
+  radius?: Radius;
   locale?: AppLocale;
   selectedModelProviderId?: string | null;
   modelProviders?: ModelProviderConfig[];
@@ -390,6 +407,8 @@ export const useSettingsStore = defineStore("settings", () => {
   const colorMode = ref<ColorMode>("dark");
   /** 界面字号以整体 UI 缩放实现，固定像素字号与控件命中区一起保持比例。 */
   const fontSize = ref<FontSize>("medium");
+  /** 界面圆角档位，驱动 theme/base.css 的 `--gw-radius-scale`。 */
+  const radius = ref<Radius>("small");
   /** 界面语言（i18n 实例初值同源于此 localStorage；切换经外壳 watch → setLocale）。 */
   const locale = ref<AppLocale>("zh-CN");
   const selectedModelProviderId = ref<string | null>(null);
@@ -446,7 +465,7 @@ export const useSettingsStore = defineStore("settings", () => {
    * system 的解析也在那里，避免两处各写一份解析规则。
    */
   function applyAppearance(): void {
-    applyAppearanceToDom({ palette: theme.value, colorMode: colorMode.value, fontSize: fontSize.value });
+    applyAppearanceToDom({ palette: theme.value, colorMode: colorMode.value, fontSize: fontSize.value, radius: radius.value });
   }
 
   function setTheme(value: ThemeId): void {
@@ -463,6 +482,12 @@ export const useSettingsStore = defineStore("settings", () => {
 
   function setFontSize(value: FontSize): void {
     fontSize.value = value;
+    applyAppearance();
+    persist();
+  }
+
+  function setRadius(value: Radius): void {
+    radius.value = value;
     applyAppearance();
     persist();
   }
@@ -499,6 +524,7 @@ export const useSettingsStore = defineStore("settings", () => {
     // v0.1 兼容：旧 theme 字段承载明暗模式；读入后下一次 persist 会写成新结构。
     else if (saved.theme && COLOR_MODE_VALUES[saved.theme as ColorMode]) colorMode.value = saved.theme as ColorMode;
     if (saved.fontSize && FONT_SIZE_VALUES[saved.fontSize]) fontSize.value = saved.fontSize;
+    if (saved.radius && RADIUS_VALUES[saved.radius]) radius.value = saved.radius;
     if (saved.locale === "zh-CN" || saved.locale === "en-US") locale.value = saved.locale;
     if (typeof saved.selectedModelProviderId === "string" || saved.selectedModelProviderId === null) {
       selectedModelProviderId.value = saved.selectedModelProviderId;
@@ -579,6 +605,7 @@ export const useSettingsStore = defineStore("settings", () => {
       theme: theme.value,
       colorMode: colorMode.value,
       fontSize: fontSize.value,
+      radius: radius.value,
       locale: locale.value,
       selectedModelProviderId: selectedModelProviderId.value,
       modelProviders: modelProviders.value,
@@ -814,6 +841,8 @@ export const useSettingsStore = defineStore("settings", () => {
     setTheme,
     setColorMode,
     setFontSize,
+    radius,
+    setRadius,
     setRunMode,
     locale,
     selectedModelProviderId,

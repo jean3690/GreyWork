@@ -142,7 +142,7 @@ watch(
 
 <template>
   <section
-    class="overflow-hidden rounded-[10px] border border-line bg-panel-2"
+    class="overflow-hidden rounded-[calc(10px*var(--gw-radius-scale))] border border-line bg-panel-2"
     data-testid="tool-timeline"
     :data-open="open"
     :data-lifecycle="lifecycle"

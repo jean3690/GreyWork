@@ -155,7 +155,7 @@ function focusInput(event: Event): void {
     align="start"
     :side-offset="6"
     :collision-padding="8"
-    class="flex max-h-(--reka-popover-content-available-height) w-[460px] flex-col overflow-hidden rounded-[12px] border-line-2 p-0 shadow-[0_16px_48px_rgba(0,0,0,0.28)]"
+    class="flex max-h-(--reka-popover-content-available-height) w-[460px] flex-col overflow-hidden rounded-[calc(12px*var(--gw-radius-scale))] border-line-2 p-0 shadow-[0_16px_48px_rgba(0,0,0,0.28)]"
     @open-auto-focus="focusInput"
   >
     <!-- 搜索框 -->
@@ -237,7 +237,7 @@ function focusInput(event: Event): void {
         {{ t("search.filterWorkspace") }}
         <select
           data-testid="search-workspace"
-          class="h-5 max-w-[140px] cursor-pointer rounded-[5px] border border-line bg-panel px-1 text-[10.5px] text-foreground outline-none"
+          class="h-5 max-w-[140px] cursor-pointer rounded-[calc(5px*var(--gw-radius-scale))] border border-line bg-panel px-1 text-[10.5px] text-foreground outline-none"
           :value="workspaceFilter === undefined ? '__all__' : workspaceFilter === null ? '__none__' : workspaceFilter"
           @change="onWorkspaceChange"
         >

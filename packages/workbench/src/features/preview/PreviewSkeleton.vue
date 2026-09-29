@@ -12,6 +12,11 @@ const BAR_WIDTHS = ["w-3/4", "w-full", "w-5/6", "w-2/3", "w-11/12", "w-1/2"];
 
 <template>
   <div data-testid="preview-skeleton" class="flex size-full flex-col gap-3 overflow-hidden p-4" aria-hidden="true">
-    <span v-for="(bar, index) in BAR_WIDTHS" :key="index" class="h-3 animate-pulse rounded-[4px] bg-panel" :class="bar" />
+    <span
+      v-for="(bar, index) in BAR_WIDTHS"
+      :key="index"
+      class="h-3 animate-pulse rounded-[calc(4px*var(--gw-radius-scale))] bg-panel"
+      :class="bar"
+    />
   </div>
 </template>

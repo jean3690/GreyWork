@@ -30,13 +30,14 @@ describe("ACP 品牌图标", () => {
 });
 
 describe("settings 持久化", () => {
-  it("persist 后主题、模式与字号往返一致", () => {
+  it("persist 后主题、模式、字号与圆角往返一致", () => {
     const settings = useSettingsStore();
     const provider = settings.modelProviders[0];
     provider.reasoningEffort = "high";
     settings.theme = "github";
     settings.colorMode = "light";
     settings.fontSize = "large";
+    settings.setRadius("large");
     settings.locale = "en-US";
     settings.persist();
 
@@ -46,7 +47,20 @@ describe("settings 持久化", () => {
     expect(reloaded.theme).toBe("github");
     expect(reloaded.colorMode).toBe("light");
     expect(reloaded.fontSize).toBe("large");
+    expect(reloaded.radius).toBe("large");
     expect(reloaded.locale).toBe("en-US");
+  });
+
+  it("圆角：默认 small（= 改造前原值），非法存档值静默回落", () => {
+    expect(useSettingsStore().radius).toBe("small");
+
+    storage.set("greywork.settings", JSON.stringify({ radius: "huge" }));
+    setActivePinia(createPinia());
+    expect(useSettingsStore().radius).toBe("small");
+
+    storage.set("greywork.settings", JSON.stringify({ radius: "none" }));
+    setActivePinia(createPinia());
+    expect(useSettingsStore().radius).toBe("none");
   });
 
   it("旧 theme 明暗字段迁移到 colorMode，主题回落 GreyWork", () => {

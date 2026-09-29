@@ -206,13 +206,13 @@ function onOpenChange(next: boolean): void {
   <Dialog :open="open" @update:open="onOpenChange">
     <DialogContent
       :show-close-button="false"
-      class="flex max-h-[90vh] flex-col gap-0 overflow-hidden rounded-[14px] border-line bg-panel p-0 shadow-xl sm:max-w-[460px]"
+      class="flex max-h-[90vh] flex-col gap-0 overflow-hidden rounded-[calc(14px*var(--gw-radius-scale))] border-line bg-panel p-0 shadow-xl sm:max-w-[460px]"
     >
       <div class="flex items-center justify-between px-4 pb-2 pt-3.5">
         <DialogTitle class="text-[13px] font-medium text-foreground">{{ editorTitle }}</DialogTitle>
         <button
           type="button"
-          class="grid size-6 cursor-pointer place-items-center rounded-[6px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground"
+          class="grid size-6 cursor-pointer place-items-center rounded-[calc(6px*var(--gw-radius-scale))] text-dim transition-colors hover:bg-panel-2 hover:text-foreground"
           aria-label="关闭"
           @click="emit('cancel')"
         >
@@ -226,20 +226,20 @@ function onOpenChange(next: boolean): void {
         </DialogDescription>
         <p
           v-if="preset?.envHint && preset.envHint.length > 0"
-          class="rounded-[8px] border border-amber-300/40 bg-amber-300/10 px-2.5 py-1.5 text-[11px] leading-relaxed text-amber-200"
+          class="rounded-[calc(8px*var(--gw-radius-scale))] border border-amber-300/40 bg-amber-300/10 px-2.5 py-1.5 text-[11px] leading-relaxed text-amber-200"
         >
           该服务声明需要环境变量（{{ preset.envHint.join("、") }}）。值为空时不会注入；一般需先在系统环境配好，或填进下方对应 KV 行。
         </p>
 
         <input
           v-model="name"
-          class="w-full rounded-[8px] border border-line bg-panel-2 px-2.5 py-1.5 text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
+          class="w-full rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2.5 py-1.5 text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
           data-testid="mcp-name"
           placeholder="名称（agent 会看到这个名字）"
         />
         <select
           v-model="transport"
-          class="w-full rounded-[8px] border border-line bg-panel-2 px-2 py-1.5 text-[12px] text-foreground outline-none focus:border-accent"
+          class="w-full rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-1.5 text-[12px] text-foreground outline-none focus:border-accent"
         >
           <option value="http">HTTP（streamable）</option>
           <option value="sse">SSE</option>
@@ -248,21 +248,21 @@ function onOpenChange(next: boolean): void {
         <input
           v-if="transport !== 'stdio'"
           v-model="url"
-          class="w-full rounded-[8px] border border-line bg-panel-2 px-2.5 py-1.5 font-mono text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
+          class="w-full rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2.5 py-1.5 font-mono text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
           data-testid="mcp-url"
           placeholder="https://mcp.deepwiki.com/mcp"
         />
         <template v-else>
           <input
             v-model="command"
-            class="w-full rounded-[8px] border border-line bg-panel-2 px-2.5 py-1.5 font-mono text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
+            class="w-full rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2.5 py-1.5 font-mono text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
             placeholder="npx 或 /usr/bin/npx"
           />
           <textarea
             v-model="args"
             data-testid="mcp-args"
             rows="3"
-            class="w-full resize-y rounded-[8px] border border-line bg-panel-2 px-2.5 py-1.5 font-mono text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
+            class="w-full resize-y rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2.5 py-1.5 font-mono text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
             placeholder="参数，每行一个（参数内部可含空格）"
           />
         </template>
@@ -292,13 +292,13 @@ function onOpenChange(next: boolean): void {
             <div v-for="(row, index) in headerRows" :key="index" class="mb-1 flex items-center gap-1.5">
               <input
                 v-model="row.name"
-                class="w-[42%] rounded-[8px] border border-line bg-panel-2 px-2 py-1 font-mono text-[11px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
+                class="w-[42%] rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-1 font-mono text-[11px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
                 placeholder="Header-Name"
               />
               <input
                 v-model="row.value"
                 :type="showSecrets ? 'text' : 'password'"
-                class="min-w-0 flex-1 rounded-[8px] border border-line bg-panel-2 px-2 py-1 font-mono text-[11px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
+                class="min-w-0 flex-1 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-1 font-mono text-[11px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
                 placeholder="值"
               />
               <button
@@ -336,13 +336,13 @@ function onOpenChange(next: boolean): void {
             <div v-for="(row, index) in envRows" :key="index" class="mb-1 flex items-center gap-1.5">
               <input
                 v-model="row.name"
-                class="w-[42%] rounded-[8px] border border-line bg-panel-2 px-2 py-1 font-mono text-[11px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
+                class="w-[42%] rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-1 font-mono text-[11px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
                 placeholder="KEY"
               />
               <input
                 v-model="row.value"
                 :type="showSecrets ? 'text' : 'password'"
-                class="min-w-0 flex-1 rounded-[8px] border border-line bg-panel-2 px-2 py-1 font-mono text-[11px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
+                class="min-w-0 flex-1 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-1 font-mono text-[11px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
                 placeholder="值"
               />
               <button
@@ -363,7 +363,7 @@ function onOpenChange(next: boolean): void {
       <div class="flex justify-end gap-2 border-t border-line px-4 py-3">
         <button
           type="button"
-          class="rounded-[8px] border border-line bg-panel-2 px-3 py-1.5 text-[12px] text-dim transition-colors hover:text-foreground"
+          class="rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-3 py-1.5 text-[12px] text-dim transition-colors hover:text-foreground"
           @click="emit('cancel')"
         >
           取消
@@ -371,7 +371,7 @@ function onOpenChange(next: boolean): void {
         <button
           data-testid="mcp-save"
           type="button"
-          class="rounded-[8px] bg-accent px-3 py-1.5 text-[12px] font-medium text-accent-ink"
+          class="rounded-[calc(8px*var(--gw-radius-scale))] bg-accent px-3 py-1.5 text-[12px] font-medium text-accent-ink"
           @click="save"
         >
           {{ entry ? "保存" : "添加" }}

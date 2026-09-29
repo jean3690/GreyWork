@@ -30,6 +30,8 @@ export interface AppearanceDetail {
   theme: ResolvedTheme;
   /** data-fontSize：small / medium / large。 */
   fontSize: string;
+  /** data-radius：none / small / large（驱动 --gw-radius-scale）。 */
+  radius: string;
 }
 
 /** 请求应用一份外观（colorMode 未解析，system 在这里展开）。 */
@@ -37,6 +39,7 @@ export interface AppearanceInput {
   palette: string;
   colorMode: ColorMode;
   fontSize: string;
+  radius: string;
 }
 
 declare global {
@@ -82,9 +85,17 @@ export function applyAppearance(input: AppearanceInput): void {
   root.dataset.palette = input.palette;
   root.dataset.theme = theme;
   root.dataset.fontSize = input.fontSize;
+  root.dataset.radius = input.radius;
 
-  if (current && current.palette === input.palette && current.theme === theme && current.fontSize === input.fontSize) return;
-  current = { palette: input.palette, theme, fontSize: input.fontSize };
+  if (
+    current &&
+    current.palette === input.palette &&
+    current.theme === theme &&
+    current.fontSize === input.fontSize &&
+    current.radius === input.radius
+  )
+    return;
+  current = { palette: input.palette, theme, fontSize: input.fontSize, radius: input.radius };
   if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") return;
   window.dispatchEvent(new CustomEvent(APPEARANCE_EVENT, { detail: current }));
 }
@@ -92,8 +103,8 @@ export function applyAppearance(input: AppearanceInput): void {
 /**
  * 订阅实际明暗变化，返回退订函数。
  *
- * 只在明暗真的翻转时回调：换配色、改字号也广播，但那些不影响 Mermaid / Univer 的
- * 明暗，跟着重渲是白花钱。
+ * 只在明暗真的翻转时回调：换配色、改字号、改圆角也广播，但那些不影响 Mermaid / Univer
+ * 的明暗，跟着重渲是白花钱。
  */
 export function watchTheme(listener: (theme: ResolvedTheme) => void): () => void {
   if (typeof window === "undefined") return () => undefined;

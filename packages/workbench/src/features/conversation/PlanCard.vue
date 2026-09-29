@@ -44,7 +44,7 @@ function cancel(): void {
 </script>
 
 <template>
-  <div data-testid="plan-card" class="flex flex-col gap-2.5 rounded-[14px] border border-line bg-panel-2 p-3">
+  <div data-testid="plan-card" class="flex flex-col gap-2.5 rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel-2 p-3">
     <div class="flex items-center justify-between gap-2">
       <span class="flex min-w-0 items-center gap-1.5 text-[12px] font-medium text-foreground">
         <Icon name="lightning" :size="13" class="shrink-0 text-dim" />
@@ -74,7 +74,7 @@ function cancel(): void {
     <p
       v-else-if="message.acp && message.planDraft"
       data-testid="plan-draft"
-      class="flex flex-col gap-1 rounded-[10px] border border-dashed border-line bg-panel px-2.5 py-2 text-[12px] leading-relaxed"
+      class="flex flex-col gap-1 rounded-[calc(10px*var(--gw-radius-scale))] border border-dashed border-line bg-panel px-2.5 py-2 text-[12px] leading-relaxed"
     >
       <span class="text-dim">{{ t("chatView.planAcpDispatch", { backend: message.acp }) }}</span>
       <span class="whitespace-pre-wrap text-foreground [overflow-wrap:anywhere]">{{ message.planDraft }}</span>
@@ -85,7 +85,7 @@ function cancel(): void {
         type="button"
         data-testid="plan-cancel"
         :disabled="busy"
-        class="flex h-7 cursor-pointer items-center gap-1 rounded-[8px] border border-line bg-panel px-2.5 text-[11.5px] text-dim transition-colors hover:border-line-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40"
+        class="flex h-7 cursor-pointer items-center gap-1 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel px-2.5 text-[11.5px] text-dim transition-colors hover:border-line-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40"
         @click="cancel"
       >
         <Icon name="close-one" :size="11" />
@@ -95,7 +95,7 @@ function cancel(): void {
         type="button"
         data-testid="plan-confirm"
         :disabled="busy"
-        class="flex h-7 cursor-pointer items-center gap-1 rounded-[8px] bg-accent px-3 text-[11.5px] font-medium text-accent-ink transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40"
+        class="flex h-7 cursor-pointer items-center gap-1 rounded-[calc(8px*var(--gw-radius-scale))] bg-accent px-3 text-[11.5px] font-medium text-accent-ink transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40"
         @click="confirm"
       >
         <Icon name="check-one" :size="12" />

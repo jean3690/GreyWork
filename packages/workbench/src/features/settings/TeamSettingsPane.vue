@@ -12,7 +12,7 @@ function onMaxParallelInput(event: Event): void {
 </script>
 
 <template>
-  <div class="rounded-[14px] border border-line bg-panel p-4">
+  <div class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-4">
     <div class="text-[13px] font-medium text-fg">编排并发度</div>
     <p class="mt-1 text-[12px] text-dim2">多智能体协作时同时运行的回合上限；调高可加速但需要更多进程资源。</p>
     <div class="mt-3 flex items-center gap-3">

@@ -149,7 +149,7 @@ function isDark(color: string): boolean {
           v-else-if="run.editId != null"
           data-testid="docx-editable"
           contenteditable="true"
-          class="rounded-[2px] outline-none focus:bg-cyan/10"
+          class="rounded-[calc(2px*var(--gw-radius-scale))] outline-none focus:bg-cyan/10"
           :style="runStyle(run)"
           @input="onRunInput($event, run.editId)"
           @keydown.enter.prevent

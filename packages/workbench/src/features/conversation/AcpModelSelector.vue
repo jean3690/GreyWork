@@ -156,7 +156,7 @@ function toggle(): void {
 
     <div
       v-if="open && selectable"
-      class="absolute z-40 w-[min(340px,calc(100vw-16px))] rounded-[10px] border border-line bg-popover shadow-lg"
+      class="absolute z-40 w-[min(340px,calc(100vw-16px))] rounded-[calc(10px*var(--gw-radius-scale))] border border-line bg-popover shadow-lg"
       :class="[openUp ? 'bottom-full mb-1' : 'top-full mt-1', alignLeft ? 'left-0' : 'right-0']"
       @keydown.esc.prevent="closeMenu"
     >
@@ -183,7 +183,7 @@ function toggle(): void {
           role="menuitemradio"
           :aria-checked="String(choice.value) === String(option?.currentValue ?? '')"
           :class="[
-            'flex w-full cursor-pointer items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-[12px] transition-colors hover:bg-panel-2',
+            'flex w-full cursor-pointer items-center gap-2 rounded-[calc(6px*var(--gw-radius-scale))] px-2 py-1.5 text-left text-[12px] transition-colors hover:bg-panel-2',
             String(choice.value) === String(option?.currentValue ?? '') ? 'text-foreground' : 'text-dim hover:text-foreground',
           ]"
           @click="pick(String(choice.value))"

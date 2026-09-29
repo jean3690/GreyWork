@@ -14,7 +14,7 @@ const chatStore = useChatStore();
   <div class="flex flex-col gap-4">
     <RemoteChannelsPane />
     <div class="mt-1 text-[11px] font-medium uppercase tracking-wide text-dim2">{{ t("remoteAssist.settings.defaults") }}</div>
-    <div class="rounded-[14px] border border-line bg-panel p-4">
+    <div class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-4">
       <label class="flex cursor-pointer items-center justify-between gap-3">
         <span>
           <span class="block text-[13px] font-medium text-foreground">Plan 模式</span>
@@ -23,7 +23,7 @@ const chatStore = useChatStore();
         <input v-model="settings.planMode" type="checkbox" class="size-4 cursor-pointer accent-[var(--accent)]" :aria-label="'Plan 模式'" />
       </label>
     </div>
-    <div class="rounded-[14px] border border-line bg-panel p-4">
+    <div class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-4">
       <label class="flex cursor-pointer items-center justify-between gap-3">
         <span>
           <span class="block text-[13px] font-medium text-foreground">速度加成</span>

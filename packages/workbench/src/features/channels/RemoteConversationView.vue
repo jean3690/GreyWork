@@ -167,14 +167,14 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
         <!-- title 与 aria-label 同文案：可读名已由 aria-label 给出，重复的悬停提示没有增量 -->
         <button
           type="button"
-          class="grid size-7 shrink-0 cursor-pointer place-items-center rounded-[7px] border border-line bg-panel-2 text-dim transition-colors hover:border-line-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          class="grid size-7 shrink-0 cursor-pointer place-items-center rounded-[calc(7px*var(--gw-radius-scale))] border border-line bg-panel-2 text-dim transition-colors hover:border-line-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
           :aria-label="t('remoteAssist.conversation.back')"
           data-testid="remote-conversation-back"
           @click="back"
         >
           <Icon name="arrow-left" :size="14" />
         </button>
-        <span class="grid size-8 shrink-0 place-items-center rounded-[9px] bg-panel-2 text-dim">
+        <span class="grid size-8 shrink-0 place-items-center rounded-[calc(9px*var(--gw-radius-scale))] bg-panel-2 text-dim">
           <Icon name="message" :size="16" />
         </span>
         <div class="min-w-0">
@@ -190,7 +190,7 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
 
       <div
         ref="scroller"
-        class="min-h-0 flex-1 overflow-y-auto rounded-[14px] border border-line bg-panel p-3"
+        class="min-h-0 flex-1 overflow-y-auto rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-3"
         data-testid="remote-message-list"
       >
         <p v-if="messages.length === 0" class="py-10 text-center text-[12px] text-dim2">{{ t("remoteAssist.conversation.empty") }}</p>
@@ -198,7 +198,7 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
           <li v-for="message in messages" :key="message.id" class="flex" :class="message.role === 'user' ? 'justify-start' : 'justify-end'">
             <!-- 对端（微信那侧）：左侧浅底；本机助手 / 人工回复：右侧主色底 -->
             <div
-              class="max-w-[78%] rounded-[12px] px-3 py-2 text-[12.5px] leading-relaxed"
+              class="max-w-[78%] rounded-[calc(12px*var(--gw-radius-scale))] px-3 py-2 text-[12.5px] leading-relaxed"
               :class="message.role === 'user' ? 'bg-panel-2 text-foreground' : 'bg-accent/12 text-foreground'"
               :data-role="message.role"
             >
@@ -212,7 +212,7 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
                     v-if="item.kind === 'image' && thumbs[item.id]"
                     :src="thumbs[item.id] as string"
                     :alt="item.name"
-                    class="max-h-[160px] max-w-[200px] rounded-[8px] object-cover"
+                    class="max-h-[160px] max-w-[200px] rounded-[calc(8px*var(--gw-radius-scale))] object-cover"
                     data-testid="remote-attachment-image"
                   />
                   <!-- 视频 / 语音：内联播放器；读不到源时落到下面的文件 chip。 -->
@@ -220,7 +220,7 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
                     v-else-if="item.kind === 'video' && thumbs[item.id]"
                     :src="thumbs[item.id] as string"
                     :aria-label="item.name"
-                    class="max-h-[160px] max-w-[200px] rounded-[8px] border border-line-2 bg-black"
+                    class="max-h-[160px] max-w-[200px] rounded-[calc(8px*var(--gw-radius-scale))] border border-line-2 bg-black"
                     data-testid="remote-attachment-video"
                     controls
                     playsinline
@@ -237,7 +237,7 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
                   />
                   <span
                     v-else
-                    class="flex max-w-[200px] items-center gap-1.5 rounded-[8px] bg-panel px-2 py-1 text-[11.5px] text-foreground"
+                    class="flex max-w-[200px] items-center gap-1.5 rounded-[calc(8px*var(--gw-radius-scale))] bg-panel px-2 py-1 text-[11.5px] text-foreground"
                     data-testid="remote-attachment-file"
                   >
                     <Icon name="file" :size="12" class="shrink-0 text-dim" />
@@ -256,7 +256,7 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
         <div
           data-attachment-dropzone
           data-testid="remote-composer-card"
-          class="flex flex-col gap-2 rounded-[14px] border bg-panel-2 p-2.5 transition-colors focus-within:border-cyan/50"
+          class="flex flex-col gap-2 rounded-[calc(14px*var(--gw-radius-scale))] border bg-panel-2 p-2.5 transition-colors focus-within:border-cyan/50"
           :class="attachmentDragging ? 'border-cyan ring-2 ring-cyan/40' : 'border-line-2'"
           @dragover="onComposerDragOver"
           @dragleave="onComposerDragLeave"
@@ -268,7 +268,7 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
             v-model="draft"
             data-ctx="composer"
             rows="2"
-            class="min-h-[52px] w-full resize-none rounded-[10px] bg-panel px-2.5 py-2 text-[13px] leading-relaxed text-foreground outline-none placeholder:text-dim"
+            class="min-h-[52px] w-full resize-none rounded-[calc(10px*var(--gw-radius-scale))] bg-panel px-2.5 py-2 text-[13px] leading-relaxed text-foreground outline-none placeholder:text-dim"
             :placeholder="t('remoteAssist.conversation.placeholder')"
             :aria-label="t('remoteAssist.conversation.send')"
             data-testid="remote-composer-input"
@@ -279,7 +279,7 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
               <Hint :text="canAttach ? t('remoteAssist.conversation.attach') : mediaHint" multiline>
                 <button
                   type="button"
-                  class="grid size-6 shrink-0 cursor-pointer place-items-center rounded-[6px] text-dim2 transition-colors hover:bg-panel hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+                  class="grid size-6 shrink-0 cursor-pointer place-items-center rounded-[calc(6px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
                   :disabled="attachmentsFull || !canAttach"
                   :aria-label="t('remoteAssist.conversation.attach')"
                   data-testid="remote-composer-attach"
@@ -294,7 +294,7 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
             </div>
             <button
               type="button"
-              class="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-[10px] border border-accent bg-accent px-3 text-[12px] font-medium text-accent-ink transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:border-line-2 disabled:bg-panel disabled:text-dim2 disabled:opacity-100"
+              class="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-[calc(10px*var(--gw-radius-scale))] border border-accent bg-accent px-3 text-[12px] font-medium text-accent-ink transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:border-line-2 disabled:bg-panel disabled:text-dim2 disabled:opacity-100"
               :disabled="!canSend || sending"
               data-testid="remote-composer-send"
               @click="void send()"

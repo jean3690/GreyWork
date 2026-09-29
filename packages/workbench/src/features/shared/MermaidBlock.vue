@@ -109,14 +109,14 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="md-mermaid relative my-[0.7em] overflow-hidden rounded-[8px] border border-line bg-panel-2">
+  <div class="md-mermaid relative my-[0.7em] overflow-hidden rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2">
     <!-- 渲染成功：语言标签 + 缩放控制（步进 ±25%，0.5×–3×） -->
     <div v-if="state === 'ok'" class="flex items-center gap-1.5 border-b border-line bg-panel py-1 pl-2.5 pr-1.5">
       <span class="font-mono text-[11px] text-dim2">mermaid</span>
       <span class="min-w-[38px] text-right font-mono text-[10.5px] tabular-nums text-dim2" aria-live="polite">{{ percent }}%</span>
       <span class="ml-auto flex items-center gap-0.5">
         <button
-          class="grid size-[20px] cursor-pointer place-items-center rounded-[5px] border border-transparent bg-transparent text-dim2 transition-colors hover:border-line hover:bg-panel-2 hover:text-foreground disabled:cursor-default disabled:opacity-40 disabled:hover:border-transparent disabled:hover:bg-transparent disabled:hover:text-dim2"
+          class="grid size-[20px] cursor-pointer place-items-center rounded-[calc(5px*var(--gw-radius-scale))] border border-transparent bg-transparent text-dim2 transition-colors hover:border-line hover:bg-panel-2 hover:text-foreground disabled:cursor-default disabled:opacity-40 disabled:hover:border-transparent disabled:hover:bg-transparent disabled:hover:text-dim2"
           type="button"
           aria-label="缩小"
           :disabled="scale <= ZOOM_MIN"
@@ -125,7 +125,7 @@ onBeforeUnmount(() => {
           <ZoomOut class="size-3.5" />
         </button>
         <button
-          class="grid size-[20px] cursor-pointer place-items-center rounded-[5px] border border-transparent bg-transparent text-dim2 transition-colors hover:border-line hover:bg-panel-2 hover:text-foreground disabled:cursor-default disabled:opacity-40 disabled:hover:border-transparent disabled:hover:bg-transparent disabled:hover:text-dim2"
+          class="grid size-[20px] cursor-pointer place-items-center rounded-[calc(5px*var(--gw-radius-scale))] border border-transparent bg-transparent text-dim2 transition-colors hover:border-line hover:bg-panel-2 hover:text-foreground disabled:cursor-default disabled:opacity-40 disabled:hover:border-transparent disabled:hover:bg-transparent disabled:hover:text-dim2"
           type="button"
           aria-label="放大"
           :disabled="scale >= ZOOM_MAX"
@@ -134,7 +134,7 @@ onBeforeUnmount(() => {
           <ZoomIn class="size-3.5" />
         </button>
         <button
-          class="grid size-[20px] cursor-pointer place-items-center rounded-[5px] border border-transparent bg-transparent text-dim2 transition-colors hover:border-line hover:bg-panel-2 hover:text-foreground disabled:cursor-default disabled:opacity-40 disabled:hover:border-transparent disabled:hover:bg-transparent disabled:hover:text-dim2"
+          class="grid size-[20px] cursor-pointer place-items-center rounded-[calc(5px*var(--gw-radius-scale))] border border-transparent bg-transparent text-dim2 transition-colors hover:border-line hover:bg-panel-2 hover:text-foreground disabled:cursor-default disabled:opacity-40 disabled:hover:border-transparent disabled:hover:bg-transparent disabled:hover:text-dim2"
           type="button"
           aria-label="重置缩放"
           :disabled="scale === 1"

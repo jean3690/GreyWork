@@ -192,20 +192,20 @@ async function removeAgentDraft(): Promise<void> {
 
 <template>
   <div class="flex flex-col gap-4">
-    <div class="rounded-[14px] border border-line bg-panel p-4">
+    <div class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-4">
       <div class="mb-3 flex items-center justify-between gap-2">
         <span class="text-[13px] font-medium text-foreground">默认模型供应商</span>
         <span class="flex gap-1.5">
           <button
             type="button"
-            class="h-6 cursor-pointer rounded-[6px] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
+            class="h-6 cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
             @click="addProviderOpen = true"
           >
             ＋ 新增供应商
           </button>
           <button
             type="button"
-            class="h-6 cursor-pointer rounded-[6px] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
+            class="h-6 cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
             @click="settings.resetModelProviders()"
           >
             恢复默认
@@ -216,7 +216,7 @@ async function removeAgentDraft(): Promise<void> {
         <button
           v-for="provider in settings.modelProviders"
           :key="provider.id"
-          class="flex cursor-pointer items-center gap-2.5 rounded-[10px] border px-3 py-2 text-left transition-colors"
+          class="flex cursor-pointer items-center gap-2.5 rounded-[calc(10px*var(--gw-radius-scale))] border px-3 py-2 text-left transition-colors"
           :class="provider.id === settings.selectedModelProviderId ? 'border-line-2 bg-panel-2' : 'border-transparent hover:bg-panel-2'"
           @click="settings.selectModelProvider(provider.id)"
         >
@@ -227,7 +227,7 @@ async function removeAgentDraft(): Promise<void> {
       </div>
     </div>
     <!-- 供应商编辑表单：API key 来自宿主进程环境变量，改完需重启应用生效 -->
-    <div v-if="activeProvider" class="rounded-[14px] border border-line bg-panel p-4">
+    <div v-if="activeProvider" class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-4">
       <div class="mb-3 flex items-center justify-between gap-2">
         <span class="text-[13px] font-medium text-foreground">编辑供应商</span>
         <span class="text-[10.5px] text-dim2">当前：{{ activeProvider.id }}</span>
@@ -237,7 +237,7 @@ async function removeAgentDraft(): Promise<void> {
           <span class="w-20 shrink-0 text-[11.5px] text-dim2">名称</span>
           <input
             v-model="providerDraft.name"
-            class="min-w-0 flex-1 rounded-[8px] border border-line bg-panel-2 px-2 py-1.5 text-[12.5px] text-foreground outline-none focus:border-line-2"
+            class="min-w-0 flex-1 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-1.5 text-[12.5px] text-foreground outline-none focus:border-line-2"
             placeholder="供应商名称"
             @input="providerDraftDirty = true"
           />
@@ -246,7 +246,7 @@ async function removeAgentDraft(): Promise<void> {
           <span class="w-20 shrink-0 text-[11.5px] text-dim2">Base URL</span>
           <input
             v-model="providerDraft.baseUrl"
-            class="min-w-0 flex-1 rounded-[8px] border border-line bg-panel-2 px-2 py-1.5 font-mono text-[12px] text-foreground outline-none focus:border-line-2"
+            class="min-w-0 flex-1 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-1.5 font-mono text-[12px] text-foreground outline-none focus:border-line-2"
             placeholder="https://api.openai.com/v1"
             @input="providerDraftDirty = true"
           />
@@ -255,7 +255,7 @@ async function removeAgentDraft(): Promise<void> {
           <span class="w-20 shrink-0 text-[11.5px] text-dim2">模型</span>
           <input
             v-model="providerDraft.model"
-            class="min-w-0 flex-1 rounded-[8px] border border-line bg-panel-2 px-2 py-1.5 font-mono text-[12px] text-foreground outline-none focus:border-line-2"
+            class="min-w-0 flex-1 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-1.5 font-mono text-[12px] text-foreground outline-none focus:border-line-2"
             placeholder="gpt-4o / claude-sonnet-4-5"
             @input="providerDraftDirty = true"
           />
@@ -264,7 +264,7 @@ async function removeAgentDraft(): Promise<void> {
           <span class="w-20 shrink-0 text-[11.5px] text-dim2">API Key 环境变量</span>
           <input
             v-model="providerDraft.apiKeyEnv"
-            class="min-w-0 flex-1 rounded-[8px] border border-line bg-panel-2 px-2 py-1.5 font-mono text-[12px] text-foreground outline-none focus:border-line-2"
+            class="min-w-0 flex-1 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-1.5 font-mono text-[12px] text-foreground outline-none focus:border-line-2"
             placeholder="OPENAI_API_KEY"
             @input="providerDraftDirty = true"
           />
@@ -280,7 +280,7 @@ async function removeAgentDraft(): Promise<void> {
             v-model="providerDraft.headersText"
             rows="3"
             spellcheck="false"
-            class="min-w-0 flex-1 resize-y rounded-[8px] border border-line bg-panel-2 px-2 py-1.5 font-mono text-[11.5px] text-foreground outline-none placeholder:text-dim2 focus:border-line-2"
+            class="min-w-0 flex-1 resize-y rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-1.5 font-mono text-[11.5px] text-foreground outline-none placeholder:text-dim2 focus:border-line-2"
             placeholder="每行一条 Key: Value，如 X-Custom-Auth: {{MY_TOKEN}}"
             data-testid="provider-draft-headers"
             @input="providerDraftDirty = true"
@@ -295,7 +295,7 @@ async function removeAgentDraft(): Promise<void> {
         <div class="flex items-center justify-between gap-2">
           <button
             type="button"
-            class="h-7 cursor-pointer rounded-[7px] border border-line bg-panel-2 px-2.5 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
+            class="h-7 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2.5 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
             @click="removeActiveProvider"
           >
             删除该供应商
@@ -303,14 +303,14 @@ async function removeAgentDraft(): Promise<void> {
           <div class="flex gap-1.5">
             <button
               type="button"
-              class="h-7 cursor-pointer rounded-[7px] border border-line bg-panel px-2.5 text-[11px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground"
+              class="h-7 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] border border-line bg-panel px-2.5 text-[11px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground"
               @click="syncProviderDraft"
             >
               撤销
             </button>
             <button
               type="button"
-              class="h-7 cursor-pointer rounded-[7px] bg-accent px-3 text-[11.5px] font-medium text-accent-ink transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+              class="h-7 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] bg-accent px-3 text-[11.5px] font-medium text-accent-ink transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
               :disabled="!providerDraftDirty"
               @click="saveProviderDraft"
             >
@@ -320,11 +320,11 @@ async function removeAgentDraft(): Promise<void> {
         </div>
       </div>
     </div>
-    <div class="rounded-[14px] border border-line bg-panel p-4">
+    <div class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-4">
       <div class="mb-1.5 text-[13px] font-medium text-foreground">推理等级</div>
       <select
         data-testid="provider-effort-select"
-        class="cursor-pointer rounded-[8px] border border-line bg-panel-2 px-2 py-1.5 text-[12px] text-foreground outline-none focus:border-line-2"
+        class="cursor-pointer rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-1.5 text-[12px] text-foreground outline-none focus:border-line-2"
         :value="activeProvider?.reasoningEffort ?? 'auto'"
         :aria-label="`设置 ${activeProvider?.name ?? ''} 的推理等级`"
         @change="setProviderEffort(($event.target as HTMLSelectElement).value)"
@@ -335,14 +335,14 @@ async function removeAgentDraft(): Promise<void> {
         {{ t(REASONING_EFFORTS.find((effort) => effort.value === (activeProvider?.reasoningEffort ?? "auto"))?.description ?? "") }}
       </div>
     </div>
-    <div class="rounded-[14px] border border-line bg-panel p-4">
+    <div class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-4">
       <div class="mb-3 flex items-center justify-between gap-2">
         <span class="text-[13px] font-medium text-foreground">ACP 后端（聊天 / 自动执行）</span>
         <button
           v-if="!agentCatalogReadOnly"
           type="button"
           data-testid="agent-catalog-add"
-          class="h-6 cursor-pointer rounded-[6px] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
+          class="h-6 cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
           @click="startAgentAdd"
         >
           新增后端
@@ -353,7 +353,7 @@ async function removeAgentDraft(): Promise<void> {
       <p
         v-if="agentCatalogReadOnly"
         data-testid="agent-catalog-readonly"
-        class="mb-2 rounded-[10px] bg-panel-2 px-3 py-2 text-[11px] leading-[1.6] text-dim2"
+        class="mb-2 rounded-[calc(10px*var(--gw-radius-scale))] bg-panel-2 px-3 py-2 text-[11px] leading-[1.6] text-dim2"
       >
         服务端模式下 agent 目录只读：这里的新增、编辑与启停不会生效。后端能否启动由服务端配置
         （GREYWORK_AGENT_PROGRAMS）管理，如需调整请修改服务端配置或联系管理员。
@@ -361,7 +361,7 @@ async function removeAgentDraft(): Promise<void> {
       <div class="flex flex-col gap-1.5">
         <div v-for="provider in agent.agentProviders" :key="provider.id">
           <label
-            class="flex cursor-pointer items-center gap-2.5 rounded-[10px] border border-transparent px-3 py-2 transition-colors hover:bg-panel-2"
+            class="flex cursor-pointer items-center gap-2.5 rounded-[calc(10px*var(--gw-radius-scale))] border border-transparent px-3 py-2 transition-colors hover:bg-panel-2"
           >
             <!-- 图标直接给人看的就是这枚：点它即换，故做成按钮而不是静态装饰 -->
             <Hint
@@ -377,7 +377,7 @@ async function removeAgentDraft(): Promise<void> {
               <button
                 type="button"
                 :data-testid="`agent-icon-${provider.id}`"
-                class="grid size-6 shrink-0 cursor-pointer place-items-center rounded-[6px] border border-line bg-panel-2 text-dim transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+                class="grid size-6 shrink-0 cursor-pointer place-items-center rounded-[calc(6px*var(--gw-radius-scale))] border border-line bg-panel-2 text-dim transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
                 :aria-expanded="providerIconTarget === provider.id"
                 :aria-label="`改 ${provider.name} 的图标`"
                 @click.stop="toggleProviderIcon(provider.id)"
@@ -404,7 +404,7 @@ async function removeAgentDraft(): Promise<void> {
             <button
               v-if="agent.isCustomAgentProvider(provider.id) && !agentCatalogReadOnly"
               type="button"
-              class="shrink-0 cursor-pointer rounded-[6px] border border-line bg-panel-2 px-2 py-0.5 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
+              class="shrink-0 cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-0.5 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
               @click.stop="startAgentEdit(provider.id)"
             >
               编辑
@@ -412,7 +412,7 @@ async function removeAgentDraft(): Promise<void> {
           </label>
           <div
             v-if="providerIconTarget === provider.id"
-            class="mb-1 ml-3 rounded-[10px] border border-line bg-panel-2 p-2"
+            class="mb-1 ml-3 rounded-[calc(10px*var(--gw-radius-scale))] border border-line bg-panel-2 p-2"
             data-testid="agent-icon-picker"
           >
             <IconPicker

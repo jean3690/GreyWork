@@ -142,8 +142,10 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
     <section class="flex min-h-full w-full flex-col items-center justify-start px-4 pb-8 pt-16 sm:justify-center sm:py-8">
       <div class="flex w-full max-w-[800px] flex-col items-center gap-4 sm:-translate-y-[5vh]">
         <div class="flex flex-col items-center gap-3 text-center">
-          <span class="grid size-12 place-items-center rounded-[14px] border border-line-2 bg-console shadow-[0_8px_28px_rgba(0,0,0,0.18)]">
-            <img :src="logoUrl" alt="" class="size-7 shrink-0 rounded-[8px]" width="28" height="28" />
+          <span
+            class="grid size-12 place-items-center rounded-[calc(14px*var(--gw-radius-scale))] border border-line-2 bg-console shadow-[0_8px_28px_rgba(0,0,0,0.18)]"
+          >
+            <img :src="logoUrl" alt="" class="size-7 shrink-0 rounded-[calc(8px*var(--gw-radius-scale))]" width="28" height="28" />
           </span>
         </div>
 
@@ -152,7 +154,7 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
           <div
             data-attachment-dropzone
             data-testid="composer-card"
-            class="relative flex w-full flex-col gap-2 rounded-[16px] border bg-panel-2 p-3 shadow-[0_10px_32px_rgba(0,0,0,0.12)] transition-[border-color,box-shadow] focus-within:border-cyan/50 focus-within:shadow-[0_12px_36px_rgba(0,0,0,0.16)]"
+            class="relative flex w-full flex-col gap-2 rounded-[calc(16px*var(--gw-radius-scale))] border bg-panel-2 p-3 shadow-[0_10px_32px_rgba(0,0,0,0.12)] transition-[border-color,box-shadow] focus-within:border-cyan/50 focus-within:shadow-[0_12px_36px_rgba(0,0,0,0.16)]"
             :class="attachmentDragging ? 'border-cyan ring-2 ring-cyan/40' : 'border-line-2'"
             @dragover="onComposerDragOver"
             @dragleave="onComposerDragLeave"
@@ -169,7 +171,7 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
               :aria-expanded="slashOpen"
               :aria-controls="slashOpen ? 'slash-command-menu' : undefined"
               :aria-activedescendant="slashActiveOptionId"
-              class="min-h-[88px] w-full resize-none rounded-[10px] bg-panel px-2.5 py-2 text-[14px] leading-relaxed text-foreground outline-none placeholder:text-dim"
+              class="min-h-[88px] w-full resize-none rounded-[calc(10px*var(--gw-radius-scale))] bg-panel px-2.5 py-2 text-[14px] leading-relaxed text-foreground outline-none placeholder:text-dim"
               :placeholder="t('chat.composer.placeholderNew')"
               :aria-label="t('chat.composer.ariaLabel')"
               @keydown="onKeydown"
@@ -186,7 +188,7 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
                   <button
                     type="button"
                     data-testid="composer-attach"
-                    class="grid size-6 shrink-0 cursor-pointer place-items-center rounded-[6px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40"
+                    class="grid size-6 shrink-0 cursor-pointer place-items-center rounded-[calc(6px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40"
                     :disabled="attachmentsFull"
                     :aria-label="t('chat.uploadFile')"
                     @click="pickAttachmentFiles"
@@ -220,7 +222,7 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
               </div>
               <button
                 data-testid="composer-send"
-                class="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-[10px] border border-accent bg-accent px-3 text-[12px] font-medium text-accent-ink transition-[background-color,border-color,color,opacity] hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:border-line-2 disabled:bg-panel disabled:text-dim2 disabled:opacity-100"
+                class="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-[calc(10px*var(--gw-radius-scale))] border border-accent bg-accent px-3 text-[12px] font-medium text-accent-ink transition-[background-color,border-color,color,opacity] hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:border-line-2 disabled:bg-panel disabled:text-dim2 disabled:opacity-100"
                 :disabled="!draft.trim() && attachmentItems.length === 0"
                 @click="onSubmit"
               >

@@ -282,7 +282,7 @@ onBeforeUnmount(() => unregisterPreviewSaver(props.tab.id));
           type="button"
           data-testid="sheet-send-to-chat"
           :aria-disabled="!canSendSelection || undefined"
-          class="flex h-5 shrink-0 cursor-pointer items-center gap-1 rounded-[5px] border border-line-2 px-2 text-[11px] text-foreground transition-colors hover:border-cyan hover:text-cyan focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan aria-disabled:cursor-not-allowed aria-disabled:border-transparent aria-disabled:text-dim2 aria-disabled:hover:border-transparent aria-disabled:hover:text-dim2"
+          class="flex h-5 shrink-0 cursor-pointer items-center gap-1 rounded-[calc(5px*var(--gw-radius-scale))] border border-line-2 px-2 text-[11px] text-foreground transition-colors hover:border-cyan hover:text-cyan focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan aria-disabled:cursor-not-allowed aria-disabled:border-transparent aria-disabled:text-dim2 aria-disabled:hover:border-transparent aria-disabled:hover:text-dim2"
           @click="sendSelectionToChat()"
         >
           <Icon name="send-one" :size="11" />

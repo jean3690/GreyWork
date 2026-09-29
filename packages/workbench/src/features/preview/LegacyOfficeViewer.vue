@@ -127,7 +127,7 @@ async function openExternal(): Promise<void> {
     </p>
 
     <div v-else data-testid="legacy-office-viewer" class="min-h-0 flex-1 overflow-y-auto p-4">
-      <div class="rounded-[8px] border border-line-2 bg-panel-2 p-4">
+      <div class="rounded-[calc(8px*var(--gw-radius-scale))] border border-line-2 bg-panel-2 p-4">
         <p class="text-[13px] text-foreground">{{ headline }}</p>
         <p class="mt-1.5 text-[12px] leading-relaxed text-dim2">{{ detail }}</p>
         <template v-if="showSystemAppHint">
@@ -138,7 +138,7 @@ async function openExternal(): Promise<void> {
             v-if="externalPath"
             type="button"
             data-testid="legacy-office-open-external"
-            class="mt-3 cursor-pointer rounded-[8px] border border-line bg-panel px-3 py-1.5 text-[12px] text-dim transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+            class="mt-3 cursor-pointer rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel px-3 py-1.5 text-[12px] text-dim transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
             @click="openExternal()"
           >
             {{ t("preview.common.openExternal") }}

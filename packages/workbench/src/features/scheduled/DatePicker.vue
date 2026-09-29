@@ -72,7 +72,7 @@ function onPick(value: DateValue | undefined): void {
         :data-testid="props.testId"
         :disabled="props.disabled"
         :aria-label="label"
-        class="flex h-7 cursor-pointer items-center gap-1.5 rounded-[8px] border border-line bg-panel px-2 text-[11.5px] text-foreground outline-none transition-colors hover:border-line-2 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40"
+        class="flex h-7 cursor-pointer items-center gap-1.5 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel px-2 text-[11.5px] text-foreground outline-none transition-colors hover:border-line-2 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40"
         :class="[props.block ? 'w-full' : '', props.modelValue ? '' : 'text-dim2', open ? 'border-line-2 bg-panel-2' : '']"
       >
         <Icon name="calendar" :size="12" class="shrink-0 text-dim2" />

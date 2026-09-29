@@ -23,5 +23,8 @@
   --border: var(--line);
   --input: var(--line-2);
   --ring: var(--accent);
-  --radius: 0.625rem;
+  /* 圆角由「外观 → 圆角」的总旋钮驱动（定义在 theme/base.css，与本文件的加载顺序无关：
+   * 自定义属性在计算值阶段解析）。这里只写基准值，派生的 sm/md/xl 见
+   * apps/desktop/src/tailwind.css 的 @theme 块。 */
+  --radius: calc(0.625rem * var(--gw-radius-scale));
 }

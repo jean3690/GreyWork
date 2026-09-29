@@ -127,11 +127,13 @@ onMounted(() => {
           v-for="channel in CHANNELS"
           :key="channel"
           type="button"
-          class="flex cursor-pointer items-center gap-3 rounded-[12px] border border-line bg-panel px-3 py-2.5 text-left transition-colors hover:border-line-2 hover:bg-panel-2"
+          class="flex cursor-pointer items-center gap-3 rounded-[calc(12px*var(--gw-radius-scale))] border border-line bg-panel px-3 py-2.5 text-left transition-colors hover:border-line-2 hover:bg-panel-2"
           :data-testid="`row-${channel}`"
           @click="openDialog = channel"
         >
-          <span class="grid size-8 shrink-0 place-items-center rounded-[9px] border border-line bg-panel-2 text-dim">
+          <span
+            class="grid size-8 shrink-0 place-items-center rounded-[calc(9px*var(--gw-radius-scale))] border border-line bg-panel-2 text-dim"
+          >
             <Icon name="message" :size="15" />
           </span>
           <span class="min-w-0 flex-1">
@@ -153,11 +155,13 @@ onMounted(() => {
           v-for="entry in integrations"
           :key="entry.id"
           type="button"
-          class="flex cursor-pointer items-center gap-3 rounded-[12px] border border-line bg-panel px-3 py-2.5 text-left transition-colors hover:border-line-2 hover:bg-panel-2"
+          class="flex cursor-pointer items-center gap-3 rounded-[calc(12px*var(--gw-radius-scale))] border border-line bg-panel px-3 py-2.5 text-left transition-colors hover:border-line-2 hover:bg-panel-2"
           :data-testid="`row-${entry.testId}`"
           @click="openDialog = entry.id"
         >
-          <span class="grid size-8 shrink-0 place-items-center rounded-[9px] border border-line bg-panel-2 text-dim">
+          <span
+            class="grid size-8 shrink-0 place-items-center rounded-[calc(9px*var(--gw-radius-scale))] border border-line bg-panel-2 text-dim"
+          >
             <Icon :name="entry.icon" :size="15" />
           </span>
           <span class="min-w-0 flex-1">

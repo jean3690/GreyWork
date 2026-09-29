@@ -56,7 +56,10 @@ const LINE_CLASS: Record<string, string> = {
 </script>
 
 <template>
-  <div class="flex flex-col gap-1.5 rounded-[8px] border border-line bg-panel px-2 py-1.5" data-testid="tool-detail">
+  <div
+    class="flex flex-col gap-1.5 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel px-2 py-1.5"
+    data-testid="tool-detail"
+  >
     <div v-if="diff" class="flex flex-col" data-testid="tool-diff">
       <div class="mb-1 flex items-center gap-2 border-b border-line/70 pb-1">
         <span class="min-w-0 flex-1 truncate font-mono text-[10.5px] text-dim2">{{ diff.path }}</span>
@@ -110,7 +113,7 @@ const LINE_CLASS: Record<string, string> = {
       <button
         v-if="hiddenLines > 0 || expanded"
         type="button"
-        class="cursor-pointer rounded-[6px] border border-line px-1.5 py-0.5 text-[10.5px] text-dim transition-colors hover:border-line-2 hover:text-foreground [font-family:inherit]"
+        class="cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] border border-line px-1.5 py-0.5 text-[10.5px] text-dim transition-colors hover:border-line-2 hover:text-foreground [font-family:inherit]"
         data-testid="tool-detail-toggle"
         @click="expanded = !expanded"
       >

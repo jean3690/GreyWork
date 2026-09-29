@@ -10,13 +10,13 @@ const emit = defineEmits<{ toggleSider: [] }>();
 <template>
   <div class="flex h-[52px] shrink-0 items-center px-2">
     <button
-      class="flex h-9 w-full cursor-pointer items-center gap-2 overflow-hidden rounded-[8px] px-1.5 text-left transition-colors hover:bg-panel focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+      class="flex h-9 w-full cursor-pointer items-center gap-2 overflow-hidden rounded-[calc(8px*var(--gw-radius-scale))] px-1.5 text-left transition-colors hover:bg-panel focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
       :class="props.collapsed ? 'justify-center px-0' : ''"
       :aria-label="props.collapsed ? '展开侧栏' : '收起侧栏'"
       data-testid="sider-brand-toggle"
       @click="emit('toggleSider')"
     >
-      <img :src="logoUrl" alt="" class="size-7 shrink-0 rounded-[8px]" width="28" height="28" />
+      <img :src="logoUrl" alt="" class="size-7 shrink-0 rounded-[calc(8px*var(--gw-radius-scale))]" width="28" height="28" />
       <span v-if="!props.collapsed" class="truncate font-display text-[14px] font-semibold tracking-tight text-foreground"> GreyWork </span>
     </button>
   </div>

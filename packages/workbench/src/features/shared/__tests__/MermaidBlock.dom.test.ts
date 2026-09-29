@@ -14,7 +14,7 @@ const mockRender = vi.mocked(renderMermaid);
 
 /** 切外观要走真实入口：只改 data-theme 是不会广播的，组件收不到。 */
 function setColorMode(colorMode: "dark" | "light" | "system"): void {
-  applyAppearance({ palette: "greywork", colorMode, fontSize: "medium" });
+  applyAppearance({ palette: "greywork", colorMode, fontSize: "medium", radius: "small" });
 }
 
 const SOURCE = "flowchart LR\n  A[解析] --> B{渲染}";

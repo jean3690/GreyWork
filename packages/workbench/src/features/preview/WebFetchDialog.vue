@@ -51,7 +51,10 @@ async function submit(): Promise<void> {
 
 <template>
   <Dialog v-model:open="open" @update:open="onOpenChange">
-    <DialogContent :show-close-button="false" class="gap-0 rounded-[14px] border-line bg-panel p-4 shadow-xl sm:max-w-[420px]">
+    <DialogContent
+      :show-close-button="false"
+      class="gap-0 rounded-[calc(14px*var(--gw-radius-scale))] border-line bg-panel p-4 shadow-xl sm:max-w-[420px]"
+    >
       <form @submit.prevent="submit">
         <DialogTitle class="text-[13px] font-medium text-foreground">{{ t("web.title") }}</DialogTitle>
         <DialogDescription class="mt-1.5 text-[11.5px] leading-relaxed text-dim2">
@@ -63,14 +66,14 @@ async function submit(): Promise<void> {
           data-testid="web-fetch-url"
           :placeholder="t('web.urlPlaceholder')"
           :disabled="!supported || busy"
-          class="mt-3 h-9 w-full rounded-[8px] border border-line-2 bg-panel-2 px-2.5 text-[12.5px] text-foreground outline-none focus-visible:border-cyan disabled:opacity-50"
+          class="mt-3 h-9 w-full rounded-[calc(8px*var(--gw-radius-scale))] border border-line-2 bg-panel-2 px-2.5 text-[12.5px] text-foreground outline-none focus-visible:border-cyan disabled:opacity-50"
         />
         <p v-if="!supported" class="mt-2 text-[11.5px] text-dim2">{{ t("web.unsupportedRuntime") }}</p>
         <p v-else-if="error" role="alert" class="mt-2 text-[12px] text-orange">{{ t("web.error", { detail: error }) }}</p>
         <div class="mt-4 flex justify-end gap-2">
           <button
             type="button"
-            class="rounded-[8px] border border-line bg-panel-2 px-3 py-1.5 text-[12px] text-dim transition-colors hover:text-foreground"
+            class="rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-3 py-1.5 text-[12px] text-dim transition-colors hover:text-foreground"
             @click="emit('close')"
           >
             {{ t("common.cancel") }}
@@ -79,7 +82,7 @@ async function submit(): Promise<void> {
             type="submit"
             data-testid="web-fetch-submit"
             :disabled="busy || !supported || !url.trim()"
-            class="rounded-[8px] bg-accent px-3 py-1.5 text-[12px] font-medium text-accent-ink transition-opacity disabled:opacity-60"
+            class="rounded-[calc(8px*var(--gw-radius-scale))] bg-accent px-3 py-1.5 text-[12px] font-medium text-accent-ink transition-opacity disabled:opacity-60"
           >
             {{ busy ? t("web.fetching") : t("web.fetch") }}
           </button>

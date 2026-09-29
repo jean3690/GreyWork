@@ -120,20 +120,20 @@ function confirmResetSources(): void {
 
 <template>
   <div class="flex flex-col gap-4">
-    <div class="rounded-[14px] border border-line bg-panel p-4">
+    <div class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-4">
       <div class="mb-1 flex items-center justify-between gap-2">
         <span class="text-[13px] font-medium text-foreground">市场源</span>
         <span class="flex gap-1.5">
           <button
             type="button"
-            class="h-6 cursor-pointer rounded-[6px] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
+            class="h-6 cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
             @click="openAddSource"
           >
             ＋ 添加源
           </button>
           <button
             type="button"
-            class="h-6 cursor-pointer rounded-[6px] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-destructive"
+            class="h-6 cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-destructive"
             @click="resetSourceTarget = true"
           >
             恢复默认
@@ -145,7 +145,11 @@ function confirmResetSources(): void {
         协议（<code>/api/search</code>、<code>/api/download</code>）。
       </p>
       <div class="flex flex-col gap-1.5">
-        <div v-for="entry in settings.skillSources" :key="entry.id" class="flex items-center gap-2 rounded-[10px] bg-panel-2 px-2.5 py-2">
+        <div
+          v-for="entry in settings.skillSources"
+          :key="entry.id"
+          class="flex items-center gap-2 rounded-[calc(10px*var(--gw-radius-scale))] bg-panel-2 px-2.5 py-2"
+        >
           <span class="min-w-0 flex-1 text-[12px] text-foreground">{{ entry.label }}</span>
           <span class="shrink-0 rounded-full border border-line px-1.5 py-px font-mono text-[10px] text-dim2">
             {{ entry.type === "api" ? "API" : "GitHub" }}
@@ -164,14 +168,14 @@ function confirmResetSources(): void {
           </label>
           <button
             type="button"
-            class="shrink-0 rounded-[8px] border border-line px-2 py-1 text-[11px] text-dim transition-colors hover:text-foreground"
+            class="shrink-0 rounded-[calc(8px*var(--gw-radius-scale))] border border-line px-2 py-1 text-[11px] text-dim transition-colors hover:text-foreground"
             @click="openEditSource(entry)"
           >
             编辑
           </button>
           <button
             type="button"
-            class="shrink-0 rounded-[8px] border border-line px-2 py-1 text-[11px] text-dim transition-colors hover:text-destructive"
+            class="shrink-0 rounded-[calc(8px*var(--gw-radius-scale))] border border-line px-2 py-1 text-[11px] text-dim transition-colors hover:text-destructive"
             @click="settings.removeSkillSource(entry.id)"
           >
             删除
@@ -180,12 +184,12 @@ function confirmResetSources(): void {
       </div>
     </div>
 
-    <div class="rounded-[14px] border border-line bg-panel p-4">
+    <div class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-4">
       <div class="mb-1 flex items-center justify-between gap-2">
         <span class="text-[13px] font-medium text-foreground">已安装</span>
         <button
           type="button"
-          class="h-6 cursor-pointer rounded-[6px] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground disabled:opacity-50"
+          class="h-6 cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground disabled:opacity-50"
           :disabled="skills.installedLoading"
           @click="skills.refreshInstalled()"
         >
@@ -204,7 +208,7 @@ function confirmResetSources(): void {
         {{ skills.installedLoading ? "扫描中…" : "还没有安装任何技能。" }}
       </p>
       <div v-else class="flex flex-col gap-2">
-        <div v-for="skill in skills.installed" :key="skill.id" class="rounded-[10px] bg-panel-2 p-2.5">
+        <div v-for="skill in skills.installed" :key="skill.id" class="rounded-[calc(10px*var(--gw-radius-scale))] bg-panel-2 p-2.5">
           <div class="flex items-center gap-2">
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-1.5">
@@ -223,7 +227,7 @@ function confirmResetSources(): void {
               <button
                 v-if="skills.recordBySkillId.get(skill.id)"
                 type="button"
-                class="rounded-[8px] border border-line px-2 py-1 text-[11px] text-dim transition-colors hover:text-foreground disabled:opacity-50"
+                class="rounded-[calc(8px*var(--gw-radius-scale))] border border-line px-2 py-1 text-[11px] text-dim transition-colors hover:text-foreground disabled:opacity-50"
                 :disabled="skills.busyId === skill.id"
                 @click="confirm = { kind: 'update', skill }"
               >
@@ -231,7 +235,7 @@ function confirmResetSources(): void {
               </button>
               <button
                 type="button"
-                class="rounded-[8px] border border-line px-2 py-1 text-[11px] text-dim transition-colors hover:text-destructive disabled:opacity-50"
+                class="rounded-[calc(8px*var(--gw-radius-scale))] border border-line px-2 py-1 text-[11px] text-dim transition-colors hover:text-destructive disabled:opacity-50"
                 :disabled="!skills.hostAvailable || skills.busyId === skill.id"
                 @click="confirm = { kind: 'uninstall', skill }"
               >
@@ -243,7 +247,7 @@ function confirmResetSources(): void {
       </div>
     </div>
 
-    <div class="rounded-[14px] border border-line bg-panel p-4">
+    <div class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-4">
       <div class="mb-1 text-[13px] font-medium text-foreground">发现</div>
       <p class="mb-3 text-[11px] leading-relaxed text-dim2">
         跨所有已启用源并行搜索（默认 skills.sh；上方自定义源）。已装技能目录里出现的技能会标「已安装」。
@@ -251,14 +255,14 @@ function confirmResetSources(): void {
       <div class="mb-2 flex items-center gap-2">
         <input
           v-model="searchQuery"
-          class="min-w-0 flex-1 rounded-[8px] border border-line bg-panel-2 px-2.5 py-1.5 text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
+          class="min-w-0 flex-1 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2.5 py-1.5 text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
           placeholder="搜索技能名 / 关键字，如 tdd、review…"
           @input="onSearchInput"
           @keydown.enter.prevent="runSearch"
         />
         <button
           type="button"
-          class="rounded-[8px] border border-line bg-panel-2 px-2.5 py-1.5 text-[11px] text-dim transition-colors hover:text-foreground disabled:opacity-50"
+          class="rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2.5 py-1.5 text-[11px] text-dim transition-colors hover:text-foreground disabled:opacity-50"
           :disabled="skills.searching"
           @click="runSearch"
         >
@@ -272,7 +276,7 @@ function confirmResetSources(): void {
       </p>
 
       <div v-if="skills.discoverResults.length > 0" class="flex flex-col gap-2">
-        <div v-for="entry in skills.discoverResults" :key="entry.ref" class="rounded-[10px] bg-panel-2 p-2.5">
+        <div v-for="entry in skills.discoverResults" :key="entry.ref" class="rounded-[calc(10px*var(--gw-radius-scale))] bg-panel-2 p-2.5">
           <div class="flex items-start gap-2">
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-1.5">
@@ -289,7 +293,7 @@ function confirmResetSources(): void {
             </div>
             <button
               type="button"
-              class="shrink-0 rounded-[8px] border border-line px-2.5 py-1 text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+              class="shrink-0 rounded-[calc(8px*var(--gw-radius-scale))] border border-line px-2.5 py-1 text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-40"
               :disabled="!entry.downloadable || !skills.hostAvailable || skills.busyId !== null"
               @click="confirm = { kind: 'install', entry }"
             >

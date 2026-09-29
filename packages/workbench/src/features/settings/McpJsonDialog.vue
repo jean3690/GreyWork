@@ -135,13 +135,13 @@ function onOpenChange(next: boolean): void {
   <Dialog :open="open" @update:open="onOpenChange">
     <DialogContent
       :show-close-button="false"
-      class="flex max-h-[90vh] flex-col gap-0 overflow-hidden rounded-[14px] border-line bg-panel p-0 shadow-xl sm:max-w-[560px]"
+      class="flex max-h-[90vh] flex-col gap-0 overflow-hidden rounded-[calc(14px*var(--gw-radius-scale))] border-line bg-panel p-0 shadow-xl sm:max-w-[560px]"
     >
       <div class="flex items-center justify-between px-4 pb-2 pt-3.5">
         <DialogTitle class="text-[13px] font-medium text-foreground">MCP JSON 配置</DialogTitle>
         <button
           type="button"
-          class="grid size-6 cursor-pointer place-items-center rounded-[6px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground"
+          class="grid size-6 cursor-pointer place-items-center rounded-[calc(6px*var(--gw-radius-scale))] text-dim transition-colors hover:bg-panel-2 hover:text-foreground"
           aria-label="关闭"
           @click="emit('cancel')"
         >
@@ -159,7 +159,7 @@ function onOpenChange(next: boolean): void {
           v-model="jsonText"
           spellcheck="false"
           rows="16"
-          class="w-full resize-y rounded-[8px] border border-line bg-panel-2 px-2.5 py-2 font-mono text-[11px] leading-relaxed text-foreground outline-none placeholder:text-dim2 focus:border-accent"
+          class="w-full resize-y rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2.5 py-2 font-mono text-[11px] leading-relaxed text-foreground outline-none placeholder:text-dim2 focus:border-accent"
           placeholder='[{"name": "deepwiki", "transport": "http", "url": "https://mcp.deepwiki.com/mcp"}]'
         />
         <p v-if="error" class="text-[11px] text-destructive">{{ error }}</p>
@@ -169,21 +169,21 @@ function onOpenChange(next: boolean): void {
       <div class="flex justify-end gap-2 border-t border-line px-4 py-3">
         <button
           type="button"
-          class="rounded-[8px] border border-line bg-panel-2 px-3 py-1.5 text-[12px] text-dim transition-colors hover:text-foreground"
+          class="rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-3 py-1.5 text-[12px] text-dim transition-colors hover:text-foreground"
           @click="resetEditor"
         >
           重置编辑
         </button>
         <button
           type="button"
-          class="rounded-[8px] border border-line bg-panel-2 px-3 py-1.5 text-[12px] text-dim transition-colors hover:text-foreground"
+          class="rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-3 py-1.5 text-[12px] text-dim transition-colors hover:text-foreground"
           @click="copyJson"
         >
           复制
         </button>
         <button
           type="button"
-          class="rounded-[8px] bg-accent px-3 py-1.5 text-[12px] font-medium text-accent-ink transition-opacity disabled:opacity-60"
+          class="rounded-[calc(8px*var(--gw-radius-scale))] bg-accent px-3 py-1.5 text-[12px] font-medium text-accent-ink transition-opacity disabled:opacity-60"
           :disabled="!valid"
           @click="importJson"
         >
@@ -191,7 +191,7 @@ function onOpenChange(next: boolean): void {
         </button>
         <button
           type="button"
-          class="rounded-[8px] border border-line bg-panel-2 px-3 py-1.5 text-[12px] text-dim transition-colors hover:text-foreground"
+          class="rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-3 py-1.5 text-[12px] text-dim transition-colors hover:text-foreground"
           @click="emit('cancel')"
         >
           取消

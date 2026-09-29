@@ -87,12 +87,14 @@ onMounted(() => {
   <Dialog :open="props.open" @update:open="onOpenChange">
     <DialogContent
       :show-close-button="false"
-      class="flex max-h-[88vh] flex-col gap-0 overflow-hidden rounded-[14px] border-line bg-panel p-0 shadow-xl sm:max-w-[520px]"
+      class="flex max-h-[88vh] flex-col gap-0 overflow-hidden rounded-[calc(14px*var(--gw-radius-scale))] border-line bg-panel p-0 shadow-xl sm:max-w-[520px]"
       data-testid="remote-workspace-folder-dialog"
     >
       <div class="flex items-center justify-between px-4 pb-2 pt-3.5">
         <div class="flex min-w-0 items-center gap-2.5">
-          <span class="grid size-7 shrink-0 place-items-center rounded-[8px] border border-line bg-panel-2 text-dim">
+          <span
+            class="grid size-7 shrink-0 place-items-center rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 text-dim"
+          >
             <Icon name="folder" :size="14" />
           </span>
           <div class="min-w-0">
@@ -104,7 +106,7 @@ onMounted(() => {
         </div>
         <button
           type="button"
-          class="grid size-6 shrink-0 cursor-pointer place-items-center rounded-[6px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground"
+          class="grid size-6 shrink-0 cursor-pointer place-items-center rounded-[calc(6px*var(--gw-radius-scale))] text-dim transition-colors hover:bg-panel-2 hover:text-foreground"
           aria-label="关闭"
           @click="emit('close')"
         >
@@ -114,7 +116,7 @@ onMounted(() => {
 
       <div class="space-y-3 px-4 pb-4 pt-1">
         <p
-          class="break-all rounded-[10px] border border-line bg-panel-2 px-3 py-2 font-mono text-[10.5px] text-dim2"
+          class="break-all rounded-[calc(10px*var(--gw-radius-scale))] border border-line bg-panel-2 px-3 py-2 font-mono text-[10.5px] text-dim2"
           data-testid="remote-workspace-folder-path"
         >
           {{ folder }}
@@ -123,7 +125,7 @@ onMounted(() => {
         <div class="flex gap-2">
           <button
             type="button"
-            class="h-7 cursor-pointer rounded-[7px] border border-line bg-panel-2 px-2.5 text-[11.5px] text-dim transition-colors hover:border-line-2 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            class="h-7 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2.5 text-[11.5px] text-dim transition-colors hover:border-line-2 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
             :disabled="busy || !isTauriRuntime()"
             data-testid="remote-workspace-folder-change"
             @click="changeFolder"
@@ -132,7 +134,7 @@ onMounted(() => {
           </button>
           <button
             type="button"
-            class="h-7 cursor-pointer rounded-[7px] border border-line bg-panel-2 px-2.5 text-[11.5px] text-dim transition-colors hover:border-line-2 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            class="h-7 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2.5 text-[11.5px] text-dim transition-colors hover:border-line-2 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
             :disabled="busy || !isTauriRuntime()"
             data-testid="remote-workspace-folder-reset"
             @click="resetFolder"

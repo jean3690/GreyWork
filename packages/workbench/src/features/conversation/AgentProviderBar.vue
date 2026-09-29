@@ -277,7 +277,7 @@ onBeforeUnmount(() => {
               :key="provider.id"
               data-testid="acp-overflow-item"
               :data-provider-id="provider.id"
-              class="h-8 cursor-pointer gap-2 rounded-[7px] px-2 text-[11.5px] text-dim"
+              class="h-8 cursor-pointer gap-2 rounded-[calc(7px*var(--gw-radius-scale))] px-2 text-[11.5px] text-dim"
               @select="selectAcp(provider.id)"
             >
               <AgentProviderIcon :provider="provider" :size="14" />
@@ -315,7 +315,7 @@ onBeforeUnmount(() => {
             :key="provider.id"
             data-testid="local-model-item"
             :data-provider-id="provider.id"
-            class="h-8 cursor-pointer gap-2 rounded-[7px] px-2 text-[11.5px]"
+            class="h-8 cursor-pointer gap-2 rounded-[calc(7px*var(--gw-radius-scale))] px-2 text-[11.5px]"
             :class="provider.id === settings.selectedModelProviderId ? 'text-foreground' : 'text-dim'"
             @select="settings.selectModelProvider(provider.id)"
           >
@@ -357,7 +357,7 @@ onBeforeUnmount(() => {
       <button
         type="button"
         data-testid="temp-readonly-restore"
-        class="cursor-pointer rounded-[5px] px-1 text-cyan underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+        class="cursor-pointer rounded-[calc(5px*var(--gw-radius-scale))] px-1 text-cyan underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
         @click="toggleTempReadOnly(false)"
       >
         恢复

@@ -43,7 +43,7 @@ async function open(): Promise<void> {
     v-if="path"
     type="button"
     data-testid="preview-external-fallback"
-    class="shrink-0 cursor-pointer rounded-[6px] border border-line-2 bg-panel px-2.5 py-1 text-[11.5px] text-dim transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+    class="shrink-0 cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] border border-line-2 bg-panel px-2.5 py-1 text-[11.5px] text-dim transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
     @click="open()"
   >
     {{ t("preview.common.openExternal") }}

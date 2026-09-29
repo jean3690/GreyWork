@@ -6,6 +6,7 @@ afterEach(() => {
   delete document.documentElement.dataset.theme;
   delete document.documentElement.dataset.palette;
   delete document.documentElement.dataset.fontSize;
+  delete document.documentElement.dataset.radius;
 });
 
 /** 收集广播出来的外观快照。 */
@@ -21,30 +22,45 @@ let seq = 0;
  * 每次换一个 palette，保证与模块内上一次广播不同、一定发得出去。
  * 去重本身另有用例覆盖，这里不想让用例之间互相踩到那条判断。
  */
-function apply(colorMode: "dark" | "light" | "system", fontSize = "medium"): void {
-  applyAppearance({ palette: `palette-${seq++}`, colorMode, fontSize });
+function apply(colorMode: "dark" | "light" | "system", fontSize = "medium", radius = "small"): void {
+  applyAppearance({ palette: `palette-${seq++}`, colorMode, fontSize, radius });
 }
 
 describe("applyAppearance", () => {
   it("写 data-* 属性并广播一次", () => {
     const { details, stop } = recordEvents();
 
-    applyAppearance({ palette: "github", colorMode: "dark", fontSize: "large" });
+    applyAppearance({ palette: "github", colorMode: "dark", fontSize: "large", radius: "large" });
 
     expect(document.documentElement.dataset.palette).toBe("github");
     expect(document.documentElement.dataset.theme).toBe("dark");
     expect(document.documentElement.dataset.fontSize).toBe("large");
-    expect(details).toEqual([{ palette: "github", theme: "dark", fontSize: "large" }]);
+    expect(document.documentElement.dataset.radius).toBe("large");
+    expect(details).toEqual([{ palette: "github", theme: "dark", fontSize: "large", radius: "large" }]);
     stop();
   });
 
   it("同一份外观重复应用只广播一次（设置页一次点击会有 store 与 Shell 两个调用点）", () => {
     const { details, stop } = recordEvents();
 
-    applyAppearance({ palette: "fox", colorMode: "dark", fontSize: "small" });
-    applyAppearance({ palette: "fox", colorMode: "dark", fontSize: "small" });
+    applyAppearance({ palette: "fox", colorMode: "dark", fontSize: "small", radius: "none" });
+    applyAppearance({ palette: "fox", colorMode: "dark", fontSize: "small", radius: "none" });
 
     expect(details).toHaveLength(1);
+    stop();
+  });
+
+  it("只有圆角变化也广播（去重键必须带上 radius）", () => {
+    const { details, stop } = recordEvents();
+    // 用一个没用过的 palette，保证第一次调用一定发得出去（去重键的模块级状态跨用例留存）。
+    const palette = `palette-${seq++}`;
+
+    applyAppearance({ palette, colorMode: "dark", fontSize: "medium", radius: "small" });
+    applyAppearance({ palette, colorMode: "dark", fontSize: "medium", radius: "none" });
+
+    expect(details).toHaveLength(2);
+    expect(details.at(-1)?.radius).toBe("none");
+    expect(document.documentElement.dataset.radius).toBe("none");
     stop();
   });
 
@@ -52,7 +68,7 @@ describe("applyAppearance", () => {
     const { details, stop } = recordEvents();
     const matchMedia = vi.spyOn(window, "matchMedia").mockReturnValue({ matches: true } as MediaQueryList);
 
-    applyAppearance({ palette: "github", colorMode: "system", fontSize: "medium" });
+    applyAppearance({ palette: "github", colorMode: "system", fontSize: "medium", radius: "small" });
 
     expect(document.documentElement.dataset.theme).toBe("dark");
     expect(details.at(-1)?.theme).toBe("dark");

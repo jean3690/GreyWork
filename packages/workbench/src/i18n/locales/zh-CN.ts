@@ -745,7 +745,7 @@ export const zhCN = {
     sections: {
       agent: { title: "Agent", desc: "模型供应商与默认后端" },
       assistant: { title: "远程助手", desc: "微信通道与助手默认行为" },
-      appearance: { title: "外观", desc: "主题、深色模式与界面字号" },
+      appearance: { title: "外观", desc: "主题、深色模式、界面字号与圆角" },
       mode: { title: "运行模式", desc: "执行档位与权限策略" },
       services: { title: "服务", desc: "第三方云端服务的接入与凭证" },
       system: { title: "系统", desc: "环境信息与沙盒" },
@@ -785,6 +785,8 @@ export const zhCN = {
       paletteHint: "配色与深色模式独立，可自由组合",
       fontSizeTitle: "界面字号",
       fontSizeHint: "同步调整文字和控件比例，避免大字被固定高度裁切",
+      radiusTitle: "界面圆角",
+      radiusHint: "统一调整面板、卡片与控件的圆角大小",
     },
     /** 配色说明：键与 store 的 THEMES[].value 对齐。 */
     themes: {
@@ -799,6 +801,12 @@ export const zhCN = {
       small: "小",
       medium: "标准",
       large: "大",
+    },
+    /** 圆角档位名：键与 store 的 RADII[].value 对齐。 */
+    radii: {
+      none: "无圆角",
+      small: "小圆角",
+      large: "大圆角",
     },
     language: {
       label: "语言",

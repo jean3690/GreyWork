@@ -59,7 +59,7 @@ const activeIsOverflow = computed(() => {
 
 const tabClass = (isActive: boolean): string =>
   [
-    "h-6 shrink-0 cursor-pointer rounded-[6px] px-2 text-[11.5px] transition-colors",
+    "h-6 shrink-0 cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] px-2 text-[11.5px] transition-colors",
     "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan",
     isActive ? "bg-panel text-foreground" : "text-dim hover:text-foreground",
   ].join(" ");
@@ -123,7 +123,7 @@ watch(
                   <button
                     type="button"
                     data-testid="activity-overflow-toggle"
-                    class="grid size-6 cursor-pointer place-items-center rounded-[6px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+                    class="grid size-6 cursor-pointer place-items-center rounded-[calc(6px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
                     :class="overflowOpen || activeIsOverflow ? 'bg-panel text-foreground' : ''"
                     aria-label="更多面板"
                   >
@@ -135,7 +135,7 @@ watch(
                     v-for="contribution in partitioned.overflow"
                     :key="contribution.id"
                     data-testid="activity-overflow-item"
-                    class="h-6 cursor-pointer rounded-[5px] px-2 text-[11.5px] text-dim"
+                    class="h-6 cursor-pointer rounded-[calc(5px*var(--gw-radius-scale))] px-2 text-[11.5px] text-dim"
                     @select="activate(contribution.id)"
                   >
                     {{ contribution.title }}
@@ -146,7 +146,7 @@ watch(
             <button
               type="button"
               data-testid="activity-collapse"
-              class="grid size-6 cursor-pointer place-items-center rounded-[6px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+              class="grid size-6 cursor-pointer place-items-center rounded-[calc(6px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
               aria-label="收起活动面板"
               @click="activity.setOpen(false)"
             >

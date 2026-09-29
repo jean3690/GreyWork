@@ -145,7 +145,7 @@ function onOpenChange(next: boolean): void {
 }
 
 const inputClass =
-  "w-full rounded-[8px] border border-line bg-panel-2 px-2.5 py-1.5 text-[12.5px] text-foreground outline-none placeholder:text-dim2 focus:border-accent";
+  "w-full rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2.5 py-1.5 text-[12.5px] text-foreground outline-none placeholder:text-dim2 focus:border-accent";
 const monoClass = `${inputClass} font-mono text-[12px]`;
 </script>
 
@@ -153,13 +153,13 @@ const monoClass = `${inputClass} font-mono text-[12px]`;
   <Dialog :open="open" @update:open="onOpenChange">
     <DialogContent
       :show-close-button="false"
-      class="flex max-h-[90vh] flex-col gap-0 overflow-hidden rounded-[14px] border-line bg-panel p-0 shadow-xl sm:max-w-[520px]"
+      class="flex max-h-[90vh] flex-col gap-0 overflow-hidden rounded-[calc(14px*var(--gw-radius-scale))] border-line bg-panel p-0 shadow-xl sm:max-w-[520px]"
     >
       <div class="flex items-center justify-between px-4 pb-2 pt-3.5">
         <DialogTitle class="text-[13px] font-medium text-foreground">{{ entry ? "编辑服务商" : "新增服务商" }}</DialogTitle>
         <button
           type="button"
-          class="grid size-6 cursor-pointer place-items-center rounded-[6px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground"
+          class="grid size-6 cursor-pointer place-items-center rounded-[calc(6px*var(--gw-radius-scale))] text-dim transition-colors hover:bg-panel-2 hover:text-foreground"
           aria-label="关闭"
           @click="emit('cancel')"
         >
@@ -226,7 +226,7 @@ const monoClass = `${inputClass} font-mono text-[12px]`;
           />
         </label>
 
-        <div class="rounded-[10px] border border-line bg-panel-2 p-3">
+        <div class="rounded-[calc(10px*var(--gw-radius-scale))] border border-line bg-panel-2 p-3">
           <div class="mb-2 text-[12px] font-medium text-foreground">上传取件配方</div>
           <p class="mb-2.5 text-[10.5px] leading-relaxed text-dim2">
             留空 = 不做云端上传，预览走本地 viewer。填了就要求 url 与取件指针齐全 —— 半填的配方会被整条丢弃。
@@ -299,7 +299,7 @@ const monoClass = `${inputClass} font-mono text-[12px]`;
           v-if="entry"
           type="button"
           data-testid="office-provider-remove"
-          class="cursor-pointer rounded-[8px] border border-line bg-panel-2 px-3 py-1.5 text-[12px] text-dim transition-colors hover:text-destructive"
+          class="cursor-pointer rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-3 py-1.5 text-[12px] text-dim transition-colors hover:text-destructive"
           @click="emit('remove')"
         >
           删除该服务商
@@ -308,7 +308,7 @@ const monoClass = `${inputClass} font-mono text-[12px]`;
         <div class="flex gap-2">
           <button
             type="button"
-            class="rounded-[8px] border border-line bg-panel-2 px-3 py-1.5 text-[12px] text-dim transition-colors hover:text-foreground"
+            class="rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-3 py-1.5 text-[12px] text-dim transition-colors hover:text-foreground"
             @click="emit('cancel')"
           >
             取消
@@ -316,7 +316,7 @@ const monoClass = `${inputClass} font-mono text-[12px]`;
           <button
             type="button"
             data-testid="office-provider-save"
-            class="rounded-[8px] bg-accent px-3 py-1.5 text-[12px] font-medium text-accent-ink"
+            class="rounded-[calc(8px*var(--gw-radius-scale))] bg-accent px-3 py-1.5 text-[12px] font-medium text-accent-ink"
             @click="save"
           >
             保存

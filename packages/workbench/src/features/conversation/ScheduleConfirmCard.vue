@@ -79,7 +79,11 @@ function goScheduled(): void {
 </script>
 
 <template>
-  <div v-if="draft" data-testid="schedule-card" class="flex flex-col gap-2.5 rounded-[14px] border border-line bg-panel-2 p-3">
+  <div
+    v-if="draft"
+    data-testid="schedule-card"
+    class="flex flex-col gap-2.5 rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel-2 p-3"
+  >
     <div class="flex items-center justify-between gap-2">
       <span class="flex min-w-0 items-center gap-1.5 text-[12px] font-medium text-foreground">
         <Icon name="clock" :size="13" class="shrink-0 text-cyan" />
@@ -108,7 +112,7 @@ function goScheduled(): void {
       <button
         type="button"
         data-testid="schedule-go-scheduled"
-        class="flex h-7 cursor-pointer items-center gap-1.5 rounded-[8px] border border-line bg-panel px-2.5 text-[11.5px] text-dim transition-colors hover:border-line-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+        class="flex h-7 cursor-pointer items-center gap-1.5 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel px-2.5 text-[11.5px] text-dim transition-colors hover:border-line-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
         @click="goScheduled"
       >
         {{ t("chatView.scheduleCard.goScheduled") }}
@@ -123,7 +127,7 @@ function goScheduled(): void {
         type="button"
         data-testid="schedule-cancel"
         :disabled="busy"
-        class="h-7 cursor-pointer rounded-[8px] border border-line bg-panel px-2.5 text-[11.5px] text-dim transition-colors hover:border-line-2 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+        class="h-7 cursor-pointer rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel px-2.5 text-[11.5px] text-dim transition-colors hover:border-line-2 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
         @click="cancel"
       >
         {{ t("chatView.scheduleCard.cancel") }}
@@ -132,7 +136,7 @@ function goScheduled(): void {
         type="button"
         data-testid="schedule-confirm"
         :disabled="busy"
-        class="flex h-7 cursor-pointer items-center gap-1.5 rounded-[8px] bg-accent px-3 text-[11.5px] font-medium text-accent-ink transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40"
+        class="flex h-7 cursor-pointer items-center gap-1.5 rounded-[calc(8px*var(--gw-radius-scale))] bg-accent px-3 text-[11.5px] font-medium text-accent-ink transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40"
         @click="confirm"
       >
         <Icon name="check" :size="12" />

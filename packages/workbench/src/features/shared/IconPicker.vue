@@ -37,7 +37,7 @@ function pick(name: string): void {
     <div v-if="props.clearable" class="flex items-center gap-1">
       <button
         type="button"
-        class="cursor-pointer rounded-[6px] border px-1.5 py-0.5 text-[11px] transition-colors"
+        class="cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] border px-1.5 py-0.5 text-[11px] transition-colors"
         :class="props.modelValue ? 'border-line text-dim hover:text-foreground' : 'border-cyan/60 text-foreground'"
         data-testid="icon-picker-clear"
         @click="pick('')"
@@ -50,7 +50,7 @@ function pick(name: string): void {
       <Hint v-for="name in names" :key="name" :text="name">
         <button
           type="button"
-          class="grid size-7 cursor-pointer place-items-center rounded-[6px] border transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          class="grid size-7 cursor-pointer place-items-center rounded-[calc(6px*var(--gw-radius-scale))] border transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
           :class="
             name === props.modelValue
               ? 'border-cyan/60 bg-cyan/10 text-foreground'

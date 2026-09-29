@@ -41,10 +41,11 @@ const ActivityBand = defineAsyncComponent(() => import("@/features/activity/Acti
 /**
  * GreyWork 风格外壳：标题栏 + 左侧栏 + 内容区（router-view）+ 右侧预览面板。
  *
- * 主题配色、明暗模式和字号独立持久化。DOM 约定（由 lib/theme 的 applyAppearance 落地）：
+ * 主题配色、明暗模式、字号和圆角独立持久化。DOM 约定（由 lib/theme 的 applyAppearance 落地）：
  * - data-palette：greywork / night-blue / night-green / github / fox；
  * - data-theme：实际生效的 light / dark（system 在这里解析，供 CSS 与后挂载的组件判断）；
- * - data-font-size：small / medium / large。
+ * - data-font-size：small / medium / large；
+ * - data-radius：none / small / large（theme/base.css 据此调 --gw-radius-scale）。
  *
  * 外观变化经 window 上的 APPEARANCE_EVENT 广播，消费方（Mermaid / Univer / 侧栏开关）
  * 订阅事件而不是盯 DOM。
@@ -71,8 +72,8 @@ const resolvedTheme = computed<"light" | "dark">(() =>
 // 这里盯 resolvedTheme 而不是 settings.colorMode：跟随系统时系统翻了、colorMode 没变，
 // 只有 resolvedTheme 会动，而它是这次重算外观的唯一触发点。
 watch(
-  [() => settings.theme, resolvedTheme, () => settings.fontSize],
-  ([palette, theme, fontSize]) => applyAppearanceToDom({ palette, colorMode: theme, fontSize }),
+  [() => settings.theme, resolvedTheme, () => settings.fontSize, () => settings.radius],
+  ([palette, theme, fontSize, radius]) => applyAppearanceToDom({ palette, colorMode: theme, fontSize, radius }),
   { immediate: true },
 );
 

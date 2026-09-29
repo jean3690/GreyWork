@@ -44,7 +44,7 @@ function onOpenChange(next: boolean): void {
 
 function rowClass(active: boolean): string {
   return [
-    "flex h-[34px] w-full cursor-pointer items-center gap-2 rounded-[8px] px-2 text-[13px] transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan",
+    "flex h-[34px] w-full cursor-pointer items-center gap-2 rounded-[calc(8px*var(--gw-radius-scale))] px-2 text-[13px] transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan",
     active ? "bg-panel text-foreground" : "text-dim hover:bg-panel hover:text-foreground",
   ].join(" ");
 }
@@ -55,7 +55,7 @@ function rowClass(active: boolean): string {
     <DialogContent
       :show-close-button="false"
       data-testid="settings-dialog"
-      class="flex h-[86vh] flex-col gap-0 overflow-hidden rounded-[14px] border-line bg-panel p-0 shadow-xl sm:max-w-[880px]"
+      class="flex h-[86vh] flex-col gap-0 overflow-hidden rounded-[calc(14px*var(--gw-radius-scale))] border-line bg-panel p-0 shadow-xl sm:max-w-[880px]"
     >
       <header class="flex items-center justify-between px-4 pb-2 pt-3.5">
         <DialogTitle class="text-[13px] font-medium text-foreground">{{ t("settings.title") }}</DialogTitle>
@@ -64,7 +64,7 @@ function rowClass(active: boolean): string {
         <DialogDescription class="sr-only">{{ t("settings.sub") }}</DialogDescription>
         <button
           type="button"
-          class="grid size-6 cursor-pointer place-items-center rounded-[6px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground"
+          class="grid size-6 cursor-pointer place-items-center rounded-[calc(6px*var(--gw-radius-scale))] text-dim transition-colors hover:bg-panel-2 hover:text-foreground"
           :aria-label="t('settings.close')"
           data-testid="settings-close"
           @click="close"
@@ -83,7 +83,7 @@ function rowClass(active: boolean): string {
             :aria-current="props.section === item.key ? 'page' : undefined"
             @click="select(item.key)"
           >
-            <span class="grid size-5 place-items-center rounded-[5px] bg-panel text-dim">
+            <span class="grid size-5 place-items-center rounded-[calc(5px*var(--gw-radius-scale))] bg-panel text-dim">
               <Icon :name="item.icon" :size="14" />
             </span>
             <span class="min-w-0 flex-1 truncate">{{ t(`settings.sections.${item.key}.title`) }}</span>

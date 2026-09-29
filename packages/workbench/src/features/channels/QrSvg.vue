@@ -20,5 +20,5 @@ const svg = computed(() => {
 </script>
 
 <template>
-  <div class="w-[168px] rounded-[8px] bg-white p-1 [&>svg]:h-auto [&>svg]:w-full" v-html="svg" />
+  <div class="w-[168px] rounded-[calc(8px*var(--gw-radius-scale))] bg-white p-1 [&>svg]:h-auto [&>svg]:w-full" v-html="svg" />
 </template>

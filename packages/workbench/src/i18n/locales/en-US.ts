@@ -755,7 +755,7 @@ export const enUS: MessageSchema = {
     sections: {
       agent: { title: "Agent", desc: "Model providers and default backend" },
       assistant: { title: "Remote assistants", desc: "WeChat channel and assistant defaults" },
-      appearance: { title: "Appearance", desc: "Theme, dark mode and UI scale" },
+      appearance: { title: "Appearance", desc: "Theme, dark mode, UI scale and corner radius" },
       mode: { title: "Run mode", desc: "Execution tier and permission policy" },
       services: { title: "Services", desc: "Third-party cloud services and credentials" },
       system: { title: "System", desc: "Environment info and sandbox" },
@@ -795,6 +795,8 @@ export const enUS: MessageSchema = {
       paletteHint: "Palette and dark mode are independent — combine them freely",
       fontSizeTitle: "UI scale",
       fontSizeHint: "Scales text and controls together so large text is not clipped by fixed heights",
+      radiusTitle: "Corner radius",
+      radiusHint: "Adjusts the rounding of panels, cards and controls across the UI",
     },
     /** Palette descriptions: keys match THEMES[].value in the store. */
     themes: {
@@ -809,6 +811,12 @@ export const enUS: MessageSchema = {
       small: "Small",
       medium: "Default",
       large: "Large",
+    },
+    /** Radius option names: keys match RADII[].value in the store. */
+    radii: {
+      none: "Square",
+      small: "Soft",
+      large: "Round",
     },
     language: {
       label: "Language",

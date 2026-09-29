@@ -102,7 +102,7 @@ const controlButton =
  * 窗口三键刻意不并进来：它仿系统 chrome，是吃满高度的方块，见上面的 controlButton。
  */
 const iconButton =
-  "grid size-7 shrink-0 cursor-pointer place-items-center rounded-[6px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan";
+  "grid size-7 shrink-0 cursor-pointer place-items-center rounded-[calc(6px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan";
 
 /** 组间竖分隔线：1px 宽，`self-center` + h-4 让它在 42px 高的标题栏里居中。 */
 const groupDivider = "mx-1 h-4 w-px shrink-0 self-center bg-line-2";
@@ -286,7 +286,9 @@ onBeforeUnmount(() => {
 
       <!-- 状态区：ml-auto 把它连同后面的面板开关一起推到右侧。
          pill 自带边框，与相邻的面板开关组天然分得开，不再另加分隔线。 -->
-      <div class="ml-auto flex items-center gap-1.5 rounded-[6px] border border-line-2 bg-panel px-2 py-1 text-[12px] text-dim">
+      <div
+        class="ml-auto flex items-center gap-1.5 rounded-[calc(6px*var(--gw-radius-scale))] border border-line-2 bg-panel px-2 py-1 text-[12px] text-dim"
+      >
         <span class="size-1.5 rounded-full" :class="activeWorkspace ? 'bg-mint' : 'bg-dim2'" />
         <span class="max-w-[200px] truncate">{{ activeWorkspace?.name ?? t("titlebar.noWorkspace") }}</span>
       </div>

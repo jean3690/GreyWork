@@ -81,7 +81,7 @@ function onFilterValue(index: number, event: Event): void {
 
 function tabClass(active: boolean): string {
   return [
-    "h-6 shrink-0 cursor-pointer rounded-[6px] px-2 text-[11.5px] transition-colors",
+    "h-6 shrink-0 cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] px-2 text-[11.5px] transition-colors",
     "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan",
     active ? "bg-panel text-foreground" : "text-dim hover:text-foreground",
   ].join(" ");
@@ -111,7 +111,7 @@ function tabClass(active: boolean): string {
           <select
             v-model="sheet"
             data-testid="analysis-sheet-select"
-            class="h-5 cursor-pointer rounded-[5px] border border-line-2 bg-panel px-1 text-[11px] text-foreground"
+            class="h-5 cursor-pointer rounded-[calc(5px*var(--gw-radius-scale))] border border-line-2 bg-panel px-1 text-[11px] text-foreground"
           >
             <option v-for="name in table.sheets" :key="name" :value="name">{{ name }}</option>
           </select>
@@ -135,7 +135,7 @@ function tabClass(active: boolean): string {
       <div v-for="(condition, index) in filters" :key="index" class="mb-1.5 flex items-center gap-1">
         <select
           :value="condition.column"
-          class="h-5 min-w-0 flex-1 cursor-pointer rounded-[5px] border border-line-2 bg-panel px-1 text-[11px] text-foreground"
+          class="h-5 min-w-0 flex-1 cursor-pointer rounded-[calc(5px*var(--gw-radius-scale))] border border-line-2 bg-panel px-1 text-[11px] text-foreground"
           :aria-label="t('preview.analysis.filter.column')"
           @change="onFilterColumn(index, $event)"
         >
@@ -143,7 +143,7 @@ function tabClass(active: boolean): string {
         </select>
         <select
           :value="condition.op"
-          class="h-5 shrink-0 cursor-pointer rounded-[5px] border border-line-2 bg-panel px-1 text-[11px] text-foreground"
+          class="h-5 shrink-0 cursor-pointer rounded-[calc(5px*var(--gw-radius-scale))] border border-line-2 bg-panel px-1 text-[11px] text-foreground"
           :aria-label="t('preview.analysis.filter.toggle')"
           @change="onFilterOp(index, $event)"
         >
@@ -151,7 +151,7 @@ function tabClass(active: boolean): string {
         </select>
         <input
           type="text"
-          class="h-5 min-w-0 flex-1 rounded-[5px] border border-line-2 bg-panel px-1.5 text-[11px] text-foreground"
+          class="h-5 min-w-0 flex-1 rounded-[calc(5px*var(--gw-radius-scale))] border border-line-2 bg-panel px-1.5 text-[11px] text-foreground"
           :value="condition.value"
           :disabled="VALUELESS_OPS.has(condition.op)"
           :placeholder="t('preview.analysis.filter.value')"
@@ -160,7 +160,7 @@ function tabClass(active: boolean): string {
         />
         <button
           type="button"
-          class="grid size-5 shrink-0 cursor-pointer place-items-center rounded-[5px] text-dim2 transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          class="grid size-5 shrink-0 cursor-pointer place-items-center rounded-[calc(5px*var(--gw-radius-scale))] text-dim2 transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
           :aria-label="t('preview.analysis.filter.clear')"
           @click="removeFilter(index)"
         >
@@ -172,7 +172,7 @@ function tabClass(active: boolean): string {
         <button
           type="button"
           data-testid="analysis-filter-add"
-          class="cursor-pointer rounded-[6px] border border-line-2 bg-panel px-2 py-0.5 text-[11px] text-dim transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          class="cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] border border-line-2 bg-panel px-2 py-0.5 text-[11px] text-dim transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
           @click="addFilter()"
         >
           {{ t("preview.analysis.filter.add") }}
@@ -180,7 +180,7 @@ function tabClass(active: boolean): string {
         <button
           v-if="filters.length"
           type="button"
-          class="cursor-pointer rounded-[6px] px-2 py-0.5 text-[11px] text-dim2 transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          class="cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] px-2 py-0.5 text-[11px] text-dim2 transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
           @click="filters = []"
         >
           {{ t("preview.analysis.filter.clear") }}

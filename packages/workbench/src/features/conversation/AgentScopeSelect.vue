@@ -98,7 +98,7 @@ function confirmFull(): void {
             v-for="tier in PERMISSION_TIERS"
             :key="tier.value"
             :value="tier.value"
-            class="cursor-pointer items-start gap-2 rounded-[6px] py-1.5 pr-2 pl-2 text-[12px]"
+            class="cursor-pointer items-start gap-2 rounded-[calc(6px*var(--gw-radius-scale))] py-1.5 pr-2 pl-2 text-[12px]"
             :class="settings.permissionTier === tier.value ? 'text-foreground' : 'text-dim'"
             @select="choose(tier.value)"
           >
@@ -117,9 +117,11 @@ function confirmFull(): void {
 
     <!-- Full Access 警告对话框 -->
     <AlertDialog :open="confirmingFull" @update:open="onConfirmOpenChange">
-      <AlertDialogContent class="max-w-[380px] gap-0 rounded-[14px] border-line bg-popover p-4 shadow-xl sm:max-w-[380px]">
+      <AlertDialogContent
+        class="max-w-[380px] gap-0 rounded-[calc(14px*var(--gw-radius-scale))] border-line bg-popover p-4 shadow-xl sm:max-w-[380px]"
+      >
         <div class="flex items-start gap-2.5">
-          <span class="grid size-8 shrink-0 place-items-center rounded-[9px] bg-amber/15 text-amber">
+          <span class="grid size-8 shrink-0 place-items-center rounded-[calc(9px*var(--gw-radius-scale))] bg-amber/15 text-amber">
             <Icon name="shield" :size="16" />
           </span>
           <div class="min-w-0">
@@ -136,13 +138,13 @@ function confirmFull(): void {
                而 dark 变体特异性 (0,2,0) 高于无变体的 bg-panel-2 (0,1,0)。 -->
           <AlertDialogCancel
             type="button"
-            class="h-8 cursor-pointer rounded-[8px] border border-line bg-panel-2 px-3 text-[12px] text-dim shadow-none transition-colors hover:border-line-2 hover:bg-panel-2 hover:text-foreground dark:border-line dark:bg-panel-2 dark:hover:bg-panel-2"
+            class="h-8 cursor-pointer rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-3 text-[12px] text-dim shadow-none transition-colors hover:border-line-2 hover:bg-panel-2 hover:text-foreground dark:border-line dark:bg-panel-2 dark:hover:bg-panel-2"
           >
             {{ t("settings.permissions.fullConfirmCancel") }}
           </AlertDialogCancel>
           <button
             type="button"
-            class="h-8 cursor-pointer rounded-[8px] bg-amber px-3 text-[12px] font-medium text-white transition-opacity hover:opacity-90"
+            class="h-8 cursor-pointer rounded-[calc(8px*var(--gw-radius-scale))] bg-amber px-3 text-[12px] font-medium text-white transition-opacity hover:opacity-90"
             @click="confirmFull"
           >
             {{ t("settings.permissions.fullConfirmOk") }}

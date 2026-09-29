@@ -128,7 +128,7 @@ onBeforeUnmount(() => unregisterPreviewSaver(props.tab.id));
       <article
         v-if="doc"
         data-selection-scope
-        class="mx-auto rounded-[6px] border border-line-2 bg-paper px-6 py-7 text-[14px] text-paper-ink shadow-sm"
+        class="mx-auto rounded-[calc(6px*var(--gw-radius-scale))] border border-line-2 bg-paper px-6 py-7 text-[14px] text-paper-ink shadow-sm"
         :style="{ maxWidth: `${doc.contentWidth}px` }"
       >
         <DocxBlocks :blocks="doc.blocks" @edit="onRunEdit" />

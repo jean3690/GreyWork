@@ -24,7 +24,10 @@ defineProps<{ items: readonly ContextMenuItem[] }>();
       data-testid="context-menu-item"
       :disabled="entry.disabled"
       :variant="entry.destructive ? 'destructive' : 'default'"
-      :class="['h-7 cursor-pointer rounded-[5px] px-2 text-[12px]', entry.destructive ? '' : 'text-dim focus:text-foreground']"
+      :class="[
+        'h-7 cursor-pointer rounded-[calc(5px*var(--gw-radius-scale))] px-2 text-[12px]',
+        entry.destructive ? '' : 'text-dim focus:text-foreground',
+      ]"
       @select="entry.onSelect()"
     >
       <Icon v-if="entry.icon" :name="entry.icon" :size="13" />

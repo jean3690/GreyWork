@@ -185,7 +185,7 @@ onMounted(() => {
       <Hint text="选择文件夹作为工作区">
         <button
           type="button"
-          class="ml-auto grid size-[24px] cursor-pointer place-items-center rounded-[5px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          class="ml-auto grid size-[24px] cursor-pointer place-items-center rounded-[calc(5px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
           aria-label="添加工作区"
           @click="addWorkspace"
         >
@@ -194,7 +194,7 @@ onMounted(() => {
       </Hint>
     </div>
 
-    <label class="flex h-7 shrink-0 items-center gap-1.5 rounded-[8px] border border-line-2 bg-panel px-2">
+    <label class="flex h-7 shrink-0 items-center gap-1.5 rounded-[calc(8px*var(--gw-radius-scale))] border border-line-2 bg-panel px-2">
       <Icon name="search" :size="13" class="text-dim2" />
       <input
         v-model="query"
@@ -216,14 +216,14 @@ onMounted(() => {
       <template v-for="group in groups" :key="rowKey(group)">
         <!-- 工作区行：caret 只管展开，行体管切换（两个独立按钮，避免按钮套按钮） -->
         <div
-          class="group/ws flex h-[34px] shrink-0 items-center gap-1 rounded-[8px] pr-1.5 transition-colors"
+          class="group/ws flex h-[34px] shrink-0 items-center gap-1 rounded-[calc(8px*var(--gw-radius-scale))] pr-1.5 transition-colors"
           :class="isActiveRow(group) ? 'bg-cyan/10' : 'hover:bg-panel'"
         >
           <Hint :text="filtering ? '搜索中：命中会话已全部展开' : isExpanded(group) ? '收起' : '展开'">
             <button
               type="button"
               :data-testid="`workspace-toggle-${rowKey(group)}`"
-              class="grid size-[24px] shrink-0 cursor-pointer place-items-center rounded-[5px] text-dim2 transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-default disabled:opacity-40"
+              class="grid size-[24px] shrink-0 cursor-pointer place-items-center rounded-[calc(5px*var(--gw-radius-scale))] text-dim2 transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-default disabled:opacity-40"
               :disabled="filtering"
               :aria-expanded="isExpanded(group)"
               :aria-controls="`workspace-group-${rowKey(group)}`"
@@ -253,7 +253,7 @@ onMounted(() => {
             <button
               type="button"
               :data-testid="`workspace-new-${rowKey(group)}`"
-              class="grid size-[24px] shrink-0 cursor-pointer place-items-center rounded-[5px] text-dim2 opacity-0 transition-opacity group-hover/ws:opacity-100 hover:text-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+              class="grid size-[24px] shrink-0 cursor-pointer place-items-center rounded-[calc(5px*var(--gw-radius-scale))] text-dim2 opacity-0 transition-opacity group-hover/ws:opacity-100 hover:text-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
               :aria-label="`在 ${group.name} 新建会话`"
               @click="newSessionIn(group)"
             >
@@ -265,7 +265,7 @@ onMounted(() => {
             <button
               type="button"
               :data-testid="`workspace-menu-${rowKey(group)}`"
-              class="grid size-[24px] shrink-0 cursor-pointer place-items-center rounded-[5px] text-dim2 opacity-0 transition-opacity group-hover/ws:opacity-100 hover:text-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+              class="grid size-[24px] shrink-0 cursor-pointer place-items-center rounded-[calc(5px*var(--gw-radius-scale))] text-dim2 opacity-0 transition-opacity group-hover/ws:opacity-100 hover:text-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
               :class="openMenuId === group.id ? 'text-foreground opacity-100' : ''"
               :aria-expanded="openMenuId === group.id"
               :aria-label="`${group.name} 的工作区设置`"

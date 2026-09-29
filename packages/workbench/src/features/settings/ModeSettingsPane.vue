@@ -51,14 +51,14 @@ function applyPermissionTier(tier: (typeof PERMISSION_TIERS)[number]["value"]): 
 
 <template>
   <div class="flex flex-col gap-4">
-    <div class="rounded-[14px] border border-line bg-panel p-4">
+    <div class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-4">
       <div class="mb-3 text-[13px] font-medium text-foreground">运行模式</div>
       <div class="flex flex-col gap-1.5">
         <button
           v-for="mode in RUN_MODES"
           :key="mode.value"
           :data-testid="`run-mode-${mode.value}`"
-          class="flex cursor-pointer items-center gap-3 rounded-[10px] px-3 py-2 text-left transition-colors hover:bg-panel-2"
+          class="flex cursor-pointer items-center gap-3 rounded-[calc(10px*var(--gw-radius-scale))] px-3 py-2 text-left transition-colors hover:bg-panel-2"
           :class="settings.runMode === mode.value ? 'bg-panel-2' : ''"
           @click="settings.setRunMode(mode.value)"
         >
@@ -71,13 +71,13 @@ function applyPermissionTier(tier: (typeof PERMISSION_TIERS)[number]["value"]): 
       </p>
     </div>
     <WorktreeSnapshotsCard />
-    <div class="rounded-[14px] border border-line bg-panel p-4">
+    <div class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-4">
       <div class="mb-3 text-[13px] font-medium text-foreground">权限档位</div>
       <div class="flex gap-2">
         <button
           v-for="tier in PERMISSION_TIERS"
           :key="tier.value"
-          class="flex flex-1 flex-col gap-1 rounded-[10px] border border-line px-3 py-2.5 text-left transition-colors"
+          class="flex flex-1 flex-col gap-1 rounded-[calc(10px*var(--gw-radius-scale))] border border-line px-3 py-2.5 text-left transition-colors"
           :class="[
             tierPinned ? 'cursor-not-allowed opacity-60' : 'cursor-pointer',
             settings.permissionTier === tier.value ? 'bg-panel-2' : tierPinned ? '' : 'hover:bg-panel-2',
