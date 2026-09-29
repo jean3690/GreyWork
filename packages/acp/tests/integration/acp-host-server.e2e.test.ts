@@ -118,6 +118,8 @@ async function waitForEvent(kind: string, label: string, from = 0): Promise<AcpE
     throw new Error(
       `${(error as Error).message}\n已收到 ${events.length} 条事件：\n${seen}` +
         (serverLog ? `\n--- greywork-server 日志尾部 ---\n${serverLog.slice(-2000)}` : ""),
+      // 带上 cause：这句只是给超时加诊断上下文，原始错误（waitUntil 的 timeout）不该丢。
+      { cause: error },
     );
   }
   return found as AcpEventEnvelope;

@@ -5,7 +5,7 @@
   "type": "module",
   "packageManager": "pnpm@11.21.0",
   "engines": {
-    "node": ">=20",
+    "node": ">=22.22.1",
     "pnpm": ">=9"
   },
   "scripts": {
@@ -27,14 +27,14 @@
     "prepare": "husky"
   },
   "devDependencies": {
-    "@eslint/js": "^9.36.0",
+    "@eslint/js": "^10.0.1",
     "@vue/eslint-config-typescript": "^14.6.0",
-    "eslint": "^9.36.0",
+    "eslint": "^10.11.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-vue": "^10.11.1",
-    "globals": "^16.4.0",
+    "globals": "^17.12.0",
     "husky": "^9.1.7",
-    "lint-staged": "^16.1.6",
+    "lint-staged": "^17.6.0",
     "prettier": "3.9.9",
     "typescript-eslint": "^8.70.1"
   }

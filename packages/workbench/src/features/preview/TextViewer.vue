@@ -70,7 +70,7 @@ async function loadText(path: string): Promise<string> {
     applyProbe(path, null);
     return readPreviewText(props.tab, path);
   }
-  let info: FileProbeInfo | null = null;
+  let info: FileProbeInfo | null;
   try {
     info = await probeWorkspaceFile(path);
   } catch {

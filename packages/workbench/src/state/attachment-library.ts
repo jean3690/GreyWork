@@ -283,7 +283,7 @@ async function candidatesFromFiles(files: readonly File[]): Promise<Candidate[]>
  */
 export async function attachmentsFromClipboard(existing: readonly Attachment[] = []): Promise<Attachment[]> {
   if (!isTauriRuntime() || typeof document === "undefined") return [];
-  let bytes: Uint8Array | null = null;
+  let bytes: Uint8Array | null;
   try {
     const image = await readImage();
     const size = await image.size();
