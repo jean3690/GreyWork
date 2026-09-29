@@ -411,40 +411,40 @@ importers:
         specifier: ^2.8.0
         version: 2.8.0
       '@univerjs/core':
-        specifier: ^0.25.1
+        specifier: 0.25.1
         version: 0.25.1(react@19.2.8)(rxjs@7.8.2)
       '@univerjs/design':
-        specifier: ^0.25.1
+        specifier: 0.25.1
         version: 0.25.1(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@univerjs/docs':
-        specifier: ^0.25.1
+        specifier: 0.25.1
         version: 0.25.1(react@19.2.8)(rxjs@7.8.2)
       '@univerjs/docs-ui':
-        specifier: ^0.25.1
+        specifier: 0.25.1
         version: 0.25.1(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2)
       '@univerjs/engine-render':
-        specifier: ^0.25.1
+        specifier: 0.25.1
         version: 0.25.1(patch_hash=ef56c7cf160648542d4ad4ca7d248d9591061cd5557ae4f05aba7043070dba2e)(react@19.2.8)(rxjs@7.8.2)
       '@univerjs/sheets':
-        specifier: ^0.25.1
+        specifier: 0.25.1
         version: 0.25.1(react@19.2.8)(rxjs@7.8.2)
       '@univerjs/sheets-formula':
-        specifier: ^0.25.1
+        specifier: 0.25.1
         version: 0.25.1(react@19.2.8)(rxjs@7.8.2)
       '@univerjs/sheets-formula-ui':
-        specifier: ^0.25.1
+        specifier: 0.25.1
         version: 0.25.1(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2)
       '@univerjs/sheets-numfmt':
-        specifier: ^0.25.1
+        specifier: 0.25.1
         version: 0.25.1(react@19.2.8)(rxjs@7.8.2)
       '@univerjs/sheets-numfmt-ui':
-        specifier: ^0.25.1
+        specifier: 0.25.1
         version: 0.25.1(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2)
       '@univerjs/sheets-ui':
-        specifier: ^0.25.1
+        specifier: 0.25.1
         version: 0.25.1(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2)
       '@univerjs/ui':
-        specifier: ^0.25.1
+        specifier: 0.25.1
         version: 0.25.1(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(rxjs@7.8.2)
       '@vueuse/core':
         specifier: ^14.4.0
