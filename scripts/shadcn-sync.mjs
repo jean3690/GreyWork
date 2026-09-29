@@ -3,27 +3,29 @@
  * shadcn-vue 组件的本地化改造（幂等）。
  *
  * 为什么是脚本而不是一次性的 sed：`shadcn add` 每次落盘的都是一模一样的上游代码，
- * 而其中三处与本项目的约定冲突。手工改一遍等于埋一个雷 —— 下个月再加个组件，
+ * 而其中两处与本项目的约定冲突。手工改一遍等于埋一个雷 —— 下个月再加个组件，
  * hover 态就会莫名其妙变成品牌蓝。所以本地化必须可重复执行。
  *
  * 用法：pnpm shadcn:add <组件名...>   （CLI add + 本脚本，别直接调 CLI）
  *      node scripts/shadcn-sync.mjs  （只跑改造，用于修上游漂移）
  *
- * 三条规则：
+ * 规则表见下面的 `RULES`（每条都是「上游产出与本项目约定冲突」的收口）。其中两条最容易被
+ * 误解，单独说明；其余（`defineSlots` 的 `=> any`、`destructive-foreground`、`TooltipContent`
+ * 紧凑皮肤等）看规则表本身即可。
  *
- *   1. @lucide/vue → lucide-vue-next
- *      v4 注册表从 @lucide/vue 导图标。本项目已有 lucide-vue-next（features/shared 下 3 处在用），
- *      两者同源、图标名一致（含 ChevronDownIcon 这类 *Icon 别名），改导入即可省掉一个重复图标包。
- *
- *   2. -accent / -accent-foreground → -secondary / -secondary-foreground
+ *   1. -accent / -accent-foreground → -secondary / -secondary-foreground
  *      tokens.css 的 --accent 是 GreyWork 蓝（全仓约 110 处按品牌色在用），
  *      而 shadcn 拿 accent 表达 hover / 选中面 —— 同名不同义。
  *      组件侧让位：hover 面改用 --secondary（= --panel-2），语义正好是「悬浮面」。
  *      详见 theme/shadcn.css 顶部那段注释。
  *
- *   3. 遮罩 bg-black/80 → bg-black/40
+ *   2. 遮罩 bg-black/80 → bg-black/40
  *      项目既有弹窗统一 40%（features/ 下 7 处），上游默认 80%。
  *      共存期两种遮罩并排会很跳，统一到项目现值。
+ *
+ * 曾有的「@lucide/vue → lucide-vue-next」一条已于 2026-09-29 删除：仓库现在**直接用
+ * `@lucide/vue`**（上游 `lucide-vue-next` 已 deprecated 并指向它），与 shadcn 的产出一致，
+ * 不再需要改写图标包 —— 留着它反而会把新组件改回那个被弃用的包名。
  */
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -37,14 +39,6 @@ function countMatches(text, pattern) {
 }
 
 const RULES = [
-  {
-    id: "lucide-package",
-    describe: "@lucide/vue → lucide-vue-next",
-    apply(source) {
-      const pattern = /"@lucide\/vue"/g;
-      return { text: source.replace(pattern, '"lucide-vue-next"'), count: countMatches(source, pattern) };
-    },
-  },
   {
     id: "accent-to-secondary",
     describe: "-accent(-foreground) → -secondary(-foreground)",

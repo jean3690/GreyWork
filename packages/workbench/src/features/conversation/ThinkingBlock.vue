@@ -7,7 +7,7 @@
  * 正在流的那一段默认展开，回合推进后自动收起为「已思考 Ns」细条。
  */
 import { computed, ref, watch } from "vue";
-import { Brain, ChevronDown } from "lucide-vue-next";
+import { Brain, ChevronDown } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
 import type { ThinkingSegment } from "@/types";
 

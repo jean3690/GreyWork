@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { RadioGroupItemProps } from "reka-ui";
 import type { HTMLAttributes } from "vue";
-import { CircleIcon } from "lucide-vue-next";
+import { CircleIcon } from "@lucide/vue";
 import { reactiveOmit } from "@vueuse/core";
 import { RadioGroupIndicator, RadioGroupItem, useForwardProps } from "reka-ui";
 import { cn } from "@/lib/utils";
