@@ -22,3 +22,18 @@ members = [
 # 放在 workspace 根：cargo 只认根 manifest 的 profile，成员里的会被忽略（并告警）。
 [profile.dev.package."*"]
 debug = 1
+
+# ⚠️ 上面那 66GB 里，**最大的一块不是调试信息，是增量编译目录**（2026-09-29 实测
+# target/debug/incremental 占 33G / 512 个目录，deps 29G）。`debug = 1` 一点没碰到它：
+# cargo 从不回收旧的增量会话目录，每换一个编译单元图就新建一个。
+#
+# 想要那 33G 归零，在下面加一行 `incremental = false`。**这里刻意没加**，因为代价是实打实
+# 的：greywork_host 有 3.4 万行，增量关掉后每次改 Rust 都要全量重编这个 crate。
+# 磁盘紧张时（CI、笔记本、小盘）加上它；日常开发留着增量、用
+# `node scripts/disks-reclaim.mjs cargo --apply` 定期剪枝更划算。
+#
+# 为什么会攒这么猛：.husky/pre-push 每次推送（只要动了 Rust）都跑一遍
+# `cargo clippy --all-targets` + `cargo test`，而 clippy / test / build 三者的指纹互不相同，
+# 各自维护一整套增量目录。实测 9-24 一天就生成了 284 个。
+[profile.dev]
+# incremental = false

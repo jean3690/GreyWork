@@ -10,6 +10,20 @@ pnpm lint && pnpm -r test
 if git diff --quiet '@{push}..HEAD' -- apps/desktop/src-tauri crates Cargo.toml Cargo.lock 2>/dev/null; then
   echo "[pre-push] 本次推送未触及 Rust workspace，跳过 Rust 检查"
 else
+  # 关增量。clippy 与 test 的指纹互不相同，各自会建一整套增量会话目录，而 cargo
+  # 从不回收旧的 —— 一次推送就能造出几百个。2026-09-29 实测 target/debug/incremental
+  # 33.6G / 515 个目录，其中 09-24、09-28、09-29 三天就占了 459 个，单个会话目录
+  # 600M–1.1G（greywork_host 一个 crate 就 68 个）。
+  #
+  # 只在钩子里关、日常开发照旧开着，是因为 cargo **只给 workspace 成员与 path 依赖开
+  # 增量**（registry 依赖一律不开，见 cargo profile 文档「Incremental compilation is
+  # only used for workspace members and "path" dependencies"）。所以关掉它不会让
+  # deps/ 里那 29.3G 的依赖产物失效、也不会触发全量重编，代价只是这几个本地 crate
+  # 在推送前编一次。真要全局关再动 Cargo.toml 的 incremental = false。
+  #
+  # 用 export 而非 `CARGO_INCREMENTAL=0 cargo ...` 前缀：下面三条是 && 串起来的，
+  # 前缀赋值只作用于紧跟的那一条，clippy 之后的 test 会漏掉。
+  export CARGO_INCREMENTAL=0
   cargo fmt --check &&
     cargo clippy --locked --all-targets -- -D warnings &&
     cargo test --locked

@@ -24,6 +24,8 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "disks": "node scripts/disks-reclaim.mjs",
+    "disks:reclaim": "node scripts/disks-reclaim.mjs --apply",
     "prepare": "husky"
   },
   "devDependencies": {
