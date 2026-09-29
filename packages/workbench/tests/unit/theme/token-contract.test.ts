@@ -8,8 +8,23 @@ import { THEME_TOKENS, isThemeTokenKey } from "@/theme/token-contract";
 const CSS_PATH = fileURLToPath(new URL("../../../src/theme/tokens.css", import.meta.url));
 const css = readFileSync(CSS_PATH, "utf8");
 
-/** 结构性布局变量：刻意不在主题契约内。 */
-const STRUCTURAL = new Set(["--gw-sidebar-w", "--gw-rail-w", "--gw-topbar-h", "--gw-side-w", "--gw-statusbar-h"]);
+/**
+ * 不进主题契约的变量：
+ *
+ * - `--gw-*`：结构性布局尺寸（侧栏宽 / 顶栏高等），不是配色或排版令牌；
+ * - `--glass-*`：Liquid Glass 的效果旋钮（模糊半径 / 饱和度），只在
+ *   `[data-palette="liquid-glass"]` 的作用域里被消费，同样不是主题令牌
+ *   —— tokens.css 里那句注释就是照这个口径写的。
+ */
+const STRUCTURAL = new Set([
+  "--gw-sidebar-w",
+  "--gw-rail-w",
+  "--gw-topbar-h",
+  "--gw-side-w",
+  "--gw-statusbar-h",
+  "--glass-blur",
+  "--glass-saturate",
+]);
 
 /** 从一段 CSS 文本中提取所有自定义属性 key（含前导 --）。 */
 function extractKeys(source: string): Set<string> {
