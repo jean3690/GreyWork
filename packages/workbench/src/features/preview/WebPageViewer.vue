@@ -84,8 +84,7 @@ function sendToChat(): void {
         data-selection-scope
         data-selection-role="paragraph"
         class="whitespace-pre-wrap break-words font-sans text-[13px] leading-relaxed text-foreground"
-        >{{ article.text }}</pre
-      >
+        >{{ article.text }}</pre>
     </div>
   </div>
 </template>

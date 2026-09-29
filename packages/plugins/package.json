@@ -20,6 +20,6 @@
   "dependencies": {
     "@greywork/core": "workspace:*",
     "@greywork/host-ipc": "workspace:*",
-    "@tauri-apps/api": "^2.11.1"
+    "@tauri-apps/api": "^2.12.0"
   }
 }

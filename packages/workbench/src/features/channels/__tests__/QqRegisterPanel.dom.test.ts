@@ -12,16 +12,14 @@ import type { QqRegisterPoll, QqStatus } from "@/lib/qq-backend";
 const mocks = vi.hoisted(() => ({
   qq: {
     supported: vi.fn(() => true),
-    status: vi.fn(
-      async (): Promise<QqStatus> => ({
-        configured: false,
-        appId: null,
-        state: "stopped",
-        detail: null,
-        lastMessageAt: null,
-        peerCount: 0,
-      }),
-    ),
+    status: vi.fn(async (): Promise<QqStatus> => ({
+      configured: false,
+      appId: null,
+      state: "stopped",
+      detail: null,
+      lastMessageAt: null,
+      peerCount: 0,
+    })),
     saveCredentials: vi.fn(),
     clearCredentials: vi.fn(),
     registerBegin: vi.fn(async () => ({

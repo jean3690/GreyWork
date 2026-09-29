@@ -115,8 +115,7 @@ onMounted(runCheck);
               v-if="status.notes.trim()"
               class="mt-1.5 max-h-[300px] overflow-y-auto rounded-[8px] border border-line-2 bg-panel-2 p-2.5 text-[12px] leading-relaxed whitespace-pre-wrap text-dim"
               data-testid="update-notes"
-              >{{ status.notes.trim() }}</pre
-            >
+              >{{ status.notes.trim() }}</pre>
             <p v-else class="mt-1.5 text-[12px] text-dim2">{{ t("update.notesEmpty") }}</p>
           </template>
         </template>

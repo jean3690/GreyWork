@@ -12,16 +12,14 @@ import type { DingTalkRegisterPoll, DingTalkStatus } from "@/lib/dingtalk-backen
 const mocks = vi.hoisted(() => ({
   dingtalk: {
     supported: vi.fn(() => true),
-    status: vi.fn(
-      async (): Promise<DingTalkStatus> => ({
-        configured: false,
-        clientId: null,
-        state: "stopped",
-        detail: null,
-        lastMessageAt: null,
-        peerCount: 0,
-      }),
-    ),
+    status: vi.fn(async (): Promise<DingTalkStatus> => ({
+      configured: false,
+      clientId: null,
+      state: "stopped",
+      detail: null,
+      lastMessageAt: null,
+      peerCount: 0,
+    })),
     saveCredentials: vi.fn(),
     clearCredentials: vi.fn(),
     registerBegin: vi.fn(async () => ({
@@ -30,13 +28,11 @@ const mocks = vi.hoisted(() => ({
       expiresIn: 7200,
       interval: 3,
     })),
-    registerPoll: vi.fn(
-      async (): Promise<DingTalkRegisterPoll> => ({
-        state: "pending",
-        detail: null,
-        clientId: null,
-      }),
-    ),
+    registerPoll: vi.fn(async (): Promise<DingTalkRegisterPoll> => ({
+      state: "pending",
+      detail: null,
+      clientId: null,
+    })),
     registerCancel: vi.fn(async () => {}),
     connect: vi.fn(),
     disconnect: vi.fn(),

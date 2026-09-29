@@ -184,8 +184,7 @@ const traceDetail = computed(() => {
         v-if="commandText"
         data-testid="permission-command"
         class="mt-1.5 max-h-24 overflow-auto whitespace-pre-wrap break-all rounded-[8px] bg-panel-2 px-2 py-1.5 font-mono text-[11px] leading-snug text-foreground"
-        >{{ commandText }}</pre
-      >
+        >{{ commandText }}</pre>
       <div v-if="paths.length" class="mt-1.5" data-testid="permission-paths">
         <span class="text-[10.5px] text-dim2">{{ t("chatView.permission.paths") }}</span>
         <ul class="m-0 mt-0.5 flex list-none flex-col gap-0.5 pl-0">
