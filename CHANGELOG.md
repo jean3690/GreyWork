@@ -6,6 +6,106 @@
 发版流程：新增条目补进对应版本标题下 → 打 `v*` 标签 → `.github/workflows/release.yml` 会自动从本文件
 抽取该版本条目作为 Release 说明。**不要手改 Release 正文**，改这里。
 
+## [0.5.0] - 2026-09-29
+
+### 新增
+
+- **新增 Liquid Glass 配色**：第六套 palette。面板表面改用半透明 `rgba` 填充，并叠一层背板模糊
+  （`backdrop-filter: blur + saturate`）采样下层表面，读作磨砂玻璃。模糊只在
+  `[data-palette="liquid-glass"]` 下挂到承载表面色的工具类上，其余 palette 的表面照旧不透明；
+  画布底 `--ink` 刻意保持不透明，为模糊提供可采样的底色。`--glass-blur` / `--glass-saturate`
+  是效果旋钮，与 `--gw-*` 同口径，不进主题令牌契约。
+- **外观新增「无圆角 / 小圆角 / 大圆角」档位**：一个旋钮（`--gw-radius-scale`）管住全界面圆角，
+  默认档即改造前的原值，行为逐像素不变。范围是**真·全局**而不只是 shadcn —— 改造前全仓 760 处
+  `rounded-*` 里只有约 49 处走 shadcn 的 `--radius` 链，其余约 580 处是写死的 px。故一次性 codemod
+  把 109 个 `.vue` 里的 577 处写死 px 圆角（含 `rounded-tr-[8px]` 这类方位形式）改写成
+  `calc(Npx * var(--gw-radius-scale))`；shadcn 的 `--radius` 与派生的 `--radius-md/sm`、
+  `input-group` 的 `calc(var(--radius) - 5px)` 一并接到同一变量，后者包一层 `max(0px, …)`——
+  否则「无圆角」档会算出 CSS 非法的负半径、整条声明被丢弃。`rounded-full` / `rounded-none`
+  是语义性的，不跟随旋钮。
+- **圆角防回归守卫**（`scripts/radius-guard.mjs`，接进 `pnpm lint`）：写死的 `rounded-[8px]` 不报错
+  也不红灯，它只是那一个控件悄悄不跟随设置 —— 这类静默失效直接拦在 lint 里，报错信息给出改法。
+  于是 CI 的 lint job 与 `pre-push` 都覆盖，不新增钩子。
+- **跨语言 ACP 门禁**：新增渲染端 `@agentclientprotocol/sdk` × 真 Rust 宿主的端到端链路
+  （`createAcpClient` → host-ipc → 真 `greywork-server` → `AcpHost` → 假 agent），断言
+  initialize → session/new → prompt → agent_message_chunk → prompt-done 全链路，外加三条反向守卫
+  （transport 不得静默回落到 WebSocket 分支、白名单外程序被真实 `process_guard` 拒绝、流式 chunk
+  必须早于 prompt-done）。此前两侧是两套独立实现、两条独立版本线，「各自编译过、单测过」并不代表
+  接得上。跑在独立的 `test:integration`（刻意不进 `pnpm -r test` —— 那个 job 没有编译产物，也不该
+  为它多编一次服务端），CI 另开 `acp-e2e` job 并复用既有的 Rust 缓存键（本仓缓存额度已顶到上限，
+  按 job 名另起一个键会把 master 那份挤出去）。
+- **宿主补 AcpHost 命令面直测**：`acp_start` / `acp_new_session` / `acp_send` / `acp_stop` 此前
+  零覆盖 —— 原有 6 个 ACP 集成测试全部绕开 `AcpHost`、直接驱动 client 去连 agent，而前端唯一会走的
+  正是这几个命令。
+
+### 变更
+
+- **依赖跨大版本批量刷新**（分五组，逐组独立验证）：
+  - 前端：pinia 3→4、vue-router 4→5、@vueuse/core 14→15（仓库侧零代码改动，逐个核对过用法面）；
+    eslint 9→10、@eslint/js 9→10、globals 16→17、lint-staged 16→17；vite 6→8、
+    @vitejs/plugin-vue 5→6、vue-tsc 2→3；vitest 3→5；`lucide-vue-next` → `@lucide/vue`。
+  - Rust：tauri 2.11.5 → 2.12.0（与前端 `@tauri-apps/api` 配对）、agent-client-protocol
+    2.0.0 → 2.2.0（schema 1.5.0 → 1.9.1，补齐 ACP 两侧版本线）。
+  - **vite 8 换掉了打包器**：Rolldown 取代 rollup/esbuild，构建 37s → 3.4s。它把默认
+    `build.target` 从 es2020 档改成 `baseline-widely-available`（Safari 16.4），不写死就会
+    **静默**把渲染端语法底线从 Safari 14 抬上去，故显式写回升级前那一档。
+  - `lucide-vue-next` → `@lucide/vue` 是**换包名**而不是升版本：旧包上游已标 deprecated 且停在
+    1.0.0，替代品是同一项目还在正常发版的新包名。22 个文件的 import 随之调整，
+    `scripts/shadcn-sync.mjs` 里「把 `@lucide/vue` 改写成 `lucide-vue-next`」那条规则的前提反转，
+    一并删除 —— 留着它只会把新生成的组件改回被弃用的包名。
+  - 根 `engines.node` `>=20` → `>=22.22.1`（本批最紧的约束来自 lint-staged 17；CI 用 Node 24、
+    本机 24.18，这条声明一直落后于事实）。
+  - `@univerjs/*` 12 个包从 `^0.25.1` 改成精确 pin `0.25.1`：patch 键带精确版本而声明写 range，
+    任何不做包名限定的依赖解析都会把 univer 抬到 0.25.2、patch 键随即失配，pnpm 以
+    `ERR_PNPM_UNUSED_PATCH` 中止整条命令（已用裸 `pnpm update -r` 复现）。
+  - eslint 10 的 recommended 集新增两条规则，逼出 3 处真实修复（包装超时错误时补回 `cause`、
+    去掉两处 `let x: T | null = null` 的死初始化）。
+- **mermaid 12 暂不升级**：评估时用真渲染冒烟发现 12.0.0 的新布局管线对图里的非 ASCII 标签
+  （中文必中）执行 `btoa(JSON.stringify(points))` 会抛 `InvalidCharacterError`，整图渲染失败；
+  `btoa` 是 Latin1-only 的，happy-dom 与真浏览器行为一致，不是测试环境的假象。原因与「等上游修掉
+  后还需显式钉回 `layout: "dagre"` + `look: "classic"`」一并写进了门面的注释。
+- **忽略清单与 `.dockerignore` 对齐**：`prettier --check .` / `eslint .` 此前每次都要把
+  `.pnpm-store` 整棵走一遍 —— 那是历史遗留的仓库内 pnpm store（1GB / 4.7 万个哈希名文件），
+  而当前 pnpm 用的是全局 store，仓库里没有任何配置引用它，等同孤儿。
+
+### 修复
+
+- **`pnpm -r test` 全过却以退出码 1 收场**：`Vitest caught 10 unhandled errors`，全部是
+  `Cannot read properties of null (reading 'insertBefore')`。根因是两个测试文件用
+  `document.body.innerHTML = ""` 清扫，把 DOM 整个抽走而**挂上去的组件树还活着** —— 悬着的延时
+  回调（tooltip 的 300ms、右键菜单的关闭定时器）随后落地，组件照常 patch，容器已经是 null；用例
+  本身仍是绿的，错误以 unhandled rejection 的形式把整轮测试染红。改用
+  `enableAutoUnmount(afterEach)` 由 @vue/test-utils 真正卸载组件树（先清 body 再卸载反而会在
+  unmount 里抛 `nextSibling` null，这个坑实际踩过）。
+- **token-contract 的一条既有红**：`--glass-*` 是效果旋钮，但契约测试的豁免集只登记了 `--gw-*`，
+  于是「`tokens.css` 里每个非结构变量都必须在契约内」那条反向断言失败。
+- **vue-tsc 3 报出的 4 处 TS6133 里有一处是真死代码**：composer 的 `attachEl` 全仓没有任何读取
+  （拖放命中判定走 `elementFromPoint(...).closest(...)`），连同 3 个调用方的声明与模板 ref 一并
+  删除；另一处 `useUniverHost` 的 `host` 只是检查器看不到字符串绑定，为迎合检查器去窄化 composable
+  的契约不值得，改成更该有的设计——元素 ref 归组件自己所有、传进 composable。
+- **适配 vitest 5**：对齐 `coverage-v8`、修 `vi.fn` / `localStorage` 的用法、按 AST 精确重映射后
+  重校覆盖率门槛；另修 mock Shell 懒加载子组件在 Windows 下环境拆除后动态导入报错。
+
+### 工程
+
+- **eslint 开 `--cache`**：类型感知 lint 那约 46s 是 12 个包各建一套 TS program 的开销、不是读盘，
+  缓存落在 `node_modules/.cache/eslint/`（刻意不用默认的仓库根 `.eslintcache`，省得再往
+  `.gitignore` 加一条）。本机冷跑 46.46s → 热跑 2.09s；CI 是全新 checkout，照旧每次冷跑全量，
+  门禁不打折。`lint:fix` 保持不缓存。
+- **`.ui-shots` 移出版本库**：UI 渲染自测的截图此前被误提交进 git，与 `.playwright*` 同性质
+  （本地验证留痕；PNG 不适合 git delta，每张新截图都永久撑大所有 clone）。4 张历史截图删除，
+  目录补进 `.gitignore` / `.prettierignore` / eslint 三份忽略清单。
+- **新增磁盘回收脚本 `scripts/disks-reclaim.mjs`**（`pnpm disks` / `pnpm disks:reclaim`）：
+  cargo 增量编译目录按 mtime 剪枝、docker 悬空镜像与构建缓存、`pnpm store prune` 三块，**默认
+  dry-run**，要真删必须显式 `--apply`（docker 的卷另需 `--volumes`——匿名卷里可能有别的项目的
+  数据，docker 判断不了）。起因是 dev 产物能长到几十 GB（实测 `target/debug` 66GB，其中增量目录
+  33GB）而 cargo / docker / pnpm 都不会自动回收自己的陈旧缓存。
+- **`.husky/pre-push` 在跑 clippy / test 前关掉增量编译**（`CARGO_INCREMENTAL=0`）：clippy 与 test
+  的指纹互不相同，各自会建一整套增量会话目录，而 cargo 从不回收旧的，一次推送就能造出几百个
+  （实测 515 个目录里，09-24 一天就 284 个）。只在钩子里关、日常开发照旧开着 —— cargo 只给
+  workspace 成员与 path 依赖开增量，所以关掉不会让 `deps/` 里那 29.3G 失效，代价只是几个本仓
+  crate 在推送前编一次。
+
 ## [0.4.0] - 2026-09-28
 
 ### 新增
@@ -386,6 +486,7 @@
 
 **安装包**：Linux 用 `.deb`（`sudo dpkg -i` 或 `apt install ./`），Windows 用 NSIS 安装器，macOS 用 `.dmg`。
 
+[0.5.0]: https://github.com/jean3690/GreyWork/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/jean3690/GreyWork/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/jean3690/GreyWork/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/jean3690/GreyWork/compare/v0.1.1...v0.2.0
