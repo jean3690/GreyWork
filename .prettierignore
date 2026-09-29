@@ -3,13 +3,16 @@ node_modules
 target
 
 # 本地运行产物 —— 与 .gitignore / .dockerignore 列的是同一批，但 prettier 只认本文件，
-# 于是 `prettier --check .` 会把它们整棵走一遍。大头是 `.pnpm-store`：历史遗留的仓库内
-# pnpm store（1GB / 4.7 万个哈希名文件；当前 pnpm 用的是全局 store，`pnpm store path`
-# 指向 ~/.local/share/pnpm/store，所以它是孤儿），不排除掉每次都要白走四万多个目录项。
-# 刻意**不含** `.vscode` / `.ui-shots`：那两个目录里有被 git 跟踪的文件
-# （.vscode/extensions.json、.ui-shots/*.png），照旧参与检查。
+# 于是 `prettier --check .` 会把它们整棵走一遍。
+# `.pnpm-store` 目录本身已于 2026-09 清空（历史遗留的仓库内 pnpm store；当前 pnpm 用的是
+# 全局 store，`pnpm store path` 指向 ~/.local/share/pnpm/store），但保留此行作廉价保险：
+# 万一老 pnpm 把它重建出来（曾达 1GB / 4.7 万个哈希名文件），不排除就得每次白走四万项。
+# 刻意**不含** `.vscode`：该目录有被 git 跟踪的文件（.vscode/extensions.json），
+# 照旧参与检查。`.ui-shots` 曾同在此列，2026-09-29 起改为本地产物、不再进版本库，
+# 理由与 .playwright* 一致（截图留痕不进 git），故重新纳入忽略。
 .pnpm-store
 .playwright*
+.ui-shots
 logs
 *.log
 .omo

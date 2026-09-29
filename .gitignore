@@ -4,9 +4,13 @@ dist/
 # （此前在 apps/desktop/src-tauri/target，随 workspace 化搬走）。
 /target/
 .playwright*
+# UI 渲染自测的截图产物（与 .playwright* 同性质：本地验证留痕，不进版本库）。
+# 此前被误提交进 git（45a4bf2），PNG 不适合 git delta，每张新截图都永久撑大所有 clone。
+.ui-shots/
 .agents/
 AGENTS.md
 AGENT.md
+CLAUDE.md
 *.log
 # 日志轮转目录：*.log 盖不住同目录的 .<hash>-audit.json（winston-daily-rotate-file 的轮转元数据）
 logs/
