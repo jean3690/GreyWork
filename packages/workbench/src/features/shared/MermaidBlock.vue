@@ -8,7 +8,7 @@
  * - code 变化（消息内容更新）时重渲并清掉旧图，避免展示过期图。
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { RotateCcw, ZoomIn, ZoomOut } from "lucide-vue-next";
+import { RotateCcw, ZoomIn, ZoomOut } from "@lucide/vue";
 import { renderMermaid } from "@/lib/mermaid";
 import { isDarkMode, watchTheme } from "@/lib/theme";
 

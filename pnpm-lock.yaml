@@ -401,6 +401,9 @@ importers:
       '@lezer/highlight':
         specifier: ^1.2.3
         version: 1.2.4
+      '@lucide/vue':
+        specifier: ^1.48.0
+        version: 1.48.0(vue@3.5.43(typescript@5.6.2))
       '@tanstack/vue-virtual':
         specifier: ^3.13.39
         version: 3.13.39(vue@3.5.43(typescript@5.6.2))
@@ -470,9 +473,6 @@ importers:
       jszip:
         specifier: ^3.10.1
         version: 3.10.2
-      lucide-vue-next:
-        specifier: ^0.544.0
-        version: 0.544.0(vue@3.5.43(typescript@5.6.2))
       marked:
         specifier: ^18.0.14
         version: 18.0.14
@@ -1019,6 +1019,11 @@ packages:
 
   '@lezer/yaml@1.0.4':
     resolution: {integrity: sha512-2lrrHqxalACEbxIbsjhqGpSW8kWpUKuY6RHgnSAFZa6qK62wvnPxA8hGOwOoDbwHcOFs5M4o27mjGu+P7TvBmw==}
+
+  '@lucide/vue@1.48.0':
+    resolution: {integrity: sha512-3/Nwx/RsqQ4ZrrSML1GNsSWCSDyLnBgoF/eEr1q9G6iZymn3+WKtzIj7Dbc/Nxrt9WOPuGrJ58S+CBiamK+36w==}
+    peerDependencies:
+      vue: '>=3.0.1'
 
   '@marijn/find-cluster-break@1.0.4':
     resolution: {integrity: sha512-Wy0V7+SGUjnF9/TkiM1hKVDPj7jKXduPNboMVtHTA8dySMURWqfg/JZ9E2Sq8JgSJmkl7k7Qe9FLeMSrSraWmQ==}
@@ -3305,12 +3310,6 @@ packages:
     resolution: {integrity: sha512-4pfM1Ff0x50o0tQwb5ucw/RzNyD0/YJME6IVcStalZuMWxdt3sR3huStTtxz4PUmvZfRguvDejasvQ2kifR11g==}
     engines: {node: 20 || >=22}
 
-  lucide-vue-next@0.544.0:
-    resolution: {integrity: sha512-mDp/AdGOPIDkpFHnFiTWgQgCST9aBXHVaiobZfOMIvv7nrOukzF/TP+7KoOwrngdWRaH9TMiepMBIX1vsgKJ3g==}
-    deprecated: Package deprecated. Please use @lucide/vue instead.
-    peerDependencies:
-      vue: '>=3.0.1'
-
   magic-string-ast@1.0.2:
     resolution: {integrity: sha512-8ngQgLhcT0t3YBdn9CGkZqCYlvwW9pm7aWJwd7AxseVWf1RU8ZHCQvG1mt3N5vvUme+pXTcHB8G/7fE666U8Vw==}
     engines: {node: '>=20.18.0'}
@@ -3502,10 +3501,6 @@ packages:
     resolution: {integrity: sha512-V7+vQEJ06Z+c5tSye8S+nHUfI51xoXIXjHQ99cQtKUkQqqO1kO/KCJUfZXuB47h/YBlDhah2H3hdUGXn8ie0oA==}
     engines: {node: '>=8.6'}
 
-  picomatch@4.0.5:
-    resolution: {integrity: sha512-RvwwcruNjI1ncT5xRakeyS9Lf8lcItv34KD+aif+VH9kduAyfYBipGh12274xtenIPZ119/R9BdTBa8gAwSh0A==}
-    engines: {node: '>=12'}
-
   picomatch@4.0.7:
     resolution: {integrity: sha512-qcJu88Q2IWqJsDD529JKMdwGm/dvInW4HvQnRwiH9JtihJvzGOscDtHE3x1pBKeUOTysQ8kVmLnJ2kJu7yhcGA==}
     engines: {node: '>=12'}
@@ -3540,10 +3535,6 @@ packages:
   postcss-selector-parser@7.1.5:
     resolution: {integrity: sha512-KvvtD7SrlBP7dlgkBghEE3r84CABm5SmV2aNcG4oCA+qDnJ/tvKonFVvwWAyyWUEwxuNawdfEAZKP9zM3oZ2Uw==}
     engines: {node: '>=4'}
-
-  postcss@8.5.26:
-    resolution: {integrity: sha512-u82N74LFzG8ca+dD8puPnplTXoGH4fTPpVGuIbt36G3qvNlkvfD0lEAZSxaly3KX8TS/L1A1gsCEmvKmBcVbkQ==}
-    engines: {node: ^10 || ^12 || >=14}
 
   postcss@8.5.28:
     resolution: {integrity: sha512-RRuzqDtt5Y9h3quz5hWhK+TPnsmVs6WwSU6LkJMeY4HstUEDuYTG8UJSdawMRzmzAtV+KEoG8N3Qg2qLy5vM/A==}
@@ -4761,6 +4752,10 @@ snapshots:
       '@lezer/common': 1.5.2
       '@lezer/highlight': 1.2.4
       '@lezer/lr': 1.4.10
+
+  '@lucide/vue@1.48.0(vue@3.5.43(typescript@5.6.2))':
+    dependencies:
+      vue: 3.5.43(typescript@5.6.2)
 
   '@marijn/find-cluster-break@1.0.4': {}
 
@@ -6787,10 +6782,6 @@ snapshots:
     dependencies:
       reusify: 1.1.0
 
-  fdir@6.5.0(picomatch@4.0.5):
-    optionalDependencies:
-      picomatch: 4.0.5
-
   fdir@6.5.0(picomatch@4.0.7):
     optionalDependencies:
       picomatch: 4.0.7
@@ -7124,10 +7115,6 @@ snapshots:
 
   lru-cache@11.5.2: {}
 
-  lucide-vue-next@0.544.0(vue@3.5.43(typescript@5.6.2)):
-    dependencies:
-      vue: 3.5.43(typescript@5.6.2)
-
   magic-string-ast@1.0.2:
     dependencies:
       magic-string: 0.30.17
@@ -7311,8 +7298,6 @@ snapshots:
 
   picomatch@2.3.2: {}
 
-  picomatch@4.0.5: {}
-
   picomatch@4.0.7: {}
 
   pinia@4.0.3(@vue/devtools-api@8.2.1)(typescript@5.6.2)(vue@3.5.43(typescript@5.6.2)):
@@ -7348,12 +7333,6 @@ snapshots:
     dependencies:
       cssesc: 3.0.0
       util-deprecate: 1.0.2
-
-  postcss@8.5.26:
-    dependencies:
-      nanoid: 3.3.18
-      picocolors: 1.1.1
-      source-map-js: 1.2.1
 
   postcss@8.5.28:
     dependencies:
@@ -7780,9 +7759,9 @@ snapshots:
   vite@6.4.3(@types/node@22.20.1)(jiti@2.7.0)(lightningcss@1.32.0)(yaml@2.9.1):
     dependencies:
       esbuild: 0.25.0
-      fdir: 6.5.0(picomatch@4.0.5)
-      picomatch: 4.0.5
-      postcss: 8.5.26
+      fdir: 6.5.0(picomatch@4.0.7)
+      picomatch: 4.0.7
+      postcss: 8.5.28
       rollup: 4.62.5
       tinyglobby: 0.2.17
     optionalDependencies:

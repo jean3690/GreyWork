@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { Check, Copy } from "lucide-vue-next";
+import { Check, Copy } from "@lucide/vue";
 import { copyText } from "@/lib/clipboard";
 import { parseBlocks } from "@/lib/markdown";
 import MarkdownInline from "@/features/shared/MarkdownInline.vue";
