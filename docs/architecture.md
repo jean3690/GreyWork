@@ -77,6 +77,16 @@ desktop     ← workbench (+ Tauri Rust host)
 - `pnpm -r test` runs all tests across packages with coverage enabled where configured.
 - Rust tests run via `cargo test --locked` from the **repo root** (single workspace: desktop shell + `greywork-host` + server).
 - Coverage thresholds are configured per-package in `vitest.config.ts`.
+- **Cross-language ACP gate**: `pnpm --filter @greywork/acp test:integration` drives the real
+  renderer-side ACP client (`@greywork/acp` → `TauriIpcTransport` → `POST /api/command` +
+  `WS /api/events`) against a real `greywork-server` and a fake agent, asserting a full
+  `initialize → session/new → prompt → agent_message_chunk → prompt-done` round trip. The two ACP
+  SDKs (TS `@agentclientprotocol/sdk` vs Rust `agent-client-protocol`) are independent release
+  lines, so "each side compiles and unit-tests green" does **not** imply they interoperate. It
+  needs `cargo build -p greywork-server` first (it never builds for you) and is deliberately kept
+  out of `pnpm -r test` so the plain test job needs no compiled artifacts. The Rust-side counterpart
+  (`apps/server/tests/acp_host.rs`) covers the `AcpHost` command surface through `dispatch` on all
+  three platforms.
 
 ## Headless Server (`apps/server`)
 
@@ -264,6 +274,10 @@ single home.
    `cargo clippy --locked --all-targets -- -D warnings`, `cargo test --locked`, plus a guard that
    `crates/greywork-host/Cargo.toml` declares no `tauri` dependency. The pre-push hook runs the same
    three commands when a push touches Rust files.
+4. **ACP E2E (renderer TS × Rust host)** — builds `greywork-server` and runs the cross-language ACP
+   gate described under Testing. It needs no browser and no renderer bundle (it only talks to
+   `/api`), and it reuses `shared-key: tauri` so it does not add a cache entry — it pays for the
+   Tauri system deps it does not strictly need rather than risk evicting the `master` cache.
 
 Rust dependency caches come from `Swatinem/rust-cache` and are keyed with `shared-key: tauri`, so the
 CI bundle matrix and the release workflow restore the same dependency artifacts (the key still

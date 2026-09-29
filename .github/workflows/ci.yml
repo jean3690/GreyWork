@@ -140,6 +140,33 @@ jobs:
       - name: Tests
         run: cargo test --locked
 
+  # 跨语言 ACP 门禁：渲染端 TS client × 真实 Rust 宿主。两侧 SDK 是**独立版本线**
+  # （`@agentclientprotocol/sdk` 1.5.0 ↔ `agent-client-protocol` 2.2.0 / schema 1.9.1），
+  # 各自编译过、单测过都不代表两边接得上 —— 这一个 job 用真进程把这条缝堵上。
+  #
+  # 为什么复用 `setup-rust`（而非裸装 toolchain + rust-cache）：它会白装一套 webkit/gtk
+  # 系统依赖（greywork-server 不依赖 tauri），但**共享缓存键**能避免新增一份依赖缓存 ——
+  # 本仓缓存额度已顶到 10GB 上限（见 setup-rust 里的测算），按 job 名另起一个键就会把
+  # master 的那份挤出去。宁可多付 40 秒 apt。
+  acp-e2e:
+    name: ACP E2E (renderer TS × Rust host)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-rust
+        with:
+          shared-key: tauri
+      - uses: ./.github/actions/setup-node
+
+      # 门禁要求产物在 target/debug/greywork-server，且刻意不替调用方构建。
+      # 不需要 chromium（不起浏览器），也不需要前端产物（只走 /api，不设 GREYWORK_STATIC_DIR）。
+      - name: Build greywork-server
+        run: cargo build -p greywork-server
+
+      - name: Cross-language ACP gate
+        run: pnpm --filter @greywork/acp test:integration
+
   # Windows 专属代码在 ubuntu 的 rust job 里根本编不到（taskkill 的创建标志、cmd /C
   # 垫片、盘符相对路径与保留设备名、逐字前缀）。cargo test 会把 cfg(windows) 的分支
   # 全编一遍，也能真正跑起 #[cfg(windows)] 的用例，所以这一个 job 同时覆盖编译与行为。
