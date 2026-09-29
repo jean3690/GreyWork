@@ -2,7 +2,7 @@
 // 取决于 agent 在 session/new 暴露的 select 型配置）；模型未暴露思考强度时展示提示桩；
 // 连接失败就地展示错误文案并可点击重试；已连接重复点击不再重复建会话。
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DOMWrapper, flushPromises, mount, type VueWrapper } from "@vue/test-utils";
+import { DOMWrapper, enableAutoUnmount, flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { defineComponent } from "vue";
 import { createPinia, setActivePinia } from "pinia";
 import AcpSessionConfig from "@/features/conversation/AcpSessionConfig.vue";
@@ -120,9 +120,18 @@ function tooltipText(): string {
   return document.body.querySelector('[data-slot="tooltip-content"]')?.textContent?.trim() ?? "";
 }
 
-afterEach(() => {
-  document.body.innerHTML = "";
-});
+/**
+ * 用例结束后**卸载**挂载的组件树。
+ *
+ * 之前是 `document.body.innerHTML = ""` 一把清空：DOM 被抽走而组件树还活着，tooltip
+ * （delayDuration=300ms）那类延时回调一落地就 patch 到已消失的容器上，抛
+ * `Cannot read properties of null (reading 'insertBefore')` —— 用例本身仍是绿的，
+ * 但它以 unhandled rejection 的形式让整轮 `pnpm -r test` 退出码变 1。
+ *
+ * 不能再顺手清 body：手工清空之后再卸载，Vue 会在 unmount 里找不到兄弟节点而抛错
+ * （`nextSibling` null）。卸载本身就干净地移除了挂到 body 上的挂载点。
+ */
+enableAutoUnmount(afterEach);
 
 function providerButton(wrapper: VueWrapper, id: string) {
   const button = wrapper.find(`[data-testid="acp-provider-button"][data-provider-id="${id}"]`);

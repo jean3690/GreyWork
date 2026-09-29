@@ -8,8 +8,8 @@
  * 覆盖：方向键 / Home / End 移动焦点、右左进出一层、F2 改名、Delete 删除、Ctrl+C/X/V
  * 走应用内剪贴板、拖拽落到目录行与空白（根），以及自投自树与同目录这类无效落点。
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { enableAutoUnmount, flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 
 const stub = {
@@ -46,6 +46,16 @@ vi.mock("@/lib/clipboard", () => ({ copyText: vi.fn(async () => undefined) }));
 
 import FileTree from "@/features/preview/FileTree.vue";
 import { i18n } from "@/i18n";
+
+/**
+ * 每个用例结束后**卸载**挂载的组件树。
+ *
+ * 之前只在 beforeEach 里 `document.body.innerHTML = ""`：DOM 被抽走而组件树还活着，
+ * 右键菜单 / 删除确认那类延时回调一落地就 patch 到已消失的容器上，抛
+ * `Cannot read properties of null (reading 'insertBefore')` —— 用例本身仍是绿的，
+ * 但它以 unhandled rejection 的形式让整轮 `pnpm -r test` 退出码变 1。
+ */
+enableAutoUnmount(afterEach);
 
 const SRC = {
   name: "src",
@@ -87,7 +97,6 @@ beforeEach(() => {
   stub.deleteEntry.mockReset();
   stub.copyToClipboard.mockReset();
   stub.cutToClipboard.mockReset();
-  document.body.innerHTML = "";
 });
 
 describe("文件树键盘导航", () => {
