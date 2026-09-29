@@ -1,4 +1,7 @@
 {
+  // vitest.integration.config.ts 显式列进来（而不像 vitest.config.ts 那样挂在 eslint 的
+  // allowDefaultProject 上）：它需要在 Node 环境跑、又要用 vitest 的配置类型，放进 tsconfig
+  // 就能被 `pnpm typecheck` 一起检查，也省掉改共享 eslint 配置。
   "extends": "../../tsconfig.base.json",
-  "include": ["src/**/*.ts", "src/**/*.d.ts", "tests/**/*.ts"]
+  "include": ["src/**/*.ts", "src/**/*.d.ts", "tests/**/*.ts", "vitest.integration.config.ts"]
 }
