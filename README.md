@@ -115,7 +115,7 @@ On Wayland, `pnpm tauri:wayland` sets the required environment variables.
 | Command            | Description                                      |
 | ------------------ | ------------------------------------------------ |
 | `pnpm dev`         | Start the desktop dev environment (Vite + Tauri) |
-| `pnpm lint`        | ESLint across the repo                           |
+| `pnpm lint`        | ESLint across the repo + the radius guard        |
 | `pnpm format`      | Format with Prettier (`format:check` to verify)  |
 | `pnpm typecheck`   | TypeScript check across all workspace packages   |
 | `pnpm test`        | Vitest across all packages                       |
@@ -134,8 +134,9 @@ signing still needs: [docs/packaging.md](docs/packaging.md).
 - Vitest runs in two projects — `node` for pure logic and `dom` for component behavior; coverage
   thresholds are configured per package.
 - `.github/workflows/ci.yml` mirrors the local hooks but runs the web checks as four parallel jobs —
-  lint (ESLint + Prettier), typecheck, vitest, renderer build — so the wall clock is the slowest job
-  instead of their sum, plus a Rust job (`cargo fmt` → `cargo clippy --locked` → `cargo test --locked`),
+  lint (ESLint + the radius guard, then Prettier), typecheck, vitest, renderer build — so the wall clock
+  is the slowest job instead of their sum, plus a Rust job (`cargo fmt` → `cargo clippy --locked` →
+  `cargo test --locked`),
   a Windows job (`cargo test --locked` + vitest — the only place `#[cfg(windows)]` code is compiled
   and run), a macOS job (`cargo clippy --locked` → `cargo test --locked` + vitest — the only place
   `#[cfg(target_os = "macos")]` code is compiled and run) and a three-platform Tauri bundle matrix
