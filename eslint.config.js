@@ -37,6 +37,13 @@ export default defineConfigWithVueTs(
       "**/coverage/**",
       "**/node_modules/**",
       "**/target/**",
+      // 本地运行产物 —— 与 .prettierignore / .dockerignore 是同一批。格外要点名
+      // `.pnpm-store`：历史遗留的仓库内 pnpm store（1GB / 4.7 万个哈希名文件，当前 pnpm
+      // 实际用的是全局 store，所以它是孤儿），不排除的话每次 lint 都要白走四万多个目录项。
+      // 刻意**不含** `.vscode` / `.ui-shots`：那两个目录里有被 git 跟踪的文件。
+      "**/.pnpm-store/**",
+      "**/.playwright*/**",
+      "**/logs/**",
       "pnpm-lock.yaml",
       "**/src-tauri/tests/*.mjs",
       "apps/desktop/e2e/**",
