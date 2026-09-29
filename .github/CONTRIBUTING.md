@@ -2,7 +2,7 @@
 
 ## 环境
 
-- Node >= 20（CI 用 24）、pnpm >= 9（`packageManager` 字段锁定 11.x，`corepack enable` 即可）
+- Node >= 22.22.1（CI 用 24，见根 `engines`）、pnpm >= 9（`packageManager` 字段锁定 11.x，`corepack enable` 即可）
 - Rust stable（仅桌面端 `apps/desktop/src-tauri` 需要）
 - 首次：`pnpm install`（自动执行 husky 钩子安装）
 
@@ -10,7 +10,7 @@
 
 ```bash
 pnpm dev            # 桌面端开发（Tauri + 渲染层热更）
-pnpm lint           # 全仓 ESLint
+pnpm lint           # 全仓 ESLint + 圆角守卫（写死的 px 圆角会拦下）
 pnpm format         # Prettier 写入（format:check 仅校验）
 pnpm typecheck      # 全 workspace vue-tsc
 pnpm -r test        # 全部测试（带 test 脚本的 package 各自跑 vitest）

@@ -16,7 +16,7 @@
     "build": "pnpm --filter @greywork/desktop build",
     "build:desktop": "pnpm --filter @greywork/desktop build",
     "typecheck": "pnpm -r --if-present run typecheck",
-    "lint": "eslint . --cache --cache-location node_modules/.cache/eslint/",
+    "lint": "eslint . --cache --cache-location node_modules/.cache/eslint/ && node scripts/radius-guard.mjs",
     "test": "pnpm -r --if-present run test",
     "check": "pnpm typecheck && pnpm build",
     "shadcn:add": "pnpm dlx --yes shadcn-vue@2.8.2 add --cwd packages/workbench -y -o && node scripts/shadcn-sync.mjs",
