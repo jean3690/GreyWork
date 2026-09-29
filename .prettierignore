@@ -1,10 +1,22 @@
 dist
 node_modules
 target
+
+# 本地运行产物 —— 与 .gitignore / .dockerignore 列的是同一批，但 prettier 只认本文件，
+# 于是 `prettier --check .` 会把它们整棵走一遍。大头是 `.pnpm-store`：历史遗留的仓库内
+# pnpm store（1GB / 4.7 万个哈希名文件；当前 pnpm 用的是全局 store，`pnpm store path`
+# 指向 ~/.local/share/pnpm/store，所以它是孤儿），不排除掉每次都要白走四万多个目录项。
+# 刻意**不含** `.vscode` / `.ui-shots`：那两个目录里有被 git 跟踪的文件
+# （.vscode/extensions.json、.ui-shots/*.png），照旧参与检查。
+.pnpm-store
+.playwright*
+logs
+*.log
+.omo
+
 *.gen.ts
 pnpm-lock.yaml
 apps/desktop/src-tauri/gen
-.omo
 # vendored 的 agent skills（markdown + 自带配置），不是本仓代码
 .agents
 # Rust 集成测试的 mock agent，eslint.config.js 同样跳过它们
