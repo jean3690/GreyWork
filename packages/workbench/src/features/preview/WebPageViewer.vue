@@ -51,7 +51,7 @@ function sendToChat(): void {
 <template>
   <div class="flex size-full min-h-0 flex-col overflow-hidden">
     <div class="flex shrink-0 items-center gap-2 border-b border-line px-3 py-2">
-      <span class="grid size-6 shrink-0 place-items-center rounded-[6px] bg-panel-2 text-dim">
+      <span class="grid size-6 shrink-0 place-items-center rounded-[calc(6px*var(--gw-radius-scale))] bg-panel-2 text-dim">
         <Icon name="earth" :size="13" />
       </span>
       <div class="min-w-0 flex-1">
@@ -66,7 +66,7 @@ function sendToChat(): void {
         type="button"
         data-testid="web-send-to-chat"
         :disabled="!article"
-        class="flex shrink-0 cursor-pointer items-center gap-1 rounded-[7px] border border-line-2 bg-panel-2 px-2 py-1 text-[11.5px] text-foreground transition-colors hover:border-cyan hover:text-cyan disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+        class="flex shrink-0 cursor-pointer items-center gap-1 rounded-[calc(7px*var(--gw-radius-scale))] border border-line-2 bg-panel-2 px-2 py-1 text-[11.5px] text-foreground transition-colors hover:border-cyan hover:text-cyan disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
         @click="sendToChat"
       >
         <Icon name="send-one" :size="12" />

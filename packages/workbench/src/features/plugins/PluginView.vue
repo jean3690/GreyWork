@@ -54,14 +54,14 @@ async function restore(): Promise<void> {
       <div class="flex items-center gap-2">
         <button
           type="button"
-          class="h-7 cursor-pointer rounded-[7px] border border-line bg-panel-2 px-3 text-[12px] text-foreground transition-colors hover:border-line-2 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          class="h-7 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] border border-line bg-panel-2 px-3 text-[12px] text-foreground transition-colors hover:border-line-2 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
           @click="router.push('/guid')"
         >
           回会话
         </button>
         <button
           type="button"
-          class="h-7 cursor-pointer rounded-[7px] bg-accent px-3 text-[12px] font-medium text-accent-ink transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40"
+          class="h-7 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] bg-accent px-3 text-[12px] font-medium text-accent-ink transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40"
           :disabled="restoring"
           @click="restore"
         >

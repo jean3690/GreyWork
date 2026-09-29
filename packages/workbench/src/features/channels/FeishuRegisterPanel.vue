@@ -15,7 +15,7 @@ const store = useRemoteAssistantStore();
 </script>
 
 <template>
-  <div class="rounded-[12px] border border-line bg-panel-2 p-3.5" data-testid="feishu-register-panel">
+  <div class="rounded-[calc(12px*var(--gw-radius-scale))] border border-line bg-panel-2 p-3.5" data-testid="feishu-register-panel">
     <!-- 浏览器态没有宿主：如实说明，而不是给一个点了没反应的按钮 -->
     <p v-if="!store.available" class="text-[11.5px] text-dim2" data-testid="feishu-register-unsupported">
       {{ t("remoteAssist.channels.desktopOnly") }}
@@ -26,7 +26,7 @@ const store = useRemoteAssistantStore();
       <span class="text-[10.5px] leading-relaxed text-dim2">{{ t("remoteAssist.feishu.registerHint") }}</span>
       <button
         type="button"
-        class="h-7 cursor-pointer rounded-[7px] bg-accent px-3 text-[11.5px] font-medium text-accent-ink transition-opacity hover:opacity-90"
+        class="h-7 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] bg-accent px-3 text-[11.5px] font-medium text-accent-ink transition-opacity hover:opacity-90"
         data-testid="feishu-register-start"
         @click="void store.startFeishuRegistration()"
       >
@@ -44,7 +44,7 @@ const store = useRemoteAssistantStore();
       </p>
       <button
         type="button"
-        class="h-7 cursor-pointer rounded-[7px] border border-line bg-panel px-3 text-[11.5px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground"
+        class="h-7 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] border border-line bg-panel px-3 text-[11.5px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground"
         data-testid="feishu-register-cancel"
         @click="store.cancelFeishuRegistration()"
       >
@@ -62,7 +62,7 @@ const store = useRemoteAssistantStore();
       </p>
       <button
         type="button"
-        class="h-7 cursor-pointer rounded-[7px] border border-line bg-panel px-3 text-[11.5px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground"
+        class="h-7 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] border border-line bg-panel px-3 text-[11.5px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground"
         data-testid="feishu-register-retry"
         @click="void store.startFeishuRegistration()"
       >

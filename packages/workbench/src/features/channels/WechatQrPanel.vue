@@ -14,7 +14,7 @@ const store = useRemoteAssistantStore();
 </script>
 
 <template>
-  <div class="rounded-[12px] border border-line bg-panel-2 p-3.5" data-testid="wechat-qr-panel">
+  <div class="rounded-[calc(12px*var(--gw-radius-scale))] border border-line bg-panel-2 p-3.5" data-testid="wechat-qr-panel">
     <div v-if="store.qr" class="flex flex-col items-center gap-2.5">
       <QrSvg :content="store.qr.content" data-testid="wechat-qr-svg" />
       <p class="text-center text-[11.5px] leading-relaxed text-dim2">
@@ -22,7 +22,7 @@ const store = useRemoteAssistantStore();
       </p>
       <button
         type="button"
-        class="h-7 cursor-pointer rounded-[7px] border border-line bg-panel px-3 text-[11.5px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground"
+        class="h-7 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] border border-line bg-panel px-3 text-[11.5px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground"
         data-testid="wechat-qr-cancel"
         @click="store.cancelLogin()"
       >
@@ -34,7 +34,7 @@ const store = useRemoteAssistantStore();
       <p class="text-center text-[11.5px] text-destructive" data-testid="wechat-qr-error">{{ store.qrError }}</p>
       <button
         type="button"
-        class="h-7 cursor-pointer rounded-[7px] border border-line bg-panel px-3 text-[11.5px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground"
+        class="h-7 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] border border-line bg-panel px-3 text-[11.5px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground"
         data-testid="wechat-qr-retry"
         @click="void store.startLogin()"
       >

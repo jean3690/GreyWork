@@ -102,7 +102,7 @@ function timeLabel(ts: number): string {
   <article class="flex flex-col" data-ctx="message" :data-message-id="message.id">
     <div
       v-if="message.role === 'user'"
-      class="msg__bubble ml-auto max-w-[78%] rounded-tl-[16px] rounded-tr-[16px] rounded-br-[4px] rounded-bl-[16px] bg-bubble px-4 py-3"
+      class="msg__bubble ml-auto max-w-[78%] rounded-tl-[calc(16px*var(--gw-radius-scale))] rounded-tr-[calc(16px*var(--gw-radius-scale))] rounded-br-[calc(4px*var(--gw-radius-scale))] rounded-bl-[calc(16px*var(--gw-radius-scale))] bg-bubble px-4 py-3"
     >
       <div class="flex flex-col gap-2">
         <div v-if="attachmentList.length" data-testid="message-attachments" class="flex flex-wrap items-center gap-2">
@@ -113,7 +113,7 @@ function timeLabel(ts: number): string {
               :src="thumbs[item.id] as string"
               :aria-label="item.name"
               data-testid="message-attachment-video"
-              class="max-h-[240px] max-w-[280px] rounded-[8px] border border-line-2 bg-black"
+              class="max-h-[240px] max-w-[280px] rounded-[calc(8px*var(--gw-radius-scale))] border border-line-2 bg-black"
               controls
               playsinline
               preload="metadata"
@@ -130,7 +130,7 @@ function timeLabel(ts: number): string {
             <Hint v-else :text="item.name" multiline>
               <button
                 type="button"
-                class="cursor-pointer overflow-hidden rounded-[8px] border border-line-2 text-left transition-opacity hover:opacity-90 disabled:cursor-default disabled:hover:opacity-100"
+                class="cursor-pointer overflow-hidden rounded-[calc(8px*var(--gw-radius-scale))] border border-line-2 text-left transition-opacity hover:opacity-90 disabled:cursor-default disabled:hover:opacity-100"
                 :aria-label="item.name"
                 :disabled="!canOpenAttachment(item)"
                 :data-testid="item.kind === 'image' ? 'message-attachment-image' : 'message-attachment-file'"
@@ -167,7 +167,7 @@ function timeLabel(ts: number): string {
       <ScheduleConfirmCard v-if="message.scheduleDraft" :thread-id="threadId || chat.activeThreadId" :message="message" />
       <div
         v-if="awaitingOutput"
-        class="flex h-9 items-center gap-2.5 rounded-[12px] border border-line bg-panel-2 px-3.5 text-[12px] text-dim"
+        class="flex h-9 items-center gap-2.5 rounded-[calc(12px*var(--gw-radius-scale))] border border-line bg-panel-2 px-3.5 text-[12px] text-dim"
       >
         <span class="flex items-center gap-1">
           <span class="size-1.5 animate-bounce rounded-full bg-cyan/70 [animation-delay:0ms]" />
@@ -205,7 +205,7 @@ function timeLabel(ts: number): string {
     >
       <DialogTitle class="sr-only">{{ lightbox?.name }}</DialogTitle>
       <DialogDescription class="sr-only">{{ t("chat.imagePreviewClose") }}</DialogDescription>
-      <img :src="lightbox?.src" alt="" class="max-h-[85vh] max-w-full rounded-[10px] object-contain" />
+      <img :src="lightbox?.src" alt="" class="max-h-[85vh] max-w-full rounded-[calc(10px*var(--gw-radius-scale))] object-contain" />
     </DialogContent>
   </Dialog>
 </template>

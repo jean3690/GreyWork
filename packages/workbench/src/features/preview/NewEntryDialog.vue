@@ -61,7 +61,10 @@ onMounted(() => void nextTick(() => input.value?.focus()));
 
 <template>
   <Dialog v-model:open="open" @update:open="onOpenChange">
-    <DialogContent :show-close-button="false" class="gap-0 rounded-[14px] border-line bg-panel p-4 shadow-xl sm:max-w-[380px]">
+    <DialogContent
+      :show-close-button="false"
+      class="gap-0 rounded-[calc(14px*var(--gw-radius-scale))] border-line bg-panel p-4 shadow-xl sm:max-w-[380px]"
+    >
       <form @submit.prevent="submit">
         <DialogTitle class="text-[13px] font-medium text-foreground">
           {{ kind === "file" ? t("preview.fileTree.newFile") : t("preview.fileTree.newFolder") }}
@@ -76,7 +79,7 @@ onMounted(() => void nextTick(() => input.value?.focus()));
           data-testid="new-entry-name"
           :placeholder="kind === 'file' ? t('preview.fileTree.filePlaceholder') : t('preview.fileTree.folderPlaceholder')"
           :disabled="busy"
-          class="mt-3 h-9 w-full rounded-[8px] border border-line-2 bg-panel-2 px-2.5 text-[12.5px] text-foreground outline-none focus-visible:border-cyan disabled:opacity-50"
+          class="mt-3 h-9 w-full rounded-[calc(8px*var(--gw-radius-scale))] border border-line-2 bg-panel-2 px-2.5 text-[12.5px] text-foreground outline-none focus-visible:border-cyan disabled:opacity-50"
         />
         <p v-if="hint" class="mt-2 text-[11.5px] text-orange">{{ hint }}</p>
         <p v-else-if="error" role="alert" class="mt-2 text-[12px] text-orange">{{ error }}</p>
@@ -84,7 +87,7 @@ onMounted(() => void nextTick(() => input.value?.focus()));
           <button
             type="button"
             data-testid="new-entry-cancel"
-            class="h-8 cursor-pointer rounded-[8px] border border-line bg-panel-2 px-3 text-[12px] text-dim transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+            class="h-8 cursor-pointer rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-3 text-[12px] text-dim transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
             @click="emit('close')"
           >
             {{ t("common.cancel") }}
@@ -93,7 +96,7 @@ onMounted(() => void nextTick(() => input.value?.focus()));
             type="submit"
             data-testid="new-entry-submit"
             :disabled="!canSubmit"
-            class="h-8 cursor-pointer rounded-[8px] bg-accent px-3 text-[12px] font-medium text-accent-ink transition-opacity hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+            class="h-8 cursor-pointer rounded-[calc(8px*var(--gw-radius-scale))] bg-accent px-3 text-[12px] font-medium text-accent-ink transition-opacity hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
           >
             {{ t("common.confirm") }}
           </button>

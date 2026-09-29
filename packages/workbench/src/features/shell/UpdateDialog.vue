@@ -59,7 +59,7 @@ onMounted(runCheck);
   <Dialog v-model:open="open" @update:open="onOpenChange">
     <DialogContent
       :show-close-button="true"
-      class="gap-0 rounded-[14px] border-line bg-panel p-4 shadow-xl sm:max-w-[440px]"
+      class="gap-0 rounded-[calc(14px*var(--gw-radius-scale))] border-line bg-panel p-4 shadow-xl sm:max-w-[440px]"
       data-testid="update-dialog"
     >
       <DialogTitle class="text-[13px] font-medium text-foreground">{{ t("update.title") }}</DialogTitle>
@@ -98,7 +98,7 @@ onMounted(runCheck);
 
           <p
             v-if="status.hasUpdate"
-            class="mt-2 inline-flex w-fit items-center rounded-[6px] bg-accent/15 px-2 py-0.5 text-[11.5px] font-medium text-accent"
+            class="mt-2 inline-flex w-fit items-center rounded-[calc(6px*var(--gw-radius-scale))] bg-accent/15 px-2 py-0.5 text-[11.5px] font-medium text-accent"
             data-testid="update-available"
           >
             {{ t("update.available") }}
@@ -113,7 +113,7 @@ onMounted(runCheck);
             </div>
             <pre
               v-if="status.notes.trim()"
-              class="mt-1.5 max-h-[300px] overflow-y-auto rounded-[8px] border border-line-2 bg-panel-2 p-2.5 text-[12px] leading-relaxed whitespace-pre-wrap text-dim"
+              class="mt-1.5 max-h-[300px] overflow-y-auto rounded-[calc(8px*var(--gw-radius-scale))] border border-line-2 bg-panel-2 p-2.5 text-[12px] leading-relaxed whitespace-pre-wrap text-dim"
               data-testid="update-notes"
               >{{ status.notes.trim() }}</pre>
             <p v-else class="mt-1.5 text-[12px] text-dim2">{{ t("update.notesEmpty") }}</p>
@@ -124,7 +124,7 @@ onMounted(runCheck);
       <div class="mt-4 flex justify-end gap-2">
         <button
           type="button"
-          class="rounded-[8px] border border-line bg-panel-2 px-3 py-1.5 text-[12px] text-dim transition-colors hover:text-foreground"
+          class="rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-3 py-1.5 text-[12px] text-dim transition-colors hover:text-foreground"
           @click="emit('close')"
         >
           {{ phase === "ready" && status?.hasUpdate ? t("update.later") : t("update.close") }}
@@ -134,7 +134,7 @@ onMounted(runCheck);
           v-if="phase === 'error'"
           type="button"
           data-testid="update-retry"
-          class="rounded-[8px] bg-accent px-3 py-1.5 text-[12px] font-medium text-accent-ink transition-opacity hover:bg-accent"
+          class="rounded-[calc(8px*var(--gw-radius-scale))] bg-accent px-3 py-1.5 text-[12px] font-medium text-accent-ink transition-opacity hover:bg-accent"
           @click="runCheck"
         >
           {{ t("update.retry") }}
@@ -146,7 +146,7 @@ onMounted(runCheck);
           type="button"
           data-testid="update-download"
           :disabled="busy"
-          class="rounded-[8px] bg-accent px-3 py-1.5 text-[12px] font-medium text-accent-ink transition-opacity hover:bg-accent disabled:opacity-60"
+          class="rounded-[calc(8px*var(--gw-radius-scale))] bg-accent px-3 py-1.5 text-[12px] font-medium text-accent-ink transition-opacity hover:bg-accent disabled:opacity-60"
           @click="download"
         >
           {{ t("update.download") }}

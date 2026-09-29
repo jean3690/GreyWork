@@ -307,7 +307,11 @@ registerPreviewSaver(props.tab.id, { dirty, save });
       <template v-if="deck">
         <section v-for="slide in deck.slides" :key="slide.index" class="mb-4 last:mb-0">
           <!-- 外框只负责占位（缩放后的尺寸）与边框；内容在里面按原始 px 布局 -->
-          <div data-testid="slide-page" class="overflow-hidden rounded-[6px] border border-line-2 shadow-sm" :style="frameStyle()">
+          <div
+            data-testid="slide-page"
+            class="overflow-hidden rounded-[calc(6px*var(--gw-radius-scale))] border border-line-2 shadow-sm"
+            :style="frameStyle()"
+          >
             <div :style="canvasStyle(slide.background)" class="relative">
               <template v-for="(element, index) in slide.elements" :key="index">
                 <div v-if="element.kind === 'shape'" :style="shapeStyle(element.rect, element.fill, element.line, element.geometry)" />

@@ -102,7 +102,7 @@ function confirmDelete(): void {
 
 <template>
   <div
-    class="mb-0.5 ml-5 flex shrink-0 flex-col gap-1 rounded-[8px] border border-line-2 bg-panel px-1.5 py-1.5"
+    class="mb-0.5 ml-5 flex shrink-0 flex-col gap-1 rounded-[calc(8px*var(--gw-radius-scale))] border border-line-2 bg-panel px-1.5 py-1.5"
     @keydown.esc="emit('close')"
   >
     <Hint :text="folder" multiline>
@@ -113,7 +113,7 @@ function confirmDelete(): void {
       v-if="renaming"
       ref="renameInput"
       v-model="draftName"
-      class="h-6 min-w-0 rounded-[6px] border border-cyan/60 bg-panel-2 px-1.5 text-[11.5px] text-foreground outline-none"
+      class="h-6 min-w-0 rounded-[calc(6px*var(--gw-radius-scale))] border border-cyan/60 bg-panel-2 px-1.5 text-[11.5px] text-foreground outline-none"
       aria-label="工作区名称"
       @keydown.enter="commitRename"
       @keydown.esc.stop="cancelRename"
@@ -124,7 +124,7 @@ function confirmDelete(): void {
         <button
           type="button"
           :data-testid="`workspace-rename-${group.id}`"
-          class="flex h-6 w-full cursor-pointer items-center gap-1.5 rounded-[5px] px-1.5 text-left text-[11.5px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          class="flex h-6 w-full cursor-pointer items-center gap-1.5 rounded-[calc(5px*var(--gw-radius-scale))] px-1.5 text-left text-[11.5px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
           @click="startRename"
         >
           <Icon name="edit" :size="11" class="text-dim2" />
@@ -135,7 +135,7 @@ function confirmDelete(): void {
         <button
           type="button"
           :data-testid="`workspace-icon-${group.id}`"
-          class="flex h-6 w-full cursor-pointer items-center gap-1.5 rounded-[5px] px-1.5 text-left text-[11.5px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          class="flex h-6 w-full cursor-pointer items-center gap-1.5 rounded-[calc(5px*var(--gw-radius-scale))] px-1.5 text-left text-[11.5px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
           :aria-expanded="iconPickerOpen"
           @click="toggleIconPicker"
         >
@@ -150,7 +150,7 @@ function confirmDelete(): void {
         <button
           type="button"
           :data-testid="`workspace-default-${group.id}`"
-          class="flex h-6 w-full cursor-pointer items-center gap-1.5 rounded-[5px] px-1.5 text-left text-[11.5px] transition-colors hover:bg-panel-2 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          class="flex h-6 w-full cursor-pointer items-center gap-1.5 rounded-[calc(5px*var(--gw-radius-scale))] px-1.5 text-left text-[11.5px] transition-colors hover:bg-panel-2 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
           :class="defaultWorkspaceId === group.id ? 'text-cyan' : 'text-dim hover:text-foreground'"
           :aria-pressed="defaultWorkspaceId === group.id"
           @click="toggleDefault"
@@ -163,7 +163,7 @@ function confirmDelete(): void {
         <button
           type="button"
           :data-testid="`workspace-rebind-${group.id}`"
-          class="flex h-6 w-full cursor-pointer items-center gap-1.5 rounded-[5px] px-1.5 text-left text-[11.5px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          class="flex h-6 w-full cursor-pointer items-center gap-1.5 rounded-[calc(5px*var(--gw-radius-scale))] px-1.5 text-left text-[11.5px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
           @click="rebindFolder"
         >
           <Icon name="folder" :size="11" class="text-dim2" />
@@ -173,7 +173,7 @@ function confirmDelete(): void {
       <button
         type="button"
         :data-testid="`workspace-delete-${group.id}`"
-        class="flex h-6 w-full cursor-pointer items-center gap-1.5 rounded-[5px] px-1.5 text-left text-[11.5px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+        class="flex h-6 w-full cursor-pointer items-center gap-1.5 rounded-[calc(5px*var(--gw-radius-scale))] px-1.5 text-left text-[11.5px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
         :aria-label="`删除工作区 ${group.name}`"
         @click="openDeleteConfirm"
       >
@@ -187,7 +187,7 @@ function confirmDelete(): void {
       <div class="flex items-center gap-1">
         <button
           type="button"
-          class="h-5 shrink-0 cursor-pointer rounded-[5px] border border-line bg-panel-2 px-1.5 text-[11px] text-foreground transition-colors hover:border-line-2"
+          class="h-5 shrink-0 cursor-pointer rounded-[calc(5px*var(--gw-radius-scale))] border border-line bg-panel-2 px-1.5 text-[11px] text-foreground transition-colors hover:border-line-2"
           @click="confirmDelete"
         >
           删除
@@ -195,7 +195,7 @@ function confirmDelete(): void {
         <button
           ref="deleteCancelEl"
           type="button"
-          class="h-5 shrink-0 cursor-pointer rounded-[5px] px-1.5 text-[11px] text-dim transition-colors hover:text-foreground"
+          class="h-5 shrink-0 cursor-pointer rounded-[calc(5px*var(--gw-radius-scale))] px-1.5 text-[11px] text-dim transition-colors hover:text-foreground"
           @click="cancelDelete"
         >
           取消

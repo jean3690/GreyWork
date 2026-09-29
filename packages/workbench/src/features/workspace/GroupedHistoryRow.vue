@@ -100,7 +100,7 @@ function fmtTime(ts: number): string {
         v-if="renaming"
         ref="renameInput"
         v-model="draftTitle"
-        class="h-[34px] w-full rounded-[8px] border border-cyan/60 bg-panel px-2 text-[13px] text-foreground outline-none"
+        class="h-[34px] w-full rounded-[calc(8px*var(--gw-radius-scale))] border border-cyan/60 bg-panel px-2 text-[13px] text-foreground outline-none"
         aria-label="重命名会话"
         @keydown.enter.prevent="commitRename"
         @keydown.esc.prevent="cancelRename"
@@ -108,12 +108,12 @@ function fmtTime(ts: number): string {
       />
       <template v-else>
         <button
-          class="flex h-[34px] w-full cursor-pointer items-center gap-2 rounded-[8px] px-2 pr-14 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          class="flex h-[34px] w-full cursor-pointer items-center gap-2 rounded-[calc(8px*var(--gw-radius-scale))] px-2 pr-14 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
           :class="active ? 'bg-panel text-foreground' : 'text-dim hover:bg-panel hover:text-foreground'"
           :aria-current="active ? 'true' : undefined"
           @click="emit('navigate', `/conversation/${session.id}`)"
         >
-          <span class="grid size-5 shrink-0 place-items-center rounded-[5px] bg-panel text-dim">
+          <span class="grid size-5 shrink-0 place-items-center rounded-[calc(5px*var(--gw-radius-scale))] bg-panel text-dim">
             <Icon name="message" :size="10" />
           </span>
           <span class="min-w-0 flex-1 truncate text-[13px]">{{ session.title }}</span>
@@ -127,7 +127,7 @@ function fmtTime(ts: number): string {
         >
           <button
             type="button"
-            class="grid size-[24px] cursor-pointer place-items-center rounded-[5px] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+            class="grid size-[24px] cursor-pointer place-items-center rounded-[calc(5px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
             :aria-label="'重命名会话'"
             @click="startRename"
           >
@@ -135,7 +135,7 @@ function fmtTime(ts: number): string {
           </button>
           <button
             type="button"
-            class="grid size-[24px] cursor-pointer place-items-center rounded-[5px] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+            class="grid size-[24px] cursor-pointer place-items-center rounded-[calc(5px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
             :aria-label="'删除会话'"
             @click="openDeleteConfirm"
           >
@@ -146,13 +146,13 @@ function fmtTime(ts: number): string {
         <!-- 删除二次确认：覆盖整行，历史不可恢复 -->
         <div
           v-if="pendingDelete"
-          class="absolute inset-0 flex items-center gap-1 rounded-[8px] border border-line-2 bg-panel px-2"
+          class="absolute inset-0 flex items-center gap-1 rounded-[calc(8px*var(--gw-radius-scale))] border border-line-2 bg-panel px-2"
           @keydown.esc.prevent="cancelDelete"
         >
           <span class="min-w-0 flex-1 truncate text-[12px] text-dim">删除该会话？</span>
           <button
             type="button"
-            class="h-5 shrink-0 cursor-pointer rounded-[5px] border border-line bg-panel-2 px-1.5 text-[11px] text-foreground transition-colors hover:border-line-2"
+            class="h-5 shrink-0 cursor-pointer rounded-[calc(5px*var(--gw-radius-scale))] border border-line bg-panel-2 px-1.5 text-[11px] text-foreground transition-colors hover:border-line-2"
             @click="confirmDelete"
           >
             删除
@@ -160,7 +160,7 @@ function fmtTime(ts: number): string {
           <button
             ref="deleteCancelEl"
             type="button"
-            class="h-5 shrink-0 cursor-pointer rounded-[5px] px-1.5 text-[11px] text-dim transition-colors hover:text-foreground"
+            class="h-5 shrink-0 cursor-pointer rounded-[calc(5px*var(--gw-radius-scale))] px-1.5 text-[11px] text-dim transition-colors hover:text-foreground"
             @click="cancelDelete"
           >
             取消

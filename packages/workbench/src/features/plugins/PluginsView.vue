@@ -340,7 +340,7 @@ async function confirmUninstall(): Promise<void> {
     <p
       v-if="notice"
       role="status"
-      class="mb-3 rounded-[10px] border px-3 py-2 text-[12px]"
+      class="mb-3 rounded-[calc(10px*var(--gw-radius-scale))] border px-3 py-2 text-[12px]"
       :class="notice.kind === 'error' ? 'border-orange/35 bg-orange/10 text-orange' : 'border-mint/25 bg-mint/10 text-mint'"
     >
       {{ notice.text }}
@@ -366,7 +366,7 @@ async function confirmUninstall(): Promise<void> {
         <Hint :text="t('market.refreshCatalog')">
           <button
             type="button"
-            class="grid size-8 cursor-pointer place-items-center rounded-[8px] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground disabled:opacity-40"
+            class="grid size-8 cursor-pointer place-items-center rounded-[calc(8px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground disabled:opacity-40"
             :disabled="marketLoading"
             :aria-label="t('market.refreshCatalog')"
             data-testid="plugin-market-refresh"
@@ -378,7 +378,7 @@ async function confirmUninstall(): Promise<void> {
         <Hint :text="t('market.registrySettings')">
           <button
             type="button"
-            class="grid size-8 cursor-pointer place-items-center rounded-[8px] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground"
+            class="grid size-8 cursor-pointer place-items-center rounded-[calc(8px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground"
             :aria-label="t('market.registrySettings')"
             :aria-expanded="registryOpen"
             data-testid="plugin-registry-toggle"
@@ -390,21 +390,25 @@ async function confirmUninstall(): Promise<void> {
       </div>
     </nav>
 
-    <section v-if="registryOpen" class="mt-3 rounded-[12px] border border-line bg-panel p-3" data-testid="plugin-registry-settings">
+    <section
+      v-if="registryOpen"
+      class="mt-3 rounded-[calc(12px*var(--gw-radius-scale))] border border-line bg-panel p-3"
+      data-testid="plugin-registry-settings"
+    >
       <label for="plugin-registry-url" class="text-[11px] font-medium text-foreground">{{ t("market.registrySource") }}</label>
       <div class="mt-2 flex flex-col gap-2 sm:flex-row">
         <input
           id="plugin-registry-url"
           v-model="registryDraft"
           type="url"
-          class="h-9 min-w-0 flex-1 rounded-[8px] border border-line bg-ink px-3 font-mono text-[11px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
+          class="h-9 min-w-0 flex-1 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-ink px-3 font-mono text-[11px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
           :placeholder="t('market.registryUrlPlaceholder')"
           data-testid="plugin-registry-url"
           @keydown.enter="saveRegistry"
         />
         <button
           type="button"
-          class="h-9 cursor-pointer rounded-[8px] bg-accent px-4 text-[11.5px] font-medium text-accent-ink transition-colors hover:bg-accent-hi disabled:opacity-50"
+          class="h-9 cursor-pointer rounded-[calc(8px*var(--gw-radius-scale))] bg-accent px-4 text-[11.5px] font-medium text-accent-ink transition-colors hover:bg-accent-hi disabled:opacity-50"
           :disabled="marketLoading"
           @click="saveRegistry"
         >
@@ -413,7 +417,11 @@ async function confirmUninstall(): Promise<void> {
       </div>
     </section>
 
-    <p v-if="marketError" class="mt-3 rounded-[10px] border border-orange/30 bg-orange/10 px-3 py-2 text-[11.5px] text-orange" role="alert">
+    <p
+      v-if="marketError"
+      class="mt-3 rounded-[calc(10px*var(--gw-radius-scale))] border border-orange/30 bg-orange/10 px-3 py-2 text-[11.5px] text-orange"
+      role="alert"
+    >
       {{ marketError }}
     </p>
 
@@ -424,7 +432,7 @@ async function confirmUninstall(): Promise<void> {
           <input
             v-model="searchQuery"
             type="search"
-            class="h-10 w-full rounded-[10px] border border-line bg-panel pl-9 pr-3 text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
+            class="h-10 w-full rounded-[calc(10px*var(--gw-radius-scale))] border border-line bg-panel pl-9 pr-3 text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
             :placeholder="t('market.searchMarketplace')"
             data-testid="plugin-market-search"
           />
@@ -443,18 +451,20 @@ async function confirmUninstall(): Promise<void> {
       </div>
 
       <div v-if="marketLoading && marketCatalog.length === 0" class="mt-3 grid gap-3 md:grid-cols-2">
-        <Skeleton v-for="index in 4" :key="index" class="h-40 rounded-[14px] border border-line bg-panel" />
+        <Skeleton v-for="index in 4" :key="index" class="h-40 rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel" />
       </div>
 
       <div v-else-if="filteredCatalog.length" class="mt-3 grid gap-3 md:grid-cols-2">
         <article
           v-for="entry in filteredCatalog"
           :key="entry.id"
-          class="group flex min-h-40 flex-col rounded-[14px] border border-line bg-panel p-4 transition-colors hover:border-line-2"
+          class="group flex min-h-40 flex-col rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-4 transition-colors hover:border-line-2"
           :data-testid="`market-plugin-${entry.id}`"
         >
           <div class="flex items-start gap-3">
-            <span class="grid size-10 shrink-0 place-items-center rounded-[11px] border border-brand-hover/25 bg-brand-light/50 text-brand">
+            <span
+              class="grid size-10 shrink-0 place-items-center rounded-[calc(11px*var(--gw-radius-scale))] border border-brand-hover/25 bg-brand-light/50 text-brand"
+            >
               <Icon name="lightning" :size="17" />
             </span>
             <div class="min-w-0 flex-1">
@@ -476,7 +486,7 @@ async function confirmUninstall(): Promise<void> {
             <button
               v-if="installedMarketIds.has(entry.id)"
               type="button"
-              class="h-7 shrink-0 cursor-pointer rounded-[7px] border border-line px-2.5 text-[11px] text-dim transition-colors hover:border-orange/40 hover:text-orange disabled:opacity-40"
+              class="h-7 shrink-0 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] border border-line px-2.5 text-[11px] text-dim transition-colors hover:border-orange/40 hover:text-orange disabled:opacity-40"
               :disabled="!pluginMarketHostAvailable() || marketBusyId === entry.id"
               :data-testid="`market-uninstall-${entry.id}`"
               @click="uninstallTarget = { id: entry.id, name: entry.name }"
@@ -486,7 +496,7 @@ async function confirmUninstall(): Promise<void> {
             <Hint v-else :text="!pluginMarketHostAvailable() ? t('market.desktopInstallOnly') : null" multiline>
               <button
                 type="button"
-                class="h-7 shrink-0 cursor-pointer rounded-[7px] bg-accent px-3 text-[11px] font-medium text-accent-ink transition-colors hover:bg-accent-hi disabled:cursor-not-allowed disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
+                class="h-7 shrink-0 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] bg-accent px-3 text-[11px] font-medium text-accent-ink transition-colors hover:bg-accent-hi disabled:cursor-not-allowed disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
                 :disabled="marketBusyId !== null"
                 :aria-disabled="!pluginMarketHostAvailable() || undefined"
                 :data-testid="`market-install-${entry.id}`"
@@ -501,10 +511,12 @@ async function confirmUninstall(): Promise<void> {
 
       <div
         v-else
-        class="mt-3 grid min-h-52 place-items-center rounded-[14px] border border-dashed border-line-2 bg-panel/50 px-6 text-center"
+        class="mt-3 grid min-h-52 place-items-center rounded-[calc(14px*var(--gw-radius-scale))] border border-dashed border-line-2 bg-panel/50 px-6 text-center"
       >
         <div>
-          <span class="mx-auto grid size-10 place-items-center rounded-[11px] bg-panel-2 text-dim2"><Icon name="search" :size="16" /></span>
+          <span class="mx-auto grid size-10 place-items-center rounded-[calc(11px*var(--gw-radius-scale))] bg-panel-2 text-dim2"
+            ><Icon name="search" :size="16"
+          /></span>
           <p class="mt-3 text-[12px] font-medium text-foreground">{{ t("market.noPluginsFound") }}</p>
           <p class="mt-1 text-[10.5px] text-dim2">{{ t("market.noPluginsHint") }}</p>
         </div>
@@ -536,7 +548,7 @@ async function confirmUninstall(): Promise<void> {
         <article
           v-for="manifest in pluginManifests"
           :key="manifest.id"
-          class="rounded-[12px] border bg-panel px-3.5 py-3 transition-colors"
+          class="rounded-[calc(12px*var(--gw-radius-scale))] border bg-panel px-3.5 py-3 transition-colors"
           :class="pendingGrantId === manifest.id ? 'border-amber/50' : 'border-line'"
           :data-testid="`plugin-card-${manifest.id}`"
         >
@@ -550,7 +562,9 @@ async function confirmUninstall(): Promise<void> {
             <div class="min-w-0 flex-1">
               <div class="flex flex-wrap items-center gap-1.5">
                 <span class="text-[12.5px] font-medium text-foreground">{{ manifest.name }}</span>
-                <code class="rounded-[5px] bg-panel-2 px-1.5 py-0.5 text-[9.5px] text-dim2">{{ manifest.id }}</code>
+                <code class="rounded-[calc(5px*var(--gw-radius-scale))] bg-panel-2 px-1.5 py-0.5 text-[9.5px] text-dim2">{{
+                  manifest.id
+                }}</code>
                 <span class="font-mono text-[9.5px] text-dim2">v{{ manifest.version }}</span>
                 <span
                   v-if="outdatedPlugins[manifest.id]"
@@ -582,7 +596,7 @@ async function confirmUninstall(): Promise<void> {
                 >
                   <button
                     type="button"
-                    class="cursor-pointer rounded-[6px] border px-1.5 py-0.5 text-[9.5px] transition-colors"
+                    class="cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] border px-1.5 py-0.5 text-[9.5px] transition-colors"
                     :class="grantChipClass(manifest.id, required.capability)"
                     :aria-pressed="isPluginCapabilityGranted(manifest.id, required.capability)"
                     :data-testid="`plugin-capability-${manifest.id}-${required.capability}`"
@@ -598,16 +612,21 @@ async function confirmUninstall(): Promise<void> {
               </div>
             </div>
             <div v-if="confirmDisableId === manifest.id" class="flex max-w-[290px] shrink-0 flex-col items-end gap-1.5">
-              <span class="rounded-[7px] bg-amber/10 px-2 py-1 text-right text-[9.5px] leading-snug text-amber">{{
-                t("market.selfDisableWarn")
-              }}</span>
+              <span
+                class="rounded-[calc(7px*var(--gw-radius-scale))] bg-amber/10 px-2 py-1 text-right text-[9.5px] leading-snug text-amber"
+                >{{ t("market.selfDisableWarn") }}</span
+              >
               <div class="flex gap-1.5">
-                <button type="button" class="h-7 rounded-[7px] bg-orange px-2.5 text-[11px] text-white" @click="confirmSelfDisable">
+                <button
+                  type="button"
+                  class="h-7 rounded-[calc(7px*var(--gw-radius-scale))] bg-orange px-2.5 text-[11px] text-white"
+                  @click="confirmSelfDisable"
+                >
                   {{ t("common.delete") }}
                 </button>
                 <button
                   type="button"
-                  class="h-7 rounded-[7px] border border-line px-2.5 text-[11px] text-dim"
+                  class="h-7 rounded-[calc(7px*var(--gw-radius-scale))] border border-line px-2.5 text-[11px] text-dim"
                   @click="confirmDisableId = null"
                 >
                   {{ t("common.cancel") }}
@@ -617,7 +636,7 @@ async function confirmUninstall(): Promise<void> {
             <button
               v-if="outdatedPlugins[manifest.id]"
               type="button"
-              class="h-7 shrink-0 cursor-pointer rounded-[7px] bg-amber px-2.5 text-[11px] font-medium text-amber-ink transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+              class="h-7 shrink-0 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] bg-amber px-2.5 text-[11px] font-medium text-amber-ink transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
               :disabled="marketBusyId !== null"
               :data-testid="`plugin-upgrade-${manifest.id}`"
               @click="requestUpgrade(manifest.id, manifest.name)"
@@ -627,7 +646,7 @@ async function confirmUninstall(): Promise<void> {
             <button
               v-else
               type="button"
-              class="h-7 w-14 shrink-0 cursor-pointer rounded-[7px] text-[11px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent"
+              class="h-7 w-14 shrink-0 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] text-[11px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent"
               :class="isPluginEnabled(manifest.id) ? 'border border-line bg-panel-2 text-dim' : 'bg-accent text-accent-ink'"
               :disabled="busyId === manifest.id"
               :aria-pressed="isPluginEnabled(manifest.id)"
@@ -640,10 +659,17 @@ async function confirmUninstall(): Promise<void> {
         </article>
       </div>
 
-      <div v-else class="grid min-h-52 place-items-center rounded-[14px] border border-dashed border-line-2 text-center">
+      <div
+        v-else
+        class="grid min-h-52 place-items-center rounded-[calc(14px*var(--gw-radius-scale))] border border-dashed border-line-2 text-center"
+      >
         <div>
           <p class="text-[12px] text-dim2">{{ t("market.pluginsEmpty") }}</p>
-          <button type="button" class="mt-3 h-8 rounded-[8px] bg-accent px-3 text-[11px] text-accent-ink" @click="restoreBuiltinPlugins()">
+          <button
+            type="button"
+            class="mt-3 h-8 rounded-[calc(8px*var(--gw-radius-scale))] bg-accent px-3 text-[11px] text-accent-ink"
+            @click="restoreBuiltinPlugins()"
+          >
             {{ t("market.restoreBuiltins") }}
           </button>
         </div>
@@ -658,7 +684,7 @@ async function confirmUninstall(): Promise<void> {
         </div>
         <button
           type="button"
-          class="h-7 cursor-pointer rounded-[7px] border border-line px-2.5 text-[11px] text-dim transition-colors hover:border-orange/40 hover:text-orange"
+          class="h-7 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] border border-line px-2.5 text-[11px] text-dim transition-colors hover:border-orange/40 hover:text-orange"
           data-testid="plugin-audit-clear"
           @click="clearAudit"
         >
@@ -669,7 +695,7 @@ async function confirmUninstall(): Promise<void> {
         <div
           v-for="(entry, index) in auditEntries"
           :key="`${entry.at}-${index}`"
-          class="flex items-start gap-2.5 rounded-[10px] border border-line bg-panel px-3 py-2"
+          class="flex items-start gap-2.5 rounded-[calc(10px*var(--gw-radius-scale))] border border-line bg-panel px-3 py-2"
           :data-testid="`plugin-audit-entry-${index}`"
         >
           <StatusChip class="mt-0.5 shrink-0 font-mono" :tone="auditChipTone(entry.outcome)">
@@ -685,7 +711,10 @@ async function confirmUninstall(): Promise<void> {
           <span class="shrink-0 font-mono text-[9.5px] text-dim2">{{ new Date(entry.at).toLocaleString() }}</span>
         </div>
       </div>
-      <div v-else class="grid min-h-52 place-items-center rounded-[14px] border border-dashed border-line-2 text-center">
+      <div
+        v-else
+        class="grid min-h-52 place-items-center rounded-[calc(14px*var(--gw-radius-scale))] border border-dashed border-line-2 text-center"
+      >
         <p class="text-[12px] text-dim2">{{ t("market.auditEmpty") }}</p>
       </div>
     </section>
@@ -728,7 +757,7 @@ async function confirmUninstall(): Promise<void> {
         <div
           v-for="required in installRequirements"
           :key="required.capability"
-          class="rounded-[10px] border border-line bg-panel-2 px-2.5 py-2"
+          class="rounded-[calc(10px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2.5 py-2"
           :data-testid="`install-capability-${required.capability}`"
         >
           <div class="flex items-center gap-1.5">

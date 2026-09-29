@@ -64,7 +64,7 @@ function onOpenChange(next: boolean): void {
 <template>
   <AlertDialog v-model:open="open" @update:open="onOpenChange">
     <AlertDialogContent
-      class="max-h-[85vh] w-full max-w-[380px] gap-3 overflow-y-auto rounded-[14px] border border-line bg-panel p-4 shadow-xl sm:max-w-[380px]"
+      class="max-h-[85vh] w-full max-w-[380px] gap-3 overflow-y-auto rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-4 shadow-xl sm:max-w-[380px]"
     >
       <AlertDialogHeader class="gap-0 text-left">
         <AlertDialogTitle class="text-[13px] font-medium text-foreground">{{ title }}</AlertDialogTitle>
@@ -84,14 +84,14 @@ function onOpenChange(next: boolean): void {
           暗色下会落回 --line-2 而不是 --panel-2。这里把暗色也钉到项目的次级面规格上。
         -->
         <AlertDialogCancel
-          class="h-auto rounded-[8px] border border-line bg-panel-2 px-3 py-1.5 text-[12px] font-normal text-dim shadow-none transition-colors hover:bg-panel-2 hover:text-foreground dark:border-line dark:bg-panel-2 dark:hover:bg-panel-2"
+          class="h-auto rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-3 py-1.5 text-[12px] font-normal text-dim shadow-none transition-colors hover:bg-panel-2 hover:text-foreground dark:border-line dark:bg-panel-2 dark:hover:bg-panel-2"
         >
           {{ t("common.cancel") }}
         </AlertDialogCancel>
         <Button
           type="button"
           :disabled="busy"
-          class="h-auto rounded-[8px] bg-accent px-3 py-1.5 text-[12px] font-medium text-accent-ink transition-opacity hover:bg-accent disabled:opacity-60"
+          class="h-auto rounded-[calc(8px*var(--gw-radius-scale))] bg-accent px-3 py-1.5 text-[12px] font-medium text-accent-ink transition-opacity hover:bg-accent disabled:opacity-60"
           @click="emit('confirm')"
         >
           {{ confirmLabel ?? t("common.confirm") }}

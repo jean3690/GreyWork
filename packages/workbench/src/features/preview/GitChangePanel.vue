@@ -71,7 +71,7 @@ function isEmptyDiff(text: string | undefined): boolean {
 
 const modeClass = (active: boolean): string =>
   [
-    "cursor-pointer rounded-[5px] px-1.5 py-0.5 text-[10.5px] transition-colors",
+    "cursor-pointer rounded-[calc(5px*var(--gw-radius-scale))] px-1.5 py-0.5 text-[10.5px] transition-colors",
     "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan",
     active ? "bg-panel-2 text-foreground" : "text-dim2 hover:text-foreground",
   ].join(" ");
@@ -188,14 +188,14 @@ function measureRow(element: unknown): void {
 }
 
 const rowButtonClass =
-  "grid size-5 shrink-0 cursor-pointer place-items-center rounded-[5px] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40";
+  "grid size-5 shrink-0 cursor-pointer place-items-center rounded-[calc(5px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40";
 </script>
 
 <template>
   <div class="flex min-h-0 min-w-0 flex-1 flex-col">
     <!-- 头部：页切换 + 分支/汇总计数 + 全部暂存 / 全部取消 + 刷新 -->
     <div class="flex shrink-0 items-center gap-1.5 border-b border-line px-2.5 py-1.5">
-      <div class="flex shrink-0 items-center gap-0.5 rounded-[6px] bg-panel p-0.5" role="tablist">
+      <div class="flex shrink-0 items-center gap-0.5 rounded-[calc(6px*var(--gw-radius-scale))] bg-panel p-0.5" role="tablist">
         <button
           type="button"
           role="tab"
@@ -235,7 +235,7 @@ const rowButtonClass =
           v-if="mode === 'changes' && git.stagedEntries.length > 0"
           type="button"
           data-testid="git-unstage-all"
-          class="shrink-0 cursor-pointer rounded-[6px] px-1.5 py-0.5 text-[10.5px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40"
+          class="shrink-0 cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] px-1.5 py-0.5 text-[10.5px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40"
           :disabled="git.staging"
           @click="git.unstageAll()"
         >
@@ -245,7 +245,7 @@ const rowButtonClass =
           v-if="mode === 'changes' && git.unstagedEntries.length > 0"
           type="button"
           data-testid="git-stage-all"
-          class="shrink-0 cursor-pointer rounded-[6px] px-1.5 py-0.5 text-[10.5px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40"
+          class="shrink-0 cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] px-1.5 py-0.5 text-[10.5px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40"
           :disabled="git.staging"
           @click="git.stageAll()"
         >
@@ -254,7 +254,7 @@ const rowButtonClass =
         <button
           type="button"
           data-testid="git-refresh"
-          class="grid size-6 shrink-0 cursor-pointer place-items-center rounded-[6px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          class="grid size-6 shrink-0 cursor-pointer place-items-center rounded-[calc(6px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
           :aria-label="mode === 'history' ? t('preview.git.history.loading') : t('preview.git.refresh')"
           @click="mode === 'history' ? git.loadHistory(true) : git.refresh()"
         >
@@ -279,7 +279,7 @@ const rowButtonClass =
         <button
           type="button"
           data-testid="git-retry"
-          class="self-start cursor-pointer rounded-[6px] px-2 py-1 text-[11px] text-cyan transition-colors hover:bg-panel"
+          class="self-start cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] px-2 py-1 text-[11px] text-cyan transition-colors hover:bg-panel"
           @click="git.refresh()"
         >
           {{ t("common.retry") }}
@@ -323,7 +323,7 @@ const rowButtonClass =
                   >
                     <Hint :text="badgeFor(git.statusOf(slot.row.entry, slot.row.side)).label">
                       <span
-                        class="grid size-4 shrink-0 place-items-center rounded-[4px] bg-panel text-[10px] font-semibold"
+                        class="grid size-4 shrink-0 place-items-center rounded-[calc(4px*var(--gw-radius-scale))] bg-panel text-[10px] font-semibold"
                         :class="badgeFor(git.statusOf(slot.row.entry, slot.row.side)).cls"
                       >
                         {{ badgeFor(git.statusOf(slot.row.entry, slot.row.side)).letter }}
@@ -390,14 +390,14 @@ const rowButtonClass =
               id="git-commit-input"
               v-model="git.commitMessage"
               type="text"
-              class="min-w-0 flex-1 rounded-[6px] border border-line bg-panel px-2 py-1 text-[11.5px] text-foreground placeholder:text-dim2 focus:border-cyan focus:outline-none"
+              class="min-w-0 flex-1 rounded-[calc(6px*var(--gw-radius-scale))] border border-line bg-panel px-2 py-1 text-[11.5px] text-foreground placeholder:text-dim2 focus:border-cyan focus:outline-none"
               :placeholder="t('preview.git.commitPlaceholder')"
               maxlength="200"
             />
             <button
               type="submit"
               data-testid="git-commit-submit"
-              class="grid size-7 shrink-0 cursor-pointer place-items-center rounded-[6px] transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40"
+              class="grid size-7 shrink-0 cursor-pointer place-items-center rounded-[calc(6px*var(--gw-radius-scale))] transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40"
               :class="canCommitStaged ? 'bg-cyan text-white hover:bg-cyan/90' : 'bg-panel text-dim2'"
               :disabled="!canCommitStaged"
               :aria-label="t('preview.git.commitStaged')"
@@ -408,7 +408,7 @@ const rowButtonClass =
           <button
             type="button"
             data-testid="git-commit-all"
-            class="self-start cursor-pointer rounded-[6px] px-1.5 py-0.5 text-[10.5px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40"
+            class="self-start cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] px-1.5 py-0.5 text-[10.5px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40"
             :disabled="!canCommitAll"
             @click="git.commitAll()"
           >
@@ -435,7 +435,7 @@ const rowButtonClass =
         <button
           type="button"
           data-testid="git-history-retry"
-          class="self-start cursor-pointer rounded-[6px] px-2 py-1 text-[11px] text-cyan transition-colors hover:bg-panel"
+          class="self-start cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] px-2 py-1 text-[11px] text-cyan transition-colors hover:bg-panel"
           @click="git.loadHistory(true)"
         >
           {{ t("common.retry") }}
@@ -465,9 +465,11 @@ const rowButtonClass =
                   <span class="min-w-0 truncate">{{ commit.author }}</span>
                   <span class="shrink-0">·</span>
                   <span class="shrink-0 tabular-nums">{{ formatWhen(commit.timestamp) }}</span>
-                  <span v-if="commit.refs" class="min-w-0 truncate rounded-[4px] bg-panel px-1 text-[10px] text-amber">{{
-                    commit.refs
-                  }}</span>
+                  <span
+                    v-if="commit.refs"
+                    class="min-w-0 truncate rounded-[calc(4px*var(--gw-radius-scale))] bg-panel px-1 text-[10px] text-amber"
+                    >{{ commit.refs }}</span
+                  >
                 </span>
               </span>
             </button>
@@ -485,7 +487,7 @@ const rowButtonClass =
           v-if="git.historyHasMore"
           type="button"
           data-testid="git-history-more"
-          class="mx-3 my-1.5 cursor-pointer rounded-[6px] px-2 py-1 text-[11px] text-cyan transition-colors hover:bg-panel focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40"
+          class="mx-3 my-1.5 cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] px-2 py-1 text-[11px] text-cyan transition-colors hover:bg-panel focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40"
           :disabled="git.historyLoading"
           @click="git.loadHistory()"
         >

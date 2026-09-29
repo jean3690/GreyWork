@@ -94,7 +94,7 @@ function onOpenChange(next: boolean): void {
   <Dialog :open="open" @update:open="onOpenChange">
     <DialogContent
       :show-close-button="false"
-      class="flex max-h-[88vh] flex-col gap-0 overflow-hidden rounded-[14px] border-line bg-panel p-0 shadow-xl sm:max-w-[560px]"
+      class="flex max-h-[88vh] flex-col gap-0 overflow-hidden rounded-[calc(14px*var(--gw-radius-scale))] border-line bg-panel p-0 shadow-xl sm:max-w-[560px]"
     >
       <div class="flex items-center justify-between px-4 pb-2 pt-3.5">
         <div class="min-w-0">
@@ -105,7 +105,7 @@ function onOpenChange(next: boolean): void {
         </div>
         <button
           type="button"
-          class="grid size-6 shrink-0 cursor-pointer place-items-center rounded-[6px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground"
+          class="grid size-6 shrink-0 cursor-pointer place-items-center rounded-[calc(6px*var(--gw-radius-scale))] text-dim transition-colors hover:bg-panel-2 hover:text-foreground"
           aria-label="关闭"
           @click="emit('close')"
         >
@@ -117,7 +117,7 @@ function onOpenChange(next: boolean): void {
         <div class="flex items-center gap-2">
           <input
             v-model="query"
-            class="min-w-0 flex-1 rounded-[8px] border border-line bg-panel-2 px-2.5 py-1.5 text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
+            class="min-w-0 flex-1 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2.5 py-1.5 text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
             placeholder="搜索服务器名 / 关键字，回车或停顿后自动搜索"
             :disabled="!hostAvailable"
             @input="onQueryInput"
@@ -125,7 +125,7 @@ function onOpenChange(next: boolean): void {
           />
           <button
             type="button"
-            class="rounded-[8px] border border-line bg-panel-2 px-2.5 py-1.5 text-[11px] text-dim transition-colors hover:text-foreground disabled:opacity-50"
+            class="rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2.5 py-1.5 text-[11px] text-dim transition-colors hover:text-foreground disabled:opacity-50"
             :disabled="!hostAvailable || searching"
             @click="runSearch"
           >
@@ -133,14 +133,17 @@ function onOpenChange(next: boolean): void {
           </button>
         </div>
 
-        <p v-if="!hostAvailable" class="rounded-[8px] border border-line bg-panel-2 px-2.5 py-1.5 text-[11px] leading-relaxed text-dim2">
+        <p
+          v-if="!hostAvailable"
+          class="rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2.5 py-1.5 text-[11px] leading-relaxed text-dim2"
+        >
           浏览器预览态无宿主命令，官方 Registry 浏览需要桌面版（Tauri）。
         </p>
         <p v-else-if="error" class="text-[11px] text-destructive">{{ error }}</p>
         <p v-else-if="searched && results.length === 0 && !searching" class="px-1 text-[11px] text-dim2">没有匹配的服务器。</p>
 
         <div v-if="results.length > 0" class="flex flex-col gap-2">
-          <div v-for="row in rows" :key="row.entry.name" class="rounded-[10px] bg-panel-2 p-2.5">
+          <div v-for="row in rows" :key="row.entry.name" class="rounded-[calc(10px*var(--gw-radius-scale))] bg-panel-2 p-2.5">
             <div class="flex items-start gap-2">
               <div class="min-w-0 flex-1">
                 <div class="flex items-center gap-1.5">
@@ -179,7 +182,7 @@ function onOpenChange(next: boolean): void {
               </div>
               <button
                 type="button"
-                class="shrink-0 rounded-[8px] border border-line px-2.5 py-1 text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+                class="shrink-0 rounded-[calc(8px*var(--gw-radius-scale))] border border-line px-2.5 py-1 text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-40"
                 :class="
                   row.registered
                     ? 'text-dim2'

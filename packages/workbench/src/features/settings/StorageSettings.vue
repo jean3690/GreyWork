@@ -49,7 +49,7 @@ async function probe(): Promise<void> {
 
 <template>
   <div class="flex flex-col gap-4">
-    <div class="rounded-[14px] border border-line bg-panel p-4">
+    <div class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-4">
       <div class="mb-2 text-[13px] font-medium text-foreground">当前落盘位置</div>
       <div v-if="desktop" class="flex flex-col gap-1 font-mono text-[11px] text-dim2">
         <span>未绑定工作区的会话 → ~/.greyWork/sessions/</span>
@@ -64,7 +64,7 @@ async function probe(): Promise<void> {
       </div>
     </div>
 
-    <div class="rounded-[14px] border border-line bg-panel p-4">
+    <div class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-4">
       <div class="mb-3 text-[13px] font-medium text-foreground">远端存储（WebDAV）</div>
       <div class="mb-3 flex gap-2">
         <button
@@ -72,7 +72,7 @@ async function probe(): Promise<void> {
           :key="kind"
           type="button"
           :data-testid="`remote-store-kind-${kind}`"
-          class="flex cursor-pointer items-center gap-1.5 rounded-[10px] border border-line px-3 py-1.5 text-[12px] transition-colors"
+          class="flex cursor-pointer items-center gap-1.5 rounded-[calc(10px*var(--gw-radius-scale))] border border-line px-3 py-1.5 text-[12px] transition-colors"
           :class="draft.kind === kind ? 'bg-panel-2 text-foreground' : 'text-dim hover:bg-panel-2'"
           :aria-pressed="draft.kind === kind"
           @click="draft.kind = kind"
@@ -89,7 +89,7 @@ async function probe(): Promise<void> {
             data-testid="remote-store-url"
             type="url"
             placeholder="https://dav.example.com/greywork"
-            class="h-8 rounded-[8px] border border-line-2 bg-panel-2 px-2 font-mono text-[12px] text-foreground outline-none focus-visible:border-cyan"
+            class="h-8 rounded-[calc(8px*var(--gw-radius-scale))] border border-line-2 bg-panel-2 px-2 font-mono text-[12px] text-foreground outline-none focus-visible:border-cyan"
           />
         </label>
         <div class="flex gap-2">
@@ -99,7 +99,7 @@ async function probe(): Promise<void> {
               v-model="draft.username"
               type="text"
               autocomplete="off"
-              class="h-8 rounded-[8px] border border-line-2 bg-panel-2 px-2 text-[12px] text-foreground outline-none focus-visible:border-cyan"
+              class="h-8 rounded-[calc(8px*var(--gw-radius-scale))] border border-line-2 bg-panel-2 px-2 text-[12px] text-foreground outline-none focus-visible:border-cyan"
             />
           </label>
           <label class="flex min-w-0 flex-1 flex-col gap-1">
@@ -108,7 +108,7 @@ async function probe(): Promise<void> {
               v-model="draft.password"
               type="password"
               autocomplete="off"
-              class="h-8 rounded-[8px] border border-line-2 bg-panel-2 px-2 text-[12px] text-foreground outline-none focus-visible:border-cyan"
+              class="h-8 rounded-[calc(8px*var(--gw-radius-scale))] border border-line-2 bg-panel-2 px-2 text-[12px] text-foreground outline-none focus-visible:border-cyan"
             />
           </label>
         </div>
@@ -122,7 +122,7 @@ async function probe(): Promise<void> {
         <button
           type="button"
           data-testid="remote-store-save"
-          class="flex h-7 cursor-pointer items-center rounded-[8px] border border-line-2 bg-panel-2 px-3 text-[12px] text-foreground transition-colors hover:border-cyan"
+          class="flex h-7 cursor-pointer items-center rounded-[calc(8px*var(--gw-radius-scale))] border border-line-2 bg-panel-2 px-3 text-[12px] text-foreground transition-colors hover:border-cyan"
           @click="save"
         >
           保存
@@ -131,7 +131,7 @@ async function probe(): Promise<void> {
           type="button"
           data-testid="remote-store-test"
           :disabled="draft.kind !== 'webdav' || !draft.url.trim() || probing"
-          class="flex h-7 cursor-pointer items-center rounded-[8px] border border-line px-3 text-[12px] text-dim transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+          class="flex h-7 cursor-pointer items-center rounded-[calc(8px*var(--gw-radius-scale))] border border-line px-3 text-[12px] text-dim transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
           @click="probe"
         >
           {{ probing ? "测试中…" : "测试连接" }}

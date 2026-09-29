@@ -36,12 +36,14 @@ function onOpenChange(next: boolean): void {
   <Dialog :open="props.open" @update:open="onOpenChange">
     <DialogContent
       :show-close-button="false"
-      class="flex max-h-[88vh] flex-col gap-0 overflow-hidden rounded-[14px] border-line bg-panel p-0 shadow-xl sm:max-w-[520px]"
+      class="flex max-h-[88vh] flex-col gap-0 overflow-hidden rounded-[calc(14px*var(--gw-radius-scale))] border-line bg-panel p-0 shadow-xl sm:max-w-[520px]"
       data-testid="remote-mcp-dialog"
     >
       <div class="flex items-center justify-between px-4 pb-2 pt-3.5">
         <div class="flex min-w-0 items-center gap-2.5">
-          <span class="grid size-7 shrink-0 place-items-center rounded-[8px] border border-line bg-panel-2 text-dim">
+          <span
+            class="grid size-7 shrink-0 place-items-center rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 text-dim"
+          >
             <Icon name="terminal" :size="14" />
           </span>
           <div class="min-w-0">
@@ -53,7 +55,7 @@ function onOpenChange(next: boolean): void {
         </div>
         <button
           type="button"
-          class="grid size-6 shrink-0 cursor-pointer place-items-center rounded-[6px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground"
+          class="grid size-6 shrink-0 cursor-pointer place-items-center rounded-[calc(6px*var(--gw-radius-scale))] text-dim transition-colors hover:bg-panel-2 hover:text-foreground"
           aria-label="关闭"
           @click="emit('close')"
         >
@@ -66,7 +68,10 @@ function onOpenChange(next: boolean): void {
           {{ t("remoteAssist.mcp.enabledCount", { enabled: enabledCount, total: settings.mcpServers.length }) }}
         </p>
 
-        <p v-if="settings.mcpServers.length === 0" class="rounded-[10px] border border-line bg-panel-2 px-3 py-2 text-[11px] text-dim2">
+        <p
+          v-if="settings.mcpServers.length === 0"
+          class="rounded-[calc(10px*var(--gw-radius-scale))] border border-line bg-panel-2 px-3 py-2 text-[11px] text-dim2"
+        >
           {{ t("remoteAssist.mcp.empty") }}
         </p>
 
@@ -74,7 +79,7 @@ function onOpenChange(next: boolean): void {
           <label
             v-for="server in settings.mcpServers"
             :key="server.id"
-            class="flex cursor-pointer items-center gap-3 rounded-[10px] border border-line bg-panel-2 px-3 py-2"
+            class="flex cursor-pointer items-center gap-3 rounded-[calc(10px*var(--gw-radius-scale))] border border-line bg-panel-2 px-3 py-2"
             :data-testid="`mcp-toggle-row-${server.id}`"
           >
             <span class="min-w-0 flex-1">
@@ -101,7 +106,7 @@ function onOpenChange(next: boolean): void {
 
         <button
           type="button"
-          class="h-7 w-fit cursor-pointer rounded-[7px] border border-line bg-panel-2 px-2.5 text-[11.5px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
+          class="h-7 w-fit cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2.5 text-[11.5px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
           data-testid="mcp-open-settings"
           @click="openSettings"
         >

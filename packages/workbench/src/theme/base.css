@@ -38,6 +38,25 @@ html #app {
   transform-origin: top left;
 }
 
+/* 圆角总旋钮：设置里的「无圆角 / 小圆角 / 大圆角」。
+ *
+ * 全仓所有装饰性圆角都写成 `calc(<原值> * var(--gw-radius-scale))` 的形式
+ * （`rounded-[calc(8px*var(--gw-radius-scale))]`、以及少量 CSS 里的 `border-radius`），
+ * 于是这一个变量就管住整个界面的圆角；shadcn 的 `--radius` 链也由它驱动（见 theme/shadcn.css）。
+ *
+ * small 刻意不写规则：默认 1 = 改造前的原值，所以不选就等于没这功能。
+ * 语义性的圆角（`rounded-full` 的药丸/头像、`rounded-none`）不跟随本旋钮。
+ * `scripts/` 里有一道 grep 守卫拦新增的写死 px 圆角，防止这条链被悄悄绕开。 */
+:root {
+  --gw-radius-scale: 1;
+}
+:root[data-radius="none"] {
+  --gw-radius-scale: 0;
+}
+:root[data-radius="large"] {
+  --gw-radius-scale: 1.5;
+}
+
 body {
   margin: 0;
   background: var(--ink);
@@ -142,7 +161,7 @@ body {
   min-width: 250px;
   padding: 10px;
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: calc(14px * var(--gw-radius-scale));
   background: var(--panel);
   box-shadow: 0 16px 44px rgba(17, 17, 20, 0.14);
   display: flex;
@@ -244,7 +263,7 @@ body {
   max-width: 680px;
   margin: 0;
   border-color: var(--line);
-  border-radius: 16px;
+  border-radius: calc(16px * var(--gw-radius-scale));
   padding: 10px 10px 8px;
   box-shadow: 0 10px 24px rgba(17, 17, 20, 0.07);
 }
@@ -265,7 +284,7 @@ body {
 
 @media (max-width: 640px) {
   .composer--hero {
-    border-radius: 18px;
+    border-radius: calc(18px * var(--gw-radius-scale));
   }
   .home .hero__pillbar {
     justify-content: flex-start;

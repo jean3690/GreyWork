@@ -25,7 +25,7 @@ defineProps<{ tokens: InlineToken[] }>();
   font-family: var(--font-mono);
   font-size: 0.88em;
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: calc(4px * var(--gw-radius-scale));
   background: var(--panel-2);
   border: 1px solid var(--line);
   word-break: break-word;

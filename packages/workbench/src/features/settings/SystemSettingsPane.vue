@@ -64,7 +64,7 @@ onMounted(() => {
 
 <template>
   <div class="flex flex-col gap-4">
-    <div class="rounded-[14px] border border-line bg-panel p-4">
+    <div class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-4">
       <div class="mb-3 text-[13px] font-medium text-foreground">关于</div>
       <div v-if="sysInfo" class="flex flex-col gap-1 font-mono text-[11px] text-dim2">
         <div class="flex justify-between">
@@ -91,7 +91,7 @@ onMounted(() => {
         {{ sysInfoFailed ? "系统信息拉取失败（见控制台日志）" : aboutPlaceholder }}
       </div>
     </div>
-    <div class="rounded-[14px] border border-line bg-panel p-4">
+    <div class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-4">
       <div class="mb-1 text-[13px] font-medium text-foreground">沙盒</div>
       <p class="mb-3 text-[11px] leading-[1.6] text-dim2">
         沙盒档位与权限档位是两条独立边界：权限三档是宿主在 ACP 工具调用层的<b class="font-medium text-dim">授权</b>判定（越界直接拒），
@@ -103,7 +103,7 @@ onMounted(() => {
           v-for="mode in SANDBOX_MODES"
           :key="mode.value"
           :data-testid="`sandbox-mode-${mode.value}`"
-          class="flex items-start justify-between gap-3 rounded-[10px] px-3 py-2 text-left transition-colors"
+          class="flex items-start justify-between gap-3 rounded-[calc(10px*var(--gw-radius-scale))] px-3 py-2 text-left transition-colors"
           :class="[
             sandboxPinned ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-panel-2',
             settings.sandboxMode === mode.value ? 'bg-panel-2' : '',
@@ -142,7 +142,7 @@ onMounted(() => {
         <button
           type="button"
           data-testid="sandbox-recommend"
-          class="flex h-7 shrink-0 cursor-pointer items-center rounded-[8px] border border-line-2 bg-panel-2 px-3 text-[12px] text-foreground transition-colors hover:border-cyan"
+          class="flex h-7 shrink-0 cursor-pointer items-center rounded-[calc(8px*var(--gw-radius-scale))] border border-line-2 bg-panel-2 px-3 text-[12px] text-foreground transition-colors hover:border-cyan"
           @click="applySandboxMode(suggestedSandbox)"
         >
           按权限档位联动
@@ -150,7 +150,7 @@ onMounted(() => {
       </div>
     </div>
     <!-- 关闭行为：宿主侧拦截 CloseRequested 的依据，经 lib/tray-bridge 同步过去。 -->
-    <div class="rounded-[14px] border border-line bg-panel p-4">
+    <div class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-4">
       <div class="mb-1 text-[13px] font-medium text-foreground">{{ t("settings.tray.title") }}</div>
       <p class="mb-3 text-[11px] leading-[1.6] text-dim2">{{ t("settings.tray.description") }}</p>
       <!-- 没有托盘（浏览器预览态 / Linux 缺 AppIndicator 宿主）时两个档位都无效：宿主会把
@@ -159,7 +159,7 @@ onMounted(() => {
       <p
         v-if="trayUnavailable"
         data-testid="tray-unavailable"
-        class="rounded-[10px] bg-panel-2 px-3 py-2 text-[11px] leading-[1.6] text-dim2"
+        class="rounded-[calc(10px*var(--gw-radius-scale))] bg-panel-2 px-3 py-2 text-[11px] leading-[1.6] text-dim2"
       >
         {{ t("settings.tray.unavailable") }}
       </p>
@@ -167,7 +167,7 @@ onMounted(() => {
         <button
           type="button"
           data-testid="tray-close-to-tray"
-          class="flex cursor-pointer items-start justify-between gap-3 rounded-[10px] px-3 py-2 text-left transition-colors hover:bg-panel-2"
+          class="flex cursor-pointer items-start justify-between gap-3 rounded-[calc(10px*var(--gw-radius-scale))] px-3 py-2 text-left transition-colors hover:bg-panel-2"
           :class="settings.closeToTray ? 'bg-panel-2' : ''"
           :aria-pressed="settings.closeToTray"
           @click="settings.setCloseToTray(true)"
@@ -181,7 +181,7 @@ onMounted(() => {
         <button
           type="button"
           data-testid="tray-quit-on-close"
-          class="flex cursor-pointer items-start justify-between gap-3 rounded-[10px] px-3 py-2 text-left transition-colors hover:bg-panel-2"
+          class="flex cursor-pointer items-start justify-between gap-3 rounded-[calc(10px*var(--gw-radius-scale))] px-3 py-2 text-left transition-colors hover:bg-panel-2"
           :class="settings.closeToTray ? '' : 'bg-panel-2'"
           :aria-pressed="!settings.closeToTray"
           @click="settings.setCloseToTray(false)"

@@ -134,7 +134,7 @@ watch([series, config, theme], () => render(), { flush: "post" });
         <select
           v-model="chartType"
           data-testid="chart-type"
-          class="h-5 cursor-pointer rounded-[5px] border border-line-2 bg-panel px-1 text-[11px] text-foreground"
+          class="h-5 cursor-pointer rounded-[calc(5px*var(--gw-radius-scale))] border border-line-2 bg-panel px-1 text-[11px] text-foreground"
         >
           <option v-for="option in CHART_TYPES" :key="option" :value="option">{{ t(`preview.analysis.chart.${option}`) }}</option>
         </select>
@@ -145,7 +145,7 @@ watch([series, config, theme], () => render(), { flush: "post" });
         <select
           v-model.number="categoryColumn"
           data-testid="chart-category-column"
-          class="h-5 cursor-pointer rounded-[5px] border border-line-2 bg-panel px-1 text-[11px] text-foreground"
+          class="h-5 cursor-pointer rounded-[calc(5px*var(--gw-radius-scale))] border border-line-2 bg-panel px-1 text-[11px] text-foreground"
         >
           <option v-for="column in columns" :key="column.index" :value="column.index">{{ column.name }}</option>
         </select>
@@ -156,7 +156,7 @@ watch([series, config, theme], () => render(), { flush: "post" });
         <select
           v-model.number="valueColumn"
           data-testid="chart-value-column"
-          class="h-5 cursor-pointer rounded-[5px] border border-line-2 bg-panel px-1 text-[11px] text-foreground"
+          class="h-5 cursor-pointer rounded-[calc(5px*var(--gw-radius-scale))] border border-line-2 bg-panel px-1 text-[11px] text-foreground"
         >
           <option v-for="column in columns" :key="column.index" :value="column.index">{{ column.name }}</option>
         </select>
@@ -167,7 +167,7 @@ watch([series, config, theme], () => render(), { flush: "post" });
         <select
           v-model="aggregation"
           data-testid="chart-aggregation"
-          class="h-5 cursor-pointer rounded-[5px] border border-line-2 bg-panel px-1 text-[11px] text-foreground"
+          class="h-5 cursor-pointer rounded-[calc(5px*var(--gw-radius-scale))] border border-line-2 bg-panel px-1 text-[11px] text-foreground"
         >
           <option v-for="option in AGGREGATIONS" :key="option" :value="option">{{ t(`preview.analysis.agg.${option}`) }}</option>
         </select>

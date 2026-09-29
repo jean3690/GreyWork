@@ -95,7 +95,7 @@ async function performUninstall(): Promise<void> {
         <input
           v-model="query"
           type="search"
-          class="h-10 w-full rounded-[10px] border border-line bg-panel pl-9 pr-3 text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
+          class="h-10 w-full rounded-[calc(10px*var(--gw-radius-scale))] border border-line bg-panel pl-9 pr-3 text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
           :placeholder="t('market.skillsSearchPlaceholder')"
           data-testid="market-skills-search"
           @input="onQueryInput"
@@ -104,7 +104,7 @@ async function performUninstall(): Promise<void> {
       </div>
       <button
         type="button"
-        class="h-10 shrink-0 cursor-pointer rounded-[10px] border border-line bg-panel px-3 text-[11.5px] text-dim transition-colors hover:border-line-2 hover:text-foreground disabled:opacity-50"
+        class="h-10 shrink-0 cursor-pointer rounded-[calc(10px*var(--gw-radius-scale))] border border-line bg-panel px-3 text-[11.5px] text-dim transition-colors hover:border-line-2 hover:text-foreground disabled:opacity-50"
         :disabled="skills.installedLoading"
         data-testid="market-skills-refresh"
         @click="skills.refreshInstalled()"
@@ -118,7 +118,11 @@ async function performUninstall(): Promise<void> {
       <span class="font-mono">{{ skills.workspace?.dir ?? ".agents/skills" }}</span>
     </p>
 
-    <p v-if="actionError" class="mt-3 rounded-[10px] border border-orange/30 bg-orange/10 px-3 py-2 text-[11.5px] text-orange" role="alert">
+    <p
+      v-if="actionError"
+      class="mt-3 rounded-[calc(10px*var(--gw-radius-scale))] border border-orange/30 bg-orange/10 px-3 py-2 text-[11.5px] text-orange"
+      role="alert"
+    >
       {{ actionError }}
     </p>
 
@@ -130,7 +134,7 @@ async function performUninstall(): Promise<void> {
       </div>
       <p
         v-if="skills.installed.length === 0"
-        class="rounded-[12px] border border-dashed border-line-2 bg-panel/50 px-4 py-6 text-center text-[11.5px] text-dim2"
+        class="rounded-[calc(12px*var(--gw-radius-scale))] border border-dashed border-line-2 bg-panel/50 px-4 py-6 text-center text-[11.5px] text-dim2"
       >
         {{ skills.installedLoading ? t("market.skillsScanning") : t("market.skillsNoneInstalled") }}
       </p>
@@ -138,17 +142,21 @@ async function performUninstall(): Promise<void> {
         <article
           v-for="skill in skills.installed"
           :key="skill.id"
-          class="rounded-[12px] border border-line bg-panel px-3.5 py-3 transition-colors hover:border-line-2"
+          class="rounded-[calc(12px*var(--gw-radius-scale))] border border-line bg-panel px-3.5 py-3 transition-colors hover:border-line-2"
           :data-testid="`market-skill-installed-${skill.id}`"
         >
           <div class="flex items-start gap-3">
-            <span class="grid size-9 shrink-0 place-items-center rounded-[10px] border border-line bg-panel-2 text-dim">
+            <span
+              class="grid size-9 shrink-0 place-items-center rounded-[calc(10px*var(--gw-radius-scale))] border border-line bg-panel-2 text-dim"
+            >
               <Icon name="lightning" :size="15" />
             </span>
             <div class="min-w-0 flex-1">
               <div class="flex flex-wrap items-center gap-1.5">
                 <span class="truncate text-[12.5px] font-medium text-foreground">{{ skill.name }}</span>
-                <code class="rounded-[5px] bg-panel-2 px-1.5 py-0.5 text-[9.5px] text-dim2">{{ skill.id }}</code>
+                <code class="rounded-[calc(5px*var(--gw-radius-scale))] bg-panel-2 px-1.5 py-0.5 text-[9.5px] text-dim2">{{
+                  skill.id
+                }}</code>
                 <span
                   v-if="skills.recordBySkillId.get(skill.id)"
                   class="rounded-full border border-accent/25 px-1.5 py-0.5 text-[9px] text-accent"
@@ -162,7 +170,7 @@ async function performUninstall(): Promise<void> {
               <button
                 v-if="skills.recordBySkillId.get(skill.id)"
                 type="button"
-                class="h-7 cursor-pointer rounded-[7px] border border-line px-2.5 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground disabled:opacity-40"
+                class="h-7 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] border border-line px-2.5 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground disabled:opacity-40"
                 :disabled="skills.busyId === skill.id"
                 :data-testid="`market-skill-update-${skill.id}`"
                 @click="confirm = { kind: 'update', skill }"
@@ -171,7 +179,7 @@ async function performUninstall(): Promise<void> {
               </button>
               <button
                 type="button"
-                class="h-7 cursor-pointer rounded-[7px] border border-line px-2.5 text-[11px] text-dim transition-colors hover:border-orange/40 hover:text-orange disabled:opacity-40"
+                class="h-7 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] border border-line px-2.5 text-[11px] text-dim transition-colors hover:border-orange/40 hover:text-orange disabled:opacity-40"
                 :disabled="!skills.hostAvailable || skills.busyId === skill.id"
                 :data-testid="`market-skill-uninstall-${skill.id}`"
                 @click="confirm = { kind: 'uninstall', skill }"
@@ -192,18 +200,20 @@ async function performUninstall(): Promise<void> {
       </div>
 
       <div v-if="skills.searching && skills.discoverResults.length === 0" class="grid gap-3 md:grid-cols-2">
-        <Skeleton v-for="index in 4" :key="index" class="h-28 rounded-[14px] border border-line bg-panel" />
+        <Skeleton v-for="index in 4" :key="index" class="h-28 rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel" />
       </div>
 
       <div v-else-if="skills.discoverResults.length" class="grid gap-3 md:grid-cols-2">
         <article
           v-for="entry in skills.discoverResults"
           :key="entry.ref"
-          class="flex min-h-28 flex-col rounded-[14px] border border-line bg-panel p-4 transition-colors hover:border-line-2"
+          class="flex min-h-28 flex-col rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-4 transition-colors hover:border-line-2"
           :data-testid="`market-skill-${entry.skillId}`"
         >
           <div class="flex items-start gap-3">
-            <span class="grid size-10 shrink-0 place-items-center rounded-[11px] border border-line bg-panel-2 text-dim">
+            <span
+              class="grid size-10 shrink-0 place-items-center rounded-[calc(11px*var(--gw-radius-scale))] border border-line bg-panel-2 text-dim"
+            >
               <Icon name="lightning" :size="16" />
             </span>
             <div class="min-w-0 flex-1">
@@ -226,7 +236,7 @@ async function performUninstall(): Promise<void> {
             </span>
             <button
               type="button"
-              class="h-7 shrink-0 cursor-pointer rounded-[7px] bg-accent px-3 text-[11px] font-medium text-accent-ink transition-colors hover:bg-accent-hi disabled:cursor-not-allowed disabled:opacity-40"
+              class="h-7 shrink-0 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] bg-accent px-3 text-[11px] font-medium text-accent-ink transition-colors hover:bg-accent-hi disabled:cursor-not-allowed disabled:opacity-40"
               :disabled="!entry.downloadable || !skills.hostAvailable || skills.busyId !== null"
               :data-testid="`market-skill-install-${entry.skillId}`"
               @click="
@@ -247,7 +257,7 @@ async function performUninstall(): Promise<void> {
 
       <div
         v-else-if="query.trim() !== '' && !skills.searching"
-        class="grid min-h-40 place-items-center rounded-[14px] border border-dashed border-line-2 bg-panel/50 px-6 text-center"
+        class="grid min-h-40 place-items-center rounded-[calc(14px*var(--gw-radius-scale))] border border-dashed border-line-2 bg-panel/50 px-6 text-center"
       >
         <p class="text-[12px] font-medium text-foreground">{{ t("market.skillsNoResults") }}</p>
       </div>
@@ -259,7 +269,7 @@ async function performUninstall(): Promise<void> {
     <!-- 二次确认：安装 / 更新 / 卸载 -->
     <div
       v-if="confirm"
-      class="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-[12px] border border-amber/40 bg-amber/10 px-3.5 py-2.5"
+      class="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-[calc(12px*var(--gw-radius-scale))] border border-amber/40 bg-amber/10 px-3.5 py-2.5"
       data-testid="market-skills-confirm"
     >
       <span class="text-[11.5px] text-amber">
@@ -274,7 +284,7 @@ async function performUninstall(): Promise<void> {
       <span class="flex gap-1.5">
         <button
           type="button"
-          class="h-7 cursor-pointer rounded-[7px] bg-amber px-2.5 text-[11px] font-medium text-amber-ink transition-opacity hover:opacity-90"
+          class="h-7 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] bg-amber px-2.5 text-[11px] font-medium text-amber-ink transition-opacity hover:opacity-90"
           data-testid="market-skills-confirm-yes"
           @click="
             confirm.kind === 'install' ? void performInstall() : confirm.kind === 'update' ? void performUpdate() : void performUninstall()
@@ -284,7 +294,7 @@ async function performUninstall(): Promise<void> {
         </button>
         <button
           type="button"
-          class="h-7 cursor-pointer rounded-[7px] border border-line px-2.5 text-[11px] text-dim transition-colors hover:text-foreground"
+          class="h-7 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] border border-line px-2.5 text-[11px] text-dim transition-colors hover:text-foreground"
           data-testid="market-skills-confirm-cancel"
           @click="confirm = null"
         >

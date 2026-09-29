@@ -98,7 +98,7 @@ const showFallbackDeny = computed(
 /** 按意图分色：允许类可点性最高（accent），拒绝类是中性描边，认不出的走默认。 */
 function optionClass(intent: PermissionIntent): string {
   const base =
-    "cursor-pointer rounded-[8px] px-2.5 py-1 text-[11.5px] transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan";
+    "cursor-pointer rounded-[calc(8px*var(--gw-radius-scale))] px-2.5 py-1 text-[11.5px] transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan";
   if (intent === "allow-once") return `${base} bg-accent font-medium text-accent-ink`;
   if (intent === "allow-always") return `${base} border border-cyan/60 bg-cyan/10 text-cyan`;
   if (intent === "reject-once" || intent === "reject-always") return `${base} border border-line bg-panel-2 text-dim`;
@@ -133,8 +133,12 @@ const traceDetail = computed(() => {
 
 <template>
   <!-- 只读态：会话流里的裁决记录 -->
-  <div v-if="settled" data-testid="permission-trace" class="flex items-start gap-2.5 rounded-[14px] border border-line bg-panel-2 p-3">
-    <span class="grid size-8 shrink-0 place-items-center rounded-[9px] bg-panel text-dim">
+  <div
+    v-if="settled"
+    data-testid="permission-trace"
+    class="flex items-start gap-2.5 rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel-2 p-3"
+  >
+    <span class="grid size-8 shrink-0 place-items-center rounded-[calc(9px*var(--gw-radius-scale))] bg-panel text-dim">
       <Icon :name="kindIcon" :size="15" />
     </span>
     <div class="min-w-0 flex-1">
@@ -163,10 +167,10 @@ const traceDetail = computed(() => {
     v-else-if="agent.pendingPermission"
     role="group"
     :aria-labelledby="titleId"
-    class="flex items-start gap-2.5 rounded-[14px] border border-line bg-popover p-3 shadow-lg"
+    class="flex items-start gap-2.5 rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-popover p-3 shadow-lg"
     data-testid="permission-card"
   >
-    <span class="grid size-8 shrink-0 place-items-center rounded-[9px] bg-amber/15 text-amber">
+    <span class="grid size-8 shrink-0 place-items-center rounded-[calc(9px*var(--gw-radius-scale))] bg-amber/15 text-amber">
       <Icon name="shield" :size="15" />
     </span>
     <div class="min-w-0 flex-1">
@@ -183,7 +187,7 @@ const traceDetail = computed(() => {
       <pre
         v-if="commandText"
         data-testid="permission-command"
-        class="mt-1.5 max-h-24 overflow-auto whitespace-pre-wrap break-all rounded-[8px] bg-panel-2 px-2 py-1.5 font-mono text-[11px] leading-snug text-foreground"
+        class="mt-1.5 max-h-24 overflow-auto whitespace-pre-wrap break-all rounded-[calc(8px*var(--gw-radius-scale))] bg-panel-2 px-2 py-1.5 font-mono text-[11px] leading-snug text-foreground"
         >{{ commandText }}</pre>
       <div v-if="paths.length" class="mt-1.5" data-testid="permission-paths">
         <span class="text-[10.5px] text-dim2">{{ t("chatView.permission.paths") }}</span>
@@ -213,7 +217,7 @@ const traceDetail = computed(() => {
           v-if="showFallbackDeny"
           type="button"
           data-testid="permission-deny"
-          class="cursor-pointer rounded-[8px] border border-line bg-panel-2 px-2.5 py-1 text-[11.5px] text-dim transition-colors hover:border-line-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          class="cursor-pointer rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2.5 py-1 text-[11.5px] text-dim transition-colors hover:border-line-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
           @click="agent.respondPermission(null)"
         >
           {{ t("chatView.permission.deny") }}

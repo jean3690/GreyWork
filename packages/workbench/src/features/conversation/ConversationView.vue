@@ -294,7 +294,7 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
     <section class="flex h-full min-h-0 flex-col">
       <div class="flex h-[46px] shrink-0 items-center gap-2 border-b border-line-2 bg-panel px-3">
         <button
-          class="grid size-7 cursor-pointer place-items-center rounded-[6px] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          class="grid size-7 cursor-pointer place-items-center rounded-[calc(6px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
           aria-label="返回"
           @click="goBack"
         >
@@ -327,7 +327,7 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
           <button
             v-if="turnActive"
             type="button"
-            class="flex h-6 cursor-pointer items-center gap-1 rounded-[6px] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
+            class="flex h-6 cursor-pointer items-center gap-1 rounded-[calc(6px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
             @click="stop"
           >
             <Icon name="close-one" :size="11" />
@@ -363,7 +363,7 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
           v-else
           class="mx-auto flex h-full w-full max-w-[860px] flex-col items-center justify-center gap-2 px-4 py-16 text-center sm:px-6"
         >
-          <span class="grid size-10 place-items-center rounded-[12px] bg-panel-2 text-dim">
+          <span class="grid size-10 place-items-center rounded-[calc(12px*var(--gw-radius-scale))] bg-panel-2 text-dim">
             <Icon name="message" :size="18" />
           </span>
           <p class="text-[13px] font-medium text-foreground">{{ t("chat.composer.emptyTitle") }}</p>
@@ -378,7 +378,7 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
           <div
             data-attachment-dropzone
             data-testid="composer-card"
-            class="relative flex w-full flex-col gap-2 rounded-[16px] border bg-panel-2 p-3 shadow-[0_8px_24px_rgba(0,0,0,0.1)] transition-[border-color,box-shadow] focus-within:border-cyan/50 focus-within:shadow-[0_10px_28px_rgba(0,0,0,0.14)]"
+            class="relative flex w-full flex-col gap-2 rounded-[calc(16px*var(--gw-radius-scale))] border bg-panel-2 p-3 shadow-[0_8px_24px_rgba(0,0,0,0.1)] transition-[border-color,box-shadow] focus-within:border-cyan/50 focus-within:shadow-[0_10px_28px_rgba(0,0,0,0.14)]"
             :class="attachmentDragging ? 'border-cyan ring-2 ring-cyan/40' : 'border-line-2'"
             @dragover="onComposerDragOver"
             @dragleave="onComposerDragLeave"
@@ -397,7 +397,7 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
               :aria-expanded="slashOpen"
               :aria-controls="slashOpen ? 'slash-command-menu' : undefined"
               :aria-activedescendant="slashActiveOptionId"
-              class="min-h-[76px] w-full resize-none rounded-[10px] bg-panel px-2.5 py-2 text-[14px] leading-relaxed text-foreground outline-none placeholder:text-dim"
+              class="min-h-[76px] w-full resize-none rounded-[calc(10px*var(--gw-radius-scale))] bg-panel px-2.5 py-2 text-[14px] leading-relaxed text-foreground outline-none placeholder:text-dim"
               :placeholder="t('chat.composer.placeholderThread')"
               :aria-label="t('chat.composer.ariaLabel')"
               @keydown="onKeydown"
@@ -414,7 +414,7 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
                   <button
                     type="button"
                     data-testid="composer-attach"
-                    class="grid size-6 shrink-0 cursor-pointer place-items-center rounded-[6px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40"
+                    class="grid size-6 shrink-0 cursor-pointer place-items-center rounded-[calc(6px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40"
                     :disabled="turnActive || attachmentsFull"
                     :aria-label="t('chat.uploadFile')"
                     @click="pickAttachmentFiles"
@@ -448,7 +448,7 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
               </div>
               <button
                 data-testid="composer-send"
-                class="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-[10px] border border-accent bg-accent px-3 text-[12px] font-medium text-accent-ink transition-[background-color,border-color,color,opacity] hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:border-line-2 disabled:bg-panel disabled:text-dim2 disabled:opacity-100"
+                class="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-[calc(10px*var(--gw-radius-scale))] border border-accent bg-accent px-3 text-[12px] font-medium text-accent-ink transition-[background-color,border-color,color,opacity] hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:border-line-2 disabled:bg-panel disabled:text-dim2 disabled:opacity-100"
                 :disabled="!canSend"
                 @click="send"
               >

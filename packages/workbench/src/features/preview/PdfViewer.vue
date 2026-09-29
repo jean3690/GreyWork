@@ -269,7 +269,7 @@ function onPageInput(event: Event): void {
 }
 
 const toolButtonClass =
-  "grid size-5 shrink-0 cursor-pointer place-items-center rounded-[5px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-dim2";
+  "grid size-5 shrink-0 cursor-pointer place-items-center rounded-[calc(5px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-dim2";
 
 /**
  * 还原上次的阅读位置。
@@ -413,7 +413,7 @@ onUnmounted(() => {
         min="1"
         :value="currentPage"
         :aria-label="t('preview.pdf.pageLabel')"
-        class="h-5 w-10 shrink-0 rounded-[5px] border border-line-2 bg-panel px-1 text-center text-[11px] text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+        class="h-5 w-10 shrink-0 rounded-[calc(5px*var(--gw-radius-scale))] border border-line-2 bg-panel px-1 text-center text-[11px] text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
         @change="onPageInput"
         @keydown.enter="onPageInput"
       />
@@ -452,7 +452,7 @@ onUnmounted(() => {
       <button
         type="button"
         data-testid="pdf-fit"
-        class="h-5 shrink-0 cursor-pointer rounded-[5px] px-1.5 text-[11px] transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+        class="h-5 shrink-0 cursor-pointer rounded-[calc(5px*var(--gw-radius-scale))] px-1.5 text-[11px] transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
         :class="zoom === 1 ? 'bg-panel text-foreground' : 'text-dim2 hover:bg-panel hover:text-foreground'"
         :aria-label="t('preview.pdf.fitWidth')"
         :aria-pressed="zoom === 1"

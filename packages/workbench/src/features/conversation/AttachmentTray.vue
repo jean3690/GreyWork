@@ -35,17 +35,17 @@ const thumbs = useAttachmentThumbs(() => props.items);
       role="listitem"
       data-testid="attachment-chip"
       :data-attachment-kind="item.kind"
-      class="group relative flex items-center gap-2 rounded-[10px] border border-line bg-panel p-1.5 pr-6"
+      class="group relative flex items-center gap-2 rounded-[calc(10px*var(--gw-radius-scale))] border border-line bg-panel p-1.5 pr-6"
     >
       <img
         v-if="item.kind === 'image' && thumbs[item.id]"
         :src="thumbs[item.id] as string"
         :alt="item.name"
-        class="size-12 shrink-0 rounded-[7px] object-cover"
+        class="size-12 shrink-0 rounded-[calc(7px*var(--gw-radius-scale))] object-cover"
       />
       <span
         v-else-if="item.kind === 'image'"
-        class="grid size-12 shrink-0 place-items-center rounded-[7px] bg-panel-2 px-1 text-center text-[9px] leading-tight text-dim2"
+        class="grid size-12 shrink-0 place-items-center rounded-[calc(7px*var(--gw-radius-scale))] bg-panel-2 px-1 text-center text-[9px] leading-tight text-dim2"
       >
         {{ t("chat.attachUnavailable") }}
       </span>
@@ -53,7 +53,7 @@ const thumbs = useAttachmentThumbs(() => props.items);
         v-else-if="item.kind === 'video' && thumbs[item.id]"
         :src="thumbs[item.id] as string"
         data-testid="attachment-video-thumb"
-        class="size-12 shrink-0 rounded-[7px] bg-black object-cover"
+        class="size-12 shrink-0 rounded-[calc(7px*var(--gw-radius-scale))] bg-black object-cover"
         muted
         playsinline
         preload="metadata"

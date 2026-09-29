@@ -38,7 +38,7 @@ watch(
 </script>
 
 <template>
-  <div class="rounded-[12px] border border-line bg-panel-2 p-3.5" data-testid="telegram-qr-panel">
+  <div class="rounded-[calc(12px*var(--gw-radius-scale))] border border-line bg-panel-2 p-3.5" data-testid="telegram-qr-panel">
     <!-- 已配置：扫码绑定（归属人认领） -->
     <template v-if="configured">
       <div v-if="link" class="flex flex-col items-center gap-2.5">
@@ -55,7 +55,7 @@ watch(
         </p>
         <button
           type="button"
-          class="h-7 cursor-pointer rounded-[7px] border border-line bg-panel px-3 text-[11.5px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground"
+          class="h-7 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] border border-line bg-panel px-3 text-[11.5px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground"
           data-testid="telegram-bind-refresh"
           @click="void store.refreshTelegramBotLink()"
         >
@@ -69,7 +69,7 @@ watch(
         </p>
         <button
           type="button"
-          class="h-7 cursor-pointer rounded-[7px] border border-line bg-panel px-3 text-[11.5px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground"
+          class="h-7 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] border border-line bg-panel px-3 text-[11.5px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground"
           data-testid="telegram-bind-retry"
           @click="void store.refreshTelegramBotLink()"
         >

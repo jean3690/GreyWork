@@ -77,13 +77,13 @@ function onOpenChange(next: boolean): void {
   <Dialog :open="open" @update:open="onOpenChange">
     <DialogContent
       :show-close-button="false"
-      class="flex max-h-[90vh] flex-col gap-0 overflow-hidden rounded-[14px] border-line bg-panel p-0 shadow-xl sm:max-w-[460px]"
+      class="flex max-h-[90vh] flex-col gap-0 overflow-hidden rounded-[calc(14px*var(--gw-radius-scale))] border-line bg-panel p-0 shadow-xl sm:max-w-[460px]"
     >
       <div class="flex items-center justify-between px-4 pb-2 pt-3.5">
         <DialogTitle class="text-[13px] font-medium text-foreground">新增供应商</DialogTitle>
         <button
           type="button"
-          class="grid size-6 cursor-pointer place-items-center rounded-[6px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground"
+          class="grid size-6 cursor-pointer place-items-center rounded-[calc(6px*var(--gw-radius-scale))] text-dim transition-colors hover:bg-panel-2 hover:text-foreground"
           aria-label="关闭"
           @click="emit('cancel')"
         >
@@ -100,7 +100,7 @@ function onOpenChange(next: boolean): void {
           <input
             v-model="draft.name"
             data-testid="provider-name"
-            class="w-full rounded-[8px] border border-line bg-panel-2 px-2.5 py-1.5 text-[12.5px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
+            class="w-full rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2.5 py-1.5 text-[12.5px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
             placeholder="如 My Gateway"
           />
         </label>
@@ -109,7 +109,7 @@ function onOpenChange(next: boolean): void {
           <input
             v-model="draft.baseUrl"
             data-testid="provider-base-url"
-            class="w-full rounded-[8px] border border-line bg-panel-2 px-2.5 py-1.5 font-mono text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
+            class="w-full rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2.5 py-1.5 font-mono text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
             placeholder="https://api.openai.com/v1"
           />
         </label>
@@ -118,7 +118,7 @@ function onOpenChange(next: boolean): void {
           <input
             v-model="draft.model"
             data-testid="provider-model"
-            class="w-full rounded-[8px] border border-line bg-panel-2 px-2.5 py-1.5 font-mono text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
+            class="w-full rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2.5 py-1.5 font-mono text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
             placeholder="gpt-4o / claude-sonnet-4-5"
           />
         </label>
@@ -127,7 +127,7 @@ function onOpenChange(next: boolean): void {
           <input
             v-model="draft.apiKeyEnv"
             data-testid="provider-api-key-env"
-            class="w-full rounded-[8px] border border-line bg-panel-2 px-2.5 py-1.5 font-mono text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
+            class="w-full rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2.5 py-1.5 font-mono text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
             placeholder="OPENAI_API_KEY"
           />
         </label>
@@ -138,7 +138,7 @@ function onOpenChange(next: boolean): void {
             data-testid="provider-headers"
             rows="3"
             spellcheck="false"
-            class="w-full resize-y rounded-[8px] border border-line bg-panel-2 px-2.5 py-1.5 font-mono text-[11.5px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
+            class="w-full resize-y rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2.5 py-1.5 font-mono text-[11.5px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
             placeholder="每行一条 Key: Value"
           />
         </label>
@@ -154,7 +154,7 @@ function onOpenChange(next: boolean): void {
       <div class="flex justify-end gap-2 border-t border-line px-4 py-3">
         <button
           type="button"
-          class="rounded-[8px] border border-line bg-panel-2 px-3 py-1.5 text-[12px] text-dim transition-colors hover:text-foreground"
+          class="rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-3 py-1.5 text-[12px] text-dim transition-colors hover:text-foreground"
           @click="emit('cancel')"
         >
           取消
@@ -162,7 +162,7 @@ function onOpenChange(next: boolean): void {
         <button
           data-testid="provider-save"
           type="button"
-          class="rounded-[8px] bg-accent px-3 py-1.5 text-[12px] font-medium text-accent-ink"
+          class="rounded-[calc(8px*var(--gw-radius-scale))] bg-accent px-3 py-1.5 text-[12px] font-medium text-accent-ink"
           @click="save"
         >
           添加

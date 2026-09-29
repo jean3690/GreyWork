@@ -8,7 +8,7 @@
  * `script-src 'self'` 里 —— 两个宿主都不用为了首帧外观放宽策略。
  *
  * 只做两件事，都不碰业务状态：
- * 1. 读 localStorage → 写 `<html>` 的三个 `data-*`；stores/settings.ts 的 applySaved()
+ * 1. 读 localStorage → 写 `<html>` 的四个 `data-*`；stores/settings.ts 的 applySaved()
  *    随后用同一份快照接管，两者的取值口径与默认值必须同步改。
  * 2. `performance.mark("gw:entry")` —— 在入口模块求值之前打点，让 main.ts 的启动日志
  *    覆盖真实的「导航起点 → 窗口 show()」全过程。
@@ -28,10 +28,12 @@
       mode = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
     }
     var fontSize = ["small", "medium", "large"].indexOf(saved.fontSize) >= 0 ? saved.fontSize : "medium";
+    var radius = ["none", "small", "large"].indexOf(saved.radius) >= 0 ? saved.radius : "small";
     var root = document.documentElement;
     root.dataset.palette = palette;
     root.dataset.theme = mode;
     root.dataset.fontSize = fontSize;
+    root.dataset.radius = radius;
   } catch (error) {
     /* 存储被禁用 / 快照损坏：保持下面的默认深色，不阻塞启动。 */
   }

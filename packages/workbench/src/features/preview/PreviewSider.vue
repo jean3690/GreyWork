@@ -289,7 +289,7 @@ function onResizeKeydown(event: KeyboardEvent): void {
 
 const sectionClass = (active: boolean): string =>
   [
-    "h-6 shrink-0 cursor-pointer rounded-[6px] px-2 text-[11.5px] transition-colors",
+    "h-6 shrink-0 cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] px-2 text-[11.5px] transition-colors",
     "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan",
     active ? "bg-panel text-foreground" : "text-dim hover:text-foreground",
   ].join(" ");
@@ -361,7 +361,7 @@ const sectionClass = (active: boolean): string =>
           type="button"
           data-testid="preview-save"
           :aria-disabled="saving || undefined"
-          class="grid size-6 cursor-pointer place-items-center rounded-[6px] text-cyan transition-colors hover:bg-panel focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan aria-disabled:cursor-not-allowed aria-disabled:text-dim2"
+          class="grid size-6 cursor-pointer place-items-center rounded-[calc(6px*var(--gw-radius-scale))] text-cyan transition-colors hover:bg-panel focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan aria-disabled:cursor-not-allowed aria-disabled:text-dim2"
           :aria-label="t('preview.sider.saveCurrent')"
           @click="saveActive()"
         >
@@ -370,7 +370,7 @@ const sectionClass = (active: boolean): string =>
         <button
           type="button"
           data-testid="web-fetch-open"
-          class="grid size-6 cursor-pointer place-items-center rounded-[6px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          class="grid size-6 cursor-pointer place-items-center rounded-[calc(6px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
           :aria-label="t('preview.sider.fetchWeb')"
           @click="fetchDialogOpen = true"
         >
@@ -380,7 +380,7 @@ const sectionClass = (active: boolean): string =>
           v-if="section === 'preview' && preview.activeTab"
           type="button"
           data-testid="preview-reload"
-          class="grid size-6 cursor-pointer place-items-center rounded-[6px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          class="grid size-6 cursor-pointer place-items-center rounded-[calc(6px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
           :aria-label="t('preview.sider.reloadCurrent')"
           @click="reloadTab(preview.activeTab.path)"
         >
@@ -390,7 +390,7 @@ const sectionClass = (active: boolean): string =>
           <button
             type="button"
             data-testid="preview-open-external"
-            class="grid size-6 cursor-pointer place-items-center rounded-[6px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+            class="grid size-6 cursor-pointer place-items-center rounded-[calc(6px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
             :aria-label="t('preview.common.openExternal')"
             @click="openExternal()"
           >
@@ -401,7 +401,7 @@ const sectionClass = (active: boolean): string =>
           v-if="section === 'preview' && preview.tabs.length > 1"
           type="button"
           data-testid="preview-close-all"
-          class="grid size-6 cursor-pointer place-items-center rounded-[6px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          class="grid size-6 cursor-pointer place-items-center rounded-[calc(6px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
           :aria-label="t('preview.sider.closeAll')"
           @click="requestClose({ kind: 'all' })"
         >
@@ -410,7 +410,7 @@ const sectionClass = (active: boolean): string =>
         <button
           type="button"
           data-testid="preview-collapse"
-          class="grid size-6 cursor-pointer place-items-center rounded-[6px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          class="grid size-6 cursor-pointer place-items-center rounded-[calc(6px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
           :aria-label="t('preview.sider.collapse')"
           @click="preview.setCollapsed(true)"
         >
@@ -434,7 +434,7 @@ const sectionClass = (active: boolean): string =>
             data-ctx="preview-tab"
             :data-tab-id="tab.id"
             draggable="true"
-            class="flex h-6 shrink-0 items-center gap-1 rounded-[6px] px-1.5 text-[11.5px] transition-colors"
+            class="flex h-6 shrink-0 items-center gap-1 rounded-[calc(6px*var(--gw-radius-scale))] px-1.5 text-[11.5px] transition-colors"
             :class="[
               tab.id === preview.activeId ? 'bg-panel text-foreground' : 'text-dim hover:text-foreground',
               draggingTabId && draggingTabId !== tab.id ? 'opacity-60' : '',
@@ -466,7 +466,7 @@ const sectionClass = (active: boolean): string =>
             <button
               type="button"
               data-testid="preview-tab-close"
-              class="grid size-4 cursor-pointer place-items-center rounded-[4px] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+              class="grid size-4 cursor-pointer place-items-center rounded-[calc(4px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
               :aria-label="t('preview.sider.closeTab', { name: tab.name })"
               @click.stop="requestClose({ kind: 'one', id: tab.id })"
             >
@@ -486,7 +486,7 @@ const sectionClass = (active: boolean): string =>
               <button
                 type="button"
                 data-testid="preview-empty-files"
-                class="cursor-pointer rounded-[6px] border border-line-2 bg-panel px-2.5 py-1 text-[11.5px] text-dim transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+                class="cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] border border-line-2 bg-panel px-2.5 py-1 text-[11.5px] text-dim transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
                 @click="switchSection('files')"
               >
                 {{ t("preview.sider.openFiles") }}
@@ -494,7 +494,7 @@ const sectionClass = (active: boolean): string =>
               <button
                 type="button"
                 data-testid="preview-empty-fetch"
-                class="cursor-pointer rounded-[6px] border border-line-2 bg-panel px-2.5 py-1 text-[11.5px] text-dim transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+                class="cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] border border-line-2 bg-panel px-2.5 py-1 text-[11.5px] text-dim transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
                 @click="fetchDialogOpen = true"
               >
                 {{ t("preview.sider.fetchWeb") }}

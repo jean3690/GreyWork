@@ -87,13 +87,13 @@ function rootSlug(root: string): string {
 </script>
 
 <template>
-  <div class="rounded-[14px] border border-line bg-panel p-4">
+  <div class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-4">
     <div class="mb-1 flex items-center justify-between gap-2">
       <span class="text-[13px] font-medium text-foreground">隔离快照</span>
       <span class="flex gap-1.5">
         <button
           type="button"
-          class="h-6 cursor-pointer rounded-[6px] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground disabled:opacity-50"
+          class="h-6 cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground disabled:opacity-50"
           :disabled="!hostAvailable || loading"
           @click="refresh"
         >
@@ -103,7 +103,7 @@ function rootSlug(root: string): string {
           v-if="entries.length > 0"
           type="button"
           data-testid="worktree-release-all"
-          class="h-6 cursor-pointer rounded-[6px] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-destructive disabled:opacity-50"
+          class="h-6 cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-destructive disabled:opacity-50"
           :disabled="!hostAvailable || releasing"
           @click="confirm = { kind: 'all' }"
         >
@@ -127,7 +127,7 @@ function rootSlug(root: string): string {
         v-for="entry in entries"
         :key="entry.root"
         data-testid="worktree-row"
-        class="rounded-[10px] bg-panel-2 p-2.5"
+        class="rounded-[calc(10px*var(--gw-radius-scale))] bg-panel-2 p-2.5"
         :class="releasingRoot === entry.root ? 'opacity-60' : ''"
       >
         <div class="flex items-center gap-2">
@@ -151,7 +151,7 @@ function rootSlug(root: string): string {
           <button
             type="button"
             :data-testid="`worktree-release-${rootSlug(entry.root)}`"
-            class="shrink-0 rounded-[8px] border border-line px-2 py-1 text-[11px] text-dim transition-colors hover:text-destructive disabled:opacity-50"
+            class="shrink-0 rounded-[calc(8px*var(--gw-radius-scale))] border border-line px-2 py-1 text-[11px] text-dim transition-colors hover:text-destructive disabled:opacity-50"
             :disabled="!hostAvailable || releasing"
             @click="confirm = { kind: 'one', entry }"
           >

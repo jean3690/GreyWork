@@ -130,11 +130,11 @@ function openSlot(threadId: string): void {
 <template>
   <div>
     <!-- 起一次协作 -->
-    <div v-if="!cowork.active" class="rounded-[14px] border border-line bg-panel p-3.5">
+    <div v-if="!cowork.active" class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-3.5">
       <textarea
         v-model="goalDraft"
         rows="2"
-        class="w-full resize-none rounded-[10px] border border-line bg-panel-2 px-3 py-2 text-[13px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
+        class="w-full resize-none rounded-[calc(10px*var(--gw-radius-scale))] border border-line bg-panel-2 px-3 py-2 text-[13px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
         :placeholder="t('cowork.goalPlaceholder')"
       />
       <div class="mt-3 text-[11px] font-medium text-dim">{{ t("cowork.members") }}</div>
@@ -142,12 +142,12 @@ function openSlot(threadId: string): void {
         <div v-for="(member, index) in memberDrafts" :key="index" class="flex flex-wrap items-center gap-1.5">
           <input
             v-model="member.name"
-            class="min-w-[120px] flex-1 rounded-[8px] border border-line bg-panel-2 px-2.5 py-1.5 text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
+            class="min-w-[120px] flex-1 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2.5 py-1.5 text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
             :placeholder="t('cowork.memberNamePlaceholder')"
           />
           <select
             v-model="member.role"
-            class="rounded-[8px] border border-line bg-panel-2 px-2 py-1.5 text-[12px] text-foreground outline-none focus:border-accent"
+            class="rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-1.5 text-[12px] text-foreground outline-none focus:border-accent"
             data-testid="member-role"
           >
             <option value="leader">{{ t("cowork.role.leader") }}</option>
@@ -156,7 +156,7 @@ function openSlot(threadId: string): void {
           <select
             v-if="member.role === 'teammate'"
             v-model="member.specialty"
-            class="rounded-[8px] border border-line bg-panel-2 px-2 py-1.5 text-[12px] text-foreground outline-none focus:border-accent"
+            class="rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-1.5 text-[12px] text-foreground outline-none focus:border-accent"
             data-testid="member-specialty"
             :aria-label="t('cowork.specialty.label')"
           >
@@ -170,7 +170,7 @@ function openSlot(threadId: string): void {
           <!-- title 与 aria-label 文案相同：可读名已由 aria-label 提供，重复的悬停提示没有增量，直接不留 -->
           <select
             v-model="member.providerId"
-            class="max-w-[150px] rounded-[8px] border border-line bg-panel-2 px-2 py-1.5 text-[12px] text-foreground outline-none focus:border-accent"
+            class="max-w-[150px] rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-1.5 text-[12px] text-foreground outline-none focus:border-accent"
             data-testid="member-provider"
             :aria-label="t('cowork.provider.label')"
           >
@@ -181,7 +181,7 @@ function openSlot(threadId: string): void {
           <button
             type="button"
             data-testid="member-config-toggle"
-            class="rounded-[8px] border px-2 py-1.5 text-[11.5px] transition-colors"
+            class="rounded-[calc(8px*var(--gw-radius-scale))] border px-2 py-1.5 text-[11.5px] transition-colors"
             :class="configTarget === index ? 'border-accent/50 text-foreground' : 'border-line text-dim hover:text-foreground'"
             :aria-expanded="configTarget === index"
             @click="toggleMemberConfig(index)"
@@ -193,7 +193,7 @@ function openSlot(threadId: string): void {
           <Hint :text="t('cowork.removeMember')">
             <button
               type="button"
-              class="grid size-7 place-items-center rounded-[8px] border border-line text-dim transition-colors hover:text-foreground"
+              class="grid size-7 place-items-center rounded-[calc(8px*var(--gw-radius-scale))] border border-line text-dim transition-colors hover:text-foreground"
               :disabled="memberDrafts.length <= 1"
               :aria-label="t('cowork.removeMember')"
               @click="removeMember(index)"
@@ -211,7 +211,7 @@ function openSlot(threadId: string): void {
             <label v-for="option in memberConfigOptions(member)" :key="option.id" class="flex items-center gap-1">
               <span class="text-[11px] text-dim2">{{ configOptionLabel(option) }}</span>
               <select
-                class="max-w-[140px] rounded-[8px] border border-line bg-panel-2 px-2 py-1 text-[11.5px] text-foreground outline-none focus:border-accent"
+                class="max-w-[140px] rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-1 text-[11.5px] text-foreground outline-none focus:border-accent"
                 :data-testid="`member-config-${option.id}`"
                 :aria-label="configOptionLabel(option)"
                 :value="member.configValues?.[option.id] ?? ''"
@@ -227,7 +227,7 @@ function openSlot(threadId: string): void {
       <div class="mt-2.5 flex items-center gap-2">
         <button
           type="button"
-          class="flex items-center gap-1 rounded-[8px] border border-line px-2.5 py-1.5 text-[12px] text-dim transition-colors hover:text-foreground"
+          class="flex items-center gap-1 rounded-[calc(8px*var(--gw-radius-scale))] border border-line px-2.5 py-1.5 text-[12px] text-dim transition-colors hover:text-foreground"
           @click="addMember"
         >
           <Icon name="plus" :size="12" />
@@ -235,7 +235,7 @@ function openSlot(threadId: string): void {
         </button>
         <button
           type="button"
-          class="ml-auto rounded-[8px] bg-accent px-3 py-1.5 text-[12px] font-medium text-accent-ink disabled:opacity-50"
+          class="ml-auto rounded-[calc(8px*var(--gw-radius-scale))] bg-accent px-3 py-1.5 text-[12px] font-medium text-accent-ink disabled:opacity-50"
           :disabled="cowork.starting"
           @click="startCowork"
         >
@@ -247,7 +247,7 @@ function openSlot(threadId: string): void {
 
     <!-- 进行中的协作 -->
     <div v-else class="flex flex-col gap-2.5">
-      <div class="rounded-[14px] border border-line bg-panel p-3.5">
+      <div class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-3.5">
         <div class="text-[13px] font-medium text-foreground">{{ cowork.goal }}</div>
         <div class="mt-2 flex flex-wrap gap-1.5">
           <Hint v-for="slot in cowork.slots" :key="slot.id" :text="t(`cowork.wake.${slot.wake}`)" multiline>
@@ -268,7 +268,7 @@ function openSlot(threadId: string): void {
             </button>
           </Hint>
         </div>
-        <p v-if="cowork.pausedReason" class="mt-2.5 rounded-[8px] bg-panel-2 px-2.5 py-2 text-[11px] text-dim">
+        <p v-if="cowork.pausedReason" class="mt-2.5 rounded-[calc(8px*var(--gw-radius-scale))] bg-panel-2 px-2.5 py-2 text-[11px] text-dim">
           {{ t("cowork.pausedHint", { reason: t(`cowork.breach.${cowork.pausedReason}`) }) }}
         </p>
         <div class="mt-2.5 flex items-center gap-2 text-[10px] text-dim2">
@@ -278,7 +278,7 @@ function openSlot(threadId: string): void {
             <button
               v-if="cowork.status === 'paused'"
               type="button"
-              class="rounded-[8px] border border-line px-2.5 py-1 text-[11px] text-dim transition-colors hover:text-foreground"
+              class="rounded-[calc(8px*var(--gw-radius-scale))] border border-line px-2.5 py-1 text-[11px] text-dim transition-colors hover:text-foreground"
               @click="resumeCowork"
             >
               {{ t("cowork.resume") }}
@@ -286,14 +286,14 @@ function openSlot(threadId: string): void {
             <button
               v-else
               type="button"
-              class="rounded-[8px] border border-line px-2.5 py-1 text-[11px] text-dim transition-colors hover:text-foreground"
+              class="rounded-[calc(8px*var(--gw-radius-scale))] border border-line px-2.5 py-1 text-[11px] text-dim transition-colors hover:text-foreground"
               @click="cowork.pauseRun()"
             >
               {{ t("cowork.pause") }}
             </button>
             <button
               type="button"
-              class="rounded-[8px] border border-line px-2.5 py-1 text-[11px] text-dim transition-colors hover:text-destructive"
+              class="rounded-[calc(8px*var(--gw-radius-scale))] border border-line px-2.5 py-1 text-[11px] text-dim transition-colors hover:text-destructive"
               @click="cowork.stopRun()"
             >
               {{ t("cowork.stop") }}
@@ -307,28 +307,32 @@ function openSlot(threadId: string): void {
       <div class="flex items-center gap-1.5">
         <select
           v-model="messageTarget"
-          class="rounded-[8px] border border-line bg-panel-2 px-2 py-2 text-[12px] text-foreground outline-none focus:border-accent"
+          class="rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-2 text-[12px] text-foreground outline-none focus:border-accent"
         >
           <option value="">{{ t("cowork.role.leader") }}</option>
           <option v-for="slot in cowork.slots" :key="slot.id" :value="slot.id">{{ slot.name }}</option>
         </select>
         <input
           v-model="messageDraft"
-          class="min-w-0 flex-1 rounded-[8px] border border-line bg-panel-2 px-3 py-2 text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
+          class="min-w-0 flex-1 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-3 py-2 text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
           :placeholder="t('cowork.sendPlaceholder')"
           @keydown.enter.prevent="sendToTeam"
         />
-        <button type="button" class="rounded-[8px] bg-accent px-3 py-2 text-[12px] font-medium text-accent-ink" @click="sendToTeam">
+        <button
+          type="button"
+          class="rounded-[calc(8px*var(--gw-radius-scale))] bg-accent px-3 py-2 text-[12px] font-medium text-accent-ink"
+          @click="sendToTeam"
+        >
           {{ t("cowork.send") }}
         </button>
       </div>
 
       <!-- 任务板 -->
-      <div class="rounded-[14px] border border-line bg-panel p-3.5">
+      <div class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-3.5">
         <div class="mb-2 text-[11px] font-medium text-dim">{{ t("cowork.board") }}</div>
         <p v-if="cowork.tasks.length === 0" class="text-[11px] text-dim2">{{ t("cowork.emptyTasks") }}</p>
         <div v-else class="flex flex-col gap-1.5">
-          <div v-for="task in cowork.tasks" :key="task.id" class="rounded-[10px] bg-panel-2 px-2.5 py-2">
+          <div v-for="task in cowork.tasks" :key="task.id" class="rounded-[calc(10px*var(--gw-radius-scale))] bg-panel-2 px-2.5 py-2">
             <div class="flex items-center gap-2">
               <span class="size-1.5 shrink-0 rounded-full" :class="taskDot[task.status]" />
               <span class="min-w-0 flex-1 truncate text-[12px] text-foreground">{{ task.subject }}</span>
@@ -342,11 +346,11 @@ function openSlot(threadId: string): void {
       </div>
 
       <!-- 协作往来 -->
-      <div class="rounded-[14px] border border-line bg-panel p-3.5">
+      <div class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-3.5">
         <div class="mb-2 text-[11px] font-medium text-dim">{{ t("cowork.activityTitle") }}</div>
         <p v-if="cowork.activity.length === 0" class="text-[11px] text-dim2">{{ t("cowork.emptyActivity") }}</p>
         <div v-else class="flex flex-col gap-1.5">
-          <div v-for="item in visibleActivity" :key="item.id" class="rounded-[10px] bg-panel-2 px-2.5 py-2">
+          <div v-for="item in visibleActivity" :key="item.id" class="rounded-[calc(10px*var(--gw-radius-scale))] bg-panel-2 px-2.5 py-2">
             <div class="flex items-center gap-1.5 text-[10px] text-dim2">
               <span class="text-dim">{{ item.fromName }}</span>
               <Icon name="right" :size="10" />

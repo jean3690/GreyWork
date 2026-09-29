@@ -33,7 +33,7 @@ const seconds = computed(() => t("chatView.seconds", { s: ((props.segment.endedA
 
 <template>
   <section
-    class="think my-[6px] mb-[2px] overflow-hidden rounded-[10px] border border-line bg-[image:var(--thought-gradient)]"
+    class="think my-[6px] mb-[2px] overflow-hidden rounded-[calc(10px*var(--gw-radius-scale))] border border-line bg-[image:var(--thought-gradient)]"
     data-testid="thinking-block"
     :data-open="open"
   >

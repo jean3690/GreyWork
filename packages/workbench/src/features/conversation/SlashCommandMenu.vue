@@ -38,7 +38,7 @@ watch(
     data-testid="slash-menu"
     role="listbox"
     :aria-label="t('chat.slash.menuAria')"
-    class="absolute bottom-full left-2 right-2 z-40 mb-2 max-h-[260px] overflow-y-auto rounded-[12px] border border-line bg-popover p-1 shadow-xl"
+    class="absolute bottom-full left-2 right-2 z-40 mb-2 max-h-[260px] overflow-y-auto rounded-[calc(12px*var(--gw-radius-scale))] border border-line bg-popover p-1 shadow-xl"
   >
     <p v-if="items.length === 0" class="px-2.5 py-2 text-[12px] text-dim2">{{ t("chat.slash.empty") }}</p>
     <button
@@ -49,7 +49,7 @@ watch(
       role="option"
       data-testid="slash-option"
       :aria-selected="index === activeIndex"
-      class="flex w-full cursor-pointer items-center gap-2 rounded-[8px] px-2.5 py-2 text-left transition-colors"
+      class="flex w-full cursor-pointer items-center gap-2 rounded-[calc(8px*var(--gw-radius-scale))] px-2.5 py-2 text-left transition-colors"
       :class="index === activeIndex ? 'bg-panel' : 'hover:bg-panel/60'"
       @mousedown.prevent
       @mouseenter="emit('update:activeIndex', index)"

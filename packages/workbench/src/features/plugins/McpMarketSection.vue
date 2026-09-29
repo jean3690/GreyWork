@@ -133,7 +133,7 @@ function draftReason(row: RegistryRow): string {
         <input
           v-model="query"
           type="search"
-          class="h-10 w-full rounded-[10px] border border-line bg-panel pl-9 pr-3 text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
+          class="h-10 w-full rounded-[calc(10px*var(--gw-radius-scale))] border border-line bg-panel pl-9 pr-3 text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
           :placeholder="t('market.mcpSearchPlaceholder')"
           :disabled="!hostAvailable"
           data-testid="market-mcp-search"
@@ -146,26 +146,35 @@ function draftReason(row: RegistryRow): string {
 
     <p class="mt-2 text-[10.5px] leading-relaxed text-dim2">{{ t("market.mcpInstallHint") }}</p>
 
-    <p v-if="!hostAvailable" class="mt-3 rounded-[10px] border border-line bg-panel px-3 py-2 text-[11px] leading-relaxed text-dim2">
+    <p
+      v-if="!hostAvailable"
+      class="mt-3 rounded-[calc(10px*var(--gw-radius-scale))] border border-line bg-panel px-3 py-2 text-[11px] leading-relaxed text-dim2"
+    >
       {{ t("market.mcpDesktopOnly") }}
     </p>
-    <p v-else-if="error" class="mt-3 rounded-[10px] border border-orange/30 bg-orange/10 px-3 py-2 text-[11.5px] text-orange" role="alert">
+    <p
+      v-else-if="error"
+      class="mt-3 rounded-[calc(10px*var(--gw-radius-scale))] border border-orange/30 bg-orange/10 px-3 py-2 text-[11.5px] text-orange"
+      role="alert"
+    >
       {{ error }}
     </p>
 
     <div v-if="searching && results.length === 0" class="mt-3 grid gap-3 md:grid-cols-2">
-      <Skeleton v-for="index in 4" :key="index" class="h-32 rounded-[14px] border border-line bg-panel" />
+      <Skeleton v-for="index in 4" :key="index" class="h-32 rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel" />
     </div>
 
     <div v-else-if="rows.length" class="mt-3 grid gap-3 md:grid-cols-2">
       <article
         v-for="row in rows"
         :key="row.entry.name"
-        class="flex min-h-32 flex-col rounded-[14px] border border-line bg-panel p-4 transition-colors hover:border-line-2"
+        class="flex min-h-32 flex-col rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-4 transition-colors hover:border-line-2"
         :data-testid="`market-mcp-${row.entry.name}`"
       >
         <div class="flex items-start gap-3">
-          <span class="grid size-10 shrink-0 place-items-center rounded-[11px] border border-line bg-panel-2 text-dim">
+          <span
+            class="grid size-10 shrink-0 place-items-center rounded-[calc(11px*var(--gw-radius-scale))] border border-line bg-panel-2 text-dim"
+          >
             <Icon name="terminal" :size="16" />
           </span>
           <div class="min-w-0 flex-1">
@@ -200,7 +209,7 @@ function draftReason(row: RegistryRow): string {
           <span class="truncate font-mono text-[10px] text-dim2">{{ row.entry.version || "" }}</span>
           <button
             type="button"
-            class="h-7 shrink-0 cursor-pointer rounded-[7px] px-3 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+            class="h-7 shrink-0 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] px-3 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40"
             :class="row.registered ? 'border border-line text-dim2' : 'bg-accent text-accent-ink hover:bg-accent-hi'"
             :disabled="row.registered || !row.draft.ok || !hostAvailable"
             :data-testid="`market-mcp-register-${row.entry.name}`"
@@ -215,10 +224,12 @@ function draftReason(row: RegistryRow): string {
 
     <div
       v-else-if="searched && !searching"
-      class="mt-3 grid min-h-52 place-items-center rounded-[14px] border border-dashed border-line-2 bg-panel/50 px-6 text-center"
+      class="mt-3 grid min-h-52 place-items-center rounded-[calc(14px*var(--gw-radius-scale))] border border-dashed border-line-2 bg-panel/50 px-6 text-center"
     >
       <div>
-        <span class="mx-auto grid size-10 place-items-center rounded-[11px] bg-panel-2 text-dim2"><Icon name="search" :size="16" /></span>
+        <span class="mx-auto grid size-10 place-items-center rounded-[calc(11px*var(--gw-radius-scale))] bg-panel-2 text-dim2"
+          ><Icon name="search" :size="16"
+        /></span>
         <p class="mt-3 text-[12px] font-medium text-foreground">{{ t("market.mcpNoResults") }}</p>
       </div>
     </div>

@@ -45,7 +45,7 @@ function openPreview(artifact: { path?: string; name: string; diskPath?: string 
       v-for="artifact in cards"
       :key="artifact.id"
       data-testid="artifact-card"
-      class="flex flex-col gap-1 rounded-[10px] border border-line bg-panel-2 px-3 py-2"
+      class="flex flex-col gap-1 rounded-[calc(10px*var(--gw-radius-scale))] border border-line bg-panel-2 px-3 py-2"
     >
       <div class="flex items-center gap-2">
         <Icon name="folder" :size="13" class="shrink-0 text-dim2" />

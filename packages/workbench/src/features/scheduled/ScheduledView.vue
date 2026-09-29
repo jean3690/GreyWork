@@ -233,7 +233,7 @@ function runNow(id: string, name: string): void {
         </p>
       </div>
       <button
-        class="flex h-8 cursor-pointer items-center gap-1.5 rounded-[10px] bg-accent px-3 text-[12px] font-medium text-accent-ink transition-opacity hover:opacity-90"
+        class="flex h-8 cursor-pointer items-center gap-1.5 rounded-[calc(10px*var(--gw-radius-scale))] bg-accent px-3 text-[12px] font-medium text-accent-ink transition-opacity hover:opacity-90"
         data-testid="automation-create"
         @click="createTask"
       >
@@ -252,18 +252,18 @@ function runNow(id: string, name: string): void {
           data-testid="automation-search"
           :placeholder="t('automation.search')"
           :aria-label="t('automation.search')"
-          class="h-8 w-full rounded-[9px] border border-line bg-panel pl-8 pr-2.5 text-[12px] text-foreground placeholder:text-dim2 focus-visible:border-line-2 focus-visible:outline-none"
+          class="h-8 w-full rounded-[calc(9px*var(--gw-radius-scale))] border border-line bg-panel pl-8 pr-2.5 text-[12px] text-foreground placeholder:text-dim2 focus-visible:border-line-2 focus-visible:outline-none"
         />
       </label>
 
-      <div class="flex items-center gap-1 rounded-[9px] border border-line bg-panel p-0.5" role="group">
+      <div class="flex items-center gap-1 rounded-[calc(9px*var(--gw-radius-scale))] border border-line bg-panel p-0.5" role="group">
         <button
           v-for="f in TYPE_FILTERS"
           :key="f.id"
           type="button"
           :data-testid="`automation-type-${f.id}`"
           :aria-pressed="typeFilter === f.id"
-          class="h-7 cursor-pointer rounded-[7px] px-2.5 text-[11.5px] transition-colors"
+          class="h-7 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] px-2.5 text-[11.5px] transition-colors"
           :class="typeFilter === f.id ? 'bg-panel-2 text-foreground' : 'text-dim2 hover:text-foreground'"
           @click="typeFilter = f.id"
         >
@@ -271,14 +271,14 @@ function runNow(id: string, name: string): void {
         </button>
       </div>
 
-      <div class="flex items-center gap-1 rounded-[9px] border border-line bg-panel p-0.5" role="group">
+      <div class="flex items-center gap-1 rounded-[calc(9px*var(--gw-radius-scale))] border border-line bg-panel p-0.5" role="group">
         <button
           v-for="f in STATUS_FILTERS"
           :key="f.id"
           type="button"
           :data-testid="`automation-status-${f.id}`"
           :aria-pressed="statusFilter === f.id"
-          class="h-7 cursor-pointer rounded-[7px] px-2.5 text-[11.5px] transition-colors"
+          class="h-7 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] px-2.5 text-[11.5px] transition-colors"
           :class="statusFilter === f.id ? 'bg-panel-2 text-foreground' : 'text-dim2 hover:text-foreground'"
           @click="statusFilter = f.id"
         >
@@ -286,7 +286,9 @@ function runNow(id: string, name: string): void {
         </button>
       </div>
 
-      <label class="flex h-8 items-center gap-1.5 rounded-[9px] border border-line bg-panel px-2.5 text-[11.5px] text-dim2">
+      <label
+        class="flex h-8 items-center gap-1.5 rounded-[calc(9px*var(--gw-radius-scale))] border border-line bg-panel px-2.5 text-[11.5px] text-dim2"
+      >
         {{ t("automation.sortBy") }}
         <select
           v-model="sortKey"
@@ -314,12 +316,12 @@ function runNow(id: string, name: string): void {
         <article
           v-for="task in section.items"
           :key="task.id"
-          class="flex flex-col rounded-[14px] border border-line bg-panel p-3.5"
+          class="flex flex-col rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-3.5"
           :class="{ 'opacity-60': !task.enabled }"
         >
           <div class="flex items-center gap-3">
             <span
-              class="grid size-8 shrink-0 place-items-center rounded-[9px]"
+              class="grid size-8 shrink-0 place-items-center rounded-[calc(9px*var(--gw-radius-scale))]"
               :class="
                 taskType(task) === 'once'
                   ? 'bg-amber/10 text-amber'
@@ -378,14 +380,14 @@ function runNow(id: string, name: string): void {
                 <span class="text-[11px] text-foreground">{{ t("automation.removeConfirm") }}</span>
                 <button
                   type="button"
-                  class="h-7 cursor-pointer rounded-[8px] bg-orange/90 px-2 text-[11px] font-medium text-white transition-opacity hover:opacity-90"
+                  class="h-7 cursor-pointer rounded-[calc(8px*var(--gw-radius-scale))] bg-orange/90 px-2 text-[11px] font-medium text-white transition-opacity hover:opacity-90"
                   @click="confirmDelete(task.id)"
                 >
                   {{ t("common.delete") }}
                 </button>
                 <button
                   type="button"
-                  class="h-7 cursor-pointer rounded-[8px] border border-line bg-panel px-2 text-[11px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground"
+                  class="h-7 cursor-pointer rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel px-2 text-[11px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground"
                   @click="pendingDeleteId = null"
                 >
                   {{ t("common.cancel") }}
@@ -395,7 +397,7 @@ function runNow(id: string, name: string): void {
                 <Hint :text="t('automation.runHistory')">
                   <button
                     type="button"
-                    class="grid size-7 cursor-pointer place-items-center rounded-[8px] transition-colors hover:bg-panel-2"
+                    class="grid size-7 cursor-pointer place-items-center rounded-[calc(8px*var(--gw-radius-scale))] transition-colors hover:bg-panel-2"
                     :class="expandedId === task.id ? 'text-foreground' : 'text-dim2 hover:text-foreground'"
                     :aria-label="t('automation.runHistory')"
                     :aria-expanded="expandedId === task.id"
@@ -408,7 +410,7 @@ function runNow(id: string, name: string): void {
                 <Hint :text="t('automation.editName')">
                   <button
                     type="button"
-                    class="grid size-7 cursor-pointer place-items-center rounded-[8px] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground"
+                    class="grid size-7 cursor-pointer place-items-center rounded-[calc(8px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground"
                     :aria-label="t('automation.editName')"
                     data-testid="automation-edit"
                     @click="editingId = task.id"
@@ -417,7 +419,7 @@ function runNow(id: string, name: string): void {
                   </button>
                 </Hint>
                 <button
-                  class="flex h-7 cursor-pointer items-center gap-1 rounded-[8px] border border-line bg-panel px-2.5 text-[11px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+                  class="flex h-7 cursor-pointer items-center gap-1 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel px-2.5 text-[11px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
                   :disabled="task.running || automation.list.some((a) => a.running)"
                   @click="runNow(task.id, task.name)"
                 >
@@ -426,7 +428,7 @@ function runNow(id: string, name: string): void {
                 </button>
                 <Hint :text="task.enabled ? t('automation.disable') : t('automation.enable')">
                   <button
-                    class="grid size-7 cursor-pointer place-items-center rounded-[8px] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground"
+                    class="grid size-7 cursor-pointer place-items-center rounded-[calc(8px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground"
                     :aria-label="task.enabled ? t('automation.disable') : t('automation.enable')"
                     @click="automation.setEnabled(task.id, !task.enabled)"
                   >
@@ -435,7 +437,7 @@ function runNow(id: string, name: string): void {
                 </Hint>
                 <Hint :text="t('automation.remove')">
                   <button
-                    class="grid size-7 cursor-pointer place-items-center rounded-[8px] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground"
+                    class="grid size-7 cursor-pointer place-items-center rounded-[calc(8px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground"
                     :aria-label="t('automation.remove')"
                     @click="pendingDeleteId = task.id"
                   >
@@ -461,7 +463,7 @@ function runNow(id: string, name: string): void {
               <button
                 v-if="run.sessionId"
                 type="button"
-                class="flex shrink-0 cursor-pointer items-center gap-1 rounded-[7px] px-1.5 py-0.5 text-[10.5px] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground"
+                class="flex shrink-0 cursor-pointer items-center gap-1 rounded-[calc(7px*var(--gw-radius-scale))] px-1.5 py-0.5 text-[10.5px] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground"
                 @click="openSession(run.sessionId)"
               >
                 {{ t("automation.openConversation") }}
@@ -488,7 +490,7 @@ function runNow(id: string, name: string): void {
       <!-- 过滤后无结果（但确有任务） -->
       <div
         v-if="automation.list.length > 0 && visible.length === 0"
-        class="rounded-[14px] border border-dashed border-line-2 bg-panel py-10 text-center text-[12px] text-dim2"
+        class="rounded-[calc(14px*var(--gw-radius-scale))] border border-dashed border-line-2 bg-panel py-10 text-center text-[12px] text-dim2"
         data-testid="automation-filter-empty"
       >
         {{ t("automation.filterEmpty") }}
@@ -497,14 +499,14 @@ function runNow(id: string, name: string): void {
       <!-- 空态 CTA -->
       <div
         v-if="automation.list.length === 0"
-        class="flex flex-col items-center gap-3 rounded-[14px] border border-dashed border-line-2 bg-panel py-14 text-center"
+        class="flex flex-col items-center gap-3 rounded-[calc(14px*var(--gw-radius-scale))] border border-dashed border-line-2 bg-panel py-14 text-center"
       >
-        <span class="grid size-10 place-items-center rounded-[12px] bg-panel-2 text-dim">
+        <span class="grid size-10 place-items-center rounded-[calc(12px*var(--gw-radius-scale))] bg-panel-2 text-dim">
           <Icon name="alarm-clock" :size="17" />
         </span>
         <p class="max-w-[380px] text-[12px] leading-relaxed text-dim2">{{ t("automation.emptyHint") }}</p>
         <button
-          class="flex h-8 cursor-pointer items-center gap-1.5 rounded-[10px] bg-accent px-3 text-[12px] font-medium text-accent-ink transition-opacity hover:opacity-90"
+          class="flex h-8 cursor-pointer items-center gap-1.5 rounded-[calc(10px*var(--gw-radius-scale))] bg-accent px-3 text-[12px] font-medium text-accent-ink transition-opacity hover:opacity-90"
           @click="createTask"
         >
           <Icon name="plus" :size="13" />

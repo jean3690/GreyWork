@@ -53,7 +53,7 @@ const CHANNEL_HINT_KEYS: Record<RemoteChannel, string> = {
 const blockedHint = computed(() => (status.value.ready ? "" : t(CHANNEL_HINT_KEYS[props.channel])));
 
 const buttonClass =
-  "h-7 cursor-pointer rounded-[7px] border border-line bg-panel-2 px-2.5 text-[11.5px] text-dim transition-colors hover:border-line-2 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40";
+  "h-7 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2.5 text-[11.5px] text-dim transition-colors hover:border-line-2 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40";
 
 function connect(): void {
   if (props.channel === "wechat") void store.connect();

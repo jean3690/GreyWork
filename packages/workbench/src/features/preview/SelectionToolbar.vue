@@ -58,7 +58,7 @@ watch(
 
 const actionClass = (available: boolean): string =>
   [
-    "rounded-[6px] px-2 py-1 text-[11.5px] transition-colors",
+    "rounded-[calc(6px*var(--gw-radius-scale))] px-2 py-1 text-[11.5px] transition-colors",
     available
       ? "cursor-pointer text-foreground hover:bg-panel-2 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
       : "cursor-not-allowed text-dim2",
@@ -76,7 +76,7 @@ const actionClass = (available: boolean): string =>
       :style="{ left: `${placement.left}px`, top: `${placement.top}px`, visibility: placed ? 'visible' : 'hidden' }"
       @mousedown.prevent
     >
-      <div class="flex items-center gap-0.5 rounded-[10px] border border-line bg-popover p-1 shadow-lg">
+      <div class="flex items-center gap-0.5 rounded-[calc(10px*var(--gw-radius-scale))] border border-line bg-popover p-1 shadow-lg">
         <button
           v-for="action in ACTIONS"
           :key="action"
@@ -95,7 +95,7 @@ const actionClass = (available: boolean): string =>
       <p
         v-if="!available"
         data-testid="selection-toolbar-disabled"
-        class="absolute start-1/2 top-full mt-1 w-max -translate-x-1/2 rounded-[6px] border border-line bg-popover px-2 py-1 text-[10.5px] text-dim2 shadow-lg"
+        class="absolute start-1/2 top-full mt-1 w-max -translate-x-1/2 rounded-[calc(6px*var(--gw-radius-scale))] border border-line bg-popover px-2 py-1 text-[10.5px] text-dim2 shadow-lg"
       >
         {{ t("preview.selection.disabledNoReceiver") }} · {{ t("preview.selection.disabledHint") }}
       </p>

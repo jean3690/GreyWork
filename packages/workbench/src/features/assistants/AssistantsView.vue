@@ -75,11 +75,11 @@ function openConversation(key: string): void {
       <article
         v-for="(channel, index) in CHANNELS"
         :key="channel"
-        class="rounded-[14px] border border-line bg-panel p-4"
+        class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-4"
         :data-testid="`channel-${channel}`"
       >
         <div class="flex items-center gap-2.5">
-          <span class="grid size-8 shrink-0 place-items-center rounded-[9px] bg-panel-2 text-dim">
+          <span class="grid size-8 shrink-0 place-items-center rounded-[calc(9px*var(--gw-radius-scale))] bg-panel-2 text-dim">
             <Icon name="message" :size="16" />
           </span>
           <div class="min-w-0">
@@ -101,7 +101,7 @@ function openConversation(key: string): void {
           </div>
           <button
             type="button"
-            class="ml-auto h-7 shrink-0 cursor-pointer rounded-[7px] border border-line bg-panel-2 px-2.5 text-[11.5px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
+            class="ml-auto h-7 shrink-0 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2.5 text-[11.5px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
             :data-testid="`${channel}-open-settings`"
             @click="openSettings"
           >
@@ -111,7 +111,7 @@ function openConversation(key: string): void {
       </article>
 
       <!-- 会话入口：每个联系人一段往来 -->
-      <article class="rounded-[14px] border border-line bg-panel p-4">
+      <article class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-4">
         <div class="mb-2 text-[13px] font-medium text-foreground">{{ t("remoteAssist.conversation.peers") }}</div>
         <p v-if="store.peerList.length === 0" class="text-[11.5px] text-dim2" data-testid="remote-peers-empty">
           {{ t("remoteAssist.conversation.peersEmpty") }}
@@ -120,11 +120,11 @@ function openConversation(key: string): void {
           <li v-for="peer in store.peerList" :key="peer.id">
             <button
               type="button"
-              class="flex w-full cursor-pointer items-center gap-2 rounded-[10px] border border-transparent px-2 py-2 text-left transition-colors hover:border-line hover:bg-panel-2 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+              class="flex w-full cursor-pointer items-center gap-2 rounded-[calc(10px*var(--gw-radius-scale))] border border-transparent px-2 py-2 text-left transition-colors hover:border-line hover:bg-panel-2 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
               :data-testid="`remote-peer-${peerKey(peer)}`"
               @click="openConversation(peerKey(peer))"
             >
-              <span class="grid size-7 shrink-0 place-items-center rounded-[8px] bg-panel-2 text-dim">
+              <span class="grid size-7 shrink-0 place-items-center rounded-[calc(8px*var(--gw-radius-scale))] bg-panel-2 text-dim">
                 <Icon name="message" :size="14" />
               </span>
               <span class="min-w-0 flex-1">

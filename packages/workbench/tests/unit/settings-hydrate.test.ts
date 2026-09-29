@@ -101,10 +101,13 @@ describe("settings store 桌面接管（SQLite 真源）", () => {
     settings.theme = "fox";
     settings.colorMode = "system";
     settings.fontSize = "large";
+    settings.setRadius("none");
     settings.persist();
     expect(invokeMock).toHaveBeenLastCalledWith(
       "db_settings_sync",
-      expect.objectContaining({ settings: expect.objectContaining({ theme: "fox", colorMode: "system", fontSize: "large" }) }),
+      expect.objectContaining({
+        settings: expect.objectContaining({ theme: "fox", colorMode: "system", fontSize: "large", radius: "none" }),
+      }),
     );
   });
 });

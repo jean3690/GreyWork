@@ -273,14 +273,14 @@ function save(): void {
   <div class="mt-3 flex flex-col gap-2.5 border-t border-line pt-3" data-testid="schedule-editor">
     <input
       v-model="name"
-      class="rounded-[8px] border border-line bg-panel px-2 py-1.5 text-[13px] text-foreground outline-none focus:border-line-2"
+      class="rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel px-2 py-1.5 text-[13px] text-foreground outline-none focus:border-line-2"
       :placeholder="t('automation.namePlaceholder')"
       :aria-label="t('automation.namePlaceholder')"
       data-testid="schedule-name"
     />
     <input
       v-model="intent"
-      class="rounded-[8px] border border-line bg-panel px-2 py-1.5 text-[11.5px] text-foreground outline-none focus:border-line-2"
+      class="rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel px-2 py-1.5 text-[11.5px] text-foreground outline-none focus:border-line-2"
       :placeholder="t('automation.intentPlaceholder')"
       :aria-label="t('automation.intentPlaceholder')"
       data-testid="schedule-intent"
@@ -290,7 +290,7 @@ function save(): void {
       <span class="w-16 shrink-0 text-[11.5px] text-dim2">{{ t("automation.schedule.acp") }}</span>
       <select
         v-model="acpProviderId"
-        class="min-w-0 flex-1 cursor-pointer rounded-[8px] border border-line bg-panel-2 px-2 py-1.5 text-[12px] text-foreground outline-none focus:border-line-2"
+        class="min-w-0 flex-1 cursor-pointer rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-1.5 text-[12px] text-foreground outline-none focus:border-line-2"
         data-testid="schedule-acp"
       >
         <option value="">{{ t("automation.schedule.acpLlm") }}</option>
@@ -304,7 +304,7 @@ function save(): void {
         v-for="option in MODES"
         :key="option.id"
         type="button"
-        class="h-7 cursor-pointer rounded-[7px] border px-2.5 text-[11.5px] transition-colors"
+        class="h-7 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] border px-2.5 text-[11.5px] transition-colors"
         :class="
           mode === option.id
             ? 'border-accent bg-panel-2 text-foreground'
@@ -337,7 +337,7 @@ function save(): void {
             v-for="day in WEEKDAY_ORDER"
             :key="day"
             type="button"
-            class="size-7 cursor-pointer rounded-[7px] border text-[11px] transition-colors"
+            class="size-7 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] border text-[11px] transition-colors"
             :class="
               weeklyDays.includes(day)
                 ? 'border-accent bg-panel-2 text-foreground'
@@ -372,13 +372,13 @@ function save(): void {
         type="number"
         min="1"
         :max="intervalMax"
-        class="w-16 rounded-[8px] border border-line bg-panel px-2 py-1 text-[11.5px] text-foreground outline-none focus:border-line-2"
+        class="w-16 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel px-2 py-1 text-[11.5px] text-foreground outline-none focus:border-line-2"
         data-testid="schedule-every"
         @blur="clampEvery"
       />
       <select
         v-model="intervalUnit"
-        class="cursor-pointer rounded-[8px] border border-line bg-panel-2 px-2 py-1 text-[11.5px] text-foreground outline-none focus:border-line-2"
+        class="cursor-pointer rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-1 text-[11.5px] text-foreground outline-none focus:border-line-2"
         data-testid="schedule-unit"
         @change="clampEvery"
       >
@@ -391,14 +391,14 @@ function save(): void {
       <input
         v-model="cronText"
         spellcheck="false"
-        class="rounded-[8px] border border-line bg-panel px-2 py-1.5 font-mono text-[12px] text-foreground outline-none focus:border-line-2"
+        class="rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel px-2 py-1.5 font-mono text-[12px] text-foreground outline-none focus:border-line-2"
         :placeholder="t('automation.schedule.cronPlaceholder')"
         data-testid="schedule-cron-input"
       />
       <p class="text-[10.5px] leading-relaxed text-dim2">{{ t("automation.schedule.cronHint") }}</p>
     </div>
 
-    <div class="rounded-[10px] border border-line bg-panel-2 px-2.5 py-2 text-[11px] leading-relaxed">
+    <div class="rounded-[calc(10px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2.5 py-2 text-[11px] leading-relaxed">
       <p v-if="mode === 'manual'" class="text-dim2">{{ t("automation.schedule.manual") }}</p>
       <template v-else-if="mode === 'once'">
         <p v-if="onceDate === null" class="text-destructive" data-testid="schedule-error">
@@ -409,7 +409,10 @@ function save(): void {
         </p>
         <p v-else class="flex items-center gap-2 text-foreground">
           <span data-testid="schedule-description">{{ onceDescription }}</span>
-          <span class="shrink-0 rounded-[5px] bg-panel px-1.5 py-0.5 text-[10.5px] text-dim2" data-testid="schedule-once-badge">
+          <span
+            class="shrink-0 rounded-[calc(5px*var(--gw-radius-scale))] bg-panel px-1.5 py-0.5 text-[10.5px] text-dim2"
+            data-testid="schedule-once-badge"
+          >
             {{ t("automation.onceBadge") }}
           </span>
         </p>
@@ -421,7 +424,10 @@ function save(): void {
         </p>
         <p v-else class="flex items-center gap-2 text-foreground">
           <span data-testid="schedule-description">{{ description }}</span>
-          <code class="shrink-0 rounded-[5px] bg-panel px-1.5 py-0.5 font-mono text-[10.5px] text-dim2" data-testid="schedule-cron">
+          <code
+            class="shrink-0 rounded-[calc(5px*var(--gw-radius-scale))] bg-panel px-1.5 py-0.5 font-mono text-[10.5px] text-dim2"
+            data-testid="schedule-cron"
+          >
             {{ cronExpression }}
           </code>
         </p>
@@ -434,7 +440,7 @@ function save(): void {
     <div class="flex items-center gap-2">
       <button
         type="button"
-        class="h-7 cursor-pointer rounded-[8px] border px-2.5 text-[11.5px] transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+        class="h-7 cursor-pointer rounded-[calc(8px*var(--gw-radius-scale))] border px-2.5 text-[11.5px] transition-colors disabled:cursor-not-allowed disabled:opacity-40"
         :class="canSave ? 'border-accent bg-panel-2 text-foreground' : 'border-line bg-panel-2 text-dim'"
         :disabled="!canSave"
         data-testid="schedule-save"
@@ -444,7 +450,7 @@ function save(): void {
       </button>
       <button
         type="button"
-        class="h-7 cursor-pointer rounded-[8px] border border-line bg-panel px-2.5 text-[11.5px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground"
+        class="h-7 cursor-pointer rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel px-2.5 text-[11.5px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground"
         data-testid="schedule-cancel"
         @click="emit('cancel')"
       >

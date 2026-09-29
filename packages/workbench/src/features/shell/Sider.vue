@@ -73,7 +73,7 @@ const navItems = computed(() => buildNavItems(useCapabilityLoader().snapshot().m
     <template v-if="!props.collapsed">
       <div class="px-2 pb-2">
         <button
-          class="flex h-[34px] w-full cursor-pointer items-center gap-2 rounded-[8px] bg-accent px-2 text-[13px] font-medium text-accent-ink transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          class="flex h-[34px] w-full cursor-pointer items-center gap-2 rounded-[calc(8px*var(--gw-radius-scale))] bg-accent px-2 text-[13px] font-medium text-accent-ink transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
           data-testid="sider-new-chat"
           @click="emit('newChat')"
         >
@@ -89,11 +89,11 @@ const navItems = computed(() => buildNavItems(useCapabilityLoader().snapshot().m
           <button
             v-for="item in navItems"
             :key="item.path"
-            class="flex h-[34px] cursor-pointer items-center gap-2 rounded-[8px] px-2 text-[13px] transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+            class="flex h-[34px] cursor-pointer items-center gap-2 rounded-[calc(8px*var(--gw-radius-scale))] px-2 text-[13px] transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
             :class="route.path === item.path ? 'bg-panel text-foreground' : 'text-dim hover:bg-panel hover:text-foreground'"
             @click="emit('navigate', item.path)"
           >
-            <span class="grid size-5 place-items-center rounded-[5px] bg-panel text-dim">
+            <span class="grid size-5 place-items-center rounded-[calc(5px*var(--gw-radius-scale))] bg-panel text-dim">
               <Icon :name="item.icon" :size="14" />
             </span>
             {{ item.label }}

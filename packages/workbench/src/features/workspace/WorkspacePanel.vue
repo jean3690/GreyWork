@@ -83,7 +83,7 @@ function onResizeKeydown(event: KeyboardEvent): void {
       <button
         type="button"
         data-testid="workspace-collapse"
-        class="grid size-6 cursor-pointer place-items-center rounded-[6px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+        class="grid size-6 cursor-pointer place-items-center rounded-[calc(6px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
         aria-label="折叠工作区面板"
         @click="workspace.setCollapsed(true)"
       >

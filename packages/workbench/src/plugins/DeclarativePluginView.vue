@@ -69,7 +69,7 @@ function actionClass(action: DeclarativeAction): string {
 
 <template>
   <main class="mx-auto flex h-full w-full max-w-[860px] flex-col gap-5 overflow-y-auto p-4 sm:p-7" data-testid="declarative-plugin-view">
-    <header class="relative overflow-hidden rounded-[16px] border border-line-2 bg-panel-2 px-5 py-6 sm:px-7">
+    <header class="relative overflow-hidden rounded-[calc(16px*var(--gw-radius-scale))] border border-line-2 bg-panel-2 px-5 py-6 sm:px-7">
       <div class="pointer-events-none absolute -right-12 -top-20 size-52 rounded-full border border-cyan/30" />
       <div class="pointer-events-none absolute -right-2 -top-12 size-32 rounded-full border border-blue/30" />
       <p v-if="props.page.eyebrow" class="text-[11px] font-medium uppercase tracking-[0.14em] text-cyan">
@@ -89,7 +89,11 @@ function actionClass(action: DeclarativeAction): string {
     />
 
     <section v-if="outputs.length" class="grid gap-3 sm:grid-cols-2" data-testid="declarative-plugin-outputs">
-      <article v-for="output in outputs" :key="output.valueKey" class="rounded-[13px] border border-line bg-panel px-4 py-3">
+      <article
+        v-for="output in outputs"
+        :key="output.valueKey"
+        class="rounded-[calc(13px*var(--gw-radius-scale))] border border-line bg-panel px-4 py-3"
+      >
         <p class="text-[11px] text-dim2">{{ output.label }}</p>
         <output
           class="mt-1 block font-mono text-[22px] font-semibold text-foreground"
@@ -100,7 +104,11 @@ function actionClass(action: DeclarativeAction): string {
       </article>
     </section>
 
-    <section v-if="fields.length" class="rounded-[14px] border border-line bg-panel p-4 sm:p-5" data-testid="declarative-plugin-fields">
+    <section
+      v-if="fields.length"
+      class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-4 sm:p-5"
+      data-testid="declarative-plugin-fields"
+    >
       <div class="grid gap-4 sm:grid-cols-2">
         <label
           v-for="field in fields"
@@ -113,7 +121,7 @@ function actionClass(action: DeclarativeAction): string {
           <input
             v-if="field.kind === 'text'"
             type="text"
-            class="h-9 rounded-[8px] border border-line-2 bg-panel-2 px-3 text-[12px] text-foreground outline-none transition-colors focus:border-cyan"
+            class="h-9 rounded-[calc(8px*var(--gw-radius-scale))] border border-line-2 bg-panel-2 px-3 text-[12px] text-foreground outline-none transition-colors focus:border-cyan"
             :value="fieldValue(field)"
             :maxlength="field.maxLength"
             :data-testid="`declarative-field-${field.key}`"
@@ -122,7 +130,7 @@ function actionClass(action: DeclarativeAction): string {
           <input
             v-else-if="field.kind === 'number'"
             type="number"
-            class="h-9 rounded-[8px] border border-line-2 bg-panel-2 px-3 font-mono text-[12px] text-foreground outline-none transition-colors focus:border-cyan"
+            class="h-9 rounded-[calc(8px*var(--gw-radius-scale))] border border-line-2 bg-panel-2 px-3 font-mono text-[12px] text-foreground outline-none transition-colors focus:border-cyan"
             :value="fieldValue(field)"
             :min="field.min"
             :max="field.max"
@@ -144,7 +152,11 @@ function actionClass(action: DeclarativeAction): string {
       </div>
     </section>
 
-    <p v-if="actionError" class="rounded-[8px] border border-orange/40 bg-orange/10 px-3 py-2 text-[11px] text-orange" role="alert">
+    <p
+      v-if="actionError"
+      class="rounded-[calc(8px*var(--gw-radius-scale))] border border-orange/40 bg-orange/10 px-3 py-2 text-[11px] text-orange"
+      role="alert"
+    >
       {{ actionError }}
     </p>
 
@@ -153,7 +165,7 @@ function actionClass(action: DeclarativeAction): string {
         v-for="action in actions"
         :key="action.id"
         type="button"
-        class="h-9 cursor-pointer rounded-[8px] border px-4 text-[12px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan"
+        class="h-9 cursor-pointer rounded-[calc(8px*var(--gw-radius-scale))] border px-4 text-[12px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan"
         :class="actionClass(action)"
         :disabled="busyAction !== null"
         :data-testid="`declarative-action-${action.id}`"

@@ -63,12 +63,14 @@ function onOpenChange(next: boolean): void {
   <Dialog :open="props.open" @update:open="onOpenChange">
     <DialogContent
       :show-close-button="false"
-      class="flex max-h-[88vh] flex-col gap-0 overflow-hidden rounded-[14px] border-line bg-panel p-0 shadow-xl sm:max-w-[520px]"
+      class="flex max-h-[88vh] flex-col gap-0 overflow-hidden rounded-[calc(14px*var(--gw-radius-scale))] border-line bg-panel p-0 shadow-xl sm:max-w-[520px]"
       data-testid="remote-reply-dialog"
     >
       <div class="flex items-center justify-between px-4 pb-2 pt-3.5">
         <div class="flex min-w-0 items-center gap-2.5">
-          <span class="grid size-7 shrink-0 place-items-center rounded-[8px] border border-line bg-panel-2 text-dim">
+          <span
+            class="grid size-7 shrink-0 place-items-center rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 text-dim"
+          >
             <Icon name="robot" :size="14" />
           </span>
           <div class="min-w-0">
@@ -80,7 +82,7 @@ function onOpenChange(next: boolean): void {
         </div>
         <button
           type="button"
-          class="grid size-6 shrink-0 cursor-pointer place-items-center rounded-[6px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground"
+          class="grid size-6 shrink-0 cursor-pointer place-items-center rounded-[calc(6px*var(--gw-radius-scale))] text-dim transition-colors hover:bg-panel-2 hover:text-foreground"
           aria-label="关闭"
           @click="emit('close')"
         >
@@ -94,7 +96,7 @@ function onOpenChange(next: boolean): void {
             v-for="mode in REPLY_MODES"
             :key="mode"
             type="button"
-            class="h-7 cursor-pointer rounded-[7px] border px-2.5 text-[11.5px] transition-colors"
+            class="h-7 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] border px-2.5 text-[11.5px] transition-colors"
             :class="
               settings.remoteAssist.replyMode === mode
                 ? 'border-accent bg-panel-2 text-foreground'
@@ -112,7 +114,7 @@ function onOpenChange(next: boolean): void {
           <label class="flex items-center gap-2">
             <span class="w-24 shrink-0 text-[11.5px] text-dim2">{{ t("remoteAssist.settings.replyProvider") }}</span>
             <select
-              class="min-w-0 flex-1 cursor-pointer rounded-[8px] border border-line bg-panel-2 px-2 py-1.5 text-[12.5px] text-foreground outline-none focus:border-line-2"
+              class="min-w-0 flex-1 cursor-pointer rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-1.5 text-[12.5px] text-foreground outline-none focus:border-line-2"
               data-testid="reply-provider"
               :value="settings.remoteAssist.replyProviderId ?? ''"
               @change="settings.setRemoteAssist({ replyProviderId: ($event.target as HTMLSelectElement).value || null })"
@@ -140,7 +142,7 @@ function onOpenChange(next: boolean): void {
               <label v-for="option in configOptions" :key="option.id" class="flex items-center gap-2">
                 <span class="w-24 shrink-0 truncate text-[11.5px] text-dim2">{{ option.label }}</span>
                 <select
-                  class="min-w-0 flex-1 cursor-pointer rounded-[8px] border border-line bg-panel-2 px-2 py-1.5 text-[12px] text-foreground outline-none focus:border-line-2"
+                  class="min-w-0 flex-1 cursor-pointer rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-1.5 text-[12px] text-foreground outline-none focus:border-line-2"
                   :data-testid="`reply-config-${option.id}`"
                   :value="option.override"
                   @change="setOverride(option.id, ($event.target as HTMLSelectElement).value)"
@@ -152,7 +154,10 @@ function onOpenChange(next: boolean): void {
                 </select>
               </label>
             </div>
-            <p v-else class="mt-2 rounded-[10px] border border-line bg-panel-2 px-3 py-2 text-[11px] leading-relaxed text-dim2">
+            <p
+              v-else
+              class="mt-2 rounded-[calc(10px*var(--gw-radius-scale))] border border-line bg-panel-2 px-3 py-2 text-[11px] leading-relaxed text-dim2"
+            >
               {{ t("remoteAssist.settings.fineGrainedEmpty") }}
             </p>
           </div>
@@ -160,7 +165,7 @@ function onOpenChange(next: boolean): void {
 
         <button
           type="button"
-          class="h-7 w-fit cursor-pointer rounded-[7px] border border-line bg-panel-2 px-2.5 text-[11.5px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
+          class="h-7 w-fit cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2.5 text-[11.5px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
           data-testid="reply-open-agent-settings"
           @click="openAgentSettings"
         >

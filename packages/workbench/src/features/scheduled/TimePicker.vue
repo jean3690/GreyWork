@@ -90,7 +90,7 @@ function setNow(): void {
         :data-testid="props.testId"
         :disabled="props.disabled"
         :aria-label="label"
-        class="flex h-7 cursor-pointer items-center gap-1.5 rounded-[8px] border border-line bg-panel px-2 font-mono text-[11.5px] text-foreground outline-none transition-colors hover:border-line-2 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40"
+        class="flex h-7 cursor-pointer items-center gap-1.5 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel px-2 font-mono text-[11.5px] text-foreground outline-none transition-colors hover:border-line-2 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40"
         :class="open ? 'border-line-2 bg-panel-2' : ''"
       >
         <Icon name="clock" :size="12" class="shrink-0 text-dim2" />
@@ -109,7 +109,7 @@ function setNow(): void {
             :key="hour"
             type="button"
             :data-testid="`${props.testId}-hour-${hour}`"
-            class="h-6 shrink-0 cursor-pointer rounded-[6px] font-mono text-[11.5px] transition-colors"
+            class="h-6 shrink-0 cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] font-mono text-[11.5px] transition-colors"
             :class="hour === parsed.hour ? 'bg-secondary text-foreground' : 'text-dim hover:bg-panel-2 hover:text-foreground'"
             :aria-pressed="hour === parsed.hour"
             @click="setHour(hour)"
@@ -128,7 +128,7 @@ function setNow(): void {
             :key="minute"
             type="button"
             :data-testid="`${props.testId}-minute-${minute}`"
-            class="h-6 shrink-0 cursor-pointer rounded-[6px] font-mono text-[11.5px] transition-colors"
+            class="h-6 shrink-0 cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] font-mono text-[11.5px] transition-colors"
             :class="minute === parsed.minute ? 'bg-secondary text-foreground' : 'text-dim hover:bg-panel-2 hover:text-foreground'"
             :aria-pressed="minute === parsed.minute"
             @click="setMinute(minute)"
@@ -140,7 +140,7 @@ function setNow(): void {
       <div class="flex items-center justify-between gap-2 border-t border-line px-2 py-1.5">
         <button
           type="button"
-          class="h-6 cursor-pointer rounded-[6px] border border-line px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
+          class="h-6 cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] border border-line px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
           :data-testid="`${props.testId}-now`"
           @click="setNow"
         >
@@ -148,7 +148,7 @@ function setNow(): void {
         </button>
         <button
           type="button"
-          class="h-6 cursor-pointer rounded-[6px] bg-accent px-2.5 text-[11px] font-medium text-accent-ink transition-opacity hover:opacity-90"
+          class="h-6 cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] bg-accent px-2.5 text-[11px] font-medium text-accent-ink transition-opacity hover:opacity-90"
           :data-testid="`${props.testId}-done`"
           @click="open = false"
         >

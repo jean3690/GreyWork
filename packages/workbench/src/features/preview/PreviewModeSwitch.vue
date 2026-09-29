@@ -15,7 +15,7 @@ const { t } = useI18n();
 
 function optionClass(active: boolean): string {
   return [
-    "h-5 shrink-0 cursor-pointer rounded-[5px] px-2 text-[11px] transition-colors",
+    "h-5 shrink-0 cursor-pointer rounded-[calc(5px*var(--gw-radius-scale))] px-2 text-[11px] transition-colors",
     "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan",
     active ? "bg-panel text-foreground" : "text-dim hover:text-foreground",
   ].join(" ");
@@ -24,7 +24,7 @@ function optionClass(active: boolean): string {
 
 <template>
   <div
-    class="flex shrink-0 items-center gap-0.5 rounded-[7px] border border-line-2 bg-panel-2 p-0.5"
+    class="flex shrink-0 items-center gap-0.5 rounded-[calc(7px*var(--gw-radius-scale))] border border-line-2 bg-panel-2 p-0.5"
     role="group"
     :aria-label="t('preview.mode.label')"
   >

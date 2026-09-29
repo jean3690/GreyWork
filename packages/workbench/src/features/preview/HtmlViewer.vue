@@ -24,7 +24,7 @@ const srcdoc = computed(() => data.value ?? "");
 
 const tabClass = (active: boolean): string =>
   [
-    "h-[22px] cursor-pointer rounded-[6px] px-2 text-[11px] transition-colors",
+    "h-[22px] cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] px-2 text-[11px] transition-colors",
     "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan",
     active ? "bg-panel text-foreground" : "text-dim hover:text-foreground",
   ].join(" ");
@@ -64,7 +64,7 @@ const tabClass = (active: boolean): string =>
         :title="t('preview.viewer.html.title')"
         sandbox="allow-same-origin"
         :srcdoc="srcdoc"
-        class="size-full rounded-[6px] border border-line-2 bg-paper"
+        class="size-full rounded-[calc(6px*var(--gw-radius-scale))] border border-line-2 bg-paper"
       />
     </div>
     <TextViewer v-else :tab="props.tab" class="min-h-0 flex-1" />

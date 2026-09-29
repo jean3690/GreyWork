@@ -102,14 +102,14 @@ function removeDraft(): void {
 
 <template>
   <div class="flex flex-col gap-4">
-    <div class="rounded-[14px] border border-line bg-panel p-4">
+    <div class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-4">
       <div class="mb-3 flex items-center justify-between gap-2">
         <span class="text-[13px] font-medium text-foreground">云端 Office 预览</span>
         <span class="flex gap-1.5">
           <button
             type="button"
             data-testid="office-provider-add"
-            class="h-6 cursor-pointer rounded-[6px] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
+            class="h-6 cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
             @click="startAdd"
           >
             ＋ 新增服务商
@@ -117,7 +117,7 @@ function removeDraft(): void {
           <button
             type="button"
             data-testid="office-provider-reset"
-            class="h-6 cursor-pointer rounded-[6px] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
+            class="h-6 cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
             @click="settings.resetServiceProviders()"
           >
             恢复默认
@@ -130,7 +130,7 @@ function removeDraft(): void {
           v-for="provider in settings.officeProviders"
           :key="provider.id"
           :data-testid="`office-provider-${provider.id}`"
-          class="flex items-center gap-2.5 rounded-[10px] border px-3 py-2 transition-colors"
+          class="flex items-center gap-2.5 rounded-[calc(10px*var(--gw-radius-scale))] border px-3 py-2 transition-colors"
           :class="provider.id === settings.selectedOfficeProviderId ? 'border-line-2 bg-panel-2' : 'border-transparent hover:bg-panel-2'"
         >
           <input
@@ -155,7 +155,7 @@ function removeDraft(): void {
           </button>
           <button
             type="button"
-            class="shrink-0 cursor-pointer rounded-[6px] border border-line bg-panel-2 px-2 py-0.5 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
+            class="shrink-0 cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-0.5 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
             :data-testid="`office-provider-edit-${provider.id}`"
             @click="startEdit(provider)"
           >
@@ -170,7 +170,7 @@ function removeDraft(): void {
       </p>
     </div>
 
-    <div class="rounded-[14px] border border-line bg-panel p-4">
+    <div class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-4">
       <div class="mb-1.5 flex items-center gap-1.5 text-[13px] font-medium text-foreground">
         <Icon name="earth" :size="13" class="text-dim" />
         当前宿主可内嵌的域名

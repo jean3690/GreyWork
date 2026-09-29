@@ -76,7 +76,10 @@ function alignOf(align: (string | null)[], column: number): Record<string, strin
 
       <hr v-else-if="block.type === 'hr'" class="md__hr my-[1.1em] border-0 border-t border-line" />
 
-      <div v-else-if="block.type === 'table'" class="md__table-wrap my-[0.7em] overflow-x-auto rounded-[8px] border border-line">
+      <div
+        v-else-if="block.type === 'table'"
+        class="md__table-wrap my-[0.7em] overflow-x-auto rounded-[calc(8px*var(--gw-radius-scale))] border border-line"
+      >
         <table class="md__table w-full border-collapse text-[0.94em] [&_tbody_tr:last-child_td]:border-b-0">
           <thead>
             <tr>
@@ -107,13 +110,16 @@ function alignOf(align: (string | null)[], column: number): Record<string, strin
       </div>
 
       <MermaidBlock v-else-if="block.type === 'code' && block.lang.toLowerCase() === 'mermaid'" :code="block.codeLines.join('\n')" />
-      <div v-else-if="block.type === 'code'" class="md-code my-[0.7em] overflow-hidden rounded-[8px] border border-line bg-panel-2">
+      <div
+        v-else-if="block.type === 'code'"
+        class="md-code my-[0.7em] overflow-hidden rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2"
+      >
         <div class="md-code__head flex items-center gap-2 border-b border-line bg-panel py-1 pl-2.5 pr-2">
           <span v-if="block.path" class="md-code__path font-mono text-[11px] text-dim">{{ block.path }}</span>
           <span v-else-if="block.lang" class="md-code__lang font-mono text-[11px] text-dim2">{{ block.lang }}</span>
           <span v-else class="md-code__lang font-mono text-[11px] text-dim2">text</span>
           <button
-            class="md-code__copy ml-auto grid size-[22px] place-items-center rounded-[5px] border border-transparent bg-transparent text-dim2 cursor-pointer hover:border-line hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+            class="md-code__copy ml-auto grid size-[22px] place-items-center rounded-[calc(5px*var(--gw-radius-scale))] border border-transparent bg-transparent text-dim2 cursor-pointer hover:border-line hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
             :aria-label="copiedIndex === i ? '已复制' : '复制代码'"
             @click="copy(i)"
           >

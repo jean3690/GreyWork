@@ -86,7 +86,7 @@ async function openExternal(): Promise<void> {
         <span class="sr-only">{{ t("preview.analysis.sheet") }}</span>
         <select
           data-testid="legacy-sheet-select"
-          class="h-5 cursor-pointer rounded-[5px] border border-line-2 bg-panel px-1 text-[11px] text-foreground"
+          class="h-5 cursor-pointer rounded-[calc(5px*var(--gw-radius-scale))] border border-line-2 bg-panel px-1 text-[11px] text-foreground"
           :value="currentSheet"
           @change="onSheetChange"
         >
@@ -105,7 +105,7 @@ async function openExternal(): Promise<void> {
         v-if="externalPath"
         type="button"
         data-testid="legacy-sheet-open-external"
-        class="mt-3 flex cursor-pointer items-center gap-1 rounded-[8px] border border-line bg-panel px-3 py-1.5 text-[12px] text-dim transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+        class="mt-3 flex cursor-pointer items-center gap-1 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel px-3 py-1.5 text-[12px] text-dim transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
         @click="openExternal()"
       >
         <Icon name="external" :size="12" />

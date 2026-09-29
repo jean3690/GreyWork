@@ -148,14 +148,14 @@ function retry(): void {
     <PreviewSkeleton v-if="loading" />
 
     <div v-else-if="error" data-testid="cloud-office-error" class="min-h-0 flex-1 overflow-y-auto p-4">
-      <div class="rounded-[8px] border border-line-2 bg-panel-2 p-4">
+      <div class="rounded-[calc(8px*var(--gw-radius-scale))] border border-line-2 bg-panel-2 p-4">
         <p class="text-[13px] text-foreground">{{ t("preview.viewer.cloudOffice.failed") }}</p>
         <p class="mt-1.5 break-words text-[12px] leading-relaxed text-dim2">{{ error }}</p>
         <p class="mt-2.5 text-[12px] leading-relaxed text-dim2">{{ t("preview.viewer.cloudOffice.fallbackHint") }}</p>
         <button
           type="button"
           data-testid="cloud-office-retry"
-          class="mt-3 cursor-pointer rounded-[8px] border border-line bg-panel px-3 py-1.5 text-[12px] text-dim transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          class="mt-3 cursor-pointer rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel px-3 py-1.5 text-[12px] text-dim transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
           @click="retry()"
         >
           {{ t("preview.viewer.cloudOffice.retry") }}

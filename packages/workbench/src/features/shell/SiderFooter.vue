@@ -11,7 +11,7 @@ const emit = defineEmits<{ openSettings: []; navigate: [path: string] }>();
 
 /** 行按钮统一样式：34px 高、8px 圆角，与 GreyWork Sider 一致。 */
 const rowClass =
-  "flex h-[34px] cursor-pointer items-center gap-2 rounded-[8px] px-2 text-[13px] transition-colors text-dim hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan";
+  "flex h-[34px] cursor-pointer items-center gap-2 rounded-[calc(8px*var(--gw-radius-scale))] px-2 text-[13px] transition-colors text-dim hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan";
 
 /** 只有服务端态有会话可退：桌面壳是本地壳，浏览器预览没有宿主。 */
 const canSignOut = computed(() => runtimeMode() === "server");
@@ -42,7 +42,7 @@ async function confirmSignOut(): Promise<void> {
 <template>
   <div class="flex shrink-0 flex-col gap-0.5 border-t border-line-2 p-2">
     <button :class="rowClass" data-testid="sider-settings" @click="emit('openSettings')">
-      <span class="grid size-5 place-items-center rounded-[5px] bg-panel text-dim">
+      <span class="grid size-5 place-items-center rounded-[calc(5px*var(--gw-radius-scale))] bg-panel text-dim">
         <Icon name="setting" :size="14" />
       </span>
       {{ t(`settings.title`) }}

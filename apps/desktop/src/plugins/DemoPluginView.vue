@@ -14,12 +14,12 @@ const count = ref(0);
       </p>
     </header>
 
-    <section class="rounded-[12px] border border-line-2 bg-panel-2 p-4">
+    <section class="rounded-[calc(12px*var(--gw-radius-scale))] border border-line-2 bg-panel-2 p-4">
       <p class="text-[12px] text-dim2">插件局部状态</p>
       <div class="mt-3 flex items-center gap-3">
         <button
           type="button"
-          class="h-8 cursor-pointer rounded-[8px] bg-accent px-3 text-[12px] font-medium text-accent-ink transition-opacity hover:opacity-90"
+          class="h-8 cursor-pointer rounded-[calc(8px*var(--gw-radius-scale))] bg-accent px-3 text-[12px] font-medium text-accent-ink transition-opacity hover:opacity-90"
           data-testid="demo-plugin-increment"
           @click="count += 1"
         >

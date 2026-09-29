@@ -45,9 +45,9 @@ function roleLabel(role: string): string {
 </script>
 
 <template>
-  <article class="rounded-[14px] border border-line bg-panel p-3.5">
+  <article class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-3.5">
     <div class="flex items-start gap-2.5">
-      <span class="mt-0.5 grid size-7 shrink-0 place-items-center rounded-[8px] bg-panel-2 text-dim">
+      <span class="mt-0.5 grid size-7 shrink-0 place-items-center rounded-[calc(8px*var(--gw-radius-scale))] bg-panel-2 text-dim">
         <Icon name="peoples" :size="14" />
       </span>
       <div class="min-w-0 flex-1">

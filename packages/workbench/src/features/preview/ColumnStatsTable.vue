@@ -39,10 +39,10 @@ function numericMetrics(entry: ColumnStats): { label: string; value: string }[] 
   <div data-testid="column-stats" class="flex flex-col gap-2 p-3">
     <p v-if="stats.length === 0" class="text-[12px] text-dim2">{{ t("preview.analysis.stats.noColumns") }}</p>
 
-    <div v-for="entry in stats" :key="entry.index" class="rounded-[8px] border border-line-2 bg-panel-2 p-2.5">
+    <div v-for="entry in stats" :key="entry.index" class="rounded-[calc(8px*var(--gw-radius-scale))] border border-line-2 bg-panel-2 p-2.5">
       <div class="flex items-baseline gap-2">
         <span class="min-w-0 flex-1 truncate text-[12.5px] text-foreground">{{ entry.name }}</span>
-        <span class="shrink-0 rounded-[4px] border border-line px-1.5 text-[10.5px] text-dim2">
+        <span class="shrink-0 rounded-[calc(4px*var(--gw-radius-scale))] border border-line px-1.5 text-[10.5px] text-dim2">
           {{ t(`preview.analysis.type.${entry.type}`) }}
         </span>
       </div>

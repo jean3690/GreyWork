@@ -52,7 +52,7 @@ function label(key: string): string {
         <select
           v-model.number="keyColumn"
           data-testid="group-key-column"
-          class="h-5 cursor-pointer rounded-[5px] border border-line-2 bg-panel px-1 text-[11px] text-foreground"
+          class="h-5 cursor-pointer rounded-[calc(5px*var(--gw-radius-scale))] border border-line-2 bg-panel px-1 text-[11px] text-foreground"
         >
           <option v-for="column in columns" :key="column.index" :value="column.index">{{ column.name }}</option>
         </select>
@@ -63,7 +63,7 @@ function label(key: string): string {
         <select
           v-model.number="valueColumn"
           data-testid="group-value-column"
-          class="h-5 cursor-pointer rounded-[5px] border border-line-2 bg-panel px-1 text-[11px] text-foreground"
+          class="h-5 cursor-pointer rounded-[calc(5px*var(--gw-radius-scale))] border border-line-2 bg-panel px-1 text-[11px] text-foreground"
         >
           <option v-for="column in columns" :key="column.index" :value="column.index">{{ column.name }}</option>
         </select>
@@ -74,7 +74,7 @@ function label(key: string): string {
         <select
           v-model="aggregation"
           data-testid="group-aggregation"
-          class="h-5 cursor-pointer rounded-[5px] border border-line-2 bg-panel px-1 text-[11px] text-foreground"
+          class="h-5 cursor-pointer rounded-[calc(5px*var(--gw-radius-scale))] border border-line-2 bg-panel px-1 text-[11px] text-foreground"
         >
           <option v-for="option in AGGREGATIONS" :key="option" :value="option">{{ t(`preview.analysis.agg.${option}`) }}</option>
         </select>

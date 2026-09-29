@@ -59,7 +59,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="relative mx-auto" data-testid="plugin-render-loop">
-    <div class="rounded-[14px] border border-line bg-panel-2 p-2">
+    <div class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel-2 p-2">
       <PluginRenderCanvas :commands="commands" :width="canvasWidth" :height="canvasHeight" />
     </div>
   </div>

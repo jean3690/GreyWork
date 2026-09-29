@@ -91,7 +91,7 @@ function openPreview(path: string | undefined, name: string, diskPath: string | 
         :key="slot.key"
         :data-index="slot.index"
         data-testid="band-artifact"
-        class="absolute left-0 top-0 flex h-[30px] w-full items-center gap-2 rounded-[8px] px-2 transition-colors hover:bg-panel"
+        class="absolute left-0 top-0 flex h-[30px] w-full items-center gap-2 rounded-[calc(8px*var(--gw-radius-scale))] px-2 transition-colors hover:bg-panel"
         :style="{ transform: `translateY(${slot.start}px)` }"
       >
         <Icon name="folder" :size="13" class="shrink-0 text-dim2" />

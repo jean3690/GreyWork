@@ -181,19 +181,21 @@ function onOpenChange(next: boolean): void {
 }
 
 const inputClass =
-  "min-w-0 flex-1 rounded-[8px] border border-line bg-panel-2 px-2 py-1.5 font-mono text-[12px] text-foreground outline-none focus:border-line-2";
+  "min-w-0 flex-1 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-1.5 font-mono text-[12px] text-foreground outline-none focus:border-line-2";
 </script>
 
 <template>
   <Dialog :open="props.open" @update:open="onOpenChange">
     <DialogContent
       :show-close-button="false"
-      class="flex max-h-[88vh] flex-col gap-0 overflow-hidden rounded-[14px] border-line bg-panel p-0 shadow-xl sm:max-w-[520px]"
+      class="flex max-h-[88vh] flex-col gap-0 overflow-hidden rounded-[calc(14px*var(--gw-radius-scale))] border-line bg-panel p-0 shadow-xl sm:max-w-[520px]"
       :data-testid="`channel-dialog-${props.channel}`"
     >
       <div class="flex items-center justify-between px-4 pb-2 pt-3.5">
         <div class="flex min-w-0 items-center gap-2.5">
-          <span class="grid size-7 shrink-0 place-items-center rounded-[8px] border border-line bg-panel-2 text-dim">
+          <span
+            class="grid size-7 shrink-0 place-items-center rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 text-dim"
+          >
             <Icon name="message" :size="14" />
           </span>
           <div class="min-w-0">
@@ -207,7 +209,7 @@ const inputClass =
         </div>
         <button
           type="button"
-          class="grid size-6 shrink-0 cursor-pointer place-items-center rounded-[6px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground"
+          class="grid size-6 shrink-0 cursor-pointer place-items-center rounded-[calc(6px*var(--gw-radius-scale))] text-dim transition-colors hover:bg-panel-2 hover:text-foreground"
           aria-label="关闭"
           data-testid="channel-dialog-close"
           @click="emit('close')"
@@ -222,7 +224,9 @@ const inputClass =
 
         <!-- 微信：扫码登录 -->
         <template v-if="props.channel === 'wechat'">
-          <p class="rounded-[10px] border border-line bg-panel-2 px-3 py-2 text-[11px] leading-relaxed text-dim2">
+          <p
+            class="rounded-[calc(10px*var(--gw-radius-scale))] border border-line bg-panel-2 px-3 py-2 text-[11px] leading-relaxed text-dim2"
+          >
             {{ t("remoteAssist.wechat.scanHint") }}
           </p>
           <div v-if="store.qr || store.qrError">
@@ -236,21 +240,21 @@ const inputClass =
         <!-- QQ 的能力边界提示：被动回复窗口，提前说清楚比事后报错好 -->
         <p
           v-if="props.channel === 'qq'"
-          class="rounded-[10px] border border-line bg-panel-2 px-3 py-2 text-[10.5px] leading-relaxed text-dim2"
+          class="rounded-[calc(10px*var(--gw-radius-scale))] border border-line bg-panel-2 px-3 py-2 text-[10.5px] leading-relaxed text-dim2"
           data-testid="qq-passive-hint"
         >
           {{ t("remoteAssist.qq.passiveHint") }}
         </p>
         <p
           v-else-if="props.channel === 'discord'"
-          class="rounded-[10px] border border-line bg-panel-2 px-3 py-2 text-[10.5px] leading-relaxed text-dim2"
+          class="rounded-[calc(10px*var(--gw-radius-scale))] border border-line bg-panel-2 px-3 py-2 text-[10.5px] leading-relaxed text-dim2"
           data-testid="discord-dm-hint"
         >
           {{ t("remoteAssist.discord.dmOnlyHint") }}
         </p>
         <p
           v-else-if="props.channel === 'wecom'"
-          class="rounded-[10px] border border-line bg-panel-2 px-3 py-2 text-[10.5px] leading-relaxed text-dim2"
+          class="rounded-[calc(10px*var(--gw-radius-scale))] border border-line bg-panel-2 px-3 py-2 text-[10.5px] leading-relaxed text-dim2"
           data-testid="wecom-takeover-hint"
         >
           {{ t("remoteAssist.wecom.takenOverHint") }}
@@ -281,12 +285,14 @@ const inputClass =
             <p class="text-[10.5px] leading-relaxed text-dim2">{{ t(tokenFields.hintKey) }}</p>
             <!-- Discord 的 token 只能从开发者门户拿，把地址摆在这里省一次切换 -->
             <div v-if="props.channel === 'discord'" class="flex items-center gap-1.5">
-              <code class="min-w-0 flex-1 truncate rounded-[7px] bg-panel-2 px-2 py-1 font-mono text-[10.5px] text-dim2">
+              <code
+                class="min-w-0 flex-1 truncate rounded-[calc(7px*var(--gw-radius-scale))] bg-panel-2 px-2 py-1 font-mono text-[10.5px] text-dim2"
+              >
                 {{ DISCORD_PORTAL_URL }}
               </code>
               <button
                 type="button"
-                class="h-7 shrink-0 cursor-pointer rounded-[7px] border border-line bg-panel px-2.5 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
+                class="h-7 shrink-0 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] border border-line bg-panel px-2.5 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
                 data-testid="discord-copy-portal"
                 @click="copyPortalUrl"
               >
@@ -297,12 +303,14 @@ const inputClass =
 
           <template v-else>
             <div v-if="props.channel === 'dingtalk'" class="flex items-center gap-1.5">
-              <code class="min-w-0 flex-1 truncate rounded-[7px] bg-panel-2 px-2 py-1 font-mono text-[10.5px] text-dim2">
+              <code
+                class="min-w-0 flex-1 truncate rounded-[calc(7px*var(--gw-radius-scale))] bg-panel-2 px-2 py-1 font-mono text-[10.5px] text-dim2"
+              >
                 {{ DINGTALK_CONSOLE_URL }}
               </code>
               <button
                 type="button"
-                class="h-7 shrink-0 cursor-pointer rounded-[7px] border border-line bg-panel px-2.5 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
+                class="h-7 shrink-0 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] border border-line bg-panel px-2.5 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
                 data-testid="dingtalk-copy-console"
                 @click="copyConsoleUrl"
               >
@@ -339,7 +347,7 @@ const inputClass =
           </p>
           <button
             type="button"
-            class="h-7 w-fit cursor-pointer rounded-[7px] bg-accent px-3 text-[11.5px] font-medium text-accent-ink transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+            class="h-7 w-fit cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] bg-accent px-3 text-[11.5px] font-medium text-accent-ink transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
             :disabled="!drafts[props.channel].id.trim()"
             :data-testid="`${props.channel}-save`"
             @click="void saveCredentials(props.channel)"

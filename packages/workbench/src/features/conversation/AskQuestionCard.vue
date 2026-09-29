@@ -90,7 +90,7 @@ function submit(): void {
     v-if="questions.length"
     data-testid="ask-card"
     :data-settled="settled"
-    class="flex flex-col gap-2.5 rounded-[14px] border border-line bg-panel-2 p-3"
+    class="flex flex-col gap-2.5 rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel-2 p-3"
   >
     <div class="flex items-center justify-between gap-2">
       <span class="flex min-w-0 items-center gap-1.5 text-[12px] font-medium text-foreground">
@@ -132,14 +132,14 @@ function submit(): void {
             :data-testid="`ask-option-${index}`"
             :aria-pressed="isPicked(index, option.label)"
             :disabled="busy"
-            class="flex cursor-pointer items-start gap-2 rounded-[8px] border px-2 py-1.5 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-50"
+            class="flex cursor-pointer items-start gap-2 rounded-[calc(8px*var(--gw-radius-scale))] border px-2 py-1.5 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-50"
             :class="isPicked(index, option.label) ? 'border-cyan/60 bg-cyan/10' : 'border-line bg-panel hover:border-line-2'"
             @click="pick(index, option.label)"
           >
             <span
               class="mt-[3px] grid size-3.5 shrink-0 place-items-center border"
               :class="[
-                question.multiSelect ? 'rounded-[3px]' : 'rounded-full',
+                question.multiSelect ? 'rounded-[calc(3px*var(--gw-radius-scale))]' : 'rounded-full',
                 isPicked(index, option.label) ? 'border-cyan bg-cyan text-accent-ink' : 'border-line-2',
               ]"
             >
@@ -157,7 +157,7 @@ function submit(): void {
         <!-- 「其他」自由输入：选项并非穷举，用户常要自行补充。
              焦点反馈做在这个 label 上（内层 input 的 outline-none 生效后不再自画描边）。 -->
         <label
-          class="flex items-center gap-2 rounded-[8px] border border-line bg-panel px-2 py-1 transition-colors focus-within:border-cyan/50"
+          class="flex items-center gap-2 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel px-2 py-1 transition-colors focus-within:border-cyan/50"
         >
           <Icon name="plus" :size="11" class="shrink-0 text-dim2" />
           <input
@@ -178,7 +178,7 @@ function submit(): void {
           type="button"
           data-testid="ask-submit"
           :disabled="busy || !allAnswered"
-          class="flex h-7 cursor-pointer items-center gap-1.5 rounded-[8px] bg-accent px-3 text-[11.5px] font-medium text-accent-ink transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40"
+          class="flex h-7 cursor-pointer items-center gap-1.5 rounded-[calc(8px*var(--gw-radius-scale))] bg-accent px-3 text-[11.5px] font-medium text-accent-ink transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40"
           @click="submit"
         >
           <Icon name="send-one" :size="12" />

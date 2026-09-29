@@ -88,7 +88,7 @@ async function runAction(actionId: string): Promise<void> {
       <Hint :text="'在桌面弹出透明悬浮窗（' + (props.windowDecl?.width ?? 0) + '×' + (props.windowDecl?.height ?? 0) + '）'" multiline>
         <button
           type="button"
-          class="h-6 cursor-pointer rounded-[6px] border border-dashed border-line-2 px-2.5 text-[10px] text-dim2 transition-colors hover:border-mint/40 hover:text-mint"
+          class="h-6 cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] border border-dashed border-line-2 px-2.5 text-[10px] text-dim2 transition-colors hover:border-mint/40 hover:text-mint"
           :disabled="pluginWindowBusy"
           :data-testid="`plugin-window-open-${props.pluginId}`"
           @click="openFloatingWindow"
@@ -103,7 +103,7 @@ async function runAction(actionId: string): Promise<void> {
         v-for="action in contribution.actions"
         :key="action.id"
         type="button"
-        class="h-6 cursor-pointer rounded-[6px] border border-line bg-panel-2 px-2 text-[10px] text-dim transition-colors hover:border-accent/40 hover:text-accent disabled:opacity-40"
+        class="h-6 cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 text-[10px] text-dim transition-colors hover:border-accent/40 hover:text-accent disabled:opacity-40"
         :disabled="busyAction === action.id"
         :data-testid="`region-action-${contribution.id}-${action.id}`"
         @click="runAction(action.id)"

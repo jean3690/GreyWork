@@ -39,12 +39,12 @@ const TONE_BY_KIND: Record<NoticeKind, string> = {
     <div
       v-for="notice in notices.list"
       :key="notice.id"
-      class="gw-notice-in pointer-events-auto rounded-[12px] border border-line bg-popover p-3 shadow-lg"
+      class="gw-notice-in pointer-events-auto rounded-[calc(12px*var(--gw-radius-scale))] border border-line bg-popover p-3 shadow-lg"
       :role="notice.kind === 'error' || notice.kind === 'warning' ? 'alert' : 'status'"
       :data-testid="`notice-${notice.kind}`"
     >
       <div class="flex items-start gap-2.5">
-        <span class="grid size-7 shrink-0 place-items-center rounded-[8px]" :class="TONE_BY_KIND[notice.kind]">
+        <span class="grid size-7 shrink-0 place-items-center rounded-[calc(8px*var(--gw-radius-scale))]" :class="TONE_BY_KIND[notice.kind]">
           <Icon :name="ICON_BY_KIND[notice.kind]" :size="14" />
         </span>
         <div class="min-w-0 flex-1">
@@ -56,7 +56,7 @@ const TONE_BY_KIND: Record<NoticeKind, string> = {
           <button
             v-if="notice.action"
             type="button"
-            class="mt-1.5 cursor-pointer rounded-[5px] text-[11px] text-cyan underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+            class="mt-1.5 cursor-pointer rounded-[calc(5px*var(--gw-radius-scale))] text-[11px] text-cyan underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
             :data-testid="`notice-action-${notice.id}`"
             @click="
               notice.action.run();
@@ -69,7 +69,7 @@ const TONE_BY_KIND: Record<NoticeKind, string> = {
         <Hint :text="t('notice.dismiss')">
           <button
             type="button"
-            class="grid size-6 shrink-0 cursor-pointer place-items-center rounded-[6px] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+            class="grid size-6 shrink-0 cursor-pointer place-items-center rounded-[calc(6px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
             :aria-label="t('notice.dismiss')"
             @click="notices.dismiss(notice.id)"
           >

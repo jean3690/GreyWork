@@ -494,7 +494,7 @@ onMounted(() => {
           <button
             type="button"
             data-testid="file-tree-bind"
-            class="h-5 shrink-0 cursor-pointer rounded-[5px] px-1.5 text-[10.5px] transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+            class="h-5 shrink-0 cursor-pointer rounded-[calc(5px*var(--gw-radius-scale))] px-1.5 text-[10.5px] transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
             :class="tree.bound ? 'text-dim2 hover:bg-panel hover:text-foreground' : 'bg-cyan/15 text-cyan hover:bg-cyan/25'"
             :disabled="binding"
             @click="bind()"
@@ -505,7 +505,7 @@ onMounted(() => {
         <button
           type="button"
           data-testid="file-tree-refresh"
-          class="grid size-[24px] shrink-0 cursor-pointer place-items-center rounded-[5px] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          class="grid size-[24px] shrink-0 cursor-pointer place-items-center rounded-[calc(5px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
           :aria-label="t('contextMenu.fileTree.refresh')"
           @click="tree.refresh()"
         >
@@ -555,7 +555,7 @@ onMounted(() => {
               v-model="renameDraft"
               type="text"
               data-testid="file-tree-rename"
-              class="h-[26px] w-full rounded-[4px] border border-cyan bg-panel-2 pe-2 text-[12px] text-foreground outline-none"
+              class="h-[26px] w-full rounded-[calc(4px*var(--gw-radius-scale))] border border-cyan bg-panel-2 pe-2 text-[12px] text-foreground outline-none"
               :style="{ paddingInlineStart: `${8 + slot.row.depth * 12}px` }"
               @keydown.enter.prevent="commitRename(slot.row.node)"
               @keydown.esc.prevent="cancelRename()"

@@ -143,7 +143,7 @@ function confirmReset(): void {
 
 <template>
   <div class="flex flex-col gap-4">
-    <div class="rounded-[14px] border border-line bg-panel p-4">
+    <div class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-4">
       <div class="mb-1 text-[13px] font-medium text-foreground">MCP 服务器</div>
       <p class="mb-3 text-[11px] leading-relaxed text-dim2">
         启用的服务器会在建会话时声明给 agent，由 <b>agent 自己连接</b>并把工具并入它的工具面；宿主不代理工具调用。 HTTP / SSE 需要后端在
@@ -152,7 +152,7 @@ function confirmReset(): void {
 
       <div v-if="settings.mcpServers.length === 0" class="text-[12px] text-dim2">还没有声明任何 MCP 服务器。</div>
       <div v-else class="flex flex-col gap-2">
-        <div v-for="entry in settings.mcpServers" :key="entry.id" class="rounded-[10px] bg-panel-2 p-2.5">
+        <div v-for="entry in settings.mcpServers" :key="entry.id" class="rounded-[calc(10px*var(--gw-radius-scale))] bg-panel-2 p-2.5">
           <div class="flex items-center gap-2">
             <span class="min-w-0 flex-1 truncate text-[12px] text-foreground">{{ entry.name }}</span>
             <span class="shrink-0 rounded-full border border-line px-1.5 text-[10px] text-dim2">
@@ -176,7 +176,7 @@ function confirmReset(): void {
             <Hint :text="entry.transport === 'sse' ? 'SSE 需由 agent 建立长连接，宿主不代为探活' : null">
               <button
                 type="button"
-                class="rounded-[8px] border border-line px-2 py-1 text-[11px] text-dim transition-colors hover:text-foreground disabled:opacity-50 aria-disabled:opacity-50"
+                class="rounded-[calc(8px*var(--gw-radius-scale))] border border-line px-2 py-1 text-[11px] text-dim transition-colors hover:text-foreground disabled:opacity-50 aria-disabled:opacity-50"
                 :disabled="Boolean(mcpProbing[entry.id])"
                 :aria-disabled="entry.transport === 'sse' || undefined"
                 @click="testMcpServer(entry)"
@@ -186,14 +186,14 @@ function confirmReset(): void {
             </Hint>
             <button
               type="button"
-              class="rounded-[8px] border border-line px-2 py-1 text-[11px] text-dim transition-colors hover:text-foreground"
+              class="rounded-[calc(8px*var(--gw-radius-scale))] border border-line px-2 py-1 text-[11px] text-dim transition-colors hover:text-foreground"
               @click="openEdit(entry)"
             >
               编辑
             </button>
             <button
               type="button"
-              class="rounded-[8px] border border-line px-2 py-1 text-[11px] text-dim transition-colors hover:text-destructive"
+              class="rounded-[calc(8px*var(--gw-radius-scale))] border border-line px-2 py-1 text-[11px] text-dim transition-colors hover:text-destructive"
               @click="deleteTarget = entry"
             >
               删除
@@ -215,28 +215,28 @@ function confirmReset(): void {
       <div class="mt-3 flex flex-wrap gap-2">
         <button
           type="button"
-          class="h-6 cursor-pointer rounded-[6px] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
+          class="h-6 cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
           @click="openAdd"
         >
           ＋ 添加服务器
         </button>
         <button
           type="button"
-          class="h-6 cursor-pointer rounded-[6px] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
+          class="h-6 cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
           @click="registryOpen = true"
         >
           从官方 Registry 添加
         </button>
         <button
           type="button"
-          class="h-6 cursor-pointer rounded-[6px] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
+          class="h-6 cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
           @click="jsonOpen = true"
         >
           JSON 配置
         </button>
         <button
           type="button"
-          class="h-6 cursor-pointer rounded-[6px] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-destructive"
+          class="h-6 cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-destructive"
           @click="resetTarget = true"
         >
           恢复默认
@@ -244,7 +244,7 @@ function confirmReset(): void {
         <button
           v-if="settings.mcpServers.some((server) => !server.enabled)"
           type="button"
-          class="h-6 cursor-pointer rounded-[6px] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
+          class="h-6 cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
           @click="settings.setAllMcpServersEnabled(true)"
         >
           全部启用
@@ -252,7 +252,7 @@ function confirmReset(): void {
         <button
           v-if="settings.mcpServers.some((server) => server.enabled)"
           type="button"
-          class="h-6 cursor-pointer rounded-[6px] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
+          class="h-6 cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
           @click="settings.setAllMcpServersEnabled(false)"
         >
           全部停用
@@ -260,7 +260,10 @@ function confirmReset(): void {
       </div>
     </div>
 
-    <div v-if="agent.acpMcpServers.length > 0 || agent.acpMcpSkipped.length > 0" class="rounded-[14px] border border-line bg-panel p-4">
+    <div
+      v-if="agent.acpMcpServers.length > 0 || agent.acpMcpSkipped.length > 0"
+      class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-4"
+    >
       <div class="mb-2 text-[13px] font-medium text-foreground">上次建会话的声明结果</div>
       <p v-if="agent.acpMcpServers.length > 0" class="text-[11px] text-dim">已声明：{{ agent.acpMcpServers.join("、") }}</p>
       <p v-for="skip in agent.acpMcpSkipped" :key="skip.name" class="text-[11px] text-destructive">

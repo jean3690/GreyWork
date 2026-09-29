@@ -35,9 +35,12 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  /* 减法派生包 max(0px, …)：--radius 在「无圆角」档是 0，裸减会算出负值。
+   * 负 border-radius 是非法值（浏览器丢弃该声明 → 视觉上恰好也是 0），但那是靠巧合，
+   * 显式夹住才是准的。 */
   --radius-lg: var(--radius);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: max(0px, calc(var(--radius) - 2px));
+  --radius-sm: max(0px, calc(var(--radius) - 4px));
   --radius-xl: calc(var(--radius) + 4px);
 
   /* 字族对齐 tokens.css（Archivo Variable + JetBrains Mono） */
