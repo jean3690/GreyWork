@@ -61,8 +61,6 @@ export interface AttachmentsController {
   /** 拖拽悬停在输入卡上（高亮提示）。 */
   dragging: Ref<boolean>;
   full: ComputedRef<boolean>;
-  /** 输入卡根元素（模板 ref 绑到绑定 `DROPZONE_ATTR` 的那个元素上）。 */
-  attachEl: Ref<HTMLElement | null>;
   pick(): Promise<void>;
   addPaths(paths: readonly string[]): Promise<void>;
   addFiles(files: readonly File[]): Promise<void>;
@@ -119,7 +117,6 @@ export function useAttachmentThumbs(items: () => readonly Attachment[]): Ref<Rec
 export function useAttachments(sessionId: () => string, options: AttachmentsOptions = {}): AttachmentsController {
   const items = ref<Attachment[]>([]);
   const dragging = ref(false);
-  const attachEl = ref<HTMLElement | null>(null);
   const full = computed(() => items.value.length >= ATTACHMENT_LIMITS.maxCount);
 
   /** agent 不收图片：丢掉本次采集到的图片并提示；文本附件不受影响。 */
@@ -251,7 +248,6 @@ export function useAttachments(sessionId: () => string, options: AttachmentsOpti
     items,
     dragging,
     full,
-    attachEl,
     pick,
     addPaths,
     addFiles,

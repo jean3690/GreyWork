@@ -180,7 +180,6 @@ const {
   items: attachmentItems,
   dragging: attachmentDragging,
   full: attachmentsFull,
-  attachEl,
   pick: pickAttachmentFiles,
   onPaste: onComposerPaste,
   onDragOver: onComposerDragOver,
@@ -377,7 +376,6 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
           <PermissionCard />
           <AgentProviderBar />
           <div
-            ref="attachEl"
             data-attachment-dropzone
             data-testid="composer-card"
             class="relative flex w-full flex-col gap-2 rounded-[16px] border bg-panel-2 p-3 shadow-[0_8px_24px_rgba(0,0,0,0.1)] transition-[border-color,box-shadow] focus-within:border-cyan/50 focus-within:shadow-[0_10px_28px_rgba(0,0,0,0.14)]"

@@ -48,7 +48,6 @@ const {
   items: attachmentItems,
   dragging: attachmentDragging,
   full: attachmentsFull,
-  attachEl,
   pick: pickAttachmentFiles,
   onPaste: onComposerPaste,
   onDragOver: onComposerDragOver,
@@ -116,9 +115,11 @@ function onKeydown(event: KeyboardEvent): void {
 
 /* ===== 输入框右键菜单 =====
  * 与对话页的输入框同一套条目（reka 的 trigger 会拦掉原生菜单，不补就一个编辑动作都没有）。
- * 区域挂在本页根 `<section>` 上：**不能**包输入卡那一层 —— reka 的 asChild 会丢弃子元素的
- * ref（`attachEl` 变 null，拖放附件随之失效）。页头 / 空白处返回空表，抑制原生菜单
- * （与对话页一致）。
+ * 区域挂在本页根 `<section>` 上：**不能**包输入卡那一层。这条约束最初的理由是 reka 的
+ * asChild 会丢弃子元素的 ref（当时拖放命中判定依赖输入卡上的模板 ref `attachEl`）。
+ * 如今判定走 `elementFromPoint().closest(DROPZONE_ATTR)`、不再依赖那个 ref —— 所以**也许**
+ * 已经能放宽，但没实测过 asChild 会不会连 `data-attachment-dropzone` 一起吃掉，先维持原状。
+ * 页头 / 空白处返回空表，抑制原生菜单（与对话页一致）。
  */
 function composerActions(): ComposerMenuActions {
   const el = textareaEl.value;
@@ -149,7 +150,6 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
         <div class="flex w-full flex-col gap-2.5">
           <AgentProviderBar />
           <div
-            ref="attachEl"
             data-attachment-dropzone
             data-testid="composer-card"
             class="relative flex w-full flex-col gap-2 rounded-[16px] border bg-panel-2 p-3 shadow-[0_10px_32px_rgba(0,0,0,0.12)] transition-[border-color,box-shadow] focus-within:border-cyan/50 focus-within:shadow-[0_12px_36px_rgba(0,0,0,0.16)]"

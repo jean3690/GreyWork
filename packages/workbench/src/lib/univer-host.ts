@@ -20,7 +20,6 @@ export interface UniverInstance {
 export type UniverBoot = (container: HTMLElement, bytes: Uint8Array) => Promise<UniverInstance>;
 
 export interface UniverHost {
-  host: Ref<HTMLElement | null>;
   loading: Ref<boolean>;
   /** 读文件失败。 */
   error: Ref<string | null>;
@@ -28,9 +27,16 @@ export interface UniverHost {
   bootError: Ref<string | null>;
 }
 
-export function useUniverHost(tab: Ref<PreviewTab>, boot: UniverBoot): UniverHost {
+/**
+ * Univer 预览的生命周期（建实例 / 换实例 / 销毁）。
+ *
+ * `host` 由**调用方**持有并传进来（SheetViewer 的模板里 `ref="host"` 把它绑到挂载容器）。
+ * 元素 ref 天生属于「模板在自己组件里」的那一方；让 composable 自己造一个再交回去，
+ * 调用方就只是为了模板绑定去持有一个脚本变量 —— 而 vue-tsc 3 的未使用检查会把
+ * 「只被模板字符串引用」的变量判成死代码。
+ */
+export function useUniverHost(host: Ref<HTMLElement | null>, tab: Ref<PreviewTab>, boot: UniverBoot): UniverHost {
   const { data, loading, error } = usePreviewBinary(tab);
-  const host = ref<HTMLElement | null>(null);
   const bootError = ref<string | null>(null);
 
   let instance: UniverInstance | null = null;
@@ -72,7 +78,7 @@ export function useUniverHost(tab: Ref<PreviewTab>, boot: UniverBoot): UniverHos
     destroy();
   });
 
-  return { host, loading, error, bootError };
+  return { loading, error, bootError };
 }
 
 /**

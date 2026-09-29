@@ -91,7 +91,9 @@ let originalBytes: Uint8Array | null = null;
 /** 有未保存改动（Univer 里改过格子）。外壳据此显示脏点 / 启用保存。 */
 const dirty = ref(false);
 
-const { host, loading, error, bootError } = useUniverHost(toRef(props, "tab"), async (container, bytes) => {
+/** Univer 挂载容器：模板里 `ref="host"` 绑它，生命周期由下面的 composable 管。 */
+const host = ref<HTMLElement | null>(null);
+const { loading, error, bootError } = useUniverHost(host, toRef(props, "tab"), async (container, bytes) => {
   const [
     { Univer, UniverInstanceType, ThemeService, ICommandService, CommandType },
     { UniverDocsPlugin },
