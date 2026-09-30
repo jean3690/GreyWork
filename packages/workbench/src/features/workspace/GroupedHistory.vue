@@ -194,7 +194,7 @@ onMounted(() => {
       </Hint>
     </div>
 
-    <label class="flex h-7 shrink-0 items-center gap-1.5 rounded-[calc(8px*var(--gw-radius-scale))] border border-line-2 bg-panel px-2">
+    <label class="flex h-6 shrink-0 items-center gap-1.5 rounded-[calc(8px*var(--gw-radius-scale))] border border-line-2 bg-panel px-2">
       <Icon name="search" :size="13" class="text-dim2" />
       <input
         v-model="query"
