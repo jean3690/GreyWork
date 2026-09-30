@@ -30,7 +30,10 @@ greywork-host = { path = "../../../crates/greywork-host" }
 # tray-icon: 系统托盘（TrayIconBuilder / Menu）在这个 feature 之后才存在。
 # 不开 image-png：托盘图标直接取 app.default_window_icon()（构建期已解码成 RGBA），
 # 只有从字节流 Image::from_bytes 载图标才需要它。
-tauri = { version = "2", features = ["macos-private-api", "tray-icon"] }
+# unstable: 内嵌浏览器用主窗口里的 child webview（`Window::add_child` +
+# `WebviewBuilder`），这两个 API 在 Tauri 2.x 全挂在 `unstable` feature 后面
+# （见 browser.rs 顶部）。与 macos-private-api / tray-icon 无冲突，是相加的。
+tauri = { version = "2", features = ["macos-private-api", "tray-icon", "unstable"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 # 单实例守卫：重复启动（双击图标 / 快捷方式）不再起第二个进程，而是把已有窗口叫回来。
@@ -52,3 +55,12 @@ percent-encoding = "2"
 [dev-dependencies]
 # 集成测试（tests/*.rs）直接驱动 ACP 客户端，故显式依赖。
 agent-client-protocol = "2.0.0"
+
+# Linux 上内嵌浏览器（browser_linux.rs）要自己建 wry webview：Tauri 的 `Window::add_child`
+# 在这边把子 webview 塞进主窗口默认的 GtkBox（`build_gtk(default_vbox)`），坐标被 GTK 布局
+# 吃掉、`set_bounds` 也变成空操作（`is_in_fixed_parent = false`）。只有把 webview 建进
+# `gtk::Fixed` 才能按坐标内嵌 —— 这是 wry README 明确推荐的做法。
+# 版本与 tauri 内部传递依赖一致（Cargo.lock 已锁 wry 0.57.0 / gtk 0.18.2），不引入新版本。
+[target.'cfg(target_os = "linux")'.dependencies]
+wry = "0.57"
+gtk = "0.18"

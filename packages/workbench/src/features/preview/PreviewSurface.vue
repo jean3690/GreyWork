@@ -48,6 +48,7 @@ const VIEWERS: Record<ViewerKind, Component> = {
   "legacy-office": makeViewer(() => import("@/features/preview/LegacyOfficeViewer.vue")),
   diff: makeViewer(() => import("@/features/preview/DiffViewer.vue")),
   web: makeViewer(() => import("@/features/preview/WebPageViewer.vue")),
+  browser: makeViewer(() => import("@/features/preview/BrowserViewer.vue")),
 };
 
 /** 云端 Office viewer：走 `office_preview_open` 让宿主上传取件，再用 iframe 内嵌。 */

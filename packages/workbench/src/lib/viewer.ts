@@ -23,6 +23,7 @@ export type ViewerKind =
   | "3d"
   | "gis"
   | "web"
+  | "browser"
   | "raw"
   | "legacy-office";
 

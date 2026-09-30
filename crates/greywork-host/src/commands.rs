@@ -266,6 +266,28 @@ command_table! {
     { "confirm_exit", auth: Auth::Required, desktop: true, binary: false,
         args: UnitArgs, run: |_ctx, _a| async move { Err::<Json<()>, String>("仅桌面端可用".into()) } }
 
+    // ---- browser（桌面专属） ----
+    // 内嵌浏览器是主窗口里的 child webview（需 cargo `unstable` feature），
+    // headless 服务端没有对应物；实现全在 apps/desktop/src-tauri/src/browser.rs。
+    { "browser_open", auth: Auth::Required, desktop: true, binary: false,
+        args: UnitArgs, run: |_ctx, _a| async move { Err::<Json<()>, String>("仅桌面端可用".into()) } }
+    { "browser_set_bounds", auth: Auth::Required, desktop: true, binary: false,
+        args: UnitArgs, run: |_ctx, _a| async move { Err::<Json<()>, String>("仅桌面端可用".into()) } }
+    { "browser_set_visible", auth: Auth::Required, desktop: true, binary: false,
+        args: UnitArgs, run: |_ctx, _a| async move { Err::<Json<()>, String>("仅桌面端可用".into()) } }
+    { "browser_navigate", auth: Auth::Required, desktop: true, binary: false,
+        args: UnitArgs, run: |_ctx, _a| async move { Err::<Json<()>, String>("仅桌面端可用".into()) } }
+    { "browser_back", auth: Auth::Required, desktop: true, binary: false,
+        args: UnitArgs, run: |_ctx, _a| async move { Err::<Json<()>, String>("仅桌面端可用".into()) } }
+    { "browser_forward", auth: Auth::Required, desktop: true, binary: false,
+        args: UnitArgs, run: |_ctx, _a| async move { Err::<Json<()>, String>("仅桌面端可用".into()) } }
+    { "browser_reload", auth: Auth::Required, desktop: true, binary: false,
+        args: UnitArgs, run: |_ctx, _a| async move { Err::<Json<()>, String>("仅桌面端可用".into()) } }
+    { "browser_stop", auth: Auth::Required, desktop: true, binary: false,
+        args: UnitArgs, run: |_ctx, _a| async move { Err::<Json<()>, String>("仅桌面端可用".into()) } }
+    { "browser_close", auth: Auth::Required, desktop: true, binary: false,
+        args: UnitArgs, run: |_ctx, _a| async move { Err::<Json<()>, String>("仅桌面端可用".into()) } }
+
     // ---- acp_host ----
     { "acp_permission_respond", auth: Auth::Required, desktop: false, binary: false,
         args: acp_host::PermissionRespondArgs,
@@ -783,6 +805,15 @@ mod tests {
 
     /// 桌面专属命令集合（与计划表一致；漂移测试的另一半在桌面壳）。
     const DESKTOP_ONLY: &[&str] = &[
+        "browser_back",
+        "browser_close",
+        "browser_forward",
+        "browser_navigate",
+        "browser_open",
+        "browser_reload",
+        "browser_set_bounds",
+        "browser_set_visible",
+        "browser_stop",
         "reveal_path",
         "open_path",
         "set_unsaved_changes",
@@ -799,7 +830,7 @@ mod tests {
 
     #[test]
     fn commands_table_shape() {
-        assert_eq!(COMMANDS.len(), 145, "命令总数应为 145");
+        assert_eq!(COMMANDS.len(), 154, "命令总数应为 154");
 
         // 命令名唯一。
         let mut names: Vec<&str> = COMMANDS.iter().map(|c| c.name).collect();

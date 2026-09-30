@@ -39,8 +39,10 @@ export interface SemanticUnit {
  *   入口在 SheetViewer 的表头按钮，不经过本模块）；
  * - `image` / `video` / `3d` / `gis` / `legacy-office`：本来就没有可选文本
  *   （3D 与地图都是 canvas / WebGL）。
+ * - `browser`：内容是原生子 webview，宿主 DOM 里根本没有它的文本 —— 划词层挂上去
+ *   只会盖在 webview 上拦点击。
  */
-const NON_TEXT_KINDS: ReadonlySet<string> = new Set(["xlsx", "image", "video", "3d", "gis", "legacy-office"]);
+const NON_TEXT_KINDS: ReadonlySet<string> = new Set(["xlsx", "image", "video", "3d", "gis", "legacy-office", "browser"]);
 
 export function isTextSelectableKind(kind: string): boolean {
   return !NON_TEXT_KINDS.has(kind);

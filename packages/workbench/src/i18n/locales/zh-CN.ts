@@ -204,6 +204,11 @@ export const zhCN = {
     sendToChat: "发送到对话",
     sendToChatDone: "已加入输入卡附件，按发送即可交给 agent。",
     unsupportedRuntime: "网页抓取仅桌面端可用。",
+    modeArticle: "正文",
+    modeBrowser: "浏览器",
+    browserUnsupported: "内嵌浏览器仅桌面端可用。",
+    browserHint: "在预览面板里直接打开网页，可登录、可交互；会话保存在桌面端浏览器数据目录。",
+    open: "打开",
   },
   preview: {
     selection: {
@@ -282,6 +287,16 @@ export const zhCN = {
         renderLabel: "渲染视图",
         sourceLabel: "源码视图",
         title: "HTML 预览",
+      },
+      browser: {
+        addressPlaceholder: "输入网址并回车",
+        back: "后退",
+        forward: "前进",
+        reload: "重新加载",
+        stop: "停止加载",
+        openExternal: "用系统浏览器打开",
+        paused: "网页已暂停（被弹层遮挡）",
+        stuck: "页面迟迟没有加载完，可以改用系统浏览器打开。",
       },
       legacyOffice: {
         actualFormat: "这个文件其实是 .{format}",

@@ -206,6 +206,12 @@ export const enUS: MessageSchema = {
     sendToChat: "Send to chat",
     sendToChatDone: "Added to the composer attachments — press Send to hand it to the agent.",
     unsupportedRuntime: "Web fetch is only available in the desktop app.",
+    modeArticle: "Article",
+    modeBrowser: "Browser",
+    browserUnsupported: "The embedded browser is only available in the desktop app.",
+    browserHint:
+      "Opens the page right in the preview panel — you can sign in and interact; sessions persist in the desktop browser profile.",
+    open: "Open",
   },
   preview: {
     selection: {
@@ -284,6 +290,16 @@ export const enUS: MessageSchema = {
         renderLabel: "Rendered view",
         sourceLabel: "Source view",
         title: "HTML preview",
+      },
+      browser: {
+        addressPlaceholder: "Enter a URL and press Enter",
+        back: "Back",
+        forward: "Forward",
+        reload: "Reload",
+        stop: "Stop loading",
+        openExternal: "Open in system browser",
+        paused: "Page paused (a dialog is overlaying it)",
+        stuck: "The page seems stuck loading — try opening it in the system browser instead.",
       },
       legacyOffice: {
         actualFormat: "This file is actually .{format}",

@@ -148,6 +148,62 @@ export const usePreviewStore = defineStore("preview", () => {
     return tab.id;
   }
 
+  /** 浏览器 tab 的默认名：取主机名（URL 解析失败就退回原文）。 */
+  function browserTabName(url: string): string {
+    try {
+      return new URL(url).hostname || url;
+    } catch {
+      return url;
+    }
+  }
+
+  /**
+   * 打开（或聚焦）内嵌浏览器标签；返回 tab id。
+   *
+   * **单实例约束**（由宿主的子 webview 决定 —— 全应用只有 `gw-browser` 一个）：
+   * 已有 browser tab 就**原地替换**路径并复用同一个 id —— `PreviewSurface` 的
+   * `:key="tab.id"` 因此保持稳定，viewer 不重建，子 webview 里的会话 / 滚动得以保留；
+   * 换地址由 viewer watch `tab.path` 自己驱动导航。
+   *
+   * 刻意**不走 `open()`**：它按 `path+source` 去重，而 browser tab 与「网页正文」tab
+   * 的 source 都是 `web` —— 同一 URL 先开过正文再开浏览器就会命中正文 tab，kind
+   * 被悄悄吞掉。
+   */
+  function openBrowser(url: string, name?: string): string {
+    const existing = tabs.value.find((tab) => tab.kind === "browser");
+    if (existing) {
+      if (existing.path !== url) {
+        tabs.value = tabs.value.map((tab) => (tab.id === existing.id ? { ...tab, path: url, name: name ?? existing.name } : tab));
+      }
+      activeId.value = existing.id;
+      if (collapsed.value) setCollapsed(false);
+      return existing.id;
+    }
+    const tab: PreviewTab = {
+      id: nextTabId(),
+      path: url,
+      name: name ?? browserTabName(url),
+      kind: "browser",
+      source: "web",
+      revision: 0,
+    };
+    tabs.value = [...tabs.value, tab];
+    while (tabs.value.length > MAX_PREVIEW_TABS) {
+      const victim = tabs.value.find((candidate) => candidate.id !== tab.id);
+      if (!victim) break;
+      tabs.value = tabs.value.filter((candidate) => candidate.id !== victim.id);
+    }
+    activeId.value = tab.id;
+    if (collapsed.value) setCollapsed(false);
+    return tab.id;
+  }
+
+  /** 用宿主回传的页面标题更新 tab 名（地址不变，不动 revision）。 */
+  function setName(id: string, name: string): void {
+    if (!name) return;
+    tabs.value = tabs.value.map((tab) => (tab.id === id ? { ...tab, name } : tab));
+  }
+
   /** 就地重载某路径的 tab（产物被追加/覆盖时）；未打开则不做任何事，不偷偷弹面板。 */
   function reload(path: string): void {
     tabs.value = tabs.value.map((tab) => (tab.path === path ? { ...tab, revision: tab.revision + 1 } : tab));
@@ -318,6 +374,8 @@ export const usePreviewStore = defineStore("preview", () => {
     available,
     effectiveWidthPx,
     open,
+    openBrowser,
+    setName,
     reload,
     setMode,
     attachDiskPath,

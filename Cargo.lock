@@ -1997,6 +1997,7 @@ version = "0.5.0"
 dependencies = [
  "agent-client-protocol",
  "greywork-host",
+ "gtk",
  "http-range",
  "percent-encoding",
  "serde",
@@ -2010,6 +2011,7 @@ dependencies = [
  "tauri-plugin-single-instance",
  "tauri-plugin-window-state",
  "tokio",
+ "wry",
 ]
 
 [[package]]

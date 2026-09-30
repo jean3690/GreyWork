@@ -10,8 +10,14 @@
 // `acp_host` / `channel_media` / `wechat` / `dingtalk` / `feishu` / `telegram` /
 // `discord` / `qq` / `wecom` / `office`。
 // 仍留桌面（真·宿主专属）：`sys` / `tray` / `notify` / `close_guard` / `plugin_window` /
-// `host`（`TauriHost` 实现）。
+// `browser`（子 webview，需 cargo `unstable` feature）/ `browser_linux`（Linux 上子 webview
+// 得自己建进 `gtk::Fixed`，原因见该文件顶部）/ `host`（`TauriHost` 实现）。
 mod acp_host;
+mod browser;
+// Linux 专属：Tauri 的 `Window::add_child` 在 GTK 上会把子 webview 塞进主窗口默认 GtkBox，
+// 槽位矩形落不下去，所以这边绕开它、用 wry 直建（详见 browser_linux.rs）。
+#[cfg(target_os = "linux")]
+mod browser_linux;
 mod bundled_skills;
 mod channel_media;
 mod close_guard;
@@ -122,6 +128,7 @@ pub fn run() {
         .manage(wecom::WecomHost::default())
         .manage(tray::TrayState::default())
         .manage(close_guard::CloseGuard::default())
+        .manage(browser::BrowserState::default())
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) = event {
                 if let Some(access) = window.try_state::<workspace_fs::WorkspaceFsAccess>() {
@@ -340,6 +347,15 @@ pub fn run() {
             tray::close_main_window,
             update::check_update,
             update::open_external,
+            browser::browser_open,
+            browser::browser_set_bounds,
+            browser::browser_set_visible,
+            browser::browser_navigate,
+            browser::browser_back,
+            browser::browser_forward,
+            browser::browser_reload,
+            browser::browser_stop,
+            browser::browser_close,
         ])
         // 走 build + App::run(callback) 而不是 Builder::run(context)：只有后者能拿到
         // 事件循环回调，macOS 的 Reopen 需要它。
@@ -528,6 +544,15 @@ mod drift_tests {
         assert_eq!(
             desktop_only,
             vec![
+                "browser_back",
+                "browser_close",
+                "browser_forward",
+                "browser_navigate",
+                "browser_open",
+                "browser_reload",
+                "browser_set_bounds",
+                "browser_set_visible",
+                "browser_stop",
                 "close_main_window",
                 "confirm_exit",
                 "fs_pick_files",
