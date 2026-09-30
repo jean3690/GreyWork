@@ -183,13 +183,16 @@ async fn list_commands_exposes_metadata() {
     assert_eq!(status, StatusCode::OK);
     let value = json_body(&body);
     let commands = value.as_array().unwrap();
-    assert_eq!(commands.len(), 141, "命令总数应与共享表一致");
+    assert_eq!(commands.len(), 142, "命令总数应与共享表一致");
     let binary: Vec<&str> = commands
         .iter()
         .filter(|meta| meta["binary"] == true)
         .map(|meta| meta["name"].as_str().unwrap())
         .collect();
-    assert_eq!(binary, vec!["channel_take_media", "fs_read_binary"]);
+    assert_eq!(
+        binary,
+        vec!["channel_take_media", "fs_read_binary", "fs_read_media"]
+    );
 
     // available 如实回传「本宿主可不可调」：桌面专属与黑名单都是 false，
     // 普通命令是 true —— 渲染端据此灰显，而不是调了 403 后自己踩坑。

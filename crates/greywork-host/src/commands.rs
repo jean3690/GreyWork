@@ -568,6 +568,9 @@ command_table! {
     { "fs_read_binary", auth: Auth::Required, desktop: false, binary: true,
         args: workspace_fs::PathArg,
         run: |ctx, a| async move { workspace_fs::fs_read_binary(&ctx.workspace, a.path).map(Bin) } }
+    { "fs_read_media", auth: Auth::Required, desktop: false, binary: true,
+        args: workspace_fs::MediaArg,
+        run: |ctx, a| async move { workspace_fs::fs_read_media(&ctx.workspace, a.path, a.max_bytes).map(Bin) } }
     { "fs_probe_file", auth: Auth::Required, desktop: false, binary: false,
         args: workspace_fs::PathArg,
         run: |ctx, a| async move { workspace_fs::fs_probe_file(&ctx.workspace, a.path).map(Json) } }
@@ -786,7 +789,7 @@ mod tests {
 
     #[test]
     fn commands_table_shape() {
-        assert_eq!(COMMANDS.len(), 141, "命令总数应为 141");
+        assert_eq!(COMMANDS.len(), 142, "命令总数应为 142");
 
         // 命令名唯一。
         let mut names: Vec<&str> = COMMANDS.iter().map(|c| c.name).collect();
@@ -809,14 +812,17 @@ mod tests {
         expected.sort_unstable();
         assert_eq!(desktop_only, expected, "桌面专属集合必须与计划一致");
 
-        // binary 命令恰 2 条。
+        // binary 命令恰 3 条。
         let mut binary: Vec<&str> = COMMANDS
             .iter()
             .filter(|c| c.binary)
             .map(|c| c.name)
             .collect();
         binary.sort_unstable();
-        assert_eq!(binary, vec!["channel_take_media", "fs_read_binary"]);
+        assert_eq!(
+            binary,
+            vec!["channel_take_media", "fs_read_binary", "fs_read_media"]
+        );
 
         // 桌面专属与 binary 不相交。
         assert!(COMMANDS.iter().all(|c| !(c.desktop_only && c.binary)));

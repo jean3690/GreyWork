@@ -6,6 +6,14 @@ use std::path::{Component, Path, PathBuf};
 
 const MAX_TEXT_BYTES: usize = 10 * 1024 * 1024;
 const MAX_BINARY_BYTES: usize = 20 * 1024 * 1024;
+/// 媒体（视频 / 3D 模型 / GIS 栅格）专用硬顶。
+///
+/// 真实视频与带贴图的模型普遍超过 20MB，按预览口径卡死等于这类文件一律打不开。
+/// **只由 `fs_read_media` 使用** —— `fs_read_binary` 的 20MB 契约另有 `office.rs` 与
+/// 附件通道在依赖，放宽它等于把「谁可以一次分配 128MB」散到所有调用点。
+const MAX_MEDIA_BYTES: usize = 128 * 1024 * 1024;
+/// 调用方没给额度时的默认值：与 `MAX_BINARY_BYTES` 一致，避免「不写 maxBytes 就默默放宽」。
+const DEFAULT_MEDIA_BYTES: usize = MAX_BINARY_BYTES;
 
 #[derive(Debug, Default)]
 struct AuthorizedPathSet {
@@ -582,6 +590,35 @@ pub fn fs_read_binary(access: &WorkspaceFsAccess, path: String) -> Result<Vec<u8
     std::fs::read(&path).map_err(|error| format!("读取文件失败: {error}"))
 }
 
+/// 夹紧调用方给的媒体额度：`None` 走默认 20MB，上限永远由宿主说了算。
+fn media_limit(max_bytes: Option<u64>) -> u64 {
+    max_bytes
+        .unwrap_or(DEFAULT_MEDIA_BYTES as u64)
+        .min(MAX_MEDIA_BYTES as u64)
+}
+
+/// 读媒体文件（视频 / 3D 模型 / GIS），**原始字节**回传，上限见 `MAX_MEDIA_BYTES`。
+///
+/// 与 `fs_read_binary` 分成两条命令而不是给它加参数：那条的 20MB 契约还有 `office.rs`
+/// 与附件通道在依赖，而「能一次分配 128MB」这件事应该只有一个入口，评审时一眼可见。
+/// 超限同样是**报错**而非截断 —— 半截的视频文件在播放器里表现为「格式损坏」，
+/// 那比一句「文件超过 128MB 上限」难排查得多。
+///
+/// 第二步的流式（Range）落地后，这条命令会被整体替换掉。
+pub fn fs_read_media(
+    access: &WorkspaceFsAccess,
+    path: String,
+    max_bytes: Option<u64>,
+) -> Result<Vec<u8>, String> {
+    let path = access.resolve_existing(&path)?;
+    let metadata = std::fs::metadata(&path).map_err(|error| format!("读取元数据失败: {error}"))?;
+    let limit = media_limit(max_bytes);
+    if metadata.len() > limit {
+        return Err(format!("文件超过 {}MB 上限", limit / (1024 * 1024)));
+    }
+    std::fs::read(&path).map_err(|error| format!("读取文件失败: {error}"))
+}
+
 /// 文件探测结果：预览面板据此决定「当文本视图还是二进制占位」以及「能不能就地编辑」。
 ///
 /// 单独一个命令而不是让渲染端嗅探内容，有两个理由：字节在宿主手上（渲染端拿到的
@@ -718,6 +755,16 @@ pub fn fs_list_dir(access: &WorkspaceFsAccess, path: String) -> Result<Vec<DirEn
 #[serde(rename_all = "camelCase")]
 pub struct PathArg {
     pub path: String,
+}
+
+/// 媒体读取入参。`maxBytes` 由渲染端按 kind 给（视频 128MB），缺省即 20MB；
+/// 宿主一律夹紧到 `MAX_MEDIA_BYTES`。
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaArg {
+    pub path: String,
+    #[serde(default)]
+    pub max_bytes: Option<u64>,
 }
 
 /// 写文本文件入参。
@@ -965,6 +1012,32 @@ mod tests {
             .expect("允许读取");
         assert_eq!(std::fs::read(read_path).unwrap(), original);
         assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn media_limit_defaults_to_binary_cap_and_clamps_to_hard_cap() {
+        assert_eq!(media_limit(None), DEFAULT_MEDIA_BYTES as u64);
+        assert_eq!(media_limit(Some(64 * 1024 * 1024)), 64 * 1024 * 1024);
+        // 渲染端报一个荒谬的额度也不能突破硬顶。
+        assert_eq!(media_limit(Some(u64::MAX)), MAX_MEDIA_BYTES as u64);
+    }
+
+    #[test]
+    fn fs_read_media_reads_within_limit_and_reports_over_limit() {
+        let root = temp_dir("media-read");
+        let access = access(&root);
+        let path = root.join("clip.mp4");
+        let bytes: Vec<u8> = vec![0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70];
+        std::fs::write(&path, &bytes).expect("写媒体文件");
+        let raw = path.to_string_lossy().to_string();
+
+        let read = fs_read_media(&access, raw.clone(), Some(64 * 1024 * 1024)).expect("额度内可读");
+        assert_eq!(read, bytes);
+
+        // 额度小于文件：报错并给出人话上限，而不是截断成半截文件。
+        let error = fs_read_media(&access, raw, Some(4)).expect_err("超限应报错");
+        assert!(error.contains("上限"), "错误应说明上限: {error}");
         let _ = std::fs::remove_dir_all(root);
     }
 

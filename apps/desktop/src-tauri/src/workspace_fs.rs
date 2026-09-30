@@ -75,6 +75,20 @@ pub fn fs_read_binary(
     greywork_host::workspace_fs::fs_read_binary(&access, path).map(tauri::ipc::Response::new)
 }
 
+/// 读媒体文件（视频 / 3D 模型 / GIS，**原始字节**回传，宿主硬顶 128MB）。
+///
+/// 与 `fs_read_binary` 分成两条：那条的 20MB 契约另有 office 解析与附件通道在依赖。
+/// `max_bytes` 由渲染端按 kind 给（视频 128MB），宿主一律夹紧到硬顶。
+#[tauri::command]
+pub fn fs_read_media(
+    access: State<'_, WorkspaceFsAccess>,
+    path: String,
+    max_bytes: Option<u64>,
+) -> Result<tauri::ipc::Response, String> {
+    greywork_host::workspace_fs::fs_read_media(&access, path, max_bytes)
+        .map(tauri::ipc::Response::new)
+}
+
 /// 探测文件能否按文本预览 / 编辑（只读前 8KB，不把大文件整个读进来）。
 #[tauri::command]
 pub fn fs_probe_file(
