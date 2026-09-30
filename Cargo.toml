@@ -27,13 +27,21 @@ debug = 1
 # target/debug/incremental 占 33G / 512 个目录，deps 29G）。`debug = 1` 一点没碰到它：
 # cargo 从不回收旧的增量会话目录，每换一个编译单元图就新建一个。
 #
-# 想要那 33G 归零，在下面加一行 `incremental = false`。**这里刻意没加**，因为代价是实打实
-# 的：greywork_host 有 3.4 万行，增量关掉后每次改 Rust 都要全量重编这个 crate。
-# 磁盘紧张时（CI、笔记本、小盘）加上它；日常开发留着增量、用
-# `node scripts/disks-reclaim.mjs cargo --apply` 定期剪枝更划算。
+# 下面 `incremental = false` 把那 33G 归零。代价是实打实的：greywork_host 有 3.4 万行，
+# 增量关掉后每次改 Rust 都要全量重编这个 crate。想换回增量就把这行注释掉，改用
+# `node scripts/disks-reclaim.mjs cargo --apply` 定期剪枝。
 #
 # 为什么会攒这么猛：.husky/pre-push 每次推送（只要动了 Rust）都跑一遍
 # `cargo clippy --all-targets` + `cargo test`，而 clippy / test / build 三者的指纹互不相同，
 # 各自维护一整套增量目录。实测 9-24 一天就生成了 284 个。
 [profile.dev]
-# incremental = false
+incremental = false
+
+# 发布构建：LTO + opt-level 3 + abort + strip，换更小更快的产物。只在 release 生效，
+# dev / 测试不受影响。`panic = "abort"` 关掉 unwind —— 本仓没有任何 `catch_unwind`
+# 依赖它，所以安全。
+[profile.release]
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true
