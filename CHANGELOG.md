@@ -6,6 +6,81 @@
 发版流程：新增条目补进对应版本标题下 → 打 `v*` 标签 → `.github/workflows/release.yml` 会自动从本文件
 抽取该版本条目作为 Release 说明。**不要手改 Release 正文**，改这里。
 
+## [0.6.0] - 2026-09-30
+
+### 新增
+
+- **内嵌浏览器**：预览面板的抓取对话框加「正文 / 浏览器」双模式，浏览器模式把 URL 交给宿主里的
+  原生子 webview —— 可登录、可交互、能访问本地 dev server，会话落在专用的 `browser-profile`
+  目录（与主 webview 存储隔离）。子 webview 渲染的是**不可信远端内容**，故按不可信方隔离：
+  不注册任何 capability、远端 origin 的 IPC 被 Tauri 按 origin 直接拒，`on_navigation` 只放行
+  http/https/about/data/blob，新窗口 / 下载 / 权限请求一律拒。全应用只有 `gw-browser` 一个
+  webview（跟随当前浏览器标签，换 URL 走导航而非重建，会话 / 滚动得以保留）；原生层永远压在
+  主窗口 DOM 之上，检测到弹层就藏起来，避免弹层 / 右键菜单被整个盖住。命令表 145 → 154。
+  Linux 上 Tauri 的 `Window::add_child` 会把子 webview 塞进主窗口默认 GtkBox、槽位坐标被 GTK
+  布局吃掉，故 Linux 走 wry 直建进 `gtk::Fixed`；Windows / macOS 走 Tauri `add_child`
+  （需 cargo `unstable` feature）。
+- **3D 模型预览**（three.js）：glb / gltf 注册成新的 `3d` viewer，走媒体通道并带 `bytes` 偏好
+  （GLTFLoader 要整份字节），额度 64MB。`.gltf` 引用外部 .bin / 贴图时给「导出成自包含 .glb」
+  的出路提示而不是留一个空场景；切 tab / 卸载时逐项 dispose 几何 / 材质 / 贴图，避免显存泄漏。
+- **GIS 矢量预览**（MapLibre GL）：geojson / shp 注册成新的 `gis` viewer，用空 style —— 不挂底图
+  就没有任何外部请求，CSP 一行都不用改；要素按 `geometry-type` 分成点 / 线 / 面三层（一个集合里
+  混着三种几何是常态），视野按数据包围盒自动 fit。shp 顺带读同目录 .prj / .dbf，读不到就降级为
+  只画几何。刻意不收 `.json`（绝大多数是普通数据文件，归到 gis 会让它们失去代码视图）。
+- **视频预览改走流式通道**：新增自定义 URI scheme `gwmedia://`，按 HTTP Range 以 1MB 分片供文件
+  （支持后缀 range，MP4 的 moov atom 在文件尾时必需），授权复用
+  `WorkspaceFsAccess::resolve_existing`、不另建白名单。此前的「整份读进内存再塞 blob URL」对真实
+  视频不成立 —— IPC 传输加同步 `new Blob` 拷贝会冻住渲染进程、WebKit 还要缓冲完整个 blob 才
+  起播（seek 基本失效）。宿主侧新增 `fs_read_media`（128MB 硬上限，超限报错而非截断，半个文件会
+  以「格式损坏」出现、比大小报错难查）；`fs_read_binary` 的 20MB 契约不动。
+- **内置技能机制**：随宿主二进制发布、不联网、不依赖用户配技能源的技能 —— 内容与宿主版本一起走，
+  不会因为市场条目改名 / 下架而失效。`include_str!` 把内容嵌进二进制，`skills_bundled_list` 出
+  目录、`skills_install_bundled` 按 id 写盘，写入复用市场安装的净化路径（抽成共用的
+  `write_skill_snapshot`），不存在第二份会漂移的净化逻辑。首份内置技能 `ffmpeg-media`：ffprobe
+  探测 → 截取 / 转码 / 抽帧 / 拼接 / 压缩 / 提音轨，产物落工作区可被预览层直接打开。插件市场
+  「技能」区与 设置 → 技能 都新增「内置技能」区（未装显示安装、已装显示重新安装，二次确认后落盘）。
+- **ACP 权限卡片全局化**：活跃态权限卡片原先只挂在 `ConversationView` 的输入区，而后台任务 / 远程
+  助手 / 定时任务触发的权限请求、或用户停在引导页 / 团队 / 定时任务页时，界面上没有裁决入口 ——
+  请求只能干等到 120s 超时被自动拒绝。新增 `PermissionPromptHost`，挂在 `Shell` 里、在读全局
+  store 的 `pendingPermission`，任意路由都能看到并裁决。
+- **品牌标识改为圆角方块**：源标识的白底满画布路径加一个 35% 圆角矩形裁切，favicon / 桌面图标 /
+  应用内 `<img>` 都跟着圆、不再依赖使用方自己加 border-radius（各调用点的圆角值此前并不统一）；
+  并按新标识重新生成全部桌面图标（icns / ico / png / Windows Store 全套）。
+
+### 变更
+
+- **引导页输入框收紧**：rows 3 → 2、`min-h` 88 → 60px（默认三行偏高，输入区下方留白明显）；
+  会话搜索框 `h-7` → `h-6`（与同排其它小控件对齐）。两处都只改高度。
+- **发布产物开启 LTO**：`[profile.release]` 加 `lto = true` / `opt-level = 3` / `panic = "abort"` /
+  `strip = true`，换更小更快的发布产物（本仓没有任何 `catch_unwind` 依赖 `panic = "abort"`）。
+  `[profile.dev]` 打开 `incremental = false` —— `target/debug/incremental` 实测占 33G / 512 个
+  目录，而 cargo 从不回收旧的增量会话目录；代价是改 `greywork_host` 要全量重编。顺带修两处笔误：
+  `opt-level = "3"`（字符串非法，cargo 拒绝解析整个 manifest）→ `3`、`trip` → `strip`。
+
+### 修复
+
+- **从托盘退出后下次启动窗口不出现**：`tauri.conf.json` 的主窗口是 `visible: false`（靠
+  window-state 插件 `restore_state()` 里的 `show()` 显示），而插件默认的 `StateFlags::all()`
+  含 VISIBLE —— 「关闭到托盘」退出时窗口是隐藏的，插件把 `visible: false` 写盘，下次启动
+  `should_show = false`、永不 `show()`。改为排除 VISIBLE，并在 `setup` 末尾无条件 `show_main()`
+  兜底（可见性由应用自己管）。
+- **反复双击图标起多个进程**：窗口不出现时用户以为没启动、反复双击，每个进程各起一份托盘 / ACP
+  宿主。引入 `tauri-plugin-single-instance`（插件要求**第一个**注册），第二次启动不再起进程，
+  回调把已有窗口 show + unminimize + focus 叫回来。新增 drift 守卫
+  `window_state_flags_exclude_visible` 钉住「可见性由应用自己管」，有人改回默认就会重新引入 bug。
+- **「关闭即退出」点 × 无反应**：Tauri 只要发现渲染端注册了 `tauri://close-requested` 监听就
+  无条件 `prevent_close()`，把「真的关掉」整个甩给 JS 包装层；而包装层在不 `preventDefault()`
+  时的默认动作 `plugin:window|destroy` 渲染端并未被授权，于是窗口永不销毁。新增宿主命令
+  `close_main_window` 把「隐藏还是真关」的判据收回宿主（仍是 `TrayState::should_hide_on_close()`
+  单点真相），渲染端一律 `preventDefault()` 后请宿主收口；刻意**不**补
+  `core:window:allow-destroy` —— 那会让「关闭到托盘」退化成「关闭即退出」。
+
+### 工程
+
+- **架构文档与注释更新**：补「3D 与 GIS：容器先于内容」与「媒体播放：流式而非缓冲」两节；更正
+  viewer 分派、技能安装路径等过期描述（删掉不存在的 `skills-lock.json`、`host_exec.rs` 并非进程
+  执行）；服务端 CSP 的 `worker-src` 注释补上 GIS 预览（MapLibre 也会建 blob Worker）。
+
 ## [0.5.0] - 2026-09-29
 
 ### 新增
