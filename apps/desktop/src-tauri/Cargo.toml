@@ -33,6 +33,8 @@ greywork-host = { path = "../../../crates/greywork-host" }
 tauri = { version = "2", features = ["macos-private-api", "tray-icon"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
+# 单实例守卫：重复启动（双击图标 / 快捷方式）不再起第二个进程，而是把已有窗口叫回来。
+tauri-plugin-single-instance = "2"
 tauri-plugin-window-state = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-clipboard-manager = "2"

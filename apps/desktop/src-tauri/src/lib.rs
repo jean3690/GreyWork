@@ -45,6 +45,7 @@ mod workspace_fs;
 mod worktree;
 
 use tauri::Manager;
+use tauri_plugin_window_state::StateFlags;
 
 use greywork_host::host::HostContext;
 use std::sync::Arc;
@@ -86,9 +87,25 @@ pub fn run() {
     apply_low_end_webkit_fallback();
 
     tauri::Builder::default()
+        // 单实例必须是**第一个**注册的插件（插件文档要求）：重复启动时新进程在
+        // setup 之前就退出，只留回调把已有实例的窗口叫回来。否则用户以为没启动、
+        // 反复双击图标，每个进程都各起一份托盘 / ACP 宿主，互相看不见对方的状态。
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            tray::show_main(app);
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_window_state::Builder::default().build())
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                // 可见性由应用自己管，**不**交给插件持久化：tauri.conf 的主窗口是
+                // `visible: false`（先建隐藏、由显式 show 显示），而插件默认的
+                // `StateFlags::all()` 含 VISIBLE —— 「关闭到托盘」退出时窗口是隐藏的，
+                // 插件会把 `visible: false` 写盘，下次启动 `should_show = false`，
+                // 永不 show()，窗口根本不出现。摘掉这一位后，插件只管尺寸 / 位置 /
+                // 最大化，可见性统一走下面 setup 末尾的 show。
+                .with_state_flags(StateFlags::all() & !StateFlags::VISIBLE)
+                .build(),
+        )
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         // 视频 / 音频预览的流式协议：媒体元素按 HTTP Range 自己拉片段，
@@ -170,6 +187,11 @@ pub fn run() {
                     format!("系统托盘初始化失败，本次不提供托盘: {error}"),
                 );
             }
+            // 启动即显示主窗口：可见性由应用自己管，不依赖 window-state 的恢复值
+            // （见上面插件注册处的说明 —— 窗口在 tauri.conf 里是 `visible: false`，
+            // 之前正是靠插件的 show() 显示，而它会把「关闭到托盘」时的隐藏态存下来）。
+            // 这里无条件 show，保证「进程在跑但桌面看不到窗口」不会再发生。
+            tray::show_main(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -468,6 +490,30 @@ mod drift_tests {
                 "{key} 的 media-src 应放行 'self' / blob: / gwmedia: / http://gwmedia.localhost"
             );
         }
+    }
+
+    /// window-state 的 `StateFlags` 必须排除 `VISIBLE`。
+    ///
+    /// 根因守卫：`tauri.conf.json` 的主窗口是 `visible: false`（先建隐藏、由 `show()`
+    /// 显示），而插件默认 `StateFlags::all()` 含 VISIBLE —— 「关闭到托盘」退出时窗口
+    /// 是隐藏的，插件把 `visible: false` 写盘，下次启动 `should_show = false`，永不
+    /// `show()`，窗口根本不出现。有人把这行改回默认就会重新引入该 bug，所以从源码里
+    /// 抠出注册处的 flags 表达式（去掉空白，避免 rustfmt 换行让断言失效）。
+    #[test]
+    fn window_state_flags_exclude_visible() {
+        let source: String = include_str!("lib.rs")
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .collect();
+        let call = source
+            .split(".with_state_flags(")
+            .nth(1)
+            .expect("lib.rs 必须用 with_state_flags 显式指定 window-state 的 StateFlags");
+        let expr = call.split(").build()").next().unwrap_or_default();
+        assert!(
+            expr.contains("!StateFlags::VISIBLE"),
+            "window-state 的 StateFlags 必须排除 VISIBLE，实际: {expr}"
+        );
     }
 
     #[test]
