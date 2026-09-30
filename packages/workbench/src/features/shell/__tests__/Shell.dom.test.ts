@@ -56,6 +56,7 @@ const stubs = {
   ActivityBand: true,
   WorkspaceOverlayRegions: true,
   NoticeHost: true,
+  PermissionPromptHost: true,
   RouterView: { template: `<div data-testid="router-view-stub" />` },
 };
 

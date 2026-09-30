@@ -23,6 +23,7 @@ import { bootPlugins } from "@/plugins/runtime";
 import Sider from "@/features/shell/Sider.vue";
 import Titlebar from "@/features/shell/Titlebar.vue";
 import NoticeHost from "@/features/shell/NoticeHost.vue";
+import PermissionPromptHost from "@/features/conversation/PermissionPromptHost.vue";
 import WorkspaceOverlayRegions from "@/features/shell/WorkspaceOverlayRegions.vue";
 
 /**
@@ -399,6 +400,8 @@ function handleNewChat(): void {
     </div>
     <WorkspaceOverlayRegions />
     <NoticeHost />
+    <!-- 待裁决的 ACP 权限请求：全局浮层，任何路由都能看到并裁决（见组件头注释）。 -->
+    <PermissionPromptHost />
     <SettingsDialog v-model:open="settingsOpen" v-model:section="settingsSection" />
   </div>
 </template>

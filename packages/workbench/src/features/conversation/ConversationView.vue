@@ -27,7 +27,6 @@ import { copyText } from "@/lib/clipboard";
 import { copySelection, cutSelection, hasTextSelection, pasteInto, selectAllText } from "@/lib/textarea-actions";
 import ConversationMessage from "@/features/conversation/ConversationMessage.vue";
 import SessionStatusIndicator from "@/features/shared/SessionStatusIndicator.vue";
-import PermissionCard from "@/features/conversation/PermissionCard.vue";
 import AttachmentTray from "@/features/conversation/AttachmentTray.vue";
 import SlashCommandMenu from "@/features/conversation/SlashCommandMenu.vue";
 import { useAttachments } from "@/lib/use-attachments";
@@ -373,7 +372,6 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
 
       <div class="shrink-0 border-t border-line-2 bg-panel px-4 py-3 sm:px-6">
         <div class="mx-auto flex w-full max-w-[860px] flex-col gap-2.5">
-          <PermissionCard />
           <AgentProviderBar />
           <div
             data-attachment-dropzone
