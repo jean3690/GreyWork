@@ -8,7 +8,22 @@
 import { extname } from "@greywork/core";
 
 export type ViewerKind =
-  "md" | "html" | "csv" | "code" | "xlsx" | "xls" | "docx" | "pptx" | "pdf" | "diff" | "image" | "video" | "web" | "raw" | "legacy-office";
+  | "md"
+  | "html"
+  | "csv"
+  | "code"
+  | "xlsx"
+  | "xls"
+  | "docx"
+  | "pptx"
+  | "pdf"
+  | "diff"
+  | "image"
+  | "video"
+  | "3d"
+  | "web"
+  | "raw"
+  | "legacy-office";
 
 const EXT_KIND: Record<string, ViewerKind> = {
   md: "md",
@@ -51,6 +66,10 @@ const EXT_KIND: Record<string, ViewerKind> = {
   webm: "video",
   mov: "video",
   mkv: "video",
+  // 3D 模型：glb 是自包含的二进制容器，gltf 是 JSON（可能引用外部 .bin / 贴图，
+  // 那种情况在 viewer 里明确报错而不是静默空白 —— 见 ModelViewer.vue）。
+  glb: "3d",
+  gltf: "3d",
   ts: "code",
   tsx: "code",
   js: "code",
@@ -87,6 +106,7 @@ const BINARY_KINDS: ReadonlySet<ViewerKind> = new Set<ViewerKind>([
   "pdf",
   "image",
   "video",
+  "3d",
   "legacy-office",
 ]);
 
@@ -99,6 +119,7 @@ const BINARY_KINDS: ReadonlySet<ViewerKind> = new Set<ViewerKind>([
  */
 const MEDIA_LIMITS: Partial<Record<ViewerKind, number>> = {
   video: 128 * 1024 * 1024,
+  "3d": 64 * 1024 * 1024,
 };
 
 /**

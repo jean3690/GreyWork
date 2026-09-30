@@ -421,6 +421,13 @@ export const enUS: MessageSchema = {
       unsupported:
         "Can't play this video (.{ext}). The host may be missing the codec (on Linux, usually gstreamer1.0-plugins-bad / -ugly), or the file couldn't be read. Try opening it in a system app.",
     },
+    model: {
+      stats: "{meshes} meshes · {triangles} triangles",
+      autoRotate: "Auto-rotate",
+      parseFailed: "Couldn't parse this model: {detail}",
+      externalRefs:
+        "Couldn't parse this glTF: {detail}. A .gltf often references sibling .bin / texture files, but the preview only gets the single file — export a self-contained .glb instead.",
+    },
     pdf: {
       rendered: "Rendered {done} / {total} pages",
       prev: "Previous page",

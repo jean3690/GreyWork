@@ -34,13 +34,16 @@ export interface SemanticUnit {
 /**
  * 选区语义能否从 DOM 拿到。
  *
- * 排除的三种不是「偷懒」，是真的拿不到：
+ * 排除的不是「偷懒」，是真的拿不到：
  * - `xlsx`：Univer 是 canvas 渲染，没有对应单元格的 DOM 节点（走它自己的选区服务，
  *   入口在 SheetViewer 的表头按钮，不经过本模块）；
- * - `image` / `video` / `legacy-office`：本来就没有可选文本。
+ * - `image` / `video` / `3d` / `legacy-office`：本来就没有可选文本
+ *   （3D 是 canvas / WebGL）。
  */
+const NON_TEXT_KINDS: ReadonlySet<string> = new Set(["xlsx", "image", "video", "3d", "legacy-office"]);
+
 export function isTextSelectableKind(kind: string): boolean {
-  return kind !== "xlsx" && kind !== "image" && kind !== "video" && kind !== "legacy-office";
+  return !NON_TEXT_KINDS.has(kind);
 }
 
 const ROLE_OVERRIDES: ReadonlySet<string> = new Set(["paragraph", "code", "block"]);

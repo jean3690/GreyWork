@@ -420,6 +420,12 @@ export const zhCN = {
       unsupported:
         "无法播放这个视频（.{ext}）。可能是宿主缺对应的解码器（Linux 上常见于缺 gstreamer1.0-plugins-bad / -ugly），也可能是文件读不出来。可以用系统应用打开。",
     },
+    model: {
+      stats: "{meshes} 个网格 · {triangles} 个三角面",
+      autoRotate: "自动旋转",
+      parseFailed: "无法解析这个模型：{detail}",
+      externalRefs: "无法解析这个 glTF：{detail}。.gltf 常引用同目录的外部 .bin / 贴图，预览只拿到单个文件，请先导出成自包含的 .glb。",
+    },
     pdf: {
       rendered: "已渲染 {done} / 共 {total} 页",
       prev: "上一页",

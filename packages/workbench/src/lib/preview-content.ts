@@ -110,18 +110,33 @@ export async function readPreviewBinary(tab: PreviewTab, path: string): Promise<
 export type PreviewMediaSource = { kind: "stream"; url: string } | { kind: "bytes"; bytes: Uint8Array };
 
 /**
+ * 媒体来源偏好。
+ *
+ * - `stream`（默认）：桌面壳优先给支持 Range 的地址 —— 视频边播边拉，不读字节。
+ * - `bytes`：调用方**必须**拿到整份字节（3D 模型要交给 GLTFLoader 解析）。
+ *   仍然走 `fs_read_media` 的放宽上限，只是不要流式地址。
+ */
+export type PreviewMediaPreference = "stream" | "bytes";
+
+/**
  * 媒体通道。优先流式：桌面壳注册了 `gwmedia://`，媒体元素按 Range 自己拉片段，
  * 不读字节、不受 128MB 硬顶约束、拖动进度条可用。
  *
  * 没有自定义协议的宿主（服务端 / 浏览器预览）回落到整份读入 + blob URL —— 这条路对
  * 视频很慢（IPC 全量传输 + 主线程同步拷贝），是已知待办：服务端还缺一条 Range 路由。
  */
-export async function resolvePreviewMedia(tab: PreviewTab, path: string): Promise<PreviewMediaSource> {
+export async function resolvePreviewMedia(
+  tab: PreviewTab,
+  path: string,
+  prefer: PreviewMediaPreference = "stream",
+): Promise<PreviewMediaSource> {
   if (!isMediaKind(tab.kind)) throw new Error(`${tab.kind} 不是媒体类型`);
   if (tab.source === "disk") {
     assertDiskAvailable();
-    const stream = mediaStreamUrl(path);
-    if (stream) return { kind: "stream", url: stream };
+    if (prefer === "stream") {
+      const stream = mediaStreamUrl(path);
+      if (stream) return { kind: "stream", url: stream };
+    }
     return { kind: "bytes", bytes: await readMediaFile(path, mediaLimitOfKind(tab.kind)) };
   }
   return { kind: "bytes", bytes: await useVfsStore().readBinary(path) };
@@ -137,7 +152,7 @@ export function usePreviewBinary(tab: Ref<PreviewTab>): PreviewContent<Uint8Arra
   return usePreviewLoader(tab, (path) => readPreviewBinary(tab.value, path));
 }
 
-/** 媒体内容（video）：流式地址或字节，由宿主能力决定。 */
-export function usePreviewMedia(tab: Ref<PreviewTab>): PreviewContent<PreviewMediaSource> {
-  return usePreviewLoader(tab, (path) => resolvePreviewMedia(tab.value, path));
+/** 媒体内容（video / 3d）：流式地址或字节，由宿主能力与调用方偏好决定。 */
+export function usePreviewMedia(tab: Ref<PreviewTab>, prefer: PreviewMediaPreference = "stream"): PreviewContent<PreviewMediaSource> {
+  return usePreviewLoader(tab, (path) => resolvePreviewMedia(tab.value, path, prefer));
 }

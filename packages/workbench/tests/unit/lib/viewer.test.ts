@@ -37,6 +37,9 @@ describe("kindOfPath", () => {
     ["clip.webm", "video"],
     ["clip.mov", "video"],
     ["clip.mkv", "video"],
+    // 3D 模型同理：落到 raw 就是把二进制当文本读。
+    ["scene.glb", "3d"],
+    ["scene.gltf", "3d"],
   ])("%s → %s", (path, kind) => {
     expect(kindOfPath(path)).toBe(kind);
   });
@@ -61,7 +64,7 @@ describe("kindOfPath", () => {
 });
 
 describe("isBinaryKind", () => {
-  it.each<ViewerKind>(["xlsx", "xls", "docx", "pptx", "pdf", "image", "video", "legacy-office"])("%s 必须按二进制读", (kind) => {
+  it.each<ViewerKind>(["xlsx", "xls", "docx", "pptx", "pdf", "image", "video", "3d", "legacy-office"])("%s 必须按二进制读", (kind) => {
     expect(isBinaryKind(kind)).toBe(true);
   });
 
@@ -75,6 +78,12 @@ describe("isBinaryKind", () => {
       expect(isBinaryKind(kindOfPath(path))).toBe(true);
     }
   });
+
+  it("3D 走二进制也是硬要求：glb 与 gltf 都不是文本", () => {
+    for (const path of ["a.glb", "a.gltf"]) {
+      expect(isBinaryKind(kindOfPath(path))).toBe(true);
+    }
+  });
 });
 
 describe("媒体读取通道", () => {
@@ -82,6 +91,13 @@ describe("媒体读取通道", () => {
     // 按 20MB 卡死等于真实视频一律打不开 —— 这个分派正是视频预览能成立的前提。
     expect(isMediaKind("video")).toBe(true);
     expect(mediaLimitOfKind("video")).toBeGreaterThan(20 * 1024 * 1024);
+  });
+
+  it("3D 模型走媒体通道（要整份字节，但体量常超 20MB）", () => {
+    expect(isMediaKind("3d")).toBe(true);
+    expect(mediaLimitOfKind("3d")).toBeGreaterThan(20 * 1024 * 1024);
+    // 比视频紧一档：模型通常几十 MB，视频动辄上百 MB。
+    expect(mediaLimitOfKind("3d")!).toBeLessThan(mediaLimitOfKind("video")!);
   });
 
   it("非媒体 kind 不走媒体通道（仍旧 20MB 契约）", () => {
