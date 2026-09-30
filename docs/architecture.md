@@ -324,13 +324,16 @@ tables — a new kind must be registered in each of them:
 - `BINARY_KINDS` is a **whitelist** of kinds that must be read as bytes. Reading binary as text is
   irreversible (UTF-8 decode), so the failure mode is "file is corrupt", not a visible error.
 - `MEDIA_LIMITS` marks kinds that read through the relaxed `fs_read_media` channel instead of the
-  20 MB `fs_read_binary` one. Only video qualifies today.
+  20 MB `fs_read_binary` one: video (128 MB) and `3d` (64 MB). GIS is deliberately **not** here — a
+  vector file large enough to need it is not something you want painted in a preview pane, so it
+  stays on the 20 MB channel.
 
 The viewer component table is `packages/workbench/src/features/preview/PreviewSurface.vue`
 (`Record<ViewerKind, Component>` — a missing key is a compile error). Every viewer is a
-`defineAsyncComponent` so heavy renderers (Univer, pdf.js, and any future three.js / MapLibre)
-stay out of the main chunk. A viewer receives only `{ tab }` and reads its own bytes through
-`lib/preview-content.ts` (`usePreviewText` / `usePreviewBinary`); tabs themselves hold no content.
+`defineAsyncComponent` so heavy renderers (Univer, pdf.js, three.js, MapLibre GL) stay out of the
+main chunk. A viewer receives only `{ tab }` and reads its own bytes through
+`lib/preview-content.ts` (`usePreviewText` / `usePreviewBinary` / `usePreviewMedia`); tabs
+themselves hold no content.
 
 Two read caps live in the host, not the renderer (`crates/greywork-host/src/workspace_fs.rs`):
 `MAX_BINARY_BYTES` = 20 MB for `fs_read_binary`, and `MAX_MEDIA_BYTES` = 128 MB for
@@ -358,6 +361,30 @@ Both URL shapes `convertFileSrc` can produce (`gwmedia://localhost/…` on Linux
 `http://gwmedia.localhost/…` on Windows/Android) must be listed in the desktop `media-src`; a drift
 test enforces it. The server has no custom scheme, so server-mode video still takes the slow
 buffered path — a Range route there is the remaining follow-up.
+
+### 3D and GIS: container before content
+
+`ModelViewer.vue` (glb / gltf, three.js + `OrbitControls`) and `MapViewer.vue` (geojson / shp,
+MapLibre GL) both need a DOM container to exist **before** the bytes arrive: the `data` watcher runs
+in Vue's pre-flush phase, i.e. before the component re-renders, so a canvas placed in a `v-else`
+branch is still `null` when the renderer is constructed — and once the branch does render, nothing
+re-triggers the load. Both viewers therefore render their container as soon as there is no read
+error, and show the loading state as an overlay.
+
+`ModelViewer` uses the media channel with the `bytes` preference
+(`usePreviewMedia(tab, "bytes")`): `GLTFLoader` needs the whole buffer, so the `gwmedia://` Range
+address is of no use here. A `.gltf` that references sibling `.bin` / texture files can never
+resolve (the preview only receives the one path), so that failure is turned into an explicit
+"export a self-contained .glb" message instead of an empty scene. Teardown (on content change and
+on unmount) traverses the object graph disposing geometries, materials and textures — one tab
+switch is one WebGL context, and skipping this leaks GPU memory.
+
+`MapViewer` reads whole bytes through `fs_read_binary` and reads a sibling `.prj` / `.dbf` on a
+best-effort basis (missing or unauthorized degrades to geometry-only). It uses an **empty style**
+(`{version: 8, sources: {}, layers: []}`): no basemap means no external requests, so the CSP is
+untouched. Features are split into point / line / polygon layers by `geometry-type` (a collection
+mixing all three is normal), and the view is fitted to the data's bounding box, computed in
+`lib/geojson.ts` as a pure function so it can be unit-tested without MapLibre.
 
 ## Design Principles
 

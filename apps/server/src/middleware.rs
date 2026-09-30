@@ -73,7 +73,7 @@ pub async fn security_headers(
 /// 按 Web 补齐：
 /// - `connect-src 'self'`：同源 `/api/*` 与 `/api/events`（ws/wss 同源已被 `'self'` 覆盖）；
 /// - `media-src 'self' blob:`：入站视频 / 语音缩略图、以及工作区视频预览（VideoViewer）走 blob: URL；
-/// - `worker-src 'self' blob:`：插件 code-runtime 用 blob Worker；
+/// - `worker-src 'self' blob:`：插件 code-runtime 用 blob Worker，GIS 预览（MapLibre GL）也会建一个；
 /// - `frame-ancestors 'none'`：禁止被 iframe 内嵌——有效会话能拉起 agent 进程，防点击劫持。
 ///
 /// **`frame-src` 单独说**：桌面壳的 CSP 写死在打包配置里，所以桌面端只内嵌三个预设厂商；
