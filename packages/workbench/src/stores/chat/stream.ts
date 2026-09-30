@@ -13,6 +13,7 @@
  * 缓冲）是本切片的闭包私有，不入 state（与 runtime 切片的策略一致）。
  */
 import { buildLlmHistory, localReasoningOverride, resolveLocalEffort, selectLlmProvider } from "../chat-llm";
+import { retrieveContext, transcribeAttachment, type LocalAiDeps } from "../../lib/local-ai";
 import { isAskSettled } from "../../lib/ask-question";
 import { mergeToolActivities } from "../../lib/tool-activity";
 import { t, tid, uid, clearSim } from "./shared";
@@ -124,6 +125,12 @@ export function createStreamSlice({ state, getSession, getDemo }: StreamDeps): S
           streamBuf += event.payload.delta ?? "";
           scheduleFlush();
         }
+      } else if (event.kind === "llm-thinking-delta") {
+        // 本地思考链（DeepSeek-R1 / Qwen3 / Ollama 的 reasoning）：写入思考段，
+        // 与 ACP 的 AgentThoughtChunk 渲染一致。
+        if (streamingInto && event.payload.delta) {
+          appendMessageThinking(streamingInto.id, event.payload.delta);
+        }
       } else if (event.kind === "llm-done") {
         finishStream();
       } else if (event.kind === "llm-error") {
@@ -141,6 +148,12 @@ export function createStreamSlice({ state, getSession, getDemo }: StreamDeps): S
       getDemo().runAssistant(message, intentText);
       return;
     }
+    const localAi: LocalAiDeps = {
+      config: settingsStore.localAi,
+      providers: settingsStore.modelProviders,
+      selectedProviderId: settingsStore.selectedModelProviderId,
+      llm,
+    };
     llmActive.value = true;
     message.planPending = false;
     // 真实管线不演造步骤时间线；增量直接写入 content
@@ -152,7 +165,13 @@ export function createStreamSlice({ state, getSession, getDemo }: StreamDeps): S
     streamingMessageId.value = message.id;
     await ensureLlmListener();
     try {
-      const history = await buildLlmHistory(session.ensure(session.activeThreadId.value).filter((item) => item.id !== message.id));
+      // 工作区检索（未启用/无命中返回 undefined）；语音附件转写（未启用返回 null → 路径引用）。
+      const contextBlock = await retrieveContext(localAi, intentText);
+      const history = await buildLlmHistory(
+        session.ensure(session.activeThreadId.value).filter((item) => item.id !== message.id),
+        20,
+        { contextBlock, transcribe: (attachment) => transcribeAttachment(localAi, attachment) },
+      );
       activeTurnToken = tid();
       llmRequestId = await llm.chat({
         baseUrl: provider.baseUrl ?? "",
@@ -161,6 +180,8 @@ export function createStreamSlice({ state, getSession, getDemo }: StreamDeps): S
         messages: history,
         reasoningEffort: resolveLocalEffort(localReasoningOverride.value, provider),
         headers: provider.headers,
+        temperature: provider.temperature,
+        maxTokens: provider.maxTokens,
         clientToken: activeTurnToken,
       });
     } catch (error) {

@@ -48,6 +48,17 @@ interface HistorySource {
   attachments?: readonly Attachment[];
 }
 
+/** 语音附件转写器：返回转写文本，null/空 = 没能转写（调用方回落到路径引用）。 */
+export type AttachmentTranscriber = (attachment: Attachment) => Promise<string | null>;
+
+/** `buildLlmHistory` 的可选增强：工作区检索上下文 + 语音转写。 */
+export interface HistoryOptions {
+  /** 命中工作区检索时注入的系统补充（在基础系统提示之后、历史之前）。 */
+  contextBlock?: string;
+  /** 语音附件转写（本地 STT）；缺省时音频只递路径引用。 */
+  transcribe?: AttachmentTranscriber;
+}
+
 /**
  * 一条消息 + 它的附件 → 内容块数组；一个附件都没能带上时返回 null
  * （调用方回落纯文本 string，别让不支持 parts 的兼容端点白白吃一个 400）。
@@ -56,6 +67,7 @@ async function toContentParts(
   message: HistorySource,
   attachments: readonly Attachment[],
   imageAllowance: number,
+  transcribe?: AttachmentTranscriber,
 ): Promise<LlmContentPart[] | null> {
   let text = message.content;
   const images: LlmContentPart[] = [];
@@ -72,6 +84,15 @@ async function toContentParts(
       } else if (item.kind === "text") {
         const { text: content, truncated } = await readAttachmentText(item);
         text += inlineTextAttachment(item.name, content, truncated);
+        attached = true;
+      } else if (item.kind === "audio" && transcribe && item.path) {
+        // 本地 STT：转写成功就内联文本（模型能读到内容）；失败/空结果回落路径引用。
+        const transcript = await transcribe(item);
+        if (transcript && transcript.trim()) {
+          text += `\n[语音转写 ${item.name}]\n${transcript.trim()}\n`;
+        } else {
+          text += inlineFileAttachment(item.name, item.path);
+        }
         attached = true;
       } else {
         // 通用文件（PDF / 压缩包等）内容内联不了，只递一条路径引用 —— 至少让模型知道
@@ -100,7 +121,7 @@ async function toContentParts(
  * 模型仍能看到当时的对话，但不必为已经翻页的截图重复付费。图片额度按「从新到旧」
  * 分配：最新的截图优先拿到额度。
  */
-export async function buildLlmHistory(messages: HistorySource[], cap = 20): Promise<LlmChatMessage[]> {
+export async function buildLlmHistory(messages: HistorySource[], cap = 20, options: HistoryOptions = {}): Promise<LlmChatMessage[]> {
   const window = messages
     .filter(
       (message) =>
@@ -125,11 +146,14 @@ export async function buildLlmHistory(messages: HistorySource[], cap = 20): Prom
   const history: LlmChatMessage[] = [];
   for (let i = 0; i < window.length; i += 1) {
     const item = window[i];
-    const parts = allowance.has(i) ? await toContentParts(item, item.attachments ?? [], allowance.get(i) ?? 0) : null;
+    const parts = allowance.has(i) ? await toContentParts(item, item.attachments ?? [], allowance.get(i) ?? 0, options.transcribe) : null;
     const content = parts ?? item.content;
     // 纯附件消息的附件被窗口丢弃（或全部读取失败）后正文为空：留着会被端点拒（空 content），直接跳过。
     if (typeof content === "string" && !content.trim()) continue;
     history.push({ role: item.role as "user" | "assistant", content });
   }
-  return [{ role: "system", content: LLM_SYSTEM_PROMPT }, ...history];
+  const head: LlmChatMessage[] = [{ role: "system", content: LLM_SYSTEM_PROMPT }];
+  // 工作区检索命中：作为第二条系统消息放在历史之前，模型先看到资料再看对话。
+  if (options.contextBlock?.trim()) head.push({ role: "system", content: options.contextBlock });
+  return [...head, ...history];
 }

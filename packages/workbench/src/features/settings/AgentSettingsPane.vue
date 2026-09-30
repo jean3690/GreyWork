@@ -5,8 +5,8 @@
  */
 import { computed, ref, watch } from "vue";
 import { agentProviderIcon, agentProviderLobeIcon, REASONING_EFFORTS, type AgentProviderConfig } from "@greywork/shell";
+import { createLlmClient } from "@greywork/llm";
 import AgentProviderIcon from "@/features/conversation/AgentProviderIcon.vue";
-import Icon from "@/features/shared/Icon.vue";
 import Hint from "@/features/shared/Hint.vue";
 import IconPicker from "@/features/shared/IconPicker.vue";
 import AgentProviderFormDialog, { type AgentProviderDraftPayload } from "@/features/settings/AgentProviderFormDialog.vue";
@@ -40,11 +40,17 @@ const activeProvider = computed(() => settings.modelProviders.find((provider) =>
 
 /** 当前编辑中的供应商 id（跟随选中项）与字段草稿。 */
 const providerDraftId = ref<string | null>(null);
-const providerDraft = ref({ name: "", baseUrl: "", model: "", apiKeyEnv: "", headersText: "" });
+const providerDraft = ref({ name: "", baseUrl: "", model: "", apiKeyEnv: "", headersText: "", temperature: "", maxTokens: "" });
 /** 草稿相对 store 有未保存改动时置真（简单脏检查，切走即丢——字段少，不做自动保存）。 */
 const providerDraftDirty = ref(false);
 /** Headers 文本解析错误（保存前就地拦截，不写进库）。 */
 const providerDraftError = ref<string | null>(null);
+
+/** 模型清单（拉取后填充模型输入的 datalist，兼作连通性自检）。 */
+const llmClient = createLlmClient();
+const modelOptions = ref<string[]>([]);
+const probing = ref(false);
+const probeError = ref<string | null>(null);
 
 function syncProviderDraft(): void {
   const provider = settings.modelProviders.find((candidate) => candidate.id === providerDraftId.value);
@@ -55,9 +61,51 @@ function syncProviderDraft(): void {
     model: provider.model ?? "",
     apiKeyEnv: provider.apiKeyEnv ?? "",
     headersText: formatHeaderText(provider.headers),
+    temperature: provider.temperature === undefined ? "" : String(provider.temperature),
+    maxTokens: provider.maxTokens === undefined ? "" : String(provider.maxTokens),
   };
   providerDraftDirty.value = false;
   providerDraftError.value = null;
+  modelOptions.value = [];
+  probeError.value = null;
+}
+
+/**
+ * 拉取 `/models` 模型清单：既填下拉，也是连通性自检（能列出来 = Base URL 可达 + 鉴权正确）。
+ * 用草稿里的连接信息而不是已保存的，方便「改完地址先测再存」。
+ */
+async function probeModels(): Promise<void> {
+  if (!providerDraftId.value) return;
+  probing.value = true;
+  probeError.value = null;
+  try {
+    const parsed = parseHeaderText(providerDraft.value.headersText);
+    if (parsed.error) {
+      probeError.value = parsed.error;
+      return;
+    }
+    modelOptions.value = await llmClient.listModels({
+      baseUrl: providerDraft.value.baseUrl.trim(),
+      apiKeyEnv: providerDraft.value.apiKeyEnv.trim(),
+      headers: Object.keys(parsed.headers).length > 0 ? parsed.headers : undefined,
+    });
+    if (modelOptions.value.length === 0) probeError.value = "服务返回了空的模型清单";
+  } catch (error) {
+    probeError.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    probing.value = false;
+  }
+}
+
+/** 解析可选数值输入（空串 = 不设置）；越界/非法就地报错，不写进库。 */
+function parseOptionalNumber(raw: string, min: number, max: number, label: string): { value?: number; error?: string } {
+  const trimmed = raw.trim();
+  if (!trimmed) return {};
+  const value = Number(trimmed);
+  if (!Number.isFinite(value) || value < min || value > max) {
+    return { error: `${label} 需在 ${min}–${max} 之间` };
+  }
+  return { value };
 }
 
 watch(
@@ -79,6 +127,16 @@ function saveProviderDraft(): void {
     providerDraftError.value = parsed.error;
     return;
   }
+  const temperature = parseOptionalNumber(providerDraft.value.temperature, 0, 2, "温度");
+  if (temperature.error) {
+    providerDraftError.value = temperature.error;
+    return;
+  }
+  const maxTokens = parseOptionalNumber(providerDraft.value.maxTokens, 1, 1_000_000, "最大 token");
+  if (maxTokens.error) {
+    providerDraftError.value = maxTokens.error;
+    return;
+  }
   settings.upsertModelProvider({
     ...current,
     name: providerDraft.value.name.trim() || current.name,
@@ -86,9 +144,18 @@ function saveProviderDraft(): void {
     model: providerDraft.value.model.trim(),
     apiKeyEnv: providerDraft.value.apiKeyEnv.trim(),
     headers: Object.keys(parsed.headers).length > 0 ? parsed.headers : undefined,
+    temperature: temperature.value,
+    maxTokens: maxTokens.value,
   });
   providerDraftDirty.value = false;
   providerDraftError.value = null;
+}
+
+/** 启用/停用一台模型供应商（此前列表只显示状态、无法开关，预设的 Ollama 因此用不起来）。 */
+function setProviderEnabled(id: string, enabled: boolean): void {
+  const provider = settings.modelProviders.find((candidate) => candidate.id === id);
+  if (!provider) return;
+  settings.upsertModelProvider({ ...provider, enabled });
 }
 
 /** 推理等级即时落盘（不入草稿脏检查：下拉改动即生效，与图标改动同一风格）。 */
@@ -213,17 +280,29 @@ async function removeAgentDraft(): Promise<void> {
         </span>
       </div>
       <div class="flex flex-col gap-1.5">
-        <button
+        <div
           v-for="provider in settings.modelProviders"
           :key="provider.id"
-          class="flex cursor-pointer items-center gap-2.5 rounded-[calc(10px*var(--gw-radius-scale))] border px-3 py-2 text-left transition-colors"
+          class="flex items-center gap-2.5 rounded-[calc(10px*var(--gw-radius-scale))] border px-3 py-2 transition-colors"
           :class="provider.id === settings.selectedModelProviderId ? 'border-line-2 bg-panel-2' : 'border-transparent hover:bg-panel-2'"
-          @click="settings.selectModelProvider(provider.id)"
         >
-          <Icon :name="provider.enabled ? 'check-one' : 'close-one'" :size="14" class="text-dim" />
-          <span class="min-w-0 flex-1 truncate text-[13px] text-foreground">{{ provider.name }}</span>
-          <span class="font-mono text-[11px] text-dim2">{{ provider.model }}</span>
-        </button>
+          <input
+            type="checkbox"
+            class="size-4 cursor-pointer accent-[var(--accent)]"
+            :checked="provider.enabled"
+            :aria-label="`启用 ${provider.name}`"
+            :data-testid="`provider-enable-${provider.id}`"
+            @change="setProviderEnabled(provider.id, ($event.target as HTMLInputElement).checked)"
+          />
+          <button
+            type="button"
+            class="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left"
+            @click="settings.selectModelProvider(provider.id)"
+          >
+            <span class="min-w-0 flex-1 truncate text-[13px] text-foreground">{{ provider.name }}</span>
+            <span class="font-mono text-[11px] text-dim2">{{ provider.model }}</span>
+          </button>
+        </div>
       </div>
     </div>
     <!-- 供应商编辑表单：API key 来自宿主进程环境变量，改完需重启应用生效 -->
@@ -255,11 +334,31 @@ async function removeAgentDraft(): Promise<void> {
           <span class="w-20 shrink-0 text-[11.5px] text-dim2">模型</span>
           <input
             v-model="providerDraft.model"
+            list="provider-model-options"
             class="min-w-0 flex-1 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-1.5 font-mono text-[12px] text-foreground outline-none focus:border-line-2"
-            placeholder="gpt-4o / claude-sonnet-4-5"
+            placeholder="gpt-4o / qwen2.5"
             @input="providerDraftDirty = true"
           />
+          <button
+            type="button"
+            class="h-7 shrink-0 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2.5 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            :disabled="probing"
+            :data-testid="`provider-probe-${activeProvider?.id ?? ''}`"
+            :title="'连上服务并拉取模型清单（同时校验 Base URL / 鉴权）'"
+            @click="probeModels"
+          >
+            {{ probing ? "拉取中…" : "拉取模型" }}
+          </button>
         </label>
+        <datalist id="provider-model-options">
+          <option v-for="option in modelOptions" :key="option" :value="option" />
+        </datalist>
+        <p v-if="probeError" class="text-[11px] text-dim2" data-testid="provider-probe-error">
+          {{ probeError }}
+        </p>
+        <p v-else-if="modelOptions.length > 0" class="text-[11px] text-dim2" data-testid="provider-probe-ok">
+          已从服务取到 {{ modelOptions.length }} 个模型，点模型输入框可下拉选择。
+        </p>
         <label class="flex items-center gap-2">
           <span class="w-20 shrink-0 text-[11.5px] text-dim2">API Key 环境变量</span>
           <input
@@ -290,6 +389,29 @@ async function removeAgentDraft(): Promise<void> {
           附加到每次模型请求的 HTTP 头（自定义网关的鉴权 / 标记头）。敏感值写
           <code v-pre class="font-mono">{{ ENV_VAR }}</code> 占位符，发送时由宿主从环境变量解析，绝不明文落盘；空行与
           <code class="font-mono">#</code> 开头的行忽略。
+        </p>
+        <div class="flex items-center gap-2">
+          <span class="w-20 shrink-0 text-[11.5px] text-dim2">采样温度</span>
+          <input
+            v-model="providerDraft.temperature"
+            inputmode="decimal"
+            data-testid="provider-temperature"
+            class="min-w-0 flex-1 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-1.5 font-mono text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-line-2"
+            placeholder="留空 = 不传（如 0.2）"
+            @input="providerDraftDirty = true"
+          />
+          <span class="w-20 shrink-0 text-[11.5px] text-dim2">最大 token</span>
+          <input
+            v-model="providerDraft.maxTokens"
+            inputmode="numeric"
+            data-testid="provider-max-tokens"
+            class="min-w-0 flex-1 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-1.5 font-mono text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-line-2"
+            placeholder="留空 = 不传"
+            @input="providerDraftDirty = true"
+          />
+        </div>
+        <p class="text-[10.5px] leading-relaxed text-dim2">
+          采样参数缺省不发送（由服务端默认值决定）。本地模型（Ollama / vLLM 等）常用温度 0–0.7、最大 token 限长。
         </p>
         <p v-if="providerDraftError" class="text-[11px] text-destructive">{{ providerDraftError }}</p>
         <div class="flex items-center justify-between gap-2">
@@ -392,6 +514,7 @@ async function removeAgentDraft(): Promise<void> {
               :checked="provider.enabled"
               :disabled="agentCatalogReadOnly"
               :aria-label="`启用 ${provider.name}`"
+              :data-testid="`agent-enable-${provider.id}`"
               @change="void agent.setAgentProviderEnabled(provider.id, ($event.target as HTMLInputElement).checked)"
             />
             <span class="min-w-0 flex-1 truncate text-[13px] text-foreground">{{ provider.name }}</span>

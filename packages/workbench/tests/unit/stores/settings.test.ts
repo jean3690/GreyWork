@@ -510,3 +510,50 @@ describe("第三方服务配置 serviceProviders", () => {
     expect(reloaded.selectedOfficeProviderId).toBe("custom");
   });
 });
+
+describe("本地 AI 配置 localAi", () => {
+  it("默认全关（没配置时行为与加这个功能之前一致）", () => {
+    const settings = useSettingsStore();
+    expect(settings.localAi.rag.enabled).toBe(false);
+    expect(settings.localAi.stt.enabled).toBe(false);
+    expect(settings.localAi.rag.topK).toBe(6);
+  });
+
+  it("更新与持久化往返一致", () => {
+    const settings = useSettingsStore();
+    settings.setLocalAiRag({ enabled: true, embeddingModel: "nomic-embed-text", topK: 12 });
+    settings.setLocalAiStt({ enabled: true, model: "whisper-large-v3" });
+
+    setActivePinia(createPinia());
+    const reloaded = useSettingsStore();
+    expect(reloaded.localAi.rag).toMatchObject({ enabled: true, embeddingModel: "nomic-embed-text", topK: 12 });
+    expect(reloaded.localAi.stt).toMatchObject({ enabled: true, model: "whisper-large-v3" });
+  });
+
+  it("脏快照归一：非法 topK 夹到区间、缺字段落默认、enabled 只有显式 true 才算开", () => {
+    storage.set(
+      "greywork.settings",
+      JSON.stringify({ localAi: { rag: { enabled: "yes", topK: 999, embeddingModel: 42 }, stt: { enabled: true } } }),
+    );
+    setActivePinia(createPinia());
+    const settings = useSettingsStore();
+    expect(settings.localAi.rag.enabled).toBe(false); // 非 true 一律按关
+    expect(settings.localAi.rag.topK).toBe(50); // 夹到上限
+    expect(settings.localAi.rag.embeddingModel).toBe("bge-m3"); // 非法值落默认
+    expect(settings.localAi.stt.enabled).toBe(true);
+    expect(settings.localAi.stt.model).toBe("whisper-1");
+  });
+});
+
+describe("模型供应商采样参数", () => {
+  it("非法 temperature / maxTokens 被丢弃（按不传处理），合法值保留", () => {
+    const settings = useSettingsStore();
+    const provider = settings.modelProviders[0];
+    settings.upsertModelProvider({ ...provider, temperature: 5, maxTokens: 0 });
+    expect(settings.modelProviders[0].temperature).toBeUndefined();
+    expect(settings.modelProviders[0].maxTokens).toBeUndefined();
+    settings.upsertModelProvider({ ...provider, temperature: 0.2, maxTokens: 512 });
+    expect(settings.modelProviders[0].temperature).toBe(0.2);
+    expect(settings.modelProviders[0].maxTokens).toBe(512);
+  });
+});

@@ -123,6 +123,10 @@ function createLlmHarness(): LlmHarness {
         listener = fn;
         return Promise.resolve(() => {});
       },
+      // 本地 RAG / STT 在本用例里默认关闭，这些桩不会被调用；补上只为满足 LlmClient 契约。
+      listModels: () => Promise.resolve([]),
+      embed: () => Promise.resolve({ embeddings: [], dim: 0, model: "" }),
+      transcribe: () => Promise.resolve({ text: "" }),
     },
     emit: (event) => listener?.(event),
     lastToken: () => lastParams?.clientToken,

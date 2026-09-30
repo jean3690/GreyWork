@@ -26,6 +26,7 @@ import { materializeAttachments } from "../../state/attachment-library";
 import { parseSendFences, stripSendFences } from "../../lib/send-fence";
 import { ensureRemoteWorkspaceFolder } from "../../lib/remote-workspace";
 import { useAgentStore } from "../agent";
+import { retrieveContext, transcribeAttachment, type LocalAiDeps } from "../../lib/local-ai";
 import { buildLlmHistory, selectLlmProvider } from "../chat-llm";
 import { aid, delay, describeError, peerKey, peerLabel, REPLY_FUSE_MS, t, type InboundMessage, type RemotePeer } from "./shared";
 import type { RemoteAssistantState } from "./state";
@@ -754,7 +755,17 @@ export function createPipelineSlice({ state, getStatus, getPeers }: PipelineDeps
         return;
       }
 
-      const history = await buildLlmHistory(sessionStore.ensure(sessionId));
+      const localAiDeps: LocalAiDeps = {
+        config: settings.localAi,
+        providers: settings.modelProviders,
+        selectedProviderId: settings.selectedModelProviderId,
+        llm: state.llm,
+      };
+      const contextBlock = await retrieveContext(localAiDeps, message.text);
+      const history = await buildLlmHistory(sessionStore.ensure(sessionId), 20, {
+        contextBlock,
+        transcribe: (attachment) => transcribeAttachment(localAiDeps, attachment),
+      });
       const turn = await runLlmTurn({
         baseUrl: provider.baseUrl ?? "",
         model: provider.model,
@@ -762,6 +773,8 @@ export function createPipelineSlice({ state, getStatus, getPeers }: PipelineDeps
         messages: history,
         reasoningEffort: provider.reasoningEffort ?? "auto",
         headers: provider.headers,
+        temperature: provider.temperature,
+        maxTokens: provider.maxTokens,
       });
       await deliver(peer, sessionId, turn, replyToken);
     } finally {

@@ -218,3 +218,53 @@ describe("buildLlmHistory", () => {
     expect(history).toHaveLength(1);
   });
 });
+
+/** 语音附件（本地 STT 的输入）。 */
+function audioAttachment(id: string): Attachment {
+  return { id, kind: "audio", name: `${id}.ogg`, mime: "audio/ogg", size: 1024, path: `/tmp/${id}.ogg` };
+}
+
+describe("buildLlmHistory · 本地增强（检索上下文 / 语音转写）", () => {
+  it("检索命中：作为第二条 system 消息插在历史之前", async () => {
+    const history = await buildLlmHistory([{ role: "user", content: "问" }], 20, { contextBlock: "[工作区检索]\n片段" });
+    expect(history[0]).toEqual({ role: "system", content: LLM_SYSTEM_PROMPT });
+    expect(history[1]).toEqual({ role: "system", content: "[工作区检索]\n片段" });
+    expect(history[2]).toEqual({ role: "user", content: "问" });
+  });
+
+  it("contextBlock 为空/空白：不注入多余 system 消息", async () => {
+    const blank = await buildLlmHistory([{ role: "user", content: "问" }], 20, { contextBlock: "   " });
+    expect(blank).toEqual([
+      { role: "system", content: LLM_SYSTEM_PROMPT },
+      { role: "user", content: "问" },
+    ]);
+    const none = await buildLlmHistory([{ role: "user", content: "问" }]);
+    expect(none).toHaveLength(2);
+  });
+
+  it("语音附件转写成功：内联转写文本", async () => {
+    const transcribe = vi.fn(() => Promise.resolve("你好世界"));
+    const history = await buildLlmHistory([{ role: "user", content: "听听", attachments: [audioAttachment("s1")] }], 20, {
+      transcribe,
+    });
+    const content = history[1]?.content as { type: string; text: string }[];
+    expect(transcribe).toHaveBeenCalledTimes(1);
+    expect(content[0].type).toBe("text");
+    expect(content[0].text).toContain("[语音转写 s1.ogg]");
+    expect(content[0].text).toContain("你好世界");
+  });
+
+  it("语音附件转写失败（null）：回落路径引用，不丢附件", async () => {
+    const history = await buildLlmHistory([{ role: "user", content: "听听", attachments: [audioAttachment("s2")] }], 20, {
+      transcribe: () => Promise.resolve(null),
+    });
+    const content = history[1]?.content as { type: string; text: string }[];
+    expect(content[0].text).toContain("[文件：s2.ogg（本地路径：/tmp/s2.ogg）]");
+  });
+
+  it("未提供转写器：语音附件只递路径引用", async () => {
+    const history = await buildLlmHistory([{ role: "user", content: "听听", attachments: [audioAttachment("s3")] }]);
+    const content = history[1]?.content as { type: string; text: string }[];
+    expect(content[0].text).toContain("s3.ogg");
+  });
+});

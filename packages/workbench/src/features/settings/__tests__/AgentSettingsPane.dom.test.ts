@@ -52,7 +52,7 @@ describe("AgentSettingsPane · agent 目录只读门", () => {
 
     expect(wrapper.get('[data-testid="agent-catalog-readonly"]').text()).toContain("agent 目录只读");
     expect(wrapper.find('[data-testid="agent-catalog-add"]').exists()).toBe(false);
-    for (const checkbox of wrapper.findAll('input[type="checkbox"][aria-label^="启用"]')) {
+    for (const checkbox of wrapper.findAll('[data-testid^="agent-enable-"]')) {
       expect(checkbox.attributes("disabled")).toBeDefined();
     }
   });
@@ -71,7 +71,7 @@ describe("AgentSettingsPane · agent 目录只读门", () => {
 
     expect(wrapper.find('[data-testid="agent-catalog-readonly"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="agent-catalog-add"]').exists()).toBe(true);
-    for (const checkbox of wrapper.findAll('input[type="checkbox"][aria-label^="启用"]')) {
+    for (const checkbox of wrapper.findAll('[data-testid^="agent-enable-"]')) {
       expect(checkbox.attributes("disabled")).toBeUndefined();
     }
   });
@@ -85,7 +85,7 @@ describe("AgentSettingsPane · agent 目录只读门", () => {
 
     expect(wrapper.find('[data-testid="agent-catalog-readonly"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="agent-catalog-add"]').exists()).toBe(true);
-    for (const checkbox of wrapper.findAll('input[type="checkbox"][aria-label^="启用"]')) {
+    for (const checkbox of wrapper.findAll('[data-testid^="agent-enable-"]')) {
       expect(checkbox.attributes("disabled")).toBeUndefined();
     }
   });

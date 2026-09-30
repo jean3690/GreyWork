@@ -39,6 +39,16 @@ function normalizeHeaders(value: unknown): Record<string, string> | undefined {
   return Object.keys(headers).length > 0 ? headers : undefined;
 }
 
+/** 采样温度归一：仅接受 [0, 2] 的有限数；其余按「不传」处理。 */
+function normalizeTemperature(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 2 ? value : undefined;
+}
+
+/** 最大输出 token 归一：仅接受正整数；其余按「不传」处理。 */
+function normalizeMaxTokens(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
+}
+
 /**
  * 服务族清单的合法值（从共享表取，避免两处各写一份）。
  * 直接查 `SERVICE_FAMILIES` 而不是复制字面量：将来加族时这里自动跟上。
@@ -320,6 +330,65 @@ export const DEFAULT_REMOTE_ASSIST: RemoteAssistPrefs = {
   },
 };
 
+/**
+ * 本地 AI 配置：本地检索（RAG）与本地语音转写（STT）。
+ *
+ * 两者都**复用模型供应商**（baseUrl / 密钥环境变量取自 modelProviders），只额外记
+ * 「用哪个供应商 + 用哪个模型」—— embedding / whisper 模型与对话模型不同，所以要单独给模型名。
+ * 默认全关：没配置时行为与加这个功能之前完全一致（附件仍以路径引用递给模型）。
+ */
+export interface LocalAiPrefs {
+  rag: {
+    enabled: boolean;
+    /** 取 embedding 的供应商 id（null = 用当前选中的对话供应商）。 */
+    providerId: string | null;
+    /** embedding 模型名（如 bge-m3 / nomic-embed-text）。 */
+    embeddingModel: string;
+    /** 每次检索注入的块数上限。 */
+    topK: number;
+  };
+  stt: {
+    enabled: boolean;
+    /** 取语音转写的供应商 id（null = 用当前选中的对话供应商）。 */
+    providerId: string | null;
+    /** whisper 模型名（如 whisper-1）。 */
+    model: string;
+  };
+}
+
+export const DEFAULT_LOCAL_AI: LocalAiPrefs = {
+  rag: { enabled: false, providerId: null, embeddingModel: "bge-m3", topK: 6 },
+  stt: { enabled: false, providerId: null, model: "whisper-1" },
+};
+
+/** 检索注入块数的合法区间（与宿主 `rag_search` 的 clamp 对齐）。 */
+export const LOCAL_AI_TOP_K_RANGE = { min: 1, max: 50 } as const;
+
+/** 本地 AI 配置的读入归一：缺字段落默认、非法值丢弃（一条坏配置不该让整份设置失效）。 */
+function normalizeLocalAi(raw: unknown): LocalAiPrefs {
+  const source = (typeof raw === "object" && raw !== null ? raw : {}) as {
+    rag?: Record<string, unknown>;
+    stt?: Record<string, unknown>;
+  };
+  const rag = source.rag ?? {};
+  const stt = source.stt ?? {};
+  const rawTopK = typeof rag.topK === "number" && Number.isInteger(rag.topK) ? rag.topK : DEFAULT_LOCAL_AI.rag.topK;
+  const topK = Math.min(Math.max(rawTopK, LOCAL_AI_TOP_K_RANGE.min), LOCAL_AI_TOP_K_RANGE.max);
+  return {
+    rag: {
+      enabled: rag.enabled === true,
+      providerId: typeof rag.providerId === "string" ? rag.providerId : null,
+      embeddingModel: typeof rag.embeddingModel === "string" ? rag.embeddingModel : DEFAULT_LOCAL_AI.rag.embeddingModel,
+      topK,
+    },
+    stt: {
+      enabled: stt.enabled === true,
+      providerId: typeof stt.providerId === "string" ? stt.providerId : null,
+      model: typeof stt.model === "string" ? stt.model : DEFAULT_LOCAL_AI.stt.model,
+    },
+  };
+}
+
 /** 细粒度 ACP 配置覆盖的读入归一：只接受 `string -> string` 的键值对。 */
 function normalizeAcpConfigValues(raw: unknown): Record<string, string> {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
@@ -377,6 +446,8 @@ export interface SavedSettings {
   serviceProviders?: ServiceProviderConfig[];
   /** 云端 Office 预览选中的服务商 id；null = 用第一个可用的。 */
   selectedOfficeProviderId?: string | null;
+  /** 本地 AI（RAG 检索 / STT 语音转写）配置。 */
+  localAi?: { rag?: Partial<LocalAiPrefs["rag"]>; stt?: Partial<LocalAiPrefs["stt"]> };
 }
 
 const settingsStorage = createJsonStorage<SavedSettings>(
@@ -436,6 +507,8 @@ export const useSettingsStore = defineStore("settings", () => {
   const serviceProviders = ref<ServiceProviderConfig[]>(DEFAULT_OFFICE_PROVIDERS.map((provider) => ({ ...provider })));
   /** 云端 Office 选中的服务商 id；null = 取第一个可用的。 */
   const selectedOfficeProviderId = ref<string | null>(null);
+  /** 本地 AI（RAG / STT）配置；默认全关。 */
+  const localAi = ref<LocalAiPrefs>(normalizeLocalAi(DEFAULT_LOCAL_AI));
   /** office 族配置（设置页分组与预览决策都只关心这一族）。 */
   const officeProviders = computed<OfficeProviderConfig[]>(() =>
     serviceProviders.value.filter((provider): provider is OfficeProviderConfig => provider.family === "office"),
@@ -551,6 +624,8 @@ export const useSettingsStore = defineStore("settings", () => {
           ...provider,
           reasoningEffort: normalizeReasoningEffort(provider.reasoningEffort),
           headers: normalizeHeaders(provider.headers),
+          temperature: normalizeTemperature(provider.temperature),
+          maxTokens: normalizeMaxTokens(provider.maxTokens),
         }));
       }
     }
@@ -571,6 +646,8 @@ export const useSettingsStore = defineStore("settings", () => {
     if (typeof saved.selectedOfficeProviderId === "string" || saved.selectedOfficeProviderId === null) {
       selectedOfficeProviderId.value = saved.selectedOfficeProviderId;
     }
+    // 本地 AI：缺字段落默认（旧快照读入后就是「全关」）。
+    localAi.value = normalizeLocalAi(saved.localAi);
     if (Array.isArray(saved.skillSources)) {
       skillSources.value = saved.skillSources
         .filter((source) => source && typeof source.id === "string" && typeof source.label === "string" && SKILL_SOURCE_TYPES[source.type])
@@ -625,6 +702,7 @@ export const useSettingsStore = defineStore("settings", () => {
       skillSources: skillSources.value,
       serviceProviders: serviceProviders.value,
       selectedOfficeProviderId: selectedOfficeProviderId.value,
+      localAi: { rag: { ...localAi.value.rag }, stt: { ...localAi.value.stt } },
       maxParallel: maxParallel.value,
       closeToTray: closeToTray.value,
       remoteAssist: {
@@ -699,9 +777,14 @@ export const useSettingsStore = defineStore("settings", () => {
     persist();
   }
 
-  /** 新增或整体覆盖一台模型供应商；写入前归一化 reasoningEffort。 */
+  /** 新增或整体覆盖一台模型供应商；写入前归一化 reasoningEffort 与采样参数。 */
   function upsertModelProvider(provider: ModelProviderConfig): void {
-    const normalized = { ...provider, reasoningEffort: normalizeReasoningEffort(provider.reasoningEffort) };
+    const normalized = {
+      ...provider,
+      reasoningEffort: normalizeReasoningEffort(provider.reasoningEffort),
+      temperature: normalizeTemperature(provider.temperature),
+      maxTokens: normalizeMaxTokens(provider.maxTokens),
+    };
     const index = modelProviders.value.findIndex((candidate) => candidate.id === provider.id);
     if (index >= 0) modelProviders.value[index] = normalized;
     else modelProviders.value.push(normalized);
@@ -823,6 +906,18 @@ export const useSettingsStore = defineStore("settings", () => {
     persist();
   }
 
+  /** 更新本地 RAG 配置（局部字段）；落盘一次。 */
+  function setLocalAiRag(patch: Partial<LocalAiPrefs["rag"]>): void {
+    localAi.value = { ...localAi.value, rag: { ...localAi.value.rag, ...patch } };
+    persist();
+  }
+
+  /** 更新本地 STT 配置（局部字段）；落盘一次。 */
+  function setLocalAiStt(patch: Partial<LocalAiPrefs["stt"]>): void {
+    localAi.value = { ...localAi.value, stt: { ...localAi.value.stt, ...patch } };
+    persist();
+  }
+
   /** 单个细粒度配置项的写入/清除（value 传空串 = 删掉覆盖，回到「跟随当前会话」）。 */
   function setRemoteAcpConfigValue(configId: string, value: string): void {
     const next = { ...remoteAssist.value.acpConfigValues };
@@ -883,6 +978,9 @@ export const useSettingsStore = defineStore("settings", () => {
     removeServiceProvider,
     resetServiceProviders,
     selectOfficeProvider,
+    localAi,
+    setLocalAiRag,
+    setLocalAiStt,
     persist,
     /** 桌面态启动接管完成信号（null = 浏览器态无后端）；await 后库内容已就位。 */
     hydrated: backendHydratePromise,

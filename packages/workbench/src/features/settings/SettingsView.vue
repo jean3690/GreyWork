@@ -11,6 +11,7 @@ import AgentSettingsPane from "@/features/settings/AgentSettingsPane.vue";
 import AppearanceSettingsPane from "@/features/settings/AppearanceSettingsPane.vue";
 import AssistantSettingsPane from "@/features/settings/AssistantSettingsPane.vue";
 import McpPane from "@/features/settings/McpPane.vue";
+import LocalAiSettingsPane from "@/features/settings/LocalAiSettingsPane.vue";
 import ModeSettingsPane from "@/features/settings/ModeSettingsPane.vue";
 import ServicesSettingsPane from "@/features/settings/ServicesSettingsPane.vue";
 import SettingsSkills from "@/features/settings/SettingsSkills.vue";
@@ -23,7 +24,19 @@ const props = defineProps<{ section: string }>();
 const { t } = useI18n();
 const agent = useAgentStore();
 
-const SECTION_KEYS = ["agent", "assistant", "appearance", "mode", "services", "system", "mcp", "skills", "storage", "team"] as const;
+const SECTION_KEYS = [
+  "agent",
+  "assistant",
+  "appearance",
+  "mode",
+  "services",
+  "localai",
+  "system",
+  "mcp",
+  "skills",
+  "storage",
+  "team",
+] as const;
 type SectionKey = (typeof SECTION_KEYS)[number];
 
 /** 分区的标题与说明都走 i18n（settings.sections.*），侧栏导航的短标签在 SettingsDialog。 */
@@ -49,6 +62,7 @@ onMounted(() => {
     <AppearanceSettingsPane v-else-if="section === 'appearance'" />
     <ModeSettingsPane v-else-if="section === 'mode'" />
     <ServicesSettingsPane v-else-if="section === 'services'" />
+    <LocalAiSettingsPane v-else-if="section === 'localai'" />
     <SystemSettingsPane v-else-if="section === 'system'" />
     <McpPane v-else-if="section === 'mcp'" />
     <SettingsSkills v-else-if="section === 'skills'" />
