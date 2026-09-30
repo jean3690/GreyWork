@@ -26,4 +26,15 @@ describe("createLlmClient desktop-path seams", () => {
     if (client.isAvailable()) return Promise.resolve();
     return expect(client.onEvent(() => undefined)).rejects.toThrow();
   });
+  it("listModels / embed / transcribe 在非桌面运行时拒绝（本地 AI 也要宿主）", async () => {
+    const client = createLlmClient();
+    if (client.isAvailable()) return;
+    await expect(client.listModels({ baseUrl: "http://localhost:11434" })).rejects.toBeInstanceOf(LlmUnavailableError);
+    await expect(client.embed({ baseUrl: "http://localhost:11434", model: "bge-m3", input: ["x"] })).rejects.toBeInstanceOf(
+      LlmUnavailableError,
+    );
+    await expect(client.transcribe({ baseUrl: "http://localhost:9000", model: "whisper-1", path: "/a/voice.wav" })).rejects.toBeInstanceOf(
+      LlmUnavailableError,
+    );
+  });
 });

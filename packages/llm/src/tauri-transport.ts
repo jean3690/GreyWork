@@ -1,5 +1,14 @@
 import { hasHostCommands, invoke, listen, type UnlistenFn } from "@greywork/host-ipc";
-import type { LlmChatParams, LlmClient, LlmEventEnvelope } from "./transports";
+import type {
+  LlmChatParams,
+  LlmClient,
+  LlmConnection,
+  LlmEmbedParams,
+  LlmEmbedResult,
+  LlmEventEnvelope,
+  LlmTranscribeParams,
+  LlmTranscribeResult,
+} from "./transports";
 
 const EVENT_NAME = "llm://event";
 
@@ -19,6 +28,8 @@ export class TauriLlmTransport implements LlmClient {
       messages: params.messages,
       reasoningEffort: params.reasoningEffort ?? "",
       headers: params.headers ?? {},
+      temperature: params.temperature ?? null,
+      maxTokens: params.maxTokens ?? null,
       clientToken: params.clientToken ?? "",
     });
   }
@@ -32,5 +43,34 @@ export class TauriLlmTransport implements LlmClient {
       listener(event.payload);
     });
     return () => unlisten();
+  }
+
+  async listModels(connection: LlmConnection): Promise<string[]> {
+    return invoke<string[]>("llm_list_models", {
+      baseUrl: connection.baseUrl,
+      apiKeyEnv: connection.apiKeyEnv ?? "",
+      headers: connection.headers ?? {},
+    });
+  }
+
+  async embed(params: LlmEmbedParams): Promise<LlmEmbedResult> {
+    return invoke<LlmEmbedResult>("llm_embed", {
+      baseUrl: params.baseUrl,
+      model: params.model,
+      apiKeyEnv: params.apiKeyEnv ?? "",
+      headers: params.headers ?? {},
+      input: params.input,
+    });
+  }
+
+  async transcribe(params: LlmTranscribeParams): Promise<LlmTranscribeResult> {
+    return invoke<LlmTranscribeResult>("llm_transcribe", {
+      baseUrl: params.baseUrl,
+      model: params.model,
+      apiKeyEnv: params.apiKeyEnv ?? "",
+      headers: params.headers ?? {},
+      path: params.path,
+      language: params.language ?? null,
+    });
   }
 }

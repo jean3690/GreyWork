@@ -9,6 +9,10 @@ export interface ModelProviderConfig {
   apiKeyEnv?: string;
   enabled: boolean;
   reasoningEffort?: ReasoningEffort;
+  /** 采样温度（0–2）；缺省不传，由服务端默认值决定。 */
+  temperature?: number;
+  /** 单轮最大输出 token；缺省不传。 */
+  maxTokens?: number;
   /**
    * 附加请求头（自定义 baseurl 网关常见的鉴权/标记头）。
    * 值支持 `{{ENV_VAR}}` 占位符，由宿主在发请求时从环境变量解析 ——

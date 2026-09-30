@@ -19,9 +19,14 @@ use tokio::sync::Mutex;
 
 use crate::host::HostContext;
 use crate::log;
+use crate::workspace_fs::WorkspaceFsAccess;
 
 /// SSE 流空闲超时：连接保持但 N 秒无任何字节 → 按错误终止（服务端挂死不能永久悬挂回合）。
 const LLM_IDLE_TIMEOUT_SECS: u64 = 60;
+
+/// 语音转写的音频上限：与附件通用文件上限一致（`attachments.ts` 的 20MB）。
+/// 转写要把整段音频读进内存再走 multipart，不设硬顶等于让一次调用分配任意大缓冲。
+const TRANSCRIBE_MAX_BYTES: usize = 20 * 1024 * 1024;
 
 /// 增量合批时间窗：与渲染端 `stores/chat/stream.ts` 的 40ms flush 节奏对齐。
 const DELTA_FLUSH_INTERVAL: Duration = Duration::from_millis(40);
@@ -90,29 +95,37 @@ pub struct LlmChatMessage {
 }
 
 /// 全局 LLM 主机状态：请求 id 分配 + 可中止的流任务句柄。
+///
+/// `streams` 用 `Arc<Mutex<…>>` 而不是裸 `Mutex`：流任务结束时**自己**要把句柄摘掉
+/// （正常完成也要摘，否则长会话会攒下成千上万个已完成的 `JoinHandle`），
+/// 于是它得持有一份锁的共享引用。
 #[derive(Default)]
 pub struct LlmHost {
     next_id: AtomicU64,
-    streams: Mutex<HashMap<u64, tokio::task::JoinHandle<()>>>,
+    streams: Arc<Mutex<HashMap<u64, tokio::task::JoinHandle<()>>>>,
 }
 
 fn emit(host: &dyn HostContext, kind: &'static str, payload: serde_json::Value) {
     crate::host::emit_json(host, "llm://event", LlmEventEnvelope { kind, payload });
 }
 
-/// 拼接 chat/completions 端点：baseUrl 已带版本段（/v1、/v4…）则直接追加，
+/// 拼接 openai 兼容端点：baseUrl 已带版本段（/v1、/v4…）则直接追加，
 /// 否则补默认 /v1。兼容 OpenAI / DeepSeek / Moonshot / 智谱 / vLLM / Ollama(/v1) 等。
-fn completions_url(base_url: &str) -> String {
+fn endpoint_url(base_url: &str, path: &str) -> String {
     let trimmed = base_url.trim().trim_end_matches('/');
     let last_segment = trimmed.rsplit('/').next().unwrap_or("");
     let has_version = last_segment.len() >= 2
         && last_segment.starts_with('v')
         && last_segment[1..].chars().all(|c| c.is_ascii_digit());
     if has_version {
-        format!("{trimmed}/chat/completions")
+        format!("{trimmed}/{path}")
     } else {
-        format!("{trimmed}/v1/chat/completions")
+        format!("{trimmed}/v1/{path}")
     }
+}
+
+fn completions_url(base_url: &str) -> String {
+    endpoint_url(base_url, "chat/completions")
 }
 
 /// 推理等级 → openai `reasoning_effort`。auto/空/未知不传；max 收敛为 high（openai 无 max 档）。
@@ -126,12 +139,23 @@ fn openai_reasoning_effort(effort: &str) -> Option<&'static str> {
     }
 }
 
+/// 采样参数（temperature / max_tokens）：仅显式设置才写进请求体。
+///
+/// 本地模型常见的「确定性 / 限长」诉求靠这两项，但对不支持的端点写进去等于拒收整个请求，
+/// 所以缺省一律不传（与 `reasoning_effort` 的 auto 同款策略）。
+#[derive(Debug, Default, Clone, Copy)]
+pub struct InferenceParams {
+    pub temperature: Option<f64>,
+    pub max_tokens: Option<u32>,
+}
+
 /// 构造流式请求体。推理档位映射为 openai `reasoning_effort`，
 /// 仅对显式档位（low/medium/high/max）添加，避免不支持的模型拒绝整个请求。
 fn chat_request_body(
     model: &str,
     messages: Vec<LlmChatMessage>,
     reasoning_effort: &str,
+    params: &InferenceParams,
 ) -> serde_json::Value {
     let mut body = serde_json::json!({
         "model": model,
@@ -147,20 +171,39 @@ fn chat_request_body(
     if let Some(effort) = openai_reasoning_effort(reasoning_effort) {
         body["reasoning_effort"] = serde_json::json!(effort);
     }
+    if let Some(temperature) = params.temperature {
+        body["temperature"] = serde_json::json!(temperature);
+    }
+    if let Some(max_tokens) = params.max_tokens {
+        body["max_tokens"] = serde_json::json!(max_tokens);
+    }
     body
 }
 
-/// 解析一条 SSE data 行为增量文本；非流式完整响应由调用方单独处理。
-/// 返回 None 表示该行不含可追加内容（如 usage 帧、空 delta）。
-fn delta_from_sse_data(data: &str) -> Option<String> {
+/// 一条 SSE data 行里的增量：正文与思考链分开取。
+///
+/// 思考链有两种线上形状：`delta.reasoning_content`（DeepSeek-R1 / Qwen3）与
+/// `delta.reasoning`（Ollama / vLLM）。两种都收，正文与思考各自独立合批下发。
+#[derive(Debug, Default, PartialEq, Eq)]
+struct SseDelta {
+    content: Option<String>,
+    reasoning: Option<String>,
+}
+
+/// 解析一条 SSE data 行为增量；非流式完整响应由调用方单独处理。
+/// 返回 None 表示该行连 choices/delta 都没有（如 usage 帧）。
+fn parse_sse_delta(data: &str) -> Option<SseDelta> {
     let value: serde_json::Value = serde_json::from_str(data).ok()?;
-    let content = value
-        .get("choices")?
-        .get(0)?
-        .get("delta")?
-        .get("content")?
-        .as_str()?;
-    (!content.is_empty()).then(|| content.to_string())
+    let delta = value.get("choices")?.get(0)?.get("delta")?;
+    let pick = |key: &str| -> Option<String> {
+        let text = delta.get(key)?.as_str()?;
+        (!text.is_empty()).then(|| text.to_string())
+    };
+    let reasoning = pick("reasoning_content").or_else(|| pick("reasoning"));
+    Some(SseDelta {
+        content: pick("content"),
+        reasoning,
+    })
 }
 
 /// 非流式完整响应（服务端忽略 stream 时）提取全文。
@@ -235,6 +278,7 @@ pub async fn llm_chat_start(
     messages: Vec<LlmChatMessage>,
     reasoning_effort: String,
     headers: Option<HashMap<String, String>>,
+    params: InferenceParams,
     client_token: Option<String>,
 ) -> Result<u64, String> {
     let base_url = base_url.trim().to_string();
@@ -252,41 +296,45 @@ pub async fn llm_chat_start(
         messages,
         &reasoning_effort,
         &headers.unwrap_or_default(),
+        &params,
     )
     .await?;
 
     let host_task = host;
+    // 先持锁生成句柄再插入：流任务结束时会自己摘除，若它在插入前就跑到摘除那一步，
+    // 那次 remove 会落空、句柄永久残留。持锁期间它拿不到锁，摘除必然发生在插入之后。
+    let mut streams = llm.streams.lock().await;
+    let streams_handle = Arc::clone(&llm.streams);
     let task = tokio::spawn(async move {
         stream_response(host_task.as_ref(), response, &turn_token).await;
+        streams_handle.lock().await.remove(&request_id);
     });
-    llm.streams.lock().await.insert(request_id, task);
+    streams.insert(request_id, task);
     Ok(request_id)
 }
 
-/// 构造并发送 chat/completions 请求（command 与宿主自主执行共用）。
-/// 密钥宿主侧解析：变量未设或为空（本地服务常见）则匿名请求。
-async fn send_chat_request(
-    base_url: &str,
-    model: &str,
-    api_key_env: &str,
-    messages: Vec<LlmChatMessage>,
-    reasoning_effort: &str,
-    headers: &HashMap<String, String>,
-) -> Result<reqwest::Response, String> {
+/// 解析 API Key（环境变量名 → 值）。声明了 env 却没设值 → Err 指路用户去哪补；
+/// env 名为空（本地服务如 Ollama）才允许匿名。
+fn resolve_api_key(api_key_env: &str) -> Result<String, String> {
     let env_name = api_key_env.trim();
-    let api_key = std::env::var(env_name).unwrap_or_default();
-    // 声明了 env 却没设值：别拿匿名请求去撞 401 —— 直接告诉用户去哪补。
-    // （env 名为空的本地服务如 Ollama 才允许匿名。）
-    if !env_name.is_empty() && api_key.is_empty() {
-        return Err(format!(
+    if env_name.is_empty() {
+        return Ok(String::new());
+    }
+    match std::env::var(env_name) {
+        Ok(value) if !value.is_empty() => Ok(value),
+        _ => Err(format!(
             "未设置 API Key：先在本机终端执行 {}，再从同一终端启动 GreyWork（设置页 → Agent → 模型供应商可查看/修改变量名）",
             env_set_hint(env_name, cfg!(windows))
-        ));
+        )),
     }
-    let client = crate::http::shared_client(10)?;
-    let mut request = client
-        .post(completions_url(base_url))
-        .json(&chat_request_body(model.trim(), messages, reasoning_effort));
+}
+
+/// 给请求挂上 bearer 鉴权与自定义头（`{{ENV}}` 占位符宿主侧解析）。
+fn apply_auth(
+    mut request: reqwest::RequestBuilder,
+    api_key: &str,
+    headers: &HashMap<String, String>,
+) -> Result<reqwest::RequestBuilder, String> {
     if !api_key.is_empty() {
         request = request.bearer_auth(api_key);
     }
@@ -294,6 +342,30 @@ async fn send_chat_request(
         let resolved = resolve_header_placeholders(value)?;
         request = request.header(key, resolved);
     }
+    Ok(request)
+}
+
+/// 构造并发送 chat/completions 请求（command 与宿主自主执行共用）。
+async fn send_chat_request(
+    base_url: &str,
+    model: &str,
+    api_key_env: &str,
+    messages: Vec<LlmChatMessage>,
+    reasoning_effort: &str,
+    headers: &HashMap<String, String>,
+    params: &InferenceParams,
+) -> Result<reqwest::Response, String> {
+    let api_key = resolve_api_key(api_key_env)?;
+    let client = crate::http::shared_client(10)?;
+    let request = client
+        .post(completions_url(base_url))
+        .json(&chat_request_body(
+            model.trim(),
+            messages,
+            reasoning_effort,
+            params,
+        ));
+    let request = apply_auth(request, &api_key, headers)?;
     let response = request
         .send()
         .await
@@ -350,6 +422,7 @@ pub async fn chat_complete(
         messages,
         reasoning_effort,
         headers,
+        &InferenceParams::default(),
     )
     .await?;
     if !is_sse_response(&response) {
@@ -367,6 +440,8 @@ pub async fn chat_complete(
     for event in events {
         match event {
             SseEvent::Delta(delta) => text.push_str(&delta),
+            // 聚合回复只要正文：思考链不进宿主兜底执行的产物。
+            SseEvent::Thinking(_) => {}
             SseEvent::Done => return Ok(text),
             SseEvent::Error(message) => return Err(message),
         }
@@ -402,7 +477,7 @@ fn emit_llm(
     emit(host, kind, payload);
 }
 
-/// 发一条增量。合批后仍走 `llm-delta` + `delta` 字段，前端契约不变（接收侧本就是累加）。
+/// 发一条正文增量。合批后仍走 `llm-delta` + `delta` 字段，前端契约不变（接收侧本就是累加）。
 fn emit_delta(host: &dyn HostContext, client_token: &str, delta: String) {
     emit_llm(
         host,
@@ -412,30 +487,27 @@ fn emit_delta(host: &dyn HostContext, client_token: &str, delta: String) {
     );
 }
 
+/// 发一条思考链增量（DeepSeek-R1 / Qwen3 / Ollama 的 reasoning）。
+/// 与正文分开一个 kind：前端渲染成「思考段」，与 ACP 的 AgentThoughtChunk 对齐。
+fn emit_thinking(host: &dyn HostContext, client_token: &str, delta: String) {
+    emit_llm(
+        host,
+        client_token,
+        "llm-thinking-delta",
+        serde_json::json!({ "delta": delta }),
+    );
+}
+
 /// SSE / 整段 JSON 双路处理；所有出口都保证发出 llm-done 或 llm-error。
 async fn stream_response(host: &dyn HostContext, response: reqwest::Response, client_token: &str) {
     if !is_sse_response(&response) {
-        match crate::http::read_json::<serde_json::Value>(
+        let body = match crate::http::read_json::<serde_json::Value>(
             response,
             crate::http::RESPONSE_READ_TIMEOUT,
         )
         .await
         {
-            Ok(body) => match content_from_completion(&body) {
-                Some(content) => {
-                    emit_delta(host, client_token, content);
-                    emit_llm(host, client_token, "llm-done", serde_json::json!({}));
-                }
-                None => {
-                    log::error("llm", "empty completion（非流式响应无内容）");
-                    emit_llm(
-                        host,
-                        client_token,
-                        "llm-error",
-                        serde_json::json!({ "message": "empty completion" }),
-                    );
-                }
-            },
+            Ok(body) => body,
             Err(error) => {
                 log::error("llm", format!("非流式响应失败: {error}"));
                 emit_llm(
@@ -444,6 +516,37 @@ async fn stream_response(host: &dyn HostContext, response: reqwest::Response, cl
                     "llm-error",
                     serde_json::json!({ "message": error }),
                 );
+                return;
+            }
+        };
+        // 非流式整包：思考链先出（如果有），正文随后 —— 与流式路径的段序一致。
+        let reasoning = body
+            .get("choices")
+            .and_then(|choices| choices.get(0))
+            .and_then(|choice| choice.get("message"))
+            .and_then(|message| {
+                message
+                    .get("reasoning_content")
+                    .or_else(|| message.get("reasoning"))
+            })
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        if !reasoning.is_empty() {
+            emit_thinking(host, client_token, reasoning.to_string());
+        }
+        match content_from_completion(&body) {
+            Some(content) => {
+                emit_delta(host, client_token, content);
+                emit_llm(host, client_token, "llm-done", serde_json::json!({}));
+            }
+            None => {
+                log::error("llm", "empty completion（非流式响应无内容）");
+                emit_llm(
+                    host,
+                    client_token,
+                    "llm-error",
+                    serde_json::json!({ "message": "empty completion" }),
+                );
             }
         }
         return;
@@ -451,15 +554,23 @@ async fn stream_response(host: &dyn HostContext, response: reqwest::Response, cl
 
     // 边收边发：合批后在增量到达时立刻下发，而不是等整段响应收完再一次性铺出去。
     // 末端内容靠 `finish()` 兜底——终止事件之前必须先把它发出去，否则最后一段会丢。
-    let mut batcher = DeltaBatcher::new();
+    // 正文与思考各一个合批器：两条流交替到达时各自按自己的节奏发车。
+    let mut content_batcher = DeltaBatcher::new();
+    let mut thinking_batcher = DeltaBatcher::new();
     let mut terminal = None;
     drain_sse_into(
         response.bytes_stream(),
         Duration::from_secs(LLM_IDLE_TIMEOUT_SECS),
         |event| match event {
             SseEvent::Delta(delta) => {
-                if let Some(batch) = batcher.push(&delta) {
+                if let Some(batch) = content_batcher.push(&delta) {
                     emit_delta(host, client_token, batch);
+                }
+                true
+            }
+            SseEvent::Thinking(delta) => {
+                if let Some(batch) = thinking_batcher.push(&delta) {
+                    emit_thinking(host, client_token, batch);
                 }
                 true
             }
@@ -470,8 +581,11 @@ async fn stream_response(host: &dyn HostContext, response: reqwest::Response, cl
         },
     )
     .await;
-    if let Some(batch) = batcher.finish() {
+    if let Some(batch) = content_batcher.finish() {
         emit_delta(host, client_token, batch);
+    }
+    if let Some(batch) = thinking_batcher.finish() {
+        emit_thinking(host, client_token, batch);
     }
     match terminal {
         Some(SseEvent::Error(message)) => {
@@ -492,6 +606,7 @@ async fn stream_response(host: &dyn HostContext, response: reqwest::Response, cl
 #[derive(Debug, PartialEq)]
 enum SseEvent {
     Delta(String),
+    Thinking(String),
     Done,
     Error(String),
 }
@@ -550,9 +665,16 @@ async fn drain_sse_into(
                 sink(SseEvent::Done);
                 return;
             }
-            if let Some(delta) = delta_from_sse_data(data) {
-                if !sink(SseEvent::Delta(delta)) {
-                    return;
+            if let Some(delta) = parse_sse_delta(data) {
+                if let Some(content) = delta.content {
+                    if !sink(SseEvent::Delta(content)) {
+                        return;
+                    }
+                }
+                if let Some(reasoning) = delta.reasoning {
+                    if !sink(SseEvent::Thinking(reasoning)) {
+                        return;
+                    }
                 }
             }
         }
@@ -582,6 +704,10 @@ pub struct ChatStartArgs {
     pub messages: Vec<LlmChatMessage>,
     pub reasoning_effort: String,
     pub headers: Option<HashMap<String, String>>,
+    #[serde(default)]
+    pub temperature: Option<f64>,
+    #[serde(default)]
+    pub max_tokens: Option<u32>,
     pub client_token: Option<String>,
 }
 
@@ -589,6 +715,266 @@ pub struct ChatStartArgs {
 #[serde(rename_all = "camelCase")]
 pub struct ChatStopArgs {
     pub request_id: u64,
+}
+
+/// `llm_list_models` 入参：连通性自检与模型下拉共用。
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListModelsArgs {
+    pub base_url: String,
+    #[serde(default)]
+    pub api_key_env: Option<String>,
+    #[serde(default)]
+    pub headers: Option<HashMap<String, String>>,
+}
+
+/// `llm_embed` 入参（RAG 索引用）。
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmbedArgs {
+    pub base_url: String,
+    pub model: String,
+    #[serde(default)]
+    pub api_key_env: Option<String>,
+    #[serde(default)]
+    pub headers: Option<HashMap<String, String>>,
+    pub input: Vec<String>,
+}
+
+/// 向量结果：`dim` 冗余回传，便于调用方校验模型是否换过。
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmbedResult {
+    pub embeddings: Vec<Vec<f32>>,
+    pub dim: usize,
+    pub model: String,
+}
+
+/// `llm_transcribe` 入参：音频以**授权路径**给出（附件已落在授权根内）。
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscribeArgs {
+    pub base_url: String,
+    pub model: String,
+    #[serde(default)]
+    pub api_key_env: Option<String>,
+    #[serde(default)]
+    pub headers: Option<HashMap<String, String>>,
+    pub path: String,
+    #[serde(default)]
+    pub language: Option<String>,
+}
+
+#[derive(serde::Serialize, Debug)]
+pub struct TranscribeResult {
+    pub text: String,
+}
+
+/* ===== 模型发现 / 向量 / 语音转写 ===== */
+
+/// 拉取 `GET /models` 的模型 id 清单。既供设置页做模型下拉，也兼作连通性自检
+/// （能列出来 = Base URL 可达 + 鉴权正确）。
+pub async fn llm_list_models(args: ListModelsArgs) -> Result<Vec<String>, String> {
+    let base_url = args.base_url.trim();
+    if base_url.is_empty() {
+        return Err("base_url is required".to_string());
+    }
+    let api_key = resolve_api_key(args.api_key_env.as_deref().unwrap_or(""))?;
+    let empty = HashMap::new();
+    let headers = args.headers.as_ref().unwrap_or(&empty);
+    let client = crate::http::shared_client(10)?;
+    let request = client.get(endpoint_url(base_url, "models"));
+    let request = apply_auth(request, &api_key, headers)?;
+    let response = request
+        .send()
+        .await
+        .map_err(|error| format!("llm models request failed: {error}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        let body = crate::http::read_text(response, crate::http::RESPONSE_READ_TIMEOUT)
+            .await
+            .unwrap_or_default();
+        return Err(format!(
+            "llm endpoint returned {status}: {}（检查 Base URL 是否正确、本地服务是否在运行）",
+            truncate(&body, 200)
+        ));
+    }
+    let body: serde_json::Value =
+        crate::http::read_json(response, crate::http::RESPONSE_READ_TIMEOUT).await?;
+    Ok(collect_model_ids(&body))
+}
+
+/// 从 `/models` 响应里收集模型 id：兼容 OpenAI `data[].id` 与 Ollama 原生 `models[].name`。
+fn collect_model_ids(body: &serde_json::Value) -> Vec<String> {
+    let mut ids: Vec<String> = Vec::new();
+    if let Some(data) = body.get("data").and_then(|value| value.as_array()) {
+        for item in data {
+            if let Some(id) = item.get("id").and_then(|value| value.as_str()) {
+                ids.push(id.to_string());
+            }
+        }
+    }
+    if let Some(models) = body.get("models").and_then(|value| value.as_array()) {
+        for item in models {
+            if let Some(name) = item.get("name").and_then(|value| value.as_str()) {
+                ids.push(name.to_string());
+            }
+        }
+    }
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
+/// 批量取文本向量（`POST /embeddings`）。RAG 索引与查询共用。
+pub async fn llm_embed(args: EmbedArgs) -> Result<EmbedResult, String> {
+    let base_url = args.base_url.trim();
+    let model = args.model.trim();
+    if base_url.is_empty() || model.is_empty() {
+        return Err("base_url and model are required".to_string());
+    }
+    if args.input.is_empty() {
+        return Ok(EmbedResult {
+            embeddings: Vec::new(),
+            dim: 0,
+            model: model.to_string(),
+        });
+    }
+    let api_key = resolve_api_key(args.api_key_env.as_deref().unwrap_or(""))?;
+    let empty = HashMap::new();
+    let headers = args.headers.as_ref().unwrap_or(&empty);
+    let client = crate::http::shared_client(30)?;
+    let request = client
+        .post(endpoint_url(base_url, "embeddings"))
+        .json(&serde_json::json!({ "model": model, "input": args.input }));
+    let request = apply_auth(request, &api_key, headers)?;
+    let response = request
+        .send()
+        .await
+        .map_err(|error| format!("llm embeddings request failed: {error}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        let body = crate::http::read_text(response, crate::http::RESPONSE_READ_TIMEOUT)
+            .await
+            .unwrap_or_default();
+        return Err(format!(
+            "llm embeddings returned {status}: {}（确认该模型是 embedding 模型、且服务支持 /v1/embeddings）",
+            truncate(&body, 200)
+        ));
+    }
+    let body: serde_json::Value =
+        crate::http::read_json(response, crate::http::RESPONSE_READ_TIMEOUT).await?;
+    let embeddings = parse_embeddings(&body)?;
+    let dim = embeddings.first().map_or(0, Vec::len);
+    Ok(EmbedResult {
+        embeddings,
+        dim,
+        model: model.to_string(),
+    })
+}
+
+/// 解析向量响应：OpenAI `data[].embedding`、批式 `embeddings[][]`、单条 `embedding[]` 三种形状。
+fn parse_embeddings(body: &serde_json::Value) -> Result<Vec<Vec<f32>>, String> {
+    let to_vec = |value: &serde_json::Value| -> Option<Vec<f32>> {
+        value.as_array().map(|arr| {
+            arr.iter()
+                .map(|n| n.as_f64().unwrap_or(0.0) as f32)
+                .collect()
+        })
+    };
+    if let Some(data) = body.get("data").and_then(|value| value.as_array()) {
+        let out: Vec<Vec<f32>> = data
+            .iter()
+            .filter_map(|item| item.get("embedding").and_then(&to_vec))
+            .collect();
+        if !out.is_empty() {
+            return Ok(out);
+        }
+    }
+    if let Some(embeddings) = body.get("embeddings").and_then(|value| value.as_array()) {
+        let out: Vec<Vec<f32>> = embeddings.iter().filter_map(&to_vec).collect();
+        if !out.is_empty() {
+            return Ok(out);
+        }
+    }
+    if let Some(single) = body.get("embedding").and_then(&to_vec) {
+        return Ok(vec![single]);
+    }
+    Err("embedding 响应里没有向量（确认模型是 embedding 模型）".to_string())
+}
+
+/// 语音转写（`POST /audio/transcriptions`，OpenAI 兼容 multipart）。
+/// 音频从**授权路径**读取 —— 附件落在 `~/.greyWork/attachments`，该根始终授权。
+pub async fn llm_transcribe(
+    workspace: &WorkspaceFsAccess,
+    args: TranscribeArgs,
+) -> Result<TranscribeResult, String> {
+    let base_url = args.base_url.trim();
+    if base_url.is_empty() {
+        return Err("base_url is required".to_string());
+    }
+    let path = workspace.resolve_existing(&args.path)?;
+    let bytes = std::fs::read(&path).map_err(|error| format!("读取音频失败: {error}"))?;
+    if bytes.is_empty() {
+        return Err("音频文件为空".to_string());
+    }
+    if bytes.len() > TRANSCRIBE_MAX_BYTES {
+        return Err(format!(
+            "音频超过上限 {} MB，无法转写",
+            TRANSCRIBE_MAX_BYTES / 1024 / 1024
+        ));
+    }
+    let api_key = resolve_api_key(args.api_key_env.as_deref().unwrap_or(""))?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("audio")
+        .to_string();
+    let part = reqwest::multipart::Part::bytes(bytes)
+        .file_name(file_name)
+        .mime_str("application/octet-stream")
+        .map_err(|error| format!("构造音频分片失败: {error}"))?;
+    let mut form = reqwest::multipart::Form::new()
+        .part("file", part)
+        .text("response_format", "json");
+    if !args.model.trim().is_empty() {
+        form = form.text("model", args.model.trim().to_string());
+    }
+    if let Some(language) = args.language.as_deref().map(str::trim) {
+        if !language.is_empty() {
+            form = form.text("language", language.to_string());
+        }
+    }
+    let client = crate::http::shared_client(60)?;
+    let request = client
+        .post(endpoint_url(base_url, "audio/transcriptions"))
+        .multipart(form);
+    let empty = HashMap::new();
+    let headers = args.headers.as_ref().unwrap_or(&empty);
+    let request = apply_auth(request, &api_key, headers)?;
+    let response = request
+        .send()
+        .await
+        .map_err(|error| format!("llm transcribe request failed: {error}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        let body = crate::http::read_text(response, crate::http::RESPONSE_READ_TIMEOUT)
+            .await
+            .unwrap_or_default();
+        return Err(format!(
+            "llm transcribe returned {status}: {}（确认本地服务支持 /v1/audio/transcriptions）",
+            truncate(&body, 200)
+        ));
+    }
+    let body: serde_json::Value =
+        crate::http::read_json(response, crate::http::RESPONSE_READ_TIMEOUT).await?;
+    let text = body
+        .get("text")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    Ok(TranscribeResult { text })
 }
 
 #[cfg(test)]
@@ -627,14 +1013,104 @@ mod tests {
     fn sse_delta_parses_content_and_ignores_noise_frames() {
         let chunk =
             r#"{"id":"x","choices":[{"index":0,"delta":{"role":"assistant","content":"你好"}}]}"#;
-        assert_eq!(delta_from_sse_data(chunk).as_deref(), Some("你好"));
-        // 空 delta 与无 choices 帧
-        assert_eq!(delta_from_sse_data(r#"{"choices":[{"delta":{}}]}"#), None);
         assert_eq!(
-            delta_from_sse_data(r#"{"usage":{"total_tokens":10}}"#),
-            None
+            parse_sse_delta(chunk),
+            Some(SseDelta {
+                content: Some("你好".into()),
+                reasoning: None
+            })
         );
-        assert_eq!(delta_from_sse_data("not-json"), None);
+        // 空 delta：content 为空 → None 字段（不产出事件）
+        assert_eq!(
+            parse_sse_delta(r#"{"choices":[{"delta":{}}]}"#),
+            Some(SseDelta::default())
+        );
+        // 无 choices 的帧（usage 等）→ None
+        assert_eq!(parse_sse_delta(r#"{"usage":{"total_tokens":10}}"#), None);
+        assert_eq!(parse_sse_delta("not-json"), None);
+    }
+
+    /// 思考链两种线上形状：reasoning_content（DeepSeek-R1/Qwen3）与 reasoning（Ollama/vLLM）。
+    #[test]
+    fn sse_delta_extracts_reasoning_from_both_shapes() {
+        assert_eq!(
+            parse_sse_delta(r#"{"choices":[{"delta":{"reasoning_content":"先想"}}]}"#),
+            Some(SseDelta {
+                content: None,
+                reasoning: Some("先想".into())
+            })
+        );
+        assert_eq!(
+            parse_sse_delta(r#"{"choices":[{"delta":{"reasoning":"再想"}}]}"#),
+            Some(SseDelta {
+                content: None,
+                reasoning: Some("再想".into())
+            })
+        );
+        // 同一帧既有正文又有思考：两个字段都取到
+        assert_eq!(
+            parse_sse_delta(r#"{"choices":[{"delta":{"content":"答","reasoning_content":"思"}}]}"#),
+            Some(SseDelta {
+                content: Some("答".into()),
+                reasoning: Some("思".into())
+            })
+        );
+    }
+
+    #[test]
+    fn endpoint_url_builds_all_openai_paths() {
+        assert_eq!(
+            endpoint_url("http://localhost:11434", "models"),
+            "http://localhost:11434/v1/models"
+        );
+        assert_eq!(
+            endpoint_url("http://localhost:11434/v1/", "embeddings"),
+            "http://localhost:11434/v1/embeddings"
+        );
+        assert_eq!(
+            endpoint_url("http://localhost:9000/v1", "audio/transcriptions"),
+            "http://localhost:9000/v1/audio/transcriptions"
+        );
+    }
+
+    #[test]
+    fn request_body_includes_sampling_params_only_when_set() {
+        let params = InferenceParams {
+            temperature: Some(0.2),
+            max_tokens: Some(512),
+        };
+        let body = chat_request_body("m", vec![], "auto", &params);
+        assert_eq!(body["temperature"], 0.2);
+        assert_eq!(body["max_tokens"], 512);
+        let bare = chat_request_body("m", vec![], "auto", &InferenceParams::default());
+        assert!(bare.get("temperature").is_none());
+        assert!(bare.get("max_tokens").is_none());
+    }
+
+    #[test]
+    fn collect_model_ids_handles_both_shapes_and_dedups() {
+        let openai: serde_json::Value =
+            serde_json::from_str(r#"{"data":[{"id":"b"},{"id":"a"},{"id":"a"}]}"#).unwrap();
+        assert_eq!(collect_model_ids(&openai), vec!["a", "b"]);
+        let ollama: serde_json::Value =
+            serde_json::from_str(r#"{"models":[{"name":"qwen2.5"},{"name":"llama3"}]}"#).unwrap();
+        assert_eq!(collect_model_ids(&ollama), vec!["llama3", "qwen2.5"]);
+        assert!(collect_model_ids(&serde_json::json!({})).is_empty());
+    }
+
+    #[test]
+    fn parse_embeddings_handles_three_shapes() {
+        let openai: serde_json::Value =
+            serde_json::from_str(r#"{"data":[{"embedding":[1,2]},{"embedding":[3,4]}]}"#).unwrap();
+        assert_eq!(
+            parse_embeddings(&openai).unwrap(),
+            vec![vec![1.0, 2.0], vec![3.0, 4.0]]
+        );
+        let batch: serde_json::Value = serde_json::from_str(r#"{"embeddings":[[1,2]]}"#).unwrap();
+        assert_eq!(parse_embeddings(&batch).unwrap(), vec![vec![1.0, 2.0]]);
+        let single: serde_json::Value = serde_json::from_str(r#"{"embedding":[5,6]}"#).unwrap();
+        assert_eq!(parse_embeddings(&single).unwrap(), vec![vec![5.0, 6.0]]);
+        assert!(parse_embeddings(&serde_json::json!({"ok":true})).is_err());
     }
 
     #[test]
@@ -674,7 +1150,7 @@ mod tests {
             role: "user".into(),
             content: parts.clone(),
         }];
-        let body = chat_request_body("gpt-test", messages, "auto");
+        let body = chat_request_body("gpt-test", messages, "auto", &InferenceParams::default());
         assert_eq!(body["messages"][0]["content"], parts);
     }
 
@@ -690,7 +1166,7 @@ mod tests {
                 content: serde_json::json!("hi"),
             },
         ];
-        let body = chat_request_body("gpt-test", messages, "high");
+        let body = chat_request_body("gpt-test", messages, "high", &InferenceParams::default());
         assert_eq!(body["model"], "gpt-test");
         assert_eq!(body["stream"], true);
         assert_eq!(body["reasoning_effort"], "high");
@@ -715,7 +1191,7 @@ mod tests {
 
     #[test]
     fn request_body_omits_reasoning_effort_when_auto() {
-        let body = chat_request_body("gpt-test", vec![], "auto");
+        let body = chat_request_body("gpt-test", vec![], "auto", &InferenceParams::default());
         assert!(body.get("reasoning_effort").is_none());
     }
 
@@ -883,6 +1359,130 @@ mod tests {
         const ENV: &str = "GREYWORK_TEST_NO_SUCH_KEY";
         std::env::set_var(ENV, "test-key");
         ENV.to_string()
+    }
+
+    /// 思考链增量与正文增量都从同一个 SSE 流里解析出来，各自成为事件。
+    #[tokio::test]
+    async fn drain_sse_emits_thinking_and_content_events() {
+        let stream = futures_util::stream::iter(vec![
+            sse_chunk(r#"{"choices":[{"delta":{"reasoning_content":"想"}}]}"#),
+            sse_chunk_delta("答"),
+            sse_chunk("[DONE]"),
+        ]);
+        let events = drain_sse(stream, Duration::from_secs(5)).await;
+        assert_eq!(
+            events,
+            vec![
+                SseEvent::Thinking("想".into()),
+                SseEvent::Delta("答".into()),
+                SseEvent::Done,
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn llm_list_models_parses_openai_and_ollama_shapes() {
+        let openai = r#"{"data":[{"id":"qwen2.5"},{"id":"llama3.2"}]}"#.to_string();
+        let url = mock_completions_server(openai, "application/json").await;
+        let models = llm_list_models(ListModelsArgs {
+            base_url: url,
+            api_key_env: Some(mock_api_key_env()),
+            headers: None,
+        })
+        .await
+        .expect("listed");
+        assert_eq!(models, vec!["llama3.2", "qwen2.5"]);
+    }
+
+    #[tokio::test]
+    async fn llm_embed_reads_vectors_and_dim() {
+        let body = r#"{"data":[{"embedding":[1,2,3]},{"embedding":[0.5,0.25,0.125]}]}"#.to_string();
+        let url = mock_completions_server(body, "application/json").await;
+        let result = llm_embed(EmbedArgs {
+            base_url: url,
+            model: "bge-m3".into(),
+            api_key_env: Some(mock_api_key_env()),
+            headers: None,
+            input: vec!["a".into(), "b".into()],
+        })
+        .await
+        .expect("embedded");
+        assert_eq!(result.dim, 3);
+        assert_eq!(result.embeddings.len(), 2);
+        assert_eq!(result.model, "bge-m3");
+    }
+
+    /// 空输入不该发请求（避免无谓往返），直接回空结果。
+    #[tokio::test]
+    async fn llm_embed_empty_input_skips_request() {
+        let result = llm_embed(EmbedArgs {
+            base_url: "http://127.0.0.1:1".into(),
+            model: "m".into(),
+            api_key_env: None,
+            headers: None,
+            input: vec![],
+        })
+        .await
+        .expect("empty ok");
+        assert!(result.embeddings.is_empty());
+        assert_eq!(result.dim, 0);
+    }
+
+    #[tokio::test]
+    async fn llm_transcribe_reads_authorized_audio_and_returns_text() {
+        let tmp = std::env::temp_dir().join(format!("gw-transcribe-{}", std::process::id()));
+        let root = tmp.join("root");
+        std::fs::create_dir_all(&root).expect("mkdir");
+        let audio = root.join("voice.wav");
+        std::fs::write(&audio, b"RIFFfake-audio-bytes").expect("write audio");
+        let workspace =
+            WorkspaceFsAccess::new(&root, tmp.join("access.json")).expect("workspace access");
+
+        let url =
+            mock_completions_server(r#"{"text":"  你好世界  "}"#.to_string(), "application/json")
+                .await;
+        let result = llm_transcribe(
+            &workspace,
+            TranscribeArgs {
+                base_url: url,
+                model: "whisper-1".into(),
+                api_key_env: Some(mock_api_key_env()),
+                headers: None,
+                path: audio.to_string_lossy().to_string(),
+                language: Some("zh".into()),
+            },
+        )
+        .await
+        .expect("transcribed");
+        assert_eq!(result.text, "你好世界");
+    }
+
+    /// 授权面外的路径不得被转写读取（与 fs 读同一条边界）。
+    #[tokio::test]
+    async fn llm_transcribe_rejects_unauthorized_path() {
+        let tmp = std::env::temp_dir().join(format!("gw-transcribe-deny-{}", std::process::id()));
+        let root = tmp.join("root");
+        let outside = tmp.join("outside");
+        std::fs::create_dir_all(&root).expect("mkdir root");
+        std::fs::create_dir_all(&outside).expect("mkdir outside");
+        let audio = outside.join("secret.wav");
+        std::fs::write(&audio, b"x").expect("write");
+        let workspace =
+            WorkspaceFsAccess::new(&root, tmp.join("access.json")).expect("workspace access");
+        let error = llm_transcribe(
+            &workspace,
+            TranscribeArgs {
+                base_url: "http://127.0.0.1:1".into(),
+                model: "whisper-1".into(),
+                api_key_env: None,
+                headers: None,
+                path: audio.to_string_lossy().to_string(),
+                language: None,
+            },
+        )
+        .await
+        .expect_err("unauthorized");
+        assert!(error.contains("未获用户授权"), "{error}");
     }
 
     #[tokio::test]

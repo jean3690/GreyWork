@@ -5,7 +5,7 @@ import { isTauriRuntime } from "@greywork/core";
 export { isTauriRuntime };
 
 export interface LlmEventEnvelope {
-  kind: "llm-delta" | "llm-done" | "llm-error";
+  kind: "llm-delta" | "llm-thinking-delta" | "llm-done" | "llm-error";
   payload: { delta?: string; message?: string; clientToken?: string };
 }
 
@@ -34,6 +34,10 @@ export interface LlmChatParams {
    * 解析失败（环境变量未设置）该笔请求整体报错，不静默丢头。
    */
   headers?: Record<string, string>;
+  /** 采样温度（0–2）。仅本地/兼容端点需要时显式设置，缺省不传。 */
+  temperature?: number;
+  /** 单轮最大输出 token。缺省不传（由服务端默认值决定）。 */
+  maxTokens?: number;
   /**
    * 本轮流水的调用方令牌，宿主原样回灌进每条事件。
    *
@@ -43,9 +47,45 @@ export interface LlmChatParams {
   clientToken?: string;
 }
 
+/** 连接参数：模型发现 / 向量 / 语音转写共用（都是打同一个 OpenAI 兼容端点）。 */
+export interface LlmConnection {
+  baseUrl: string;
+  /** 密钥所在环境变量名；空 = 本地服务（匿名请求）。 */
+  apiKeyEnv?: string;
+  headers?: Record<string, string>;
+}
+
+export interface LlmEmbedParams extends LlmConnection {
+  model: string;
+  input: string[];
+}
+
+export interface LlmEmbedResult {
+  embeddings: number[][];
+  dim: number;
+  model: string;
+}
+
+export interface LlmTranscribeParams extends LlmConnection {
+  model: string;
+  /** 音频文件的**授权路径**（附件落在授权根内），宿主侧读取。 */
+  path: string;
+  language?: string;
+}
+
+export interface LlmTranscribeResult {
+  text: string;
+}
+
 export interface LlmClient {
   isAvailable(): boolean;
   chat(params: LlmChatParams): Promise<number>;
   stop(requestId: number): Promise<void>;
   onEvent(listener: (event: LlmEventEnvelope) => void): Promise<() => void>;
+  /** 拉取 `/models` 清单（设置页模型下拉，兼作连通性自检）。 */
+  listModels(connection: LlmConnection): Promise<string[]>;
+  /** 批量取文本向量（本地 RAG 索引用）。 */
+  embed(params: LlmEmbedParams): Promise<LlmEmbedResult>;
+  /** 语音转写（本地 STT，OpenAI 兼容 `/audio/transcriptions`）。 */
+  transcribe(params: LlmTranscribeParams): Promise<LlmTranscribeResult>;
 }
