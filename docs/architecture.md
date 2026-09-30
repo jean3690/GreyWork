@@ -22,9 +22,12 @@ greyWork/
 │   ├── cowork/               # Co-operative workspace engine
 │   └── workbench/            # Shared UI package: shell, views, plugin runtime
 ├── plugin-market/            # Plugin registry source + signing
-├── .agents/skills/           # Installed agent skills (vendored)
-└── skills-lock.json          # Locked skill definitions with hashes
+└── .agents/skills/           # Installed agent skills (read natively by the ACP agent)
 ```
+
+There is no lockfile for skills: the host is only an installer (`skills_market.rs` writes a
+snapshot into `<workspace>/.agents/skills/<id>/`), and the ACP agent picks the directory up at its
+next session. Installed-from-market records are tracked renderer-side in `localStorage`.
 
 ## Dependency Direction
 
@@ -66,7 +69,7 @@ desktop     ← workbench (+ Tauri Rust host)
 
 - All packages use source-direct execution (TypeScript via Vite/vue-tsc), no separate build step for packages.
 - The desktop app builds via Tauri: `pnpm build` runs `vue-tsc --noEmit && vite build` as `beforeBuildCommand`, then Tauri compiles the Rust binary.
-- Domain logic lives in `crates/greywork-host/` (a single Cargo workspace at the repo root, one `Cargo.lock`), shared by both hosts. Major domains: `llm.rs` (OpenAI-compatible stream -> events), `acp_host.rs`, `mcp*.rs`, `host_exec.rs` (sandboxed process exec), `http.rs` / `web_fetch.rs`, `workspace_fs.rs` (authorized workspace root resolution) and `git.rs` (git CLI surfaced as `git_*` commands, scoped to the authorized root). The command face has a single source of truth: `commands::COMMANDS` + `commands::dispatch`.
+- Domain logic lives in `crates/greywork-host/` (a single Cargo workspace at the repo root, one `Cargo.lock`), shared by both hosts. Major domains: `llm.rs` (OpenAI-compatible stream -> events), `acp_host.rs`, `mcp*.rs`, `host_exec.rs` (automation-queue consumer, **not** process exec — that is `sandbox.rs` + `process_guard.rs`), `http.rs` / `web_fetch.rs`, `workspace_fs.rs` (authorized workspace root resolution + file reads) and `git.rs` (git CLI surfaced as `git_*` commands, scoped to the authorized root). The command face has a single source of truth: `commands::COMMANDS` + `commands::dispatch`.
 - `apps/desktop/src-tauri/src/` keeps only `#[tauri::command]` wrappers and truly host-specific modules (`sys` / `tray` / `notify` / `close_guard` / `plugin_window` / `TauriHost`).
 - `apps/server/` is the headless host (see below).
 - Patches are applied to dependencies via `patches/` directory (e.g., `@univerjs/engine-render`, `exceljs`).

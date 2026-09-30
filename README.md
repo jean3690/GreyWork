@@ -43,7 +43,7 @@ messaging channels so you can drive the machine from your phone.
   [plugin-market/README.md](plugin-market/README.md).
 - **Market** in one place: the official plugin registry (signed, so a compromised GitHub account
   cannot poison the catalog), the MCP registry, and skill sources such as skills.sh.
-- Agent skills vendored under `.agents/skills/`, locked with hashes in `skills-lock.json`.
+- Agent skills installed under `.agents/skills/`, read natively by the ACP agent at its next session.
 
 **Beyond the conversation**
 
@@ -86,8 +86,7 @@ greyWork/
 │   ├── cowork/               # Co-operative workspace engine
 │   └── workbench/            # Unified UI package (shell, views, plugin runtime)
 ├── plugin-market/            # Plugin registry source + signing
-├── .agents/skills/           # Installed agent skills (vendored)
-└── skills-lock.json          # Locked skill definitions with hashes
+└── .agents/skills/           # Installed agent skills (read natively by the ACP agent)
 ```
 
 Dependency direction is enforced by ESLint: leaf packages depend only on `@greywork/core` (or

@@ -38,7 +38,7 @@ GreyWork 把外部编码智能体（走 **Agent Client Protocol**）与本机 Op
   [plugin-market/README.md](plugin-market/README.md)。
 - **市场**收在一处：官方插件注册表（带签名 —— GitHub 账号失陷也无法投毒目录）、MCP Registry
   与 skills.sh 等技能源。
-- Agent 技能放在 `.agents/skills/`，由 `skills-lock.json` 记录哈希锁定。
+- Agent 技能装在 `.agents/skills/`，由 ACP agent 在下次会话原生读取。
 
 **对话之外**
 
@@ -80,8 +80,7 @@ greyWork/
 │   ├── cowork/               # 协作工作区引擎
 │   └── workbench/            # 统一 UI 包（外壳、视图、插件运行时）
 ├── plugin-market/            # 插件注册表源与签名
-├── .agents/skills/           # 已安装的 agent 技能（vendored）
-└── skills-lock.json          # 带哈希锁定的技能定义
+└── .agents/skills/           # 已安装的 agent 技能（由 ACP agent 原生读取）
 ```
 
 依赖方向由 ESLint 强制：叶子包只依赖 `@greywork/core`（或零依赖），`workbench` 负责组合，
