@@ -426,6 +426,11 @@ export const zhCN = {
       parseFailed: "无法解析这个模型：{detail}",
       externalRefs: "无法解析这个 glTF：{detail}。.gltf 常引用同目录的外部 .bin / 贴图，预览只拿到单个文件，请先导出成自包含的 .glb。",
     },
+    gis: {
+      features: "{count} 个要素",
+      fit: "适应范围",
+      parseFailed: "无法解析这个矢量文件：{detail}",
+    },
     pdf: {
       rendered: "已渲染 {done} / 共 {total} 页",
       prev: "上一页",

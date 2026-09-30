@@ -21,6 +21,7 @@ export type ViewerKind =
   | "image"
   | "video"
   | "3d"
+  | "gis"
   | "web"
   | "raw"
   | "legacy-office";
@@ -70,6 +71,11 @@ const EXT_KIND: Record<string, ViewerKind> = {
   // 那种情况在 viewer 里明确报错而不是静默空白 —— 见 ModelViewer.vue）。
   glb: "3d",
   gltf: "3d",
+  // GIS：geojson 是文本、shp 是二进制（同目录的 .dbf / .prj 会被顺带读取）。
+  // **刻意不收 .json**：绝大多数 .json 是普通数据文件，归到 gis 会让它们失去代码视图。
+  // 需要地图预览就把扩展名改成 .geojson。
+  geojson: "gis",
+  shp: "gis",
   ts: "code",
   tsx: "code",
   js: "code",
@@ -107,6 +113,7 @@ const BINARY_KINDS: ReadonlySet<ViewerKind> = new Set<ViewerKind>([
   "image",
   "video",
   "3d",
+  "gis",
   "legacy-office",
 ]);
 
@@ -116,6 +123,9 @@ const BINARY_KINDS: ReadonlySet<ViewerKind> = new Set<ViewerKind>([
  * 值按「这类文件实际有多大」给，而不是一律拉满 —— 视频动辄上百 MB，3D 模型通常几十 MB。
  * 宿主另有自己的硬顶（`MAX_MEDIA_BYTES`）并会夹紧，所以这里的数字只是申请值，
  * 真正的上限始终在宿主那一处。
+ *
+ * geojson / shp 不在表里：它们按整份字节读，走 `fs_read_binary` 的 20MB 通道 ——
+ * 超过这个体量的矢量数据本来也不适合在预览面板里铺开。
  */
 const MEDIA_LIMITS: Partial<Record<ViewerKind, number>> = {
   video: 128 * 1024 * 1024,

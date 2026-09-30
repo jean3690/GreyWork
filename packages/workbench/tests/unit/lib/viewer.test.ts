@@ -37,9 +37,13 @@ describe("kindOfPath", () => {
     ["clip.webm", "video"],
     ["clip.mov", "video"],
     ["clip.mkv", "video"],
-    // 3D 模型同理：落到 raw 就是把二进制当文本读。
+    // 3D 模型与 GIS 矢量同理：落到 raw 就是把二进制当文本读。
     ["scene.glb", "3d"],
     ["scene.gltf", "3d"],
+    ["districts.geojson", "gis"],
+    ["districts.shp", "gis"],
+    // .json 刻意留给代码视图：绝大多数 .json 是普通数据，归到 gis 会让它们失去代码视图。
+    ["data.json", "code"],
   ])("%s → %s", (path, kind) => {
     expect(kindOfPath(path)).toBe(kind);
   });
@@ -64,9 +68,12 @@ describe("kindOfPath", () => {
 });
 
 describe("isBinaryKind", () => {
-  it.each<ViewerKind>(["xlsx", "xls", "docx", "pptx", "pdf", "image", "video", "3d", "legacy-office"])("%s 必须按二进制读", (kind) => {
-    expect(isBinaryKind(kind)).toBe(true);
-  });
+  it.each<ViewerKind>(["xlsx", "xls", "docx", "pptx", "pdf", "image", "video", "3d", "gis", "legacy-office"])(
+    "%s 必须按二进制读",
+    (kind) => {
+      expect(isBinaryKind(kind)).toBe(true);
+    },
+  );
 
   it.each<ViewerKind>(["md", "html", "csv", "code", "diff", "raw"])("%s 按文本读", (kind) => {
     expect(isBinaryKind(kind)).toBe(false);
@@ -79,8 +86,8 @@ describe("isBinaryKind", () => {
     }
   });
 
-  it("3D 走二进制也是硬要求：glb 与 gltf 都不是文本", () => {
-    for (const path of ["a.glb", "a.gltf"]) {
+  it("3D / GIS 走二进制也是硬要求：glb 与 shp 都是二进制容器", () => {
+    for (const path of ["a.glb", "a.gltf", "a.geojson", "a.shp"]) {
       expect(isBinaryKind(kindOfPath(path))).toBe(true);
     }
   });
@@ -100,8 +107,13 @@ describe("媒体读取通道", () => {
     expect(mediaLimitOfKind("3d")!).toBeLessThan(mediaLimitOfKind("video")!);
   });
 
+  it("GIS 不走媒体通道：矢量数据按整份字节读，20MB 之上本来也不适合预览", () => {
+    expect(isMediaKind("gis")).toBe(false);
+    expect(mediaLimitOfKind("gis")).toBeUndefined();
+  });
+
   it("非媒体 kind 不走媒体通道（仍旧 20MB 契约）", () => {
-    for (const kind of ["image", "pdf", "docx", "xlsx", "legacy-office", "md", "code"] as ViewerKind[]) {
+    for (const kind of ["image", "pdf", "docx", "xlsx", "legacy-office", "md", "code", "gis"] as ViewerKind[]) {
       expect(isMediaKind(kind)).toBe(false);
       expect(mediaLimitOfKind(kind)).toBeUndefined();
     }

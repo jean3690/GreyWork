@@ -428,6 +428,11 @@ export const enUS: MessageSchema = {
       externalRefs:
         "Couldn't parse this glTF: {detail}. A .gltf often references sibling .bin / texture files, but the preview only gets the single file — export a self-contained .glb instead.",
     },
+    gis: {
+      features: "{count} features",
+      fit: "Fit extent",
+      parseFailed: "Couldn't parse this vector file: {detail}",
+    },
     pdf: {
       rendered: "Rendered {done} / {total} pages",
       prev: "Previous page",
