@@ -1,8 +1,8 @@
 //! 「有未保存改动时别退出」的宿主侧守卫。
 //!
 //! **为什么宿主还要管这件事**：点窗口 X 走渲染端的
-//! `getCurrentWindow().onCloseRequested()`（JS 就地拦下、先保存再关），但另两条
-//! 「退出」路径渲染端拿不到机会 ——
+//! `getCurrentWindow().onCloseRequested()`（JS 就地拦下、先保存、再请宿主 `close_main_window`
+//! 收口），但另两条「退出」路径渲染端拿不到机会 ——
 //! - 托盘菜单的「退出应用」：`app.exit(0)`，代码里已注明它绕过 CloseRequested（tray.rs）；
 //! - macOS 的 Cmd+Q / 系统注销：走 `RunEvent::ExitRequested`。
 //!
@@ -10,8 +10,9 @@
 //! 再请渲染端走它的保存 / 确认流程。标志由渲染端推 —— 只有它知道编辑器里脏不脏，
 //! 宿主不猜。
 //!
-//! **优先级**：`CloseRequested` 分支不动（见 lib.rs）。「关闭到托盘」为真时点 X 只是隐藏，
-//! 不丢数据也不该弹窗，那条路径优先。
+//! **优先级**：点 X 那条路仍由渲染端先走一遍保存（见 lib/close-guard.ts），保存成功才
+//! 落到 [`crate::tray::close_main_window`]；「关闭到托盘」为真时那里只是隐藏，不丢数据
+//! 也不该弹窗，那条路径优先。
 
 use std::sync::atomic::{AtomicBool, Ordering};
 

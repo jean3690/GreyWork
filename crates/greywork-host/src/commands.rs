@@ -716,6 +716,8 @@ command_table! {
         args: UnitArgs, run: |_ctx, _a| async move { Err::<Json<()>, String>("仅桌面端可用".into()) } }
     { "set_tray_labels", auth: Auth::Required, desktop: true, binary: false,
         args: UnitArgs, run: |_ctx, _a| async move { Err::<Json<()>, String>("仅桌面端可用".into()) } }
+    { "close_main_window", auth: Auth::Required, desktop: true, binary: false,
+        args: UnitArgs, run: |_ctx, _a| async move { Err::<Json<()>, String>("仅桌面端可用".into()) } }
 
     // ---- update ----
     { "check_update", auth: Auth::Required, desktop: false, binary: false,
@@ -791,12 +793,13 @@ mod tests {
         "pick_workspace_folder",
         "set_close_to_tray",
         "set_tray_labels",
+        "close_main_window",
         "open_external",
     ];
 
     #[test]
     fn commands_table_shape() {
-        assert_eq!(COMMANDS.len(), 144, "命令总数应为 144");
+        assert_eq!(COMMANDS.len(), 145, "命令总数应为 145");
 
         // 命令名唯一。
         let mut names: Vec<&str> = COMMANDS.iter().map(|c| c.name).collect();

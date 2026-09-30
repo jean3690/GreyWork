@@ -117,6 +117,12 @@ pub fn run() {
             // 快照的一部分），但**托盘真的建出来了**才是前提 —— should_hide_on_close
             // 把这两条一起判了。没有托盘还拦下关闭，窗口会消失且无入口恢复。
             // 托盘「退出应用」走 app.exit，不经过这里。
+            //
+            // 这里**只负责隐藏**，不负责「关闭即退出」那一支：Tauri 只要发现渲染端注册了
+            // JS 的 close-requested 监听，就把真正的关闭整个甩给 JS 包装层，宿主拦不拦都
+            // 一样。那一支由渲染端回头调 tray::close_main_window 收口（同一条偏好的另一
+            // 半）。本分支留着兜的是「JS 监听没注册成功」——那时 Tauri 不 prevent，靠这里
+            // 的 hide 仍能保住「关闭到托盘」。
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == tray::MAIN_WINDOW {
                     if let Some(state) = window.try_state::<tray::TrayState>() {
@@ -309,6 +315,7 @@ pub fn run() {
             db::db_agents_sync,
             tray::set_close_to_tray,
             tray::set_tray_labels,
+            tray::close_main_window,
             update::check_update,
             update::open_external,
         ])
@@ -475,6 +482,7 @@ mod drift_tests {
         assert_eq!(
             desktop_only,
             vec![
+                "close_main_window",
                 "confirm_exit",
                 "fs_pick_files",
                 "open_external",

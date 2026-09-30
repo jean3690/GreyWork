@@ -9,6 +9,10 @@
 //! - `set_close_to_tray`：「关闭到托盘」开关，决定 CloseRequested 拦不拦。
 //! - `set_tray_labels`：菜单文案 + 首次隐藏的提示语，语言切换时重发。
 //!
+//! 另有一个**反向**命令 `close_main_window`：渲染端点 X 后经它请宿主收口（隐藏或真关）。
+//! 绕这一圈的原因见该命令的文档 —— Tauri 会把「关窗」整个交给 JS 包装层，而那条路
+//! 依赖渲染端没被授权的 `plugin:window|destroy`。
+//!
 //! **可用性钳制**：托盘构建可能失败（Linux 缺 AppIndicator 宿主是最常见的一种），
 //! 此时 [`TrayState::should_hide_on_close`] 恒为 false —— 没有托盘还把窗口藏起来，
 //! 用户就再也找不到入口了。这条钳制不看偏好值，是硬约束。
@@ -149,6 +153,31 @@ impl TrayState {
 #[tauri::command]
 pub fn set_close_to_tray(state: tauri::State<'_, TrayState>, enabled: bool) {
     state.close_to_tray.store(enabled, Ordering::Relaxed);
+}
+
+/// 渲染端请求关闭主窗口：按「关闭到托盘」偏好隐藏，或真关掉。
+///
+/// **为什么关窗要绕回宿主**：Tauri 只要发现 JS 注册了 `tauri://close-requested` 监听，
+/// 就无条件 `prevent_close()`，把「真的关掉」整个甩给 JS 包装层（tauri 的
+/// `manager/window.rs`）；而包装层在不 `preventDefault` 时的默认动作是
+/// `plugin:window|destroy` —— 那是一条独立的 ACL 命令，渲染端并没有被授权。
+/// 于是「关闭即退出」下点 X 什么都不发生，只有托盘「退出应用」（`app.exit`，绕过
+/// CloseRequested）能退；「关闭到托盘」则被宿主自己的 hide 掩盖，看不出问题。
+///
+/// 所以收口动作放回宿主：策略只有 [`TrayState::should_hide_on_close`] 一份真相，
+/// 渲染端只表达「用户点了关闭」这个意图，不在 JS 里重写一遍隐藏 / 关闭的判据。
+#[tauri::command]
+pub fn close_main_window(app: AppHandle, state: tauri::State<'_, TrayState>) {
+    let Some(window) = app.get_webview_window(MAIN_WINDOW) else {
+        return;
+    };
+    if state.should_hide_on_close() {
+        let _ = window.hide();
+        notify_hidden(&app, &state);
+    } else {
+        // 关闭即退出：销毁窗口 → 最后一个窗口消失 → 进程随之退出。
+        let _ = window.destroy();
+    }
 }
 
 /// 同步托盘菜单文案（启动水合 + 每次切语言）。托盘不可用时静默接受，只存文案。
