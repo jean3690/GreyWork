@@ -36,6 +36,7 @@ mod office;
 mod plugin_market;
 mod plugin_window;
 pub mod qq;
+mod rag;
 mod scheduler;
 mod sheet;
 mod skills_market;
@@ -119,6 +120,7 @@ pub fn run() {
         .register_asynchronous_uri_scheme_protocol(media_protocol::SCHEME, media_protocol::handle)
         .manage(Arc::new(acp_host::AcpHost::default()))
         .manage(greywork_host::llm::LlmHost::default())
+        .manage(greywork_host::rag::RagHost::default())
         .manage(wechat::WechatHost::default())
         .manage(dingtalk::DingTalkHost::default())
         .manage(feishu::FeishuHost::default())
@@ -219,6 +221,13 @@ pub fn run() {
             acp_host::acp_detect_programs,
             llm::llm_chat_start,
             llm::llm_chat_stop,
+            llm::llm_list_models,
+            llm::llm_embed,
+            llm::llm_transcribe,
+            rag::rag_index_build,
+            rag::rag_search,
+            rag::rag_status,
+            rag::rag_clear,
             office::office_host_info,
             office::office_preview_open,
             mcp::mcp_probe,

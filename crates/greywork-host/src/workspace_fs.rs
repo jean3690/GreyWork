@@ -232,6 +232,14 @@ impl WorkspaceFsAccess {
             .iter()
             .any(|root| crate::path_safety::same_path(root, path))
     }
+
+    /// 已授权根的只读快照（RAG 索引遍历的入口）。
+    ///
+    /// 返回的是内部路径的克隆 —— 调用方拿到的只是「可以去看哪些目录」，任何读写仍走
+    /// `resolve_existing` / `require_authorized` 收口，不存在绕过授权面直接落盘的路径。
+    pub fn authorized_roots(&self) -> Vec<PathBuf> {
+        self.paths.read().roots.iter().cloned().collect()
+    }
 }
 
 fn validate_absolute(path: &Path) -> Result<PathBuf, String> {

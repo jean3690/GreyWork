@@ -92,6 +92,7 @@ fn make_state(tmp: &Path, config: ServerConfig) -> AppState {
         workspace: Arc::new(access),
         acp: Arc::new(greywork_host::acp_host::AcpHost::default()),
         llm: Arc::new(greywork_host::llm::LlmHost::default()),
+        rag: Arc::new(greywork_host::rag::RagHost::default()),
         wechat: Arc::new(greywork_host::wechat::WechatHost::default()),
         dingtalk: Arc::new(greywork_host::dingtalk::DingTalkHost::default()),
         feishu: Arc::new(greywork_host::feishu::FeishuHost::default()),

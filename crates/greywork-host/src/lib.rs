@@ -33,6 +33,7 @@ pub mod path_safety;
 pub mod plugin_market;
 pub mod process_guard;
 pub mod qq;
+pub mod rag;
 pub mod sandbox;
 pub mod scheduler;
 pub mod sheet;

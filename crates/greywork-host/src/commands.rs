@@ -30,14 +30,15 @@ use crate::feishu::FeishuHost;
 use crate::host::HostContext;
 use crate::llm::LlmHost;
 use crate::qq::QqHost;
+use crate::rag::RagHost;
 use crate::telegram::TelegramHost;
 use crate::wechat::WechatHost;
 use crate::wecom::WecomHost;
 use crate::workspace_fs::WorkspaceFsAccess;
 use crate::{
     acp_host, bundled_skills, channel_media, db, dingtalk, discord, feishu, git, llm, mcp,
-    mcp_registry, office, plugin_market, qq, sheet, skills_market, store_fs, sys, telegram, update,
-    web_fetch, wechat, wecom, workspace_fs, worktree,
+    mcp_registry, office, plugin_market, qq, rag, sheet, skills_market, store_fs, sys, telegram,
+    update, web_fetch, wechat, wecom, workspace_fs, worktree,
 };
 
 /// 命令的鉴权要求。
@@ -82,6 +83,7 @@ pub struct CommandContext {
     pub workspace: Arc<WorkspaceFsAccess>,
     pub acp: Arc<AcpHost>,
     pub llm: Arc<LlmHost>,
+    pub rag: Arc<RagHost>,
     pub wechat: Arc<WechatHost>,
     pub dingtalk: Arc<DingTalkHost>,
     pub feishu: Arc<FeishuHost>,
@@ -322,10 +324,34 @@ command_table! {
     // ---- llm ----
     { "llm_chat_start", auth: Auth::Required, desktop: false, binary: false,
         args: llm::ChatStartArgs,
-        run: |ctx, a| async move { llm::llm_chat_start(Arc::clone(&ctx.host), &ctx.llm, a.base_url, a.model, a.api_key_env, a.messages, a.reasoning_effort, a.headers, a.client_token).await.map(Json) } }
+        run: |ctx, a| async move { llm::llm_chat_start(Arc::clone(&ctx.host), &ctx.llm, a.base_url, a.model, a.api_key_env, a.messages, a.reasoning_effort, a.headers, llm::InferenceParams { temperature: a.temperature, max_tokens: a.max_tokens }, a.client_token).await.map(Json) } }
     { "llm_chat_stop", auth: Auth::Required, desktop: false, binary: false,
         args: llm::ChatStopArgs,
         run: |ctx, a| async move { llm::llm_chat_stop(&ctx.llm, a.request_id).await.map(Json) } }
+    // 模型清单（连通性自检）/ 向量 / 语音转写：本地 OpenAI 兼容服务提供。
+    { "llm_list_models", auth: Auth::Required, desktop: false, binary: false,
+        args: llm::ListModelsArgs,
+        run: |_ctx, a| async move { llm::llm_list_models(a).await.map(Json) } }
+    { "llm_embed", auth: Auth::Required, desktop: false, binary: false,
+        args: llm::EmbedArgs,
+        run: |_ctx, a| async move { llm::llm_embed(a).await.map(Json) } }
+    { "llm_transcribe", auth: Auth::Required, desktop: false, binary: false,
+        args: llm::TranscribeArgs,
+        run: |ctx, a| async move { llm::llm_transcribe(&ctx.workspace, a).await.map(Json) } }
+
+    // ---- rag（本地向量检索：授权工作区 → 本地 embedding → SQLite → 暴力余弦） ----
+    { "rag_index_build", auth: Auth::Required, desktop: false, binary: false,
+        args: rag::IndexBuildArgs,
+        run: |ctx, a| async move { rag::rag_index_build(ctx.host.as_ref(), &ctx.workspace, &ctx.db, &ctx.rag, a).await.map(Json) } }
+    { "rag_search", auth: Auth::Required, desktop: false, binary: false,
+        args: rag::SearchArgs,
+        run: |ctx, a| async move { rag::rag_search(&ctx.db, &ctx.rag, a).await.map(Json) } }
+    { "rag_status", auth: Auth::Required, desktop: false, binary: false,
+        args: UnitArgs,
+        run: |ctx, _a| async move { rag::rag_status(&ctx.db).map(Json) } }
+    { "rag_clear", auth: Auth::Required, desktop: false, binary: false,
+        args: UnitArgs,
+        run: |ctx, _a| async move { rag::rag_clear(&ctx.db, &ctx.rag).map(Json) } }
 
     // ---- office（第三方云端 Office 预览） ----
     // `office` 本身无状态（配方随调用传入，凭证每次从环境变量解析），与 LlmHost / WecomHost
@@ -783,6 +809,7 @@ mod tests {
             ),
             acp: Arc::new(AcpHost::default()),
             llm: Arc::new(LlmHost::default()),
+            rag: Arc::new(RagHost::default()),
             wechat: Arc::new(WechatHost::default()),
             dingtalk: Arc::new(DingTalkHost::default()),
             feishu: Arc::new(FeishuHost::default()),
@@ -830,7 +857,7 @@ mod tests {
 
     #[test]
     fn commands_table_shape() {
-        assert_eq!(COMMANDS.len(), 154, "命令总数应为 154");
+        assert_eq!(COMMANDS.len(), 161, "命令总数应为 161");
 
         // 命令名唯一。
         let mut names: Vec<&str> = COMMANDS.iter().map(|c| c.name).collect();
