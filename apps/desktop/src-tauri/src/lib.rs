@@ -23,6 +23,7 @@ mod host;
 mod llm;
 pub mod mcp;
 mod mcp_registry;
+mod media_protocol;
 mod notify;
 mod office;
 mod plugin_market;
@@ -89,6 +90,9 @@ pub fn run() {
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        // 视频 / 音频预览的流式协议：媒体元素按 HTTP Range 自己拉片段，
+        // 而不是先整份读进内存再塞 blob URL（见 media_protocol.rs 顶部）。
+        .register_asynchronous_uri_scheme_protocol(media_protocol::SCHEME, media_protocol::handle)
         .manage(Arc::new(acp_host::AcpHost::default()))
         .manage(greywork_host::llm::LlmHost::default())
         .manage(wechat::WechatHost::default())
@@ -415,6 +419,43 @@ mod drift_tests {
             assert_eq!(
                 declared, expected,
                 "{key} 的 frame-src 与 EMBEDDABLE_FRAME_ORIGINS 漂移"
+            );
+        }
+    }
+
+    #[test]
+    fn desktop_csp_declares_media_sources() {
+        // 视频预览有两种地址形态，缺一个都会静默不出画面（控制台之外看不到任何报错）：
+        // - `blob:`：非桌面态 / 无自定义协议时的兜底（整份读进内存再建 blob URL）；
+        // - `gwmedia:` 与 `http://gwmedia.localhost`：`convertFileSrc(path, "gwmedia")`
+        //   在 Linux/macOS 与 Windows/Android 上各自产出的形态（见 media_protocol.rs）。
+        //
+        // `media-src` 缺省时回落到 `default-src 'self'`，而 WebKitGTK 的 `'self'` 既不匹配
+        // `blob:` 也不匹配自定义 scheme。服务端那份只发 blob:（它没有自定义协议），
+        // 所以这条断言只钉桌面这份。
+        let conf = include_str!("../tauri.conf.json");
+        for key in ["\"csp\"", "\"devCsp\""] {
+            let start = conf
+                .find(key)
+                .unwrap_or_else(|| panic!("tauri.conf.json 必须有 {key}"));
+            let policy = &conf[start..];
+            let media_src = policy
+                .split("media-src ")
+                .nth(1)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{key} 必须显式声明 media-src（default-src 不覆盖 blob: 与自定义 scheme）"
+                    )
+                })
+                .split([';', '"'])
+                .next()
+                .unwrap_or_default();
+            let mut declared: Vec<&str> = media_src.split_whitespace().collect();
+            declared.sort_unstable();
+            assert_eq!(
+                declared,
+                vec!["'self'", "blob:", "gwmedia:", "http://gwmedia.localhost"],
+                "{key} 的 media-src 应放行 'self' / blob: / gwmedia: / http://gwmedia.localhost"
             );
         }
     }

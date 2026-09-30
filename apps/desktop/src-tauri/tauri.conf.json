@@ -27,8 +27,8 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost; worker-src 'self' blob:; frame-src https://www.kdocs.cn https://docs.qq.com https://view.officeapps.live.com",
-      "devCsp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost ws://localhost:1420; worker-src 'self' blob:; frame-src https://www.kdocs.cn https://docs.qq.com https://view.officeapps.live.com"
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob: gwmedia: http://gwmedia.localhost; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost; worker-src 'self' blob:; frame-src https://www.kdocs.cn https://docs.qq.com https://view.officeapps.live.com",
+      "devCsp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob: gwmedia: http://gwmedia.localhost; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost ws://localhost:1420; worker-src 'self' blob:; frame-src https://www.kdocs.cn https://docs.qq.com https://view.officeapps.live.com"
     }
   },
   "bundle": {

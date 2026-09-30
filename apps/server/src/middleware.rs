@@ -68,9 +68,11 @@ pub async fn security_headers(
 
 /// 服务端托管 SPA 的内容安全策略（`security_headers` 给每个响应带上）。
 ///
-/// 对齐桌面壳 `tauri.conf.json` 的 CSP，去掉只有 Tauri 有的 `ipc:` 源，按 Web 补齐：
+/// 对齐桌面壳 `tauri.conf.json` 的 CSP，去掉只有 Tauri 有的源（`ipc:`，以及媒体流式协议
+/// `gwmedia:` / `http://gwmedia.localhost` —— 那是桌面自定义 URI scheme，Web 端没有），
+/// 按 Web 补齐：
 /// - `connect-src 'self'`：同源 `/api/*` 与 `/api/events`（ws/wss 同源已被 `'self'` 覆盖）；
-/// - `media-src 'self' blob:`：入站视频 / 语音缩略图走 blob: URL（见 use-attachments.ts）；
+/// - `media-src 'self' blob:`：入站视频 / 语音缩略图、以及工作区视频预览（VideoViewer）走 blob: URL；
 /// - `worker-src 'self' blob:`：插件 code-runtime 用 blob Worker；
 /// - `frame-ancestors 'none'`：禁止被 iframe 内嵌——有效会话能拉起 agent 进程，防点击劫持。
 ///

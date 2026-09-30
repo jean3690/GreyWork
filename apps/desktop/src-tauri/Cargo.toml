@@ -41,6 +41,11 @@ serde_json = "1"
 # 仅剩的用途是原生文件/目录选择器的 oneshot 回调（fs_pick_files / pick_workspace_folder）；
 # 命令实现本身已不直接引 tokio（spawn 走 tauri::async_runtime，见 scheduler.rs）。
 tokio = { version = "1", features = ["sync", "time", "macros", "rt", "process", "io-util"] }
+# 媒体流式协议（media_protocol.rs）用：Range 头解析与路径百分号解码。
+# `http-range` 就是 Tauri 自带 asset 协议用的同一个 crate（在 Tauri 里挂在 protocol-asset
+# feature 后）；自己手写多段 range / 后缀 range 的边界不值得，直接用它。
+http-range = "0.1"
+percent-encoding = "2"
 
 [dev-dependencies]
 # 集成测试（tests/*.rs）直接驱动 ACP 客户端，故显式依赖。
