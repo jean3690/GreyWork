@@ -75,6 +75,10 @@ function fakeHost(): void {
         return { dir: "/ws/proj/.agents/skills/tdd", filesWritten: 1 };
       case "skills_uninstall":
         return null;
+      case "skills_bundled_list":
+        return [{ id: "ffmpeg-media", name: "ffmpeg 媒体处理", description: "转码 / 截取 / 抽帧", files: ["SKILL.md"] }];
+      case "skills_install_bundled":
+        return { dir: "/ws/proj/.agents/skills/ffmpeg-media", filesWritten: 1 };
       default:
         throw new Error(`unexpected host command: ${cmd}`);
     }
@@ -172,5 +176,29 @@ describe("插件市场 · 技能专区", () => {
     await wrapper.get('[data-testid="market-skills-confirm-cancel"]').trigger("click");
     expect(wrapper.find('[data-testid="market-skills-confirm"]').exists()).toBe(false);
     expect(invokeMock).not.toHaveBeenCalledWith("skills_uninstall", expect.anything());
+  });
+
+  it("内置技能：目录来自宿主二进制，安装走二次确认 + 宿主写盘", async () => {
+    const wrapper = await render(SkillsMarketSection);
+
+    // 目录渲染（未安装 → 按钮是「安装」）
+    await vi.waitFor(() => expect(wrapper.find('[data-testid="market-bundled-ffmpeg-media"]').exists()).toBe(true));
+    expect(wrapper.get('[data-testid="market-bundled-ffmpeg-media"]').text()).toContain("ffmpeg 媒体处理");
+    const installButton = wrapper.get('[data-testid="market-bundled-install-ffmpeg-media"]');
+    expect(installButton.text()).toBe("安装");
+
+    // 二次确认前不落盘
+    await installButton.trigger("click");
+    expect(wrapper.get('[data-testid="market-skills-confirm"]').text()).toContain("内置技能");
+    expect(invokeMock).not.toHaveBeenCalledWith("skills_install_bundled", expect.anything());
+
+    await wrapper.get('[data-testid="market-skills-confirm-yes"]').trigger("click");
+    await vi.waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("skills_install_bundled", {
+        workspaceRoot: "/ws/proj",
+        skillId: "ffmpeg-media",
+      }),
+    );
+    expect(wrapper.find('[data-testid="market-skills-confirm"]').exists()).toBe(false);
   });
 });

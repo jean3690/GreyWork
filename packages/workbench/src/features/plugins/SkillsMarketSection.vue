@@ -2,9 +2,9 @@
 /**
  * 插件市场 · 技能专区：搜索 skills.sh 并把技能装进工作区 `.agents/skills/`。
  *
- * 数据面完全交给 `useSkillsStore`（已安装 = 磁盘扫描、发现 = 跨启用源搜索、
- * 安装/更新/卸载 = 宿主写盘）——设置 → 技能 与这里共用同一份 store，
- * 不重复实现任何安装流程，也就不会有第二条会漂移的写入路径。
+ * 数据面完全交给 `useSkillsStore`（已安装 = 磁盘扫描、内置 = 宿主二进制目录、
+ * 发现 = 跨启用源搜索、安装/更新/卸载 = 宿主写盘）——设置 → 技能 与这里共用
+ * 同一份 store，不重复实现任何安装流程，也就不会有第二条会漂移的写入路径。
  */
 import { onMounted, ref } from "vue";
 import { i18n } from "@/i18n";
@@ -17,10 +17,11 @@ const skills = useSkillsStore();
 
 const query = ref("");
 const actionError = ref("");
-/** 二次确认对象：安装 / 更新(市场) / 更新(已装记录) / 卸载。 */
+/** 二次确认对象：安装 / 安装(内置) / 更新(市场) / 更新(已装记录) / 卸载。 */
 const confirm = ref<
   | null
   | { kind: "install"; ref: string; skillId: string; name: string; downloadable: boolean }
+  | { kind: "installBundled"; id: string; name: string }
   | { kind: "update"; skill: InstalledSkill }
   | { kind: "uninstall"; skill: InstalledSkill }
 >(null);
@@ -29,6 +30,7 @@ let timer: ReturnType<typeof setTimeout> | null = null;
 
 onMounted(() => {
   void skills.refreshInstalled();
+  void skills.refreshBundled();
 });
 
 function onQueryInput(): void {
@@ -57,6 +59,18 @@ async function performInstall(): Promise<void> {
   actionError.value = "";
   try {
     await skills.installFromMarket({ ref: entryRef, skillId, name, installs: 0, source: "", downloadable });
+  } catch (error) {
+    actionError.value = String(error);
+  }
+}
+
+async function performInstallBundled(): Promise<void> {
+  if (!confirm.value || confirm.value.kind !== "installBundled") return;
+  const { id } = confirm.value;
+  confirm.value = null;
+  actionError.value = "";
+  try {
+    await skills.installBundled(id);
   } catch (error) {
     actionError.value = String(error);
   }
@@ -192,6 +206,61 @@ async function performUninstall(): Promise<void> {
       </div>
     </div>
 
+    <!-- 内置技能（内容随宿主二进制发布，不联网） -->
+    <div v-if="skills.bundled.length" class="mt-5" data-testid="market-skills-bundled">
+      <div class="mb-2 flex items-end justify-between gap-3">
+        <h2 class="text-[13px] font-semibold text-foreground">{{ t("market.skillsBundled") }}</h2>
+        <span class="font-mono text-[10px] text-dim2">{{ skills.bundled.length }}</span>
+      </div>
+      <div class="grid gap-3 md:grid-cols-2">
+        <article
+          v-for="entry in skills.bundled"
+          :key="entry.id"
+          class="flex min-h-28 flex-col rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-4 transition-colors hover:border-line-2"
+          :data-testid="`market-bundled-${entry.id}`"
+        >
+          <div class="flex items-start gap-3">
+            <span
+              class="grid size-10 shrink-0 place-items-center rounded-[calc(11px*var(--gw-radius-scale))] border border-line bg-panel-2 text-dim"
+            >
+              <Icon name="lightning" :size="16" />
+            </span>
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2">
+                <h3 class="truncate text-[13px] font-semibold text-foreground">{{ entry.name }}</h3>
+                <span
+                  v-if="installedOf(entry.id)"
+                  class="shrink-0 rounded-full bg-mint/10 px-1.5 py-0.5 text-[9.5px] font-medium text-mint"
+                >
+                  {{ t("market.installed") }}
+                </span>
+              </div>
+              <p class="mt-0.5 truncate font-mono text-[9.5px] text-dim2">{{ entry.id }} · {{ entry.files.join(", ") }}</p>
+            </div>
+          </div>
+          <p class="mt-2 line-clamp-2 text-[11px] leading-relaxed text-dim">{{ entry.description }}</p>
+          <footer class="mt-3 flex items-center justify-between gap-3 border-t border-line pt-3">
+            <span class="truncate text-[10.5px] text-dim2">{{ t("market.skillsBundledBadge") }}</span>
+            <button
+              type="button"
+              class="h-7 shrink-0 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] bg-accent px-3 text-[11px] font-medium text-accent-ink transition-colors hover:bg-accent-hi disabled:cursor-not-allowed disabled:opacity-40"
+              :disabled="!skills.hostAvailable || skills.busyId !== null"
+              :data-testid="`market-bundled-install-${entry.id}`"
+              @click="confirm = { kind: 'installBundled', id: entry.id, name: entry.name }"
+            >
+              {{
+                skills.busyId === entry.id
+                  ? t("market.installing")
+                  : installedOf(entry.id)
+                    ? t("market.skillsReinstall")
+                    : t("market.install")
+              }}
+            </button>
+          </footer>
+        </article>
+      </div>
+    </div>
+
     <!-- 发现 -->
     <div class="mt-5">
       <div class="mb-2 flex items-end justify-between gap-3">
@@ -276,9 +345,11 @@ async function performUninstall(): Promise<void> {
         {{
           confirm.kind === "install"
             ? t("market.skillsConfirmInstall", { name: confirm.name })
-            : confirm.kind === "update"
-              ? t("market.skillsConfirmUpdate", { name: confirm.skill.name })
-              : t("market.skillsConfirmUninstall", { name: confirm.skill.name })
+            : confirm.kind === "installBundled"
+              ? t("market.skillsConfirmInstallBundled", { name: confirm.name })
+              : confirm.kind === "update"
+                ? t("market.skillsConfirmUpdate", { name: confirm.skill.name })
+                : t("market.skillsConfirmUninstall", { name: confirm.skill.name })
         }}
       </span>
       <span class="flex gap-1.5">
@@ -287,7 +358,13 @@ async function performUninstall(): Promise<void> {
           class="h-7 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] bg-amber px-2.5 text-[11px] font-medium text-amber-ink transition-opacity hover:opacity-90"
           data-testid="market-skills-confirm-yes"
           @click="
-            confirm.kind === 'install' ? void performInstall() : confirm.kind === 'update' ? void performUpdate() : void performUninstall()
+            confirm.kind === 'install'
+              ? void performInstall()
+              : confirm.kind === 'installBundled'
+                ? void performInstallBundled()
+                : confirm.kind === 'update'
+                  ? void performUpdate()
+                  : void performUninstall()
           "
         >
           {{ t("market.confirmInstall") }}

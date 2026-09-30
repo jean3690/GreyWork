@@ -7,6 +7,7 @@ import {
   createSkillsTransport,
   parseSnapshot,
   SKILLS_SH_DEFAULT_ORIGIN,
+  type BundledSkillMeta,
   type MarketSkillEntry,
   type SkillSourceAdapter,
   type SkillsMarketTransport,
@@ -16,13 +17,15 @@ import { resolveWorkspaceRoot, type WorkspaceRootResolution } from "../lib/works
 import { listDir, readTextFile } from "../state/workspaceFiles";
 
 /**
- * 技能设置面板的数据面：两块各自独立 ——
+ * 技能设置面板的数据面：三块各自独立 ——
  *
  * 1. 已安装：扫描工作区 `.agents/skills/*` 磁盘真源（兼容外部 ACP agent 手动
  *    放进来的技能），读各 SKILL.md frontmatter 拿 name/description；
- * 2. 发现：skills.sh 官方市场搜索 → 下载快照 → 宿主写盘（install 覆盖即更新）。
+ * 2. 内置：随宿主二进制发布的技能目录（`skills_bundled_list`），不联网，
+ *    装进同一目录（内容由宿主按 id 取，渲染端不传文件）；
+ * 3. 发现：skills.sh 官方市场搜索 → 下载快照 → 宿主写盘（install 覆盖即更新）。
  *
- * 安装目标是 ACP agent（opencode / claude-code / codex 等）的原生技能目录，
+ * 安装目标都是 ACP agent（opencode / claude-code / codex 等）的原生技能目录，
  * 装完新开会话即被识别。浏览器态（无宿主）只读不写。
  */
 
@@ -143,6 +146,11 @@ export const useSkillsStore = defineStore("skills", () => {
   const installedLoading = ref(false);
   const installedError = ref("");
 
+  /** 内置技能目录（随宿主二进制发布，不联网）。 */
+  const bundled = ref<BundledSkillMeta[]>([]);
+  const bundledLoading = ref(false);
+  const bundledError = ref("");
+
   /** 市场搜索。 */
   const searching = ref(false);
   const discoverResults = ref<MarketSkillEntry[]>([]);
@@ -212,6 +220,32 @@ export const useSkillsStore = defineStore("skills", () => {
       return parseSkillFrontmatter(text.slice(0, 32 * 1024));
     } catch {
       return {};
+    }
+  }
+
+  /** 拉取内置技能目录（无宿主时宿主通道返回空数组，不算故障）。 */
+  async function refreshBundled(): Promise<void> {
+    bundledError.value = "";
+    bundledLoading.value = true;
+    try {
+      bundled.value = await transport.bundledList();
+    } catch (error) {
+      bundled.value = [];
+      bundledError.value = String(error);
+    } finally {
+      bundledLoading.value = false;
+    }
+  }
+
+  /** 安装一份内置技能（内容由宿主按 id 取，已装即覆盖更新）。 */
+  async function installBundled(skillId: string): Promise<void> {
+    const ws = await requireHostWorkspace();
+    busyId.value = skillId;
+    try {
+      await transport.installBundled(ws.root.dir, skillId);
+      await refreshInstalled();
+    } finally {
+      busyId.value = null;
     }
   }
 
@@ -310,6 +344,9 @@ export const useSkillsStore = defineStore("skills", () => {
   /** 已知的已安装 id 集合（市场结果标注「已安装/可更新」用）。 */
   const installedIds = computed(() => new Set(installed.value.map((skill) => skill.id)));
 
+  /** 内置技能 id 集合（市场结果里同名条目标注「内置」用）。 */
+  const bundledIds = computed(() => new Set(bundled.value.map((skill) => skill.id)));
+
   return {
     transport,
     builtInMarket,
@@ -319,6 +356,9 @@ export const useSkillsStore = defineStore("skills", () => {
     installed,
     installedLoading,
     installedError,
+    bundled,
+    bundledLoading,
+    bundledError,
     searching,
     discoverResults,
     discoverError,
@@ -326,10 +366,13 @@ export const useSkillsStore = defineStore("skills", () => {
     records,
     recordBySkillId,
     installedIds,
+    bundledIds,
     ensureWorkspace,
     refreshInstalled,
+    refreshBundled,
     searchDiscover,
     installFromMarket,
+    installBundled,
     updateInstalled,
     uninstallSkill,
   };

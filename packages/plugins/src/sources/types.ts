@@ -23,6 +23,15 @@ export interface SkillSnapshot {
   hash: string;
 }
 
+/** 随宿主二进制发布的内置技能条目（内容已编译进宿主，不联网）。 */
+export interface BundledSkillMeta {
+  id: string;
+  name: string;
+  description: string;
+  /** 该技能包含的文件相对路径（含 SKILL.md）。 */
+  files: string[];
+}
+
 /** 技能市场传输抽象（Web 通道经 vite 代理；宿主命令已移除）。 */
 export interface SkillsMarketTransport {
   available(): boolean;
@@ -34,6 +43,10 @@ export interface SkillsMarketTransport {
   download(entryRef: string, origin?: string): Promise<unknown>;
   install(workspaceRoot: string, skillId: string, files: SkillSnapshotFile[]): Promise<{ dir: string; filesWritten: number }>;
   uninstall(workspaceRoot: string, skillId: string): Promise<void>;
+  /** 内置技能目录。无宿主时返回空数组（不报错，UI 直接不显示该区）。 */
+  bundledList(): Promise<BundledSkillMeta[]>;
+  /** 安装一份内置技能（宿主按 id 从内置清单取内容写盘）。 */
+  installBundled(workspaceRoot: string, skillId: string): Promise<{ dir: string; filesWritten: number }>;
 }
 
 export interface SkillSourceAdapter {

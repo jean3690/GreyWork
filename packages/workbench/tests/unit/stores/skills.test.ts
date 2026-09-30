@@ -58,6 +58,10 @@ function host(marketResults: unknown[] = []): void {
         return { dir: "/ws/proj/.agents/skills/tdd", filesWritten: 1 };
       case "skills_uninstall":
         return null;
+      case "skills_bundled_list":
+        return [{ id: "ffmpeg-media", name: "ffmpeg 媒体处理", description: "转码 / 截取 / 抽帧", files: ["SKILL.md"] }];
+      case "skills_install_bundled":
+        return { dir: "/ws/proj/.agents/skills/ffmpeg-media", filesWritten: 1 };
       default:
         throw new Error(`unexpected host command: ${cmd}`);
     }
@@ -175,5 +179,51 @@ describe("skills store 市场安装/卸载", () => {
     expect(invokeMock).toHaveBeenCalledWith("skills_uninstall", { workspaceRoot: "/ws/proj", skillId: "tdd" });
     expect(store.recordBySkillId.has("tdd")).toBe(false);
     expect(store.installed.find((skill) => skill.id === "tdd")).toBeUndefined();
+  });
+});
+
+describe("skills store 内置技能", () => {
+  it("refreshBundled lists host-provided skills and exposes bundledIds", async () => {
+    host();
+    const store = useSkillsStore();
+    await store.refreshBundled();
+
+    expect(invokeMock).toHaveBeenCalledWith("skills_bundled_list");
+    expect(store.bundled.map((skill) => skill.id)).toEqual(["ffmpeg-media"]);
+    expect(store.bundledIds.has("ffmpeg-media")).toBe(true);
+    expect(store.bundledError).toBe("");
+  });
+
+  it("refreshBundled clears the list and records the error when the host fails", async () => {
+    invokeMock.mockRejectedValue(new Error("boom"));
+    const store = useSkillsStore();
+    await store.refreshBundled();
+    expect(store.bundled).toEqual([]);
+    expect(store.bundledError).toContain("boom");
+  });
+
+  it("installBundled writes via host, then refreshes the installed scan", async () => {
+    host();
+    const store = useSkillsStore();
+    await store.installBundled("ffmpeg-media");
+
+    expect(invokeMock).toHaveBeenCalledWith("skills_install_bundled", {
+      workspaceRoot: "/ws/proj",
+      skillId: "ffmpeg-media",
+    });
+    // 装完刷新了磁盘扫描，busyId 归零
+    expect(store.installed.map((skill) => skill.id)).toContain("tdd");
+    expect(store.busyId).toBeNull();
+  });
+
+  it("installBundled surfaces host rejection and still clears busyId", async () => {
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "skills_install_bundled") throw new Error("不是内置技能: nope");
+      if (cmd === "fs_list_dir") return [];
+      throw new Error(`unexpected host command: ${cmd}`);
+    });
+    const store = useSkillsStore();
+    await expect(store.installBundled("nope")).rejects.toThrow("不是内置技能");
+    expect(store.busyId).toBeNull();
   });
 });

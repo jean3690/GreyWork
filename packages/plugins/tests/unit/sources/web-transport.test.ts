@@ -66,6 +66,13 @@ describe("WebSkillsTransport", () => {
     expect(transport.installable()).toBe(false);
   });
 
+  it("bundled skills come from the host binary: empty list, install rejected", async () => {
+    const transport = new WebSkillsTransport();
+    // 无宿主 → 目录为空（不报错，UI 直接不显示该区）
+    await expect(transport.bundledList()).resolves.toEqual([]);
+    await expect(transport.installBundled("/tmp", "ffmpeg-media")).rejects.toThrow(/desktop host/i);
+  });
+
   it("factory picks the web transport outside Tauri and scoped sources map via proxy", async () => {
     installFetch(async () => SEARCH_RAW);
     const transport = createSkillsTransport();

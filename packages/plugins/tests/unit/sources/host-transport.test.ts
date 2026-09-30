@@ -75,4 +75,18 @@ describe("HostSkillsTransport", () => {
     await transport.uninstall("/ws", "tdd");
     expect(invoke).toHaveBeenCalledWith("skills_uninstall", { workspaceRoot: "/ws", skillId: "tdd" });
   });
+
+  it("bundledList/installBundled forward to the bundled host commands", async () => {
+    vi.mocked(invoke).mockResolvedValue([{ id: "ffmpeg-media", name: "ffmpeg 媒体处理", description: "转码", files: ["SKILL.md"] }]);
+    const list = await transport.bundledList();
+    expect(invoke).toHaveBeenCalledWith("skills_bundled_list");
+    expect(list.map((skill) => skill.id)).toEqual(["ffmpeg-media"]);
+
+    vi.mocked(invoke).mockResolvedValue({ dir: "/ws/.agents/skills/ffmpeg-media", filesWritten: 1 });
+    await transport.installBundled("/ws", "ffmpeg-media");
+    expect(invoke).toHaveBeenCalledWith("skills_install_bundled", {
+      workspaceRoot: "/ws",
+      skillId: "ffmpeg-media",
+    });
+  });
 });

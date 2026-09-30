@@ -1,6 +1,6 @@
 import { fetchJson } from "@greywork/core";
 import { hasHostCommands } from "@greywork/host-ipc";
-import type { SkillSnapshotFile, SkillsMarketTransport } from "./types";
+import type { BundledSkillMeta, SkillSnapshotFile, SkillsMarketTransport } from "./types";
 import { HostSkillsTransport } from "./host-transport";
 
 /**
@@ -45,6 +45,17 @@ export class WebSkillsTransport implements SkillsMarketTransport {
   uninstall(workspaceRoot: string, skillId: string): Promise<void> {
     return Promise.reject(
       new Error(`skills uninstall requires the desktop host (Tauri): ${workspaceRoot.trim()}/.agents/skills/${skillId}`),
+    );
+  }
+
+  /** 内置技能由宿主二进制提供；Web 预览没有宿主，目录为空。 */
+  async bundledList(): Promise<BundledSkillMeta[]> {
+    return [];
+  }
+
+  installBundled(workspaceRoot: string, skillId: string): Promise<{ dir: string; filesWritten: number }> {
+    return Promise.reject(
+      new Error(`bundled skill install requires the desktop host (Tauri): ${workspaceRoot.trim()}/.agents/skills/${skillId}`),
     );
   }
 }

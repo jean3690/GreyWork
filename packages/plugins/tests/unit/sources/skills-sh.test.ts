@@ -55,6 +55,8 @@ describe("createBuiltinSources", () => {
       download: async (ref) => ({ files: [{ path: "SKILL.md", contents: `of ${ref}` }], hash: scope }),
       install: async () => ({ dir: "/tmp/x", filesWritten: 1 }),
       uninstall: async () => undefined,
+      bundledList: async () => [],
+      installBundled: async () => ({ dir: "/tmp/x", filesWritten: 1 }),
     };
   }
 

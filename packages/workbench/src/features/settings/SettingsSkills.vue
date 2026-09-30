@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * 设置页「技能」面板：自定义市场源 + 已安装（工作区 .agents/skills 磁盘扫描）+
- * 发现（跨所有启用源搜索）。
+ * 内置技能（随宿主二进制发布）+ 发现（跨所有启用源搜索）。
  *
  * 安装目标 .agents/skills/&lt;skillId&gt;/ 是外部 ACP agent（opencode /
  * claude-code / codex 等）的原生技能目录——装完新建/重启 agent 会话即被识别，
@@ -21,10 +21,11 @@ const settings = useSettingsStore();
 const searchQuery = ref("");
 const searchError = ref("");
 const actionError = ref("");
-/** 二次确认对象：卸载某已装技能 / 从市场安装（已装则提示覆盖更新）/ 按记录更新。 */
+/** 二次确认对象：卸载某已装技能 / 从市场安装 / 安装内置技能 / 按记录更新。 */
 const confirm = ref<
   | null
   | { kind: "install"; entry: MarketSkillEntry }
+  | { kind: "installBundled"; id: string; name: string }
   | { kind: "update"; skill: InstalledSkill }
   | { kind: "uninstall"; skill: InstalledSkill }
 >(null);
@@ -33,6 +34,7 @@ let timer: ReturnType<typeof setTimeout> | null = null;
 
 onMounted(() => {
   void skills.refreshInstalled();
+  void skills.refreshBundled();
 });
 
 function onSearchInput(): void {
@@ -68,6 +70,18 @@ async function performUpdate(): Promise<void> {
   actionError.value = "";
   try {
     await skills.updateInstalled(skill.id);
+  } catch (error) {
+    actionError.value = String(error);
+  }
+}
+
+async function performInstallBundled(): Promise<void> {
+  if (!confirm.value || confirm.value.kind !== "installBundled") return;
+  const { id } = confirm.value;
+  confirm.value = null;
+  actionError.value = "";
+  try {
+    await skills.installBundled(id);
   } catch (error) {
     actionError.value = String(error);
   }
@@ -247,6 +261,43 @@ function confirmResetSources(): void {
       </div>
     </div>
 
+    <div v-if="skills.bundled.length" class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-4">
+      <div class="mb-1 flex items-center justify-between gap-2">
+        <span class="text-[13px] font-medium text-foreground">内置技能</span>
+        <span class="font-mono text-[10px] text-dim2">{{ skills.bundled.length }}</span>
+      </div>
+      <p class="mb-3 text-[11px] leading-relaxed text-dim2">
+        随应用一起发布、已编译进宿主二进制：不需要联网，也不依赖上面的市场源。安装目标同样是工作区技能目录。
+      </p>
+      <div class="flex flex-col gap-2">
+        <div v-for="entry in skills.bundled" :key="entry.id" class="rounded-[calc(10px*var(--gw-radius-scale))] bg-panel-2 p-2.5">
+          <div class="flex items-start gap-2">
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-1.5">
+                <span class="truncate text-[12px] font-medium text-foreground">{{ entry.name }}</span>
+                <span class="shrink-0 rounded-full border border-line px-1.5 py-px font-mono text-[10px] text-dim2">{{ entry.id }}</span>
+                <span
+                  v-if="skills.installed.some((skill) => skill.id === entry.id)"
+                  class="shrink-0 rounded-full border border-line px-1.5 py-px text-[10px] text-accent"
+                  >已安装</span
+                >
+              </div>
+              <p class="mt-0.5 line-clamp-2 text-[11px] leading-relaxed text-dim2">{{ entry.description }}</p>
+              <p class="mt-1 truncate font-mono text-[10px] text-dim2">{{ entry.files.join(", ") }}</p>
+            </div>
+            <button
+              type="button"
+              class="shrink-0 rounded-[calc(8px*var(--gw-radius-scale))] border border-line px-2.5 py-1 text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+              :disabled="!skills.hostAvailable || skills.busyId !== null"
+              @click="confirm = { kind: 'installBundled', id: entry.id, name: entry.name }"
+            >
+              {{ skills.installed.some((skill) => skill.id === entry.id) ? "重新安装" : "安装" }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-4">
       <div class="mb-1 text-[13px] font-medium text-foreground">发现</div>
       <p class="mb-3 text-[11px] leading-relaxed text-dim2">
@@ -313,6 +364,15 @@ function confirmResetSources(): void {
       :message="`将下载「${confirm.entry.name}」并写入 ${joinPath(skills.workspace?.root.dir ?? '工作区', '.agents', 'skills', confirm.entry.skillId)}/。${installedOf(confirm.entry) ? '该技能已安装，本次将覆盖为市场最新版本。' : ''}新建 / 重启 agent 会话后生效。`"
       confirm-label="安装"
       @confirm="performInstall"
+      @cancel="confirm = null"
+    />
+
+    <ConfirmDialog
+      v-if="confirm?.kind === 'installBundled'"
+      title="安装内置技能？"
+      :message="`将把内置的「${confirm.name}」写入 ${joinPath(skills.workspace?.root.dir ?? '工作区', '.agents', 'skills', confirm.id)}/。不需要联网，同名技能会被覆盖。新建 / 重启 agent 会话后生效。`"
+      confirm-label="安装"
+      @confirm="performInstallBundled"
       @cancel="confirm = null"
     />
 

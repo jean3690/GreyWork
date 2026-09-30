@@ -1,5 +1,5 @@
 import { invoke } from "@greywork/host-ipc";
-import type { SkillSnapshotFile, SkillsMarketTransport } from "./types";
+import type { BundledSkillMeta, SkillSnapshotFile, SkillsMarketTransport } from "./types";
 
 /**
  * 桌面宿主通道：搜索/下载/安装/卸载全部经 Tauri IPC 走 Rust 宿主
@@ -64,5 +64,14 @@ export class HostSkillsTransport implements SkillsMarketTransport {
 
   async uninstall(workspaceRoot: string, skillId: string): Promise<void> {
     await invoke("skills_uninstall", { workspaceRoot, skillId });
+  }
+
+  /** 内置技能：内容随宿主二进制发布，直接取目录 / 按 id 安装，不经网络。 */
+  async bundledList(): Promise<BundledSkillMeta[]> {
+    return invoke<BundledSkillMeta[]>("skills_bundled_list");
+  }
+
+  async installBundled(workspaceRoot: string, skillId: string): Promise<{ dir: string; filesWritten: number }> {
+    return invoke("skills_install_bundled", { workspaceRoot, skillId });
   }
 }
