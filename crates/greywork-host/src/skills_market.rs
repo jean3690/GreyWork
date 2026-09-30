@@ -56,7 +56,9 @@ pub struct InstallReport {
 }
 
 /// 工作区目录校验：绝对路径 + 已存在目录 + 非文件系统根（与 acp_host 同规则）。
-fn validate_workspace_root(raw: &str) -> Result<PathBuf, String> {
+///
+/// `pub(crate)`：内置技能安装（`bundled_skills`）复用同一条校验。
+pub(crate) fn validate_workspace_root(raw: &str) -> Result<PathBuf, String> {
     let trimmed = raw.trim();
     let path = PathBuf::from(trimmed);
     if trimmed.is_empty() || !path.is_absolute() {
@@ -74,7 +76,9 @@ fn validate_workspace_root(raw: &str) -> Result<PathBuf, String> {
 }
 
 /// skillId 强制小写 slug；卸载/安装路径由它构造，格式不严即路径逃逸。
-fn validate_skill_id(raw: &str) -> Result<String, String> {
+///
+/// `pub(crate)`：内置技能的 id 也走同一套白名单，安装路径同样由它构造。
+pub(crate) fn validate_skill_id(raw: &str) -> Result<String, String> {
     let id = raw.trim();
     let valid = !id.is_empty()
         && id.len() <= SKILL_ID_MAX_CHARS
@@ -246,6 +250,19 @@ pub async fn skills_install(
 ) -> Result<InstallReport, String> {
     let root = validate_workspace_root(&workspace_root)?;
     let id = validate_skill_id(&skill_id)?;
+    write_skill_snapshot(&root, &id, &files)
+}
+
+/// 校验并落盘一份技能快照（两阶段：全部路径与体积先过审，再写入）。
+///
+/// `root` / `id` 必须已由 `validate_workspace_root` / `validate_skill_id` 过审 ——
+/// 本函数只做「内容」层面的净化，不再碰目录本身。市场安装与内置技能安装
+/// （`bundled_skills`）共用这条路径，因此不存在第二份会漂移的净化逻辑。
+pub(crate) fn write_skill_snapshot(
+    root: &std::path::Path,
+    id: &str,
+    files: &[SkillSnapshotFile],
+) -> Result<InstallReport, String> {
     if files.is_empty() {
         return Err("snapshot has no files".to_string());
     }
@@ -258,7 +275,7 @@ pub async fn skills_install(
 
     // 两阶段：全部路径与体积先过审，再落盘——可疑快照整体拒绝，不产生部分写入
     let mut sanitized: Vec<(PathBuf, &SkillSnapshotFile)> = Vec::with_capacity(files.len());
-    for file in &files {
+    for file in files {
         let rel = sanitize_rel_path(&file.path)
             .ok_or_else(|| format!("unsafe file path rejected: {:?}", file.path))?;
         if file.contents.len() > MAX_FILE_BYTES {
@@ -270,7 +287,7 @@ pub async fn skills_install(
         sanitized.push((rel, file));
     }
 
-    let target = root.join(".agents").join("skills").join(&id);
+    let target = root.join(".agents").join("skills").join(id);
     std::fs::create_dir_all(&target).map_err(|error| format!("create dir failed: {error}"))?;
 
     let mut written = 0usize;

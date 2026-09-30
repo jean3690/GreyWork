@@ -183,7 +183,7 @@ async fn list_commands_exposes_metadata() {
     assert_eq!(status, StatusCode::OK);
     let value = json_body(&body);
     let commands = value.as_array().unwrap();
-    assert_eq!(commands.len(), 142, "命令总数应与共享表一致");
+    assert_eq!(commands.len(), 144, "命令总数应与共享表一致");
     let binary: Vec<&str> = commands
         .iter()
         .filter(|meta| meta["binary"] == true)

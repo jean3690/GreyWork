@@ -35,9 +35,9 @@ use crate::wechat::WechatHost;
 use crate::wecom::WecomHost;
 use crate::workspace_fs::WorkspaceFsAccess;
 use crate::{
-    acp_host, channel_media, db, dingtalk, discord, feishu, git, llm, mcp, mcp_registry, office,
-    plugin_market, qq, sheet, skills_market, store_fs, sys, telegram, update, web_fetch, wechat,
-    wecom, workspace_fs, worktree,
+    acp_host, bundled_skills, channel_media, db, dingtalk, discord, feishu, git, llm, mcp,
+    mcp_registry, office, plugin_market, qq, sheet, skills_market, store_fs, sys, telegram, update,
+    web_fetch, wechat, wecom, workspace_fs, worktree,
 };
 
 /// 命令的鉴权要求。
@@ -334,6 +334,13 @@ command_table! {
     { "skills_uninstall", auth: Auth::Required, desktop: false, binary: false,
         args: skills_market::UninstallArgs,
         run: |_ctx, a| async move { skills_market::skills_uninstall(a.workspace_root, a.skill_id).await.map(Json) } }
+    // 内置技能（内容编译进二进制，不联网）：列出 + 安装。
+    { "skills_bundled_list", auth: Auth::Required, desktop: false, binary: false,
+        args: UnitArgs,
+        run: |_ctx, _a| async move { Ok::<_, String>(Json(bundled_skills::skills_bundled_list())) } }
+    { "skills_install_bundled", auth: Auth::Required, desktop: false, binary: false,
+        args: bundled_skills::InstallBundledArgs,
+        run: |_ctx, a| async move { bundled_skills::skills_install_bundled(a.workspace_root, a.skill_id).map(Json) } }
 
     // ---- plugin_market ----
     { "plugin_market_catalog", auth: Auth::Required, desktop: false, binary: false,
@@ -789,7 +796,7 @@ mod tests {
 
     #[test]
     fn commands_table_shape() {
-        assert_eq!(COMMANDS.len(), 142, "命令总数应为 142");
+        assert_eq!(COMMANDS.len(), 144, "命令总数应为 144");
 
         // 命令名唯一。
         let mut names: Vec<&str> = COMMANDS.iter().map(|c| c.name).collect();

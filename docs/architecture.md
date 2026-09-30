@@ -29,6 +29,19 @@ There is no lockfile for skills: the host is only an installer (`skills_market.r
 snapshot into `<workspace>/.agents/skills/<id>/`), and the ACP agent picks the directory up at its
 next session. Installed-from-market records are tracked renderer-side in `localStorage`.
 
+Skills come from two places, both landing in the same directory:
+
+- **Market** (`skills_market.rs`) — search/download from skills.sh through the host (the renderer
+  never reaches the market directly).
+- **Bundled** (`bundled_skills.rs`) — content compiled into the host binary with `include_str!`, so
+  installing one needs no network and no configured source. `skills_bundled_list` serves the
+  catalogue, `skills_install_bundled` resolves the files by id.
+
+Both write through `skills_market::write_skill_snapshot`, which is the single place that decides
+what a skill directory may contain (path sanitising, file-count and per-file size caps). The first
+bundled skill is `ffmpeg-media`, a driver for the `ffmpeg` CLI: the host ships the instructions, the
+agent runs the tool, and the artefacts land in the workspace where the preview viewers pick them up.
+
 ## Dependency Direction
 
 The project enforces strict dependency direction: **leaf packages depend on nothing or only on `@greywork/core`**; higher-level packages depend on lower-level ones.

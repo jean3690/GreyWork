@@ -10,6 +10,7 @@
 
 pub mod acp_host;
 pub mod acp_process;
+pub mod bundled_skills;
 pub mod channel_common;
 pub mod channel_media;
 pub mod commands;

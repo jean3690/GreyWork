@@ -12,6 +12,7 @@
 // 仍留桌面（真·宿主专属）：`sys` / `tray` / `notify` / `close_guard` / `plugin_window` /
 // `host`（`TauriHost` 实现）。
 mod acp_host;
+mod bundled_skills;
 mod channel_media;
 mod close_guard;
 mod db;
@@ -190,6 +191,8 @@ pub fn run() {
             skills_market::skills_download,
             skills_market::skills_install,
             skills_market::skills_uninstall,
+            bundled_skills::skills_bundled_list,
+            bundled_skills::skills_install_bundled,
             plugin_market::plugin_market_catalog,
             plugin_market::plugin_market_install,
             plugin_market::plugin_market_list_installed,
