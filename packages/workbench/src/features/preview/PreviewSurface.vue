@@ -37,6 +37,7 @@ const VIEWERS: Record<ViewerKind, Component> = {
   code: makeViewer(() => import("@/features/preview/TextViewer.vue")),
   raw: makeViewer(() => import("@/features/preview/TextViewer.vue")),
   image: makeViewer(() => import("@/features/preview/ImageViewer.vue")),
+  video: makeViewer(() => import("@/features/preview/VideoViewer.vue")),
   xlsx: makeViewer(() => import("@/features/preview/SheetViewer.vue")),
   xls: makeViewer(() => import("@/features/preview/LegacySheetViewer.vue")),
   docx: makeViewer(() => import("@/features/preview/DocViewer.vue")),

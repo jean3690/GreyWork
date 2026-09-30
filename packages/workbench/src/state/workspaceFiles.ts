@@ -269,6 +269,17 @@ export async function readBinaryFile(path: string): Promise<Uint8Array> {
 }
 
 /**
+ * 读取磁盘媒体文件（Rust fs_read_media，**原始字节**回传，宿主硬顶 128MB）。
+ *
+ * 与 `readBinaryFile` 分成两条命令：那条的 20MB 契约另有 office 解析与附件通道在依赖，
+ * 而视频 / 3D 模型普遍超过 20MB。`maxBytes` 按 kind 给（见 `lib/viewer.ts` 的
+ * `mediaLimitOfKind`），宿主一律夹紧到自己的硬顶 —— 上限只在宿主那一处说了算。
+ */
+export async function readMediaFile(path: string, maxBytes?: number): Promise<Uint8Array> {
+  return binaryPayload(await invoke<ArrayBuffer | Uint8Array>("fs_read_media", { path, maxBytes }), "fs_read_media");
+}
+
+/**
  * 读取表格文件（Rust fs_read_sheet，calamine 解析，≤20MB）。
  *
  * 只对 `.xls` 这类渲染端读不了的老格式使用：命令按**路径**读取并走同一套授权，

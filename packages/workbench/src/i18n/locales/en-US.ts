@@ -417,6 +417,10 @@ export const enUS: MessageSchema = {
       rotateLeft: "Rotate left 90°",
       rotateRight: "Rotate right 90°",
     },
+    video: {
+      unsupported:
+        "Can't play this video (.{ext}). The host may be missing the codec (on Linux, usually gstreamer1.0-plugins-bad / -ugly), or the file couldn't be read. Try opening it in a system app.",
+    },
     pdf: {
       rendered: "Rendered {done} / {total} pages",
       prev: "Previous page",

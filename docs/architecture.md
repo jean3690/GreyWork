@@ -189,14 +189,14 @@ Design notes:
 Every response (API and static alike) carries a fixed set of headers from `middleware::security_headers`.
 The CSP is computed once at router-assembly time from the config, not per response:
 
-| Header                      | Value                                                                    | Why                                                                                                                                             |
-| --------------------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Content-Security-Policy`   | mirrors the desktop `tauri.conf.json` CSP, plus `media-src 'self' blob:` | the desktop policy is the strongest evidence of what the app actually needs; `media-src blob:` is for inbound video/voice thumbnails            |
-| `X-Frame-Options`           | `DENY`                                                                   | clickjacking guard for older browsers (`frame-ancestors 'none'` covers modern ones)                                                             |
-| `Referrer-Policy`           | `no-referrer`                                                            | never leak the self-hosted URL/paths to outbound links                                                                                          |
-| `Permissions-Policy`        | `camera=(), microphone=(), …` (omits `clipboard-*`)                      | the UI uses `navigator.clipboard` for its copy buttons, so `clipboard-*` is deliberately left unset; everything else is unused and denied       |
-| `X-Content-Type-Options`    | `nosniff`                                                                | don't let the browser sniff JSON/binary into an executable type                                                                                 |
-| `Strict-Transport-Security` | `max-age=31536000; includeSubDomains`                                    | **only when `secure_cookie` is set** — that flag is the "behind a TLS proxy" signal; over plain HTTP HSTS is meaningless and can lock users out |
+| Header                      | Value                                                               | Why                                                                                                                                             |
+| --------------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Content-Security-Policy`   | mirrors the desktop `tauri.conf.json` CSP, minus Tauri-only sources | the desktop policy is the strongest evidence of what the app actually needs; a drift test keeps the two in sync                                 |
+| `X-Frame-Options`           | `DENY`                                                              | clickjacking guard for older browsers (`frame-ancestors 'none'` covers modern ones)                                                             |
+| `Referrer-Policy`           | `no-referrer`                                                       | never leak the self-hosted URL/paths to outbound links                                                                                          |
+| `Permissions-Policy`        | `camera=(), microphone=(), …` (omits `clipboard-*`)                 | the UI uses `navigator.clipboard` for its copy buttons, so `clipboard-*` is deliberately left unset; everything else is unused and denied       |
+| `X-Content-Type-Options`    | `nosniff`                                                           | don't let the browser sniff JSON/binary into an executable type                                                                                 |
+| `Strict-Transport-Security` | `max-age=31536000; includeSubDomains`                               | **only when `secure_cookie` is set** — that flag is the "behind a TLS proxy" signal; over plain HTTP HSTS is meaningless and can lock users out |
 
 `GREYWORK_FRAME_ORIGINS` appends a `frame-src` allow-list for cloud Office viewers. Origins are
 normalized by the shared `greywork_host::csp::normalize_frame_origin` (the server CSP, the desktop
@@ -300,6 +300,51 @@ starts it with a known password, polls `/api/health`, and asserts that `/` reall
 (`<div id="app">`) and that the CSP header is present — a plain health check would pass on an image
 whose UI 404s. It does **not** use BuildKit's `type=gha` cache: the repository's 10 GB cache budget is
 already saturated by the Rust dependency caches.
+
+## File preview (viewer dispatch)
+
+Preview is a pure extension-name dispatch. `packages/workbench/src/lib/viewer.ts` holds the kind
+tables — a new kind must be registered in each of them:
+
+- `EXT_KIND` maps an extension to a `ViewerKind`; unknown extensions fall back to `raw` (CodeMirror
+  plain text), so a file never "fails to open".
+- `BINARY_KINDS` is a **whitelist** of kinds that must be read as bytes. Reading binary as text is
+  irreversible (UTF-8 decode), so the failure mode is "file is corrupt", not a visible error.
+- `MEDIA_LIMITS` marks kinds that read through the relaxed `fs_read_media` channel instead of the
+  20 MB `fs_read_binary` one. Only video qualifies today.
+
+The viewer component table is `packages/workbench/src/features/preview/PreviewSurface.vue`
+(`Record<ViewerKind, Component>` — a missing key is a compile error). Every viewer is a
+`defineAsyncComponent` so heavy renderers (Univer, pdf.js, and any future three.js / MapLibre)
+stay out of the main chunk. A viewer receives only `{ tab }` and reads its own bytes through
+`lib/preview-content.ts` (`usePreviewText` / `usePreviewBinary`); tabs themselves hold no content.
+
+Two read caps live in the host, not the renderer (`crates/greywork-host/src/workspace_fs.rs`):
+`MAX_BINARY_BYTES` = 20 MB for `fs_read_binary`, and `MAX_MEDIA_BYTES` = 128 MB for
+`fs_read_media`. `fs_read_media` clamps a caller-supplied `maxBytes` to its own ceiling, so the
+renderer can ask for a per-kind budget but can never raise the host's hard cap. Both are **errors**
+when exceeded, never truncation — a half file surfaces as "corrupt format", which is far harder to
+diagnose than a size message.
+
+### Media playback: stream, don't buffer
+
+Reading a video into memory and handing `<video>` a `blob:` URL does **not** work for real files:
+the IPC transfer plus the synchronous `new Blob` copy freeze the renderer, and WebKit buffers the
+whole blob before it starts playing (seeking is effectively broken). The symptom is a spinner with
+no error anywhere.
+
+So the desktop shell registers a custom URI scheme, `gwmedia://`
+(`apps/desktop/src-tauri/src/media_protocol.rs`), which serves the file with **HTTP Range** support
+in 1 MB chunks. `packages/host-ipc/src/media.ts` builds the address via
+`convertFileSrc(path, "gwmedia")` and returns `null` on hosts that lack the scheme, so
+`lib/preview-content.ts` (`resolvePreviewMedia`) can fall back to bytes. The scheme's authorization
+is `WorkspaceFsAccess::resolve_existing` — the _same_ check `fs_read_media` uses, so there is no
+second allow-list to keep in sync (which is why Tauri's built-in asset protocol is not used here).
+
+Both URL shapes `convertFileSrc` can produce (`gwmedia://localhost/…` on Linux/macOS,
+`http://gwmedia.localhost/…` on Windows/Android) must be listed in the desktop `media-src`; a drift
+test enforces it. The server has no custom scheme, so server-mode video still takes the slow
+buffered path — a Range route there is the remaining follow-up.
 
 ## Design Principles
 

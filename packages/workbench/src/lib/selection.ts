@@ -37,10 +37,10 @@ export interface SemanticUnit {
  * 排除的三种不是「偷懒」，是真的拿不到：
  * - `xlsx`：Univer 是 canvas 渲染，没有对应单元格的 DOM 节点（走它自己的选区服务，
  *   入口在 SheetViewer 的表头按钮，不经过本模块）；
- * - `image` / `legacy-office`：本来就没有可选文本。
+ * - `image` / `video` / `legacy-office`：本来就没有可选文本。
  */
 export function isTextSelectableKind(kind: string): boolean {
-  return kind !== "xlsx" && kind !== "image" && kind !== "legacy-office";
+  return kind !== "xlsx" && kind !== "image" && kind !== "video" && kind !== "legacy-office";
 }
 
 const ROLE_OVERRIDES: ReadonlySet<string> = new Set(["paragraph", "code", "block"]);

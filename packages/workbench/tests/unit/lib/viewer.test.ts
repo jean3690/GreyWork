@@ -3,7 +3,7 @@
  * 防止 xlsx 被当文本读坏的护栏 —— 两者都必须有用例守住。
  */
 import { describe, expect, it } from "vitest";
-import { basename, codeLanguageOfPath, isBinaryKind, kindOfPath, type ViewerKind } from "@/lib/viewer";
+import { basename, codeLanguageOfPath, isBinaryKind, isMediaKind, kindOfPath, mediaLimitOfKind, type ViewerKind } from "@/lib/viewer";
 
 describe("kindOfPath", () => {
   it.each<[string, ViewerKind]>([
@@ -30,6 +30,13 @@ describe("kindOfPath", () => {
     ["fix.patch", "diff"],
     ["logo.png", "image"],
     ["logo.svg", "image"],
+    // 视频必须单独成类：落到 raw 会被当文本读，二进制经 utf-8 解码就是一屏乱码且不报错。
+    // mov / mkv 能否真播出取决于宿主解码器，但「有没有走对通道」与解码器无关。
+    ["clip.mp4", "video"],
+    ["clip.m4v", "video"],
+    ["clip.webm", "video"],
+    ["clip.mov", "video"],
+    ["clip.mkv", "video"],
   ])("%s → %s", (path, kind) => {
     expect(kindOfPath(path)).toBe(kind);
   });
@@ -54,7 +61,7 @@ describe("kindOfPath", () => {
 });
 
 describe("isBinaryKind", () => {
-  it.each<ViewerKind>(["xlsx", "xls", "docx", "pptx", "pdf", "image", "legacy-office"])("%s 必须按二进制读", (kind) => {
+  it.each<ViewerKind>(["xlsx", "xls", "docx", "pptx", "pdf", "image", "video", "legacy-office"])("%s 必须按二进制读", (kind) => {
     expect(isBinaryKind(kind)).toBe(true);
   });
 
@@ -66,6 +73,21 @@ describe("isBinaryKind", () => {
     // .doc / .xls / .ppt 都是 OLE2 二进制；曾经的 bug 就是它们落到 raw 走了文本通道。
     for (const path of ["a.doc", "a.xls", "a.ppt"]) {
       expect(isBinaryKind(kindOfPath(path))).toBe(true);
+    }
+  });
+});
+
+describe("媒体读取通道", () => {
+  it("视频走媒体通道，申请额度远高于 20MB 硬顶", () => {
+    // 按 20MB 卡死等于真实视频一律打不开 —— 这个分派正是视频预览能成立的前提。
+    expect(isMediaKind("video")).toBe(true);
+    expect(mediaLimitOfKind("video")).toBeGreaterThan(20 * 1024 * 1024);
+  });
+
+  it("非媒体 kind 不走媒体通道（仍旧 20MB 契约）", () => {
+    for (const kind of ["image", "pdf", "docx", "xlsx", "legacy-office", "md", "code"] as ViewerKind[]) {
+      expect(isMediaKind(kind)).toBe(false);
+      expect(mediaLimitOfKind(kind)).toBeUndefined();
     }
   });
 });

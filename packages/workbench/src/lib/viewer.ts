@@ -8,7 +8,7 @@
 import { extname } from "@greywork/core";
 
 export type ViewerKind =
-  "md" | "html" | "csv" | "code" | "xlsx" | "xls" | "docx" | "pptx" | "pdf" | "diff" | "image" | "web" | "raw" | "legacy-office";
+  "md" | "html" | "csv" | "code" | "xlsx" | "xls" | "docx" | "pptx" | "pdf" | "diff" | "image" | "video" | "web" | "raw" | "legacy-office";
 
 const EXT_KIND: Record<string, ViewerKind> = {
   md: "md",
@@ -43,6 +43,14 @@ const EXT_KIND: Record<string, ViewerKind> = {
   ico: "image",
   avif: "image",
   svg: "image",
+  // 视频：mp4 / webm 是浏览器原生支持的主力，mov / mkv 能否解出画面取决于宿主运行时的
+  // 解码器（WebKitGTK 走 GStreamer 插件）。归到 video 而不是 raw —— 解不出来时给的是
+  // 播放器错误 + 「用系统应用打开」，比把二进制当文本读出一屏乱码强得多。
+  mp4: "video",
+  m4v: "video",
+  webm: "video",
+  mov: "video",
+  mkv: "video",
   ts: "code",
   tsx: "code",
   js: "code",
@@ -71,7 +79,42 @@ const EXT_KIND: Record<string, ViewerKind> = {
  * 走错通道的代价不对称：二进制被当文本读会经 utf-8 解码后**不可逆地损坏**
  * （xlsx 读回即报「文件损坏」），所以这张表是白名单而非启发式判断。
  */
-const BINARY_KINDS: ReadonlySet<ViewerKind> = new Set<ViewerKind>(["xlsx", "xls", "docx", "pptx", "pdf", "image", "legacy-office"]);
+const BINARY_KINDS: ReadonlySet<ViewerKind> = new Set<ViewerKind>([
+  "xlsx",
+  "xls",
+  "docx",
+  "pptx",
+  "pdf",
+  "image",
+  "video",
+  "legacy-office",
+]);
+
+/**
+ * 媒体 kind 向宿主申请的读取额度（字节）。
+ *
+ * 值按「这类文件实际有多大」给，而不是一律拉满 —— 视频动辄上百 MB，3D 模型通常几十 MB。
+ * 宿主另有自己的硬顶（`MAX_MEDIA_BYTES`）并会夹紧，所以这里的数字只是申请值，
+ * 真正的上限始终在宿主那一处。
+ */
+const MEDIA_LIMITS: Partial<Record<ViewerKind, number>> = {
+  video: 128 * 1024 * 1024,
+};
+
+/**
+ * 该 kind 是否走媒体读取通道。
+ *
+ * 媒体走 `fs_read_media`（放宽上限）而不是 `fs_read_binary`（20MB 硬顶）——
+ * 按 20MB 卡死等于真实视频一律打不开。分派只在这一处，与 `isBinaryKind` 同理。
+ */
+export function isMediaKind(kind: ViewerKind): boolean {
+  return MEDIA_LIMITS[kind] !== undefined;
+}
+
+/** 该 kind 向宿主申请的读取额度；非媒体 kind 为 `undefined`（走 20MB 通道）。 */
+export function mediaLimitOfKind(kind: ViewerKind): number | undefined {
+  return MEDIA_LIMITS[kind];
+}
 
 /** 按扩展名推断产物查看类型；未知归 raw（文本兜底）。 */
 export function kindOfPath(path: string): ViewerKind {

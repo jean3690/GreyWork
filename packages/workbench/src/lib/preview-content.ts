@@ -1,7 +1,7 @@
-import { hasHostCommands } from "@greywork/host-ipc";
+import { hasHostCommands, mediaStreamUrl } from "@greywork/host-ipc";
 import { ref, watch, type Ref } from "vue";
-import { readBinaryFile, readTextFile } from "../state/workspaceFiles";
-import { isBinaryKind } from "./viewer";
+import { readBinaryFile, readMediaFile, readTextFile } from "../state/workspaceFiles";
+import { isBinaryKind, isMediaKind, mediaLimitOfKind } from "./viewer";
 import { useVfsStore } from "../stores/vfs";
 import type { PreviewTab } from "../stores/preview";
 
@@ -90,11 +90,41 @@ export async function readPreviewText(tab: PreviewTab, path: string): Promise<st
 /** 二进制通道。与 `readPreviewText` 分成两个函数，理由见 `workspaceFiles.readBinaryFile`。 */
 export async function readPreviewBinary(tab: PreviewTab, path: string): Promise<Uint8Array> {
   if (!isBinaryKind(tab.kind)) throw new Error(`${tab.kind} 不是二进制类型`);
+  // 媒体必须走 `resolvePreviewMedia`：它的字节可能是几百 MB，而且桌面端**根本不读字节**。
+  // 走错这条的代价不对称 —— 视频会被 20MB 硬顶静默挡下，看起来像文件坏了。
+  if (isMediaKind(tab.kind)) throw new Error(`${tab.kind} 必须走媒体通道（resolvePreviewMedia）`);
   if (tab.source === "disk") {
     assertDiskAvailable();
     return readBinaryFile(path);
   }
   return useVfsStore().readBinary(path);
+}
+
+/**
+ * 媒体来源：要么是一个支持 HTTP Range 的流式地址（桌面壳的 `gwmedia://` 协议），
+ * 要么是整份读进来的原始字节（服务端 / 浏览器预览 / VFS）。
+ *
+ * 分成两态而不是统一成字节：视频的字节可能是几百 MB，而流式那条路**根本不读字节**。
+ * 统一成字节就等于把这个区别抹掉 —— 那正是「一直转圈、不出画面」的病根。
+ */
+export type PreviewMediaSource = { kind: "stream"; url: string } | { kind: "bytes"; bytes: Uint8Array };
+
+/**
+ * 媒体通道。优先流式：桌面壳注册了 `gwmedia://`，媒体元素按 Range 自己拉片段，
+ * 不读字节、不受 128MB 硬顶约束、拖动进度条可用。
+ *
+ * 没有自定义协议的宿主（服务端 / 浏览器预览）回落到整份读入 + blob URL —— 这条路对
+ * 视频很慢（IPC 全量传输 + 主线程同步拷贝），是已知待办：服务端还缺一条 Range 路由。
+ */
+export async function resolvePreviewMedia(tab: PreviewTab, path: string): Promise<PreviewMediaSource> {
+  if (!isMediaKind(tab.kind)) throw new Error(`${tab.kind} 不是媒体类型`);
+  if (tab.source === "disk") {
+    assertDiskAvailable();
+    const stream = mediaStreamUrl(path);
+    if (stream) return { kind: "stream", url: stream };
+    return { kind: "bytes", bytes: await readMediaFile(path, mediaLimitOfKind(tab.kind)) };
+  }
+  return { kind: "bytes", bytes: await useVfsStore().readBinary(path) };
 }
 
 /** 文本内容（md / html / csv / code / raw）。 */
@@ -105,4 +135,9 @@ export function usePreviewText(tab: Ref<PreviewTab>): PreviewContent<string> {
 /** 二进制内容（xlsx / docx / pptx / pdf / image）。 */
 export function usePreviewBinary(tab: Ref<PreviewTab>): PreviewContent<Uint8Array> {
   return usePreviewLoader(tab, (path) => readPreviewBinary(tab.value, path));
+}
+
+/** 媒体内容（video）：流式地址或字节，由宿主能力决定。 */
+export function usePreviewMedia(tab: Ref<PreviewTab>): PreviewContent<PreviewMediaSource> {
+  return usePreviewLoader(tab, (path) => resolvePreviewMedia(tab.value, path));
 }
