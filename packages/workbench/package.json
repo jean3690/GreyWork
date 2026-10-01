@@ -49,7 +49,7 @@
     "@greywork/plugins": "workspace:*",
     "@greywork/shell": "workspace:*",
     "@internationalized/date": "3.12.4",
-    "@lezer/highlight": "^1.2.3",
+    "@lezer/highlight": "^1.2.5",
     "@lucide/vue": "^1.48.0",
     "@tanstack/vue-virtual": "^3.13.39",
     "@tauri-apps/api": "^2.12.0",
