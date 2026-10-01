@@ -62,7 +62,7 @@
     "@univerjs/engine-render": "0.25.1",
     "@univerjs/sheets": "0.25.1",
     "@univerjs/sheets-formula": "0.25.1",
-    "@univerjs/sheets-formula-ui": "0.25.1",
+    "@univerjs/sheets-formula-ui": "1.0.2",
     "@univerjs/sheets-numfmt": "0.25.1",
     "@univerjs/sheets-numfmt-ui": "0.25.1",
     "@univerjs/sheets-ui": "0.25.1",
