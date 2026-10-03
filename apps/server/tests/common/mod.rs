@@ -19,7 +19,7 @@ use http_body_util::BodyExt;
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
-use greywork_host::commands::CommandContext;
+use greywork_host::commands::{Channels, CommandContext, Services};
 use greywork_host::host::{HostContext, HostPaths};
 use greywork_server::auth::{LoginThrottle, SessionStore};
 use greywork_server::config::{hash_password, ServerConfig};
@@ -88,18 +88,22 @@ fn make_state(tmp: &Path, config: ServerConfig) -> AppState {
     let db = Arc::new(greywork_host::db::Db::open_in_memory().unwrap());
     let ctx = Arc::new(CommandContext {
         host,
-        db,
-        workspace: Arc::new(access),
-        acp: Arc::new(greywork_host::acp_host::AcpHost::default()),
-        llm: Arc::new(greywork_host::llm::LlmHost::default()),
-        rag: Arc::new(greywork_host::rag::RagHost::default()),
-        wechat: Arc::new(greywork_host::wechat::WechatHost::default()),
-        dingtalk: Arc::new(greywork_host::dingtalk::DingTalkHost::default()),
-        feishu: Arc::new(greywork_host::feishu::FeishuHost::default()),
-        telegram: Arc::new(greywork_host::telegram::TelegramHost::default()),
-        discord: Arc::new(greywork_host::discord::DiscordHost::default()),
-        qq: Arc::new(greywork_host::qq::QqHost::default()),
-        wecom: Arc::new(greywork_host::wecom::WecomHost::default()),
+        services: Arc::new(Services {
+            db,
+            workspace: Arc::new(access),
+            acp: Arc::new(greywork_host::acp_host::AcpHost::default()),
+            llm: Arc::new(greywork_host::llm::LlmHost::default()),
+            rag: Arc::new(greywork_host::rag::RagHost::default()),
+        }),
+        channels: Arc::new(Channels {
+            wechat: Arc::new(greywork_host::wechat::WechatHost::default()),
+            dingtalk: Arc::new(greywork_host::dingtalk::DingTalkHost::default()),
+            feishu: Arc::new(greywork_host::feishu::FeishuHost::default()),
+            telegram: Arc::new(greywork_host::telegram::TelegramHost::default()),
+            discord: Arc::new(greywork_host::discord::DiscordHost::default()),
+            qq: Arc::new(greywork_host::qq::QqHost::default()),
+            wecom: Arc::new(greywork_host::wecom::WecomHost::default()),
+        }),
         agent_programs: Arc::new(config.agent_programs.clone()),
         frame_origins: Arc::new(config.frame_origins.clone()),
         // 与 lib.rs 同源：钉住判定看配置有没有值（`policy::overlay_args` 的覆盖条件）。

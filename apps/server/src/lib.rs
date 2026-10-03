@@ -22,7 +22,7 @@ pub mod state;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use greywork_host::commands::CommandContext;
+use greywork_host::commands::{Channels, CommandContext, Services};
 use greywork_host::host::{HostContext, HostPaths};
 
 pub use config::ServerConfig;
@@ -163,18 +163,22 @@ pub async fn run() -> Result<(), String> {
 
     let ctx = Arc::new(CommandContext {
         host: Arc::clone(&host),
-        db,
-        workspace: Arc::new(access),
-        acp: Arc::new(greywork_host::acp_host::AcpHost::default()),
-        llm: Arc::new(greywork_host::llm::LlmHost::default()),
-        rag: Arc::new(greywork_host::rag::RagHost::default()),
-        wechat: Arc::new(greywork_host::wechat::WechatHost::default()),
-        dingtalk: Arc::new(greywork_host::dingtalk::DingTalkHost::default()),
-        feishu: Arc::new(greywork_host::feishu::FeishuHost::default()),
-        telegram: Arc::new(greywork_host::telegram::TelegramHost::default()),
-        discord: Arc::new(greywork_host::discord::DiscordHost::default()),
-        qq: Arc::new(greywork_host::qq::QqHost::default()),
-        wecom: Arc::new(greywork_host::wecom::WecomHost::default()),
+        services: Arc::new(Services {
+            db,
+            workspace: Arc::new(access),
+            acp: Arc::new(greywork_host::acp_host::AcpHost::default()),
+            llm: Arc::new(greywork_host::llm::LlmHost::default()),
+            rag: Arc::new(greywork_host::rag::RagHost::default()),
+        }),
+        channels: Arc::new(Channels {
+            wechat: Arc::new(greywork_host::wechat::WechatHost::default()),
+            dingtalk: Arc::new(greywork_host::dingtalk::DingTalkHost::default()),
+            feishu: Arc::new(greywork_host::feishu::FeishuHost::default()),
+            telegram: Arc::new(greywork_host::telegram::TelegramHost::default()),
+            discord: Arc::new(greywork_host::discord::DiscordHost::default()),
+            qq: Arc::new(greywork_host::qq::QqHost::default()),
+            wecom: Arc::new(greywork_host::wecom::WecomHost::default()),
+        }),
         // 冻结白名单：来自配置，不读 DB（DB 可被客户端改写，是 RCE 面）。
         agent_programs: Arc::new(config.agent_programs.clone()),
         // 本服务端 CSP 的 frame-src 白名单：与 middleware 拼策略用的是同一份配置，

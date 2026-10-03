@@ -310,6 +310,7 @@ async fn frozen_allowlist_ignores_db_enabled_programs() {
     // 模拟「DB 被写入了启用的自配后端」：直写 DB，绕过被禁的 db_agents_sync。
     h.state
         .ctx
+        .services
         .db
         .sync_agent_providers(&[AgentProviderDto {
             id: "custom-1".to_string(),

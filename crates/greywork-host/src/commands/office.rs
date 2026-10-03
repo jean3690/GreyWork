@@ -15,7 +15,7 @@ macro_rules! office_commands {
         run: |ctx, a| async move { Ok::<_, String>(Json(office::host_info(&ctx.frame_origins, a))) } }
     { "office_preview_open", auth: Auth::Required, desktop: false, binary: false,
         args: office::PreviewOpenArgs,
-        run: |ctx, a| async move { office::open_preview(&ctx.workspace, a).await.map(Json) } }
+        run: |ctx, a| async move { office::open_preview(&ctx.services.workspace, a).await.map(Json) } }
 
         }
     };

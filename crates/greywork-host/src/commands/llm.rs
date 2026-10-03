@@ -9,10 +9,10 @@ macro_rules! llm_commands {
     // ---- llm ----
     { "llm_chat_start", auth: Auth::Required, desktop: false, binary: false,
         args: llm::ChatStartArgs,
-        run: |ctx, a| async move { llm::llm_chat_start(Arc::clone(&ctx.host), &ctx.llm, a.base_url, a.model, a.api_key_env, a.messages, a.reasoning_effort, a.headers, llm::InferenceParams { temperature: a.temperature, max_tokens: a.max_tokens }, a.client_token).await.map(Json) } }
+        run: |ctx, a| async move { llm::llm_chat_start(Arc::clone(&ctx.host), &ctx.services.llm, a.base_url, a.model, a.api_key_env, a.messages, a.reasoning_effort, a.headers, llm::InferenceParams { temperature: a.temperature, max_tokens: a.max_tokens }, a.client_token).await.map(Json) } }
     { "llm_chat_stop", auth: Auth::Required, desktop: false, binary: false,
         args: llm::ChatStopArgs,
-        run: |ctx, a| async move { llm::llm_chat_stop(&ctx.llm, a.request_id).await.map(Json) } }
+        run: |ctx, a| async move { llm::llm_chat_stop(&ctx.services.llm, a.request_id).await.map(Json) } }
     // 模型清单（连通性自检）/ 向量 / 语音转写：本地 OpenAI 兼容服务提供。
     { "llm_list_models", auth: Auth::Required, desktop: false, binary: false,
         args: llm::ListModelsArgs,
@@ -22,7 +22,7 @@ macro_rules! llm_commands {
         run: |_ctx, a| async move { llm::llm_embed(a).await.map(Json) } }
     { "llm_transcribe", auth: Auth::Required, desktop: false, binary: false,
         args: llm::TranscribeArgs,
-        run: |ctx, a| async move { llm::llm_transcribe(ctx.workspace.as_ref(), a).await.map(Json) } }
+        run: |ctx, a| async move { llm::llm_transcribe(ctx.services.workspace.as_ref(), a).await.map(Json) } }
 
         }
     };

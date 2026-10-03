@@ -12,7 +12,7 @@ macro_rules! sys_commands {
     // 桌面壳另有一份 `#[tauri::command]` 薄包装（apps/desktop/src-tauri/src/sys.rs）。
     { "sys_info", auth: Auth::Required, desktop: false, binary: false,
         args: UnitArgs,
-        run: |ctx, _a| async move { sys::sys_info(&ctx.db, &ctx.acp, &ctx.host_facts).await.map(Json) } }
+        run: |ctx, _a| async move { sys::sys_info(&ctx.services.db, &ctx.services.acp, &ctx.host_facts).await.map(Json) } }
     { "reveal_path", auth: Auth::Required, desktop: true, binary: false,
         args: UnitArgs, run: |_ctx, _a| async move { Err::<Json<()>, String>("仅桌面端可用".into()) } }
     { "open_path", auth: Auth::Required, desktop: true, binary: false,

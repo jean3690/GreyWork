@@ -43,20 +43,24 @@ fn test_ctx(tmp: &Path) -> CommandContext {
     });
     CommandContext {
         host,
-        db: Arc::new(Db::open_in_memory().expect("db")),
-        workspace: Arc::new(
-            WorkspaceFsAccess::new(&root, tmp.join("access.json")).expect("access"),
-        ),
-        acp: Arc::new(AcpHost::default()),
-        llm: Arc::new(LlmHost::default()),
-        rag: Arc::new(RagHost::default()),
-        wechat: Arc::new(WechatHost::default()),
-        dingtalk: Arc::new(DingTalkHost::default()),
-        feishu: Arc::new(FeishuHost::default()),
-        telegram: Arc::new(TelegramHost::default()),
-        discord: Arc::new(DiscordHost::default()),
-        qq: Arc::new(QqHost::default()),
-        wecom: Arc::new(WecomHost::default()),
+        services: Arc::new(Services {
+            db: Arc::new(Db::open_in_memory().expect("db")),
+            workspace: Arc::new(
+                WorkspaceFsAccess::new(&root, tmp.join("access.json")).expect("access"),
+            ),
+            acp: Arc::new(AcpHost::default()),
+            llm: Arc::new(LlmHost::default()),
+            rag: Arc::new(RagHost::default()),
+        }),
+        channels: Arc::new(Channels {
+            wechat: Arc::new(WechatHost::default()),
+            dingtalk: Arc::new(DingTalkHost::default()),
+            feishu: Arc::new(FeishuHost::default()),
+            telegram: Arc::new(TelegramHost::default()),
+            discord: Arc::new(DiscordHost::default()),
+            qq: Arc::new(QqHost::default()),
+            wecom: Arc::new(WecomHost::default()),
+        }),
         // 空列表 = 只放行内置白名单（headless 语义）。
         agent_programs: Arc::new(Vec::new()),
         // 非空样例：既覆盖「宿主白名单被如实回给渲染端」，也让下面的冒烟断言有东西可断。

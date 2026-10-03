@@ -60,17 +60,22 @@ pub enum CommandOutput {
     Binary(Vec<u8>),
 }
 
-/// 服务端的命令上下文：启动期建一次，跨请求复用。
+/// 命令用到的后端服务集合（db / 工作区 / LLM / RAG / ACP）。
 ///
-/// 桌面端**不构造**它 —— Tauri 用 `State<'_, T>` 管理这些状态，命令签名各自声明即可。
-/// 这里持 `Arc<T>` 是为了让服务端能把同一份状态交给并发请求。
-pub struct CommandContext {
-    pub host: Arc<dyn HostContext>,
+/// 从 `CommandContext` 里单独拎出来，既避免 god-struct，也让「一起建、一起传」的服务成组。
+pub struct Services {
     pub db: Arc<Db>,
     pub workspace: Arc<WorkspaceFsAccess>,
     pub acp: Arc<AcpHost>,
     pub llm: Arc<LlmHost>,
     pub rag: Arc<RagHost>,
+}
+
+/// 聊天通道宿主集合（7 条通道）。
+///
+/// 各 host 都实现了 [`channel_media::ChannelHost`]；`channel_send_media` 分发时把它们
+/// 摆进 [`channel_media::ChannelRegistry`]。
+pub struct Channels {
     pub wechat: Arc<WechatHost>,
     pub dingtalk: Arc<DingTalkHost>,
     pub feishu: Arc<FeishuHost>,
@@ -78,6 +83,18 @@ pub struct CommandContext {
     pub discord: Arc<DiscordHost>,
     pub qq: Arc<QqHost>,
     pub wecom: Arc<WecomHost>,
+}
+
+/// 服务端的命令上下文：启动期建一次，跨请求复用。
+///
+/// 桌面端**不构造**它 —— Tauri 用 `State<'_, T>` 管理这些状态，命令签名各自声明即可。
+/// 这里持 `Arc<T>` 是为了让服务端能把同一份状态交给并发请求。
+pub struct CommandContext {
+    pub host: Arc<dyn HostContext>,
+    /// 后端服务（db / 工作区 / LLM / RAG / ACP）。
+    pub services: Arc<Services>,
+    /// 聊天通道宿主。
+    pub channels: Arc<Channels>,
     /// 在 [`crate::acp_host`] 内置白名单之外额外放行的 agent 程序名。
     ///
     /// 桌面端不构造 `CommandContext`（该值由桌面包装自行从 `db.enabled_agent_programs()`
@@ -168,18 +185,18 @@ async fn channel_send_media(
     args: channel_media::SendMediaArgs,
 ) -> Result<(), String> {
     let media = channel_media::prepare_outbound(
-        ctx.workspace.as_ref(),
+        ctx.services.workspace.as_ref(),
         &args.channel,
         &args.path,
         args.kind.as_deref(),
     )?;
     let registry = channel_media::ChannelRegistry::new()
-        .register("wechat", &*ctx.wechat)
-        .register("telegram", &*ctx.telegram)
-        .register("discord", &*ctx.discord)
-        .register("feishu", &*ctx.feishu)
-        .register("qq", &*ctx.qq)
-        .register("wecom", &*ctx.wecom);
+        .register("wechat", &*ctx.channels.wechat)
+        .register("telegram", &*ctx.channels.telegram)
+        .register("discord", &*ctx.channels.discord)
+        .register("feishu", &*ctx.channels.feishu)
+        .register("qq", &*ctx.channels.qq)
+        .register("wecom", &*ctx.channels.wecom);
     channel_media::send_media_via(
         &registry,
         &ctx.host,
