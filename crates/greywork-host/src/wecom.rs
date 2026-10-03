@@ -1503,6 +1503,18 @@ async fn upload_media(
 /// 发一条媒体：先上传换 `media_id`，再被动回复（有 req_id）或主动推送。
 ///
 /// 企业微信出站只有图片出口（图文混排），文件出口不存在 —— 能力矩阵已拦文件，这里再兜一层。
+impl crate::channel_media::ChannelHost for WecomHost {
+    fn send_media<'a>(
+        &'a self,
+        host_ctx: &'a Arc<dyn HostContext>,
+        peer_id: &'a str,
+        _context_token: Option<&'a str>,
+        media: OutboundMedia,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
+        Box::pin(send_media_impl(host_ctx, self, peer_id, media))
+    }
+}
+
 pub async fn send_media_impl(
     host_ctx: &Arc<dyn HostContext>,
     host: &WecomHost,

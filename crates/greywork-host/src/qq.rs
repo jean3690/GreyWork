@@ -1208,6 +1208,18 @@ async fn put_part(client: &reqwest::Client, url: &str, chunk: Vec<u8>) -> Result
 /// 发一条媒体：先分片上传换 `file_info`，再以 `msg_type=7` 被动回复出去。
 ///
 /// token 与被动回复凭据都不出宿主：渲染端只传对端 id 与授权面内的本地路径。
+impl crate::channel_media::ChannelHost for QqHost {
+    fn send_media<'a>(
+        &'a self,
+        host_ctx: &'a Arc<dyn HostContext>,
+        peer_id: &'a str,
+        _context_token: Option<&'a str>,
+        media: OutboundMedia,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
+        Box::pin(send_media_impl(host_ctx, self, peer_id, media))
+    }
+}
+
 pub async fn send_media_impl(
     host_ctx: &Arc<dyn HostContext>,
     host: &QqHost,

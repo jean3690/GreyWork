@@ -172,10 +172,10 @@ where
     run(ctx, a)
 }
 
-/// `channel_send_media` 的服务端分发：按通道名取对应 host，交给该通道的上传实现。
+/// `channel_send_media` 的服务端分发：把各通道 host 摆进注册表，交给共享层统一分发。
 ///
-/// 桌面壳里有等价的一份（用 `app.state::<XHost>()`）。刻意写两遍 —— 换来不必把
-/// 7 个 host 全改成 `Arc`（见阶段 2 的设计记录）。
+/// 桌面壳里等价的一份用 `app.state::<XHost>()` 装配同一个 [`channel_media::ChannelRegistry`]，
+/// 分发逻辑（[`channel_media::send_media_via`]）只此一处。
 async fn channel_send_media(
     ctx: &CommandContext,
     args: channel_media::SendMediaArgs,
@@ -186,26 +186,22 @@ async fn channel_send_media(
         &args.path,
         args.kind.as_deref(),
     )?;
-    match args.channel.as_str() {
-        "wechat" => {
-            wechat::send_media_impl(
-                &ctx.host,
-                &ctx.wechat,
-                &args.peer_id,
-                args.context_token.as_deref(),
-                media,
-            )
-            .await
-        }
-        "telegram" => {
-            telegram::send_media_impl(&ctx.host, &ctx.telegram, &args.peer_id, media).await
-        }
-        "discord" => discord::send_media_impl(&ctx.host, &ctx.discord, &args.peer_id, media).await,
-        "feishu" => feishu::send_media_impl(&ctx.host, &ctx.feishu, &args.peer_id, media).await,
-        "qq" => qq::send_media_impl(&ctx.host, &ctx.qq, &args.peer_id, media).await,
-        "wecom" => wecom::send_media_impl(&ctx.host, &ctx.wecom, &args.peer_id, media).await,
-        other => Err(format!("未知通道: {other}")),
-    }
+    let registry = channel_media::ChannelRegistry::new()
+        .register("wechat", &*ctx.wechat)
+        .register("telegram", &*ctx.telegram)
+        .register("discord", &*ctx.discord)
+        .register("feishu", &*ctx.feishu)
+        .register("qq", &*ctx.qq)
+        .register("wecom", &*ctx.wecom);
+    channel_media::send_media_via(
+        &registry,
+        &ctx.host,
+        &args.channel,
+        &args.peer_id,
+        args.context_token.as_deref(),
+        media,
+    )
+    .await
 }
 
 /// 命令表宏：一次声明同时生成 [`COMMANDS`] 与 [`dispatch`]。

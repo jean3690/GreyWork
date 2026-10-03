@@ -1232,6 +1232,24 @@ pub async fn wechat_send_typing(
 ///
 /// 日志带上「走哪个端点（图片 / 视频 / 文件）、回复还是主动发、多大」——出站媒体端点是否
 /// 被账号放行只有真机才能确认，失败时这几项能一眼区分是端点没权限、凭据过期，还是体积被拒。
+impl crate::channel_media::ChannelHost for WechatHost {
+    fn send_media<'a>(
+        &'a self,
+        host_ctx: &'a Arc<dyn HostContext>,
+        peer_id: &'a str,
+        context_token: Option<&'a str>,
+        media: OutboundMedia,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
+        Box::pin(send_media_impl(
+            host_ctx,
+            self,
+            peer_id,
+            context_token,
+            media,
+        ))
+    }
+}
+
 pub async fn send_media_impl(
     host_ctx: &Arc<dyn HostContext>,
     host: &WechatHost,

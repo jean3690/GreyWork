@@ -1046,6 +1046,18 @@ fn send_endpoint(kind: MediaKind, name: &str) -> (&'static str, &'static str) {
 /// 回一条媒体：按类别走对应端点（multipart 直传字节，不落临时文件）。
 ///
 /// token 不出宿主：与文本同一条路径，渲染端只传对端 id 与授权面内的本地路径。
+impl crate::channel_media::ChannelHost for TelegramHost {
+    fn send_media<'a>(
+        &'a self,
+        host_ctx: &'a Arc<dyn HostContext>,
+        peer_id: &'a str,
+        _context_token: Option<&'a str>,
+        media: OutboundMedia,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
+        Box::pin(send_media_impl(host_ctx, self, peer_id, media))
+    }
+}
+
 pub async fn send_media_impl(
     host_ctx: &Arc<dyn HostContext>,
     host: &TelegramHost,

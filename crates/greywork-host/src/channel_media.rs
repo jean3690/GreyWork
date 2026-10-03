@@ -9,14 +9,18 @@
 //! 这边是需要 `WorkspaceFsAccess`、`serde` 与 `HostContext` 的媒体关注点。
 //!
 //! 命令刻意做成「一对通用入口 + 按 channel 分发」，而不是七条通道各来一对：
-//! take 的逻辑与通道无关（唯一变量是 inbox 目录名，而目录名就是 channel 名），
-//! send 的差异只在「用哪套协议上传」这一处。**按 channel 的 `match` 分发留在各宿主壳**
-//! （桌面用 `AppHandle::state::<XHost>()`，服务端用 `CommandContext` 里的各 host 字段），
-//! 因为共享层拿不到「从宿主取某个通道 host」这件事 —— 那是宿主专有的。代价是那段 match
-//! 要写两遍，换来不把七个 `Arc<XHost>` 塞进共享层的上下文。
+//! take 的逻辑与通道无关（唯一变量是 inbox 目录名，而目录名就是 channel 名）；
+//! send 的差异只在「用哪套协议上传」这一处，由 [`ChannelHost`] 抽象、[`send_media_via`] 统一分发。
+//!
+//! 「从宿主取某个通道 host」是宿主专有的：桌面用 `AppHandle::state::<XHost>()`、服务端用
+//! `CommandContext` 里的各 host 字段。两端各自把这些 host 摆进 [`ChannelRegistry`]（一行一条），
+//! 分发逻辑因此只写一遍。
 
 use std::collections::BTreeMap;
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde::Serialize;
@@ -82,6 +86,56 @@ pub struct OutboundMedia {
     /// 文件名（各通道上传时用；也是日志里的标识）。
     pub name: String,
     pub kind: MediaKind,
+}
+
+/// 单条通道的媒体出口。
+///
+/// 「按通道上传」是宿主专有的一步（桌面从 Tauri state 取 host，服务端从 `CommandContext`
+/// 取 host 字段）。把它收成 trait，各通道模块为自己的 host 实现，分发（[`send_media_via`]）
+/// 就只写一遍；两端各自只负责把 host 摆进 [`ChannelRegistry`]。
+pub trait ChannelHost: Send + Sync {
+    /// 把已准备好的出站媒体交给本通道上传。
+    ///
+    /// `context_token` 仅微信使用（被动回复的上下文令牌）；其余通道忽略。
+    fn send_media<'a>(
+        &'a self,
+        host_ctx: &'a Arc<dyn HostContext>,
+        peer_id: &'a str,
+        context_token: Option<&'a str>,
+        media: OutboundMedia,
+    ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>>;
+}
+
+/// 通道名 → 媒体出口 的注册表。各宿主壳按自己的状态来源装配（桌面 `app.state`、
+/// 服务端 `CommandContext` 字段），之后交给 [`send_media_via`] 统一分发。
+pub struct ChannelRegistry<'a> {
+    hosts: Vec<(&'static str, &'a dyn ChannelHost)>,
+}
+
+impl<'a> ChannelRegistry<'a> {
+    pub fn new() -> Self {
+        Self { hosts: Vec::new() }
+    }
+
+    /// 注册一条通道的媒体出口（链式）。
+    pub fn register(mut self, channel: &'static str, host: &'a dyn ChannelHost) -> Self {
+        self.hosts.push((channel, host));
+        self
+    }
+
+    /// 取通道的媒体出口；未注册返回 None。
+    pub fn get(&self, channel: &str) -> Option<&'a dyn ChannelHost> {
+        self.hosts
+            .iter()
+            .find(|(name, _)| *name == channel)
+            .map(|(_, host)| *host)
+    }
+}
+
+impl Default for ChannelRegistry<'_> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// 通道的媒体能力：能收哪些类别、能**原生**发哪些类别。
@@ -592,6 +646,24 @@ pub fn prepare_outbound(
     Ok(media)
 }
 
+/// 按通道名把媒体交给注册表里的对应出口上传。
+///
+/// 未注册的通道报「未知通道: x」——与各宿主壳旧的 `match` 兜底分支文案一致。
+pub async fn send_media_via(
+    registry: &ChannelRegistry<'_>,
+    host_ctx: &Arc<dyn HostContext>,
+    channel: &str,
+    peer_id: &str,
+    context_token: Option<&str>,
+    media: OutboundMedia,
+) -> Result<(), String> {
+    let host = registry
+        .get(channel)
+        .ok_or_else(|| format!("未知通道: {channel}"))?;
+    host.send_media(host_ctx, peer_id, context_token, media)
+        .await
+}
+
 /// 各通道的媒体能力矩阵；渲染端启动时拉一次，据此提示「这条通道能发什么」。
 pub fn channel_media_capabilities() -> BTreeMap<String, ChannelMediaCapability> {
     CHANNELS
@@ -939,5 +1011,28 @@ mod tests {
             assert!(map.contains_key(channel), "矩阵缺少通道 {channel}");
         }
         assert_eq!(map.len(), CHANNELS.len());
+    }
+
+    #[test]
+    fn channel_registry_looks_up_registered_and_misses_unknown() {
+        struct Dummy;
+        impl ChannelHost for Dummy {
+            fn send_media<'a>(
+                &'a self,
+                _host_ctx: &'a Arc<dyn HostContext>,
+                _peer_id: &'a str,
+                _context_token: Option<&'a str>,
+                _media: OutboundMedia,
+            ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
+                Box::pin(async { Ok(()) })
+            }
+        }
+        let dummy = Dummy;
+        let registry = ChannelRegistry::new()
+            .register("wechat", &dummy)
+            .register("telegram", &dummy);
+        assert!(registry.get("wechat").is_some());
+        assert!(registry.get("telegram").is_some());
+        assert!(registry.get("nope").is_none(), "未注册通道必须查不到");
     }
 }

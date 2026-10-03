@@ -757,6 +757,18 @@ pub(crate) async fn send_text(
 /// 发一条媒体：multipart 直传字节（`payload_json` 空对象 = 只发附件、不带正文）。
 ///
 /// 图片与文件走同一条附件通道（Discord 不区分端点），所以不需要按 kind 分叉。
+impl crate::channel_media::ChannelHost for DiscordHost {
+    fn send_media<'a>(
+        &'a self,
+        host_ctx: &'a Arc<dyn HostContext>,
+        peer_id: &'a str,
+        _context_token: Option<&'a str>,
+        media: OutboundMedia,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
+        Box::pin(send_media_impl(host_ctx, self, peer_id, media))
+    }
+}
+
 pub async fn send_media_impl(
     host_ctx: &Arc<dyn HostContext>,
     host: &DiscordHost,
