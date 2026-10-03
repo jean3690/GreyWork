@@ -8,6 +8,14 @@
 //! crate 里直接引 tauri。目前仍留在桌面壳里的模块（`acp_host` / `channel_media` /
 //! 各通道 / `sys` 等）会在后续阶段逐步搬进来 —— 它们现在还用 `AppHandle` 发事件。
 
+// 分层模块：L0 core / L1 infra / L2 services / L3 channels / L4 app。
+// 目前仅 core 与 infra 已归位，其余仍平铺（见重构计划 P2–P5）；所有旧路径经 `pub use` 回根保持可用。
+mod core;
+mod infra;
+
+pub use core::{csp, host, log, path_safety, text};
+pub use infra::{db, workspace_fs};
+
 pub mod acp_host;
 pub mod acp_process;
 pub mod bundled_skills;
@@ -15,21 +23,16 @@ pub mod channel_common;
 pub mod channel_media;
 pub mod commands;
 pub mod cron;
-pub mod csp;
-pub mod db;
 pub mod dingtalk;
 pub mod discord;
 pub mod feishu;
 pub mod git;
-pub mod host;
 pub mod host_exec;
 pub mod http;
 pub mod llm;
-pub mod log;
 pub mod mcp;
 pub mod mcp_registry;
 pub mod office;
-pub mod path_safety;
 pub mod plugin_market;
 pub mod process_guard;
 pub mod qq;
@@ -41,10 +44,8 @@ pub mod skills_market;
 pub mod store_fs;
 pub mod sys;
 pub mod telegram;
-pub mod text;
 pub mod update;
 pub mod web_fetch;
 pub mod wechat;
 pub mod wecom;
-pub mod workspace_fs;
 pub mod worktree;
