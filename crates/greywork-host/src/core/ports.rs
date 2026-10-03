@@ -4,7 +4,12 @@
 //! 「≥2 消费方」或「需要测试替身」处引入。具体实现留在各自层（如
 //! `WorkspaceFsAccess` 实现 [`WorkspaceFs`] / [`WorkspaceAuthorizer`]）。
 
+use std::collections::HashMap;
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
+
+use serde::{Deserialize, Serialize};
 
 /// 工作区文件系统的**授权读取面**。
 ///
@@ -39,4 +44,40 @@ pub trait WorkspaceAuthorizer: Send + Sync {
 
     /// 授权一批「OS 拖放」的文件（目录被忽略）。
     fn authorize_drop_paths(&self, dropped: &[PathBuf]) -> Result<(), String>;
+}
+
+/// 文本向量化请求（本地 OpenAI 兼容 `/embeddings`）。
+///
+/// 放在端口层而非 `llm` 模块：它是 [`Embedder`] 端口的请求形状，消费方（RAG）不应
+/// 为拿到参数类型而依赖具体传输实现。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmbedArgs {
+    pub base_url: String,
+    pub model: String,
+    #[serde(default)]
+    pub api_key_env: Option<String>,
+    #[serde(default)]
+    pub headers: Option<HashMap<String, String>>,
+    pub input: Vec<String>,
+}
+
+/// 向量结果：`dim` 冗余回传，便于调用方校验模型是否换过。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmbedResult {
+    pub embeddings: Vec<Vec<f32>>,
+    pub dim: usize,
+    pub model: String,
+}
+
+/// 文本向量化端口。
+///
+/// RAG 只依赖本 trait，不依赖 `llm` 模块；测试可注入假实现，无需真起 HTTP。
+/// async 方法手写 `Pin<Box<dyn Future>>` 以保持 dyn 兼容（不引 `async-trait`）。
+pub trait Embedder: Send + Sync {
+    fn embed<'a>(
+        &'a self,
+        args: EmbedArgs,
+    ) -> Pin<Box<dyn Future<Output = Result<EmbedResult, String>> + Send + 'a>>;
 }

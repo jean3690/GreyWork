@@ -31,6 +31,7 @@ pub async fn rag_index_build(
         &*access,
         &db,
         &rag,
+        &greywork_host::llm::LlmEmbedder,
         IndexBuildArgs {
             root,
             base_url,
@@ -57,6 +58,7 @@ pub async fn rag_search(
     top_k: Option<usize>,
 ) -> Result<Vec<RagHit>, String> {
     greywork_host::rag::rag_search(
+        &greywork_host::llm::LlmEmbedder,
         &db,
         &rag,
         SearchArgs {

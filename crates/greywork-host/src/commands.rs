@@ -342,10 +342,10 @@ command_table! {
     // ---- rag（本地向量检索：授权工作区 → 本地 embedding → SQLite → 暴力余弦） ----
     { "rag_index_build", auth: Auth::Required, desktop: false, binary: false,
         args: rag::IndexBuildArgs,
-        run: |ctx, a| async move { rag::rag_index_build(ctx.host.as_ref(), ctx.workspace.as_ref(), &ctx.db, &ctx.rag, a).await.map(Json) } }
+        run: |ctx, a| async move { rag::rag_index_build(ctx.host.as_ref(), ctx.workspace.as_ref(), &ctx.db, &ctx.rag, &llm::LlmEmbedder, a).await.map(Json) } }
     { "rag_search", auth: Auth::Required, desktop: false, binary: false,
         args: rag::SearchArgs,
-        run: |ctx, a| async move { rag::rag_search(&ctx.db, &ctx.rag, a).await.map(Json) } }
+        run: |ctx, a| async move { rag::rag_search(&llm::LlmEmbedder, &ctx.db, &ctx.rag, a).await.map(Json) } }
     { "rag_status", auth: Auth::Required, desktop: false, binary: false,
         args: UnitArgs,
         run: |ctx, _a| async move { rag::rag_status(&ctx.db).map(Json) } }
