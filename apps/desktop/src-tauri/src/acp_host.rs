@@ -34,7 +34,7 @@ pub async fn acp_start(
         Arc::clone(&host),
         &state,
         &extra_programs,
-        &access,
+        &*access,
         agent_cmd,
         tier,
         sandbox,

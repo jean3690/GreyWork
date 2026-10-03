@@ -22,8 +22,10 @@ use std::time::Duration;
 use serde::Serialize;
 
 use crate::channel_common::{channel_dir, write_private};
+use crate::core::ports::WorkspaceFs;
 use crate::host::HostContext;
 use crate::log;
+#[cfg(test)]
 use crate::workspace_fs::WorkspaceFsAccess;
 
 /* ===== 常量 ===== */
@@ -494,10 +496,7 @@ pub fn take_media_from_inbox(inbox: &Path, channel: &str, path: &str) -> Result<
 /// `path` 必须落在已授权路径内（与 `fs_read_binary` 同一授权面）：渲染端选过的文件、
 /// `~/.greyWork` 下的附件都在其中，不新开授权面。显式 kind 由调用方在拿到 `bytes` 后
 /// 用 `resolve_media_kind_named(Some(kind), &media.name, &media.bytes)` 覆盖。
-pub fn load_outbound_media(
-    access: &WorkspaceFsAccess,
-    path: &str,
-) -> Result<OutboundMedia, String> {
+pub fn load_outbound_media(access: &dyn WorkspaceFs, path: &str) -> Result<OutboundMedia, String> {
     let real = access.resolve_existing(path)?;
     let metadata =
         std::fs::metadata(&real).map_err(|error| format!("读取文件元数据失败: {error}"))?;
@@ -565,7 +564,7 @@ pub fn channel_take_media(
 ///
 /// 真正的「按通道上传」由各宿主壳分发（见模块头注释）。
 pub fn prepare_outbound(
-    access: &WorkspaceFsAccess,
+    access: &dyn WorkspaceFs,
     channel: &str,
     path: &str,
     kind: Option<&str>,

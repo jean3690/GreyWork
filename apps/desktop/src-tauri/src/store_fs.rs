@@ -26,7 +26,7 @@ pub fn store_sessions_load(
     greywork_host::store_fs::store_sessions_load(
         host_ctx.inner().as_ref(),
         &db,
-        &access,
+        &*access,
         workspaces,
     )
 }
@@ -42,7 +42,7 @@ pub fn store_sessions_sync(
 ) -> Result<SyncReportDto, String> {
     greywork_host::store_fs::store_sessions_sync(
         host_ctx.inner().as_ref(),
-        &access,
+        &*access,
         snapshot,
         workspaces,
         deleted_session_ids,
@@ -56,7 +56,7 @@ pub fn store_sessions_relocate(
     access: State<'_, WorkspaceFsAccess>,
     request: RelocateRequestDto,
 ) -> Result<RelocateReportDto, String> {
-    greywork_host::store_fs::store_sessions_relocate(host_ctx.inner().as_ref(), &access, request)
+    greywork_host::store_fs::store_sessions_relocate(host_ctx.inner().as_ref(), &*access, request)
 }
 
 /// 默认数据根（`~/.greyWork`）——前端产物默认落盘目录基准。

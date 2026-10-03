@@ -17,6 +17,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+use crate::core::ports::WorkspaceFs;
+#[cfg(test)]
 use crate::workspace_fs::WorkspaceFsAccess;
 
 const GIT: &str = "git";
@@ -339,7 +341,7 @@ fn numstat_of(list: &[(u32, u32, String)], path: &str) -> (u32, u32) {
 
 /* ===== 命令实现 ===== */
 
-fn resolve_root(access: &WorkspaceFsAccess, raw: &str) -> Result<PathBuf, String> {
+fn resolve_root(access: &dyn WorkspaceFs, raw: &str) -> Result<PathBuf, String> {
     let path = access.resolve_existing(raw)?;
     let metadata =
         std::fs::metadata(&path).map_err(|error| format!("读取目录元数据失败: {error}"))?;
@@ -350,12 +352,12 @@ fn resolve_root(access: &WorkspaceFsAccess, raw: &str) -> Result<PathBuf, String
 }
 
 /// 变更状态列表（status），供变更面板展示。
-fn status(access: &WorkspaceFsAccess, root: &str) -> Result<Vec<GitStatusDto>, String> {
+fn status(access: &dyn WorkspaceFs, root: &str) -> Result<Vec<GitStatusDto>, String> {
     collect_status(&resolve_root(access, root)?)
 }
 
 /// status + 每文件**分侧**的行级增删。
-fn changes(access: &WorkspaceFsAccess, root: &str) -> Result<Vec<GitChangeDto>, String> {
+fn changes(access: &dyn WorkspaceFs, root: &str) -> Result<Vec<GitChangeDto>, String> {
     let root = resolve_root(access, root)?;
     let records = collect_records(&root)?;
     let unstaged = collect_numstat(&root, false)?;
@@ -422,7 +424,7 @@ fn validate_rel_path(path: &str) -> Result<(), String> {
 /// **两侧不再拼接**：变更面板现在按「已暂存 / 未暂存」分区展示，拼在一起就分不清
 /// 哪段属于哪一侧了（旧实现把两段 diff 直接接起来，正是这个问题的来源）。
 fn diff(
-    access: &WorkspaceFsAccess,
+    access: &dyn WorkspaceFs,
     root: &str,
     path: Option<&str>,
     staged: bool,
@@ -451,12 +453,7 @@ fn has_staged_changes(root: &Path) -> Result<bool, String> {
 }
 
 /// 暂存：`all` 走 `add -A`，否则只 add 指定路径（**必须带 `--`**，防 `-` 开头被当选项）。
-fn stage(
-    access: &WorkspaceFsAccess,
-    root: &str,
-    paths: &[String],
-    all: bool,
-) -> Result<(), String> {
+fn stage(access: &dyn WorkspaceFs, root: &str, paths: &[String], all: bool) -> Result<(), String> {
     let root = resolve_root(access, root)?;
     if all {
         run_git(&root, &["add", "-A"]).map_err(|error| format!("暂存变更失败: {error}"))?;
@@ -483,7 +480,7 @@ fn stage(
 /// - **重命名要成对处理**：只 reset 新路径会留下一条「旧路径已删除」的索引条目，
 ///   界面上就是一个删不掉的幽灵变更。
 fn unstage(
-    access: &WorkspaceFsAccess,
+    access: &dyn WorkspaceFs,
     root: &str,
     paths: &[String],
     all: bool,
@@ -534,7 +531,7 @@ fn expand_renames(root: &Path, paths: &[String]) -> Result<Vec<String>, String> 
 /// 提交。`all: true` = 先 `add -A` 再提交（旧的「提交全部」行为）；
 /// `all: false` = 只提交已暂存的内容，索引为空时给出中文文案而不是 git 的英文报错。
 fn commit(
-    access: &WorkspaceFsAccess,
+    access: &dyn WorkspaceFs,
     root: &str,
     message: &str,
     all: bool,
@@ -569,7 +566,7 @@ fn commit(
     })
 }
 
-fn current_branch(access: &WorkspaceFsAccess, root: &str) -> Result<String, String> {
+fn current_branch(access: &dyn WorkspaceFs, root: &str) -> Result<String, String> {
     Ok(
         run_git(&resolve_root(access, root)?, &["branch", "--show-current"])?
             .trim()
@@ -577,7 +574,7 @@ fn current_branch(access: &WorkspaceFsAccess, root: &str) -> Result<String, Stri
     )
 }
 
-fn branch_list(access: &WorkspaceFsAccess, root: &str) -> Result<Vec<String>, String> {
+fn branch_list(access: &dyn WorkspaceFs, root: &str) -> Result<Vec<String>, String> {
     let out = run_git(
         &resolve_root(access, root)?,
         &["branch", "--format=%(refname:short)"],
@@ -645,7 +642,7 @@ fn parse_log_records(out: &str) -> Vec<GitCommitDto> {
 /// 未提交仓库（unborn HEAD）没有 HEAD 可遍历，`git log` 会报 `does not have any commits
 /// yet`；这不是错误，返回空列表让界面显示「暂无提交」，与「仓库干净」区分开的是列表本身。
 fn log_history(
-    access: &WorkspaceFsAccess,
+    access: &dyn WorkspaceFs,
     root: &str,
     limit: Option<u32>,
     skip: Option<u32>,
@@ -681,7 +678,7 @@ fn validate_rev(rev: &str) -> Result<(), String> {
 /// `--format=` 压掉 git 自带的提交头（作者 / 日期 / 消息）：元信息由 `log_history` 提供，
 /// 这里只要 diff 正文 —— 否则渲染端还得再切一次，而切点又受 locale / git 版本影响。
 fn show_commit(
-    access: &WorkspaceFsAccess,
+    access: &dyn WorkspaceFs,
     root: &str,
     hash: &str,
     path: Option<&str>,
@@ -699,17 +696,17 @@ fn show_commit(
 
 /* ===== 命令实现入口 ===== */
 
-pub fn git_status(access: &WorkspaceFsAccess, root: String) -> Result<Vec<GitStatusDto>, String> {
+pub fn git_status(access: &dyn WorkspaceFs, root: String) -> Result<Vec<GitStatusDto>, String> {
     status(access, &root)
 }
 
-pub fn git_changes(access: &WorkspaceFsAccess, root: String) -> Result<Vec<GitChangeDto>, String> {
+pub fn git_changes(access: &dyn WorkspaceFs, root: String) -> Result<Vec<GitChangeDto>, String> {
     changes(access, &root)
 }
 
 /// `staged` 缺省视为 false（看未暂存侧）：旧前端只传 root/path 时不会因为少一个字段而整条命令失败。
 pub fn git_diff(
-    access: &WorkspaceFsAccess,
+    access: &dyn WorkspaceFs,
     root: String,
     path: Option<String>,
     staged: Option<bool>,
@@ -719,7 +716,7 @@ pub fn git_diff(
 
 /// 暂存指定路径；`all` 为真时暂存全部。
 pub fn git_stage(
-    access: &WorkspaceFsAccess,
+    access: &dyn WorkspaceFs,
     root: String,
     paths: Vec<String>,
     all: bool,
@@ -729,7 +726,7 @@ pub fn git_stage(
 
 /// 取消暂存指定路径；`all` 为真时取消全部。
 pub fn git_unstage(
-    access: &WorkspaceFsAccess,
+    access: &dyn WorkspaceFs,
     root: String,
     paths: Vec<String>,
     all: bool,
@@ -739,7 +736,7 @@ pub fn git_unstage(
 
 /// 提交；`all` 为真时先 `add -A`（旧的「提交全部」），否则只提交已暂存的内容。
 pub fn git_commit(
-    access: &WorkspaceFsAccess,
+    access: &dyn WorkspaceFs,
     root: String,
     message: String,
     all: Option<bool>,
@@ -747,17 +744,17 @@ pub fn git_commit(
     commit(access, &root, &message, all.unwrap_or(false))
 }
 
-pub fn git_current_branch(access: &WorkspaceFsAccess, root: String) -> Result<String, String> {
+pub fn git_current_branch(access: &dyn WorkspaceFs, root: String) -> Result<String, String> {
     current_branch(access, &root)
 }
 
-pub fn git_branch_list(access: &WorkspaceFsAccess, root: String) -> Result<Vec<String>, String> {
+pub fn git_branch_list(access: &dyn WorkspaceFs, root: String) -> Result<Vec<String>, String> {
     branch_list(access, &root)
 }
 
 /// 提交历史；`limit` 缺省 50、`skip` 缺省 0（分页）。
 pub fn git_log(
-    access: &WorkspaceFsAccess,
+    access: &dyn WorkspaceFs,
     root: String,
     limit: Option<u32>,
     skip: Option<u32>,
@@ -767,7 +764,7 @@ pub fn git_log(
 
 /// 单次提交的 diff；`path` 缺省为整次提交。
 pub fn git_show(
-    access: &WorkspaceFsAccess,
+    access: &dyn WorkspaceFs,
     root: String,
     hash: String,
     path: Option<String>,

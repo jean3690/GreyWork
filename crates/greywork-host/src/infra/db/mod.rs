@@ -19,8 +19,8 @@ use parking_lot::Mutex;
 use rusqlite::Connection;
 
 mod agents;
+mod args;
 mod automations;
-mod commands;
 mod dto;
 mod lifecycle;
 mod rag;
@@ -32,7 +32,7 @@ mod team_runs;
 #[cfg(test)]
 mod tests;
 
-pub use commands::*;
+pub use args::*;
 pub use dto::*;
 
 /// 全局数据库状态（setup 阶段打开，经 Tauri manage 注入）。

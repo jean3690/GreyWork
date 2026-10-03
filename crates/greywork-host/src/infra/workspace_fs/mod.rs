@@ -242,6 +242,40 @@ impl WorkspaceFsAccess {
     }
 }
 
+// 端口 trait 实现：消费方依赖 `core::ports::WorkspaceFs` / `WorkspaceAuthorizer`，
+// 由本类型提供具体行为。委托到同名 inherent 方法（inherent 优先，不会递归）。
+impl crate::core::ports::WorkspaceFs for WorkspaceFsAccess {
+    fn resolve_existing(&self, raw: &str) -> Result<PathBuf, String> {
+        WorkspaceFsAccess::resolve_existing(self, raw)
+    }
+
+    fn validate_existing(&self, raw: &str) -> Result<PathBuf, String> {
+        WorkspaceFsAccess::validate_existing(self, raw)
+    }
+
+    fn is_authorized_root(&self, path: &Path) -> bool {
+        WorkspaceFsAccess::is_authorized_root(self, path)
+    }
+
+    fn authorized_roots(&self) -> Vec<PathBuf> {
+        WorkspaceFsAccess::authorized_roots(self)
+    }
+}
+
+impl crate::core::ports::WorkspaceAuthorizer for WorkspaceFsAccess {
+    fn authorize_selected_path(&self, path: &Path) -> Result<PathBuf, String> {
+        WorkspaceFsAccess::authorize_selected_path(self, path)
+    }
+
+    fn authorize_selected_paths(&self, selected: &[PathBuf]) -> Result<Vec<String>, String> {
+        WorkspaceFsAccess::authorize_selected_paths(self, selected.iter())
+    }
+
+    fn authorize_drop_paths(&self, dropped: &[PathBuf]) -> Result<(), String> {
+        WorkspaceFsAccess::authorize_drop_paths(self, dropped.iter())
+    }
+}
+
 mod dto;
 mod read;
 mod resolve;

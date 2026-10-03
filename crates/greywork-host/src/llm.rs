@@ -17,8 +17,10 @@ use futures_util::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
+use crate::core::ports::WorkspaceFs;
 use crate::host::HostContext;
 use crate::log;
+#[cfg(test)]
 use crate::workspace_fs::WorkspaceFsAccess;
 
 /// SSE 流空闲超时：连接保持但 N 秒无任何字节 → 按错误终止（服务端挂死不能永久悬挂回合）。
@@ -906,7 +908,7 @@ fn parse_embeddings(body: &serde_json::Value) -> Result<Vec<Vec<f32>>, String> {
 /// 语音转写（`POST /audio/transcriptions`，OpenAI 兼容 multipart）。
 /// 音频从**授权路径**读取 —— 附件落在 `~/.greyWork/attachments`，该根始终授权。
 pub async fn llm_transcribe(
-    workspace: &WorkspaceFsAccess,
+    workspace: &dyn WorkspaceFs,
     args: TranscribeArgs,
 ) -> Result<TranscribeResult, String> {
     let base_url = args.base_url.trim();

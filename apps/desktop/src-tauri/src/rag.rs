@@ -28,7 +28,7 @@ pub async fn rag_index_build(
 ) -> Result<IndexBuildResult, String> {
     greywork_host::rag::rag_index_build(
         host.inner().as_ref(),
-        &access,
+        &*access,
         &db,
         &rag,
         IndexBuildArgs {

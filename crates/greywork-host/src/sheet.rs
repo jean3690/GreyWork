@@ -17,7 +17,7 @@ use std::io::Cursor;
 use calamine::{open_workbook_auto_from_rs, Data, ExcelDateTime, Reader, Sheets};
 use serde::Serialize;
 
-use crate::workspace_fs::WorkspaceFsAccess;
+use crate::core::ports::WorkspaceFs;
 
 /// 解析前的字节上限，与 `workspace_fs::fs_read_binary` 对齐 —— 两个通道读的是同一批
 /// 文件，上限不一致只会让用户看到「预览能开、分析说文件太大」这种莫名其妙的分歧。
@@ -138,7 +138,7 @@ fn read_sheet_from_bytes(
 /// 走的是与 `fs_read_binary` 同一套路径授权 —— 解析发生在宿主，不能绕过
 /// 「只有用户授权过的路径才可读」这条约束。
 pub fn fs_read_sheet(
-    access: &WorkspaceFsAccess,
+    access: &dyn WorkspaceFs,
     path: String,
     sheet: Option<String>,
     max_rows: Option<usize>,

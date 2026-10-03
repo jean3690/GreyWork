@@ -42,7 +42,7 @@ pub async fn channel_send_media(
     context_token: Option<String>,
 ) -> Result<(), String> {
     let media =
-        greywork_host::channel_media::prepare_outbound(&access, &channel, &path, kind.as_deref())?;
+        greywork_host::channel_media::prepare_outbound(&*access, &channel, &path, kind.as_deref())?;
     match channel.as_str() {
         "wechat" => {
             let wechat = app.state::<greywork_host::wechat::WechatHost>();

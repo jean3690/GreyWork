@@ -181,7 +181,7 @@ async fn channel_send_media(
     args: channel_media::SendMediaArgs,
 ) -> Result<(), String> {
     let media = channel_media::prepare_outbound(
-        &ctx.workspace,
+        ctx.workspace.as_ref(),
         &args.channel,
         &args.path,
         args.kind.as_deref(),
@@ -296,7 +296,7 @@ command_table! {
         run: |ctx, a| async move { acp_host::acp_permission_respond(&ctx.acp, a.request_id, a.option_id).await.map(Json) } }
     { "acp_start", auth: Auth::Required, desktop: false, binary: false,
         args: acp_host::StartArgs,
-        run: |ctx, a| async move { acp_host::acp_start(Arc::clone(&ctx.host), &ctx.acp, &ctx.agent_programs, &ctx.workspace, a.agent_cmd, a.tier, a.sandbox, a.workspace, a.env).await.map(Json) } }
+        run: |ctx, a| async move { acp_host::acp_start(Arc::clone(&ctx.host), &ctx.acp, &ctx.agent_programs, ctx.workspace.as_ref(), a.agent_cmd, a.tier, a.sandbox, a.workspace, a.env).await.map(Json) } }
     { "acp_new_session", auth: Auth::Required, desktop: false, binary: false,
         args: acp_host::NewSessionArgs,
         run: |ctx, a| async move { acp_host::acp_new_session(Arc::clone(&ctx.host), &ctx.acp, a.handle, a.cwd, a.mcp_servers).await.map(Json) } }
@@ -337,12 +337,12 @@ command_table! {
         run: |_ctx, a| async move { llm::llm_embed(a).await.map(Json) } }
     { "llm_transcribe", auth: Auth::Required, desktop: false, binary: false,
         args: llm::TranscribeArgs,
-        run: |ctx, a| async move { llm::llm_transcribe(&ctx.workspace, a).await.map(Json) } }
+        run: |ctx, a| async move { llm::llm_transcribe(ctx.workspace.as_ref(), a).await.map(Json) } }
 
     // ---- rag（本地向量检索：授权工作区 → 本地 embedding → SQLite → 暴力余弦） ----
     { "rag_index_build", auth: Auth::Required, desktop: false, binary: false,
         args: rag::IndexBuildArgs,
-        run: |ctx, a| async move { rag::rag_index_build(ctx.host.as_ref(), &ctx.workspace, &ctx.db, &ctx.rag, a).await.map(Json) } }
+        run: |ctx, a| async move { rag::rag_index_build(ctx.host.as_ref(), ctx.workspace.as_ref(), &ctx.db, &ctx.rag, a).await.map(Json) } }
     { "rag_search", auth: Auth::Required, desktop: false, binary: false,
         args: rag::SearchArgs,
         run: |ctx, a| async move { rag::rag_search(&ctx.db, &ctx.rag, a).await.map(Json) } }
@@ -662,47 +662,47 @@ command_table! {
     // ---- sheet ----
     { "fs_read_sheet", auth: Auth::Required, desktop: false, binary: false,
         args: sheet::ReadSheetArgs,
-        run: |ctx, a| async move { sheet::fs_read_sheet(&ctx.workspace, a.path, a.sheet, a.max_rows).map(Json) } }
+        run: |ctx, a| async move { sheet::fs_read_sheet(ctx.workspace.as_ref(), a.path, a.sheet, a.max_rows).map(Json) } }
 
     // ---- git ----
     { "git_status", auth: Auth::Required, desktop: false, binary: false,
         args: git::RootArg,
-        run: |ctx, a| async move { git::git_status(&ctx.workspace, a.root).map(Json) } }
+        run: |ctx, a| async move { git::git_status(ctx.workspace.as_ref(), a.root).map(Json) } }
     { "git_changes", auth: Auth::Required, desktop: false, binary: false,
         args: git::RootArg,
-        run: |ctx, a| async move { git::git_changes(&ctx.workspace, a.root).map(Json) } }
+        run: |ctx, a| async move { git::git_changes(ctx.workspace.as_ref(), a.root).map(Json) } }
     { "git_diff", auth: Auth::Required, desktop: false, binary: false,
         args: git::DiffArgs,
-        run: |ctx, a| async move { git::git_diff(&ctx.workspace, a.root, a.path, a.staged).map(Json) } }
+        run: |ctx, a| async move { git::git_diff(ctx.workspace.as_ref(), a.root, a.path, a.staged).map(Json) } }
     { "git_stage", auth: Auth::Required, desktop: false, binary: false,
         args: git::StageArgs,
-        run: |ctx, a| async move { git::git_stage(&ctx.workspace, a.root, a.paths, a.all).map(Json) } }
+        run: |ctx, a| async move { git::git_stage(ctx.workspace.as_ref(), a.root, a.paths, a.all).map(Json) } }
     { "git_unstage", auth: Auth::Required, desktop: false, binary: false,
         args: git::StageArgs,
-        run: |ctx, a| async move { git::git_unstage(&ctx.workspace, a.root, a.paths, a.all).map(Json) } }
+        run: |ctx, a| async move { git::git_unstage(ctx.workspace.as_ref(), a.root, a.paths, a.all).map(Json) } }
     { "git_commit", auth: Auth::Required, desktop: false, binary: false,
         args: git::CommitArgs,
-        run: |ctx, a| async move { git::git_commit(&ctx.workspace, a.root, a.message, a.all).map(Json) } }
+        run: |ctx, a| async move { git::git_commit(ctx.workspace.as_ref(), a.root, a.message, a.all).map(Json) } }
     { "git_current_branch", auth: Auth::Required, desktop: false, binary: false,
         args: git::RootArg,
-        run: |ctx, a| async move { git::git_current_branch(&ctx.workspace, a.root).map(Json) } }
+        run: |ctx, a| async move { git::git_current_branch(ctx.workspace.as_ref(), a.root).map(Json) } }
     { "git_branch_list", auth: Auth::Required, desktop: false, binary: false,
         args: git::RootArg,
-        run: |ctx, a| async move { git::git_branch_list(&ctx.workspace, a.root).map(Json) } }
+        run: |ctx, a| async move { git::git_branch_list(ctx.workspace.as_ref(), a.root).map(Json) } }
     { "git_log", auth: Auth::Required, desktop: false, binary: false,
         args: git::LogArgs,
-        run: |ctx, a| async move { git::git_log(&ctx.workspace, a.root, a.limit, a.skip).map(Json) } }
+        run: |ctx, a| async move { git::git_log(ctx.workspace.as_ref(), a.root, a.limit, a.skip).map(Json) } }
     { "git_show", auth: Auth::Required, desktop: false, binary: false,
         args: git::ShowArgs,
-        run: |ctx, a| async move { git::git_show(&ctx.workspace, a.root, a.hash, a.path).map(Json) } }
+        run: |ctx, a| async move { git::git_show(ctx.workspace.as_ref(), a.root, a.hash, a.path).map(Json) } }
 
     // ---- store_fs ----
     { "store_sessions_load", auth: Auth::Required, desktop: false, binary: false,
         args: store_fs::SessionsLoadArgs,
-        run: |ctx, a| async move { store_fs::store_sessions_load(ctx.host.as_ref(), &ctx.db, &ctx.workspace, a.workspaces).map(Json) } }
+        run: |ctx, a| async move { store_fs::store_sessions_load(ctx.host.as_ref(), &ctx.db, ctx.workspace.as_ref(), a.workspaces).map(Json) } }
     { "store_sessions_sync", auth: Auth::Required, desktop: false, binary: false,
         args: store_fs::SessionsSyncArgs,
-        run: |ctx, a| async move { store_fs::store_sessions_sync(ctx.host.as_ref(), &ctx.workspace, a.snapshot, a.workspaces, a.deleted_session_ids).map(Json) } }
+        run: |ctx, a| async move { store_fs::store_sessions_sync(ctx.host.as_ref(), ctx.workspace.as_ref(), a.snapshot, a.workspaces, a.deleted_session_ids).map(Json) } }
     { "store_default_root", auth: Auth::Required, desktop: false, binary: false,
         args: UnitArgs,
         run: |ctx, _a| async move { store_fs::store_default_root(ctx.host.as_ref()).map(Json) } }
@@ -711,53 +711,53 @@ command_table! {
         run: |ctx, a| async move { store_fs::attachments_prune_session(ctx.host.as_ref(), a.session_id).map(Json) } }
     { "store_sessions_relocate", auth: Auth::Required, desktop: false, binary: false,
         args: store_fs::RelocateRequestDto,
-        run: |ctx, a| async move { store_fs::store_sessions_relocate(ctx.host.as_ref(), &ctx.workspace, a).map(Json) } }
+        run: |ctx, a| async move { store_fs::store_sessions_relocate(ctx.host.as_ref(), ctx.workspace.as_ref(), a).map(Json) } }
     { "pick_workspace_folder", auth: Auth::Required, desktop: true, binary: false,
         args: UnitArgs, run: |_ctx, _a| async move { Err::<Json<()>, String>("仅桌面端可用".into()) } }
 
     // ---- worktree ----
     { "worktree_provision", auth: Auth::Required, desktop: false, binary: false,
         args: worktree::ProvisionArgs,
-        run: |ctx, a| async move { worktree::worktree_provision(ctx.host.as_ref(), &ctx.workspace, a.source).map(Json) } }
+        run: |ctx, a| async move { worktree::worktree_provision(ctx.host.as_ref(), ctx.workspace.as_ref(), a.source).map(Json) } }
     { "worktree_release", auth: Auth::Required, desktop: false, binary: false,
         args: worktree::ReleaseArgs,
-        run: |ctx, a| async move { worktree::worktree_release(ctx.host.as_ref(), &ctx.workspace, a.root).map(Json) } }
+        run: |ctx, a| async move { worktree::worktree_release(ctx.host.as_ref(), ctx.workspace.as_ref(), a.root).map(Json) } }
     { "worktree_list", auth: Auth::Required, desktop: false, binary: false,
         args: UnitArgs,
         run: |ctx, _a| async move { worktree::worktree_list(ctx.host.as_ref()).map(Json) } }
 
     // ---- db ----
     { "db_settings_load", auth: Auth::Required, desktop: false, binary: false,
-        args: UnitArgs, run: |ctx, _a| async move { db::db_settings_load(&ctx.db).map(Json) } }
+        args: UnitArgs, run: |ctx, _a| async move { ctx.db.load_settings().map(Json) } }
     { "db_settings_sync", auth: Auth::Required, desktop: false, binary: false,
         args: db::SettingsSyncArgs,
-        run: |ctx, a| async move { db::db_settings_sync(&ctx.db, a.settings).map(Json) } }
+        run: |ctx, a| async move { ctx.db.sync_settings(&a.settings).map(Json) } }
     { "db_automations_load", auth: Auth::Required, desktop: false, binary: false,
-        args: UnitArgs, run: |ctx, _a| async move { db::db_automations_load(&ctx.db).map(Json) } }
+        args: UnitArgs, run: |ctx, _a| async move { ctx.db.load_automations().map(Json) } }
     { "db_automations_sync", auth: Auth::Required, desktop: false, binary: false,
         args: db::AutomationsSyncArgs,
-        run: |ctx, a| async move { db::db_automations_sync(&ctx.db, a.tasks).map(Json) } }
+        run: |ctx, a| async move { ctx.db.sync_automations(&a.tasks).map(Json) } }
     { "db_automations_due_list", auth: Auth::Required, desktop: false, binary: false,
-        args: UnitArgs, run: |ctx, _a| async move { db::db_automations_due_list(&ctx.db).map(Json) } }
+        args: UnitArgs, run: |ctx, _a| async move { ctx.db.automation_due_list().map(Json) } }
     { "db_automations_due_finish", auth: Auth::Required, desktop: false, binary: false,
         args: db::DueFinishArgs,
-        run: |ctx, a| async move { db::db_automations_due_finish(&ctx.db, a.id, a.status).map(Json) } }
+        run: |ctx, a| async move { ctx.db.automation_due_finish(a.id, &a.status).map(Json) } }
     { "db_automation_runs_load", auth: Auth::Required, desktop: false, binary: false,
         args: db::RunsLoadArgs,
-        run: |ctx, a| async move { db::db_automation_runs_load(&ctx.db, a.limit).map(Json) } }
+        run: |ctx, a| async move { ctx.db.automation_runs_load(a.limit.unwrap_or(200)).map(Json) } }
     { "db_automation_run_record", auth: Auth::Required, desktop: false, binary: false,
         args: db::RunRecordArgs,
-        run: |ctx, a| async move { db::db_automation_run_record(&ctx.db, a.run).map(Json) } }
+        run: |ctx, a| async move { ctx.db.automation_record_run(&a.run).map(Json) } }
     { "db_team_runs_load", auth: Auth::Required, desktop: false, binary: false,
-        args: UnitArgs, run: |ctx, _a| async move { db::db_team_runs_load(&ctx.db).map(Json) } }
+        args: UnitArgs, run: |ctx, _a| async move { ctx.db.load_team_runs().map(Json) } }
     { "db_team_runs_sync", auth: Auth::Required, desktop: false, binary: false,
         args: db::TeamRunsSyncArgs,
-        run: |ctx, a| async move { db::db_team_runs_sync(&ctx.db, a.runs).map(Json) } }
+        run: |ctx, a| async move { ctx.db.sync_team_runs(&a.runs).map(Json) } }
     { "db_agents_load", auth: Auth::Required, desktop: false, binary: false,
-        args: UnitArgs, run: |ctx, _a| async move { db::db_agents_load(&ctx.db).map(Json) } }
+        args: UnitArgs, run: |ctx, _a| async move { ctx.db.load_agent_providers().map(Json) } }
     { "db_agents_sync", auth: Auth::Required, desktop: false, binary: false,
         args: db::AgentsSyncArgs,
-        run: |ctx, a| async move { db::db_agents_sync(&ctx.db, a.providers).map(Json) } }
+        run: |ctx, a| async move { ctx.db.sync_agent_providers(&a.providers).map(Json) } }
 
     // ---- tray（桌面专属） ----
     { "set_close_to_tray", auth: Auth::Required, desktop: true, binary: false,

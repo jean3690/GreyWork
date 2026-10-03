@@ -18,8 +18,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
+use crate::core::ports::WorkspaceFs;
 use crate::host::HostContext;
 use crate::store_fs;
+#[cfg(test)]
 use crate::workspace_fs::WorkspaceFsAccess;
 
 const GIT: &str = "git";
@@ -204,7 +206,7 @@ fn canonical_home(home: &Path) -> PathBuf {
 /* ===== 核心逻辑（home 由命令/测试各自提供） ===== */
 
 fn provision(
-    access: &WorkspaceFsAccess,
+    access: &dyn WorkspaceFs,
     home: &Path,
     source_raw: &str,
 ) -> Result<WorktreeProvisionDto, String> {
@@ -294,7 +296,7 @@ fn provision(
     })
 }
 
-fn release(access: &WorkspaceFsAccess, home: &Path, root_raw: &str) -> Result<(), String> {
+fn release(access: &dyn WorkspaceFs, home: &Path, root_raw: &str) -> Result<(), String> {
     let root = access.resolve_existing(root_raw)?;
     let home = canonical_home(home);
     let default_root = store_fs::default_root(&home)?;
@@ -393,7 +395,7 @@ fn list(home: &Path) -> Result<Vec<WorktreeEntryDto>, String> {
 
 pub fn worktree_provision(
     host: &dyn HostContext,
-    access: &WorkspaceFsAccess,
+    access: &dyn WorkspaceFs,
     source: String,
 ) -> Result<WorktreeProvisionDto, String> {
     provision(access, &host.paths().home_dir, &source)
@@ -401,7 +403,7 @@ pub fn worktree_provision(
 
 pub fn worktree_release(
     host: &dyn HostContext,
-    access: &WorkspaceFsAccess,
+    access: &dyn WorkspaceFs,
     root: String,
 ) -> Result<(), String> {
     release(access, &host.paths().home_dir, &root)

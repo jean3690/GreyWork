@@ -630,7 +630,7 @@ pub async fn acp_start(
     host: Arc<dyn HostContext>,
     state: &Arc<AcpHost>,
     extra_programs: &[String],
-    access: &crate::workspace_fs::WorkspaceFsAccess,
+    access: &dyn crate::core::ports::WorkspaceFs,
     agent_cmd: String,
     tier: Option<String>,
     sandbox: Option<String>,

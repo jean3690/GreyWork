@@ -18,9 +18,9 @@
 //!
 //! 消息负载不透明（ThreadMessage 全文 JSON 往返，零解析）。
 
+use crate::core::ports::WorkspaceFs;
 use crate::db::{ConversationDto, Db, SessionsSnapshotDto};
 use crate::host::HostContext;
-use crate::workspace_fs::WorkspaceFsAccess;
 use serde::{Deserialize, Serialize};
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -178,10 +178,7 @@ fn validate_folder(folder: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-fn validate_authorized_folder(
-    access: &crate::workspace_fs::WorkspaceFsAccess,
-    folder: &str,
-) -> Result<(), String> {
+fn validate_authorized_folder(access: &dyn WorkspaceFs, folder: &str) -> Result<(), String> {
     let authorized = access.validate_existing(folder)?;
     if authorized.is_dir() {
         Ok(())
@@ -191,7 +188,7 @@ fn validate_authorized_folder(
 }
 
 fn validate_authorized_workspaces(
-    access: &crate::workspace_fs::WorkspaceFsAccess,
+    access: &dyn WorkspaceFs,
     workspaces: &[WorkspaceDirDto],
 ) -> Result<(), String> {
     for workspace in workspaces {
@@ -516,7 +513,7 @@ pub fn migrate_from_db(
 pub fn store_sessions_load(
     host: &dyn HostContext,
     db: &Db,
-    access: &WorkspaceFsAccess,
+    access: &dyn WorkspaceFs,
     workspaces: Vec<WorkspaceDirDto>,
 ) -> Result<Option<SessionsSnapshotDto>, String> {
     validate_authorized_workspaces(access, &workspaces)?;
@@ -534,7 +531,7 @@ pub fn store_sessions_load(
 /// 否则多实例并发时会互删对方新建的会话。
 pub fn store_sessions_sync(
     host: &dyn HostContext,
-    access: &WorkspaceFsAccess,
+    access: &dyn WorkspaceFs,
     snapshot: SessionsSnapshotDto,
     workspaces: Vec<WorkspaceDirDto>,
     deleted_session_ids: Vec<String>,
@@ -548,7 +545,7 @@ pub fn store_sessions_sync(
 /// 工作区改绑文件夹后把既有会话文件搬到新目录。
 pub fn store_sessions_relocate(
     host: &dyn HostContext,
-    access: &WorkspaceFsAccess,
+    access: &dyn WorkspaceFs,
     request: RelocateRequestDto,
 ) -> Result<RelocateReportDto, String> {
     if let Some(folder) = request

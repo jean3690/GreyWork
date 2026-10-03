@@ -13,5 +13,5 @@ pub fn fs_read_sheet(
     sheet: Option<String>,
     max_rows: Option<usize>,
 ) -> Result<SheetTable, String> {
-    greywork_host::sheet::fs_read_sheet(&access, path, sheet, max_rows)
+    greywork_host::sheet::fs_read_sheet(&*access, path, sheet, max_rows)
 }

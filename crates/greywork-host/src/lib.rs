@@ -13,7 +13,7 @@
 mod core;
 mod infra;
 
-pub use core::{csp, host, log, path_safety, text};
+pub use core::{csp, host, log, path_safety, ports, text};
 pub use infra::{db, workspace_fs};
 
 pub mod acp_host;

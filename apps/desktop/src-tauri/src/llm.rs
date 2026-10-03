@@ -98,7 +98,7 @@ pub async fn llm_transcribe(
     language: Option<String>,
 ) -> Result<TranscribeResult, String> {
     greywork_host::llm::llm_transcribe(
-        &access,
+        &*access,
         TranscribeArgs {
             base_url,
             model,

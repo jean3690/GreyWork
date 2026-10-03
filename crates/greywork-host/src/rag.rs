@@ -15,11 +15,11 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
+use crate::core::ports::WorkspaceFs;
 use crate::db::{Db, RagChunkDto, RagChunkRow};
 use crate::host::HostContext;
 use crate::llm::{self, EmbedArgs};
 use crate::log;
-use crate::workspace_fs::WorkspaceFsAccess;
 
 /// 单文件参与索引的上限：生成物 / 日志 / 打包产物不进索引。
 const MAX_FILE_BYTES: u64 = 1024 * 1024;
@@ -245,7 +245,7 @@ pub struct RagHit {
 /// 构建（或增量更新）指定授权根的向量索引。
 pub async fn rag_index_build(
     host: &dyn HostContext,
-    workspace: &WorkspaceFsAccess,
+    workspace: &dyn WorkspaceFs,
     db: &Db,
     rag: &RagHost,
     args: IndexBuildArgs,
