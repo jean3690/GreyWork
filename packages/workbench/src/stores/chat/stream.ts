@@ -12,7 +12,8 @@
  * 流式上下文（llmRequestId / activeTurnToken / streamingInto / llmListening /
  * 缓冲）是本切片的闭包私有，不入 state（与 runtime 切片的策略一致）。
  */
-import { buildLlmHistory, localReasoningOverride, resolveLocalEffort, selectLlmProvider } from "../chat-llm";
+import { buildLlmHistory, localReasoningOverride, resolveLocalEffort } from "../chat-llm";
+import { selectLlmProvider } from "../../lib/llm-provider";
 import { retrieveContext, transcribeAttachment, type LocalAiDeps } from "../../lib/local-ai";
 import { isAskSettled } from "../../lib/ask-question";
 import { mergeToolActivities } from "../../lib/tool-activity";

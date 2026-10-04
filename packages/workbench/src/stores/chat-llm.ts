@@ -26,11 +26,8 @@ export function resolveLocalEffort(
 }
 
 /** Phase 1 统一 openai-compatible 线格式：anthropic / ollama 均提供兼容端点，
- * kind 不作为路由条件，只要求启用且 baseUrl/model 已配置。 */
-export function selectLlmProvider(providers: ModelProviderConfig[], preferredId?: string | null): ModelProviderConfig | null {
-  const available = providers.filter((provider) => provider.enabled && !!provider.baseUrl?.trim() && !!provider.model.trim());
-  return available.find((provider) => provider.id === preferredId) ?? available[0] ?? null;
-}
+ * kind 不作为路由条件，只要求启用且 baseUrl/model 已配置。
+ * （`selectLlmProvider` 已移到 `lib/llm-provider.ts`，避免 lib 反向依赖 store。） */
 
 export const LLM_SYSTEM_PROMPT = "你是 GreyWork 智能工作台中的助手。回答简洁准确；涉及数据或文件操作时，先给出简短计划再执行说明。";
 

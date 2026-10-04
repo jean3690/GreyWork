@@ -13,7 +13,7 @@ import { useArtifactStore } from "../artifact";
 import { useSessionStore } from "../session";
 import { useSettingsStore } from "../settings";
 import { useVfsStore } from "../vfs";
-import { selectLlmProvider } from "../chat-llm";
+import { selectLlmProvider } from "../../lib/llm-provider";
 import type { QueuedCommand } from "../../types";
 
 export interface ChatStoreState {

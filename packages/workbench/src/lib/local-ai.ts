@@ -12,7 +12,7 @@ import { invoke } from "@greywork/host-ipc";
 import type { LlmClient, LlmConnection } from "@greywork/llm";
 import type { ModelProviderConfig } from "@greywork/shell";
 import { createBoundedMap } from "./bounded-map";
-import { selectLlmProvider } from "../stores/chat-llm";
+import { selectLlmProvider } from "./llm-provider";
 import { notify } from "../stores/notice";
 import { i18n } from "../i18n";
 import type { Attachment } from "../types";

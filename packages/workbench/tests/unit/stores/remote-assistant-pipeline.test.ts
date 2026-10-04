@@ -86,8 +86,10 @@ vi.mock("@/stores/agent", () => ({
   }),
 }));
 vi.mock("@/stores/chat-llm", () => ({
-  selectLlmProvider: (...args: unknown[]) => chatLlm.selectLlmProvider(...(args as [])),
   buildLlmHistory: (...args: unknown[]) => chatLlm.buildLlmHistory(...(args as [])),
+}));
+vi.mock("@/lib/llm-provider", () => ({
+  selectLlmProvider: (...args: unknown[]) => chatLlm.selectLlmProvider(...(args as [])),
 }));
 
 import { createPipelineSlice, type PipelineApi } from "@/stores/remote-assistant/pipeline";

@@ -13,7 +13,8 @@ vi.mock("@/state/attachment-library", () => ({
   readAttachmentText: (item: Attachment) => h.readAttachmentText(item),
 }));
 
-import { buildLlmHistory, localReasoningOverride, resolveLocalEffort, selectLlmProvider, LLM_SYSTEM_PROMPT } from "@/stores/chat-llm";
+import { buildLlmHistory, localReasoningOverride, resolveLocalEffort, LLM_SYSTEM_PROMPT } from "@/stores/chat-llm";
+import { selectLlmProvider } from "@/lib/llm-provider";
 
 function provider(overrides: Partial<ModelProviderConfig> = {}): ModelProviderConfig {
   return {
