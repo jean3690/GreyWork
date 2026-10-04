@@ -7,24 +7,20 @@
  * 与 getTurn().writeTurnError 完成。
  */
 import type { AcpPermissionRequestPayload, AcpSessionConfigOption, AcpSessionOpened, McpProbeReport, McpServerConfig } from "@greywork/acp";
-// 走 ./permissions 子路径而不是包根：那是无依赖的纯分类层。包根会连带拉起 client.ts
-// （@tauri-apps/api / ACP SDK），而权限分类在测试里必须能独立于传输层加载。
-import { classifyAcpPermission, safeAllowOnceId } from "@greywork/acp/permissions";
 import { basename } from "@greywork/core";
 import { watch } from "vue";
 import { acp } from "../../lib/acp-client";
 import { normalizeAcpCommands } from "../../lib/slash-commands";
 import { formatDuration, parseToolActivityPayload } from "../../lib/tool-activity";
-import { permissionCommand } from "../../lib/permission-detail";
 import { conversationFolder } from "../../lib/conversation-folder";
 import { isolateForRun, resolveWorkspaceDir } from "../../lib/workspace-dir";
 import { parseScheduleFences } from "../../lib/schedule-fence";
 import { appEvents } from "../../events";
 import { notify } from "../notice";
+import { createPermissionGate } from "./permission";
 import { CONNECT_ABORTED, t, looksLikeMissingBinary } from "./shared";
 import type { AgentStoreState } from "./state";
 import type { TurnApi } from "./turn";
-import type { PermissionTrace } from "../../types";
 
 export interface RuntimeDeps {
   state: AgentStoreState;
@@ -47,18 +43,8 @@ export interface RuntimeApi {
 export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi {
   const locals = state.locals;
 
-  /** 待前端裁决的权限请求；null = 无待决项（auto 决策只进通知流）。 */
-  const pendingPermission = state.pendingPermission;
-  /** 权限确认截止（epoch ms，卡片倒计时用）；与宿主 PERMISSION_CONFIRM_TIMEOUT 同一 120s 窗口。 */
-  const permissionDeadline = state.permissionDeadline;
-  let permissionTimer: ReturnType<typeof setTimeout> | null = null;
-  /**
-   * 本次 ACP 会话内已被「始终允许」的工具类别。
-   *
-   * 按 kind 记而不是按 optionId：optionId 是各 agent 自定的（opencode 用 "always"，
-   * 别的后端可能是 "allow-always"），存下来换个后端就是一堆废键。类别语义跨后端一致。
-   */
-  const alwaysAllowedKinds = new Set<string>();
+  /** 权限门（待决卡 / 120s 超时 / 留痕 / 免问直答 / 用户裁决）在 ./permission.ts。 */
+  const gate = createPermissionGate(state);
 
   /** 事件监听只挂一次。 */
   let listening = false;
@@ -102,84 +88,6 @@ export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi 
     });
     // 到时有可能是内容仍在刷（overtime 触发），但只要没被外部清，就解除——下游新内容已不属重放。
     clearReplayGuard();
-  }
-
-  /** 清权限定时器：任何清 pending 的路径都必须先走这里，否则定时器会打在已删除的通知上。 */
-  function clearPermissionTimer(): void {
-    if (permissionTimer !== null) {
-      clearTimeout(permissionTimer);
-      permissionTimer = null;
-    }
-    permissionDeadline.value = null;
-  }
-
-  /** 置起 120s 超时窗口：宿主到时取消工具调用，前端镜像同一时刻收卡并通知。 */
-  function armPermissionTimer(): void {
-    clearPermissionTimer();
-    if (!pendingPermission.value) return;
-    permissionDeadline.value = Date.now() + 120_000;
-    permissionTimer = setTimeout(() => {
-      permissionTimer = null;
-      const pending = pendingPermission.value;
-      if (!pending) return;
-      pendingPermission.value = null;
-      permissionDeadline.value = null;
-      writePermissionTrace(permissionTrace(pending, null, "timeout"));
-      notify({ kind: "warning", key: "permission-timeout", title: t("errors.permissionTimedOut") });
-    }, 120_000);
-  }
-
-  /** 统一清场（respondPermission / 断开 / 切后端 / 重启）。 */
-  function dismissPendingPermission(): void {
-    clearPermissionTimer();
-    pendingPermission.value = null;
-  }
-
-  /** 权限载荷 + 裁决结果 → 留痕记录（消息流里那条只读卡）。 */
-  function permissionTrace(
-    payload: AcpPermissionRequestPayload,
-    choice: string | null,
-    source: PermissionTrace["source"],
-  ): PermissionTrace {
-    return {
-      toolCallId: payload.toolCallId,
-      title: payload.title ?? null,
-      kind: payload.kind,
-      paths: payload.locations ?? [],
-      command: permissionCommand(payload.rawInput),
-      choice,
-      source,
-      decidedAt: Date.now(),
-    };
-  }
-
-  /** 留痕写进当前 ACP 支架消息；无支架时丢弃（设置页主动连接这类场景本来就没有消息可挂）。 */
-  function writePermissionTrace(trace: PermissionTrace): void {
-    if (!locals.acpStream || !locals.acpThreadId) return;
-    state.chat.setPermissionTrace(trace, locals.acpStream.id, locals.acpThreadId);
-  }
-
-  /**
-   * 免问直答：用户此前对该类别选过「始终允许」，替他答掉这条请求。
-   *
-   * 走这里而不是 respondPermission：那条路径要先弹卡再收卡，视觉上会闪一下，
-   * 而用户的本意恰恰是「别再问我」。留痕照写，回看时能解释清「这次为什么没问」。
-   */
-  async function autoRespondPermission(payload: AcpPermissionRequestPayload, optionId: string): Promise<void> {
-    const choice = payload.options.find((option) => option.optionId === optionId)?.name ?? optionId;
-    // 先留痕再回传：回传失败也不该把「发生过的事」丢掉。
-    writePermissionTrace(permissionTrace(payload, choice, "auto"));
-    try {
-      await acp.respondPermission(payload.requestId, optionId);
-    } catch (error) {
-      if (locals.acpStream && locals.acpThreadId) {
-        state.chat.appendMessageContent(
-          locals.acpStream.id,
-          `\n\n${t("errors.permissionFailed", { detail: String(error) })}`,
-          locals.acpThreadId,
-        );
-      }
-    }
   }
 
   async function ensureListener(): Promise<void> {
@@ -269,17 +177,13 @@ export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi 
       } else if (event.kind === "permission-request") {
         // 用户此前选过「始终允许」的类别：直接答掉，不再第二次打扰。
         const payload = event.payload as AcpPermissionRequestPayload;
-        const remembered = alwaysAllowedKinds.has(payload.kind)
-          ? (safeAllowOnceId(payload.options) ??
-            payload.options.find((option) => classifyAcpPermission(option.kind) === "allow-always")?.optionId)
-          : undefined;
+        const remembered = gate.rememberedOptionId(payload);
         if (remembered) {
-          void autoRespondPermission(payload, remembered);
+          void gate.autoRespond(payload, remembered);
           return;
         }
         // cautious / daily 非只读：转发到确认卡片；同时置 120s 镜像超时
-        pendingPermission.value = payload;
-        armPermissionTimer();
+        gate.arm(payload);
       } else if (event.kind === "prompt-done") {
         state.chat.flushPendingContent();
         const payload = event.payload as { handle?: number; response?: unknown; error?: unknown; files?: unknown };
@@ -398,7 +302,7 @@ export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi 
         state.acpImageSupport.value = null;
         state.acpBusy.value = false;
         state.chat.runningSessionId = null;
-        dismissPendingPermission();
+        gate.dismiss();
         state.activeTurnId.value = null;
         state.turnStartedAtMs.value = null;
         state.acpStatus.value = "disconnected";
@@ -425,7 +329,7 @@ export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi 
   /** 连接在途被停止：释放刚建出的进程/会话并复位；返回哨兵让调用方走「已停止」文案。 */
   async function abortInFlightStart(): Promise<string> {
     abortConnecting = false;
-    dismissPendingPermission();
+    gate.dismiss();
     acpConnecting.value = false;
     state.acpBusy.value = false;
     state.chat.runningSessionId = null;
@@ -646,37 +550,13 @@ export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi 
     state.acpSessionId.value = null;
     locals.acpSessionThreadId = null;
     state.acpConfigOptions.value = [];
-    dismissPendingPermission();
+    gate.dismiss();
     state.acpStreamId.value = null;
     state.chat.runningSessionId = null;
     state.activeTurnId.value = null;
     state.turnStartedAtMs.value = null;
     state.acpStatus.value = "disconnected";
     return startAcpSession();
-  }
-
-  /** 权限裁决回传宿主；optionId=null 表示拒绝该次操作。 */
-  async function respondPermission(optionId: string | null): Promise<void> {
-    const pending = pendingPermission.value;
-    if (!pending) return;
-    dismissPendingPermission();
-    const option = optionId ? pending.options.find((candidate) => candidate.optionId === optionId) : undefined;
-    // 「始终允许」记进本次会话：同类工具后续免问（消费点在 permission-request 分支）。
-    if (option && classifyAcpPermission(option.kind) === "allow-always") alwaysAllowedKinds.add(pending.kind);
-    // 留痕替掉原先往正文里追加的 "[权限] xxx" 纯文本：同样的信息做成只读卡片，
-    // 且不会把 markdown 流切断。
-    writePermissionTrace(permissionTrace(pending, optionId ? (option?.name ?? optionId) : null, "user"));
-    try {
-      await acp.respondPermission(pending.requestId, optionId);
-    } catch (error) {
-      if (locals.acpStream && locals.acpThreadId) {
-        state.chat.appendMessageContent(
-          locals.acpStream.id,
-          `\n\n${t("errors.permissionFailed", { detail: String(error) })}`,
-          locals.acpThreadId,
-        );
-      }
-    }
   }
 
   /**
@@ -698,7 +578,7 @@ export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi 
   // 路径（stop / 切后端 / 切回 Local / 重启 runtime）都会把 acpSessionId 置回 null。
   watch(state.acpSessionId, () => {
     state.acpCommands.value = [];
-    alwaysAllowedKinds.clear();
+    gate.clearRemembered();
   });
 
   return {
@@ -709,8 +589,8 @@ export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi 
     connectAcp,
     stopAcp,
     restartAcpRuntime,
-    respondPermission,
+    respondPermission: gate.respond,
     probeMcpServer,
-    dismissPendingPermission,
+    dismissPendingPermission: gate.dismiss,
   };
 }
