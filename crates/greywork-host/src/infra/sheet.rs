@@ -217,7 +217,7 @@ mod tests {
 
     #[test]
     fn reads_legacy_xls_fixture() {
-        let bytes = include_bytes!("../tests/fixtures/sample.xls").to_vec();
+        let bytes = include_bytes!("../../tests/fixtures/sample.xls").to_vec();
         let table = read_sheet_from_bytes(bytes, None, MAX_ROWS).expect("解析 .xls");
 
         assert_eq!(table.sheets, vec!["Sheet1".to_string()]);
@@ -235,7 +235,7 @@ mod tests {
 
     #[test]
     fn unknown_sheet_falls_back_to_first_and_row_limit_truncates() {
-        let bytes = include_bytes!("../tests/fixtures/sample.xls").to_vec();
+        let bytes = include_bytes!("../../tests/fixtures/sample.xls").to_vec();
         let table = read_sheet_from_bytes(bytes, Some("不存在的表"), 2).expect("解析 .xls");
         assert_eq!(table.name, "Sheet1");
         assert!(table.truncated, "行数超过上限必须置 truncated");

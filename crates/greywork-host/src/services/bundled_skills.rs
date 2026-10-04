@@ -42,7 +42,7 @@ const BUNDLED_SKILLS: &[BundledSkill] = &[BundledSkill {
         "用 ffmpeg / ffprobe 做转码、截取、拼接、抽帧、压缩、提取音轨；产物落在工作区可直接预览。",
     files: &[BundledFile {
         path: "SKILL.md",
-        contents: include_str!("../assets/bundled-skills/ffmpeg-media/SKILL.md"),
+        contents: include_str!("../../assets/bundled-skills/ffmpeg-media/SKILL.md"),
     }],
 }];
 

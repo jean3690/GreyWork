@@ -4,48 +4,44 @@
 //! 避免命令面出现两份会漂移的实现。
 //!
 //! 边界约定：本 crate 只放「与具体宿主无关」的逻辑。任何需要宿主出口的能力
-//! （事件广播、系统通知、路径来源）都应通过 `host::HostContext` 注入，而不是在本
-//! crate 里直接引 tauri。目前仍留在桌面壳里的模块（`acp_host` / `channel_media` /
-//! 各通道 / `sys` 等）会在后续阶段逐步搬进来 —— 它们现在还用 `AppHandle` 发事件。
+//! （事件广播、系统通知、路径来源）都应通过 [`host::HostContext`] 注入，而不是在本
+//! crate 里直接引 tauri。
+//!
+//! # 分层
+//!
+//! 代码按职责分五层存放，依赖只能自上而下（L0 ← L1 ← L2 ← L3 ← L4）：
+//!
+//! | 层 | 目录 | 职责 |
+//! |---|---|---|
+//! | L0 core | `core/` | 出口契约、端口 trait、纯原语 |
+//! | L1 infra | `infra/` | 本机资源适配器（db / 工作区 / git / 进程 / 沙箱） |
+//! | L2 services | `services/` | 外部服务集成（llm / rag / acp / mcp / 市场 / 办公…） |
+//! | L3 channels | `channels/` | 聊天通道（common / media + 7 条通道） |
+//! | L4 app | `app/` | 组合根、命令注册表 |
+//!
+//! # 对外路径（加法式 facade）
+//!
+//! 各层用**私有** `mod` 声明，再逐叶子 `pub use` 回根。因此外部调用方看到的仍是
+//! 扁平的 `greywork_host::<mod>::<Type>`（如 `greywork_host::db::Db`、
+//! `greywork_host::commands::CommandContext`、`greywork_host::wechat::WechatHost`），
+//! 与分层前**完全一致** —— apps 无需同步改动。层内代码则可用 `crate::services::llm`
+//! 这类带层的路径。
 
 // 分层模块：L0 core / L1 infra / L2 services / L3 channels / L4 app。
-// 目前仅 core 与 infra 已归位，其余仍平铺（见重构计划 P2–P5）；所有旧路径经 `pub use` 回根保持可用。
+mod app;
+mod channels;
 mod core;
 mod infra;
+mod services;
 
+pub use app::commands;
+pub use channels::{
+    common as channel_common, dingtalk, discord, feishu, media as channel_media, qq, telegram,
+    wechat, wecom,
+};
 pub use core::{csp, host, log, path_safety, ports, text};
-pub use infra::{db, workspace_fs};
-
-pub mod acp_host;
-pub mod acp_process;
-pub mod bundled_skills;
-pub mod channel_common;
-pub mod channel_media;
-pub mod commands;
-pub mod cron;
-pub mod dingtalk;
-pub mod discord;
-pub mod feishu;
-pub mod git;
-pub mod host_exec;
-pub mod http;
-pub mod llm;
-pub mod mcp;
-pub mod mcp_registry;
-pub mod office;
-pub mod plugin_market;
-pub mod process_guard;
-pub mod qq;
-pub mod rag;
-pub mod sandbox;
-pub mod scheduler;
-pub mod sheet;
-pub mod skills_market;
-pub mod store_fs;
-pub mod sys;
-pub mod telegram;
-pub mod update;
-pub mod web_fetch;
-pub mod wechat;
-pub mod wecom;
-pub mod worktree;
+pub use infra::{db, git, http, process_guard, sandbox, sheet, store_fs, workspace_fs, worktree};
+pub use services::{
+    acp_host, acp_process, bundled_skills, cron, host_exec, llm, mcp, mcp_registry, office,
+    plugin_market, rag, scheduler, skills_market, sys, update, web_fetch,
+};
