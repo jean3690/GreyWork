@@ -12,13 +12,13 @@ import type { LlmChatParams } from "@greywork/llm";
 import type { AgentProviderConfig } from "@greywork/shell";
 import { basename } from "@greywork/core";
 import type { Attachment, ChannelMediaCapability, MediaKind, MediaRef, ThreadMessage } from "../../types";
-import { dingtalkBackend, type DingTalkInbound } from "../../lib/dingtalk-backend";
-import { feishuBackend, type FeishuInbound } from "../../lib/feishu-backend";
-import { discordBackend, type DiscordInbound } from "../../lib/discord-backend";
-import { qqBackend, type QqInbound } from "../../lib/qq-backend";
-import { telegramBackend, type TelegramInbound } from "../../lib/telegram-backend";
-import { wecomBackend, type WecomInbound } from "../../lib/wecom-backend";
-import { wechatBackend, type WechatInbound } from "../../lib/wechat-backend";
+import { dingtalkBackend } from "../../lib/dingtalk-backend";
+import { feishuBackend } from "../../lib/feishu-backend";
+import { discordBackend } from "../../lib/discord-backend";
+import { qqBackend } from "../../lib/qq-backend";
+import { telegramBackend } from "../../lib/telegram-backend";
+import { wecomBackend } from "../../lib/wecom-backend";
+import { wechatBackend } from "../../lib/wechat-backend";
 import { channelMediaAllows, channelMediaBackend, channelMediaHint } from "../../lib/channel-media";
 import { markdownToPlainText } from "../../lib/wechat-text";
 import { attachmentKind, createAttachment } from "../../lib/attachments";
@@ -29,7 +29,9 @@ import { useAgentStore } from "../agent";
 import { retrieveContext, transcribeAttachment, type LocalAiDeps } from "../../lib/local-ai";
 import { buildLlmHistory } from "../chat-llm";
 import { selectLlmProvider } from "../../lib/llm-provider";
-import { aid, delay, describeError, peerKey, peerLabel, REPLY_FUSE_MS, t, type InboundMessage, type RemotePeer } from "./shared";
+import { aid, delay, describeError, REPLY_FUSE_MS, t, type InboundMessage, type RemotePeer } from "./shared";
+import { FULL_MEDIA_CAPABILITY, remoteSendHint } from "./send-hint";
+import { createInboundHandlers, type InboundApi } from "./inbound";
 import type { RemoteAssistantState } from "./state";
 import type { StatusApi } from "./status";
 import type { PeersApi } from "./peers";
@@ -40,53 +42,8 @@ export interface PipelineDeps {
   getPeers: () => PeersApi;
 }
 
-export interface PipelineApi {
-  onWechatInbound(message: WechatInbound): void;
-  onDingTalkInbound(message: DingTalkInbound): void;
-  onFeishuInbound(message: FeishuInbound): void;
-  onTelegramInbound(message: TelegramInbound): void;
-  onQqInbound(message: QqInbound): void;
-  onDiscordInbound(message: DiscordInbound): void;
-  onWecomInbound(message: WecomInbound): void;
+export interface PipelineApi extends InboundApi {
   sendFromDesktop(key: string, text: string, attachments?: readonly Attachment[]): Promise<{ ok: boolean; error?: string }>;
-}
-
-/**
- * 远程回合的宿主能力提示（```sendfile 围栏协议）：模型据此知道「对方不在本机」，
- * 以及要把文件交出来该怎么表达。中文字面量直发、不进 i18n —— 与 SCHEDULE_HINT 同款。
- *
- * 按通道的媒体能力分叉：能力不支持出站文件的通道（钉钉 / 企业微信）必须如实告知，
- * 否则模型会一直输出围栏、宿主一直拒发，双方都以为对方有问题。
- */
-const REMOTE_SEND_HINT_HEAD = "【宿主能力提示 · 远程文件发送】你正在通过聊天通道与用户对话：用户**不在本机**，看不到你的工作区与磁盘。";
-
-/** 未指定通道时的默认能力：可发任意类别（按「能发文件」生成提示）。 */
-const FULL_MEDIA_CAPABILITY: ChannelMediaCapability = {
-  inbound: ["image", "video", "audio", "file"],
-  outbound: ["image", "video", "audio", "file"],
-};
-
-function remoteSendHint(cap: ChannelMediaCapability): string {
-  if (cap.outbound.length === 0) {
-    return [
-      REMOTE_SEND_HINT_HEAD,
-      "这条通道**只能收文件、不能发文件**。用户要求「把某个文件发给我」时，直接说明这条通道发不了文件（建议改用其他通道），**不要**输出任何围栏，也不要回答「文件已在本机、无需发送」。",
-    ].join("\n");
-  }
-  if (!cap.outbound.includes("file")) {
-    return [
-      REMOTE_SEND_HINT_HEAD,
-      "这条通道**只能发送图片**，发不了文件。用户要图片时，把图片放进工作区后在回复最末尾输出一个 ```sendfile 围栏（内容是图片绝对路径的 JSON 数组）：",
-      '```sendfile\n["/绝对/路径/截图.png"]\n```',
-      "用户要文件时，直接说明这条通道发不了文件、建议改用其他通道，**不要**输出围栏。用户没有要求发文件时，绝对不要输出该围栏。",
-    ].join("\n");
-  }
-  return [
-    REMOTE_SEND_HINT_HEAD,
-    "用户要求「把某个文件发给我」时，**不要**回答「文件已在本机、无需发送」。正确做法是：把该文件放进你的工作区目录（若它已在工作区内则不必移动），然后在回复的**最末尾**输出一个 ```sendfile 代码围栏，内容为要发送文件的**绝对路径**组成的 JSON 数组，例如：",
-    '```sendfile\n["/绝对/路径/报告.xlsx"]\n```',
-    "规则：只输出一个围栏；路径必须是绝对路径，且落在工作区或用户已授权的目录内（否则宿主会拒发）；单个文件不超过 20MB；用户没有要求发文件时，绝对不要输出该围栏。",
-  ].join("\n");
 }
 
 export function createPipelineSlice({ state, getStatus, getPeers }: PipelineDeps): PipelineApi {
@@ -104,173 +61,9 @@ export function createPipelineSlice({ state, getStatus, getPeers }: PipelineDeps
   }
 
   /* ===== 入站 → 档案 → 排队回复 ===== */
-
-  /** 入站媒体在活动流 / 档案里的短标签（单条给具体类型，多条只报数量）。 */
-  function mediaLabel(refs: readonly MediaRef[]): string {
-    const [only] = refs;
-    if (refs.length === 1 && only) {
-      switch (only.kind) {
-        case "image":
-          return t("remoteAssist.media.imageInbound");
-        case "video":
-          return t("remoteAssist.media.videoInbound", { name: only.name });
-        case "audio":
-          return t("remoteAssist.media.audioInbound", { name: only.name });
-        default:
-          return t("remoteAssist.media.fileInbound", { name: only.name });
-      }
-    }
-    return t("remoteAssist.media.inbound", { count: refs.length });
-  }
-
-  /** 记录一条入站并刷新联系人档案（回发凭据随消息更新）。 */
-  function ingestInbound(message: InboundMessage): RemotePeer {
-    const key = peerKey({ channel: message.channel, id: message.peerId });
-    const media = message.mediaRefs ?? [];
-    const description =
-      message.text.trim() || (media.length ? mediaLabel(media) : t("remoteAssist.wechat.unsupported", { types: message.unsupportedLabel }));
-    const existing = getPeers().peerByKey(key);
-    if (existing) {
-      existing.contextToken = message.contextToken || existing.contextToken;
-      existing.lastAt = message.at;
-      existing.lastText = description;
-      if (message.nick) existing.nick = message.nick;
-      getPeers().peerSessionId(existing);
-      getPeers().persistPeers();
-      return existing;
-    }
-    const created: RemotePeer = {
-      channel: message.channel,
-      id: message.peerId,
-      nick: message.nick || peerLabel(message.peerId),
-      sessionId: "",
-      contextToken: message.contextToken || null,
-      lastAt: message.at,
-      lastText: description,
-      readAt: 0,
-    };
-    getPeers().peerSessionId(created);
-    getPeers().persistPeers();
-    return getPeers().peerByKey(key) as RemotePeer;
-  }
-
-  function handleInbound(message: InboundMessage): void {
-    const peer = ingestInbound(message);
-    const media = message.mediaRefs ?? [];
-    if (message.text.trim()) {
-      getStatus().recordActivity({ direction: "in", peer: peer.nick, channel: message.channel, text: message.text, kind: "text" });
-    } else if (media.length) {
-      getStatus().recordActivity({ direction: "in", peer: peer.nick, channel: message.channel, text: mediaLabel(media), kind: "media" });
-    } else {
-      getStatus().recordActivity({
-        direction: "in",
-        peer: peer.nick,
-        channel: message.channel,
-        text: t("remoteAssist.wechat.unsupported", { types: message.unsupportedLabel }),
-        kind: "unsupported",
-      });
-    }
-    if (!settings.remoteAssist.channels[message.channel].autoReply) return;
-    enqueue(() => replyTo(peer, message));
-  }
-
-  function onWechatInbound(message: WechatInbound): void {
-    handleInbound({
-      channel: "wechat",
-      peerId: message.fromUserId,
-      nick: "",
-      text: message.text,
-      contextToken: message.contextToken,
-      unsupportedLabel: message.itemTypes.join("/") || "?",
-      mediaRefs: message.media ?? [],
-      at: message.at,
-    });
-  }
-
-  function onDingTalkInbound(message: DingTalkInbound): void {
-    // 钉钉的非文本消息（picture / audio）也走同一条入站路径：图片落成 mediaRefs，
-    // 其余（audio 等）文本为空 → 回一句只认文字。
-    const isText = message.msgType === null || message.msgType === "text";
-    handleInbound({
-      channel: "dingtalk",
-      peerId: message.peerId,
-      nick: message.nick,
-      text: isText ? message.text : "",
-      contextToken: null,
-      unsupportedLabel: message.msgType ?? "?",
-      mediaRefs: message.media ?? [],
-      at: message.at,
-    });
-  }
-
-  function onFeishuInbound(message: FeishuInbound): void {
-    // 同钉钉：非文本消息也走同一路径，图片 / 文件落成 mediaRefs，其余文本为空。
-    const isText = message.messageType === null || message.messageType === "text";
-    handleInbound({
-      channel: "feishu",
-      peerId: message.peerId,
-      nick: message.nick,
-      text: isText ? message.text : "",
-      contextToken: null,
-      unsupportedLabel: message.messageType ?? "?",
-      mediaRefs: message.media ?? [],
-      at: message.at,
-    });
-  }
-
-  function onTelegramInbound(message: TelegramInbound): void {
-    // 图片 / 文件 / 语音落成 mediaRefs；纯贴纸等没有可下载内容的仍只有空文本。
-    handleInbound({
-      channel: "telegram",
-      peerId: message.peerId,
-      nick: message.nick,
-      text: message.text,
-      contextToken: null,
-      unsupportedLabel: "non-text",
-      mediaRefs: message.media ?? [],
-      at: message.at,
-    });
-  }
-
-  function onDiscordInbound(message: DiscordInbound): void {
-    handleInbound({
-      channel: "discord",
-      peerId: message.peerId,
-      nick: message.nick,
-      text: message.text,
-      contextToken: null,
-      unsupportedLabel: "non-text",
-      mediaRefs: message.media ?? [],
-      at: message.at,
-    });
-  }
-
-  function onQqInbound(message: QqInbound): void {
-    handleInbound({
-      channel: "qq",
-      peerId: message.peerId,
-      nick: message.nick,
-      text: message.text,
-      contextToken: null,
-      unsupportedLabel: "non-text",
-      mediaRefs: message.media ?? [],
-      at: message.at,
-    });
-  }
-
-  function onWecomInbound(message: WecomInbound): void {
-    // 非文本消息（图片 / 文件 / 语音）也走同一路径：图片 / 文件落成 mediaRefs。
-    handleInbound({
-      channel: "wecom",
-      peerId: message.peerId,
-      nick: message.nick,
-      text: message.text,
-      contextToken: null,
-      unsupportedLabel: message.unsupported || "non-text",
-      mediaRefs: message.media ?? [],
-      at: message.at,
-    });
-  }
+  // 7 条通道的入站适配（字段抹平 + 记档案 + 排队）在 ./inbound.ts；
+  // 本切片只把串行队列 enqueue 与回复实现 replyTo 注入进去。
+  const inbound = createInboundHandlers({ settings, getPeers, getStatus, enqueue, replyTo });
 
   /* ===== LLM 管线（replyMode = llm） ===== */
 
@@ -789,13 +582,7 @@ export function createPipelineSlice({ state, getStatus, getPeers }: PipelineDeps
   }
 
   return {
-    onWechatInbound,
-    onDingTalkInbound,
-    onFeishuInbound,
-    onTelegramInbound,
-    onQqInbound,
-    onDiscordInbound,
-    onWecomInbound,
+    ...inbound,
     sendFromDesktop,
   };
 }
