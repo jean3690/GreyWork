@@ -25,15 +25,15 @@ greyWork/
 └── .agents/skills/           # Installed agent skills (read natively by the ACP agent)
 ```
 
-There is no lockfile for skills: the host is only an installer (`skills_market.rs` writes a
+There is no lockfile for skills: the host is only an installer (`services/skills_market.rs` writes a
 snapshot into `<workspace>/.agents/skills/<id>/`), and the ACP agent picks the directory up at its
 next session. Installed-from-market records are tracked renderer-side in `localStorage`.
 
 Skills come from two places, both landing in the same directory:
 
-- **Market** (`skills_market.rs`) — search/download from skills.sh through the host (the renderer
+- **Market** (`services/skills_market.rs`) — search/download from skills.sh through the host (the renderer
   never reaches the market directly).
-- **Bundled** (`bundled_skills.rs`) — content compiled into the host binary with `include_str!`, so
+- **Bundled** (`services/bundled_skills.rs`) — content compiled into the host binary with `include_str!`, so
   installing one needs no network and no configured source. `skills_bundled_list` serves the
   catalogue, `skills_install_bundled` resolves the files by id.
 
@@ -82,7 +82,7 @@ desktop     ← workbench (+ Tauri Rust host)
 
 - All packages use source-direct execution (TypeScript via Vite/vue-tsc), no separate build step for packages.
 - The desktop app builds via Tauri: `pnpm build` runs `vue-tsc --noEmit && vite build` as `beforeBuildCommand`, then Tauri compiles the Rust binary.
-- Domain logic lives in `crates/greywork-host/` (a single Cargo workspace at the repo root, one `Cargo.lock`), shared by both hosts. Major domains: `llm.rs` (OpenAI-compatible stream -> events), `acp_host.rs`, `mcp*.rs`, `host_exec.rs` (automation-queue consumer, **not** process exec — that is `sandbox.rs` + `process_guard.rs`), `http.rs` / `web_fetch.rs`, `workspace_fs.rs` (authorized workspace root resolution + file reads) and `git.rs` (git CLI surfaced as `git_*` commands, scoped to the authorized root). The command face has a single source of truth: `commands::COMMANDS` + `commands::dispatch`.
+- Domain logic lives in `crates/greywork-host/` (a single Cargo workspace at the repo root, one `Cargo.lock`), shared by both hosts. It is organised into four layers — `core/` (leaf utilities), `infra/` (DB, git, http, sandbox, workspace FS), `services/` (LLM, ACP, MCP, RAG, office, skills, cron), `channels/` (chat transports) and `app/` (the `commands` face) — with a strict downward dependency direction (L0 ← L1 ← L2 ← L3 ← L4). `lib.rs` re-exports every module back to the crate root, so `greywork_host::<mod>` paths are unchanged. Major domains: `services/llm/` (OpenAI-compatible stream -> events), `services/acp_host.rs`, `services/mcp*.rs`, `services/host_exec.rs` (automation-queue consumer, **not** process exec — that is `infra/sandbox.rs` + `infra/process_guard.rs`), `infra/http.rs` / `services/web_fetch.rs`, `infra/workspace_fs/` (authorized workspace root resolution + file reads) and `infra/git.rs` (git CLI surfaced as `git_*` commands, scoped to the authorized root). The command face has a single source of truth: `commands::COMMANDS` + `commands::dispatch`.
 - `apps/desktop/src-tauri/src/` keeps only `#[tauri::command]` wrappers and truly host-specific modules (`sys` / `tray` / `notify` / `close_guard` / `plugin_window` / `TauriHost`).
 - `apps/server/` is the headless host (see below).
 - Patches are applied to dependencies via `patches/` directory (e.g., `@univerjs/engine-render`, `exceljs`).
@@ -335,7 +335,7 @@ main chunk. A viewer receives only `{ tab }` and reads its own bytes through
 `lib/preview-content.ts` (`usePreviewText` / `usePreviewBinary` / `usePreviewMedia`); tabs
 themselves hold no content.
 
-Two read caps live in the host, not the renderer (`crates/greywork-host/src/workspace_fs.rs`):
+Two read caps live in the host, not the renderer (`crates/greywork-host/src/infra/workspace_fs/`):
 `MAX_BINARY_BYTES` = 20 MB for `fs_read_binary`, and `MAX_MEDIA_BYTES` = 128 MB for
 `fs_read_media`. `fs_read_media` clamps a caller-supplied `maxBytes` to its own ceiling, so the
 renderer can ask for a per-kind budget but can never raise the host's hard cap. Both are **errors**
