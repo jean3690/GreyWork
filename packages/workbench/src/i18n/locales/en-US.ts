@@ -696,6 +696,12 @@ export const enUS: MessageSchema = {
     removeMember: "Remove member",
     title: "Cowork Run",
     sub: "One leader splits the goal and delegates; members run in parallel, each in its own session, coordinating through inbox and task board.",
+    /** Sidebar "Cowork" section: the run as parent node with member slots nested under it (U5). */
+    sider: {
+      openConsole: "Open the cowork console",
+      openSlot: "Open {name}'s session",
+      slotsGroup: "Cowork member slots",
+    },
     user: "User",
     goalPlaceholder: "Describe the goal you want the team to deliver…",
     start: "Start cowork",

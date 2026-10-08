@@ -24,6 +24,11 @@ import WorkspaceRowMenu from "@/features/workspace/WorkspaceRowMenu.vue";
  */
 const props = defineProps<{
   activeSessionId: string | null;
+  /**
+   * 不在此列表出现的会话 id（当前协作 run 的成员位会话由侧栏「协作运行」区嵌套展示）。
+   * 由 Sider 从 cowork store 算出后传入 —— 本组件不认识 cowork，保持只读会话 + 分组的纯投影。
+   */
+  excludeSessionIds?: ReadonlySet<string>;
 }>();
 
 const emit = defineEmits<{ navigate: [path: string] }>();
@@ -43,6 +48,7 @@ const groups = computed<HistoryGroup[]>(() =>
       workspaceId: session.workspaceId,
     })),
     keyword: query.value,
+    excludeIds: props.excludeSessionIds,
   }),
 );
 

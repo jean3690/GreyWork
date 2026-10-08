@@ -218,6 +218,18 @@ describe("GroupedHistory · 工作区列表", () => {
     ]);
     expect(wrapper.text()).not.toContain("自由会话");
   });
+
+  it("excludeSessionIds 里的会话从列表摘除（协作成员位会话不重复出现）", () => {
+    const wrapper = mount(GroupedHistory, { props: { activeSessionId: null, excludeSessionIds: new Set(["s-a1"]) } });
+    // 工作区行照常在（空组仍是可切换落点），但被排除的会话不再出现
+    expect(wrapper.findAll(ROW).map((row) => row.attributes("data-testid"))).toEqual([
+      "workspace-row-w-alpha",
+      "workspace-row-w-beta",
+      "workspace-row-p-general",
+    ]);
+    expect(wrapper.text()).not.toContain("Alpha 会话");
+    expect(wrapper.text()).toContain("暂无会话");
+  });
 });
 
 describe("GroupedHistory · 会话状态标记", () => {

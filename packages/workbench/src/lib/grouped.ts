@@ -4,6 +4,9 @@
  * 侧栏那份列表既是浏览面也是切换器，所以无关键字时**每个工作区都出一行**（含 0 会话的），
  * 且「普通对话」兜底行恒在最后（p-general 与未绑定 null 的会话合并进去）。
  * 有关键字时退化成搜索结果：无命中会话的行整行隐去。
+ *
+ * `excludeIds` 里的会话（当前协作 run 的成员位会话）被整体排除：它们由侧栏「协作运行」区
+ * 嵌套展示，不在这里重复出现。排除发生在关键字过滤之前，因此工作区的会话计数也只算留下的。
  */
 
 export interface HistorySession {
@@ -29,15 +32,22 @@ export interface GroupingInput {
   sessions: { id: string; title: string; updatedAt: number; workspaceId: string | null }[];
   /** 按标题过滤关键字（小写已归一）。 */
   keyword?: string;
+  /**
+   * 不参与常规分组的会话 id。当前协作 run 的成员位会话走侧栏「协作运行」区嵌套展示，
+   * 这里把它们滤掉，避免同一会话在侧栏出现两次（见 features/team/CoworkSiderSection）。
+   */
+  excludeIds?: ReadonlySet<string>;
 }
 
 export function groupSessions(input: GroupingInput): HistoryGroup[] {
   const keyword = (input.keyword ?? "").trim().toLowerCase();
+  const exclude = input.excludeIds;
   const generalId = input.workspaces.find((workspace) => workspace.id === "p-general")?.id ?? null;
 
   const groupOf = (workspaceId: string | null): HistorySession[] =>
     input.sessions
       .filter((session) => session.workspaceId === workspaceId)
+      .filter((session) => !exclude?.has(session.id))
       .sort((a, b) => b.updatedAt - a.updatedAt)
       .map((session) => ({ id: session.id, title: session.title, updatedAt: session.updatedAt }))
       .filter((row) => !keyword || row.title.toLowerCase().includes(keyword));

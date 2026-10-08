@@ -684,6 +684,12 @@ export const zhCN = {
     removeMember: "移除成员",
     title: "协作运行",
     sub: "一位 leader 拆解派活，成员各自独立会话并行执行；靠收件箱与任务板协作。",
+    /** 侧栏「协作运行」区：run 作父节点、成员位嵌套其下（U5）。 */
+    sider: {
+      openConsole: "打开协作控制台",
+      openSlot: "打开 {name} 的会话",
+      slotsGroup: "协作成员位",
+    },
     user: "用户",
     goalPlaceholder: "描述这次要一起完成的目标…",
     start: "开始协作",

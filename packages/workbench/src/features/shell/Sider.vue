@@ -2,11 +2,13 @@
 import { computed } from "vue";
 import { useRoute } from "vue-router";
 import { useSessionStore } from "@/stores/session";
+import { useCoworkStore } from "@/stores/cowork";
 import { useCapabilityLoader } from "@/plugins/current";
 import { buildNavItems } from "@/lib/nav-items";
 import Icon from "@/features/shared/Icon.vue";
 import ContextMenuRegion from "@/features/shared/ContextMenuRegion.vue";
 import GroupedHistory from "@/features/workspace/GroupedHistory.vue";
+import CoworkSiderSection from "@/features/team/CoworkSiderSection.vue";
 import SiderFooter from "@/features/shell/SiderFooter.vue";
 import SiderToolbar from "@/features/shell/SiderToolbar.vue";
 import SiderRegions from "@/features/shell/SiderRegions.vue";
@@ -28,6 +30,7 @@ const emit = defineEmits<{ newChat: []; navigate: [path: string]; toggleSider: [
 
 const route = useRoute();
 const sessionStore = useSessionStore();
+const cowork = useCoworkStore();
 /** 外壳组件不装 i18n 插件也要能渲染，故用全局实例而非 useI18n。 */
 const t = i18n.global.t;
 
@@ -58,6 +61,12 @@ const activeSessionId = computed<string | null>(() => {
  * 清单构建在 lib/nav-items（标题栏搜索读同一份，避免两边漂移）。
  */
 const navItems = computed(() => buildNavItems(useCapabilityLoader().snapshot().modes));
+
+/**
+ * 当前协作 run 的成员位会话 id：从常规「工作区 → 会话」列表摘出，改由「协作运行」区嵌套展示，
+ * 避免同一会话在侧栏出现两次。cowork store 只读，本组件不碰其运行逻辑。
+ */
+const coworkSlotIds = computed(() => new Set(cowork.slots.map((slot) => slot.threadId)));
 </script>
 
 <template>
@@ -106,7 +115,10 @@ const navItems = computed(() => buildNavItems(useCapabilityLoader().snapshot().m
       <!-- 插件贡献的左栏分组（shellSidebar）：无贡献时零渲染，布局回到现状 -->
       <SiderRegions />
 
-      <GroupedHistory :active-session-id="activeSessionId" @navigate="emit('navigate', $event)" />
+      <!-- 协作运行：当前 run 作父节点、成员位嵌套其下（无 run 时零渲染） -->
+      <CoworkSiderSection />
+
+      <GroupedHistory :active-session-id="activeSessionId" :exclude-session-ids="coworkSlotIds" @navigate="emit('navigate', $event)" />
 
       <SiderFooter @open-settings="emit('openSettings')" @navigate="emit('navigate', $event)" />
     </template>

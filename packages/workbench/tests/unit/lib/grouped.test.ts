@@ -85,4 +85,29 @@ describe("groupSessions 分组逻辑", () => {
     });
     expect(groups).toEqual([]);
   });
+
+  it("excludeIds 里的会话从分组中摘除（协作成员位会话不在常规列表重复出现）", () => {
+    const groups = groupSessions({
+      workspaces,
+      sessions: [
+        session("keep", "普通会话", "p-gw-main", 100),
+        session("slot-1", "Builder · 目标", "p-gw-main", 200),
+        session("slot-2", "Reviewer · 目标", "p-gw-main", 300),
+      ],
+      excludeIds: new Set(["slot-1", "slot-2"]),
+    });
+    // 计数也只算留下的：主仓组只剩 keep 一条。
+    expect(groups[0]?.sessions.map((s) => s.id)).toEqual(["keep"]);
+  });
+
+  it("excludeIds 先于 keyword 生效：被排除的会话即使命中关键字也不出现", () => {
+    const groups = groupSessions({
+      workspaces,
+      sessions: [session("slot-1", "Builder · 目标", "p-gw-main", 100)],
+      keyword: "builder",
+      excludeIds: new Set(["slot-1"]),
+    });
+    // 主仓组被过滤空 → 整行隐去（搜索态）；只剩兜底行被 keyword 抑制 → 空
+    expect(groups).toEqual([]);
+  });
 });
