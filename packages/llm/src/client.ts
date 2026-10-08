@@ -17,6 +17,8 @@ export function createLlmClient(): LlmClient {
     isAvailable: () => transport.isAvailable(),
     chat: (params) => gate(() => transport.chat(params)),
     stop: (requestId) => transport.stop(requestId),
+    agentRun: (params) => gate(() => transport.agentRun(params)),
+    stopAgent: (requestId) => transport.stopAgent(requestId),
     onEvent: (listener) => transport.onEvent(listener),
     listModels: (connection) => gate(() => transport.listModels(connection)),
     embed: (params) => gate(() => transport.embed(params)),
@@ -25,6 +27,7 @@ export function createLlmClient(): LlmClient {
 }
 
 export type {
+  LlmAgentParams,
   LlmChatMessage,
   LlmChatParams,
   LlmClient,

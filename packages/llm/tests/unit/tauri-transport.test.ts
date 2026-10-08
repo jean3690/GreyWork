@@ -131,4 +131,49 @@ describe("TauriLlmTransport", () => {
     expect(h.invoke).toHaveBeenCalledWith("llm_chat_start", expect.objectContaining({ clientToken: "turn-1" }));
     vi.unstubAllGlobals();
   });
+
+  it("agentRun 打到 llm_agent_start，参数形状与 chat 一致外加 maxRounds", async () => {
+    h.invoke.mockResolvedValue(9);
+    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
+    const transport = new TauriLlmTransport();
+    const id = await transport.agentRun({
+      baseUrl: "http://localhost:11434",
+      model: "qwen2.5",
+      messages: [{ role: "user", content: "看看 src" }],
+      clientToken: "turn-a",
+      maxRounds: 8,
+    });
+    expect(id).toBe(9);
+    expect(h.invoke).toHaveBeenCalledWith("llm_agent_start", {
+      baseUrl: "http://localhost:11434",
+      model: "qwen2.5",
+      apiKeyEnv: "",
+      messages: [{ role: "user", content: "看看 src" }],
+      reasoningEffort: "",
+      headers: {},
+      temperature: null,
+      maxTokens: null,
+      maxRounds: 8,
+      clientToken: "turn-a",
+    });
+    vi.unstubAllGlobals();
+  });
+
+  it("agentRun 缺省 maxRounds 传 null（宿主取自己的默认值并硬夹上限）", async () => {
+    h.invoke.mockResolvedValue(1);
+    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
+    const transport = new TauriLlmTransport();
+    await transport.agentRun({ baseUrl: "http://x", model: "m", messages: [] });
+    expect(h.invoke).toHaveBeenCalledWith("llm_agent_start", expect.objectContaining({ maxRounds: null }));
+    vi.unstubAllGlobals();
+  });
+
+  it("stopAgent 打到 llm_agent_stop（与 stop 是不同的宿主句柄表）", async () => {
+    h.invoke.mockResolvedValue(undefined);
+    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
+    const transport = new TauriLlmTransport();
+    await transport.stopAgent(9);
+    expect(h.invoke).toHaveBeenCalledWith("llm_agent_stop", { requestId: 9 });
+    vi.unstubAllGlobals();
+  });
 });

@@ -158,6 +158,28 @@ function setProviderEnabled(id: string, enabled: boolean): void {
   settings.upsertModelProvider({ ...provider, enabled });
 }
 
+/**
+ * 本机 agent 回合开关即时落盘（不入草稿脏检查：勾选即生效，与启用开关同一风格）。
+ *
+ * 逐供应商而不是全局：tool calling 是**端点/模型**的能力，不支持的网关会直接 400，
+ * 同一时刻另一个供应商完全正常 —— 做成全局开关就等于「要么全开、要么全关」。
+ */
+function setProviderAgentMode(enabled: boolean): void {
+  const current = activeProvider.value;
+  if (!current) return;
+  settings.upsertModelProvider({ ...current, agentMode: enabled });
+}
+
+/** 工具回合上限即时落盘；空串 = 用宿主默认值（12 轮），宿主另有硬上限兜底。 */
+function setProviderAgentRounds(raw: string): void {
+  const current = activeProvider.value;
+  if (!current) return;
+  const trimmed = raw.trim();
+  const rounds = trimmed === "" ? undefined : Number(trimmed);
+  if (rounds !== undefined && (!Number.isInteger(rounds) || rounds < 1 || rounds > 32)) return;
+  settings.upsertModelProvider({ ...current, agentMaxRounds: rounds });
+}
+
 /** 推理等级即时落盘（不入草稿脏检查：下拉改动即生效，与图标改动同一风格）。 */
 function setProviderEffort(effort: string): void {
   const current = activeProvider.value;
@@ -413,6 +435,34 @@ async function removeAgentDraft(): Promise<void> {
         <p class="text-[10.5px] leading-relaxed text-dim2">
           采样参数缺省不发送（由服务端默认值决定）。本地模型（Ollama / vLLM 等）常用温度 0–0.7、最大 token 限长。
         </p>
+        <label class="flex items-start gap-2.5">
+          <input
+            type="checkbox"
+            class="mt-0.5 size-4 shrink-0 cursor-pointer accent-[var(--accent)]"
+            :checked="activeProvider?.agentMode === true"
+            data-testid="provider-agent-mode"
+            @change="setProviderAgentMode(($event.target as HTMLInputElement).checked)"
+          />
+          <span class="min-w-0">
+            <span class="block text-[11.5px] text-foreground">Agent 模式（模型可用只读工具）</span>
+            <span class="block text-[10.5px] leading-relaxed text-dim2">
+              开启后该供应商走多轮工具回合：模型可调 <code class="font-mono">read_file</code> / <code class="font-mono">list_dir</code> /
+              <code class="font-mono">git_log</code>，在 GreyWork 自己的授权面内执行，直到给出结论。 端点不支持 tool calling
+              时请保持关闭（会返回 400）。
+            </span>
+          </span>
+        </label>
+        <div v-if="activeProvider?.agentMode === true" class="flex items-center gap-2">
+          <span class="w-20 shrink-0 text-[11.5px] text-dim2">工具轮数上限</span>
+          <input
+            :value="activeProvider.agentMaxRounds === undefined ? '' : String(activeProvider.agentMaxRounds)"
+            inputmode="numeric"
+            data-testid="provider-agent-max-rounds"
+            class="min-w-0 flex-1 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-1.5 font-mono text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-line-2"
+            placeholder="留空 = 宿主默认 12 轮"
+            @change="setProviderAgentRounds(($event.target as HTMLInputElement).value)"
+          />
+        </div>
         <p v-if="providerDraftError" class="text-[11px] text-destructive">{{ providerDraftError }}</p>
         <div class="flex items-center justify-between gap-2">
           <button

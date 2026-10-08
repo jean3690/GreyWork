@@ -3,6 +3,7 @@
 // 图标走 localStorage 覆盖层、不经这条命令，保持可改。
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mount, type VueWrapper } from "@vue/test-utils";
+import { nextTick } from "vue";
 import { createPinia, setActivePinia } from "pinia";
 
 const h = vi.hoisted(() => ({
@@ -22,6 +23,7 @@ vi.mock("@greywork/host-ipc", async (importOriginal) => ({
 
 import AgentSettingsPane from "@/features/settings/AgentSettingsPane.vue";
 import { i18n } from "@/i18n";
+import { useSettingsStore } from "@/stores/settings";
 
 const mounted: VueWrapper[] = [];
 
@@ -88,5 +90,49 @@ describe("AgentSettingsPane · agent 目录只读门", () => {
     for (const checkbox of wrapper.findAll('[data-testid^="agent-enable-"]')) {
       expect(checkbox.attributes("disabled")).toBeUndefined();
     }
+  });
+});
+
+describe("AgentSettingsPane · 模型供应商的 agent 模式开关", () => {
+  it("默认关闭；勾选即时落盘并展开轮数上限，关掉后收起", async () => {
+    const wrapper = await mountPane(false);
+    const settings = useSettingsStore();
+    const first = settings.modelProviders[0];
+    settings.selectModelProvider(first.id);
+    await nextTick();
+
+    const toggle = () => wrapper.get('[data-testid="provider-agent-mode"]');
+    expect((toggle().element as HTMLInputElement).checked).toBe(false);
+    expect(wrapper.find('[data-testid="provider-agent-max-rounds"]').exists()).toBe(false);
+
+    await toggle().setValue(true);
+    expect(settings.modelProviders.find((p) => p.id === first.id)?.agentMode).toBe(true);
+    expect(wrapper.find('[data-testid="provider-agent-max-rounds"]').exists()).toBe(true);
+
+    await wrapper.get('[data-testid="provider-agent-max-rounds"]').setValue("6");
+    expect(settings.modelProviders.find((p) => p.id === first.id)?.agentMaxRounds).toBe(6);
+
+    await toggle().setValue(false);
+    expect(settings.modelProviders.find((p) => p.id === first.id)?.agentMode).toBe(false);
+    expect(wrapper.find('[data-testid="provider-agent-max-rounds"]').exists()).toBe(false);
+  });
+
+  // 越界的轮数不该静默落盘：那会让用户以为设了 999 轮，实际被宿主硬夹到 32。
+  it("轮数越界 / 非整数一律忽略（宿主另有硬上限，输入层先挡一道）", async () => {
+    const wrapper = await mountPane(false);
+    const settings = useSettingsStore();
+    const first = settings.modelProviders[0];
+    settings.selectModelProvider(first.id);
+    await nextTick();
+    await wrapper.get('[data-testid="provider-agent-mode"]').setValue(true);
+
+    for (const bad of ["0", "999", "3.5", "abc"]) {
+      await wrapper.get('[data-testid="provider-agent-max-rounds"]').setValue(bad);
+      expect(settings.modelProviders.find((p) => p.id === first.id)?.agentMaxRounds).toBeUndefined();
+    }
+    // 空串 = 回到「用宿主默认」
+    await wrapper.get('[data-testid="provider-agent-max-rounds"]').setValue("8");
+    await wrapper.get('[data-testid="provider-agent-max-rounds"]').setValue("");
+    expect(settings.modelProviders.find((p) => p.id === first.id)?.agentMaxRounds).toBeUndefined();
   });
 });

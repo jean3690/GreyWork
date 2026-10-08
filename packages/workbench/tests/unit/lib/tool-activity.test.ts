@@ -6,6 +6,7 @@ import {
   buildActivityRows,
   diffStatOf,
   durationOf,
+  llmToolEventToActivity,
   mergeToolActivities,
   parseToolActivityPayload,
   parseToolCallUpdate,
@@ -556,5 +557,58 @@ describe("AskUserQuestion 识别", () => {
     const done = parseToolCallUpdate({ update: { sessionUpdate: "tool_call_update", toolCallId: "ask2", status: "completed" } }, T + 500);
     const merged = mergeToolActivities([first as ToolActivity], [done as ToolActivity]);
     expect(merged[0]?.ask?.questions).toHaveLength(1);
+  });
+});
+
+describe("llmToolEventToActivity（本机 agent 回合的工具事件）", () => {
+  it("call 帧：in_progress + 从入参拼出的一行描述 + 入参可展开", () => {
+    const activity = llmToolEventToActivity("call", { id: "call_a", name: "read_file", input: { path: "src/main.rs" } }, T);
+    expect(activity).toMatchObject({
+      toolCallId: "call_a",
+      kind: "read",
+      status: "in_progress",
+      finishedAt: null,
+      name: "read_file",
+      description: "读取 src/main.rs",
+    });
+    expect(activity?.detail?.args).toContain('"path": "src/main.rs"');
+  });
+
+  it("list_dir 省略 path 时描述落回「工作区根目录」（不该只显示裸工具名）", () => {
+    expect(llmToolEventToActivity("call", { id: "c1", name: "list_dir" }, T)?.description).toBe("列出工作区根目录");
+    expect(llmToolEventToActivity("call", { id: "c2", name: "list_dir", input: {} }, T)?.description).toBe("列出工作区根目录");
+    expect(llmToolEventToActivity("call", { id: "c3", name: "git_log", input: { limit: 5 } }, T)?.description).toBe("读取提交历史");
+  });
+
+  it("result 帧：成功 completed、失败 failed（失败也必须 settle，否则时间线永远转圈）", () => {
+    expect(
+      llmToolEventToActivity(
+        "result",
+        { id: "call_a", name: "read_file", ok: true, summary: "读取 x（11 字符）", preview: "hello" },
+        T + 5,
+      ),
+    ).toMatchObject({ status: "completed", finishedAt: T + 5, description: "读取 x（11 字符）" });
+    const failed = llmToolEventToActivity(
+      "result",
+      { id: "call_b", name: "read_file", ok: false, error: "路径未授权", path: "/etc/passwd" },
+      T + 5,
+    );
+    expect(failed).toMatchObject({ status: "failed", finishedAt: T + 5, error: "路径未授权", path: "/etc/passwd" });
+  });
+
+  // 无 id 的活动过不了 mergeToolActivities 的去重锚点，进了时间线就是一行永不 settle 的僵尸。
+  it("缺 id 的事件返回 null（丢弃而不是造一个无法配对的活动）", () => {
+    expect(llmToolEventToActivity("call", { name: "read_file" }, T)).toBeNull();
+    expect(llmToolEventToActivity("result", { name: "read_file", ok: true }, T)).toBeNull();
+    expect(llmToolEventToActivity("call", { id: "", name: "read_file" }, T)).toBeNull();
+  });
+
+  it("call + result 能被 mergeToolActivities 配成一条（与 ACP 侧同一套锚点）", () => {
+    const call = llmToolEventToActivity("call", { id: "call_a", name: "read_file", input: { path: "a.txt" } }, T);
+    const result = llmToolEventToActivity("result", { id: "call_a", name: "read_file", ok: true, summary: "读取 a.txt" }, T + 40);
+    const merged = mergeToolActivities([call as ToolActivity], [result as ToolActivity]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.status).toBe("completed");
+    expect(merged[0]?.description).toBe("读取 a.txt");
   });
 });
