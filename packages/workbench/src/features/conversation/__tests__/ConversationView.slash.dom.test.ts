@@ -118,7 +118,7 @@ describe("ConversationView · 斜杠命令", () => {
     await composer(wrapper).setValue("/zzz");
     await composer(wrapper).trigger("keydown", { key: "Enter" });
 
-    expect(submit).toHaveBeenCalledWith("/zzz", []);
+    expect(submit).toHaveBeenCalledWith("/zzz", [], []);
     chat.clearSim();
   });
 
@@ -148,7 +148,7 @@ describe("ConversationView · 斜杠命令", () => {
 
     await composer(wrapper).setValue("/compact");
     await composer(wrapper).trigger("keydown", { key: "Enter" });
-    expect(dispatch).toHaveBeenCalledWith("/compact", []);
+    expect(dispatch).toHaveBeenCalledWith("/compact", [], []);
     expect(composerValue(wrapper)).toBe("");
 
     await composer(wrapper).setValue("/deploy");

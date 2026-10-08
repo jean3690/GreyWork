@@ -18,6 +18,7 @@ import { applyAppearance as applyAppearanceToDom } from "@/lib/theme";
 import { modeOfShortcut, visibilityOf, type LayoutMode } from "@/lib/layout-modes";
 import { syncCloseToTray, syncTrayLabels, useTrayBridge, type TrayLabels } from "@/lib/tray-bridge";
 import { useCloseGuard } from "@/lib/close-guard";
+import { useQueueBridge } from "@/lib/queue-bridge";
 import { hasDirtyPreviewTabs, pendingDiscard, requestLeave } from "@/lib/preview-edit-guard";
 import { bootPlugins } from "@/plugins/runtime";
 import Sider from "@/features/shell/Sider.vue";
@@ -62,6 +63,11 @@ const preview = usePreviewStore();
 const workspace = useWorkspacePanelStore();
 const activity = useActivityStore();
 const layout = useLayoutStore();
+
+// 命令队列的补发要经 dispatchIntent 分流（否则 ACP 会话的待发指令会走本地 LLM）。
+// 与托盘桥 / 关闭守卫同为应用级接线，故挂在外壳；队列补发在 store 内触发，桥必须在
+// setup 期就位，所以这里同步调用而不是放进 onMounted。
+useQueueBridge();
 
 const darkMedia =
   typeof window !== "undefined" && typeof window.matchMedia === "function" ? window.matchMedia("(prefers-color-scheme: dark)") : null;

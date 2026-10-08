@@ -99,6 +99,7 @@ export const zhCN = {
     },
     message: {
       copyBody: "复制正文",
+      rewind: "回退到这里",
     },
     composer: {
       cut: "剪切",
@@ -216,6 +217,9 @@ export const zhCN = {
       ask: "问 AI",
       explain: "解释",
       rewrite: "改写",
+      comment: "评论",
+      commentPlaceholder: "对这段写一句批注…",
+      commentSubmit: "添加",
       prompt: {
         ask: "关于我附加的这段内容：",
         explain: "请解释我附加的这段内容，说明它的含义与背景。",
@@ -568,6 +572,21 @@ export const zhCN = {
       processing: "处理中…",
       emptyTitle: "新对话已就绪",
       emptyHint: "输入指令开始工作，回车发送。",
+      placeholderQueued: "当前回合进行中，Enter 加入待发队列…",
+    },
+    /** 待发队列（M5）：回合进行中发出的指令先入队，回合结束后自动补发。 */
+    queue: {
+      heading: "待发指令",
+      hint: "当前回合结束后自动发送",
+      enqueue: "加入待发",
+      edit: "取回编辑",
+      remove: "移除待发指令",
+    },
+    /** 选区评论草稿：预览划词「评论」挂上的批注，发送后渲染为消息注解。 */
+    comment: {
+      heading: "选区评论",
+      hint: "发送后作为批注挂在消息上",
+      remove: "移除评论",
     },
     busy: "任务执行中…",
     plan: "计划",
@@ -611,6 +630,13 @@ export const zhCN = {
     configMode: "会话模式",
     planMode: "计划模式",
     imagePreviewClose: "点击任意处或按 Esc 关闭。",
+    rewindUnavailable: "这条消息没有可回退的工作区快照",
+    rewindBusy: "回合进行中，无法回退",
+    rewindFailed: "回退失败：{detail}",
+    rewindConfirmTitle: "回退到这条消息之前？",
+    rewindConfirmBody:
+      "工作区文件会硬恢复到这条消息开跑前的状态（之后新建的文件会被删除）。这条消息及其之后的全部对话都会被丢弃。agent 会重置上下文——它将忘记这段对话，无法回忆之前做过什么。",
+    rewindConfirmAction: "回退",
     stop: "停止生成",
     send: "发送",
     uploadFile: "上传文件 / 图片",

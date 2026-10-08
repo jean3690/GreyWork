@@ -22,7 +22,8 @@ import { useTurnActive } from "@/lib/turn-activity";
 import { dispatchIntent } from "@/lib/dispatch-intent";
 import { useSlashCommands } from "@/lib/use-slash-commands";
 import { materializeAttachments } from "@/state/attachment-library";
-import type { Attachment } from "@/types";
+import { quoteSummary } from "@/lib/message-comments";
+import type { Attachment, MessageComment } from "@/types";
 import logoUrl from "@/assets/logo.svg?url";
 
 /**
@@ -38,6 +39,8 @@ const workspaceStore = useWorkspaceStore();
 const settings = useSettingsStore();
 
 const draft = ref("");
+/** 选区评论草稿（预览划词 → 评论）：随首条消息挂上，发后清空。 */
+const comments = ref<MessageComment[]>([]);
 
 /** 图片可用性：本地 LLM 无能力声明（交给供应商报错），ACP 以 agent 声明为准。 */
 const imagesAllowed = computed(() => !agent.routeToAcp || agent.acpImageSupport !== false);
@@ -79,29 +82,36 @@ const {
 
 // 本视图能接收对话注入：注册接收方（预览划词工具条据此判断可用）+ 挂附件桥与预填桥。
 // 网页正文「发送到对话」与划词工具条都走这条线，落到同一份附件草稿。
-useChatReceiver({ draft, textarea: textareaEl, attachments });
+useChatReceiver({ draft, textarea: textareaEl, attachments, comments });
 
-async function run(prompt: string, items: readonly Attachment[] = []): Promise<void> {
+async function run(prompt: string, items: readonly Attachment[] = [], pending: readonly MessageComment[] = []): Promise<void> {
   const workspaceId = workspaceStore.activeWorkspaceId;
   const session = sessionStore.createSession(workspaceId);
   sessionStore.setActive(session.id);
   chat.activeThreadId = session.id;
   // 先跳转再落库：附件可能是几 MB 的图片，写盘不该把用户按在引导页上等。
   void router.push(`/conversation/${session.id}`);
-  // 允许「只有附件、没有文字」：图片本身就是完整意图（截图问答的常态）。
-  if (prompt.trim() || items.length) {
+  // 允许「只有附件 / 评论、没有文字」：图片与批注本身就是完整意图。
+  if (prompt.trim() || items.length || pending.length) {
     // 附件落进新会话的附件库后再派发；落库失败会以内联降级，附件不会丢。
     // 分流（ACP / 编排 / 本地管线）在 lib/dispatch-intent，与对话页同一份。
     const ready = items.length ? await materializeAttachments(session.id, items) : [...items];
-    await dispatchIntent(prompt, ready, { allowOrchestrate: true });
+    await dispatchIntent(prompt, ready, { allowOrchestrate: true, comments: pending });
   }
 }
 
 function onSubmit(): void {
-  if (!draft.value.trim() && attachmentItems.value.length === 0) return;
+  if (!draft.value.trim() && attachmentItems.value.length === 0 && comments.value.length === 0) return;
   const items = attachmentItems.value.length ? takeAttachments() : [];
-  void run(draft.value, items);
+  const pending = comments.value;
+  comments.value = [];
+  void run(draft.value, items, pending);
   draft.value = "";
+}
+
+/** 移除一条待发选区评论。 */
+function removeComment(id: string): void {
+  comments.value = comments.value.filter((comment) => comment.id !== id);
 }
 
 function onKeydown(event: KeyboardEvent): void {
@@ -151,6 +161,27 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
 
         <div class="flex w-full flex-col gap-2.5">
           <AgentProviderBar />
+          <!-- 选区评论草稿：挂在本条消息上的批注（展示被引用的原文片段）。 -->
+          <div v-if="comments.length" data-testid="comment-draft" class="flex flex-col gap-1.5">
+            <div
+              v-for="comment in comments"
+              :key="comment.id"
+              data-testid="comment-draft-item"
+              class="flex items-start gap-2 rounded-[calc(10px*var(--gw-radius-scale))] border border-line bg-panel px-3 py-2"
+            >
+              <Icon name="message" :size="12" class="mt-0.5 shrink-0 text-dim2" />
+              <span class="min-w-0 flex-1 truncate text-[12px] text-dim" :title="comment.quote">{{ quoteSummary(comment.quote) }}</span>
+              <button
+                type="button"
+                data-testid="comment-draft-remove"
+                class="grid size-5 shrink-0 place-items-center rounded-[calc(6px*var(--gw-radius-scale))] text-dim2 transition-colors hover:text-destructive"
+                :aria-label="t('chat.comment.remove')"
+                @click="removeComment(comment.id)"
+              >
+                <Icon name="close" :size="12" />
+              </button>
+            </div>
+          </div>
           <div
             data-attachment-dropzone
             data-testid="composer-card"

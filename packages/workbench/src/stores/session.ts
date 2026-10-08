@@ -379,6 +379,20 @@ export const useSessionStore = defineStore("session", () => {
     persist();
   }
 
+  /**
+   * 回退：只保留前 `keepCount` 条消息，丢弃其余（「会话 + 文件一起回退」的会话侧）。
+   * 消息只有数组位置这一个顺序键，按索引截断即可；keepCount 越界按夹紧处理。
+   */
+  function truncateMessages(id: string, keepCount: number): void {
+    const record = getSession(id);
+    if (!record) return;
+    const keep = Math.max(0, keepCount);
+    if (record.messages.length <= keep) return;
+    record.messages.splice(keep);
+    touch(id);
+    persist();
+  }
+
   /** 工作区删除后把其会话迁移到「普通对话」（不连带删除用户对话历史）。 */
   function reassignWorkspace(fromWorkspaceId: string, toWorkspaceId: string | null): void {
     let changed = false;
@@ -411,6 +425,7 @@ export const useSessionStore = defineStore("session", () => {
     touch,
     setActive,
     appendMessage,
+    truncateMessages,
     reassignWorkspace,
     sessionsOf,
     /** 深层就地修改后打脏，500ms 防抖合并落盘（替代曾经的 deep watch）。 */

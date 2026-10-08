@@ -47,7 +47,7 @@ describe("dispatchIntent · ACP 路径", () => {
     const s = seed();
     s.agent.routeToAcp = true;
     await dispatchIntent("改一下接口", [FILE]);
-    expect(s.dispatchToAcp).toHaveBeenCalledWith("改一下接口", [FILE]);
+    expect(s.dispatchToAcp).toHaveBeenCalledWith("改一下接口", [FILE], []);
     expect(s.submitText).not.toHaveBeenCalled();
   });
 
@@ -56,7 +56,7 @@ describe("dispatchIntent · ACP 路径", () => {
     s.agent.routeToAcp = true;
     useSettingsStore().planMode = true;
     await dispatchIntent("改一下接口", [], { planGate: true });
-    expect(s.beginAcpPlan).toHaveBeenCalledWith("改一下接口", []);
+    expect(s.beginAcpPlan).toHaveBeenCalledWith("改一下接口", [], []);
     expect(s.dispatchToAcp).not.toHaveBeenCalled();
   });
 
@@ -65,7 +65,7 @@ describe("dispatchIntent · ACP 路径", () => {
     s.agent.routeToAcp = true;
     useSettingsStore().planMode = false;
     await dispatchIntent("改一下接口", [], { planGate: true });
-    expect(s.dispatchToAcp).toHaveBeenCalledWith("改一下接口", []);
+    expect(s.dispatchToAcp).toHaveBeenCalledWith("改一下接口", [], []);
     expect(s.beginAcpPlan).not.toHaveBeenCalled();
   });
 
@@ -75,7 +75,15 @@ describe("dispatchIntent · ACP 路径", () => {
     useSettingsStore().planMode = true;
     await dispatchIntent("继续", []);
     expect(s.beginAcpPlan).not.toHaveBeenCalled();
-    expect(s.dispatchToAcp).toHaveBeenCalledWith("继续", []);
+    expect(s.dispatchToAcp).toHaveBeenCalledWith("继续", [], []);
+  });
+
+  it("选区评论随派发透传给 ACP", async () => {
+    const s = seed();
+    s.agent.routeToAcp = true;
+    const comments = [{ id: "c1", quote: "原句", note: "改这里", createdAt: 1 }];
+    await dispatchIntent("改一下", [], { comments });
+    expect(s.dispatchToAcp).toHaveBeenCalledWith("改一下", [], comments);
   });
 });
 
@@ -84,7 +92,7 @@ describe("dispatchIntent · 本地管线", () => {
     const s = seed();
     s.agent.routeToAcp = false;
     await dispatchIntent("写个周报", [FILE]);
-    expect(s.submitText).toHaveBeenCalledWith("写个周报", [FILE]);
+    expect(s.submitText).toHaveBeenCalledWith("写个周报", [FILE], []);
     expect(s.maybeOrchestrate).not.toHaveBeenCalled();
   });
 
@@ -103,6 +111,16 @@ describe("dispatchIntent · 本地管线", () => {
     s.maybeOrchestrate.mockReturnValue(true);
     await dispatchIntent("自动执行部署", [FILE], { allowOrchestrate: true });
     expect(s.maybeOrchestrate).not.toHaveBeenCalled();
-    expect(s.submitText).toHaveBeenCalledWith("自动执行部署", [FILE]);
+    expect(s.submitText).toHaveBeenCalledWith("自动执行部署", [FILE], []);
+  });
+
+  it("带评论时跳过编排（planner 只吃纯文本，评论的指代会丢）", async () => {
+    const s = seed();
+    s.agent.routeToAcp = false;
+    s.maybeOrchestrate.mockReturnValue(true);
+    const comments = [{ id: "c1", quote: "原句", note: "改这里", createdAt: 1 }];
+    await dispatchIntent("自动执行部署", [], { allowOrchestrate: true, comments });
+    expect(s.maybeOrchestrate).not.toHaveBeenCalled();
+    expect(s.submitText).toHaveBeenCalledWith("自动执行部署", [], comments);
   });
 });

@@ -10,7 +10,8 @@ import { useChatStore } from "@/stores/chat";
 import { useSessionStore } from "@/stores/session";
 import { useSettingsStore, type PermTier } from "@/stores/settings";
 import { useWorkspaceStore } from "@/stores/workspace";
-import type { Attachment, ThreadMessage } from "@/types";
+import { useNoticeStore } from "@/stores/notice";
+import type { Attachment, MessageComment, ThreadMessage } from "@/types";
 import AcpSessionConfig from "@/features/conversation/AcpSessionConfig.vue";
 import AgentProviderBar from "@/features/conversation/AgentProviderBar.vue";
 import Icon from "@/features/shared/Icon.vue";
@@ -26,6 +27,7 @@ import {
 import { copyText } from "@/lib/clipboard";
 import { copySelection, cutSelection, hasTextSelection, pasteInto, selectAllText } from "@/lib/textarea-actions";
 import ConversationMessage from "@/features/conversation/ConversationMessage.vue";
+import ConfirmDialog from "@/features/settings/ConfirmDialog.vue";
 import SessionStatusIndicator from "@/features/shared/SessionStatusIndicator.vue";
 import AttachmentTray from "@/features/conversation/AttachmentTray.vue";
 import SlashCommandMenu from "@/features/conversation/SlashCommandMenu.vue";
@@ -34,6 +36,7 @@ import { useChatReceiver } from "@/lib/use-chat-receiver";
 import { useSessionStatus } from "@/lib/session-status";
 import { useTurnActive } from "@/lib/turn-activity";
 import { dispatchIntent } from "@/lib/dispatch-intent";
+import { quoteSummary } from "@/lib/message-comments";
 import { useSlashCommands } from "@/lib/use-slash-commands";
 import { materializeAttachments } from "@/state/attachment-library";
 
@@ -49,11 +52,16 @@ const chat = useChatStore();
 const sessionStore = useSessionStore();
 const settings = useSettingsStore();
 const workspaceStore = useWorkspaceStore();
+const notice = useNoticeStore();
 
 const draft = ref("");
+/** 选区评论草稿（预览划词 → 评论）：发送时挂到消息上，发后清空。 */
+const comments = ref<MessageComment[]>([]);
 const scrollEl = ref<HTMLElement | null>(null);
 /** 钉底锚定（虚拟列表用）：默认底部；syncActive 切会话时重置为 true。 */
 const pinnedToBottom = ref(true);
+/** 会话回退目标：非 null 时挂确认弹层（见 performRewind）。 */
+const rewindTarget = ref<ThreadMessage | null>(null);
 
 const sessionId = computed(() => {
   const raw = route.params.conversationId;
@@ -203,33 +211,58 @@ const {
   textarea: textareaEl,
   onSend: (text) => {
     draft.value = text;
-    send();
+    void send();
   },
   canSend: () => !turnActive.value,
 });
 
 // 本视图能接收对话注入：注册接收方（预览划词工具条据此判断可用）+ 挂附件桥与预填桥。
 // 网页正文「发送到对话」与划词工具条都走这条线，落到同一份附件草稿。
-useChatReceiver({ draft, textarea: textareaEl, attachments });
+useChatReceiver({ draft, textarea: textareaEl, attachments, comments });
 
 /**
  * 带附件的派发：先把草稿落进会话附件库（路径化存储），再交给统一分流点
  * （计划门 / 编排判定 / 后端路由都在 lib/dispatch-intent，别在这里重写一遍）。
  * 落库失败会以内联数据降级，附件不会丢。
  */
-async function dispatchWithAttachments(text: string, items: readonly Attachment[]): Promise<void> {
+async function dispatchWithAttachments(text: string, items: readonly Attachment[], pending: readonly MessageComment[]): Promise<void> {
   const threadId = sessionId.value || chat.activeThreadId;
   const ready = items.length ? await materializeAttachments(threadId, items) : [...items];
-  await dispatchIntent(text, ready, { planGate: true, allowOrchestrate: true });
+  await dispatchIntent(text, ready, { planGate: true, allowOrchestrate: true, comments: pending });
 }
 
-function send(): void {
+async function send(): Promise<void> {
   if (!canSend.value) return;
   const text = draft.value.trim();
   const items = attachmentItems.value.length ? takeAttachments() : [];
-  void dispatchWithAttachments(text, items);
+  const pending = comments.value;
   draft.value = "";
+  comments.value = [];
+  // 回合进行中不再禁发：入待发队列，回合结束后自动补发（Delta 式「待发草稿」）。
+  // 附件同样先落库再入队 —— 否则补发时附件没有磁盘路径（与立即派发走同一条路）。
+  // 评论随队列入队，补发时一并挂回消息。
+  if (turnActive.value) {
+    const threadId = sessionId.value || chat.activeThreadId;
+    const ready = items.length ? await materializeAttachments(threadId, items) : items;
+    chat.enqueueCommand(text, [...ready], pending);
+  } else {
+    void dispatchWithAttachments(text, items, pending);
+  }
   scrollToBottom();
+}
+
+/** 移除一条待发选区评论（评论已追加进草稿的批注文本需用户自行删除）。 */
+function removeComment(id: string): void {
+  comments.value = comments.value.filter((comment) => comment.id !== id);
+}
+
+/** 把一条待发指令取回输入框编辑：出队 + 回填 + 聚焦。 */
+function editPending(id: string): void {
+  const item = chat.commandQueue.find((candidate) => candidate.id === id);
+  if (!item) return;
+  draft.value = item.input;
+  chat.removeCommand(id);
+  void nextTick(() => textareaEl.value?.focus());
 }
 
 function onKeydown(event: KeyboardEvent): void {
@@ -237,7 +270,7 @@ function onKeydown(event: KeyboardEvent): void {
   if (handleSlashKeydown(event)) return;
   if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
-    send();
+    void send();
   }
 }
 
@@ -245,8 +278,20 @@ function goBack(): void {
   void router.push("/guid");
 }
 
-/** 发送按钮可用：有文字或附件，且当前回合不在跑（斜杠菜单与按钮共用同一判定）。 */
-const canSend = computed(() => !turnActive.value && (draft.value.trim().length > 0 || attachmentItems.value.length > 0));
+/** 有可发送内容（文字 / 附件 / 选区评论）。回合进行中不再禁发 —— 发送会进待发队列。 */
+const hasContent = computed(() => draft.value.trim().length > 0 || attachmentItems.value.length > 0 || comments.value.length > 0);
+/** 发送按钮可用：与斜杠菜单共用「有没有内容」这一条（回合状态不再参与）。 */
+const canSend = computed(() => hasContent.value);
+
+/** 待发队列：全局队列按语义只属于「正在跑的会话」，别的会话不显示。 */
+const pendingItems = computed(() => (chat.runningSessionId === sessionId.value ? chat.commandQueue : []));
+
+/** 发送按钮文案：回合进行中改叫「加入待发」。 */
+const sendLabel = computed(() => (turnActive.value ? t("chat.queue.enqueue") : t("chat.send")));
+/** 输入框占位：回合进行中提示会入队。 */
+const composerPlaceholder = computed(() =>
+  turnActive.value ? t("chat.composer.placeholderQueued") : t("chat.composer.placeholderThread"),
+);
 
 /** 权限档位胶囊文案（grey 外壳字面量，不走 i18n）。 */
 const PERM_TIER_LABELS: Record<PermTier, string> = {
@@ -276,11 +321,31 @@ function composerActions(): ComposerMenuActions {
   };
 }
 
+/** 可回退：只有带回合起点快照的用户消息（A3 在 sendGlobalTurn 起跑前写入 snapshotRef）。 */
+function canRewind(message: ThreadMessage): boolean {
+  return message.role === "user" && Boolean(message.snapshotRef);
+}
+
+/**
+ * 执行回退：工作区硬恢复 + 截断消息流 + 清 ACP 绑定都在 `agent.rewindTo` 里。
+ * 先关弹层再跑（与释放快照面板同套路）；失败文案走全局通知面，不在本视图另开一处错误位。
+ */
+async function performRewind(): Promise<void> {
+  const target = rewindTarget.value;
+  if (!target) return;
+  rewindTarget.value = null;
+  const error = await agent.rewindTo(sessionId.value || chat.activeThreadId, target.id);
+  if (error) notice.error(error);
+}
+
 function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
   if (target?.ctx === "message") {
     const id = target.el.dataset.messageId;
     const message = messages.value.find((candidate) => candidate.id === id);
-    return buildMessageItems(message?.content ?? null, t, { copyBody: (text) => void copyText(text) });
+    return buildMessageItems(message?.content ?? null, t, {
+      copyBody: (text) => void copyText(text),
+      ...(message && canRewind(message) ? { rewind: () => (rewindTarget.value = message) } : {}),
+    });
   }
   if (target?.ctx === "composer") return buildComposerItems(t, composerActions());
   // 页头 / 空白处：不弹自定义菜单（同时把原生菜单拦掉）。
@@ -373,6 +438,66 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
       <div class="shrink-0 border-t border-line-2 bg-panel px-4 py-3 sm:px-6">
         <div class="mx-auto flex w-full max-w-[860px] flex-col gap-2.5">
           <AgentProviderBar />
+          <!-- 选区评论草稿：挂在本条消息上的批注（展示被引用的原文片段），发送后渲染为注解。 -->
+          <div v-if="comments.length" data-testid="comment-draft" class="flex flex-col gap-1.5">
+            <div class="flex items-center gap-2 text-[10px] text-dim2">
+              <span>{{ t("chat.comment.heading") }}</span>
+              <span>{{ t("chat.comment.hint") }}</span>
+            </div>
+            <div
+              v-for="comment in comments"
+              :key="comment.id"
+              data-testid="comment-draft-item"
+              class="flex items-start gap-2 rounded-[calc(10px*var(--gw-radius-scale))] border border-line bg-panel px-3 py-2"
+            >
+              <Icon name="message" :size="12" class="mt-0.5 shrink-0 text-dim2" />
+              <span class="min-w-0 flex-1 truncate text-[12px] text-dim" :title="comment.quote">{{ quoteSummary(comment.quote) }}</span>
+              <button
+                type="button"
+                data-testid="comment-draft-remove"
+                class="grid size-5 shrink-0 place-items-center rounded-[calc(6px*var(--gw-radius-scale))] text-dim2 transition-colors hover:text-destructive"
+                :aria-label="t('chat.comment.remove')"
+                @click="removeComment(comment.id)"
+              >
+                <Icon name="close" :size="12" />
+              </button>
+            </div>
+          </div>
+          <!-- 待发草稿：回合进行中发出的指令先落这里，回合结束自动补发。
+               可「取回编辑」（出队回填输入框）或直接移除。 -->
+          <div v-if="pendingItems.length" data-testid="pending-queue" class="flex flex-col gap-1.5">
+            <div class="flex items-center gap-2 text-[10px] text-dim2">
+              <span>{{ t("chat.queue.heading") }}</span>
+              <span>{{ t("chat.queue.hint") }}</span>
+            </div>
+            <div
+              v-for="item in pendingItems"
+              :key="item.id"
+              data-testid="pending-item"
+              class="flex items-start gap-2 rounded-[calc(10px*var(--gw-radius-scale))] border border-dashed border-line-2 bg-panel px-3 py-2"
+            >
+              <span class="min-w-0 flex-1 whitespace-pre-wrap text-[12.5px] leading-relaxed text-foreground [overflow-wrap:anywhere]">{{
+                item.input
+              }}</span>
+              <button
+                type="button"
+                data-testid="pending-edit"
+                class="shrink-0 rounded-[calc(6px*var(--gw-radius-scale))] px-1.5 py-0.5 text-[11px] text-dim2 transition-colors hover:text-foreground"
+                @click="editPending(item.id)"
+              >
+                {{ t("chat.queue.edit") }}
+              </button>
+              <button
+                type="button"
+                data-testid="pending-remove"
+                class="grid size-5 shrink-0 place-items-center rounded-[calc(6px*var(--gw-radius-scale))] text-dim2 transition-colors hover:text-destructive"
+                :aria-label="t('chat.queue.remove')"
+                @click="chat.removeCommand(item.id)"
+              >
+                <Icon name="close" :size="12" />
+              </button>
+            </div>
+          </div>
           <div
             data-attachment-dropzone
             data-testid="composer-card"
@@ -396,7 +521,7 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
               :aria-controls="slashOpen ? 'slash-command-menu' : undefined"
               :aria-activedescendant="slashActiveOptionId"
               class="min-h-[76px] w-full resize-none rounded-[calc(10px*var(--gw-radius-scale))] bg-panel px-2.5 py-2 text-[14px] leading-relaxed text-foreground outline-none placeholder:text-dim"
-              :placeholder="t('chat.composer.placeholderThread')"
+              :placeholder="composerPlaceholder"
               :aria-label="t('chat.composer.ariaLabel')"
               @keydown="onKeydown"
               @blur="dismissSlashMenu"
@@ -450,7 +575,7 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
                 :disabled="!canSend"
                 @click="send"
               >
-                {{ t("chat.send") }}
+                {{ sendLabel }}
                 <Icon name="send-one" :size="13" />
               </button>
             </div>
@@ -465,5 +590,15 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
         </div>
       </div>
     </section>
+
+    <!-- 回退确认：工作区会硬恢复、消息流会截断，且 agent 上下文不可回退（必须明示）。 -->
+    <ConfirmDialog
+      v-if="rewindTarget"
+      :title="t('chat.rewindConfirmTitle')"
+      :message="t('chat.rewindConfirmBody')"
+      :confirm-label="t('chat.rewindConfirmAction')"
+      @confirm="performRewind"
+      @cancel="rewindTarget = null"
+    />
   </ContextMenuRegion>
 </template>

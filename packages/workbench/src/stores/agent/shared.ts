@@ -11,7 +11,7 @@ import { ref } from "vue";
 import { i18n } from "../../i18n";
 import { inlineFileAttachment, inlineTextAttachment } from "../../lib/attachments";
 import { readAttachmentBase64, readAttachmentText } from "../../state/attachment-library";
-import type { Attachment, ThreadMessage } from "../../types";
+import type { Attachment, MessageComment, ThreadMessage } from "../../types";
 import { notify } from "../notice";
 
 export const t = i18n.global.t;
@@ -235,6 +235,8 @@ export interface GlobalTurnOptions {
   reuseScaffold?: { threadId: string; message: ThreadMessage };
   /** 随本轮 prompt 发出的附件（图片走 image 内容块，文本内联内容，通用文件只递路径）。 */
   attachments?: readonly Attachment[];
+  /** 选区评论：挂到本轮 user 消息上，并把引用拼进 prompt（见 lib/message-comments）。 */
+  comments?: readonly MessageComment[];
   /**
    * 调用方追加的宿主能力提示（远程助手据此告诉模型「对方不在本机，怎么把文件发过去」）。
    * 与 schedule 提示不同：**hooks 存在时也注入** —— 远程回合本身就带 hooks。

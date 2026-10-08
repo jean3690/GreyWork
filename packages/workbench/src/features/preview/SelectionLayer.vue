@@ -23,6 +23,7 @@ import SelectionToolbar from "@/features/preview/SelectionToolbar.vue";
 import { resolveSemanticUnit, type AnchorRect, type SemanticUnit } from "@/lib/selection";
 import { injectSelectionIntoChat, selectionPrompt, type SelectionAction } from "@/lib/selection-injection";
 import { chatReceiverAvailable } from "@/lib/chat-receiver";
+import { appEvents } from "@/events";
 import type { PreviewTab } from "@/stores/preview";
 
 const props = defineProps<{ tab: PreviewTab; root: HTMLElement | null }>();
@@ -68,6 +69,10 @@ function capture(): void {
   // 按下按钮时浏览器可能清空选区 → selectionchange 触发 → 这里若照常 hide()，
   // 浮层会在 click 之前被拆掉，按钮就永远点不动了。快照在按下之前已经取好，不受影响。
   if (pressingToolbar) return;
+  // 焦点落在浮层里（正在评论输入框里打字）：浏览器可能因输入触发 selectionchange 并
+  // 让文档选区折叠 —— 此时若 hide()，批注打到一半浮层就没了。快照已取好，保持不动。
+  const active = document.activeElement;
+  if (active instanceof Element && active.closest('[data-testid="selection-toolbar"]')) return;
 
   const scope = resolveScope();
   const selection = window.getSelection();
@@ -151,6 +156,18 @@ function run(action: SelectionAction): void {
   hide();
 }
 
+/**
+ * 提交一条选区评论：把「选中一段 + 批注」发给输入卡（挂为消息注解 + 追加进草稿）。
+ * 与 run 一样在无接收方时什么都不发 —— 按钮此时也是 disabled，这是第二道闸。
+ */
+function runComment(note: string): void {
+  const current = snapshot.value;
+  if (!current || !chatReceiverAvailable.value) return;
+  appEvents.emit("chat:comment", { quote: current.text, note, source: props.tab.name });
+  window.getSelection()?.removeAllRanges();
+  hide();
+}
+
 onMounted(() => {
   document.addEventListener("selectionchange", onSelectionChange);
   // capture 必需：viewer 的 overflow-y-auto 滚动容器不冒泡 scroll。
@@ -173,5 +190,5 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <SelectionToolbar v-if="snapshot" :anchor="snapshot.rect" :available="available" @select="run" />
+  <SelectionToolbar v-if="snapshot" :anchor="snapshot.rect" :available="available" @select="run" @comment="runComment" />
 </template>

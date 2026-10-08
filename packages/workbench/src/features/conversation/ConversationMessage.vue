@@ -159,6 +159,21 @@ function timeLabel(ts: number): string {
         <p v-if="message.content" class="whitespace-pre-wrap text-[13.5px] leading-[1.7] text-foreground [overflow-wrap:anywhere]">
           {{ message.content }}
         </p>
+        <!-- 选区评论注解：展示这条消息批注了哪一段原文（批注文本本身已是消息正文）。 -->
+        <div v-if="message.comments?.length" data-testid="message-comments" class="flex flex-col gap-1.5">
+          <div
+            v-for="comment in message.comments"
+            :key="comment.id"
+            data-testid="message-comment"
+            class="flex gap-2 rounded-[calc(8px*var(--gw-radius-scale))] bg-panel-2 px-2.5 py-1.5"
+          >
+            <span class="w-0.5 shrink-0 rounded-full bg-cyan/50" aria-hidden="true" />
+            <div class="min-w-0 flex-1">
+              <p class="whitespace-pre-wrap text-[11.5px] leading-relaxed text-dim [overflow-wrap:anywhere]">{{ comment.quote }}</p>
+              <p v-if="comment.source" class="mt-0.5 text-[10px] text-dim2">{{ comment.source }}</p>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
     <div v-else class="flex max-w-[92%] flex-col gap-2.5">

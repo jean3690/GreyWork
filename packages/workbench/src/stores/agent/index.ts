@@ -88,6 +88,8 @@ export const useAgentStore = defineStore("agent", () => {
     dispatchToAcp: turn.dispatchToAcp,
     beginAcpPlan: turn.beginAcpPlan,
     confirmAcpPlan: turn.confirmAcpPlan,
+    /** 回退到某条用户消息之前（工作区 + 消息流一起回退；agent 上下文重置）。 */
+    rewindTo: turn.rewindTo,
     stopAcp: runtime.stopAcp,
     respondPermission: runtime.respondPermission,
     probeMcpServer: runtime.probeMcpServer,

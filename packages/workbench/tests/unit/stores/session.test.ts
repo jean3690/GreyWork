@@ -103,6 +103,21 @@ describe("基础 CRUD", () => {
     expect(store.activeSessionId).toBeNull();
   });
 
+  it("truncateMessages 只保留前 N 条（回退的会话侧）", () => {
+    const store = useSessionStore();
+    const session = store.createSession(null);
+    for (const id of ["m-1", "m-2", "m-3"]) {
+      store.appendMessage(session.id, { id, role: "user", content: id, ts: Date.now() });
+    }
+    store.truncateMessages(session.id, 1);
+    expect(store.getSession(session.id)?.messages.map((message) => message.id)).toEqual(["m-1"]);
+    // 越界（>= 长度）不动；负数夹到 0。
+    store.truncateMessages(session.id, 9);
+    expect(store.getSession(session.id)?.messages).toHaveLength(1);
+    store.truncateMessages(session.id, -3);
+    expect(store.getSession(session.id)?.messages).toHaveLength(0);
+  });
+
   it("首条用户消息自动命名，且后续不覆盖手动重命名", () => {
     const store = useSessionStore();
     const session = store.createSession(null);

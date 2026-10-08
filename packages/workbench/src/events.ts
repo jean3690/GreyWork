@@ -45,6 +45,8 @@ export interface GreyWorkEventMap {
   /** 预填输入框草稿并聚焦（预览划词 → 问 AI / 解释 / 改写）。
    *  append 时空行分隔追加，且草稿为空时等同 replace —— 不覆盖用户已写的内容。 */
   "chat:prefill": { text: string; mode?: "replace" | "append" };
+  /** 把「选中一段 + 批注」作为选区评论挂到当前输入卡的评论草稿（预览划词 → 评论）。 */
+  "chat:comment": { quote: string; note: string; source?: string };
   /** 请求打开设置弹窗（可指定分区）；远程助手页等「去设置配置」入口使用。 */
   "settings:open": { section?: string };
 }

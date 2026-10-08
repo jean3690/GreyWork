@@ -100,6 +100,7 @@ export const enUS: MessageSchema = {
     },
     message: {
       copyBody: "Copy text",
+      rewind: "Rewind to here",
     },
     composer: {
       cut: "Cut",
@@ -219,6 +220,9 @@ export const enUS: MessageSchema = {
       ask: "Ask AI",
       explain: "Explain",
       rewrite: "Rewrite",
+      comment: "Comment",
+      commentPlaceholder: "Write a note about this passage…",
+      commentSubmit: "Add",
       prompt: {
         ask: "About the passage I attached:",
         explain: "Please explain the passage I attached — what it means and its context.",
@@ -571,6 +575,21 @@ export const enUS: MessageSchema = {
       processing: "Working…",
       emptyTitle: "New conversation ready",
       emptyHint: "Type an instruction to get started; press Enter to send.",
+      placeholderQueued: "A turn is running — press Enter to queue this message…",
+    },
+    /** Pending queue (M5): instructions sent mid-turn are queued and auto-sent when the turn ends. */
+    queue: {
+      heading: "Pending instructions",
+      hint: "sent automatically when the current turn ends",
+      enqueue: "Queue",
+      edit: "Edit",
+      remove: "Remove pending instruction",
+    },
+    /** Selection-comment draft: annotations attached from preview selections, rendered on the message once sent. */
+    comment: {
+      heading: "Selection comments",
+      hint: "attached to the message as annotations once sent",
+      remove: "Remove comment",
     },
     busy: "Executing task…",
     plan: "Plan",
@@ -614,6 +633,13 @@ export const enUS: MessageSchema = {
     configMode: "Session mode",
     planMode: "Plan mode",
     imagePreviewClose: "Click anywhere or press Esc to close.",
+    rewindUnavailable: "This message has no workspace snapshot to rewind to",
+    rewindBusy: "A turn is running — can't rewind",
+    rewindFailed: "Rewind failed: {detail}",
+    rewindConfirmTitle: "Rewind to before this message?",
+    rewindConfirmBody:
+      "Workspace files will be hard-restored to the state before this message ran (files created after the snapshot are deleted). This message and everything after it will be discarded. The agent's context is reset — it will forget this conversation and cannot recall what it did.",
+    rewindConfirmAction: "Rewind",
     stop: "Stop generating",
     send: "Send",
     uploadFile: "Upload file / image",

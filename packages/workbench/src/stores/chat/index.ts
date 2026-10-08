@@ -64,6 +64,7 @@ export const useChatStore = defineStore("chat", () => {
     clearQueue: queue.clearQueue,
     sendCommand: queue.sendCommand,
     toggleQueueMode: queue.toggleQueueMode,
+    setQueueDispatch: queue.setDispatch,
     clearSim,
     ensure: session.ensure,
     submitText: submit.submitText,

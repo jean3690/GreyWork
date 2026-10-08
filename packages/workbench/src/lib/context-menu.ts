@@ -240,12 +240,25 @@ export function buildHistoryRowItems(t: Translate, actions: HistoryRowMenuAction
 
 export interface MessageMenuActions {
   copyBody: (text: string) => void;
+  /**
+   * 会话回退（A3）：仅当命中消息带回合起点快照时由调用方传入。缺省则不给「回退到这里」——
+   * 可用性判定（role=user + snapshotRef）留在视图侧，构建器只认「有没有这个动作」。
+   */
+  rewind?: () => void;
 }
 
-/** content 为空（纯占位 / 只带卡片的消息）返回空表 → 该次右键被抑制。 */
+/**
+ * 消息行条目：正文可复制时给「复制正文」；带快照的回合起点消息再多一条「回退到这里」。
+ * 两者都没有（纯占位 / 只带卡片的消息）时返回空表 → 该次右键被抑制。
+ */
 export function buildMessageItems(content: string | null, t: Translate, actions: MessageMenuActions): ContextMenuItem[] {
-  if (!content) return [];
-  return [item(t("contextMenu.message.copyBody"), () => actions.copyBody(content), { icon: "file" })];
+  const entries: ContextMenuItem[] = [];
+  if (content) entries.push(item(t("contextMenu.message.copyBody"), () => actions.copyBody(content), { icon: "file" }));
+  if (actions.rewind) {
+    if (entries.length > 0) entries.push(separator());
+    entries.push(item(t("contextMenu.message.rewind"), actions.rewind, { icon: "history", destructive: true }));
+  }
+  return entries;
 }
 
 /* ===================== 输入框 ===================== */

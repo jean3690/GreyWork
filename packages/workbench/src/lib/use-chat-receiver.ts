@@ -9,19 +9,24 @@
  */
 import { onUnmounted, type Ref } from "vue";
 import { registerChatReceiver } from "./chat-receiver";
+import { useChatCommentBridge } from "./use-chat-comment";
 import { useChatTextAttachmentBridge } from "./use-chat-text-attachment";
 import { useChatPrefillBridge } from "./use-chat-prefill";
 import type { AttachmentsController } from "./use-attachments";
+import type { MessageComment } from "../types";
 
 export interface ChatReceiverOptions {
   draft: Ref<string>;
   textarea: Ref<HTMLTextAreaElement | null>;
   attachments: AttachmentsController;
+  /** 选区评论草稿（预览划词 → 评论）；发送时挂到消息上，发后清空。 */
+  comments: Ref<MessageComment[]>;
 }
 
 export function useChatReceiver(options: ChatReceiverOptions): void {
   const unregister = registerChatReceiver();
   useChatTextAttachmentBridge(options.attachments);
   useChatPrefillBridge(options.draft, options.textarea);
+  useChatCommentBridge(options.comments, options.draft, options.textarea);
   onUnmounted(unregister);
 }
