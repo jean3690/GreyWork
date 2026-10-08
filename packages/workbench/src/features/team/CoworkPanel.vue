@@ -9,7 +9,9 @@ import { useI18n } from "vue-i18n";
 import Icon from "@/features/shared/Icon.vue";
 import Hint from "@/features/shared/Hint.vue";
 import ConversationMessage from "@/features/conversation/ConversationMessage.vue";
+import AttachmentTray from "@/features/conversation/AttachmentTray.vue";
 import { configOptionLabel } from "@/lib/acp-config-options";
+import { useAttachments } from "@/lib/use-attachments";
 import { useAgentStore } from "@/stores/agent";
 import { useChatStore } from "@/stores/chat";
 import { useCoworkStore, type CoworkMemberInit } from "@/stores/cowork";
@@ -21,6 +23,34 @@ const sessionStore = useSessionStore();
 const agentStore = useAgentStore();
 const chat = useChatStore();
 const router = useRouter();
+
+/**
+ * 两处附件草稿：起跑目标（初始资料给 leader）与「对团队说话」（发给 leader 或某成员）。
+ * sessionId 传常量 —— 这里的草稿不随会话切换清空（团队页没有会话切换语义）。
+ * 图片能力不在这里预判：各成员后端能力在派发时按目标成员门控（见 stores/cowork）。
+ */
+const {
+  items: goalItems,
+  dragging: goalDragging,
+  pick: pickGoal,
+  onPaste: onGoalPaste,
+  onDragOver: onGoalDragOver,
+  onDragLeave: onGoalDragLeave,
+  onDrop: onGoalDrop,
+  remove: removeGoal,
+  clear: clearGoal,
+} = useAttachments(() => "cowork-goal");
+const {
+  items: messageItems,
+  dragging: messageDragging,
+  pick: pickMessage,
+  onPaste: onMessagePaste,
+  onDragOver: onMessageDragOver,
+  onDragLeave: onMessageDragLeave,
+  onDrop: onMessageDrop,
+  remove: removeMessage,
+  take: takeMessage,
+} = useAttachments(() => "cowork-send");
 
 /** 可选的 ACP 后端：成员位各自挑一个，不选则跟随全局。 */
 const acpProviders = computed(() => agentStore.agentProviders);
@@ -96,12 +126,14 @@ async function startCowork(): Promise<void> {
   const failure = await cowork.startRun(
     goalDraft.value,
     memberDrafts.value.filter((member) => member.name.trim().length > 0),
+    goalItems.value.slice(),
   );
   if (failure) {
     startError.value = failure;
     return;
   }
   goalDraft.value = "";
+  clearGoal();
 }
 
 function addMember(): void {
@@ -114,9 +146,11 @@ function removeMember(index: number): void {
 
 function sendToTeam(): void {
   const text = messageDraft.value.trim();
-  if (!text) return;
-  cowork.sendUser(text, messageTarget.value || undefined);
+  const items = messageItems.value;
+  if (!text && items.length === 0) return;
+  const attachments = takeMessage();
   messageDraft.value = "";
+  void cowork.sendUser(text, messageTarget.value || undefined, attachments);
 }
 
 function resumeCowork(): void {
@@ -140,13 +174,38 @@ function openAuthor(authorId: string): void {
 <template>
   <div>
     <!-- 起一次协作 -->
-    <div v-if="!cowork.active" class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-3.5">
+    <div
+      v-if="!cowork.active"
+      data-attachment-dropzone
+      class="rounded-[calc(14px*var(--gw-radius-scale))] border bg-panel p-3.5 transition-[border-color,box-shadow]"
+      :class="goalDragging ? 'border-cyan ring-2 ring-cyan/40' : 'border-line'"
+      @dragover="onGoalDragOver"
+      @dragleave="onGoalDragLeave"
+      @drop="onGoalDrop"
+    >
       <textarea
         v-model="goalDraft"
         rows="2"
         class="w-full resize-none rounded-[calc(10px*var(--gw-radius-scale))] border border-line bg-panel-2 px-3 py-2 text-[13px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
         :placeholder="t('cowork.goalPlaceholder')"
+        @paste="onGoalPaste"
       />
+      <!-- 起跑目标随带的初始资料：作为 leader 首回合的附件一起递进去 -->
+      <AttachmentTray :items="goalItems" @remove="removeGoal" />
+      <div class="mt-2 flex items-center gap-2">
+        <Hint :text="t('chat.uploadFile')">
+          <button
+            type="button"
+            data-testid="cowork-goal-attach"
+            class="grid size-6 shrink-0 cursor-pointer place-items-center rounded-[calc(6px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground"
+            :aria-label="t('chat.uploadFile')"
+            @click="pickGoal"
+          >
+            <Icon name="plus" :size="14" />
+          </button>
+        </Hint>
+        <span class="text-[11px] text-dim2">{{ t("cowork.attachHint") }}</span>
+      </div>
       <div class="mt-3 text-[11px] font-medium text-dim">{{ t("cowork.members") }}</div>
       <div class="mt-1.5 flex flex-col gap-1.5">
         <div v-for="(member, index) in memberDrafts" :key="index" class="flex flex-wrap items-center gap-1.5">
@@ -313,28 +372,50 @@ function openAuthor(authorId: string): void {
         <p v-if="startError" class="mt-2 text-[11px] text-destructive">{{ startError }}</p>
       </div>
 
-      <!-- 对团队说话 -->
-      <div class="flex items-center gap-1.5">
-        <select
-          v-model="messageTarget"
-          class="rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-2 text-[12px] text-foreground outline-none focus:border-accent"
-        >
-          <option value="">{{ t("cowork.role.leader") }}</option>
-          <option v-for="slot in cowork.slots" :key="slot.id" :value="slot.id">{{ slot.name }}</option>
-        </select>
-        <input
-          v-model="messageDraft"
-          class="min-w-0 flex-1 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-3 py-2 text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
-          :placeholder="t('cowork.sendPlaceholder')"
-          @keydown.enter.prevent="sendToTeam"
-        />
-        <button
-          type="button"
-          class="rounded-[calc(8px*var(--gw-radius-scale))] bg-accent px-3 py-2 text-[12px] font-medium text-accent-ink"
-          @click="sendToTeam"
-        >
-          {{ t("cowork.send") }}
-        </button>
+      <!-- 对团队说话（可带附件：附件随目标成员的下一次派发一起递进去） -->
+      <div
+        data-attachment-dropzone
+        class="flex flex-col gap-1.5 rounded-[calc(12px*var(--gw-radius-scale))] border bg-panel p-2 transition-[border-color,box-shadow]"
+        :class="messageDragging ? 'border-cyan ring-2 ring-cyan/40' : 'border-line'"
+        @dragover="onMessageDragOver"
+        @dragleave="onMessageDragLeave"
+        @drop="onMessageDrop"
+      >
+        <div class="flex items-center gap-1.5">
+          <select
+            v-model="messageTarget"
+            class="rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-2 text-[12px] text-foreground outline-none focus:border-accent"
+          >
+            <option value="">{{ t("cowork.role.leader") }}</option>
+            <option v-for="slot in cowork.slots" :key="slot.id" :value="slot.id">{{ slot.name }}</option>
+          </select>
+          <input
+            v-model="messageDraft"
+            class="min-w-0 flex-1 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-3 py-2 text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
+            :placeholder="t('cowork.sendPlaceholder')"
+            @keydown.enter.prevent="sendToTeam"
+            @paste="onMessagePaste"
+          />
+          <Hint :text="t('chat.uploadFile')">
+            <button
+              type="button"
+              data-testid="cowork-send-attach"
+              class="grid size-7 shrink-0 cursor-pointer place-items-center rounded-[calc(8px*var(--gw-radius-scale))] border border-line text-dim transition-colors hover:text-foreground"
+              :aria-label="t('chat.uploadFile')"
+              @click="pickMessage"
+            >
+              <Icon name="plus" :size="13" />
+            </button>
+          </Hint>
+          <button
+            type="button"
+            class="rounded-[calc(8px*var(--gw-radius-scale))] bg-accent px-3 py-2 text-[12px] font-medium text-accent-ink"
+            @click="sendToTeam"
+          >
+            {{ t("cowork.send") }}
+          </button>
+        </div>
+        <AttachmentTray :items="messageItems" @remove="removeMessage" />
       </div>
 
       <!-- 任务板 -->

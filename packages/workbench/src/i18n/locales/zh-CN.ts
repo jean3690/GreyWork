@@ -710,6 +710,10 @@ export const zhCN = {
     speakTo: "对 {name} 说",
     sendPlaceholder: "给 leader 补充信息或调整计划…",
     send: "发送",
+    /** 附件：起跑目标与「对团队说话」都可带文件 / 图片，随目标成员的下一次派发递进去。 */
+    attachHint: "可拖入 / 粘贴文件，或点 + 添加",
+    /** 成员会话审计消息里列附件名的小标题。 */
+    inboxAttachments: "附件",
     emptyRun: "还没有协作运行。填目标、选成员，然后开始。",
     emptyTasks: "任务板还是空的——leader 会在拆解后建任务。",
     emptyActivity: "还没有往来消息。",

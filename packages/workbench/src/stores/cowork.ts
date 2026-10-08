@@ -20,9 +20,11 @@ import { i18n } from "../i18n";
 import { activeConversationFolder } from "../lib/conversation-folder";
 import { parseToolActivityPayload } from "../lib/tool-activity";
 import { resolveWorkspaceDir, isolateForRun } from "../lib/workspace-dir";
-import type { ThreadMessage } from "../types";
+import { materializeAttachments } from "../state/attachment-library";
+import type { Attachment, ThreadMessage } from "../types";
 import { notify } from "./notice";
 import { useAgentStore } from "./agent";
+import { toAcpUnits } from "./agent/shared";
 import { useRunsStore } from "./runs";
 import { useChatStore } from "./chat";
 import { useSessionStore } from "./session";
@@ -124,6 +126,16 @@ export const useCoworkStore = defineStore("cowork", () => {
   const lastError = ref<string | null>(null);
   const runtimes = new Map<string, SlotRuntime>();
   let listening = false;
+  /**
+   * 用户随消息带给某成员位的附件，在该成员位下一次派发时消费（按成员位累积）。
+   *
+   * 用成员位而非信件 id 作键：引擎一次 dispatch 会把收件箱里的信全部 drain 成同一个
+   * prompt（见 engine.dispatchSlot），所以同一成员位的多条待发消息本就合并成一轮 ——
+   * 附件跟着合并，语义与引擎一致。
+   */
+  const slotAttachments = new Map<string, Attachment[]>();
+  /** 各成员位 ACP 会话是否声明图片能力（startRun 时记录），派发时按目标成员门控图片。 */
+  const slotImageSupport = new Map<string, boolean>();
 
   const touch = (): void => {
     revision.value += 1;
@@ -266,22 +278,29 @@ export const useCoworkStore = defineStore("cowork", () => {
   }
 
   /** 把本回合投递的信件落成一条 system 消息，让成员位的会话自身可审计。 */
-  function describeInbox(input: CoworkDispatchInput): string {
+  function describeInbox(input: CoworkDispatchInput, attachments: readonly Attachment[] = []): string {
     const head = input.kind === "role" ? `${t("cowork.system.roleInjected")}\n\n` : "";
     const lines = input.mail.map((mail) => {
       const body = mail.body.length > MAX_MAIL_ECHO ? `${mail.body.slice(0, MAX_MAIL_ECHO)}…` : mail.body;
       return `**${nameOf(mail.from)} → ${t(`cowork.mailKind.${mail.kind}`)}**\n${body}`;
     });
-    return `${head}${lines.join("\n\n")}`;
+    const text = `${head}${lines.join("\n\n")}`;
+    if (attachments.length === 0) return text;
+    // 附件名落在审计消息里：成员会话回看时能知道这一回合带了哪些文件（正文在 prompt units 里）。
+    const names = attachments.map((item) => `- ${item.name}`).join("\n");
+    return `${text}\n\n**${t("cowork.inboxAttachments")}**\n${names}`;
   }
 
   function dispatchTurn(input: CoworkDispatchInput): Promise<void> {
     const runtime = runtimes.get(input.slot.id);
     if (!runtime) return Promise.reject(new Error(t("cowork.errors.runtimeMissing", { slot: input.slot.name })));
+    // 附件在派发时消费（同步取走，避免与后续 await 竞态）。
+    const attached = slotAttachments.get(input.slot.id);
+    if (attached?.length) slotAttachments.delete(input.slot.id);
     sessionStore.appendMessage(runtime.threadId, {
       id: uid(),
       role: "system",
-      content: describeInbox(input),
+      content: describeInbox(input, attached ?? []),
       ts: Date.now(),
     });
     const scaffold: ThreadMessage = {
@@ -294,9 +313,11 @@ export const useCoworkStore = defineStore("cowork", () => {
     sessionStore.appendMessage(runtime.threadId, scaffold);
     runtime.messageId = scaffold.id;
     touch();
-    return acp.prompt(runtime.handle, input.prompt).then(({ turnId }) => {
+    return (async () => {
+      const units = attached?.length ? await toAcpUnits(attached, slotImageSupport.get(input.slot.id) ?? true) : [];
+      const { turnId } = await acp.prompt(runtime.handle, input.prompt, units);
       runtime.turnId = turnId;
-    });
+    })();
   }
 
   /** 回合收尾：先解析协作指令（可能唤醒别人），再结束回合（决定是否汇总给 leader）。 */
@@ -456,9 +477,14 @@ export const useCoworkStore = defineStore("cowork", () => {
 
   /**
    * 起一次协作运行：每个成员位一个独立会话 + 独立 ACP 进程/会话。
-   * 返回错误文案（null = 成功），与既有 store 的错误约定一致。
+   * `goalAttachments` 是起跑时随目标带给 leader 的初始资料（落进 leader 的附件库，
+   * 作为它首回合的 prompt units 一起递进去）。返回错误文案（null = 成功），与既有约定一致。
    */
-  async function startRun(goalText: string, members: readonly CoworkMemberInit[]): Promise<string | null> {
+  async function startRun(
+    goalText: string,
+    members: readonly CoworkMemberInit[],
+    goalAttachments: readonly Attachment[] = [],
+  ): Promise<string | null> {
     if (active.value) return t("cowork.errors.alreadyRunning");
     const trimmed = goalText.trim();
     if (!trimmed) return t("cowork.errors.emptyGoal");
@@ -472,6 +498,9 @@ export const useCoworkStore = defineStore("cowork", () => {
     lastError.value = null;
     const previousActive = sessionStore.activeSessionId;
     const created: Array<{ init: CoworkSlotInit; runtime: SlotRuntime }> = [];
+    // 新一轮清空上一轮的附件/能力账本，避免跨 run 串味。
+    slotAttachments.clear();
+    slotImageSupport.clear();
     try {
       const workspace = await isolateForRun(activeConversationFolder() ?? (await resolveWorkspaceDir()));
       await ensureListener();
@@ -514,11 +543,15 @@ export const useCoworkStore = defineStore("cowork", () => {
           },
           runtime: { handle, sessionId: opened.sessionId, threadId: session.id, messageId: null, turnId: null },
         });
+        // 记下该成员位后端是否收图片（派发时按目标成员门控，见 dispatchTurn）。
+        slotImageSupport.set(`slot-${index}`, opened.imagePrompts === true);
       }
     } catch (error) {
       await teardown(created.map((item) => item.runtime));
       starting.value = false;
       sessionStore.setActive(previousActive);
+      slotAttachments.clear();
+      slotImageSupport.clear();
       const detail = t("errors.startFailed", { detail: String(error) });
       lastError.value = detail;
       return detail;
@@ -541,13 +574,34 @@ export const useCoworkStore = defineStore("cowork", () => {
       sessionStore.setActive(leaderThread);
       chat.activeThreadId = leaderThread;
     }
+    // 起跑目标随带的初始资料：落进 leader 的附件库，作为它首回合的附件一起递进去。
+    // 必须在 start() 之前 stash —— start() 会同步唤醒 leader 并派发首回合（读走这份附件）。
+    const leader = created.find((item) => item.init.role === "leader");
+    if (leader && goalAttachments.length > 0) {
+      slotAttachments.set(leader.init.id, await materializeAttachments(leader.init.threadId, goalAttachments));
+    }
     instance.start();
     touch();
     return null;
   }
 
-  function sendUser(text: string, to?: string): void {
-    engine.value?.sendUser(text, to);
+  /**
+   * 用户发言（可带附件）。附件落进目标成员的附件库，在该成员位下一次派发时随 prompt 递进去；
+   * `to` 省略时发给 leader。空文本但带附件时以附件名兜底正文（引擎会丢弃空 body 的信）。
+   */
+  async function sendUser(text: string, to?: string, attachments: readonly Attachment[] = []): Promise<void> {
+    const current = engine.value;
+    if (!current) return;
+    const body = text.trim();
+    if (attachments.length > 0) {
+      const target = to ? current.run.slots.find((slot) => slot.id === to) : current.run.slots.find((slot) => slot.role === "leader");
+      if (target) {
+        const materialized = await materializeAttachments(target.threadId, attachments);
+        slotAttachments.set(target.id, [...(slotAttachments.get(target.id) ?? []), ...materialized]);
+      }
+    }
+    // 空正文时用附件名兜底：引擎对空 body 直接 return，附件会滞留没人消费。
+    current.sendUser(body || attachments.map((item) => item.name).join("、"), to);
     touch();
   }
 
@@ -572,6 +626,8 @@ export const useCoworkStore = defineStore("cowork", () => {
     engine.value?.cancel();
     await teardown([...runtimes.values()]);
     runtimes.clear();
+    // 已取消：不会再有派发来消费这些附件，留着只会挂到「下一次 run 的同名 slot」上。
+    slotAttachments.clear();
     touch();
   }
 

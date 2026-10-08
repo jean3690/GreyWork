@@ -722,6 +722,10 @@ export const enUS: MessageSchema = {
     speakTo: "Talk to {name}",
     sendPlaceholder: "Add context for the leader or adjust the plan…",
     send: "Send",
+    /** Attachments: both the goal and "talk to team" can carry files/images, delivered with the target member's next dispatch. */
+    attachHint: "Drop or paste files, or click + to add",
+    /** Heading for the attachment-name list in a member session's audit message. */
+    inboxAttachments: "Attachments",
     emptyRun: "No cowork run yet. Set a goal, pick members, then start.",
     emptyTasks: "Task board is empty — the leader creates tasks after splitting the goal.",
     emptyActivity: "No messages yet.",
