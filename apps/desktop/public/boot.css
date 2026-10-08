@@ -1,0 +1,18 @@
+/*
+ * 首帧兜底底色：CSS 加载前先按 boot.js 解析出的 data-theme 铺一层底色，避免灰底在纯黑上
+ * 闪一下浅边。取值与 tokens.css 的 --ink 对齐。
+ *
+ * 为什么是外部文件而不是内联 style 标签：
+ * 桌面壳打包时，Tauri 会扫 HTML 里的每个 style 元素并给它打 nonce，同时把 `'nonce-…'`
+ * 追加进 style-src。而 CSP 规范规定 style-src 一旦带 nonce，`'unsafe-inline'` 就被忽略 ——
+ * 内联样式之外的**运行时注入样式**（CodeMirror / Univer / pdfjs / MapLibre 都用 JS 建
+ * style 元素）会被一并拦掉，症状是预览面板布局塌掉（行号与正文上下堆叠）。走同源外链则落在
+ * `style-src 'self'` 里，桌面壳与自托管服务端都不必为了首帧外观放宽策略。
+ * 与 boot.js 同理，只是那条管的是 script-src。
+ */
+html {
+  background-color: #000000;
+}
+html[data-theme="light"] {
+  background-color: #ffffff;
+}

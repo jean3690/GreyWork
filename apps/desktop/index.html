@@ -8,16 +8,10 @@
     <!-- 首帧外观 + 启动打点：外链（同源）而非内联，见 public/boot.js 顶部说明。
          经典脚本在解析时同步执行，仍然早于下面那个 deferred 的模块入口。 -->
     <script src="/boot.js"></script>
-    <style>
-      /* CSS 加载前的兜底底色，随上面脚本解析出的 data-theme 分支（令牌此时还没到）。
-         值与 tokens.css 的 --ink 对齐：灰了会在纯黑上闪一下浅边。 */
-      html {
-        background-color: #000000;
-      }
-      html[data-theme="light"] {
-        background-color: #ffffff;
-      }
-    </style>
+    <!-- 首帧兜底底色走同源外链，**不要**写回内联 style 标签：桌面壳打包时 Tauri 会给
+         style-src 追加 nonce，而带 nonce 会让 `'unsafe-inline'` 失效，连带拦掉 CodeMirror
+         等运行时注入的样式（预览面板会塌成「只有行号」）。详见 public/boot.css 顶部说明。 -->
+    <link rel="stylesheet" href="/boot.css" />
   </head>
 
   <body>
