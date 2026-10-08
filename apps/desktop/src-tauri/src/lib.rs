@@ -342,6 +342,8 @@ pub fn run() {
             worktree::worktree_provision,
             worktree::worktree_release,
             worktree::worktree_list,
+            worktree::worktree_snapshot,
+            worktree::worktree_restore,
             db::db_settings_load,
             db::db_settings_sync,
             db::db_automations_load,

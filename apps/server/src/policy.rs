@@ -3,7 +3,8 @@
 //! 冻结的 agent 程序白名单不在这里 —— 它经 `CommandContext.agent_programs` 传给
 //! `acp_host::acp_start`（来源是配置，不是 DB）。这里管两件事：
 //! 1. 整条命令禁用（黑名单）；
-//! 2. 把 `acp_start` / `acp_set_permission_tier` 里客户端可控的沙箱/档位参数改写成配置值。
+//! 2. 把 `acp_start` / `acp_set_permission_tier` / `worktree_provision` 里客户端可控的
+//!    沙箱 / 档位 / 准备脚本参数改写成配置值。
 
 use serde_json::Value;
 
@@ -32,11 +33,13 @@ pub fn is_available(meta: &greywork_host::commands::CommandMeta) -> bool {
     !meta.desktop_only && !is_denied(meta.name)
 }
 
-/// 用服务端策略覆盖客户端可控的沙箱/档位参数。
+/// 用服务端策略覆盖客户端可控的沙箱/档位/准备脚本参数。
 ///
 /// - `acp_start`：`sandbox`/`tier` 一律取配置值 —— 否则远端可传 `sandbox="off"` 关掉
 ///   OS 隔离、或 `tier="full"` 拿到全权。
 /// - `acp_set_permission_tier`：同样钉到配置档位，防「先按 read-only 起、再升级 full」。
+/// - `worktree_provision`：`prepare` 按配置档位夹紧 —— 只读档一律 false。否则远端可借
+///   provision 执行仓库里的 `.agents/prepare` 脚本，等于绕过只读档拿到任意代码执行。
 ///
 /// 参数非对象（如 `null`）时原样返回 —— 那会让 `dispatch` 的入参解析报错，不静默放行。
 pub fn overlay_args(command: &str, mut args: Value, config: &ServerConfig) -> Value {
@@ -55,6 +58,11 @@ pub fn overlay_args(command: &str, mut args: Value, config: &ServerConfig) -> Va
         "acp_set_permission_tier" => {
             if let Some(tier) = &config.tier {
                 object.insert("tier".to_string(), Value::String(tier.clone()));
+            }
+        }
+        "worktree_provision" => {
+            if let Some(tier) = &config.tier {
+                object.insert("prepare".to_string(), Value::Bool(tier != "read-only"));
             }
         }
         _ => {}
@@ -121,6 +129,32 @@ mod tests {
         );
         assert_eq!(out["tier"], "read-only");
         assert_eq!(out["handle"], 1);
+    }
+
+    #[test]
+    fn overlay_clamps_prepare_by_tier() {
+        let read_only = ServerConfig {
+            tier: Some("read-only".to_string()),
+            ..ServerConfig::default()
+        };
+        let out = overlay_args(
+            "worktree_provision",
+            serde_json::json!({ "source": "/w", "prepare": true }),
+            &read_only,
+        );
+        assert_eq!(out["prepare"], false, "只读档必须夹掉 prepare");
+        assert_eq!(out["source"], "/w", "其余参数不动");
+
+        let full = ServerConfig {
+            tier: Some("full".to_string()),
+            ..ServerConfig::default()
+        };
+        let out = overlay_args(
+            "worktree_provision",
+            serde_json::json!({ "source": "/w", "prepare": false }),
+            &full,
+        );
+        assert_eq!(out["prepare"], true, "非只读档放开 prepare");
     }
 
     #[test]

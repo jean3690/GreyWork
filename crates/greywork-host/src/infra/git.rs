@@ -100,7 +100,13 @@ pub struct GitCommitDto {
 ///
 /// Unix 上 spawn 前自成进程组（`process_group(0)`）：`kill_process_tree` 的契约要求 pid
 /// 就是组长，否则 killpg 会 ESRCH 而静默留下残留进程。
-fn run_capture(cmd: &mut Command, timeout: Duration) -> Result<std::process::Output, String> {
+///
+/// `pub(crate)`：`infra::worktree` 跑 `.agents/prepare` 时复用同一套有界执行，
+/// 免得再抄一遍「抽干管道 + 到点杀进程组」。
+pub(crate) fn run_capture(
+    cmd: &mut Command,
+    timeout: Duration,
+) -> Result<std::process::Output, String> {
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
     #[cfg(unix)]
     {
