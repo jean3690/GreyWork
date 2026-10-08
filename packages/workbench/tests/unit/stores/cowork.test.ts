@@ -360,6 +360,38 @@ describe("宿主事件分流", () => {
   });
 });
 
+describe("群聊式时间线投影（transcript）", () => {
+  it("把邮件按时间正序投影成带作者的消息流", async () => {
+    const cowork = await startPair();
+    // start() 时引擎给 leader 投了一条「目标：…」的用户信 → 时间线首行即用户
+    expect(cowork.transcript).toHaveLength(1);
+    expect(cowork.transcript[0]).toMatchObject({ role: "user", authorId: "user", authorName: "用户" });
+
+    emit({
+      kind: "session-update",
+      payload: {
+        sessionId: "s-1",
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { text: fence([{ op: "task", subject: "实现登录", owner: "Builder" }]) },
+        },
+      },
+    });
+    useChatStore().flushPendingContent();
+    emit({ kind: "prompt-done", payload: { handle: 1, turnId: 1 } });
+    await Promise.resolve();
+
+    // leader 建任务即投递 assignment 邮件 → 时间线多一条来自 leader 的消息
+    const assignment = cowork.transcript.find((row) => row.content.includes("已派给你"));
+    expect(assignment).toBeTruthy();
+    expect(assignment?.authorId).toBe(cowork.slots[0]!.id);
+    expect(assignment?.authorName).toBe("Leader");
+    expect(assignment?.role).toBe("assistant");
+    // 正序：用户的目标信仍在最前
+    expect(cowork.transcript[0]!.authorId).toBe("user");
+  });
+});
+
 describe("stopRun", () => {
   it("取消运行并回收全部 ACP 进程", async () => {
     const cowork = await startPair();

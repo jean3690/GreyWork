@@ -285,6 +285,13 @@ export interface ThreadMessage {
   /** ACP 后端派发消息的来源提供方名（内部 LLM 管线无此字段） */
   acp?: string;
   /**
+   * 作者键（`user` / `system` / 协作成员位 id）。仅在群聊式时间线这类「一条流混排多作者」
+   * 的视图里设置：渲染层据此画作者头像与身份色（见 lib/author-identity）。1:1 会话不设。
+   */
+  authorId?: string;
+  /** 作者展示名（缺省时渲染层回落到 authorId）。 */
+  authorName?: string;
+  /**
    * 选区评论：把「预览里选中的一段 + 用户写的批注」挂到这条消息上，渲染为注解。
    * 与附件的区别：附件是给模型看的内容，评论是**针对某段原文的批注**，渲染在气泡上，
    * 让「当时对哪一段说了什么」回看可见。评论同样会拼进发给模型的提示词（见 lib/message-comments）。

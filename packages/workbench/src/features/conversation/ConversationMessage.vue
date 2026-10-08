@@ -22,18 +22,24 @@ import Hint from "@/features/shared/Hint.vue";
 import { appEvents } from "@/events";
 import { useAgentStore } from "@/stores/agent";
 import { useChatStore } from "@/stores/chat";
+import { authorIdentity } from "@/lib/author-identity";
 import { useAttachmentThumbs } from "@/lib/use-attachments";
 import { useTurnActive } from "@/lib/turn-activity";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import type { Attachment, MessageSegment, ThreadMessage, ToolActivity } from "@/types";
 
 const props = withDefaults(defineProps<{ message: ThreadMessage; threadId?: string }>(), { threadId: "" });
+/** 点作者头像/名：群聊时间线据此打开该成员的完整会话（1:1 会话不设 authorId，不会触发）。 */
+const emit = defineEmits<{ authorClick: [authorId: string] }>();
 
 const { t } = useI18n();
 const agent = useAgentStore();
 const chat = useChatStore();
 
 const message = computed(() => props.message);
+
+/** 作者身份（头像 + 名 + 色）：仅在群聊式时间线设置了 authorId 时渲染。 */
+const author = computed(() => (message.value.authorId ? authorIdentity(message.value.authorId, message.value.authorName) : null));
 
 /** 附件缩略图（磁盘附件 → blob URL，模块级 LRU）；读不到时渲染占位。 */
 const attachmentList = computed<readonly Attachment[]>(() => message.value.attachments ?? []);
@@ -100,6 +106,24 @@ function timeLabel(ts: number): string {
 <template>
   <!-- data-ctx/data-message-id：会话页的右键菜单靠它认出「右键的是哪条消息」（见 ConversationView）。 -->
   <article class="flex flex-col" data-ctx="message" :data-message-id="message.id">
+    <!-- 作者行（群聊时间线专属）：头像 + 名，点开该作者的完整会话。user 侧右对齐。 -->
+    <button
+      v-if="author"
+      type="button"
+      data-testid="message-author"
+      class="mb-1 flex cursor-pointer items-center gap-1.5 bg-transparent p-0 text-left"
+      :class="message.role === 'user' ? 'ml-auto flex-row-reverse' : ''"
+      :aria-label="t('chat.openAuthor', { name: author.name })"
+      @click="emit('authorClick', author.id)"
+    >
+      <span
+        class="grid size-5 shrink-0 place-items-center rounded-full text-[10px] font-medium text-white"
+        :style="{ backgroundColor: author.color }"
+        aria-hidden="true"
+        >{{ author.initial }}</span
+      >
+      <span class="text-[11px] font-medium text-dim">{{ author.name }}</span>
+    </button>
     <div
       v-if="message.role === 'user'"
       class="msg__bubble ml-auto max-w-[78%] rounded-tl-[calc(16px*var(--gw-radius-scale))] rounded-tr-[calc(16px*var(--gw-radius-scale))] rounded-br-[calc(4px*var(--gw-radius-scale))] rounded-bl-[calc(16px*var(--gw-radius-scale))] bg-bubble px-4 py-3"

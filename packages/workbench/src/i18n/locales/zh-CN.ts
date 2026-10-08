@@ -630,6 +630,7 @@ export const zhCN = {
     configMode: "会话模式",
     planMode: "计划模式",
     imagePreviewClose: "点击任意处或按 Esc 关闭。",
+    openAuthor: "打开 {name} 的会话",
     rewindUnavailable: "这条消息没有可回退的工作区快照",
     rewindBusy: "回合进行中，无法回退",
     rewindFailed: "回退失败：{detail}",
@@ -708,6 +709,11 @@ export const zhCN = {
     emptyActivity: "还没有往来消息。",
     board: "任务板",
     activityTitle: "协作往来",
+    /** 往来区两种视图：邮件列表（控制台视角）/ 群聊式时间线（多作者一条流）。 */
+    view: {
+      mail: "往来",
+      timeline: "时间线",
+    },
     /** 团队页下半段的 planner 看板：数据来自会话里「自动执行」拆出的子任务。 */
     planner: {
       title: "编排运行",

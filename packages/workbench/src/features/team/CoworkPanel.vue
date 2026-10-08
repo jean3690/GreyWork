@@ -8,6 +8,7 @@ import { useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import Icon from "@/features/shared/Icon.vue";
 import Hint from "@/features/shared/Hint.vue";
+import ConversationMessage from "@/features/conversation/ConversationMessage.vue";
 import { configOptionLabel } from "@/lib/acp-config-options";
 import { useAgentStore } from "@/stores/agent";
 import { useChatStore } from "@/stores/chat";
@@ -69,6 +70,9 @@ const messageTarget = ref("");
 /*** 活动流只展示最近 30 条（拖长会堆到整个列表）。 */
 const visibleActivity = computed(() => cowork.activity.slice(0, 30));
 
+/** 协作往来视图：邮件列表（控制台视角）或群聊式时间线（多作者混排一条流）。 */
+const activityView = ref<"mail" | "timeline">("mail");
+
 const wakeDot: Record<string, string> = {
   idle: "bg-line-2",
   running: "bg-amber",
@@ -124,6 +128,12 @@ function openSlot(threadId: string): void {
   sessionStore.setActive(threadId);
   chat.activeThreadId = threadId;
   void router.push(`/conversation/${threadId}`);
+}
+
+/** 点时间线里的作者行：打开该成员位的完整会话（用户自己的消息没有可打开的会话）。 */
+function openAuthor(authorId: string): void {
+  const slot = cowork.slots.find((candidate) => candidate.id === authorId);
+  if (slot) openSlot(slot.threadId);
 }
 </script>
 
@@ -345,23 +355,59 @@ function openSlot(threadId: string): void {
         </div>
       </div>
 
-      <!-- 协作往来 -->
+      <!-- 协作往来：邮件列表（控制台视角） / 群聊式时间线（多作者混排一条流） -->
       <div class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-3.5">
-        <div class="mb-2 text-[11px] font-medium text-dim">{{ t("cowork.activityTitle") }}</div>
-        <p v-if="cowork.activity.length === 0" class="text-[11px] text-dim2">{{ t("cowork.emptyActivity") }}</p>
-        <div v-else class="flex flex-col gap-1.5">
-          <div v-for="item in visibleActivity" :key="item.id" class="rounded-[calc(10px*var(--gw-radius-scale))] bg-panel-2 px-2.5 py-2">
-            <div class="flex items-center gap-1.5 text-[10px] text-dim2">
-              <span class="text-dim">{{ item.fromName }}</span>
-              <Icon name="right" :size="10" />
-              <span class="text-dim">{{ item.toName }}</span>
-              <span class="rounded-full bg-panel px-1.5">{{ t(`cowork.mailKind.${item.kind}`) }}</span>
-              <span v-if="!item.read" class="text-cyan">●</span>
-              <span class="ml-auto tabular-nums">{{ timeOf(item.createdAt) }}</span>
-            </div>
-            <p class="mt-1 line-clamp-4 whitespace-pre-wrap text-[11px] text-foreground">{{ item.summary || item.body }}</p>
+        <div class="mb-2 flex items-center gap-2">
+          <span class="text-[11px] font-medium text-dim">{{ t("cowork.activityTitle") }}</span>
+          <div class="ml-auto flex items-center rounded-full border border-line bg-panel-2 p-0.5" data-testid="activity-view-toggle">
+            <button
+              type="button"
+              data-testid="activity-view-mail"
+              class="rounded-full px-2 py-0.5 text-[10.5px] transition-colors"
+              :class="activityView === 'mail' ? 'bg-panel text-foreground' : 'text-dim hover:text-foreground'"
+              :aria-pressed="activityView === 'mail'"
+              @click="activityView = 'mail'"
+            >
+              {{ t("cowork.view.mail") }}
+            </button>
+            <button
+              type="button"
+              data-testid="activity-view-timeline"
+              class="rounded-full px-2 py-0.5 text-[10.5px] transition-colors"
+              :class="activityView === 'timeline' ? 'bg-panel text-foreground' : 'text-dim hover:text-foreground'"
+              :aria-pressed="activityView === 'timeline'"
+              @click="activityView = 'timeline'"
+            >
+              {{ t("cowork.view.timeline") }}
+            </button>
           </div>
         </div>
+
+        <!-- 邮件列表 -->
+        <template v-if="activityView === 'mail'">
+          <p v-if="cowork.activity.length === 0" class="text-[11px] text-dim2">{{ t("cowork.emptyActivity") }}</p>
+          <div v-else class="flex flex-col gap-1.5">
+            <div v-for="item in visibleActivity" :key="item.id" class="rounded-[calc(10px*var(--gw-radius-scale))] bg-panel-2 px-2.5 py-2">
+              <div class="flex items-center gap-1.5 text-[10px] text-dim2">
+                <span class="text-dim">{{ item.fromName }}</span>
+                <Icon name="right" :size="10" />
+                <span class="text-dim">{{ item.toName }}</span>
+                <span class="rounded-full bg-panel px-1.5">{{ t(`cowork.mailKind.${item.kind}`) }}</span>
+                <span v-if="!item.read" class="text-cyan">●</span>
+                <span class="ml-auto tabular-nums">{{ timeOf(item.createdAt) }}</span>
+              </div>
+              <p class="mt-1 line-clamp-4 whitespace-pre-wrap text-[11px] text-foreground">{{ item.summary || item.body }}</p>
+            </div>
+          </div>
+        </template>
+
+        <!-- 群聊式时间线：复用对话消息行（含作者头像 + 身份色），点作者打开其会话 -->
+        <template v-else>
+          <p v-if="cowork.transcript.length === 0" class="text-[11px] text-dim2">{{ t("cowork.emptyActivity") }}</p>
+          <div v-else data-testid="cowork-transcript" class="flex flex-col gap-3">
+            <ConversationMessage v-for="message in cowork.transcript" :key="message.id" :message="message" @author-click="openAuthor" />
+          </div>
+        </template>
       </div>
     </div>
   </div>

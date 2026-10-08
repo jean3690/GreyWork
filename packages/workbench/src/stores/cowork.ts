@@ -216,6 +216,27 @@ export const useCoworkStore = defineStore("cowork", () => {
       .reverse();
   });
 
+  /**
+   * 群聊式时间线：把邮件按时间正序映射成可复用的消息流（用户 + 各成员位混排成一条流）。
+   *
+   * 与 `activity` 的区别：activity 是给邮件列表看的「最近往来」倒序视图；transcript 正序、
+   * 且带上 authorId/authorName，让 ConversationMessage 画出作者头像与身份色。纯展示投影，
+   * 不落库；点作者行打开其会话由面板按 authorId 回查 threadId。
+   */
+  const transcript = computed<ThreadMessage[]>(() => {
+    void revision.value;
+    const current = engine.value;
+    if (!current) return [];
+    return current.run.mail.map((mail) => ({
+      id: mail.id,
+      role: mail.from === "user" ? "user" : "assistant",
+      content: mail.body,
+      ts: mail.createdAt,
+      authorId: mail.from,
+      authorName: nameOf(mail.from),
+    }));
+  });
+
   const stats = computed(() => {
     void revision.value;
     const current = engine.value;
@@ -561,6 +582,7 @@ export const useCoworkStore = defineStore("cowork", () => {
     slots,
     tasks,
     activity,
+    transcript,
     stats,
     spend,
     active,

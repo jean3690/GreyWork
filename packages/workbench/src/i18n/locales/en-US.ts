@@ -633,6 +633,7 @@ export const enUS: MessageSchema = {
     configMode: "Session mode",
     planMode: "Plan mode",
     imagePreviewClose: "Click anywhere or press Esc to close.",
+    openAuthor: "Open {name}'s session",
     rewindUnavailable: "This message has no workspace snapshot to rewind to",
     rewindBusy: "A turn is running — can't rewind",
     rewindFailed: "Rewind failed: {detail}",
@@ -720,6 +721,11 @@ export const enUS: MessageSchema = {
     emptyActivity: "No messages yet.",
     board: "Task board",
     activityTitle: "Activity",
+    /** Two views for the activity section: mail list (console view) / group-chat timeline. */
+    view: {
+      mail: "Mail",
+      timeline: "Timeline",
+    },
     /** Planner board in the lower half of the team page; data comes from "auto-run" subtasks. */
     planner: {
       title: "Orchestrated runs",
