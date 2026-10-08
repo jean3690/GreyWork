@@ -11,11 +11,10 @@
  * 这条守卫只拦「又把内联样式写回入口 HTML」这一种回归：它**只在打包态复现**，dev 与
  * 服务端托管的 e2e（served-spa）都看不见，靠人工很难在提交时发现。
  */
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-
-const html = readFileSync(fileURLToPath(new URL("../../index.html", import.meta.url)), "utf8");
+// 走 Vite 的 `?raw` 拿入口 HTML 原文，而不用 node:fs —— 壳层的 typecheck 程序不（也不该）
+// 加载 @types/node，引 node 内建模块会直接报 TS2307 把打包构建卡死。
+import html from "../../index.html?raw";
 
 describe("入口 index.html 的 CSP 约束", () => {
   it("不含内联 style 元素（否则 Tauri 的 style-src nonce 会连带拦掉运行时注入的样式）", () => {
