@@ -6,6 +6,54 @@
 发版流程：新增条目补进对应版本标题下 → 打 `v*` 标签 → `.github/workflows/release.yml` 会自动从本文件
 抽取该版本条目作为 Release 说明。**不要手改 Release 正文**，改这里。
 
+## [0.7.0] - 2026-10-08
+
+### 新增
+
+- **本地 AI 设置页**（设置 → 本地 AI）：新增 `localAi` 分区（rag / stt，默认全关），读入时归一
+  （非法值落默认、topK 夹区间）并随快照持久化。RAG 侧可配启用 / 供应商 / embedding 模型 / 注入
+  片段数 / 索引根，并显示索引状态与「构建 / 全量重建 / 清空」（进度读 `rag://event`）；STT 侧可配
+  启用 / 供应商 / whisper 模型，并如实说明需要本机先跑一个 OpenAI 兼容的 whisper 服务。同时补上
+  本地模型链路的界面缺口：供应商列表行加启用开关（预设 Ollama 是 `enabled:false`，此前在 UI 上
+  根本启用不了）、编辑表单加「拉取模型」按钮（`llm_list_models`，兼作连通性自检）与采样温度 /
+  最大 token 输入（越界就地报错、不落库）。
+- **本地 RAG 索引**（`crates/greywork-host/src/rag.rs`）：递归遍历授权根（不跟随符号链接，忽略
+  `node_modules` / `target` 等目录，文本扩展名白名单 + NUL 嗅探，单文件 ≤1MB、文件数 ≤2 万），
+  按行分块（1200 字符 / 200 重叠），批量调 `llm_embed`，向量以 float32 小端 BLOB 落 SQLite，检索
+  为暴力余弦 top-K；单文件失败只跳过它，换 embedding 模型即整库失效重建。检索命中组装成「工作区
+  检索」系统补充注入回合；未启用 / 无命中 / 出错一律返回空值，不拦回合。渲染端的注入逻辑抽成
+  依赖注入的 `lib/local-ai.ts`（不做 Pinia store），会话切片与远程助手切片共用、便于单测。
+- **本地模型链路补齐**（`packages/llm` + 宿主 `llm.rs`）：新增 `llm_list_models`（`GET /models`，
+  兼容 `data[].id` 与 `models[].name`）、`llm_embed`（`POST /embeddings`，兼容三种响应形状）、
+  `llm_transcribe`（`POST /audio/transcriptions`，multipart，音频从授权路径读取、20MB 上限）。
+  思考链增量：解析 `delta.reasoning_content` / `delta.reasoning`（DeepSeek-R1、Qwen3、Ollama、
+  vLLM），新增事件 kind `llm-thinking-delta`，与 ACP 思考段同一渲染；可选采样参数
+  `temperature` / `max_tokens` 仅在显式设置时才写进请求体。命令表 154 → 161。
+- **音频附件转写**：`audio` 附件转写成功即内联文本，失败回落路径引用（`transcribeAttachment` 带
+  内存缓存）；会话切片与远程助手 LLM 回合两条路径都接入。
+
+### 修复
+
+- **打包态下预览面板只剩行号、没有正文**：桌面壳入口 `index.html` 里的首帧兜底底色写成了内联
+  style，而 Tauri 打包时会给 HTML 里每个 style 元素注入 nonce、并把 `'nonce-…'` 追加进
+  `style-src` —— 按 CSP 规范，`style-src` 一旦带 nonce，`'unsafe-inline'` 即失效，于是
+  CodeMirror 运行时注入的布局样式被拦下：行号槽与正文从并排变成上下堆叠，正文被面板的
+  `overflow-hidden` 裁掉，看上去「只有行号」。改为同源外链 `public/boot.css`（与 `boot.js` 同一
+  套路，那条管的是 `script-src`），入口 HTML 不再含任何 style 元素，`'unsafe-inline'` 恢复生效。
+  同一原因也会影响 Univer（xlsx）/ pdfjs / MapLibre 等运行时注入样式的库，一并修复。该 bug 只在
+  **打包态**复现 —— dev 走 `devCsp`、服务端托管的 e2e 也不经过 Tauri 的 nonce 注入，两处都看不见。
+
+### 工程
+
+- **`greywork-host` 分层重构**：落地 `core / infra / services / app / channels` 五层目录，抽出
+  `WorkspaceFs` / `WorkspaceAuthorizer` / `Embedder` / `ChannelHost` / `HostContext` 等 trait
+  边界，命令层改经 `HostContext` 收口；把 `commands.rs`（957 行）、`feishu.rs`（2664）、`qq.rs`
+  （2250）、`dingtalk.rs`（2155）、`wecom.rs`（1904）、`discord.rs`（1763）、`wechat.rs`（1657）、
+  `telegram.rs`（1520）等巨型文件按领域拆成子模块，facade 定型（加法式 `pub use` 回根，调用方
+  零改动）。
+- **入口 HTML 的 CSP 守卫**：新增 `apps/desktop/tests/unit/index-html.test.ts`，断言入口 HTML 不含
+  内联 style 元素、首帧底色走 `/boot.css`，钉住上面那条只在打包态复现的回归。
+
 ## [0.6.0] - 2026-09-30
 
 ### 新增
