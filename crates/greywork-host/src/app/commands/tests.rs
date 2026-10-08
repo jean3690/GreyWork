@@ -9,7 +9,7 @@ use crate::dingtalk::DingTalkHost;
 use crate::discord::DiscordHost;
 use crate::feishu::FeishuHost;
 use crate::host::{HostContext, HostPaths};
-use crate::llm::LlmHost;
+use crate::llm::{LlmAgentHost, LlmHost};
 use crate::qq::QqHost;
 use crate::rag::RagHost;
 use crate::sys;
@@ -50,6 +50,7 @@ fn test_ctx(tmp: &Path) -> CommandContext {
             ),
             acp: Arc::new(AcpHost::default()),
             llm: Arc::new(LlmHost::default()),
+            agent: Arc::new(LlmAgentHost::default()),
             rag: Arc::new(RagHost::default()),
         }),
         channels: Arc::new(Channels {
@@ -101,7 +102,7 @@ const DESKTOP_ONLY: &[&str] = &[
 
 #[test]
 fn commands_table_shape() {
-    assert_eq!(COMMANDS.len(), 161, "命令总数应为 161");
+    assert_eq!(COMMANDS.len(), 163, "命令总数应为 163");
 
     // 命令名唯一。
     let mut names: Vec<&str> = COMMANDS.iter().map(|c| c.name).collect();

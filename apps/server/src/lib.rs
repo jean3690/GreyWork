@@ -168,6 +168,7 @@ pub async fn run() -> Result<(), String> {
             workspace: Arc::new(access),
             acp: Arc::new(greywork_host::acp_host::AcpHost::default()),
             llm: Arc::new(greywork_host::llm::LlmHost::default()),
+            agent: Arc::new(greywork_host::llm::LlmAgentHost::default()),
             rag: Arc::new(greywork_host::rag::RagHost::default()),
         }),
         channels: Arc::new(Channels {

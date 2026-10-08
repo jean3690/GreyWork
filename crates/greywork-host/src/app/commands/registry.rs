@@ -15,7 +15,7 @@ use crate::dingtalk::DingTalkHost;
 use crate::discord::DiscordHost;
 use crate::feishu::FeishuHost;
 use crate::host::HostContext;
-use crate::llm::LlmHost;
+use crate::llm::{LlmAgentHost, LlmHost};
 use crate::qq::QqHost;
 use crate::rag::RagHost;
 use crate::telegram::TelegramHost;
@@ -68,6 +68,8 @@ pub struct Services {
     pub workspace: Arc<WorkspaceFsAccess>,
     pub acp: Arc<AcpHost>,
     pub llm: Arc<LlmHost>,
+    /// 本机 agent 回合的状态（请求 id + 可中止句柄）；与 `llm` 独立，见 `llm::agent`。
+    pub agent: Arc<LlmAgentHost>,
     pub rag: Arc<RagHost>,
 }
 

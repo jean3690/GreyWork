@@ -120,6 +120,7 @@ pub fn run() {
         .register_asynchronous_uri_scheme_protocol(media_protocol::SCHEME, media_protocol::handle)
         .manage(Arc::new(acp_host::AcpHost::default()))
         .manage(greywork_host::llm::LlmHost::default())
+        .manage(Arc::new(greywork_host::llm::LlmAgentHost::default()))
         .manage(greywork_host::rag::RagHost::default())
         .manage(wechat::WechatHost::default())
         .manage(dingtalk::DingTalkHost::default())
@@ -172,7 +173,7 @@ pub fn run() {
                 data_dir.join("workspace-path-access.json"),
             )
             .map_err(|err| -> Box<dyn std::error::Error> { err.into() })?;
-            app.manage(workspace_access);
+            app.manage(Arc::new(workspace_access));
             // 宿主出口：领域逻辑只认 `HostContext`，桌面实现把事件/通知接到 Tauri。
             // 先于 log::init 建立即可 —— TauriHost 自身不写日志。
             let host: Arc<dyn HostContext> = host::TauriHost::new(app.handle().clone())
@@ -221,6 +222,8 @@ pub fn run() {
             acp_host::acp_detect_programs,
             llm::llm_chat_start,
             llm::llm_chat_stop,
+            llm::llm_agent_start,
+            llm::llm_agent_stop,
             llm::llm_list_models,
             llm::llm_embed,
             llm::llm_transcribe,

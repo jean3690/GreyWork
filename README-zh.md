@@ -73,7 +73,7 @@ greyWork/
 │   ├── core/                 # 共享类型与数学工具（零依赖）
 │   ├── editor/               # 文件系统、Git、CodeMirror 抽象
 │   ├── agents/               # Agent 领域逻辑（角色、事件、编排）
-│   ├── llm/                  # LLM 供应商客户端（OpenAI 兼容流 → IPC）
+│   ├── llm/                  # LLM 供应商客户端（OpenAI 兼容流 → IPC；含本机 agent 回合）
 │   ├── acp/                  # Agent Client Protocol 客户端（Tauri IPC + WebSocket）
 │   ├── shell/                # 供应商注册表与传输数据面
 │   ├── plugins/              # 插件市场适配器与类型

@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use greywork_host::host::HostContext;
 use greywork_host::llm::{
-    EmbedArgs, EmbedResult, InferenceParams, ListModelsArgs, LlmChatMessage, LlmHost,
-    TranscribeArgs, TranscribeResult,
+    AgentStartArgs, EmbedArgs, EmbedResult, InferenceParams, ListModelsArgs, LlmAgentHost,
+    LlmChatMessage, LlmHost, TranscribeArgs, TranscribeResult,
 };
 use tauri::State;
 
@@ -52,6 +52,32 @@ pub async fn llm_chat_stop(state: State<'_, LlmHost>, request_id: u64) -> Result
     greywork_host::llm::llm_chat_stop(&state, request_id).await
 }
 
+/// 发起一个本机 agent 回合（模型可用只读工具）；返回请求 id（用于 llm_agent_stop 中止）。
+#[tauri::command]
+pub async fn llm_agent_start(
+    host: State<'_, Arc<dyn HostContext>>,
+    state: State<'_, Arc<LlmAgentHost>>,
+    workspace: State<'_, Arc<WorkspaceFsAccess>>,
+    args: AgentStartArgs,
+) -> Result<u64, String> {
+    greywork_host::llm::llm_agent_start(
+        host.inner().clone(),
+        state.inner(),
+        Arc::clone(&workspace),
+        args,
+    )
+    .await
+}
+
+/// 中止进行中的 agent 回合并回收句柄。
+#[tauri::command]
+pub async fn llm_agent_stop(
+    state: State<'_, Arc<LlmAgentHost>>,
+    request_id: u64,
+) -> Result<(), String> {
+    greywork_host::llm::llm_agent_stop(state.inner(), request_id).await
+}
+
 /// 拉取模型清单（设置页模型下拉 + 连通性自检）。
 #[tauri::command]
 pub async fn llm_list_models(
@@ -89,7 +115,7 @@ pub async fn llm_embed(
 /// 语音转写：音频以授权路径给出（附件落在授权根内）。
 #[tauri::command]
 pub async fn llm_transcribe(
-    access: State<'_, WorkspaceFsAccess>,
+    access: State<'_, Arc<WorkspaceFsAccess>>,
     base_url: String,
     model: String,
     api_key_env: Option<String>,
@@ -98,7 +124,7 @@ pub async fn llm_transcribe(
     language: Option<String>,
 ) -> Result<TranscribeResult, String> {
     greywork_host::llm::llm_transcribe(
-        &*access,
+        &**access,
         TranscribeArgs {
             base_url,
             model,

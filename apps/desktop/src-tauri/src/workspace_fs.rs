@@ -5,6 +5,7 @@
 //! `State`，也能把它转交给共享实现。
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use tauri::State;
 
 // 供 `crate::workspace_fs::WorkspaceFsAccess` 的既有引用继续解析（sys / acp_host / channel_media / lib）。
@@ -12,26 +13,35 @@ pub use greywork_host::workspace_fs::{DirEntryInfo, FileProbe, WorkspaceFsAccess
 
 /// 确保目录存在（产物默认目录等工作区相关落盘前置）。
 #[tauri::command]
-pub fn fs_ensure_dir(access: State<'_, WorkspaceFsAccess>, path: String) -> Result<(), String> {
+pub fn fs_ensure_dir(
+    access: State<'_, Arc<WorkspaceFsAccess>>,
+    path: String,
+) -> Result<(), String> {
     greywork_host::workspace_fs::fs_ensure_dir(&access, path)
 }
 
 /// 新建空文件（工作区文件树「新建文件」）。
 #[tauri::command]
-pub fn fs_create_file(access: State<'_, WorkspaceFsAccess>, path: String) -> Result<(), String> {
+pub fn fs_create_file(
+    access: State<'_, Arc<WorkspaceFsAccess>>,
+    path: String,
+) -> Result<(), String> {
     greywork_host::workspace_fs::fs_create_file(&access, path)
 }
 
 /// 新建文件夹（工作区文件树「新建文件夹」）。
 #[tauri::command]
-pub fn fs_create_dir(access: State<'_, WorkspaceFsAccess>, path: String) -> Result<(), String> {
+pub fn fs_create_dir(
+    access: State<'_, Arc<WorkspaceFsAccess>>,
+    path: String,
+) -> Result<(), String> {
     greywork_host::workspace_fs::fs_create_dir(&access, path)
 }
 
 /// 改名 / 移动（工作区文件树「重命名 / 剪切后粘贴」）。
 #[tauri::command]
 pub fn fs_rename_path(
-    access: State<'_, WorkspaceFsAccess>,
+    access: State<'_, Arc<WorkspaceFsAccess>>,
     from: String,
     to: String,
 ) -> Result<(), String> {
@@ -41,7 +51,7 @@ pub fn fs_rename_path(
 /// 复制（工作区文件树「复制后粘贴」，目录递归）。
 #[tauri::command]
 pub fn fs_copy_path(
-    access: State<'_, WorkspaceFsAccess>,
+    access: State<'_, Arc<WorkspaceFsAccess>>,
     from: String,
     to: String,
 ) -> Result<(), String> {
@@ -50,14 +60,17 @@ pub fn fs_copy_path(
 
 /// 删除文件或文件夹（工作区文件树「删除」）。
 #[tauri::command]
-pub fn fs_delete_path(access: State<'_, WorkspaceFsAccess>, path: String) -> Result<(), String> {
+pub fn fs_delete_path(
+    access: State<'_, Arc<WorkspaceFsAccess>>,
+    path: String,
+) -> Result<(), String> {
     greywork_host::workspace_fs::fs_delete_path(&access, path)
 }
 
 /// 读取文本文件（10MB 上限），供工作区「打开文件」读取真实磁盘文件。
 #[tauri::command]
 pub fn fs_read_text_file(
-    access: State<'_, WorkspaceFsAccess>,
+    access: State<'_, Arc<WorkspaceFsAccess>>,
     path: String,
 ) -> Result<String, String> {
     greywork_host::workspace_fs::fs_read_text_file(&access, path)
@@ -69,7 +82,7 @@ pub fn fs_read_text_file(
 /// 转义、再由前端解码一遍 —— 每次打开预览都付这份开销。这里直接回字节，前端拿到 ArrayBuffer。
 #[tauri::command]
 pub fn fs_read_binary(
-    access: State<'_, WorkspaceFsAccess>,
+    access: State<'_, Arc<WorkspaceFsAccess>>,
     path: String,
 ) -> Result<tauri::ipc::Response, String> {
     greywork_host::workspace_fs::fs_read_binary(&access, path).map(tauri::ipc::Response::new)
@@ -81,7 +94,7 @@ pub fn fs_read_binary(
 /// `max_bytes` 由渲染端按 kind 给（视频 128MB），宿主一律夹紧到硬顶。
 #[tauri::command]
 pub fn fs_read_media(
-    access: State<'_, WorkspaceFsAccess>,
+    access: State<'_, Arc<WorkspaceFsAccess>>,
     path: String,
     max_bytes: Option<u64>,
 ) -> Result<tauri::ipc::Response, String> {
@@ -92,7 +105,7 @@ pub fn fs_read_media(
 /// 探测文件能否按文本预览 / 编辑（只读前 8KB，不把大文件整个读进来）。
 #[tauri::command]
 pub fn fs_probe_file(
-    access: State<'_, WorkspaceFsAccess>,
+    access: State<'_, Arc<WorkspaceFsAccess>>,
     path: String,
 ) -> Result<FileProbe, String> {
     greywork_host::workspace_fs::fs_probe_file(&access, path)
@@ -101,7 +114,7 @@ pub fn fs_probe_file(
 /// 写回文本文件（单次 ≤10MB），供编辑器保存时同步到工作区存放文件夹。
 #[tauri::command]
 pub fn fs_write_text_file(
-    access: State<'_, WorkspaceFsAccess>,
+    access: State<'_, Arc<WorkspaceFsAccess>>,
     path: String,
     content: String,
 ) -> Result<(), String> {
@@ -111,7 +124,7 @@ pub fn fs_write_text_file(
 /// 写二进制文件（base64 载荷，≤20MB），产物默认落盘通道。
 #[tauri::command]
 pub fn fs_write_binary(
-    access: State<'_, WorkspaceFsAccess>,
+    access: State<'_, Arc<WorkspaceFsAccess>>,
     path: String,
     data_base64: String,
 ) -> Result<(), String> {
@@ -121,7 +134,7 @@ pub fn fs_write_binary(
 /// 浅层列目录；指向授权根之外的符号链接不会暴露给渲染端。
 #[tauri::command]
 pub fn fs_list_dir(
-    access: State<'_, WorkspaceFsAccess>,
+    access: State<'_, Arc<WorkspaceFsAccess>>,
     path: String,
 ) -> Result<Vec<DirEntryInfo>, String> {
     greywork_host::workspace_fs::fs_list_dir(&access, path)
@@ -134,7 +147,7 @@ pub fn fs_list_dir(
 #[tauri::command]
 pub async fn fs_pick_files(
     app: tauri::AppHandle,
-    access: State<'_, WorkspaceFsAccess>,
+    access: State<'_, Arc<WorkspaceFsAccess>>,
     purpose: String,
     multiple: bool,
 ) -> Result<Vec<String>, String> {

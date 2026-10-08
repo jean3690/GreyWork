@@ -5,6 +5,7 @@
 //! false/None）。同一实现服务端也能经命令表调到（`sys_info` 已非桌面专属）。
 //! 「揭示 / 打开」是纯宿主能力（`tauri_plugin_opener`），留在桌面壳。
 
+use std::sync::Arc;
 use tauri::State;
 
 /// 系统信息快照。实现收在 `greywork_host::sys`。
@@ -29,7 +30,7 @@ pub async fn sys_info(
 /// 与读写命令共用宿主授权面；渲染端不能利用 opener 探测或打开任意本机路径。
 #[tauri::command]
 pub fn reveal_path(
-    access: tauri::State<'_, crate::workspace_fs::WorkspaceFsAccess>,
+    access: tauri::State<'_, Arc<crate::workspace_fs::WorkspaceFsAccess>>,
     path: String,
 ) -> Result<(), String> {
     let target = access.validate_existing(path.trim())?;
@@ -42,7 +43,7 @@ pub fn reveal_path(
 /// 这里走 Rust 自由函数，授权完全由 `validate_existing` 兜住。
 #[tauri::command]
 pub fn open_path(
-    access: tauri::State<'_, crate::workspace_fs::WorkspaceFsAccess>,
+    access: tauri::State<'_, Arc<crate::workspace_fs::WorkspaceFsAccess>>,
     path: String,
 ) -> Result<(), String> {
     let target = access.validate_existing(path.trim())?;

@@ -12,19 +12,19 @@ pub use greywork_host::worktree::{WorktreeEntryDto, WorktreeProvisionDto};
 #[tauri::command]
 pub fn worktree_provision(
     host_ctx: State<'_, Arc<dyn HostContext>>,
-    access: State<'_, WorkspaceFsAccess>,
+    access: State<'_, Arc<WorkspaceFsAccess>>,
     source: String,
 ) -> Result<WorktreeProvisionDto, String> {
-    greywork_host::worktree::worktree_provision(host_ctx.inner().as_ref(), &*access, source)
+    greywork_host::worktree::worktree_provision(host_ctx.inner().as_ref(), &**access, source)
 }
 
 #[tauri::command]
 pub fn worktree_release(
     host_ctx: State<'_, Arc<dyn HostContext>>,
-    access: State<'_, WorkspaceFsAccess>,
+    access: State<'_, Arc<WorkspaceFsAccess>>,
     root: String,
 ) -> Result<(), String> {
-    greywork_host::worktree::worktree_release(host_ctx.inner().as_ref(), &*access, root)
+    greywork_host::worktree::worktree_release(host_ctx.inner().as_ref(), &**access, root)
 }
 
 /// 列出隔离快照。

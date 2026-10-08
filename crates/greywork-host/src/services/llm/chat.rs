@@ -5,24 +5,18 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use serde::Serialize;
 use tokio::sync::Mutex;
 
 use crate::host::HostContext;
 use crate::log;
 
 use super::dto::{InferenceParams, LlmChatMessage};
+use super::events::{emit_delta, emit_error, emit_llm, emit_thinking};
 use super::sse::{content_from_completion, drain_sse, drain_sse_into, DeltaBatcher, SseEvent};
-use super::transport::{is_sse_response, send_chat_request};
+use super::transport::{is_sse_response, messages_wire, send_chat_request, ChatRequest, ToolMode};
 
 /// SSE 流空闲超时：连接保持但 N 秒无任何字节 → 按错误终止（服务端挂死不能永久悬挂回合）。
 const LLM_IDLE_TIMEOUT_SECS: u64 = 60;
-/// 事件信封：统一 kind + payload（与 acp_host 的 AcpEventEnvelope 同构）。
-#[derive(Serialize, Clone)]
-struct LlmEventEnvelope {
-    kind: &'static str,
-    payload: serde_json::Value,
-}
 
 /// 全局 LLM 主机状态：请求 id 分配 + 可中止的流任务句柄。
 ///
@@ -33,10 +27,6 @@ struct LlmEventEnvelope {
 pub struct LlmHost {
     next_id: AtomicU64,
     streams: Arc<Mutex<HashMap<u64, tokio::task::JoinHandle<()>>>>,
-}
-
-fn emit(host: &dyn HostContext, kind: &'static str, payload: serde_json::Value) {
-    crate::host::emit_json(host, "llm://event", LlmEventEnvelope { kind, payload });
 }
 
 /// 发起一轮流式对话；返回请求 id（用于 llm_chat_stop 中止）。
@@ -68,13 +58,17 @@ pub async fn llm_chat_start(
     let turn_token = client_token.unwrap_or_default();
 
     let response = send_chat_request(
-        &base_url,
-        &model,
-        &api_key_env,
-        messages,
-        &reasoning_effort,
-        &headers.unwrap_or_default(),
-        &params,
+        ChatRequest {
+            base_url: &base_url,
+            model: &model,
+            api_key_env: &api_key_env,
+            reasoning_effort: &reasoning_effort,
+            headers: &headers.unwrap_or_default(),
+            params: &params,
+            // 纯聊天回合不声明工具；工具面属于 agent 回合（`agent::llm_agent_start`）。
+            tools: ToolMode::None,
+        },
+        messages_wire(messages),
     )
     .await?;
 
@@ -102,13 +96,16 @@ pub async fn chat_complete(
     headers: &HashMap<String, String>,
 ) -> Result<String, String> {
     let response = send_chat_request(
-        base_url,
-        model,
-        api_key_env,
-        messages,
-        reasoning_effort,
-        headers,
-        &InferenceParams::default(),
+        ChatRequest {
+            base_url,
+            model,
+            api_key_env,
+            reasoning_effort,
+            headers,
+            params: &InferenceParams::default(),
+            tools: ToolMode::None,
+        },
+        messages_wire(messages),
     )
     .await?;
     if !is_sse_response(&response) {
@@ -128,50 +125,13 @@ pub async fn chat_complete(
             SseEvent::Delta(delta) => text.push_str(&delta),
             // 聚合回复只要正文：思考链不进宿主兜底执行的产物。
             SseEvent::Thinking(_) => {}
+            // 同 chat.rs 的流式路径：无 tools 声明却收到调用，忽略。
+            SseEvent::ToolCalls(_) => {}
             SseEvent::Done => return Ok(text),
             SseEvent::Error(message) => return Err(message),
         }
     }
     Ok(text) // 无 [DONE] 的连接关闭：已收文本视为完成（与命令路径语义一致）
-}
-
-/// 发一条 LLM 事件；带上调用方令牌（空令牌 = 旧调用方，事件不带该字段）。
-fn emit_llm(
-    host: &dyn HostContext,
-    client_token: &str,
-    kind: &'static str,
-    mut payload: serde_json::Value,
-) {
-    if !client_token.is_empty() {
-        if let Some(object) = payload.as_object_mut() {
-            object.insert(
-                "clientToken".into(),
-                serde_json::Value::String(client_token.to_string()),
-            );
-        }
-    }
-    emit(host, kind, payload);
-}
-
-/// 发一条正文增量。合批后仍走 `llm-delta` + `delta` 字段，前端契约不变（接收侧本就是累加）。
-fn emit_delta(host: &dyn HostContext, client_token: &str, delta: String) {
-    emit_llm(
-        host,
-        client_token,
-        "llm-delta",
-        serde_json::json!({ "delta": delta }),
-    );
-}
-
-/// 发一条思考链增量（DeepSeek-R1 / Qwen3 / Ollama 的 reasoning）。
-/// 与正文分开一个 kind：前端渲染成「思考段」，与 ACP 的 AgentThoughtChunk 对齐。
-fn emit_thinking(host: &dyn HostContext, client_token: &str, delta: String) {
-    emit_llm(
-        host,
-        client_token,
-        "llm-thinking-delta",
-        serde_json::json!({ "delta": delta }),
-    );
 }
 
 /// SSE / 整段 JSON 双路处理；所有出口都保证发出 llm-done 或 llm-error。
@@ -186,12 +146,7 @@ async fn stream_response(host: &dyn HostContext, response: reqwest::Response, cl
             Ok(body) => body,
             Err(error) => {
                 log::error("llm", format!("非流式响应失败: {error}"));
-                emit_llm(
-                    host,
-                    client_token,
-                    "llm-error",
-                    serde_json::json!({ "message": error }),
-                );
+                emit_error(host, client_token, error.to_string());
                 return;
             }
         };
@@ -217,12 +172,7 @@ async fn stream_response(host: &dyn HostContext, response: reqwest::Response, cl
             }
             None => {
                 log::error("llm", "empty completion（非流式响应无内容）");
-                emit_llm(
-                    host,
-                    client_token,
-                    "llm-error",
-                    serde_json::json!({ "message": "empty completion" }),
-                );
+                emit_error(host, client_token, "empty completion".to_string());
             }
         }
         return;
@@ -250,6 +200,10 @@ async fn stream_response(host: &dyn HostContext, response: reqwest::Response, cl
                 }
                 true
             }
+            // 纯聊天回合没声明 tools，正常不会收到。显式忽略而不是 `unreachable!()`：
+            // 端点行为不受本侧控制（个别兼容实现会无视 tools 缺失仍回 tool_calls），
+            // 这里崩掉等于让一个可降级的怪帧升级成整个回合失败。
+            SseEvent::ToolCalls(_) => true,
             terminal_event => {
                 terminal = Some(terminal_event);
                 false
@@ -266,12 +220,7 @@ async fn stream_response(host: &dyn HostContext, response: reqwest::Response, cl
     match terminal {
         Some(SseEvent::Error(message)) => {
             log::error("llm", format!("流式失败: {message}"));
-            emit_llm(
-                host,
-                client_token,
-                "llm-error",
-                serde_json::json!({ "message": message }),
-            );
+            emit_error(host, client_token, message);
         }
         // Done / 流在未发送 [DONE] 时关闭（None）：都按结束处理，避免前端 busy 卡死。
         _ => emit_llm(host, client_token, "llm-done", serde_json::json!({})),

@@ -314,6 +314,78 @@ starts it with a known password, polls `/api/health`, and asserts that `/` reall
 whose UI 404s. It does **not** use BuildKit's `type=gha` cache: the repository's 10 GB cache budget is
 already saturated by the Rust dependency caches.
 
+## Native model agent loop (`services::llm::agent`)
+
+Three conversation paths share one OpenAI-compatible transport (`services::llm::transport`) and
+differ only in what they declare to the model:
+
+| Path             | Entry             | Tools                                | Where the loop lives                  |
+| ---------------- | ----------------- | ------------------------------------ | ------------------------------------- |
+| Single-turn chat | `llm_chat_start`  | none                                 | one request                           |
+| **Native agent** | `llm_agent_start` | `read_file` / `list_dir` / `git_log` | host (`services::llm::agent::runner`) |
+| ACP agent        | `acp_send`        | whatever the external agent declares | external process                      |
+
+### Why the loop runs in the host
+
+The tool surface is read-only, so every call is auto-approved under all three permission tiers —
+no interactive confirmation branch exists. That is what lets the loop live in the host: the
+renderer, the remote-assistant pipeline (`stores/remote-assistant/pipeline.ts`) and the automation
+queue's host fallback (`services/host_exec.rs`) all reuse one implementation, and aborting is
+`JoinHandle::abort()` exactly as in `llm_chat_stop`.
+
+### Trust boundary
+
+Tools execute **inside GreyWork, inside its own authorization surface** — `read_file` /
+`list_dir` call the same `workspace_fs` functions as the `fs_read_text_file` / `fs_list_dir`
+commands, and `git_log` calls the same `git_log`. There is deliberately **no second allow-list**:
+a path outside the authorized roots fails in `resolve_existing`, which canonicalizes _before_
+checking, so `../` escapes and symlinks are rejected too.
+
+This is a different trust relationship than "mounting these capabilities as MCP tools for an
+external agent": there the external agent's own sandbox is the boundary; here the host's
+authorization ledger is.
+
+### Protocol details worth knowing
+
+- **Streaming `tool_calls` are fragmented.** `function.arguments` arrives token by token, tagged
+  by `index`. `ToolCallAccumulator` reassembles per index; reading only the last chunk yields
+  truncated JSON. `take()` clears the accumulator so a reused accumulator cannot append a new
+  round's `index:0` onto the previous call's arguments.
+- **Missing `id` / `name` is synthesized, not dropped.** The assistant message is constructed
+  host-side, so a synthesized id keeps the `assistant.tool_calls` ↔ `tool.tool_call_id` pairing
+  self-consistent. Dropping the call instead would leave the model without a tool result and
+  looping on the same request.
+- **Truncation is visible to the model.** Tool output is capped (`MAX_TOOL_OUTPUT_CHARS`), and the
+  cap states how much was dropped. Silently truncating makes the model reason confidently over
+  partial content.
+- **Authorization failures are worded identically to "does not exist".** Telling the model
+  "unauthorized" maps the boundary for it.
+- **Running out of rounds still produces an answer.** After `max_rounds`, one final request is
+  sent with `tool_choice: "none"` — tools stay declared (so the model still knows what it could
+  have used) but calls are forbidden. Stripping `tools` instead makes the model assume they do
+  not exist and hallucinate having read a file.
+
+### Event contract
+
+The same `llm://event` broadcast as chat, with two extra kinds. `clientToken` filtering and the
+event envelope are identical, which is why the store's tool timeline needed no new plumbing — it
+reuses the ACP `ToolActivity` path via `lib/tool-activity.ts`.
+
+| kind              | payload                                           | meaning                                |
+| ----------------- | ------------------------------------------------- | -------------------------------------- |
+| `llm-tool-call`   | `id`, `name`, `input`, `round`                    | model requested a tool                 |
+| `llm-tool-result` | `id`, `ok`, `error`, `summary`, `path`, `preview` | tool finished (`preview` is truncated) |
+
+`llm_agent_start` / `llm_agent_stop` keep a **separate handle table** from `llm_chat_*`: an agent
+turn runs for many rounds and minutes, so a shared table would let one stop the other.
+
+### Enabling it
+
+Per model provider (`ModelProviderConfig.agentMode`), not globally — tool calling is an
+endpoint/model capability, and some gateways reject a request carrying `tools` with `400` while
+another provider works fine at the same moment. `agentMaxRounds` caps tool rounds (host clamps to
+a hard ceiling).
+
 ## File preview (viewer dispatch)
 
 Preview is a pure extension-name dispatch. `packages/workbench/src/lib/viewer.ts` holds the kind

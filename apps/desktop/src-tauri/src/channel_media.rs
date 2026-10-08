@@ -36,15 +36,19 @@ pub fn channel_take_media(
 pub async fn channel_send_media(
     app: AppHandle,
     host_ctx: State<'_, Arc<dyn HostContext>>,
-    access: State<'_, WorkspaceFsAccess>,
+    access: State<'_, Arc<WorkspaceFsAccess>>,
     channel: String,
     peer_id: String,
     path: String,
     kind: Option<String>,
     context_token: Option<String>,
 ) -> Result<(), String> {
-    let media =
-        greywork_host::channel_media::prepare_outbound(&*access, &channel, &path, kind.as_deref())?;
+    let media = greywork_host::channel_media::prepare_outbound(
+        &**access,
+        &channel,
+        &path,
+        kind.as_deref(),
+    )?;
     let wechat = app.state::<greywork_host::wechat::WechatHost>();
     let telegram = app.state::<greywork_host::telegram::TelegramHost>();
     let discord = app.state::<greywork_host::discord::DiscordHost>();

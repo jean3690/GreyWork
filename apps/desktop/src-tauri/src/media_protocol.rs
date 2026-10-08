@@ -22,6 +22,7 @@
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
+use std::sync::Arc;
 
 use http_range::HttpRange;
 // `http` 不单独声明依赖：Tauri 把它原样再导出（`tauri::http`），
@@ -55,7 +56,7 @@ pub fn handle<R: Runtime>(
 }
 
 fn respond<R: Runtime>(app: &AppHandle<R>, request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
-    let Some(access) = app.try_state::<WorkspaceFsAccess>() else {
+    let Some(access) = app.try_state::<Arc<WorkspaceFsAccess>>() else {
         return plain(StatusCode::INTERNAL_SERVER_ERROR, "工作区访问未初始化");
     };
     let Some(decoded) = decode_path(request.uri().path()) else {

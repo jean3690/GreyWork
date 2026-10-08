@@ -16,7 +16,7 @@ use tauri::State;
 #[tauri::command]
 pub async fn rag_index_build(
     host: State<'_, Arc<dyn HostContext>>,
-    access: State<'_, WorkspaceFsAccess>,
+    access: State<'_, Arc<WorkspaceFsAccess>>,
     db: State<'_, Db>,
     rag: State<'_, RagHost>,
     root: String,
@@ -28,7 +28,7 @@ pub async fn rag_index_build(
 ) -> Result<IndexBuildResult, String> {
     greywork_host::rag::rag_index_build(
         host.inner().as_ref(),
-        &*access,
+        &**access,
         &db,
         &rag,
         &greywork_host::llm::LlmEmbedder,

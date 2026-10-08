@@ -48,7 +48,8 @@ fn sse_delta_parses_content_and_ignores_noise_frames() {
         parse_sse_delta(chunk),
         Some(SseDelta {
             content: Some("你好".into()),
-            reasoning: None
+            reasoning: None,
+            tool_calls: Vec::new(),
         })
     );
     // 空 delta：content 为空 → None 字段（不产出事件）
@@ -68,14 +69,16 @@ fn sse_delta_extracts_reasoning_from_both_shapes() {
         parse_sse_delta(r#"{"choices":[{"delta":{"reasoning_content":"先想"}}]}"#),
         Some(SseDelta {
             content: None,
-            reasoning: Some("先想".into())
+            reasoning: Some("先想".into()),
+            tool_calls: Vec::new(),
         })
     );
     assert_eq!(
         parse_sse_delta(r#"{"choices":[{"delta":{"reasoning":"再想"}}]}"#),
         Some(SseDelta {
             content: None,
-            reasoning: Some("再想".into())
+            reasoning: Some("再想".into()),
+            tool_calls: Vec::new(),
         })
     );
     // 同一帧既有正文又有思考：两个字段都取到
@@ -83,7 +86,8 @@ fn sse_delta_extracts_reasoning_from_both_shapes() {
         parse_sse_delta(r#"{"choices":[{"delta":{"content":"答","reasoning_content":"思"}}]}"#),
         Some(SseDelta {
             content: Some("答".into()),
-            reasoning: Some("思".into())
+            reasoning: Some("思".into()),
+            tool_calls: Vec::new(),
         })
     );
 }
@@ -110,12 +114,252 @@ fn request_body_includes_sampling_params_only_when_set() {
         temperature: Some(0.2),
         max_tokens: Some(512),
     };
-    let body = chat_request_body("m", vec![], "auto", &params);
+    let body = chat_request_body("m", vec![], "auto", &params, ToolMode::None);
     assert_eq!(body["temperature"], 0.2);
     assert_eq!(body["max_tokens"], 512);
-    let bare = chat_request_body("m", vec![], "auto", &InferenceParams::default());
+    let bare = chat_request_body(
+        "m",
+        vec![],
+        "auto",
+        &InferenceParams::default(),
+        ToolMode::None,
+    );
     assert!(bare.get("temperature").is_none());
     assert!(bare.get("max_tokens").is_none());
+}
+
+/// 工具调用分片：首片带 id/name，后续片只带 arguments 片段。
+#[test]
+fn sse_delta_extracts_tool_call_chunks() {
+    let first = r#"{"choices":[{"delta":{"tool_calls":[
+        {"index":0,"id":"call_a","type":"function","function":{"name":"read_file","arguments":""}}]}}]}"#;
+    let Some(delta) = parse_sse_delta(first) else {
+        panic!("首片应解析出 tool_calls")
+    };
+    assert_eq!(
+        delta.tool_calls,
+        vec![ToolCallChunk {
+            index: 0,
+            id: Some("call_a".into()),
+            name: Some("read_file".into()),
+            arguments: None,
+        }]
+    );
+    // arguments 为空串 → None（占位不算内容，分片拼接时才不会插入多余字符）
+    let empty_args = r#"{"choices":[{"delta":{"tool_calls":[
+        {"index":0,"id":"call_a","function":{"name":"read_file","arguments":""}}]}}]}"#;
+    assert_eq!(
+        parse_sse_delta(empty_args).unwrap().tool_calls[0].arguments,
+        None
+    );
+    // 缺 index 的分片无法归位 → 丢弃，不猜归属
+    let no_index = r#"{"choices":[{"delta":{"tool_calls":[
+        {"id":"call_a","function":{"name":"read_file"}}]}}]}"#;
+    assert!(parse_sse_delta(no_index).unwrap().tool_calls.is_empty());
+    // 无 tool_calls 字段 → 空 vec（不产出事件）
+    assert!(
+        parse_sse_delta(r#"{"choices":[{"delta":{"content":"x"}}]}"#)
+            .unwrap()
+            .tool_calls
+            .is_empty()
+    );
+}
+
+/// 分片按 index 归位拼接：一回合里 arguments 是逐 token 累加的，取最后一片只得半截 JSON。
+#[test]
+fn tool_call_accumulator_joins_argument_fragments_by_index() {
+    let mut accumulator = ToolCallAccumulator::default();
+    accumulator.push(&[ToolCallChunk {
+        index: 0,
+        id: Some("call_a".into()),
+        name: Some("read_file".into()),
+        arguments: Some("{\"pa".into()),
+    }]);
+    accumulator.push(&[ToolCallChunk {
+        index: 0,
+        id: None,
+        name: None,
+        arguments: Some("th\":\"src/mai".into()),
+    }]);
+    accumulator.push(&[ToolCallChunk {
+        index: 0,
+        id: None,
+        name: None,
+        arguments: Some("n.rs\"}".into()),
+    }]);
+    assert_eq!(
+        accumulator.take(),
+        vec![ToolCall {
+            id: "call_a".into(),
+            name: "read_file".into(),
+            arguments: r#"{"path":"src/main.rs"}"#.into(),
+        }]
+    );
+}
+
+/// 并行调用：两个 index 交错到达，按 index 升序还原，且各自 arguments 独立拼接。
+#[test]
+fn tool_call_accumulator_orders_parallel_calls_by_index() {
+    let mut accumulator = ToolCallAccumulator::default();
+    for chunk in [
+        ToolCallChunk {
+            index: 1,
+            id: Some("call_b".into()),
+            name: Some("list_dir".into()),
+            arguments: Some("{\"pa".into()),
+        },
+        ToolCallChunk {
+            index: 0,
+            id: Some("call_a".into()),
+            name: Some("read_file".into()),
+            arguments: Some("{\"pa".into()),
+        },
+        ToolCallChunk {
+            index: 1,
+            arguments: Some("th\":\"src\"}".into()),
+            ..Default::default()
+        },
+        ToolCallChunk {
+            index: 0,
+            arguments: Some("th\":\"README\"}".into()),
+            ..Default::default()
+        },
+    ] {
+        accumulator.push(&[chunk]);
+    }
+    let calls = accumulator.take();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0].id, "call_a");
+    assert_eq!(calls[0].arguments, r#"{"path":"README"}"#);
+    assert_eq!(calls[1].id, "call_b");
+    assert_eq!(calls[1].arguments, r#"{"path":"src"}"#);
+}
+
+/// take() 清空累积器：同一 accumulator 跨回合复用时，新回合的 index:0 不能续在旧调用后面。
+#[test]
+fn tool_call_accumulator_take_resets_between_rounds() {
+    let mut accumulator = ToolCallAccumulator::default();
+    accumulator.push(&[ToolCallChunk {
+        index: 0,
+        id: Some("call_a".into()),
+        name: Some("read_file".into()),
+        arguments: Some("{\"path\":\"a\"}".into()),
+    }]);
+    assert_eq!(accumulator.take().len(), 1);
+    accumulator.push(&[ToolCallChunk {
+        index: 0,
+        id: Some("call_b".into()),
+        name: Some("git_log".into()),
+        arguments: Some("{\"limit\":5}".into()),
+    }]);
+    let calls = accumulator.take();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].id, "call_b");
+    assert_eq!(calls[0].arguments, r#"{"limit":5}"#);
+    assert!(accumulator.take().is_empty());
+}
+
+/// 缺 id / 缺 name 时合成而不是丢弃：协议自洽优先，模型能收到 tool 错误后自我纠正。
+#[test]
+fn tool_call_accumulator_synthesizes_missing_id_and_name() {
+    let mut accumulator = ToolCallAccumulator::default();
+    accumulator.push(&[ToolCallChunk {
+        index: 0,
+        arguments: Some("{}".into()),
+        ..Default::default()
+    }]);
+    let calls = accumulator.take();
+    assert_eq!(calls.len(), 1);
+    assert!(
+        calls[0].id.starts_with("call_synth_"),
+        "缺 id 应合成: {calls:?}"
+    );
+    assert_eq!(calls[0].name, "");
+    // 同一回合两次漏 id 不撞号（否则第二条 tool 消息会挂到第一条上）
+    let mut second = ToolCallAccumulator::default();
+    second.push(&[
+        ToolCallChunk {
+            index: 0,
+            arguments: Some("{}".into()),
+            ..Default::default()
+        },
+        ToolCallChunk {
+            index: 1,
+            arguments: Some("{}".into()),
+            ..Default::default()
+        },
+    ]);
+    let calls = second.take();
+    assert_ne!(calls[0].id, calls[1].id);
+}
+
+/// 非流式与流式两条路径的协议行为必须一致（都经同一个累积器）。
+#[test]
+fn tool_calls_from_completion_matches_the_stream_path() {
+    let body: serde_json::Value = serde_json::from_str(
+        r#"{"choices":[{"message":{"tool_calls":[
+            {"id":"call_a","type":"function","function":{"name":"read_file","arguments":"{\"path\":\"a\"}"}},
+            {"id":"call_b","type":"function","function":{"name":"git_log","arguments":"{\"limit\":5}"}}]}}]}"#,
+    )
+    .unwrap();
+    let calls = tool_calls_from_completion(&body);
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0].name, "read_file");
+    assert_eq!(calls[1].arguments, r#"{"limit":5}"#);
+    // 无 tool_calls → 空 vec
+    let plain: serde_json::Value =
+        serde_json::from_str(r#"{"choices":[{"message":{"content":"答"}}]}"#).unwrap();
+    assert!(tool_calls_from_completion(&plain).is_empty());
+}
+
+/// tools 非空才写字段：纯聊天回合不该为 agent 能力付「模型不支持 tools 就 400」的代价。
+#[test]
+fn request_body_carries_tools_only_when_declared() {
+    let bare = chat_request_body(
+        "m",
+        vec![],
+        "auto",
+        &InferenceParams::default(),
+        ToolMode::None,
+    );
+    assert!(bare.get("tools").is_none());
+    assert!(bare.get("tool_choice").is_none());
+    let tool = serde_json::json!({"type": "function", "function": {"name": "read_file"}});
+    let with = chat_request_body(
+        "m",
+        vec![],
+        "auto",
+        &InferenceParams::default(),
+        ToolMode::Auto(&[tool]),
+    );
+    assert_eq!(with["tool_choice"], "auto");
+    assert_eq!(with["tools"][0]["function"]["name"], "read_file");
+}
+
+/// 收尾回合：工具清单仍在（模型知道自己有哪些手段），但 `tool_choice: "none"` 禁调用。
+/// 摘掉 tools 会让模型以为工具不存在，转去正文里编造「我已经读过那个文件」。
+#[test]
+fn request_body_disable_tools_keeps_the_schema_but_forbids_calls() {
+    let tool = serde_json::json!({"type": "function", "function": {"name": "read_file"}});
+    let body = chat_request_body(
+        "m",
+        vec![],
+        "auto",
+        &InferenceParams::default(),
+        ToolMode::Disable(&[tool]),
+    );
+    assert_eq!(body["tool_choice"], "none");
+    assert_eq!(body["tools"][0]["function"]["name"], "read_file");
+    // 空 schema 列表的 Auto / Disable 退化成不声明（无可声明的东西）。
+    let empty = chat_request_body(
+        "m",
+        vec![],
+        "auto",
+        &InferenceParams::default(),
+        ToolMode::Auto(&[]),
+    );
+    assert!(empty.get("tools").is_none());
+    assert!(empty.get("tool_choice").is_none());
 }
 
 #[test]
@@ -181,7 +425,13 @@ fn request_body_passes_content_parts_through() {
         role: "user".into(),
         content: parts.clone(),
     }];
-    let body = chat_request_body("gpt-test", messages, "auto", &InferenceParams::default());
+    let body = chat_request_body(
+        "gpt-test",
+        messages_wire(messages),
+        "auto",
+        &InferenceParams::default(),
+        ToolMode::None,
+    );
     assert_eq!(body["messages"][0]["content"], parts);
 }
 
@@ -197,7 +447,13 @@ fn request_body_marks_stream_and_maps_messages() {
             content: serde_json::json!("hi"),
         },
     ];
-    let body = chat_request_body("gpt-test", messages, "high", &InferenceParams::default());
+    let body = chat_request_body(
+        "gpt-test",
+        messages_wire(messages),
+        "high",
+        &InferenceParams::default(),
+        ToolMode::None,
+    );
     assert_eq!(body["model"], "gpt-test");
     assert_eq!(body["stream"], true);
     assert_eq!(body["reasoning_effort"], "high");
@@ -222,7 +478,13 @@ fn openai_reasoning_effort_maps_explicit_tiers_only() {
 
 #[test]
 fn request_body_omits_reasoning_effort_when_auto() {
-    let body = chat_request_body("gpt-test", vec![], "auto", &InferenceParams::default());
+    let body = chat_request_body(
+        "gpt-test",
+        vec![],
+        "auto",
+        &InferenceParams::default(),
+        ToolMode::None,
+    );
     assert!(body.get("reasoning_effort").is_none());
 }
 

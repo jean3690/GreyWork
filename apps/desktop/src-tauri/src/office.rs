@@ -6,6 +6,7 @@
 //! 渲染端据 `office_host_info` 的 `embeddableFrameOrigins` 决定要不要走云端。
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use greywork_host::office::{HostInfo, HostInfoArgs, OfficeRecipe, PreviewOpenArgs, PreviewResult};
 use tauri::State;
@@ -15,7 +16,7 @@ use crate::workspace_fs::WorkspaceFsAccess;
 /// 上传工作区文件到厂商 API，取回可嵌入的文档地址（云端 Office 预览）。
 #[tauri::command]
 pub async fn office_preview_open(
-    access: State<'_, WorkspaceFsAccess>,
+    access: State<'_, Arc<WorkspaceFsAccess>>,
     path: String,
     recipe: OfficeRecipe,
     credential_env: Option<String>,

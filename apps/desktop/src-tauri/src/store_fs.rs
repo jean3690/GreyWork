@@ -20,13 +20,13 @@ pub use greywork_host::store_fs::{
 pub fn store_sessions_load(
     host_ctx: State<'_, Arc<dyn HostContext>>,
     db: State<'_, Db>,
-    access: State<'_, WorkspaceFsAccess>,
+    access: State<'_, Arc<WorkspaceFsAccess>>,
     workspaces: Vec<WorkspaceDirDto>,
 ) -> Result<Option<SessionsSnapshotDto>, String> {
     greywork_host::store_fs::store_sessions_load(
         host_ctx.inner().as_ref(),
         &db,
-        &*access,
+        &**access,
         workspaces,
     )
 }
@@ -35,14 +35,14 @@ pub fn store_sessions_load(
 #[tauri::command]
 pub fn store_sessions_sync(
     host_ctx: State<'_, Arc<dyn HostContext>>,
-    access: State<'_, WorkspaceFsAccess>,
+    access: State<'_, Arc<WorkspaceFsAccess>>,
     snapshot: SessionsSnapshotDto,
     workspaces: Vec<WorkspaceDirDto>,
     deleted_session_ids: Vec<String>,
 ) -> Result<SyncReportDto, String> {
     greywork_host::store_fs::store_sessions_sync(
         host_ctx.inner().as_ref(),
-        &*access,
+        &**access,
         snapshot,
         workspaces,
         deleted_session_ids,
@@ -53,10 +53,10 @@ pub fn store_sessions_sync(
 #[tauri::command]
 pub fn store_sessions_relocate(
     host_ctx: State<'_, Arc<dyn HostContext>>,
-    access: State<'_, WorkspaceFsAccess>,
+    access: State<'_, Arc<WorkspaceFsAccess>>,
     request: RelocateRequestDto,
 ) -> Result<RelocateReportDto, String> {
-    greywork_host::store_fs::store_sessions_relocate(host_ctx.inner().as_ref(), &*access, request)
+    greywork_host::store_fs::store_sessions_relocate(host_ctx.inner().as_ref(), &**access, request)
 }
 
 /// 默认数据根（`~/.greyWork`）——前端产物默认落盘目录基准。
@@ -81,7 +81,7 @@ pub fn attachments_prune_session(
 #[tauri::command]
 pub async fn pick_workspace_folder(
     app: AppHandle,
-    access: State<'_, WorkspaceFsAccess>,
+    access: State<'_, Arc<WorkspaceFsAccess>>,
 ) -> Result<Option<String>, String> {
     use tauri_plugin_dialog::DialogExt;
     let (tx, rx) = tokio::sync::oneshot::channel::<Option<PathBuf>>();
