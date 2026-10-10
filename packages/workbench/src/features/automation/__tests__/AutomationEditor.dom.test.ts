@@ -5,6 +5,7 @@ import { DOMWrapper, flushPromises, mount, type VueWrapper } from "@vue/test-uti
 import { createPinia, setActivePinia } from "pinia";
 import AutomationEditor from "@/features/automation/AutomationEditor.vue";
 import { useAgentStore } from "@/stores/agent";
+import { useWorkspaceStore } from "@/stores/workspace";
 import { i18n, setLocale } from "@/i18n";
 
 // 日历与滚轮都 Portal 到 body：断言一律查 document.body，且挂载要 attachTo + 显式 unmount。
@@ -29,6 +30,7 @@ interface Draft {
   name?: string;
   intent?: string;
   acpProviderId?: string | null;
+  workspaceId?: string | null;
   cron?: string | null;
   onceAt?: number | null;
 }
@@ -39,6 +41,7 @@ function mountEditor(draft: Draft = {}) {
       name: draft.name ?? "测试任务",
       intent: draft.intent ?? "生成日报",
       acpProviderId: draft.acpProviderId ?? null,
+      workspaceId: draft.workspaceId ?? null,
       cron: draft.cron ?? null,
       onceAt: draft.onceAt ?? null,
     },
@@ -257,5 +260,27 @@ describe("AutomationEditor 执行后端与指令", () => {
     await wrapper.find('[data-testid="schedule-cancel"]').trigger("click");
     expect(wrapper.emitted("save")).toBeFalsy();
     expect(wrapper.emitted("cancel")).toHaveLength(1);
+  });
+});
+
+describe("AutomationEditor 工作区绑定", () => {
+  it("默认未绑定；选工作区后 save 带上 workspaceId", async () => {
+    const workspace = useWorkspaceStore().createWorkspace("项目A");
+    const wrapper = mountEditor();
+    expect(wrapper.find<HTMLSelectElement>('[data-testid="schedule-workspace"]').element.value).toBe("");
+
+    await wrapper.find('[data-testid="schedule-workspace"]').setValue(workspace.id);
+    await wrapper.find('[data-testid="schedule-save"]').trigger("click");
+    expect(saved(wrapper)).toMatchObject({ workspaceId: workspace.id });
+  });
+
+  it("传入 workspaceId 时回填选中；清空则 save 写 null", async () => {
+    const workspace = useWorkspaceStore().createWorkspace("项目B");
+    const wrapper = mountEditor({ workspaceId: workspace.id });
+    expect(wrapper.find<HTMLSelectElement>('[data-testid="schedule-workspace"]').element.value).toBe(workspace.id);
+
+    await wrapper.find('[data-testid="schedule-workspace"]').setValue("");
+    await wrapper.find('[data-testid="schedule-save"]').trigger("click");
+    expect(saved(wrapper)).toMatchObject({ workspaceId: null });
   });
 });

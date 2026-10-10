@@ -1092,6 +1092,8 @@ export const zhCN = {
     openConversation: "查看会话",
     seedHint: "示例任务默认停用；确认指令与时间后再启用。",
     manualTrigger: "手动触发",
+    targetLabel: "工作区",
+    targetHint: "任务到点执行时以该工作区为运行目录；不选则用当前对话目录或应用私有目录。",
     defaultTarget: "未绑定工作区",
     onceBadge: "仅一次",
     acpBadge: "ACP",

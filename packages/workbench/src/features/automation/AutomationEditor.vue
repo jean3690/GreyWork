@@ -2,6 +2,7 @@
 import { computed, ref } from "vue";
 import { i18n } from "@/i18n";
 import { useAgentStore } from "@/stores/agent";
+import { useWorkspaceStore } from "@/stores/workspace";
 import { composeCron, decomposeCron, describeCron, nextCronRuns, validateCron, type ScheduleSpec } from "@/lib/cron";
 import DatePicker from "@/features/automation/DatePicker.vue";
 import TimePicker from "@/features/automation/TimePicker.vue";
@@ -23,6 +24,8 @@ const props = defineProps<{
   name: string;
   intent: string;
   acpProviderId: string | null;
+  /** 绑定的工作区 id（取自任务专属会话；null = 未绑定）。 */
+  workspaceId: string | null;
   cron: string | null;
   /** 一次性任务的触发时刻（epoch ms）；null = 非一次性。 */
   onceAt: number | null;
@@ -34,6 +37,7 @@ const emit = defineEmits<{
       name: string;
       intent: string;
       acpProviderId: string | null;
+      workspaceId: string | null;
       cron: string | null;
       onceAt: number | null;
       schedule: string;
@@ -44,6 +48,7 @@ const emit = defineEmits<{
 
 const t = i18n.global.t;
 const agent = useAgentStore();
+const workspaceStore = useWorkspaceStore();
 
 type ScheduleMode = ScheduleSpec["kind"];
 
@@ -79,6 +84,8 @@ const initial = decomposeCron(props.cron, props.onceAt);
 const name = ref(props.name);
 const intent = ref(props.intent);
 const acpProviderId = ref(props.acpProviderId ?? "");
+/** 绑定工作区（`""` = 未绑定，对齐 value="" 的选项）。 */
+const workspaceTarget = ref(props.workspaceId ?? "");
 const mode = ref<ScheduleMode>(initial.kind);
 /** `HH:MM`：所有带时刻的模式共用（切模式不丢用户刚挑的时间）。 */
 const time = ref(
@@ -118,6 +125,9 @@ const providerOptions = computed(() =>
     label: provider.enabled ? provider.name : t("automation.schedule.acpDisabled", { name: provider.name }),
   })),
 );
+
+/** 可绑定的工作区清单（任务到点执行时会以该工作区为运行目录）。 */
+const workspaceOptions = computed(() => workspaceStore.workspaces.map((workspace) => ({ id: workspace.id, label: workspace.name })));
 
 /** `HH:MM`（选择器已约束）→ 组件；缺失/非法时回落 09:00（防御用）。 */
 const parsedTime = computed(() => {
@@ -257,6 +267,7 @@ function save(): void {
     name: name.value.trim() || t("automation.namePlaceholder"),
     intent: intent.value.trim(),
     acpProviderId: acpProviderId.value === "" ? null : acpProviderId.value,
+    workspaceId: workspaceTarget.value === "" ? null : workspaceTarget.value,
     cron: expr,
     onceAt: once,
     schedule:
@@ -285,6 +296,19 @@ function save(): void {
       :aria-label="t('automation.intentPlaceholder')"
       data-testid="schedule-intent"
     />
+
+    <label class="flex items-center gap-2">
+      <span class="w-16 shrink-0 text-[11.5px] text-dim2">{{ t("automation.targetLabel") }}</span>
+      <select
+        v-model="workspaceTarget"
+        class="min-w-0 flex-1 cursor-pointer rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-1.5 text-[12px] text-foreground outline-none focus:border-line-2"
+        data-testid="schedule-workspace"
+      >
+        <option value="">{{ t("automation.defaultTarget") }}</option>
+        <option v-for="workspace in workspaceOptions" :key="workspace.id" :value="workspace.id">{{ workspace.label }}</option>
+      </select>
+    </label>
+    <p class="text-[10.5px] leading-relaxed text-dim2">{{ t("automation.targetHint") }}</p>
 
     <label class="flex items-center gap-2">
       <span class="w-16 shrink-0 text-[11.5px] text-dim2">{{ t("automation.schedule.acp") }}</span>

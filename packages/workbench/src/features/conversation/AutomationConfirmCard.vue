@@ -60,10 +60,9 @@ function confirm(): void {
     running: false,
     // 跟随当前路由：ACP 会话里提议的任务带工具执行，Local 管线任务走本机模型
     acpProviderId: agent.routeToAcp ? agent.selectedProviderId : null,
-    target:
-      workspaceStore.workspaces.find((workspace) => workspace.id === workspaceStore.activeWorkspaceId)?.name ??
-      t("automation.defaultTarget"),
   });
+  // 落在当前工作区：绑定写在专属会话上，任务到期即在那个工作区里跑。
+  automation.setTaskWorkspace(task.id, workspaceStore.activeWorkspaceId);
   // 走 chat store 落库（与 markAskAnswered 同一约定），不在组件里直接改 prop
   chat.markScheduleCreated(props.threadId, props.message, task.id);
 }

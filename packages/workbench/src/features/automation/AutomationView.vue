@@ -187,12 +187,16 @@ function commitEdit(
     name: string;
     intent: string;
     acpProviderId: string | null;
+    workspaceId: string | null;
     cron: string | null;
     onceAt: number | null;
     schedule: string;
   },
 ): void {
-  automation.update(id, patch);
+  // workspaceId 不落在任务行上：绑定写在专属会话里（setTaskWorkspace）。
+  const { workspaceId, ...taskPatch } = patch;
+  automation.update(id, taskPatch);
+  automation.setTaskWorkspace(id, workspaceId);
   editingId.value = null;
 }
 
@@ -479,6 +483,7 @@ function runNow(id: string, name: string): void {
             :name="task.name"
             :intent="task.intent"
             :acp-provider-id="task.acpProviderId ?? null"
+            :workspace-id="automation.taskWorkspaceId(task.id)"
             :cron="task.cron ?? null"
             :once-at="task.onceAt ?? null"
             @save="(patch) => commitEdit(task.id, patch)"

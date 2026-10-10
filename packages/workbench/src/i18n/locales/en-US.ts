@@ -1115,6 +1115,9 @@ export const enUS: MessageSchema = {
     openConversation: "Open conversation",
     seedHint: "Sample tasks ship disabled; review the intent and schedule before enabling.",
     manualTrigger: "Manual",
+    targetLabel: "Workspace",
+    targetHint:
+      "Runs use this workspace as their working directory; unset falls back to the active conversation or the app's private folder.",
     defaultTarget: "No workspace bound",
     onceBadge: "One-off",
     acpBadge: "ACP",

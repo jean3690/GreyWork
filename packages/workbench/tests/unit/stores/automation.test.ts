@@ -5,6 +5,7 @@ import { useAutomationStore } from "@/stores/automation";
 import { useAgentStore } from "@/stores/agent";
 import { useChatStore } from "@/stores/chat";
 import { useSessionStore } from "@/stores/session";
+import { useWorkspaceStore } from "@/stores/workspace";
 
 const storageHolder = globalThis as { localStorage?: Storage };
 
@@ -141,6 +142,45 @@ describe("Run Now 执行路由", () => {
     expect(submit).toHaveBeenCalledWith(`auto-${task.id}`, "生成日报");
     await vi.waitFor(() => expect(task.lastRun).toBeGreaterThan(0));
     expect(store.runs[0]?.sessionId).toBe(`auto-${task.id}`);
+  });
+});
+
+describe("工作区绑定（写在专属会话上）", () => {
+  it("setTaskWorkspace 写专属会话的 workspaceId，并同步 target 展示名", () => {
+    const store = useAutomationStore();
+    const workspace = useWorkspaceStore().createWorkspace("项目A");
+    const task = store.add({ name: "绑工作区", intent: "生成日报" });
+
+    store.setTaskWorkspace(task.id, workspace.id);
+    expect(useSessionStore().getSession(`auto-${task.id}`)?.workspaceId).toBe(workspace.id);
+    expect(store.taskWorkspaceId(task.id)).toBe(workspace.id);
+    expect(task.target).toBe("项目A");
+
+    store.setTaskWorkspace(task.id, null);
+    expect(store.taskWorkspaceId(task.id)).toBeNull();
+    expect(task.target).toBe("未绑定工作区");
+  });
+
+  it("任务行不落 workspaceId 字段（绑定只落在会话上）", () => {
+    const store = useAutomationStore();
+    const workspace = useWorkspaceStore().createWorkspace("项目B");
+    const task = store.add({ name: "不落行", intent: "生成日报" });
+    store.setTaskWorkspace(task.id, workspace.id);
+    expect(Object.prototype.hasOwnProperty.call(task, "workspaceId")).toBe(false);
+  });
+
+  it("先 Run Now 建了会话再绑工作区：绑定改写既有会话", () => {
+    const store = useAutomationStore();
+    const sessions = useSessionStore();
+    const workspace = useWorkspaceStore().createWorkspace("项目C");
+    const task = store.add({ name: "改绑", intent: "生成日报" });
+    vi.spyOn(useChatStore(), "submitTextIn").mockImplementation(() => null);
+
+    store.runNow(task.id);
+    expect(sessions.getSession(`auto-${task.id}`)?.workspaceId).toBeNull();
+
+    store.setTaskWorkspace(task.id, workspace.id);
+    expect(sessions.getSession(`auto-${task.id}`)?.workspaceId).toBe(workspace.id);
   });
 });
 

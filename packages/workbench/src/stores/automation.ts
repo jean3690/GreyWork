@@ -12,6 +12,7 @@ import {
 import { useChatStore } from "./chat";
 import { useAgentStore } from "./agent";
 import { useSessionStore } from "./session";
+import { useWorkspaceStore } from "./workspace";
 import { notify } from "./notice";
 import { i18n } from "../i18n";
 
@@ -147,6 +148,8 @@ export const useAutomationStore = defineStore("automation", () => {
   const runs = ref<AutomationRunRow[]>([]);
   /** 会话存储：每条任务跑在自己的专属会话里（`auto-<taskId>`，见 ensureTaskSession）。 */
   const sessionStore = useSessionStore();
+  /** 工作区存储：任务绑定的运行目录写在专属会话的 workspaceId 上（任务行不存该字段）。 */
+  const workspaceStore = useWorkspaceStore();
   /** 浏览器态本地记录的合成 id（负数，绝不与库侧正整数自增 id 冲突）。 */
   let localRunSeq = -1;
 
@@ -160,6 +163,31 @@ export const useAutomationStore = defineStore("automation", () => {
     const id = taskSessionId(task.id);
     sessionStore.ensureUnactivated(id, sessionTitle(task));
     return id;
+  }
+
+  /** 任务专属会话当前绑定的工作区 id（编辑器回填用；未建会话 = null）。 */
+  function taskWorkspaceId(id: string): string | null {
+    return sessionStore.getSession(taskSessionId(id))?.workspaceId ?? null;
+  }
+
+  /**
+   * 把任务绑定到某工作区：写在其专属会话的 `workspaceId` 上，**任务行不存该字段**。
+   *
+   * 已存在的会话也要改写绑定（`ensureUnactivated` 只在新建时落 workspaceId）；
+   * `target` 仅作展示（列表 / 确认卡），与绑定同步以免两处口径漂移。
+   */
+  function setTaskWorkspace(id: string, workspaceId: string | null): void {
+    const task = list.value.find((a) => a.id === id);
+    if (!task) return;
+    const session = sessionStore.ensureUnactivated(taskSessionId(id), sessionTitle(task), workspaceId);
+    if (session.workspaceId !== workspaceId) {
+      session.workspaceId = workspaceId;
+      sessionStore.markDirty();
+    }
+    task.target = workspaceId
+      ? (workspaceStore.workspaceById(workspaceId)?.name ?? t("automation.defaultTarget"))
+      : t("automation.defaultTarget");
+    persist();
   }
 
   function loadPersisted(): void {
@@ -525,10 +553,13 @@ export const useAutomationStore = defineStore("automation", () => {
     remove,
     setEnabled,
     update,
+    setTaskWorkspace,
     runNow,
     consumeDue,
     /** 任务专属会话 id（auto-<taskId>）；给视图「查看会话」用。 */
     taskSessionId,
+    /** 任务专属会话绑定的工作区 id；给编辑器回填用。 */
+    taskWorkspaceId,
     /** 桌面态启动接管完成信号（null = 浏览器态无后端）。 */
     hydrated: backendHydratePromise,
   };

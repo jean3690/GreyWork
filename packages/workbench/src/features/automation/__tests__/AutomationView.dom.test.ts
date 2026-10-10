@@ -9,6 +9,7 @@ import { createAppRouter } from "@/router";
 import { i18n, setLocale } from "@/i18n";
 import { useAgentStore } from "@/stores/agent";
 import { useAutomationStore } from "@/stores/automation";
+import { useWorkspaceStore } from "@/stores/workspace";
 
 beforeEach(() => {
   window.localStorage.clear();
@@ -95,6 +96,20 @@ describe("AutomationView", () => {
     expect(wrapper.find('[data-testid="schedule-editor"]').exists()).toBe(false);
     expect(wrapper.text()).toContain("每周五 18:00");
     expect(wrapper.find('[data-testid="automation-acp-badge"]').text()).toContain(provider.name);
+  });
+
+  it("行内编辑：选工作区后保存，绑定写在任务专属会话上", async () => {
+    const automation = useAutomationStore();
+    const workspace = useWorkspaceStore().createWorkspace("项目A");
+    const wrapper = await mountView();
+    const first = automation.list[0];
+
+    await articleFor(wrapper, "整理项目状态").find('[data-testid="automation-edit"]').trigger("click");
+    await wrapper.find('[data-testid="schedule-workspace"]').setValue(workspace.id);
+    await wrapper.find('[data-testid="schedule-save"]').trigger("click");
+
+    expect(automation.taskWorkspaceId(first.id)).toBe(workspace.id);
+    expect(first.target).toBe("项目A");
   });
 
   it("行内纯图标按钮带可见提示（编辑 / 启停 / 删除）", async () => {
