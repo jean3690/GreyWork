@@ -34,7 +34,7 @@ const SCHEDULE_HINT = [
 export interface TurnApi {
   writeTurnError(messageId: string, detail: string, threadId: string): void;
   sendGlobalTurn(text: string, providerName: string, options?: GlobalTurnOptions): Promise<void>;
-  dispatchToAcp(text: string, attachments?: readonly Attachment[], comments?: readonly MessageComment[]): Promise<void>;
+  dispatchToAcp(text: string, attachments?: readonly Attachment[], comments?: readonly MessageComment[], threadId?: string): Promise<void>;
   beginAcpPlan(text: string, attachments?: readonly Attachment[], comments?: readonly MessageComment[]): void;
   confirmAcpPlan(threadId: string, message: ThreadMessage): void;
   attachRunBridge(bridge: RunEventBridge | null): void;
@@ -118,6 +118,7 @@ export function createTurnSlice({ state, getRuntime }: TurnDeps): TurnApi {
         providerName,
         [...(options.attachments ?? [])],
         options.comments ?? [],
+        options.threadId,
       ));
     }
     locals.acpStream = message;
@@ -200,9 +201,10 @@ export function createTurnSlice({ state, getRuntime }: TurnDeps): TurnApi {
     text: string,
     attachments: readonly Attachment[] = [],
     comments: readonly MessageComment[] = [],
+    threadId?: string,
   ): Promise<void> {
     const providerName = state.agentProviders.value.find((provider) => provider.id === state.selectedProviderId.value)?.name ?? "ACP";
-    await sendGlobalTurn(text, providerName, { attachments, comments });
+    await sendGlobalTurn(text, providerName, { attachments, comments, threadId });
   }
 
   /**

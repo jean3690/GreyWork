@@ -30,7 +30,11 @@ export interface StreamDeps {
 }
 
 export interface StreamApi {
-  dispatchAssistant(message: ThreadMessage, intentText?: string): Promise<void>;
+  /**
+   * @param threadId 指定历史与 runningSessionId 归属的线程（自动化任务的专属会话）；
+   *   缺省 = 当前激活线程。正文仍写在 message 上，故增量流与激活态解耦。
+   */
+  dispatchAssistant(message: ThreadMessage, intentText?: string, threadId?: string): Promise<void>;
   abortGeneration(): void;
   appendMessageContent(messageId: string, content: string, threadId?: string): void;
   setMessageContent(messageId: string, content: string, threadId?: string): void;
@@ -156,11 +160,13 @@ export function createStreamSlice({ state, getSession, getDemo }: StreamDeps): S
   }
 
   /** 统一助手分发：配置了可用供应商 → 真实流式；否则 mock 兜底（明示演示管线）。 */
-  async function dispatchAssistant(message: ThreadMessage, intentText = ""): Promise<void> {
+  async function dispatchAssistant(message: ThreadMessage, intentText = "", threadId?: string): Promise<void> {
+    // 目标线程：自动化任务的专属会话传入 threadId，否则回落当前激活线程。
+    const targetThread = threadId ?? session.activeThreadId.value;
     const provider = selectLlmProvider(settingsStore.modelProviders, settingsStore.selectedModelProviderId);
     if (!provider || !llm.isAvailable()) {
       llmActive.value = false;
-      getDemo().runAssistant(message, intentText);
+      getDemo().runAssistant(message, intentText, targetThread);
       return;
     }
     const localAi: LocalAiDeps = {
@@ -175,7 +181,7 @@ export function createStreamSlice({ state, getSession, getDemo }: StreamDeps): S
     message.steps = [];
     sessionStore.markDirty();
     busy.value = true;
-    runningSessionId.value = session.activeThreadId.value;
+    runningSessionId.value = targetThread;
     streamingInto = message;
     streamingMessageId.value = message.id;
     await ensureLlmListener();
@@ -183,7 +189,7 @@ export function createStreamSlice({ state, getSession, getDemo }: StreamDeps): S
       // 工作区检索（未启用/无命中返回 undefined）；语音附件转写（未启用返回 null → 路径引用）。
       const contextBlock = await retrieveContext(localAi, intentText);
       const history = await buildLlmHistory(
-        session.ensure(session.activeThreadId.value).filter((item) => item.id !== message.id),
+        session.ensure(targetThread).filter((item) => item.id !== message.id),
         20,
         { contextBlock, transcribe: (attachment) => transcribeAttachment(localAi, attachment) },
       );

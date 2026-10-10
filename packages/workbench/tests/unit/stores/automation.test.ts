@@ -4,6 +4,7 @@ import { createPinia, setActivePinia } from "pinia";
 import { useAutomationStore } from "@/stores/automation";
 import { useAgentStore } from "@/stores/agent";
 import { useChatStore } from "@/stores/chat";
+import { useSessionStore } from "@/stores/session";
 
 const storageHolder = globalThis as { localStorage?: Storage };
 
@@ -68,18 +69,18 @@ describe("Run Now 执行路由", () => {
     return { agent, provider };
   }
 
-  it("绑定 ACP 后端：派发到该后端、不落本机模型管线，成功后回写 lastRun", async () => {
+  it("绑定 ACP 后端：派发到该后端、按专属线程入流，成功后回写 lastRun", async () => {
     const { agent, provider } = readyAgent();
     const store = useAutomationStore();
     const task = store.add({ name: "带后端", intent: "生成日报", acpProviderId: provider.id });
-    const submit = vi.spyOn(useChatStore(), "submitText").mockImplementation(() => null);
+    const submit = vi.spyOn(useChatStore(), "submitTextIn").mockImplementation(() => null);
     const dispatch = vi.spyOn(agent, "dispatchToAcp").mockResolvedValue(undefined);
 
     expect(store.runNow(task.id)).toBe("started");
     expect(task.running).toBe(true);
     await vi.waitFor(() => expect(task.lastRun).toBeGreaterThan(0));
 
-    expect(dispatch).toHaveBeenCalledWith("生成日报");
+    expect(dispatch).toHaveBeenCalledWith("生成日报", [], [], `auto-${task.id}`);
     expect(submit).not.toHaveBeenCalled();
   });
 
@@ -89,7 +90,7 @@ describe("Run Now 执行路由", () => {
     provider.enabled = false;
     const store = useAutomationStore();
     const task = store.add({ name: "停用后端", intent: "生成日报", acpProviderId: provider.id });
-    const submit = vi.spyOn(useChatStore(), "submitText").mockImplementation(() => null);
+    const submit = vi.spyOn(useChatStore(), "submitTextIn").mockImplementation(() => null);
     const dispatch = vi.spyOn(agent, "dispatchToAcp").mockResolvedValue(undefined);
 
     expect(store.runNow(task.id)).toBe("started");
@@ -103,7 +104,7 @@ describe("Run Now 执行路由", () => {
   it("绑定的后端已被删除：只报错，不改用本机模型", async () => {
     const store = useAutomationStore();
     const task = store.add({ name: "后端没了", intent: "生成日报", acpProviderId: "custom-gone" });
-    const submit = vi.spyOn(useChatStore(), "submitText").mockImplementation(() => null);
+    const submit = vi.spyOn(useChatStore(), "submitTextIn").mockImplementation(() => null);
     const dispatch = vi.spyOn(useAgentStore(), "dispatchToAcp").mockResolvedValue(undefined);
 
     expect(store.runNow(task.id)).toBe("started");
@@ -114,16 +115,32 @@ describe("Run Now 执行路由", () => {
     expect(task.lastRun).toBe(0);
   });
 
-  it("未绑定后端：走本机模型管线", async () => {
+  it("未绑定后端：走本机模型管线，落到专属会话", async () => {
     const store = useAutomationStore();
     const task = store.add({ name: "本机", intent: "生成日报" });
-    const submit = vi.spyOn(useChatStore(), "submitText").mockImplementation(() => null);
+    const submit = vi.spyOn(useChatStore(), "submitTextIn").mockImplementation(() => null);
     const dispatch = vi.spyOn(useAgentStore(), "dispatchToAcp").mockResolvedValue(undefined);
 
     expect(store.runNow(task.id)).toBe("started");
-    expect(submit).toHaveBeenCalledWith("生成日报");
+    expect(submit).toHaveBeenCalledWith(`auto-${task.id}`, "生成日报");
     expect(dispatch).not.toHaveBeenCalled();
     await vi.waitFor(() => expect(task.lastRun).toBeGreaterThan(0));
+  });
+
+  it("Run Now 建/用专属会话，不抢当前激活会话；运行记录带会话入口", async () => {
+    const store = useAutomationStore();
+    const sessions = useSessionStore();
+    sessions.setActive("ses-user-keep");
+    const task = store.add({ name: "隔离", intent: "生成日报" });
+    const submit = vi.spyOn(useChatStore(), "submitTextIn").mockImplementation(() => null);
+
+    expect(store.runNow(task.id)).toBe("started");
+    // 专属会话已就位，且用户的激活会话没被顶掉
+    expect(sessions.getSession(`auto-${task.id}`)?.title).toContain(task.name);
+    expect(sessions.activeSessionId).toBe("ses-user-keep");
+    expect(submit).toHaveBeenCalledWith(`auto-${task.id}`, "生成日报");
+    await vi.waitFor(() => expect(task.lastRun).toBeGreaterThan(0));
+    expect(store.runs[0]?.sessionId).toBe(`auto-${task.id}`);
   });
 });
 

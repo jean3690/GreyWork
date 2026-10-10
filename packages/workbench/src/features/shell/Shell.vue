@@ -22,6 +22,7 @@ import { useQueueBridge } from "@/lib/queue-bridge";
 import { hasDirtyPreviewTabs, pendingDiscard, requestLeave } from "@/lib/preview-edit-guard";
 import { bootPlugins } from "@/plugins/runtime";
 import Sider from "@/features/shell/Sider.vue";
+import MinimalSider from "@/features/shell/MinimalSider.vue";
 import Titlebar from "@/features/shell/Titlebar.vue";
 import NoticeHost from "@/features/shell/NoticeHost.vue";
 import PermissionPromptHost from "@/features/conversation/PermissionPromptHost.vue";
@@ -63,6 +64,43 @@ const preview = usePreviewStore();
 const workspace = useWorkspacePanelStore();
 const activity = useActivityStore();
 const layout = useLayoutStore();
+
+/**
+ * 极简模式开关（见 stores/layout 的 `minimal`）：换一整套精简外壳 —— 极简顶栏 + 瘦身侧栏。
+ * 预览面板保留（顶栏有右栏开合键），工作区栏 / 活动带整体不渲染。
+ */
+const minimal = computed(() => layout.minimal);
+
+function toggleMinimal(): void {
+  layout.setMinimal(!layout.minimal);
+}
+
+/**
+ * 进极简时把预览面板收起来（极简默认干净），退出时还原进极简前的折叠态。
+ *
+ * 只记「进极简那一刻的值」并在退出时还回去，不落盘、不动别的面板 —— 这样极简的开关
+ * 对预览面板是幂等的（进来干净、出去回到原样），也不会污染用户的持久化偏好。
+ *
+ * `flush: "sync"` 是必须的：Ctrl+1..4 会先退出极简、紧接着 applyLayoutMode 拨预览，
+ * 两者在同一 tick 内。异步 flush 的话这个还原动作会排在 applyLayoutMode 之后，把刚拨好的
+ * 档位覆盖掉；同步 flush 保证「先还原、后按档位设定」的顺序。
+ */
+let previewCollapsedBeforeMinimal: boolean | null = null;
+watch(
+  minimal,
+  (on) => {
+    if (on) {
+      previewCollapsedBeforeMinimal = preview.collapsed;
+      preview.setCollapsed(true);
+      return;
+    }
+    if (previewCollapsedBeforeMinimal !== null) {
+      preview.setCollapsed(previewCollapsedBeforeMinimal);
+      previewCollapsedBeforeMinimal = null;
+    }
+  },
+  { flush: "sync" },
+);
 
 // 命令队列的补发要经 dispatchIntent 分流（否则 ACP 会话的待发指令会走本地 LLM）。
 // 与托盘桥 / 关闭守卫同为应用级接线，故挂在外壳；队列补发在 store 内触发，桥必须在
@@ -200,6 +238,11 @@ function onWindowKeydown(event: KeyboardEvent): void {
       handleNewChat();
       return;
     }
+    // 极简模式下没有可拨的面板：单栏开关（B / E / \）变 no-op，避免拨一个不存在的面板。
+    if (minimal.value && (key === "b" || key === "e" || key === "\\")) {
+      event.preventDefault();
+      return;
+    }
     if (key === "b") {
       event.preventDefault();
       collapsed.value = !collapsed.value;
@@ -218,6 +261,8 @@ function onWindowKeydown(event: KeyboardEvent): void {
     const layoutMode: LayoutMode | null = modeOfShortcut(event.code);
     if (layoutMode) {
       event.preventDefault();
+      // 布局档要求完整外壳在场：先退出极简，再拨到位（否则会卡在「有档位、无面板」的状态）。
+      if (minimal.value) layout.setMinimal(false);
       applyLayoutMode(layoutMode);
       return;
     }
@@ -372,16 +417,27 @@ function handleNewChat(): void {
     <Titlebar
       :collapsed="collapsed"
       :show-sider-toggle="isMobile"
+      :minimal="minimal"
       @toggle-sider="collapsed = !collapsed"
+      @toggle-minimal="toggleMinimal"
       @navigate="navigate"
       @new-chat="handleNewChat"
       @open-settings="openSettings"
     />
     <div class="relative flex min-h-0 flex-1 overflow-hidden">
-      <!-- 移动端展开的侧栏是抽屉：遮罩点击收起，侧栏悬浮于内容之上而非挤占宽度 -->
+      <!-- 移动端展开的侧栏是抽屉：遮罩点击收起，侧栏悬浮于内容之上而非挤占宽度。
+           极简模式的侧栏同样按抽屉走（窄屏默认收起，靠顶栏左栏开合键拉出），故遮罩共用。 -->
       <div v-if="isMobile && !collapsed" class="absolute inset-0 z-30 bg-black/30" aria-hidden="true" @click="collapsed = true" />
+      <!-- 极简模式：瘦身侧栏（窄屏作抽屉悬浮；顶栏左栏开合键收起后整个隐去） -->
+      <MinimalSider
+        v-if="minimal && !collapsed"
+        :overlay="isMobile"
+        @new-chat="handleNewChat"
+        @navigate="navigate"
+        @open-settings="openSettings"
+      />
       <Sider
-        v-if="!isMobile || !collapsed"
+        v-else-if="!minimal && (!isMobile || !collapsed)"
         :collapsed="collapsed"
         :overlay="isMobile"
         @toggle-sider="collapsed = !collapsed"
@@ -392,16 +448,18 @@ function handleNewChat(): void {
       <!-- [内容区 + 预览 + 工作区] 组成一列：上行为被观测的 mainRow（宽度是两个面板 clamp 的依据）。
            顺序 = 会话 | 预览 | 工作区：预览紧挨会话（看产物的心智最近），工作区（文件树）在最右。
            工作区栏默认折叠（回旧单右栏布局），展开与否由 workspace store 的持久化开关决定。
-           下行为底部活动面板通栏（ActivityBand 内部自管高度/折叠）。 -->
+           下行为底部活动面板通栏（ActivityBand 内部自管高度/折叠）。
+           极简模式：预览面板保留（顶栏有右栏开合键；进入极简时先收起，退出还原），
+           工作区栏 / 活动带整体不渲染。 -->
       <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
         <div ref="mainRow" class="flex min-w-0 flex-1 overflow-hidden">
           <main class="min-w-0 flex-1 overflow-hidden bg-panel">
             <router-view />
           </main>
           <PreviewSider v-if="preview.available" />
-          <WorkspacePanel v-if="workspace.available" />
+          <WorkspacePanel v-if="!minimal && workspace.available" />
         </div>
-        <ActivityBand v-if="activity.available" />
+        <ActivityBand v-if="!minimal && activity.available" />
       </div>
     </div>
     <WorkspaceOverlayRegions />

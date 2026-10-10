@@ -206,14 +206,14 @@ describe("automation 到期队列消费（consumeDue）", () => {
     dispatchInvoke();
     const automation = useAutomationStore();
     const chat = useChatStore();
-    const submit = vi.spyOn(chat, "submitText").mockImplementation(() => null);
+    const submit = vi.spyOn(chat, "submitTextIn").mockImplementation(() => null);
 
     await automation.hydrated;
     await vi.waitFor(() => expect(queue).toHaveLength(0));
 
     expect(submit).toHaveBeenCalledTimes(2);
-    expect(submit).toHaveBeenNthCalledWith(1, "生成日报");
-    expect(submit).toHaveBeenNthCalledWith(2, "生成周报");
+    expect(submit).toHaveBeenNthCalledWith(1, "auto-at-db-1", "生成日报");
+    expect(submit).toHaveBeenNthCalledWith(2, "auto-at-db-2", "生成周报");
     const finishes = invokeMock.mock.calls.filter(([cmd]) => cmd === "db_automations_due_finish");
     expect(finishes).toHaveLength(2);
     expect(finishes[0][1]).toMatchObject({ id: 1, status: "success" });
@@ -228,7 +228,7 @@ describe("automation 到期队列消费（consumeDue）", () => {
     dispatchInvoke();
     const automation = useAutomationStore();
     const chat = useChatStore();
-    const submit = vi.spyOn(chat, "submitText").mockImplementation(() => null);
+    const submit = vi.spyOn(chat, "submitTextIn").mockImplementation(() => null);
     chat.busy = true;
 
     await automation.hydrated;
@@ -260,14 +260,14 @@ describe("automation 到期队列消费（consumeDue）", () => {
     ];
     dispatchInvoke();
     const automation = useAutomationStore();
-    const submit = vi.spyOn(useChatStore(), "submitText").mockImplementation(() => null);
+    const submit = vi.spyOn(useChatStore(), "submitTextIn").mockImplementation(() => null);
     // 待跑状态：库里 lastRun 尚未回写（渲染端在场，由本进程执行）
     automation.update("at-db-once", { lastRun: 0, enabled: true });
 
     await automation.hydrated;
     await vi.waitFor(() => expect(queue).toHaveLength(0));
 
-    expect(submit).toHaveBeenCalledWith("发一封提醒");
+    expect(submit).toHaveBeenCalledWith("auto-at-db-once", "发一封提醒");
     const task = automation.list.find((a) => a.id === "at-db-once");
     expect(task?.enabled).toBe(false);
     expect(task?.lastRun).toBeGreaterThan(0);
@@ -282,7 +282,7 @@ describe("automation 到期队列消费（consumeDue）", () => {
     dispatchInvoke();
     const automation = useAutomationStore();
     const chat = useChatStore();
-    const submit = vi.spyOn(chat, "submitText").mockImplementation(() => null);
+    const submit = vi.spyOn(chat, "submitTextIn").mockImplementation(() => null);
 
     await automation.hydrated;
     await vi.waitFor(() => expect(queue).toHaveLength(0));
@@ -311,13 +311,13 @@ describe("automation 到期队列消费（consumeDue）", () => {
     ];
     dispatchInvoke();
     const automation = useAutomationStore();
-    const submit = vi.spyOn(useChatStore(), "submitText").mockImplementation(() => null);
+    const submit = vi.spyOn(useChatStore(), "submitTextIn").mockImplementation(() => null);
     const dispatch = vi.spyOn(agent, "dispatchToAcp").mockResolvedValue(undefined);
 
     await automation.hydrated;
     await vi.waitFor(() => expect(queue).toHaveLength(0));
 
-    expect(dispatch).toHaveBeenCalledWith("生成日报");
+    expect(dispatch).toHaveBeenCalledWith("生成日报", [], [], "auto-at-db-1");
     expect(submit).not.toHaveBeenCalled();
     const finish = invokeMock.mock.calls.find(([cmd]) => cmd === "db_automations_due_finish");
     expect(finish?.[1]).toMatchObject({ id: 3, status: "success" });
@@ -341,7 +341,7 @@ describe("automation 到期队列消费（consumeDue）", () => {
     ];
     dispatchInvoke();
     const automation = useAutomationStore();
-    const submit = vi.spyOn(useChatStore(), "submitText").mockImplementation(() => null);
+    const submit = vi.spyOn(useChatStore(), "submitTextIn").mockImplementation(() => null);
     const dispatch = vi.spyOn(agent, "dispatchToAcp").mockResolvedValue(undefined);
 
     await automation.hydrated;

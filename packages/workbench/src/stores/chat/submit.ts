@@ -19,6 +19,7 @@ export interface SubmitDeps {
 
 export interface SubmitApi {
   submitText(text: string, attachments?: Attachment[], comments?: readonly MessageComment[]): ThreadMessage | null;
+  submitTextIn(threadId: string, text: string): ThreadMessage | null;
   confirmPlan(_threadId: string, message: ThreadMessage): void;
   cancelPlan(threadId: string, message: ThreadMessage): void;
   markAskAnswered(threadId: string, message: ThreadMessage, answers: AskAnswer[]): void;
@@ -31,6 +32,8 @@ export interface SubmitApi {
     providerName: string,
     attachments?: Attachment[],
     comments?: readonly MessageComment[],
+    /** 指定入流线程（自动化任务专属会话）；缺省走当前激活线程。 */
+    threadId?: string,
   ): { threadId: string; message: ThreadMessage; userMessage: ThreadMessage };
 }
 
@@ -74,6 +77,25 @@ export function createSubmitSlice({ state, getSession, getStream }: SubmitDeps):
     session.push(session.activeThreadId.value, message);
     // 评论引用拼进提示词：批注文本已在正文里，模型还缺「针对哪一段」。
     void getStream().dispatchAssistant(message, buildCommentPrompt(trimmed, comments));
+    return message;
+  }
+
+  /**
+   * 在**指定线程**里发起一轮对话，不碰 `activeThreadId`。
+   *
+   * 自动化任务的专属会话用这条：任务到点执行时，用户可能正停在别的会话里聊天，
+   * 若走 submitText 会把指令灌进「当前会话」（旧实现就是这个毛病：一条每分钟的任务
+   * 把 hello 反复塞进同一个会话）。这里还刻意跳过 planMode —— 自动化是无人值守跑的，
+   * 挂一张「等你确认」的计划卡等于这一轮永远不执行。
+   */
+  function submitTextIn(threadId: string, text: string): ThreadMessage | null {
+    const trimmed = text.trim();
+    if (!trimmed || busy.value || !threadId) return null;
+    session.push(threadId, { id: uid(), role: "user", content: trimmed, ts: Date.now() });
+    const message: ThreadMessage = { id: uid(), role: "assistant", content: "", ts: Date.now(), steps: buildSteps(trimmed) };
+    session.push(threadId, message);
+    // threadId 交给流式分片：历史取该线程的，runningSessionId 也标到该线程上。
+    void getStream().dispatchAssistant(message, trimmed, threadId);
     return message;
   }
 
@@ -129,9 +151,14 @@ export function createSubmitSlice({ state, getSession, getStream }: SubmitDeps):
     providerName: string,
     attachments: Attachment[] = [],
     comments: readonly MessageComment[] = [],
+    threadId?: string,
   ): { threadId: string; message: ThreadMessage; userMessage: ThreadMessage } {
-    if (!session.activeThreadId.value) session.activeThreadId.value = sessionStore.createSession(null).id;
-    const threadId = session.activeThreadId.value;
+    // 指定了线程就不读写 activeThreadId：自动化任务的专属会话不该抢走用户的焦点。
+    let targetThreadId = threadId ?? "";
+    if (!targetThreadId) {
+      if (!session.activeThreadId.value) session.activeThreadId.value = sessionStore.createSession(null).id;
+      targetThreadId = session.activeThreadId.value;
+    }
     const userMessage: ThreadMessage = {
       id: uid(),
       role: "user",
@@ -140,11 +167,11 @@ export function createSubmitSlice({ state, getSession, getStream }: SubmitDeps):
       attachments: [...attachments],
       ...(comments.length > 0 ? { comments: [...comments] } : {}),
     };
-    session.push(threadId, userMessage);
+    session.push(targetThreadId, userMessage);
     const message: ThreadMessage = { id: uid(), role: "assistant", content: "", ts: Date.now(), acp: providerName };
-    session.push(threadId, message);
-    return { threadId, message, userMessage };
+    session.push(targetThreadId, message);
+    return { threadId: targetThreadId, message, userMessage };
   }
 
-  return { submitText, confirmPlan, cancelPlan, markAskAnswered, markScheduleCreated, clearScheduleDraft, startAcpTurn };
+  return { submitText, submitTextIn, confirmPlan, cancelPlan, markAskAnswered, markScheduleCreated, clearScheduleDraft, startAcpTurn };
 }

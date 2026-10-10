@@ -30,7 +30,8 @@ export interface DemoDeps {
 }
 
 export interface DemoApi {
-  runAssistant(message: ThreadMessage, intentText?: string): void;
+  /** threadId = 消息所在线程（自动化专属会话传入，避免把「运行中」标到激活会话上）。 */
+  runAssistant(message: ThreadMessage, intentText?: string, threadId?: string): void;
 }
 
 export function createDemoSlice({ state, getSession, getStream }: DemoDeps): DemoApi {
@@ -71,13 +72,14 @@ export function createDemoSlice({ state, getSession, getStream }: DemoDeps): Dem
   }
 
   /** mock 执行：步进时间线 → 思考链揭示 → 工具活动时间线 → 完成文案 → 追加交付物。 */
-  function runAssistant(message: ThreadMessage, intentText = ""): void {
+  function runAssistant(message: ThreadMessage, intentText = "", threadId?: string): void {
+    const targetThread = threadId ?? session.activeThreadId.value;
     // 走响应式引用更新：直接改原始 message 不会触发 Pinia 重渲染，步骤时间线会卡在 wait。
-    const live = session.ensure(session.activeThreadId.value).find((m) => m.id === message.id) ?? message;
+    const live = session.ensure(targetThread).find((m) => m.id === message.id) ?? message;
     live.planPending = false;
     sessionStore.markDirty();
     busy.value = true;
-    runningSessionId.value = session.activeThreadId.value;
+    runningSessionId.value = targetThread;
     // 演示管线回合起点：完成时报真实耗时（mock 工具时间线 startedAt/finishedAt 同刻，无法自算）。
     const turnStartAt = Date.now();
     // 本条消息正在被写入：思考段据此判定「仍在流」并保持展开（与真实 ACP 回合同一判据）。

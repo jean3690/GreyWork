@@ -1092,10 +1092,11 @@ export const enUS: MessageSchema = {
       "This removes {name} from this device. If active, it is disabled safely first; you can reinstall it from the marketplace later.",
   },
   automation: {
-    title: "Scheduled tasks",
-    sub: "Scheduled tasks run by time or rules; tasks are persisted and can be re-run any time via Run Now.",
+    title: "Automations",
+    sub: "Automations run by time or rules; every run lands in the task's own session, isolated from the conversation you're in.",
     whereHint:
       "Tasks live in this server's database — the desktop app keeps a separate set. To keep them running after the browser is closed, set GREYWORK_AUTOMATION_HOST_PRIMARY=1 on the server.",
+    sessionTitle: "Automation · {name}",
     create: "New automation",
     neverRun: "Never run",
     lastRun: "Last run: {last}",

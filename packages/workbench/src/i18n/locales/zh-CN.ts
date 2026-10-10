@@ -1069,10 +1069,11 @@ export const zhCN = {
     uninstallPluginMessage: "将从本机删除「{name}」。若插件正在运行，会先安全停用；下次仍可从市场重新安装。",
   },
   automation: {
-    title: "定时任务",
-    sub: "按时间或规则定时执行的任务；任务已持久化，可手动 Run Now 随时复跑。",
+    title: "自动化任务",
+    sub: "按时间或规则自动执行的任务：每次运行都落在任务的专属会话里，与你正在聊的对话互不干扰。",
     whereHint:
       "任务存在本服务端的库里，桌面端另有一份、互不可见。要让它在浏览器关掉后照跑，需服务端置 GREYWORK_AUTOMATION_HOST_PRIMARY=1。",
+    sessionTitle: "自动化 · {name}",
     create: "新建自动化",
     neverRun: "从未运行",
     lastRun: "上次运行：{last}",

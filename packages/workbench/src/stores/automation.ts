@@ -73,6 +73,11 @@ function uid(): string {
   return `at-${seq}`;
 }
 
+/** 任务专属会话 id：确定性派生自任务 id（不入库、不加列；删除任务即连带删除会话）。 */
+function taskSessionId(taskId: string): string {
+  return `auto-${taskId}`;
+}
+
 const DEFAULT_AUTOMATIONS: AutomationTask[] = [
   {
     id: "at-seed-1",
@@ -140,8 +145,22 @@ export const useAutomationStore = defineStore("automation", () => {
   const list = ref<AutomationTask[]>([]);
   /** 运行记录（新→旧）；浏览器态来自 localStorage，桌面态由 SQLite 覆盖并含宿主兜底跑。 */
   const runs = ref<AutomationRunRow[]>([]);
+  /** 会话存储：每条任务跑在自己的专属会话里（`auto-<taskId>`，见 ensureTaskSession）。 */
+  const sessionStore = useSessionStore();
   /** 浏览器态本地记录的合成 id（负数，绝不与库侧正整数自增 id 冲突）。 */
   let localRunSeq = -1;
+
+  /** 专属会话的标题（跟着任务名走，改名即改会话标题）。 */
+  function sessionTitle(task: AutomationTask): string {
+    return t("automation.sessionTitle", { name: task.name });
+  }
+
+  /** 取/建任务专属会话（不激活）：任务的所有运行都落在这一条会话里，与用户当前对话完全隔离。 */
+  function ensureTaskSession(task: AutomationTask): string {
+    const id = taskSessionId(task.id);
+    sessionStore.ensureUnactivated(id, sessionTitle(task));
+    return id;
+  }
 
   function loadPersisted(): void {
     const saved = automationsStorage.read();
@@ -237,6 +256,9 @@ export const useAutomationStore = defineStore("automation", () => {
   }
 
   function remove(id: string): void {
+    // 专属会话跟着任务一起删：任务没了，它的对话（与产物）不该留在会话列表里占位。
+    const sessionId = taskSessionId(id);
+    if (sessionStore.getSession(sessionId)) sessionStore.deleteSession(sessionId);
     list.value = list.value.filter((a) => a.id !== id);
     persist();
   }
@@ -253,6 +275,11 @@ export const useAutomationStore = defineStore("automation", () => {
     const task = list.value.find((a) => a.id === id);
     if (task) {
       Object.assign(task, patch);
+      // 改名时同步专属会话的标题，会话列表里不残留旧名字。
+      if (patch.name !== undefined) {
+        const sessionId = taskSessionId(id);
+        if (sessionStore.getSession(sessionId)) sessionStore.renameSession(sessionId, sessionTitle(task));
+      }
       persist();
     }
   }
@@ -270,12 +297,13 @@ export const useAutomationStore = defineStore("automation", () => {
   }
 
   /**
-   * 把指令交给执行后端：本机模型走 chat 管线（同步入流），ACP 先切后端再派发。
-   * 返回失败文案（null = 已成功下发）；后端被删 / 未启用 / 连不上都在这里落地。
+   * 把指令交给执行后端，落到**任务专属线程**：本机模型走 chat 管线（submitTextIn 直写该线程，
+   * 不碰 activeThreadId），ACP 先切后端再按线程派发。返回失败文案（null = 已成功下发）；
+   * 后端被删 / 未启用 / 连不上都在这里落地。
    */
-  async function dispatchIntent(acpProviderId: string | null, intent: string): Promise<string | null> {
+  async function dispatchIntent(threadId: string, acpProviderId: string | null, intent: string): Promise<string | null> {
     if (!acpProviderId) {
-      useChatStore().submitText(intent);
+      useChatStore().submitTextIn(threadId, intent);
       return null;
     }
     const agent = useAgentStore();
@@ -286,7 +314,9 @@ export const useAutomationStore = defineStore("automation", () => {
       const failure = await agent.activateAcpProvider(provider.id);
       if (failure) return failure;
     }
-    await agent.dispatchToAcp(intent);
+    // threadId 使 ACP 回合入流到任务的专属会话：会话隔离检查认线程，acpSessionThreadId
+    // 变了自然为该线程另起 ACP 会话（与用户自己的对话互不串上下文）。
+    await agent.dispatchToAcp(intent, [], [], threadId);
     return null;
   }
 
@@ -344,22 +374,19 @@ export const useAutomationStore = defineStore("automation", () => {
   function runNow(id: string): "started" | "busy" | "missing" {
     const task = list.value.find((a) => a.id === id);
     if (!task) return "missing";
-    const chat = useChatStore();
     if (turnActive() || inflight !== null) return "busy";
-    if (!chat.activeThreadId) {
-      const session = useSessionStore().createSession(null);
-      chat.activeThreadId = session.id;
-    }
+    // 专属会话：任务跑在 auto-<id> 里，不占用/不顶掉用户当前正在看的会话。
+    const threadId = ensureTaskSession(task);
     task.enabled = true;
     task.running = true;
-    lastRunSessionId.value = chat.activeThreadId;
+    lastRunSessionId.value = threadId;
     inflight = { id, mode: task.acpProviderId ? "acp" : "llm", sawBusy: false };
     fuseTimer = setTimeout(() => {
       fuseTimer = null;
       clearInflight();
     }, RUN_FUSE_MS);
     const mode: AutomationRunRow["mode"] = task.acpProviderId ? "acp" : "llm";
-    void dispatchIntent(task.acpProviderId ?? null, task.intent).then((failure) => {
+    void dispatchIntent(threadId, task.acpProviderId ?? null, task.intent).then((failure) => {
       if (!failure) {
         task.lastRun = Date.now();
         recordRun({
@@ -367,7 +394,7 @@ export const useAutomationStore = defineStore("automation", () => {
           name: task.name,
           status: "success",
           detail: null,
-          sessionId: lastRunSessionId.value,
+          sessionId: threadId,
           mode,
           ranAt: task.lastRun,
         });
@@ -410,7 +437,9 @@ export const useAutomationStore = defineStore("automation", () => {
     const task = list.value.find((a) => a.id === row.taskId);
     if (!task) return "missing";
     const mode: AutomationRunRow["mode"] = row.acpProviderId ? "acp" : "llm";
-    const failure = await dispatchIntent(row.acpProviderId, row.intent);
+    // 专属会话：到期执行同样落在 auto-<taskId> 那条会话里，不挤进用户当前对话。
+    const threadId = ensureTaskSession(task);
+    const failure = await dispatchIntent(threadId, row.acpProviderId, row.intent);
     if (failure) {
       recordRun({ taskId: row.taskId, name: row.name, status: "failed", detail: failure, sessionId: null, mode, ranAt: Date.now() });
       notify({
@@ -428,7 +457,7 @@ export const useAutomationStore = defineStore("automation", () => {
       name: row.name,
       status: "success",
       detail: null,
-      sessionId: useChatStore().activeThreadId ?? null,
+      sessionId: threadId,
       mode,
       ranAt: task.lastRun,
     });
@@ -498,6 +527,8 @@ export const useAutomationStore = defineStore("automation", () => {
     update,
     runNow,
     consumeDue,
+    /** 任务专属会话 id（auto-<taskId>）；给视图「查看会话」用。 */
+    taskSessionId,
     /** 桌面态启动接管完成信号（null = 浏览器态无后端）。 */
     hydrated: backendHydratePromise,
   };

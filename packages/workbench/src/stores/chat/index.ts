@@ -68,6 +68,7 @@ export const useChatStore = defineStore("chat", () => {
     clearSim,
     ensure: session.ensure,
     submitText: submit.submitText,
+    submitTextIn: submit.submitTextIn,
     confirmPlan: submit.confirmPlan,
     cancelPlan: submit.cancelPlan,
     markAskAnswered: submit.markAskAnswered,
