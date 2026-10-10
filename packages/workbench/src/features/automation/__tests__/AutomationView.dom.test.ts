@@ -1,10 +1,10 @@
-// 定时任务契约：默认种子任务全量渲染；「新建任务」置顶插入一条并持久化；
+// 自动化任务契约：默认种子任务全量渲染；「新建任务」置顶插入一条并持久化；
 // 行内编辑器把触发时间 / 执行后端写回任务。
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { VueWrapper } from "@vue/test-utils";
 import { DOMWrapper, flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
-import ScheduledView from "@/features/scheduled/ScheduledView.vue";
+import AutomationView from "@/features/automation/AutomationView.vue";
 import { createAppRouter } from "@/router";
 import { i18n, setLocale } from "@/i18n";
 import { useAgentStore } from "@/stores/agent";
@@ -47,14 +47,14 @@ async function mountView() {
   const router = createAppRouter();
   await router.push("/scheduled");
   await router.isReady();
-  return mount(ScheduledView, { global: { plugins: [router, i18n] } });
+  return mount(AutomationView, { global: { plugins: [router, i18n] } });
 }
 
-describe("ScheduledView", () => {
-  it("渲染定时任务标题与种子任务", async () => {
+describe("AutomationView", () => {
+  it("渲染标题与种子任务", async () => {
     const automation = useAutomationStore();
     const wrapper = await mountView();
-    expect(wrapper.text()).toContain("定时任务");
+    expect(wrapper.text()).toContain("自动化任务");
     expect(wrapper.findAll("article")).toHaveLength(automation.list.length);
     expect(wrapper.text()).toContain("整理项目状态");
   });

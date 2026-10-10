@@ -6,7 +6,7 @@ import { createRouter, createWebHashHistory, type Router, type RouteRecordRaw } 
  *   /guid           全新对话引导页
  *   /conversation/  单 Agent 对话（历史会话）
  *   /assistants     助手库（Agent 设置页的读入口）
- *   /scheduled      定时任务
+ *   /scheduled      自动化任务
  *   /team           团队
  *   /plugin/:modeId 插件贡献的模式页（组件取自 seam 的 modes 快照，无需注册路由）
  *
@@ -23,7 +23,7 @@ export function createAppRouter(): Router {
     { path: "/assistants", component: () => import("@/features/assistants/AssistantsView.vue") },
     // 远程通道的单联系人会话页（微信那侧的对端在左、本机回复在右）
     { path: "/remote/:peerId", component: () => import("@/features/channels/RemoteConversationView.vue") },
-    { path: "/scheduled", component: () => import("@/features/scheduled/ScheduledView.vue") },
+    { path: "/scheduled", component: () => import("@/features/automation/AutomationView.vue") },
     { path: "/team", component: () => import("@/features/team/TeamView.vue") },
     { path: "/plugin/:modeId", component: () => import("@/features/plugins/PluginView.vue") },
     // 插件悬浮窗口内容（透明置顶小窗加载 #/plugin-window；Shell 按 meta.bare 只出 router-view）。

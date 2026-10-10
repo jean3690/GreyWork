@@ -126,7 +126,7 @@ export interface StorageProviderConfig extends ServiceProviderBase {
 }
 
 /**
- * 定时任务族：把「到期后怎么执行」做成可插拔后端。
+ * 自动化任务族：把「到期后怎么执行」做成可插拔后端。
  * 长期落点：`crates/greywork-host/src/host_exec.rs` 与 `automation_due` 队列。
  * 本期只实现了「宿主成为主执行者」，见 `GREYWORK_AUTOMATION_HOST_PRIMARY`。
  */

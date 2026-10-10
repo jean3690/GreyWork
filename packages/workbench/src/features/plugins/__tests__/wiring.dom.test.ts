@@ -288,8 +288,8 @@ describe("Sider 插件分组（shellSidebar）", () => {
 
     // 分组出现在快捷入口与 SiderFooter 之间
     const text = wrapper.text();
-    expect(text.indexOf("定时任务")).toBeGreaterThanOrEqual(0);
-    expect(text.indexOf("演示分组")).toBeGreaterThan(text.indexOf("定时任务"));
+    expect(text.indexOf("自动化任务")).toBeGreaterThanOrEqual(0);
+    expect(text.indexOf("演示分组")).toBeGreaterThan(text.indexOf("自动化任务"));
     expect(text.indexOf("设置")).toBeGreaterThan(text.indexOf("演示分组"));
 
     // 停用 → 分组宿主整体消失

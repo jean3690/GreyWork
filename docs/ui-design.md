@@ -154,7 +154,7 @@ Font size: 15px base.
 改内联 `role="group"`——它本就不是模态；`UnsavedChangesDialog` 随功能删除）、3 个菜单（`dropdown-menu`）、
 约 58 处 `title` → `Hint`（原生 `title` 至此迁完，只剩 `ConfirmDialog` 的 `title` prop 与 `<iframe title>`）、
 `SearchPanel` → `Popover`、插件市场加载态 → `Skeleton`。
-另外给一批只有 `aria-label` 的**纯图标按钮**补了 `Hint`（定时任务的编辑 / 启停 / 删除、协作面板的移除成员、
+另外给一批只有 `aria-label` 的**纯图标按钮**补了 `Hint`（自动化任务的编辑 / 启停 / 删除、协作面板的移除成员、
 插件市场的刷新 / 注册表设置、通知卡的关闭）：`aria-label` 只服务读屏，看得见的人需要一条悬停提示。
 判断准则与上面一致 —— 提示说的是「点了会做什么」就照常用 `disabled`，只有提示在解释「为什么不能用」时才换 `aria-disabled`。
 另有 3 个新弹窗（会话图片灯箱 / MCP JSON / 技能源表单）一开始就建在 shadcn 上：现在共 9 处

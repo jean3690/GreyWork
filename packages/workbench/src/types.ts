@@ -197,7 +197,7 @@ export interface ChannelMediaCapability {
 }
 
 /**
- * 待确认的定时任务提案（AI 回复中的 ```schedule 围栏解析产物）。
+ * 待确认的自动化任务提案（AI 回复中的 ```schedule 围栏解析产物）。
  * 随会话整条持久化：回合结束/重启后仍可确认；`createdId` 非空 = 已收口
  * （卡片转只读，回放渲染也不会重复建任务）。
  */
@@ -218,7 +218,7 @@ export interface ScheduleDraft {
  *
  * 活跃态卡片挂在输入框上方（那是「等你点」的位置，对 120s 超时窗口最友好）；
  * 一旦裁决就转成本结构随消息落盘，在消息流里留一条只读记录 —— 与 AskQuestionCard /
- * ScheduleConfirmCard 的 settled 态同一约定：事后回看能知道「当时批了什么」。
+ * AutomationConfirmCard 的 settled 态同一约定：事后回看能知道「当时批了什么」。
  */
 export interface PermissionTrace {
   toolCallId: string;
@@ -273,7 +273,7 @@ export interface ThreadMessage {
   tools?: ToolActivity[];
   /** 待用户作答的提问（AskUserQuestion）；作答后 answers 非空，卡片转只读。 */
   ask?: AskRequest;
-  /** 待确认的定时任务提案（```schedule 围栏）；确认后 createdId 非空，取消则移除。 */
+  /** 待确认的自动化任务提案（```schedule 围栏）；确认后 createdId 非空，取消则移除。 */
   scheduleDraft?: ScheduleDraft;
   /**
    * 本条消息内发生的权限裁决留痕，按发生顺序排列。

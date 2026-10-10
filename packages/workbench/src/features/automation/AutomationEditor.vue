@@ -3,11 +3,11 @@ import { computed, ref } from "vue";
 import { i18n } from "@/i18n";
 import { useAgentStore } from "@/stores/agent";
 import { composeCron, decomposeCron, describeCron, nextCronRuns, validateCron, type ScheduleSpec } from "@/lib/cron";
-import DatePicker from "@/features/scheduled/DatePicker.vue";
-import TimePicker from "@/features/scheduled/TimePicker.vue";
+import DatePicker from "@/features/automation/DatePicker.vue";
+import TimePicker from "@/features/automation/TimePicker.vue";
 
 /**
- * 定时任务编辑器（行内展开面板）：任务名 / 指令 / 执行后端（ACP 或本机模型）/
+ * 自动化任务编辑器（行内展开面板）：任务名 / 指令 / 执行后端（ACP 或本机模型）/
  * 触发时间（日历 + 时间选择器，或写 cron）。
  *
  * 设计要点：

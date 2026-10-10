@@ -79,7 +79,7 @@ beforeEach(() => {
   acpDefaultConfigValues.value = {};
 });
 
-describe("schedule 围栏（AI 提议定时任务）", () => {
+describe("schedule 围栏（AI 提议自动化任务）", () => {
   /** 单回合派发并立即以 prompt-done 收尾；返回支架消息。 */
   async function runTurnWithOutput(): Promise<ReturnType<typeof useChatStore>["threads"][string][number]> {
     h.startAgent.mockResolvedValue(7);
@@ -89,7 +89,7 @@ describe("schedule 围栏（AI 提议定时任务）", () => {
     const chat = useChatStore();
     useSessionStore().createSession(null, "围栏测试");
     chat.activeThreadId = useSessionStore().activeSessionId!;
-    await agentStore.dispatchToAcp("帮我建个定时任务");
+    await agentStore.dispatchToAcp("帮我建个自动化任务");
     const threadId = chat.activeThreadId;
     emit({
       kind: "prompt-done",

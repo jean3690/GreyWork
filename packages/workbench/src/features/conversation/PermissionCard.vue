@@ -7,7 +7,7 @@
  *   （acp_host.rs PERMISSION_CONFIRM_TIMEOUT），store 镜像同一窗口：卡片显示倒计时，
  *   到时自行收卡并留痕。
  * - **只读态**（传 `trace`）：裁决结果随消息落盘后回看的那条记录，挂在会话消息流里
- *   （ConversationMessage）。与 AskQuestionCard / ScheduleConfirmCard 的 settled 态同一约定。
+ *   （ConversationMessage）。与 AskQuestionCard / AutomationConfirmCard 的 settled 态同一约定。
  *
  * 无障碍：活跃态卡片是**内联**在消息流里的，没有遮罩、不抢焦点，身后的消息照样可见可操作，
  * 所以它不是 alertdialog（那是模态变体）也绝不能标 aria-modal —— 那是在告诉辅助技术

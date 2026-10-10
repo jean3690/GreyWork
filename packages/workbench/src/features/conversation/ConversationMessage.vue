@@ -15,7 +15,7 @@ import ThinkingBlock from "@/features/conversation/ThinkingBlock.vue";
 import ToolTimeline from "@/features/conversation/ToolTimeline.vue";
 import PlanCard from "@/features/conversation/PlanCard.vue";
 import AskQuestionCard from "@/features/conversation/AskQuestionCard.vue";
-import ScheduleConfirmCard from "@/features/conversation/ScheduleConfirmCard.vue";
+import AutomationConfirmCard from "@/features/conversation/AutomationConfirmCard.vue";
 import PermissionCard from "@/features/conversation/PermissionCard.vue";
 import Icon from "@/features/shared/Icon.vue";
 import Hint from "@/features/shared/Hint.vue";
@@ -203,7 +203,7 @@ function timeLabel(ts: number): string {
     <div v-else class="flex max-w-[92%] flex-col gap-2.5">
       <PlanCard v-if="message.planPending" :thread-id="threadId || chat.activeThreadId" :message="message" />
       <AskQuestionCard v-if="message.ask" :thread-id="threadId || chat.activeThreadId" :message="message" />
-      <ScheduleConfirmCard v-if="message.scheduleDraft" :thread-id="threadId || chat.activeThreadId" :message="message" />
+      <AutomationConfirmCard v-if="message.scheduleDraft" :thread-id="threadId || chat.activeThreadId" :message="message" />
       <div
         v-if="awaitingOutput"
         class="flex h-9 items-center gap-2.5 rounded-[calc(12px*var(--gw-radius-scale))] border border-line bg-panel-2 px-3.5 text-[12px] text-dim"

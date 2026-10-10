@@ -50,11 +50,11 @@ pub struct ServerConfig {
     ///
     /// 只接受 `scheme://host[:port]` 形态；非法项会被丢弃并在启动日志里点名。
     pub frame_origins: Vec<String>,
-    /// 宿主是否作为定时任务的**主执行者**（`GREYWORK_AUTOMATION_HOST_PRIMARY=1`）。
+    /// 宿主是否作为自动化任务的**主执行者**（`GREYWORK_AUTOMATION_HOST_PRIMARY=1`）。
     ///
     /// 默认 `false`：与桌面壳一致，宿主只做兜底（到期 2 分钟后才认领），适合「浏览器
     /// 一直开着」的用法。置 `true` 后阈值归零，到点即由本进程执行 —— 这才是
-    /// 「把定时任务放到服务器上跑，不用一直开着自己的电脑」要的语义。
+    /// 「把自动化任务放到服务器上跑，不用一直开着自己的电脑」要的语义。
     ///
     /// 注意无人值守的模型凭证来自**本进程的环境变量**（`modelProviders[].apiKeyEnv`），
     /// 容器里必须在 compose 注入；否则任务会以「无可用模型配置」失败。

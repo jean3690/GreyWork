@@ -153,7 +153,7 @@ export const useRunsStore = defineStore("runs", () => {
       const provider = agentStore.agentProviders.find((provider) => provider.id === agentStore.selectedProviderId);
       if (!provider) throw new Error(t("errors.acpNotSelected"));
       // 编排子任务的工作区取自设置项 / 宿主私有根，**不跟随当前打开的对话**：
-      // 批次可能由定时任务在后台派发，那时「活动对话」与它无关。
+      // 批次可能由自动化任务在后台派发，那时「活动对话」与它无关。
       const workspace = await isolateForRun(await resolveWorkspaceDir());
       handle = await acp.startAgent(provider.command, settings.effectivePermissionTier, settings.sandboxMode, workspace);
       const { sessionId } = await acp.openSession(handle, workspace, settings.enabledMcpServers);

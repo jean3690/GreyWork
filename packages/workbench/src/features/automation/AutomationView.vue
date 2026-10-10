@@ -10,10 +10,10 @@ import { nextCronRuns } from "@/lib/cron";
 import type { AutomationRunRow } from "@/lib/automations-backend";
 import Icon from "@/features/shared/Icon.vue";
 import Hint from "@/features/shared/Hint.vue";
-import ScheduleEditor from "@/features/scheduled/ScheduleEditor.vue";
+import AutomationEditor from "@/features/automation/AutomationEditor.vue";
 
 /**
- * 定时任务页：automation store 清单 + 启停 + 立即运行 + 新建 + 行内编辑 + 运行记录回看。
+ * 自动化任务页：automation store 清单 + 启停 + 立即运行 + 新建 + 行内编辑 + 运行记录回看。
  * 顶部工具条给搜索 / 类型筛选 / 状态筛选 / 排序；列表按启用态分组（启用中在上）。
  * 删除走两步确认；立即运行有真实在途态与结果通知；每张卡可展开近 5 次运行记录，
  * 成功/失败带色点，能点进关联会话（含宿主无人值守兜底跑）。
@@ -473,7 +473,7 @@ function runNow(id: string, name: string): void {
           </div>
 
           <!-- 行内编辑器：草稿在组件内部，保存即写回任务并收拢 -->
-          <ScheduleEditor
+          <AutomationEditor
             v-if="editingId === task.id"
             :key="task.id"
             :name="task.name"

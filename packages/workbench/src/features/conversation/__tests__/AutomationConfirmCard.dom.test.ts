@@ -1,12 +1,12 @@
 /**
- * 定时任务确认卡：确认 → automation store 落一条任务且卡片转「已创建」只读态；
+ * 自动化任务确认卡：确认 → automation store 落一条任务且卡片转「已创建」只读态；
  * createdId 存在时再点无效（会话回放/连点都不会重复建）；取消移除提案。
  */
 import { beforeEach, describe, expect, it } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 
-import ScheduleConfirmCard from "@/features/conversation/ScheduleConfirmCard.vue";
+import AutomationConfirmCard from "@/features/conversation/AutomationConfirmCard.vue";
 import { i18n } from "@/i18n";
 import { useAutomationStore } from "@/stores/automation";
 import type { ThreadMessage } from "@/types";
@@ -18,7 +18,7 @@ function messageOf(draft: ThreadMessage["scheduleDraft"]): ThreadMessage {
 function mountCard(message: ThreadMessage) {
   const pinia = createPinia();
   setActivePinia(pinia);
-  const wrapper = mount(ScheduleConfirmCard, {
+  const wrapper = mount(AutomationConfirmCard, {
     props: { threadId: "t1", message },
     global: { plugins: [pinia, i18n] },
   });
@@ -29,7 +29,7 @@ beforeEach(() => {
   localStorage.clear();
 });
 
-describe("ScheduleConfirmCard", () => {
+describe("AutomationConfirmCard", () => {
   it("渲染名称 / 指令 / 触发描述", () => {
     const { wrapper } = mountCard(messageOf({ name: "站会提醒", intent: "发起站会", cron: "0 9 * * *" }));
     expect(wrapper.find('[data-testid="schedule-card"]').exists()).toBe(true);

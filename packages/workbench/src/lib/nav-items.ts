@@ -11,7 +11,7 @@ export interface NavItem {
 /** 内置快捷入口（非插件）。 */
 export const BUILTIN_NAV_ITEMS: readonly NavItem[] = [
   { path: "/assistants", label: "远程助手", icon: "robot" },
-  { path: "/scheduled", label: "定时任务", icon: "alarm-clock" },
+  { path: "/scheduled", label: "自动化任务", icon: "alarm-clock" },
   { path: "/team", label: "团队", icon: "peoples" },
 ];
 

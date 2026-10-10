@@ -2,7 +2,7 @@
 //!
 //! 循环放在宿主侧而不是渲染端，三个理由：
 //! - 只读工具在三档权限里都自动放行，循环里没有任何需要用户点确认的分支，所以不必
-//!   依赖 UI 才能推进 —— 远程助手（`stores/remote-assistant/pipeline.ts`）与定时任务
+//!   依赖 UI 才能推进 —— 远程助手（`stores/remote-assistant/pipeline.ts`）与自动化任务
 //!   的宿主兜底执行（`host_exec.rs`）能直接复用同一套。
 //! - 中止只要 abort 掉一个 `JoinHandle`，与 `llm_chat_stop` 同构。
 //! - 工具执行只有一处实现（`tools::execute`），不会随入口分裂出两份授权逻辑。

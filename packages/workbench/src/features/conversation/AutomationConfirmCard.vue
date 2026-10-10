@@ -1,11 +1,11 @@
 <script setup lang="ts">
 /**
- * 定时任务确认卡（message.scheduleDraft 消息）：
- * AI 在回复末尾输出 ```schedule 围栏提议一个定时任务，这里渲染成确认卡——
+ * 自动化任务确认卡（message.scheduleDraft 消息）：
+ * AI 在回复末尾输出 ```schedule 围栏提议一个自动化任务，这里渲染成确认卡——
  * 展示名称 / 指令 / 触发描述，用户确认才真正创建（automation store），
  * 取消则把提案从消息上摘掉。createdId 非空 = 已收口（只读态，回放不重复建）。
  *
- * 触发时刻不可信：AI 估的 onceAt/cron 可能是错的，精确调整引导去定时任务页，
+ * 触发时刻不可信：AI 估的 onceAt/cron 可能是错的，精确调整引导去自动化任务页，
  * 卡片不做行内编辑（保持小卡职责单一）。
  */
 import { computed } from "vue";
@@ -107,7 +107,7 @@ function goScheduled(): void {
       <p class="m-0 text-[12px] leading-relaxed text-dim [overflow-wrap:anywhere]">{{ draft.intent }}</p>
     </div>
 
-    <!-- 已创建：给一个显式的「去定时任务页」入口（精确调整在那里做） -->
+    <!-- 已创建：给一个显式的「去自动化任务页」入口（精确调整在那里做） -->
     <div v-if="settled" class="flex justify-end">
       <button
         type="button"

@@ -125,7 +125,7 @@ Loaded as `defaults → <data_dir>/server.json → GREYWORK_* env vars` (env win
 `workspace_roots`, `sandbox`, `tier`, `secure_cookie`, `allowed_origins`,
 `frame_origins` (`GREYWORK_FRAME_ORIGINS`, see [Security headers](#security-headers)),
 `automation_host_primary` (`GREYWORK_AUTOMATION_HOST_PRIMARY`, see
-[Scheduled tasks](#scheduled-tasks)), `static_dir` (`GREYWORK_STATIC_DIR`, see
+[Automations](#automations)), `static_dir` (`GREYWORK_STATIC_DIR`, see
 [Static hosting](#static-hosting-spa)).
 
 Password bootstrap, in priority order:
@@ -221,7 +221,7 @@ large `web_fetch`, and 32 MB binary reads legitimately run for minutes, and long
 must stay open. The only abuse-prone entry point is `/api/login`, which `LoginThrottle` already
 covers (5 failures → `429`).
 
-### Scheduled tasks
+### Automations
 
 Due automations are consumed by the renderer's 30 s poll loop when a browser is present. The host
 process also consumes them, and `GREYWORK_AUTOMATION_HOST_PRIMARY=1` decides **which role** it

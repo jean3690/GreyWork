@@ -20,15 +20,15 @@ export interface TurnDeps {
 }
 
 /**
- * 发给模型的宿主能力提示（schedule 围栏协议）：模型据此知道「可以提议定时任务」。
+ * 发给模型的宿主能力提示（schedule 围栏协议）：模型据此知道「可以提议自动化任务」。
  * 与 cowork 的协作协议提示同构——中文字面量直发，不进 i18n；刻意不告诉模型当前时间
- * （onceAt 由模型估必错），时刻准确性由确认卡与定时任务页的编辑兜住。
+ * （onceAt 由模型估必错），时刻准确性由确认卡与自动化任务页的编辑兜住。
  */
-const SCHEDULE_HINT = [
-  "【宿主能力提示 · 定时任务】如果用户在本条消息里明确要求创建定时/周期/提醒类任务，请在回复的**最末尾**输出一个 ```schedule 代码围栏，内容为一个 JSON 对象：",
+const AUTOMATION_HINT = [
+  "【宿主能力提示 · 自动化任务】如果用户在本条消息里明确要求创建定时/周期/提醒类任务，请在回复的**最末尾**输出一个 ```schedule 代码围栏，内容为一个 JSON 对象：",
   '- 周期任务：{"name":"任务名","intent":"每次触发时要执行的指令","cron":"分 时 日 月 周"}',
   '- 一次性任务：{"name":"任务名","intent":"…","onceAt":<触发时刻的 epoch 毫秒>}',
-  "规则：只输出一个围栏；cron 必须是标准 5 段表达式（分 时 日 月 周）；intent 要写成独立可执行的完整指令。用户没有要求定时任务时，绝对不要输出该围栏。最终是否创建由用户在确认卡上决定。",
+  "规则：只输出一个围栏；cron 必须是标准 5 段表达式（分 时 日 月 周）；intent 要写成独立可执行的完整指令。用户没有要求自动化任务时，绝对不要输出该围栏。最终是否创建由用户在确认卡上决定。",
 ].join("\n");
 
 export interface TurnApi {
@@ -160,7 +160,7 @@ export function createTurnSlice({ state, getRuntime }: TurnDeps): TurnApi {
       const sessionId = state.acpSessionId.value;
       if (!options.hooks && sessionId && locals.scheduleHintInjectedFor !== sessionId) {
         locals.scheduleHintInjectedFor = sessionId;
-        promptText = `${SCHEDULE_HINT}\n\n${promptText}`;
+        promptText = `${AUTOMATION_HINT}\n\n${promptText}`;
       }
       // 调用方宿主能力提示（远程文件发送）：hooks 存在时也要注入——远程回合走的就是 hooked 分支。
       if (options.hostHint && sessionId && locals.hostHintInjectedFor !== sessionId) {

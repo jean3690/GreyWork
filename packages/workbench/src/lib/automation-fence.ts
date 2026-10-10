@@ -1,5 +1,5 @@
 /**
- * ```schedule 围栏解析：AI 回复里声明的定时任务提案 → 结构化草稿。
+ * ```automation 围栏解析：AI 回复里声明的自动化任务提案 → 结构化草稿。
  *
  * 为什么不是工具调用：宿主没有向 agent 注册工具的通道，agent 侧也不存在
  * ScheduleTask 这个工具（调了只会 not found）。输出围栏是既有同构模式 ——
@@ -8,14 +8,15 @@
  */
 import { validateCron } from "./cron";
 
-export interface ScheduleFence {
+export interface AutomationFence {
   name: string;
   intent: string;
   cron?: string;
   onceAt?: number;
 }
 
-const SCHEDULE_FENCE = /```schedule\s*([\s\S]*?)```/gi;
+// 围栏关键字保持 `schedule`（宿主提示词与模型输出按此约定，改动会破坏兼容）。
+const FENCE_PATTERN = /```schedule\s*([\s\S]*?)```/gi;
 
 /** 该字段是否能作为触发条件（cron 合法 / onceAt 是未来时刻）。 */
 function hasTrigger(entry: { cron?: unknown; onceAt?: unknown }): boolean {
@@ -25,13 +26,13 @@ function hasTrigger(entry: { cron?: unknown; onceAt?: unknown }): boolean {
 }
 
 /**
- * 从模型输出中解析所有合法的 schedule 提案。
+ * 从模型输出中解析所有合法的 automation 提案。
  * 容错策略：JSON 坏、缺 name/intent、无有效触发条件的条目**整条丢弃**（半份提案
  * 没有确认价值，还容易让用户误建一个永远不触发的任务）。
  */
-export function parseScheduleFences(output: string): ScheduleFence[] {
-  const results: ScheduleFence[] = [];
-  for (const match of output.matchAll(SCHEDULE_FENCE)) {
+export function parseAutomationFences(output: string): AutomationFence[] {
+  const results: AutomationFence[] = [];
+  for (const match of output.matchAll(FENCE_PATTERN)) {
     let parsed: unknown;
     try {
       parsed = JSON.parse(match[1]?.trim() ?? "");
@@ -46,7 +47,7 @@ export function parseScheduleFences(output: string): ScheduleFence[] {
       if (typeof name !== "string" || !name.trim()) continue;
       if (typeof intent !== "string" || !intent.trim()) continue;
       if (!hasTrigger(record)) continue;
-      const fence: ScheduleFence = { name: name.trim(), intent: intent.trim() };
+      const fence: AutomationFence = { name: name.trim(), intent: intent.trim() };
       if (typeof record.cron === "string" && record.cron.trim() !== "" && validateCron(record.cron) === null) {
         fence.cron = record.cron.trim();
       }

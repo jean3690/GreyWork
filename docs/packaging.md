@@ -244,7 +244,7 @@ ships the same Vue renderer as a same-origin SPA behind a password login. A mult
    `ca-certificates` and `git`. It runs as a non-root user and serves `0.0.0.0:8787`.
 
 ```sh
-# 0) 可选：cp .env.example .env —— 三种密码来源 / 授权面 / 安全开关 / 定时任务与
+# 0) 可选：cp .env.example .env —— 三种密码来源 / 授权面 / 安全开关 / 自动化任务与
 #    模型凭证都在里面逐条注明了用途
 cp .env.example .env
 

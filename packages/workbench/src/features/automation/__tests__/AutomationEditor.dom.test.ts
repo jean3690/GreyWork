@@ -1,9 +1,9 @@
-// 定时任务编辑器契约：结构化时间选择 ↔ cron 表达式、日历/时间选择器接入、
+// 自动化任务编辑器契约：结构化时间选择 ↔ cron 表达式、日历/时间选择器接入、
 // 一次性任务的 onceAt、非法表达式拒绝保存、ACP 后端绑定。
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DOMWrapper, flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
-import ScheduleEditor from "@/features/scheduled/ScheduleEditor.vue";
+import AutomationEditor from "@/features/automation/AutomationEditor.vue";
 import { useAgentStore } from "@/stores/agent";
 import { i18n, setLocale } from "@/i18n";
 
@@ -34,7 +34,7 @@ interface Draft {
 }
 
 function mountEditor(draft: Draft = {}) {
-  const wrapper = mount(ScheduleEditor, {
+  const wrapper = mount(AutomationEditor, {
     props: {
       name: draft.name ?? "测试任务",
       intent: draft.intent ?? "生成日报",
@@ -84,7 +84,7 @@ async function pickDate(wrapper: VueWrapper, testId: string, day: number): Promi
   await flushPromises();
 }
 
-describe("ScheduleEditor 结构化触发时间", () => {
+describe("AutomationEditor 结构化触发时间", () => {
   it("默认手动触发：不排期，保存写入空 cron", async () => {
     const wrapper = mountEditor();
     expect(wrapper.text()).toContain("手动触发（仅 Run Now）");
@@ -167,7 +167,7 @@ describe("ScheduleEditor 结构化触发时间", () => {
   });
 });
 
-describe("ScheduleEditor 一次性任务", () => {
+describe("AutomationEditor 一次性任务", () => {
   it("指定日期时间：保存写 onceAt、不写 cron，描述带年月日", async () => {
     const wrapper = mountEditor();
     await wrapper.find('[data-testid="schedule-mode-once"]').trigger("click");
@@ -204,7 +204,7 @@ describe("ScheduleEditor 一次性任务", () => {
   });
 });
 
-describe("ScheduleEditor 自定义 cron", () => {
+describe("AutomationEditor 自定义 cron", () => {
   it("非法表达式就地报错并拒绝保存，表达式原文保留", async () => {
     const wrapper = mountEditor({ cron: "0 9 * * 1-5" });
     await wrapper.find('[data-testid="schedule-mode-cron"]').trigger("click");
@@ -230,7 +230,7 @@ describe("ScheduleEditor 自定义 cron", () => {
   });
 });
 
-describe("ScheduleEditor 执行后端与指令", () => {
+describe("AutomationEditor 执行后端与指令", () => {
   it("ACPs 后端随保存一起写回；不选则回落到本机模型（null）", async () => {
     const provider = useAgentStore().agentProviders[0];
     const wrapper = mountEditor();

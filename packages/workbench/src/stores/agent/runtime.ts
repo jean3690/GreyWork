@@ -14,7 +14,7 @@ import { normalizeAcpCommands } from "../../lib/slash-commands";
 import { formatDuration, parseToolActivityPayload } from "../../lib/tool-activity";
 import { conversationFolder } from "../../lib/conversation-folder";
 import { isolateForRun, resolveWorkspaceDir } from "../../lib/workspace-dir";
-import { parseScheduleFences } from "../../lib/schedule-fence";
+import { parseAutomationFences } from "../../lib/automation-fence";
 import { appEvents } from "../../events";
 import { notify } from "../notice";
 import { createPermissionGate } from "./permission";
@@ -243,12 +243,12 @@ export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi 
             state.chat.flushPendingContent();
           }
         }
-        // ```schedule 围栏解析（AI 提议定时任务）：只在成功回合、支架还在、且未挂过
+        // ```schedule 围栏解析（AI 提议自动化任务）：只在成功回合、支架还在、且未挂过
         // 草稿时做一次；只取第一条（多围栏多半是幻觉，少即是多）。挂上后由
-        // ScheduleConfirmCard 走用户确认，不会静默创建。
+        // AutomationConfirmCard 走用户确认，不会静默创建。
         const scaffold = locals.acpStream;
         if (!errorText && scaffold && !scaffold.scheduleDraft && scaffold.content.trim()) {
-          const fence = parseScheduleFences(scaffold.content)[0];
+          const fence = parseAutomationFences(scaffold.content)[0];
           if (fence) {
             scaffold.scheduleDraft = fence;
             state.session.markDirty();

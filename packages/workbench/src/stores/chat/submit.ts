@@ -23,9 +23,9 @@ export interface SubmitApi {
   confirmPlan(_threadId: string, message: ThreadMessage): void;
   cancelPlan(threadId: string, message: ThreadMessage): void;
   markAskAnswered(threadId: string, message: ThreadMessage, answers: AskAnswer[]): void;
-  /** 定时任务提案已创建：写回 createdId，卡片转只读（回放不重复建）。 */
+  /** 自动化任务提案已创建：写回 createdId，卡片转只读（回放不重复建）。 */
   markScheduleCreated(threadId: string, message: ThreadMessage, createdId: string): void;
-  /** 用户不需要这条定时任务提案：从消息上摘掉草稿。 */
+  /** 用户不需要这条自动化任务提案：从消息上摘掉草稿。 */
   clearScheduleDraft(threadId: string, message: ThreadMessage): void;
   startAcpTurn(
     text: string,
