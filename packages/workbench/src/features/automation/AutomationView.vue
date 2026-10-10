@@ -219,6 +219,94 @@ function runNow(id: string, name: string): void {
     notices.info(t("automation.runBusy"), undefined, { key: "automation-run-busy" });
   }
 }
+
+/* ===== 批量选择 ===== */
+const selectMode = ref(false);
+const selected = ref<Set<string>>(new Set());
+const batchDeletePending = ref(false);
+
+function toggleSelectMode(): void {
+  selectMode.value = !selectMode.value;
+  if (!selectMode.value) clearSelected();
+}
+
+function toggleSelected(id: string): void {
+  const next = new Set(selected.value);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  selected.value = next;
+  batchDeletePending.value = false;
+}
+
+function selectAllVisible(): void {
+  selected.value = new Set(visible.value.map((task) => task.id));
+  batchDeletePending.value = false;
+}
+
+function clearSelected(): void {
+  selected.value = new Set();
+  batchDeletePending.value = false;
+}
+
+function batchSetEnabled(enabled: boolean): void {
+  automation.setManyEnabled([...selected.value], enabled);
+}
+
+/** 两步确认删除（与卡片一致，不用原生 confirm）。 */
+function batchDelete(): void {
+  if (!batchDeletePending.value) {
+    batchDeletePending.value = true;
+    return;
+  }
+  automation.removeMany([...selected.value]);
+  clearSelected();
+}
+
+function duplicateTask(id: string): void {
+  automation.duplicate(id);
+}
+
+/* ===== 导入 / 导出 ===== */
+const importInput = ref<HTMLInputElement | null>(null);
+
+function exportTasks(): void {
+  const blob = new Blob([automation.exportJson()], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = "greywork-automations.json";
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+function pickImport(): void {
+  importInput.value?.click();
+}
+
+async function onImportFile(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = ""; // 允许连续导入同一个文件
+  if (!file) return;
+  const result = automation.importJson(await file.text());
+  if ("error" in result) notices.error(result.error);
+  else notices.success(t("automation.imported", { count: result.added }));
+}
+
+/* ===== 运行记录：全部 / 近 5 次 ===== */
+const showAllRuns = ref<Set<string>>(new Set());
+
+function toggleShowAll(id: string): void {
+  const next = new Set(showAllRuns.value);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  showAllRuns.value = next;
+}
+
+function visibleRuns(taskId: string): AutomationRunRow[] {
+  const all = runsFor(taskId);
+  return showAllRuns.value.has(taskId) ? all : all.slice(0, 5);
+}
 </script>
 
 <template>
@@ -305,6 +393,103 @@ function runNow(id: string, name: string): void {
           <option value="lastRun">{{ t("automation.sortLastRun") }}</option>
         </select>
       </label>
+
+      <div class="ml-auto flex items-center gap-1.5">
+        <button
+          type="button"
+          class="flex h-8 cursor-pointer items-center gap-1.5 rounded-[calc(9px*var(--gw-radius-scale))] border px-2.5 text-[11.5px] transition-colors"
+          :class="selectMode ? 'border-accent bg-panel-2 text-foreground' : 'border-line bg-panel text-dim hover:text-foreground'"
+          :aria-pressed="selectMode"
+          data-testid="automation-select-mode"
+          @click="toggleSelectMode"
+        >
+          <Icon name="check-one" :size="12" />
+          {{ t("automation.selectMode") }}
+        </button>
+        <button
+          type="button"
+          class="flex h-8 cursor-pointer items-center gap-1.5 rounded-[calc(9px*var(--gw-radius-scale))] border border-line bg-panel px-2.5 text-[11.5px] text-dim transition-colors hover:text-foreground"
+          data-testid="automation-import"
+          @click="pickImport"
+        >
+          <Icon name="up" :size="12" />
+          {{ t("automation.importJson") }}
+        </button>
+        <button
+          type="button"
+          class="flex h-8 cursor-pointer items-center gap-1.5 rounded-[calc(9px*var(--gw-radius-scale))] border border-line bg-panel px-2.5 text-[11.5px] text-dim transition-colors hover:text-foreground"
+          data-testid="automation-export"
+          @click="exportTasks"
+        >
+          <Icon name="down" :size="12" />
+          {{ t("automation.exportJson") }}
+        </button>
+        <input
+          ref="importInput"
+          type="file"
+          accept="application/json,.json"
+          class="hidden"
+          data-testid="automation-import-input"
+          @change="onImportFile"
+        />
+      </div>
+    </div>
+
+    <!-- 批量操作条：进入选择模式即出现（未选时动作禁用） -->
+    <div
+      v-if="selectMode"
+      class="mb-4 flex flex-wrap items-center gap-2 rounded-[calc(10px*var(--gw-radius-scale))] border border-line bg-panel-2 px-3 py-2"
+      data-testid="automation-batch-bar"
+    >
+      <span class="text-[11.5px] text-dim2" data-testid="automation-selected-count">
+        {{ t("automation.selectedCount", { count: selected.size }) }}
+      </span>
+      <button
+        type="button"
+        class="cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] px-1.5 py-0.5 text-[11px] text-dim2 transition-colors hover:text-foreground"
+        data-testid="automation-select-all"
+        @click="selectAllVisible"
+      >
+        {{ t("automation.selectAll") }}
+      </button>
+      <button
+        type="button"
+        class="cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] px-1.5 py-0.5 text-[11px] text-dim2 transition-colors hover:text-foreground"
+        data-testid="automation-select-none"
+        @click="clearSelected"
+      >
+        {{ t("automation.selectNone") }}
+      </button>
+      <div class="ml-auto flex items-center gap-1.5">
+        <button
+          type="button"
+          class="h-7 cursor-pointer rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel px-2.5 text-[11px] text-dim transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+          :disabled="selected.size === 0"
+          data-testid="automation-batch-enable"
+          @click="batchSetEnabled(true)"
+        >
+          {{ t("automation.batchEnable") }}
+        </button>
+        <button
+          type="button"
+          class="h-7 cursor-pointer rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel px-2.5 text-[11px] text-dim transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+          :disabled="selected.size === 0"
+          data-testid="automation-batch-disable"
+          @click="batchSetEnabled(false)"
+        >
+          {{ t("automation.batchDisable") }}
+        </button>
+        <button
+          type="button"
+          class="h-7 cursor-pointer rounded-[calc(8px*var(--gw-radius-scale))] border px-2.5 text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+          :class="batchDeletePending ? 'border-orange/60 bg-orange/90 text-white' : 'border-line bg-panel text-dim hover:text-foreground'"
+          :disabled="selected.size === 0"
+          data-testid="automation-batch-delete"
+          @click="batchDelete"
+        >
+          {{ batchDeletePending ? t("automation.batchDeleteConfirm", { count: selected.size }) : t("automation.batchDelete") }}
+        </button>
+      </div>
     </div>
 
     <div class="flex flex-col gap-4">
@@ -324,6 +509,15 @@ function runNow(id: string, name: string): void {
           :class="{ 'opacity-60': !task.enabled }"
         >
           <div class="flex items-center gap-3">
+            <input
+              v-if="selectMode"
+              type="checkbox"
+              class="size-4 shrink-0 cursor-pointer"
+              :checked="selected.has(task.id)"
+              :aria-label="task.name"
+              :data-testid="`automation-select-${task.id}`"
+              @change="toggleSelected(task.id)"
+            />
             <span
               class="grid size-8 shrink-0 place-items-center rounded-[calc(9px*var(--gw-radius-scale))]"
               :class="
@@ -422,6 +616,17 @@ function runNow(id: string, name: string): void {
                     <Icon name="edit" :size="13" />
                   </button>
                 </Hint>
+                <Hint :text="t('automation.duplicate')">
+                  <button
+                    type="button"
+                    class="grid size-7 cursor-pointer place-items-center rounded-[calc(8px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground"
+                    :aria-label="t('automation.duplicate')"
+                    :data-testid="`automation-duplicate-${task.id}`"
+                    @click="duplicateTask(task.id)"
+                  >
+                    <Icon name="file" :size="13" />
+                  </button>
+                </Hint>
                 <button
                   class="flex h-7 cursor-pointer items-center gap-1 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel px-2.5 text-[11px] text-dim transition-colors hover:bg-panel-2 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
                   :disabled="task.running || automation.list.some((a) => a.running)"
@@ -458,12 +663,36 @@ function runNow(id: string, name: string): void {
             class="mt-3 flex flex-col gap-1.5 border-t border-line pt-3"
             :data-testid="`automation-history-${task.id}`"
           >
+            <div class="flex items-center justify-between">
+              <span class="text-[10.5px] font-medium tracking-wide text-dim2 uppercase">
+                {{ t("automation.runHistoryCount", { count: runsFor(task.id).length }) }}
+              </span>
+              <button
+                v-if="runsFor(task.id).length > 5"
+                type="button"
+                class="cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] px-1.5 py-0.5 text-[10.5px] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground"
+                :data-testid="`automation-history-all-${task.id}`"
+                @click="toggleShowAll(task.id)"
+              >
+                {{ showAllRuns.has(task.id) ? t("automation.showFewerRuns") : t("automation.showAllRuns") }}
+              </button>
+            </div>
             <p v-if="runsFor(task.id).length === 0" class="text-[11px] text-dim2">{{ t("automation.runHistoryEmpty") }}</p>
-            <div v-for="run in runsFor(task.id).slice(0, 5)" :key="run.id" class="flex items-center gap-2 text-[11px]">
+            <div v-for="run in visibleRuns(task.id)" :key="run.id" class="flex items-center gap-2 text-[11px]">
               <span class="size-1.5 shrink-0 rounded-full" :class="run.status === 'success' ? 'bg-mint' : 'bg-orange'" aria-hidden="true" />
               <span class="shrink-0 tabular-nums text-dim2">{{ fmtDateTime(run.ranAt) }}</span>
               <span class="shrink-0 rounded-full bg-panel-2 px-1.5 py-0.5 text-[10px] text-dim2">{{ modeLabel(run.mode) }}</span>
               <span class="min-w-0 flex-1 truncate text-dim" :title="run.detail ?? ''">{{ run.detail ?? "" }}</span>
+              <button
+                v-if="run.status === 'failed'"
+                type="button"
+                class="flex shrink-0 cursor-pointer items-center gap-1 rounded-[calc(7px*var(--gw-radius-scale))] px-1.5 py-0.5 text-[10.5px] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground"
+                :data-testid="`automation-retry-${run.id}`"
+                @click="runNow(task.id, task.name)"
+              >
+                <Icon name="refresh" :size="10" />
+                {{ t("automation.retryRun") }}
+              </button>
               <button
                 v-if="run.sessionId"
                 type="button"

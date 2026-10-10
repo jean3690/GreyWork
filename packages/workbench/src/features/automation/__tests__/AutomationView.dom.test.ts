@@ -187,6 +187,53 @@ describe("AutomationView", () => {
     expect(openBtn).toBeDefined();
   });
 
+  it("复制：卡片复制按钮新增一条副本", async () => {
+    const automation = useAutomationStore();
+    const wrapper = await mountView();
+    const seed = automation.list.find((task) => task.name === "整理项目状态")!;
+    const before = automation.list.length;
+
+    await articleFor(wrapper, "整理项目状态").find(`[data-testid="automation-duplicate-${seed.id}"]`).trigger("click");
+    expect(automation.list.length).toBe(before + 1);
+    expect(automation.list[0].name).toContain("副本");
+  });
+
+  it("批量：进入选择模式勾选后批量停用", async () => {
+    const automation = useAutomationStore();
+    const seed = automation.list.find((task) => task.name === "整理项目状态")!;
+    automation.setEnabled(seed.id, true);
+    const wrapper = await mountView();
+
+    await wrapper.get('[data-testid="automation-select-mode"]').trigger("click");
+    await wrapper.get(`[data-testid="automation-select-${seed.id}"]`).setValue(true);
+    expect(wrapper.get('[data-testid="automation-selected-count"]').text()).toContain("1");
+
+    await wrapper.get('[data-testid="automation-batch-disable"]').trigger("click");
+    expect(automation.list.find((task) => task.id === seed.id)?.enabled).toBe(false);
+  });
+
+  it("运行记录：失败条目带重试按钮，面板显示条数", async () => {
+    const automation = useAutomationStore();
+    const wrapper = await mountView();
+    const seed = automation.list.find((task) => task.name === "整理项目状态")!;
+    automation.recordRun({
+      taskId: seed.id,
+      name: seed.name,
+      status: "failed",
+      detail: "连接失败",
+      sessionId: null,
+      mode: "llm",
+      ranAt: Date.now(),
+    });
+    await flushPromises();
+
+    await articleFor(wrapper, "整理项目状态").get(`[data-testid="automation-history-toggle-${seed.id}"]`).trigger("click");
+    const panel = wrapper.get(`[data-testid="automation-history-${seed.id}"]`);
+    expect(panel.text()).toContain("运行记录（1）");
+    const retry = panel.findAll("button").find((b) => b.text().includes("重试"));
+    expect(retry).toBeDefined();
+  });
+
   // 边界：任务落在哪一侧库、以及无人值守要开哪个开关 —— 只在服务端态提示。
   // 桌面端的任务在自己库里，浏览器预览态压根没有服务端，两种情形下提这个开关都是噪音。
   describe("服务端态提示", () => {

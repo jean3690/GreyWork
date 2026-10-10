@@ -184,6 +184,116 @@ describe("工作区绑定（写在专属会话上）", () => {
   });
 });
 
+describe("失败重试", () => {
+  it("可重试失败：退避后重试，成功补恢复通知并记 success", async () => {
+    vi.useFakeTimers();
+    try {
+      const agent = useAgentStore();
+      const provider = agent.agentProviders[0];
+      provider.enabled = true;
+      agent.routeToAcp = true;
+      agent.selectedProviderId = "other-provider"; // 触发 activateAcpProvider 分支
+      const activate = vi.spyOn(agent, "activateAcpProvider").mockResolvedValueOnce("连接失败").mockResolvedValue(null);
+      const dispatch = vi.spyOn(agent, "dispatchToAcp").mockResolvedValue(undefined);
+      const store = useAutomationStore();
+      const task = store.add({ name: "重试", intent: "生成日报", acpProviderId: provider.id });
+
+      expect(store.runNow(task.id)).toBe("started");
+      await vi.advanceTimersByTimeAsync(0);
+      // 首次失败，仍在退避窗口内：未派发
+      expect(dispatch).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(activate).toHaveBeenCalledTimes(2);
+      expect(dispatch).toHaveBeenCalledWith("生成日报", [], [], `auto-${task.id}`);
+      expect(task.lastRun).toBeGreaterThan(0);
+      expect(store.runs[0]?.status).toBe("success");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("不可重试失败（后端被删）：立即失败，不触发 activate/重试", async () => {
+    const agent = useAgentStore();
+    const activate = vi.spyOn(agent, "activateAcpProvider");
+    const store = useAutomationStore();
+    const task = store.add({ name: "缺后端", intent: "生成日报", acpProviderId: "custom-gone" });
+    vi.spyOn(useChatStore(), "submitTextIn").mockImplementation(() => null);
+
+    store.runNow(task.id);
+    await vi.waitFor(() => expect(task.running).toBe(false));
+    expect(activate).not.toHaveBeenCalled();
+    expect(task.lastRun).toBe(0);
+  });
+});
+
+describe("复制 / 批量", () => {
+  it("duplicate 复制为新任务：新 id、名字加副本、停用、未跑过，并沿用工作区绑定", () => {
+    const store = useAutomationStore();
+    const workspace = useWorkspaceStore().createWorkspace("项目D");
+    const source = store.add({ name: "原始", intent: "生成日报", cron: "0 9 * * *", enabled: true });
+    store.setTaskWorkspace(source.id, workspace.id);
+
+    const copy = store.duplicate(source.id);
+    expect(copy).toBeTruthy();
+    expect(copy!.id).not.toBe(source.id);
+    expect(copy!.name).toContain("副本");
+    expect(copy!.enabled).toBe(false);
+    expect(copy!.lastRun).toBe(0);
+    expect(copy!.cron).toBe("0 9 * * *");
+    expect(store.taskWorkspaceId(copy!.id)).toBe(workspace.id);
+  });
+
+  it("setManyEnabled 批量启停；removeMany 批量删除并清专属会话", () => {
+    const store = useAutomationStore();
+    const a = store.add({ name: "a", intent: "i" });
+    const b = store.add({ name: "b", intent: "i" });
+    store.setManyEnabled([a.id, b.id], true);
+    expect(store.list.find((x) => x.id === a.id)?.enabled).toBe(true);
+    expect(store.list.find((x) => x.id === b.id)?.enabled).toBe(true);
+
+    useSessionStore().ensureUnactivated(`auto-${a.id}`, "x");
+    store.removeMany([a.id, b.id]);
+    expect(store.list.find((x) => x.id === a.id)).toBeUndefined();
+    expect(store.list.find((x) => x.id === b.id)).toBeUndefined();
+    expect(useSessionStore().getSession(`auto-${a.id}`)).toBeUndefined();
+  });
+});
+
+describe("导入 / 导出", () => {
+  it("exportJson → importJson 往返：导出内容原样导入为新一批任务、默认停用", () => {
+    const store = useAutomationStore();
+    const workspace = useWorkspaceStore().createWorkspace("项目E");
+    const source = store.add({ name: "往返", intent: "生成周报", cron: "0 18 * * 5", enabled: true });
+    store.setTaskWorkspace(source.id, workspace.id);
+    const json = store.exportJson();
+    const exportedCount = (JSON.parse(json) as { tasks: unknown[] }).tasks.length;
+    const before = store.list.length;
+
+    const result = store.importJson(json);
+    expect("added" in result && result.added).toBe(exportedCount);
+    expect(store.list.length).toBe(before + exportedCount);
+
+    const imported = store.list.find((x) => x.name === "往返" && x.id !== source.id);
+    expect(imported?.intent).toBe("生成周报");
+    expect(imported?.enabled).toBe(false);
+    expect(imported?.cron).toBe("0 18 * * 5");
+    // 工作区绑定随导出 / 导入一起还原
+    expect(store.taskWorkspaceId(imported!.id)).toBe(workspace.id);
+  });
+
+  it("importJson 拒绝非法 JSON / 空清单；跳过缺字段与非法 cron 的条目", () => {
+    const store = useAutomationStore();
+    expect(store.importJson("{ not json")).toHaveProperty("error");
+    expect(store.importJson("[]")).toHaveProperty("error");
+
+    const before = store.list.length;
+    const result = store.importJson(JSON.stringify({ tasks: [{ name: "无指令" }, { name: "坏cron", intent: "i", cron: "99 99 * *" }] }));
+    expect(store.list.length).toBe(before + 1); // 只导入「坏cron」那条（cron 非法 → 归一为 null）
+    expect("added" in result && result.added).toBe(1);
+  });
+});
+
 describe("持久化", () => {
   it("写操作落盘，重建 store 后状态还原", () => {
     injectStorage();

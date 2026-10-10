@@ -14,6 +14,7 @@ import { useAgentStore } from "./agent";
 import { useSessionStore } from "./session";
 import { useWorkspaceStore } from "./workspace";
 import { notify } from "./notice";
+import { validateCron } from "../lib/cron";
 import { i18n } from "../i18n";
 
 const t = i18n.global.t;
@@ -190,6 +191,89 @@ export const useAutomationStore = defineStore("automation", () => {
     persist();
   }
 
+  /** 复制一条任务：新 id、名字加后缀、停用、未跑过；沿用原任务的工作区绑定。 */
+  function duplicate(id: string): AutomationTask | null {
+    const source = list.value.find((a) => a.id === id);
+    if (!source) return null;
+    const copy = add({
+      name: t("automation.copyName", { name: source.name }),
+      intent: source.intent,
+      schedule: source.schedule,
+      cron: source.cron ?? null,
+      onceAt: source.onceAt ?? null,
+      acpProviderId: source.acpProviderId ?? null,
+      enabled: false,
+      lastRun: 0,
+    });
+    const workspaceId = taskWorkspaceId(id);
+    if (workspaceId) setTaskWorkspace(copy.id, workspaceId);
+    return copy;
+  }
+
+  /** 批量启停：一次改多条并只落盘一次。 */
+  function setManyEnabled(ids: readonly string[], enabled: boolean): void {
+    const set = new Set(ids);
+    for (const task of list.value) if (set.has(task.id)) task.enabled = enabled;
+    persist();
+  }
+
+  /** 批量删除：连带各任务的专属会话一起删。 */
+  function removeMany(ids: readonly string[]): void {
+    const set = new Set(ids);
+    for (const id of set) {
+      const sessionId = taskSessionId(id);
+      if (sessionStore.getSession(sessionId)) sessionStore.deleteSession(sessionId);
+    }
+    list.value = list.value.filter((a) => !set.has(a.id));
+    persist();
+  }
+
+  /** 导出为 JSON 文本（含工作区绑定，导入端据此还原）。 */
+  function exportJson(): string {
+    const tasks = list.value.map((task) => ({ ...toRow(task), workspaceId: taskWorkspaceId(task.id) }));
+    return JSON.stringify({ version: 1, tasks }, null, 2);
+  }
+
+  /**
+   * 导入 JSON 文本：接受 `{ tasks: [...] }` 或裸数组。逐条校验（name/intent 必填、
+   * cron 合法），全部以**新 id** 追加（避免与现有任务冲突），默认停用且未跑过。
+   */
+  function importJson(text: string): { added: number } | { error: string } {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return { error: t("automation.importInvalid") };
+    }
+    const rows = Array.isArray(parsed) ? parsed : (parsed as { tasks?: unknown } | null)?.tasks;
+    if (!Array.isArray(rows)) return { error: t("automation.importInvalid") };
+    let added = 0;
+    for (const raw of rows) {
+      if (typeof raw !== "object" || raw === null) continue;
+      const row = raw as Record<string, unknown>;
+      const name = typeof row.name === "string" && row.name.trim() ? row.name.trim() : null;
+      const intent = typeof row.intent === "string" && row.intent.trim() ? row.intent.trim() : null;
+      if (!name || !intent) continue;
+      const cron = typeof row.cron === "string" && row.cron.trim() !== "" && validateCron(row.cron) === null ? row.cron : null;
+      const onceAt = typeof row.onceAt === "number" && Number.isFinite(row.onceAt) ? row.onceAt : null;
+      const acpProviderId = typeof row.acpProviderId === "string" && row.acpProviderId ? row.acpProviderId : null;
+      const created = add({
+        name,
+        intent,
+        schedule: typeof row.schedule === "string" && row.schedule.trim() ? row.schedule : t("automation.manualTrigger"),
+        cron,
+        onceAt,
+        acpProviderId,
+        enabled: false,
+        lastRun: 0,
+      });
+      if (typeof row.workspaceId === "string" && row.workspaceId) setTaskWorkspace(created.id, row.workspaceId);
+      added += 1;
+    }
+    if (added === 0) return { error: t("automation.importEmpty") };
+    return { added };
+  }
+
   function loadPersisted(): void {
     const saved = automationsStorage.read();
     const base = saved?.list && Array.isArray(saved.list) && saved.list.length ? saved.list : DEFAULT_AUTOMATIONS.map((a) => ({ ...a }));
@@ -326,26 +410,64 @@ export const useAutomationStore = defineStore("automation", () => {
 
   /**
    * 把指令交给执行后端，落到**任务专属线程**：本机模型走 chat 管线（submitTextIn 直写该线程，
-   * 不碰 activeThreadId），ACP 先切后端再按线程派发。返回失败文案（null = 已成功下发）；
+   * 不碰 activeThreadId），ACP 先切后端再按线程派发。返回失败信息（null = 已成功下发）；
    * 后端被删 / 未启用 / 连不上都在这里落地。
+   *
+   * `retryable` 区分「配置错误」（后端被删/停用，重试无意义）与「瞬时错误」（连不上/暂不可用）。
    */
-  async function dispatchIntent(threadId: string, acpProviderId: string | null, intent: string): Promise<string | null> {
+  async function dispatchIntent(
+    threadId: string,
+    acpProviderId: string | null,
+    intent: string,
+  ): Promise<{ failure: string; retryable: boolean } | null> {
     if (!acpProviderId) {
       useChatStore().submitTextIn(threadId, intent);
       return null;
     }
     const agent = useAgentStore();
     const provider = agent.agentProviders.find((candidate) => candidate.id === acpProviderId);
-    if (!provider) return t("errors.acpNotSelected");
-    if (!provider.enabled) return t("errors.providerNotEnabled", { name: provider.name });
+    if (!provider) return { failure: t("errors.acpNotSelected"), retryable: false };
+    if (!provider.enabled) return { failure: t("errors.providerNotEnabled", { name: provider.name }), retryable: false };
     if (agent.selectedProviderId !== provider.id || !agent.routeToAcp) {
       const failure = await agent.activateAcpProvider(provider.id);
-      if (failure) return failure;
+      if (failure) return { failure, retryable: true };
     }
     // threadId 使 ACP 回合入流到任务的专属会话：会话隔离检查认线程，acpSessionThreadId
     // 变了自然为该线程另起 ACP 会话（与用户自己的对话互不串上下文）。
     await agent.dispatchToAcp(intent, [], [], threadId);
     return null;
+  }
+
+  /* ===== 失败重试 =====
+   * 只对**瞬时失败**（连不上 / 后端暂不可用）退避重试；配置类错误（后端被删/停用）
+   * 立即失败——重试救不回配置，只会拖慢反馈。本机模型管线没有下发阶段失败，故不涉及重试。 */
+  const MAX_ATTEMPTS = 3;
+  /** attempt 1、2 失败后的退避（ms）；不足时取最后一档。 */
+  const RETRY_BACKOFF_MS = [3_000, 10_000];
+
+  function delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /** 带重试下发：返回最终失败文案（null = 成功）；重试后才成功时补一条恢复通知。 */
+  async function dispatchWithRetry(threadId: string, acpProviderId: string | null, intent: string, label: string): Promise<string | null> {
+    for (let attempt = 1; ; attempt += 1) {
+      const result = await dispatchIntent(threadId, acpProviderId, intent);
+      if (!result) {
+        if (attempt > 1) {
+          notify({ kind: "success", key: `automation-recovered-${label}`, title: t("automation.retryRecovered", { name: label }) });
+        }
+        return null;
+      }
+      if (!result.retryable || attempt >= MAX_ATTEMPTS) return result.failure;
+      notify({
+        kind: "warning",
+        key: `automation-retry-${label}`,
+        title: t("automation.retryScheduled", { name: label, attempt, total: MAX_ATTEMPTS }),
+        detail: result.failure,
+      });
+      await delay(RETRY_BACKOFF_MS[Math.min(attempt - 1, RETRY_BACKOFF_MS.length - 1)]);
+    }
   }
 
   /* ===== Run Now 在途跟踪 =====
@@ -414,7 +536,7 @@ export const useAutomationStore = defineStore("automation", () => {
       clearInflight();
     }, RUN_FUSE_MS);
     const mode: AutomationRunRow["mode"] = task.acpProviderId ? "acp" : "llm";
-    void dispatchIntent(threadId, task.acpProviderId ?? null, task.intent).then((failure) => {
+    void dispatchWithRetry(threadId, task.acpProviderId ?? null, task.intent, task.name).then((failure) => {
       if (!failure) {
         task.lastRun = Date.now();
         recordRun({
@@ -467,7 +589,7 @@ export const useAutomationStore = defineStore("automation", () => {
     const mode: AutomationRunRow["mode"] = row.acpProviderId ? "acp" : "llm";
     // 专属会话：到期执行同样落在 auto-<taskId> 那条会话里，不挤进用户当前对话。
     const threadId = ensureTaskSession(task);
-    const failure = await dispatchIntent(threadId, row.acpProviderId, row.intent);
+    const failure = await dispatchWithRetry(threadId, row.acpProviderId, row.intent, row.name);
     if (failure) {
       recordRun({ taskId: row.taskId, name: row.name, status: "failed", detail: failure, sessionId: null, mode, ranAt: Date.now() });
       notify({
@@ -553,6 +675,11 @@ export const useAutomationStore = defineStore("automation", () => {
     remove,
     setEnabled,
     update,
+    duplicate,
+    setManyEnabled,
+    removeMany,
+    exportJson,
+    importJson,
     setTaskWorkspace,
     runNow,
     consumeDue,
