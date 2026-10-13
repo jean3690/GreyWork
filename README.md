@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/jean3690/GreyWork/actions/workflows/ci.yml/badge.svg)](https://github.com/jean3690/GreyWork/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-![Tauri 2](https://img.shields.io/badge/Tauri-2-24C8DB)
+![Electron](https://img.shields.io/badge/Electron-30-47848F)
 ![Vue 3](https://img.shields.io/badge/Vue-3-42B883)
 
 A desktop-first AI agent workspace for developers who think in code, diagrams, and multi-agent workflows.
@@ -56,31 +56,35 @@ messaging channels so you can drive the machine from your phone.
 
 **Platform**
 
-- Tauri 2 desktop shell (Linux / macOS / Windows), Rust host, Vue 3 renderer.
+- Electron desktop shell (Linux / macOS / Windows) driving a headless Rust server sidecar, Vue 3 renderer.
 - Bilingual UI (zh-CN / en-US); host capabilities degrade gracefully when the UI runs in a browser.
 
 ## Tech Stack
 
-| Layer   | Choices                                                                     |
-| ------- | --------------------------------------------------------------------------- |
-| Desktop | Tauri 2, Rust, rusqlite, tokio, reqwest, `agent-client-protocol`            |
-| UI      | Vue 3, Vite, Pinia, vue-router, vue-i18n, Tailwind, shadcn-vue (reka-ui)    |
-| Editing | CodeMirror 6, Univer (spreadsheets / docs)                                  |
-| Plugins | Cordis micro-kernel                                                         |
-| Tooling | pnpm workspaces, TypeScript, Vitest (node + dom projects), ESLint, Prettier |
+| Layer   | Choices                                                                                                 |
+| ------- | ------------------------------------------------------------------------------------------------------- |
+| Desktop | Electron shell + headless Rust server (axum sidecar), rusqlite, tokio, reqwest, `agent-client-protocol` |
+| UI      | Vue 3, Vite, Pinia, vue-router, vue-i18n, Tailwind, shadcn-vue (reka-ui)                                |
+| Editing | CodeMirror 6, Univer (spreadsheets / docs)                                                              |
+| Plugins | Cordis micro-kernel                                                                                     |
+| Tooling | pnpm workspaces, TypeScript, Vitest (node + dom projects), ESLint, Prettier                             |
 
 ## Project Structure
 
 ```
 greyWork/
 ├── apps/
-│   └── desktop/              # Tauri shell: Vite + Vue renderer + Rust host
+│   ├── desktop/              # Renderer SPA (Vite + Vue; shared by the Electron shell & server hosting)
+│   ├── electron/             # Electron shell: main process + preload + sidecar orchestration
+│   └── server/               # Headless server (axum): command surface / WS events / static hosting
+├── crates/
+│   └── greywork-host/        # Domain layer: command registry, ACP host, plugin market, channels
 ├── packages/
 │   ├── core/                 # Shared types & math (no deps)
 │   ├── editor/               # File system, Git, CodeMirror abstractions
 │   ├── agents/               # Agent domain logic (roles, events, orchestration)
 │   ├── llm/                  # LLM provider clients (OpenAI-compatible stream → IPC)
-│   ├── acp/                  # Agent Client Protocol client (Tauri IPC + WebSocket)
+│   ├── acp/                  # Agent Client Protocol client (host commands + WebSocket)
 │   ├── shell/                # Provider registry & transport data plane
 │   ├── plugins/              # Plugin market adapters & types
 │   ├── cowork/               # Co-operative workspace engine
@@ -99,30 +103,31 @@ See [docs/architecture.md](docs/architecture.md) for the full dependency graph a
 ```bash
 # Prerequisites
 #   Node >= 20, pnpm >= 9 (corepack recommended)
-#   Rust stable + platform Tauri deps (only for the desktop shell)
+#   Rust stable (builds the headless server sidecar)
 
 git clone https://github.com/jean3690/GreyWork.git
 cd GreyWork
 pnpm install
-pnpm dev        # Vite dev server + Tauri window
+pnpm electron:dev   # Desktop app (Electron window + auto-started local server)
 ```
 
-On Wayland, `pnpm tauri:wayland` sets the required environment variables.
+For a plain browser preview (no host), `pnpm dev` starts the Vite dev server.
 
 ## Common Commands
 
-| Command            | Description                                      |
-| ------------------ | ------------------------------------------------ |
-| `pnpm dev`         | Start the desktop dev environment (Vite + Tauri) |
-| `pnpm lint`        | ESLint across the repo + the radius guard        |
-| `pnpm format`      | Format with Prettier (`format:check` to verify)  |
-| `pnpm typecheck`   | TypeScript check across all workspace packages   |
-| `pnpm test`        | Vitest across all packages                       |
-| `pnpm build`       | Build the desktop renderer                       |
-| `pnpm tauri build` | Build the full Tauri bundle                      |
-| `pnpm check`       | `typecheck` + `build`                            |
+| Command                 | Description                                      |
+| ----------------------- | ------------------------------------------------ |
+| `pnpm dev`              | Renderer Vite dev server (browser-preview mode)  |
+| `pnpm electron:dev`     | Desktop app (Electron + local server)            |
+| `pnpm lint`             | ESLint across the repo + the radius guard        |
+| `pnpm format`           | Format with Prettier (`format:check` to verify)  |
+| `pnpm typecheck`        | TypeScript check across all workspace packages   |
+| `pnpm test`             | Vitest across all packages                       |
+| `pnpm build`            | Build the renderer                               |
+| `pnpm electron:package` | Build desktop installers (AppImage / NSIS / dmg) |
+| `pnpm check`            | `typecheck` + `build`                            |
 
-Rust side (run inside `apps/desktop/src-tauri`): `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+Rust side (from the repo root — single workspace manifest): `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 `cargo test` — `--all-targets` so `tests/` and `examples/` are linted too.
 
 Which bundle each platform produces, what the Windows installer does about WebView2, and what code
@@ -138,16 +143,16 @@ signing still needs: [docs/packaging.md](docs/packaging.md).
   `cargo test --locked`),
   a Windows job (`cargo test --locked` + vitest — the only place `#[cfg(windows)]` code is compiled
   and run), a macOS job (`cargo clippy --locked` → `cargo test --locked` + vitest — the only place
-  `#[cfg(target_os = "macos")]` code is compiled and run) and a three-platform Tauri bundle matrix
-  (deb / NSIS / dmg).
-- Tagging `v*` runs `.github/workflows/release.yml`, which builds deb / NSIS / dmg bundles and opens
-  a draft GitHub Release. macOS is built as a universal binary so Intel Macs can install it too. The
-  release body is taken from the matching entry in [CHANGELOG.md](CHANGELOG.md); un-draft it once all
-  three platforms are green. Bundling shares the `tauri` Rust cache key with CI, so a tag build reuses
-  the dependency artifacts warmed on `master` instead of recompiling the whole dependency tree.
+  `#[cfg(target_os = "macos")]` code is compiled and run) and a three-platform Electron packaging job
+  (AppImage / NSIS / dmg).
+- Tagging `v*` runs `.github/workflows/release.yml`, which builds the Electron installers for all
+  three platforms and opens a draft GitHub Release. The release body is taken from the matching entry
+  in [CHANGELOG.md](CHANGELOG.md); un-draft it once all three platforms are green. Packaging shares the
+  same Rust cache key with CI, so a tag build reuses the dependency artifacts warmed on `master`
+  instead of recompiling the whole dependency tree.
 - Hooks keep CI from being the first place a problem shows up: pre-commit runs `cargo fmt --check`
   whenever `.rs` files are staged, and pre-push runs `pnpm lint && pnpm -r test` plus — when the push
-  touches `apps/desktop/src-tauri` — the three Cargo Test commands in order: `cargo fmt --check` →
+  touches the Rust workspace (`crates/`, `apps/server`) — the three Cargo Test commands in order: `cargo fmt --check` →
   `cargo clippy --locked --all-targets -- -D warnings` → `cargo test --locked`. Pushes that stay on
   the renderer skip the cargo half, so they don't wait on a compile.
 

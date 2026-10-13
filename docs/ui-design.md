@@ -53,6 +53,27 @@ Each palette has `light` and `dark` variants.
 --gw-statusbar-h: 24px     /* Bottom status bar */
 ```
 
+### Minimal mode（极简模式）
+
+A persisted shell toggle (`minimal` in `stores/layout.ts`, key `greywork.layout`) that swaps the
+**chrome**, not the panel layout: a slim sidebar (`features/shell/MinimalSider.vue`) replaces the
+full `Sider`; the titlebar drops its search / GitHub / update clusters (`Titlebar.vue`'s `minimal`
+branch keeps the drag region + window controls + a left-panel toggle + the workspace pill + a
+right-panel toggle + an exit). Both panel toggles use **panel glyphs** (`sidebar` / `sidebar-right`
+from `lib/icons.ts`), never arrows — the state is carried by the aria-label, matching the
+reference. The left toggle collapses the slim sidebar away entirely (on narrow viewports it starts
+collapsed and opens as an overlay drawer, like the full `Sider`); the right toggle drives the
+**retained** preview panel (`PreviewSider` still mounts — entering minimal collapses it, exiting
+restores the pre-minimal state, so the toggle is idempotent). The workspace
+panel and activity band are not rendered in minimal. The center stays the router view: on
+`/guid` **and** on `/conversation/:id` the composer is the streamlined
+`features/guid/MinimalComposer.vue` card (chips + textarea + action row), driven by each view's
+existing dispatch pipeline (the full composer is untouched and returns on exit).
+
+Minimal is deliberately **not** a fifth entry in `lib/layout-modes.ts`: that model's invariant is
+"mode = a function of the two panel visibilities", and a chrome swap cannot be expressed that way.
+It is an orthogonal boolean axis; `stores/layout`'s `mode` returns `null` while it is on.
+
 ## Typography
 
 - **UI / Display**: Archivo Variable (DIN-style industrial grotesque with width axis for label tags)
@@ -92,6 +113,10 @@ Font size: 15px base.
 - New color tokens must be registered in `token-contract.ts` and will be validated by `token-contract.test.ts`
 - Status signals should use the semantic token set (`--amber`, `--cyan`, `--violet`, `--mint`, `--orange`)
 - Agent-specific accent colors use the `--grey-*` family (blue, green, orange, violet, red)
+- **业务按钮用 `features/shared/GwButton.vue`**（`variant` ghost/subtle/secondary/outline/primary/danger，
+  `size` xs/sm/md + icon-xs/icon/icon-lg，`radius` sm–xl/full）。它用项目配方（`gw-button-variants.ts`）
+  而非上游 `components/ui/button`，base 自带焦点环 / disabled / 过渡；一次性样式叠 `class`。详见下方
+  「刻意不迁移」里的 `Button` 条。
 
 ### 提示（tooltip）：用 `features/shared/Hint.vue`，不要用原生 `title=`
 
@@ -117,12 +142,18 @@ Font size: 15px base.
 
 ### 刻意**不**迁移的部分（附理由，避免重复分析）
 
-- **`Button`：不迁移那 227 个业务按钮。** `buttonVariants()` 的基类只在调用点 class 与之冲突时
-  才被 twMerge 消掉，不冲突就原样生效，实测后果：`[&_svg:not([class*='size-'])]:size-4` 会把
-  **86 个**按钮里的图标强制成 16px（`Icon.vue` 用的是 `width`/`height` **属性**，CSS 覆盖属性）、
-  默认 `h-9` 影响 **139 个**、默认 `bg-primary` 影响 **137 个**、两者同时 **111 个**。
-  另外量过重复度：227 个按钮 / 160 个不同 class 串，仅 31 个串出现 >1 次（最高 7 次），
-  抽公共变体也没有杠杆。`Button` 只在 shadcn 组件要求的场合用（弹窗底部动作），并逐个核对 twMerge 结果。
+- **业务按钮不走上游 `Button`，改用 `features/shared/GwButton.vue`。** 不迁的是**上游
+  `components/ui/button` 的 `buttonVariants()`**：它的基类只在调用点 class 冲突时才被 twMerge 消掉，
+  不冲突就原样生效，实测后果 `[&_svg:not([class*='size-'])]:size-4` 把 **86 个**图标强制 16px
+  （`Icon.vue` 用 `width`/`height` **属性**，CSS 覆盖属性）、默认 `h-9` 影响 **139 个**、
+  `bg-primary` 影响 **137 个**。整串去重也低（原生 `<button>` 约 160 个不同 class 串，仅 31 串复用）。
+  但**组合**上杠杆很大：实测 371 个带 class 的原生按钮里，焦点环（`focus-visible:outline-cyan` 一组）
+  重复 94 次、ghost 文字（`text-dim hover:text-foreground`）169 次、`cursor-pointer`/`transition-colors`
+  各 260+、primary（`bg-accent text-accent-ink`）37 次。所以收口方式不是复用上游配方，而是
+  **自带一份项目配方** `gw-button-variants.ts`（同机制 cva + reka `Primitive` + `cn`，但 base 只收
+  普适有益的行为、视觉由 `variant·size·radius` 三轴表达，无上游冲突默认值）。调用点的一次性 class
+  原样塞 `class`（twMerge 后者胜）；带 logo 的品牌入口这类真正异形的不强迁。上游 `Button` 仅在
+  shadcn 组件要求处（弹窗底部动作）使用，并逐个核对 twMerge。
 - **`<select>` 保持原生。** 原生 select 的可访问性/键盘行为由平台保证，换成 reka Select 是降级。
 - **原生复选框保持原生。** 同 `<select>`：标签点击激活、表单语义、键盘都由平台保证；reka 的 `Checkbox`
   是 `role="checkbox"` 的按钮，换过去没有行为收益，却把「点整行文字也切换」押在各引擎的 label 激活实现上。
@@ -159,8 +190,8 @@ Font size: 15px base.
 判断准则与上面一致 —— 提示说的是「点了会做什么」就照常用 `disabled`，只有提示在解释「为什么不能用」时才换 `aria-disabled`。
 另有 3 个新弹窗（会话图片灯箱 / MCP JSON / 技能源表单）一开始就建在 shadcn 上：现在共 9 处
 `dialog` / `alert-dialog` 使用点、0 处手写模态。
-`Button` / `Select` / 原生复选框 / `AcpModelSelector` / `SlashCommandMenu` / `SelectionToolbar`
-按上节理由保持原样。
+业务按钮改用 `GwButton`（`features/shared/`，首处落地 `SiderFooter`；其余按改到的 feature 顺手迁）。
+上游 `Select` / 原生复选框 / `AcpModelSelector` / `SlashCommandMenu` / `SelectionToolbar` 按上节理由保持原样。
 新增组件时按本节的约定走，不必专门开迁移轮次 —— 改到某个 feature 时顺手换即可。
 
 ## Accessibility

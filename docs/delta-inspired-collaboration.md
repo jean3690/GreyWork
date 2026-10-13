@@ -397,6 +397,38 @@ page could only send text, so there was no way to hand a member a file/image.
   the target backend can't take and notifies — gating by the **target member**, since
   members can run on different backends.
 
+### U6 · Chat-first console + run capabilities + teammate commits — **implemented**
+
+Follow-up to U2, requested as "make the team UI modern, let it use skills / MCP, and let me
+see teammates' commits".
+
+- **Chat-first layout.** The running console now leads with the group-chat transcript (U2's
+  timeline is the default view, mail list is the secondary tab) in a fixed-height, auto-scrolled
+  panel with the composer docked beneath it; the task board and the new commits card sit in a
+  right rail. The start form is split into three cards: goal, members, and run capabilities.
+- **Run-level capabilities (skills + MCP).** The start form gains a `CoworkTooling` card: MCP
+  servers and skills are toggles, defaulting to the settings-enabled servers and all installed
+  skills. `startRun` accepts a 4th `CoworkRunOptions` arg; the MCP selection overrides
+  `settings.enabledMcpServers` for this run, and the skill selection is threaded through
+  `isolateForRun(base, { skills })` → `worktree_provision.skills` (see `architecture.md`). The
+  filter only bites under `worktree` isolation; every other mode uses the source directory, so
+  the card says so. Declared/skipped MCP servers (per the agent's capabilities) are surfaced on
+  the run header.
+- **Git integration — "see teammates' commits".** Cowork members share one isolated workspace on
+  one `greywork/<slug>-<hash>` branch, so teammate commits are that workspace's history. The
+  store attaches a git service at `startRun`, records a baseline, and refreshes on each turn;
+  `CoworkCommits` renders the log (author avatar, subject, `fromRun` badge, branch) and lazy-loads
+  a commit's diff. Non-git workspaces hide the card, and the run proceeds.
+- **Not done (deliberately).** Per-member worktrees/branches: members still share one snapshot.
+  Splitting them would let each teammate own a branch, but it changes the workspace/session
+  wiring (one `isolateForRun` call today) and is a separate project — the commit card works with
+  the shared snapshot and does not depend on that split.
+- **Touch points:** `features/team/CoworkPanel.vue`, `CoworkTooling.vue`, `CoworkCommits.vue`,
+  `TeamView.vue`, `stores/cowork.ts` (`CoworkRunOptions`, `availableSkills`, commit state),
+  `stores/skills.ts` (`scanSkills`), `lib/workspace-dir.ts`, `infra/worktree/skills.rs`,
+  `worktree_provision` args, i18n locales.
+- **Cost:** medium (done).
+
 ## Part 5 — Suggested phasing
 
 | Phase | Content                                                                                   | Leverage                              |
@@ -405,6 +437,7 @@ page could only send text, so there was no way to hand a member a file/image.
 | 2     | ~~U2 (team timeline)~~ + ~~U1 (author dimension)~~ + ~~U4 (selection comments)~~ **done** | the bulk of the group-chat experience |
 | 3     | ~~A2 (two remotes)~~ **done** (named branch; remote half dropped)                         | closes the workflow loop              |
 | 4     | ~~A3 (session + file rewind)~~ **done** (A3a/A3b/A3c)                                     | large; separate project               |
+| 5     | ~~U6 (chat-first console, run capabilities, teammate commits)~~ **done**                  | polishes the console; host skills fix |
 
 U1 moved from phase 1 to phase 2: it needs U2 to have any producer (see U1 above).
 Phase 2 was delivered in two checkpoints — U1 + U2 first, then U4. A2 was scoped down at

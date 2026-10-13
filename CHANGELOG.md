@@ -6,6 +6,35 @@
 发版流程：新增条目补进对应版本标题下 → 打 `v*` 标签 → `.github/workflows/release.yml` 会自动从本文件
 抽取该版本条目作为 Release 说明。**不要手改 Release 正文**，改这里。
 
+## [Unreleased]
+
+### 新增
+
+- **团队协作（Cowork）控制台重做 + 本轮能力勾选 + 队友提交**：起跑表单拆成「目标 / 成员 / 本轮能力」
+  三张卡，运行中改成对话优先布局（群聊式时间线为主、邮件列表为次，右侧挂任务板），并新增提交卡。
+  - **run 级能力**：起跑时可勾选本轮带给每个成员的 MCP 服务器与技能（默认跟设置里已启用 / 全量技能）；
+    `startRun` 新增第 4 参 `CoworkRunOptions`，MCP 选择覆盖本轮的工具面，技能选择透传到
+    `worktree_provision`（`skills` 入参）—— 修复了先前 `worktree` 隔离下成员会话拿不到
+    **未提交** `.agents/skills` 的缺口（宿主把源工作区的技能符号链接进快照，见
+    `crates/greywork-host/src/infra/worktree/skills.rs`）。运行头部展示本轮已声明 / 被后端跳过的服务器。
+  - **队友提交**：协作成员跑在同一份隔离工作区、同一条 `greywork/<slug>-<hash>` 分支上，提交卡据此
+    展示提交历史（作者、主题、「本轮」标记、分支名），起跑记基线、每回合刷新增量，点开按需拉 diff；
+    非 git 工作区整段隐藏，协作照跑。
+
+- **协议层子代理（ACP subagent sessions）**：支持 agent 内部委派的子代理经 `subagent_update`
+  宣告的独立子会话（RFD: Subagent Sessions）。
+  - **归属与状态**：会话头部新增子代理胶囊（`SubagentIndicator.vue`），展开可见每个子代理的标题、
+    当前工作状态（running / idle / requires_action / unknown）、工具数与最新输出；无子代理时零渲染。
+  - **收工通知**：子代理从运行态转入 idle 时按 `stopReason` 给出一次非侵入式通知（完成 / 取消 /
+    出错），同一子代理重新开工后再收工可再次通知，幂等的 idle 快照不重复打扰。
+  - **事件路由**：子代理自身的消息 / 思考 / 工具流量按 sessionId 归属其独立转录，不泄漏进主会话支架；
+    宣告前的早到流量先缓冲、宣告到达后回放（缓冲溢出则整块回落主会话，不吞事件）；`session_message`
+    / `session_message_chunk` 记为会话间消息。会话回收（stop / 换会话 / 重连）时子代理树整体失效。
+  - **单独取消**：宣告了 `capabilities.cancel` 的子代理可从胶囊里单独取消——新增宿主命令
+    `acp_cancel_session`（发 ACP `session/cancel` 指向子会话 id，不回收进程），桌面 / 远程传输均已接线。
+  - 与应用层「编排子任务」（TeamView 看板，UI 主动拆解并行跑的独立会话）是两回事，两者可并存、按
+    sessionId 分流。
+
 ## [0.7.0] - 2026-10-08
 
 ### 新增

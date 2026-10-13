@@ -37,10 +37,10 @@ A package file is a `PluginPackage`:
     "type": "worker",
     "entry": "https://raw.githubusercontent.com/<owner>/<repo>/<commit>/<file>.js",
     "sha256": "<64 lowercase hex>",
-    "render": { "handler": "draw", "fps": 12, "width": 160, "height": 140 }, // optional render loop
+    "render": { "handler": "draw", "fps": 12, "width": 160, "height": 140, "pointer": true }, // optional render loop; "pointer": true enables pointer events
   },
 
-  "requires": ["window.floating"], // capability declarations (see below)
+  "requires": ["window.floating"], // capability declarations (plain string, or object with params — see Capabilities)
   "window": { "width": 200, "height": 200 }, // optional; needs requires: window.floating + worker+render
 
   "contributes": {
@@ -97,7 +97,8 @@ Attach a render loop to an existing shell region — `shellSidebar`, `activityPa
 ```
 
 Region actions call the worker handler with the region's own persisted state and merge the returned
-patch.
+patch. A region is also the **mount surface** for `schedule`: while it is mounted, declared wakeups
+fire (see [Scheduled wakeups](#scheduled-wakeups)).
 
 ## Capabilities
 
@@ -105,11 +106,15 @@ Capabilities are **granted per plugin**: authorizing `net.fetch` for plugin A ne
 plugin B. A plugin only gets a capability if it is (1) declared in `requires`, (2) authorized by the
 user, and (3) registered in the host catalog (`packages/workbench/src/plugins/capabilities.ts`).
 
-| Capability        | Danger | Declared as                                                  | Notes                                                                   |
-| ----------------- | ------ | ------------------------------------------------------------ | ----------------------------------------------------------------------- |
-| `net.fetch`       | medium | `{ "capability": "net.fetch", "hosts": ["api.github.com"] }` | HTTPS GET/HEAD only, 30 calls/min, 1 MiB response cap, host allowlist   |
-| `window.floating` | medium | `"window.floating"`                                          | Host-managed transparent always-on-top window rendering the render loop |
-| `plugin-admin`    | high   | `"plugin-admin"`                                             | Host trust mark for built-ins; not callable from plugin code            |
+| Capability        | Danger | Declared as                                                                                                                         | Notes                                                                                                                                                   |
+| ----------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `net.fetch`       | medium | `{ "capability": "net.fetch", "hosts": ["api.github.com"], "methods": ["GET","POST"], "paths": ["/graphql"], "maxBytes": 4194304 }` | HTTPS requests; `GET`/`HEAD` by default, opt-in `POST` limited to declared path templates; 30 calls/min; 1 MiB per request/response by default (≤8 MiB) |
+| `storage.kv`      | low    | `"storage.kv"`                                                                                                                      | Plugin-scoped KV: `get`/`set`/`remove`/`list`/`clear`, any JSON value, 256 KiB per plugin / 64 KiB per value                                            |
+| `fs.scoped`       | medium | `"fs.scoped"`                                                                                                                       | Plugin-private file area: `read`/`write`/`remove`/`list`/`stat`, relative paths only, symlinks refused, 1 MiB per file / 8 MiB per plugin               |
+| `notify`          | low    | `"notify"`                                                                                                                          | System notification `{ title, body }`; title gets a `[plugin-id] ` attribution prefix, 10 calls/min, desktop host only                                  |
+| `schedule`        | low    | `{ "capability": "schedule", "schedule": { "kind": "interval", "min": 5 } }`                                                        | Host-driven background wakeups: fires `registerSchedule` while a mount surface is alive, 5-1440 min interval, catch-up once on reactivation             |
+| `window.floating` | medium | `"window.floating"`                                                                                                                 | Host-managed transparent always-on-top window rendering the render loop                                                                                 |
+| `plugin-admin`    | high   | `"plugin-admin"`                                                                                                                    | Host trust mark for built-ins; not callable from plugin code                                                                                            |
 
 `requires` is also the activation gate: enabling a plugin whose grants are missing fails with a
 `CapabilityRequiredError`, and the plugin center surfaces which capability still needs authorizing.
@@ -127,6 +132,23 @@ greywork.registerAction("draw", (state) => [{ kind: "circle", cx: 80, cy: 70, r:
 
 // Call a host capability (only those declared + granted)
 const res = await greywork.call("net.fetch", { url: "https://api.github.com/meta" });
+
+// Plugin-scoped KV storage (JSON values, isolated per plugin, 256 KiB quota)
+await greywork.call("storage.kv", { op: "set", key: "note", value: { text: "hi", at: Date.now() } });
+const { value } = await greywork.call("storage.kv", { op: "get", key: "note" });
+
+// Plugin-private sandbox files (relative paths; 1 MiB/file, 8 MiB per plugin; desktop/server host only)
+await greywork.call("fs.scoped", { op: "write", path: "logs/today.txt", data: "hi" });
+const { exists, data } = await greywork.call("fs.scoped", { op: "read", path: "logs/today.txt" });
+
+// System notification (title is prefixed `[plugin-id]` by the host; 10 calls/min; desktop host only)
+await greywork.call("notify", { title: "构建完成", body: "所有测试通过" });
+
+// Background wakeup: host calls this while a mount surface is alive (declared via `schedule`)
+greywork.registerSchedule((state) => ({ ticks: (typeof state.ticks === "number" ? state.ticks : 0) + 1 }));
+
+// Pointer events: only called when the manifest declares `render.pointer` (see Pointer events)
+greywork.registerPointer((event, state) => ({ x: event.x, y: event.y, last: event.type }));
 ```
 
 - Action handlers return a **patch** of primitive values (`string | number | boolean`); the host
@@ -135,6 +157,63 @@ const res = await greywork.call("net.fetch", { url: "https://api.github.com/meta
   declaration, the plugin's grants, and the catalog; revoking a grant takes effect on the next call.
 - Actions time out after 10 s, host calls after 20 s.
 - There is no DOM, no `window`, no network: a worker that wants I/O must go through `greywork.call`.
+
+### Network requests
+
+`net.fetch` is the only network path. Requests default to `GET`/`HEAD`; `POST` is opt-in and can only
+reach paths you declare as templates.
+
+```jsonc
+"requires": [{
+  "capability": "net.fetch",
+  "hosts": ["api.github.com"],
+  "methods": ["GET", "POST"],
+  "paths": ["/graphql", "/repos/*/issues"],
+  "maxBytes": 4194304
+}]
+```
+
+```js
+const res = await greywork.call("net.fetch", {
+  url: "https://api.github.com/graphql",
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ query: "{ viewer { login } }" }),
+});
+```
+
+- `hosts` (required, 1-16 entries): HTTPS only, exact host or `.`-bounded subdomain match.
+- `methods` (optional): a subset of `GET`/`HEAD`/`POST`; omitting it means `GET`/`HEAD`.
+- `paths` (required when `POST` is declared, 1-8 entries): templates matched against the URL path.
+  `*` matches within one segment, `**` matches across segments (e.g. `/v1/**`). `GET`/`HEAD` are
+  host-scoped only.
+- `maxBytes` (optional, 1 KiB-8 MiB): per-request request/response byte cap; defaults to 1 MiB.
+- `body` is only allowed on `POST` and must fit within `maxBytes`.
+- The rate limit stays at 30 calls/min per plugin regardless of the declaration, and every call is
+  audited. The desktop/server host re-checks host/method/path/bytes independently (defense in depth).
+
+### Scheduled wakeups
+
+`schedule` is **host-driven**: the plugin doesn't call it, it declares an interval and registers a
+handler. The host (the workbench renderer, which owns the worker) keeps a clock while the plugin's
+mount surface is alive and calls the handler through the same `invoke` channel as an action — the
+returned patch is merged into the surface's state exactly like an action patch.
+
+```jsonc
+"requires": [{ "capability": "schedule", "schedule": { "kind": "interval", "min": 15 } }]
+```
+
+```js
+greywork.registerSchedule(async (state) => ({ ticks: (state.ticks ?? 0) + 1, at: Date.now() }));
+```
+
+- Interval `min` is 5-1440 minutes (checked at install time). `"schedule"` is a reserved handler
+  name — `registerAction("schedule", …)` is rejected.
+- Fires **only while a `uiRegion` is mounted**; when the surface is out of memory (e.g. disabled)
+  wakeups are skipped, and the next activation catches up **once** before resuming the cadence.
+- Works in the browser preview too — unlike `notify`/`fs.scoped`, the scheduler lives in the
+  workbench, so it needs no desktop/server host. The `effectiveRegionSchedule` gate means an
+  unauthorized or undeclared plugin never gets a clock.
 
 ### Render commands
 
@@ -147,6 +226,42 @@ each with optional `fill` / `stroke` / `strokeWidth` / `opacity`.
 An invalid frame is dropped entirely (the previous frame stays on screen). Bounds: 256 commands per
 frame, coordinates within ±1024, text ≤64 chars, path data ≤1024 chars from the SVG path alphabet,
 colors limited to `#hex` / `rgb()` / `rgba()` / plain names.
+
+### Pointer events
+
+Rendering is otherwise one-way. Declare `"pointer": true` inside `runtime.render` to turn the canvas
+into an input surface: the host listens for `pointerdown` / `pointermove` / `pointerup` /
+`pointercancel` / `pointerleave` on the canvas and forwards each one to the worker's pointer handler
+through the same `invoke`-style channel as an action.
+
+```jsonc
+"runtime": {
+  "type": "worker",
+  "entry": "https://raw.githubusercontent.com/<owner>/<repo>/<commit>/demo.js",
+  "sha256": "<64 lowercase hex>",
+  "render": { "handler": "draw", "fps": 12, "width": 220, "height": 160, "pointer": true }
+}
+```
+
+```js
+greywork.registerPointer((event, state) => {
+  // event = { type, x, y, nx, ny, buttons, pointerId }
+  if (event.type === "down") return { x: event.x, y: event.y, clicks: (state.clicks ?? 0) + 1 };
+  return { x: event.x, y: event.y };
+});
+```
+
+- The host builds the event, not the worker: `x`/`y` are **canvas coordinates clamped to
+  `[0, width]` / `[0, height]`**, `nx`/`ny` are the `[0,1]` normalized equivalents, `type` is one of
+  five fixed values, `buttons`/`pointerId` are integers. Worker code still has no DOM.
+- The handler returns a **state patch** exactly like an action (`isPatch` — primitives only); the
+  host merges it into the same state that drives the render loop, so the next frame reflects it.
+- Dispatch is serialized (one event in flight): `move` events are coalesced, discrete
+  events (`down`/`up`/`cancel`/`leave`) are delivered in order. A handler that throws or times out
+  drops that event without stopping the loop.
+- `"pointer"` is a reserved handler name — `registerAction("pointer", …)` is rejected.
+- Pointer events are **gated by the declaration only**: they carry input, not host resources, so no
+  capability grant is involved. `render.pointer` defaults to `false` (existing packages unaffected).
 
 ## Publishing to the market
 
