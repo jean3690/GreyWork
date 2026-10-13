@@ -7,10 +7,12 @@ import { useChatStore } from "@/stores/chat";
 import { useSessionStore } from "@/stores/session";
 import { useSettingsStore } from "@/stores/settings";
 import { useWorkspaceStore } from "@/stores/workspace";
+import { useLayoutStore } from "@/stores/layout";
 import AcpSessionConfig from "@/features/conversation/AcpSessionConfig.vue";
 import AgentProviderBar from "@/features/conversation/AgentProviderBar.vue";
 import AttachmentTray from "@/features/conversation/AttachmentTray.vue";
 import SlashCommandMenu from "@/features/conversation/SlashCommandMenu.vue";
+import MinimalComposer from "@/features/guid/MinimalComposer.vue";
 import Icon from "@/features/shared/Icon.vue";
 import Hint from "@/features/shared/Hint.vue";
 import ContextMenuRegion from "@/features/shared/ContextMenuRegion.vue";
@@ -24,8 +26,6 @@ import { useSlashCommands } from "@/lib/use-slash-commands";
 import { materializeAttachments } from "@/state/attachment-library";
 import { quoteSummary } from "@/lib/message-comments";
 import type { Attachment, MessageComment } from "@/types";
-import logoUrl from "@/assets/logo.svg?url";
-
 /**
  * GreyWork 风格新对话引导页：hero + 快捷入口 + 输入卡。
  * 提交 → 新建会话 → 走 chat 管线（mock/真实 LLM）→ 跳到对话页。
@@ -37,6 +37,7 @@ const chat = useChatStore();
 const sessionStore = useSessionStore();
 const workspaceStore = useWorkspaceStore();
 const settings = useSettingsStore();
+const layout = useLayoutStore();
 
 const draft = ref("");
 /** 选区评论草稿（预览划词 → 评论）：随首条消息挂上，发后清空。 */
@@ -150,18 +151,13 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
 <template>
   <ContextMenuRegion :build="buildMenu">
     <section class="flex min-h-full w-full flex-col items-center justify-start px-4 pb-8 pt-16 sm:justify-center sm:py-8">
-      <div class="flex w-full max-w-[800px] flex-col items-center gap-4 sm:-translate-y-[5vh]">
-        <div class="flex flex-col items-center gap-3 text-center">
-          <span
-            class="grid size-12 place-items-center rounded-[calc(14px*var(--gw-radius-scale))] border border-line-2 bg-console shadow-[0_8px_28px_rgba(0,0,0,0.18)]"
-          >
-            <img :src="logoUrl" alt="" class="size-7 shrink-0 rounded-[calc(8px*var(--gw-radius-scale))]" width="28" height="28" />
-          </span>
-        </div>
-
+      <div
+        class="flex w-full flex-col items-center gap-4"
+        :class="layout.minimal ? 'max-w-[760px]' : 'max-w-[800px] sm:-translate-y-[5vh]'"
+      >
         <div class="flex w-full flex-col gap-2.5">
-          <AgentProviderBar />
-          <!-- 选区评论草稿：挂在本条消息上的批注（展示被引用的原文片段）。 -->
+          <AgentProviderBar v-if="!layout.minimal" />
+          <!-- 选区评论草稿：挂在本条消息上的批注（展示被引用的原文片段）。两种输入卡共用。 -->
           <div v-if="comments.length" data-testid="comment-draft" class="flex flex-col gap-1.5">
             <div
               v-for="comment in comments"
@@ -182,7 +178,42 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
               </button>
             </div>
           </div>
+          <!-- 极简模式：精简输入卡。管线仍归本页（run / onSubmit / 附件 / 斜杠 / 评论），
+               经 props + 具名 slot 注入；拖放命中靠 data-attachment-dropzone 落到根元素
+               （Vue 把属性与未声明的监听透传到单根），复用同一套 onComposerDrag* 处理器。 -->
+          <MinimalComposer
+            v-if="layout.minimal"
+            v-model="draft"
+            :busy="turnActive"
+            :can-send="!!draft.trim() || attachmentItems.length > 0"
+            :placeholder="t('chat.composer.placeholderPitch')"
+            data-attachment-dropzone
+            @submit="onSubmit"
+            @attach="pickAttachmentFiles"
+            @keydown="onKeydown"
+            @paste="onComposerPaste"
+            @blur="dismissSlashMenu"
+            @dragover="onComposerDragOver"
+            @dragleave="onComposerDragLeave"
+            @drop="onComposerDrop"
+          >
+            <template #tray>
+              <AttachmentTray :items="attachmentItems" @remove="removeAttachment" />
+            </template>
+            <template #menu>
+              <SlashCommandMenu
+                v-if="slashOpen"
+                :items="slashItems"
+                :active-index="slashActiveIndex"
+                @select="selectSlashCommand"
+                @update:active-index="slashActiveIndex = $event"
+              />
+            </template>
+          </MinimalComposer>
+
+          <!-- 完整外壳：原输入卡（附件托盘 + 文本区 + 会话配置行 + 动作行 + 斜杠菜单） -->
           <div
+            v-else
             data-attachment-dropzone
             data-testid="composer-card"
             class="relative flex w-full flex-col gap-2 rounded-[calc(16px*var(--gw-radius-scale))] border bg-panel-2 p-3 shadow-[0_10px_32px_rgba(0,0,0,0.12)] transition-[border-color,box-shadow] focus-within:border-cyan/50 focus-within:shadow-[0_12px_36px_rgba(0,0,0,0.16)]"

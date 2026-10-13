@@ -193,6 +193,24 @@ export const zhCN = {
       document: "文档",
       focus: "专注",
     },
+    minimal: "极简模式",
+    exitMinimal: "退出极简模式",
+  },
+  /** 极简模式（见 stores/layout 的 minimal 与 features/shell/MinimalSider）。 */
+  minimal: {
+    sessions: "会话",
+    newSession: "新建",
+    sortLabel: "排序",
+    sortRecent: "最近更新",
+    sortTitle: "名称",
+    filterLabel: "筛选",
+    filterOnlyActive: "只看当前工作区",
+    agent: "Agent",
+    agentLabel: "智能体",
+    agentDisabled: "未启用",
+    agentSwitchFailed: "切换后端失败：{name}",
+    workspaceFallback: "普通对话",
+    workspaceLabel: "工作区",
   },
   web: {
     title: "抓取网页",
@@ -567,6 +585,8 @@ export const zhCN = {
     composer: {
       placeholderNew: "描述你想完成的任务，回车发送…",
       placeholderThread: "输入指令，Enter 发送，Shift+Enter 换行…",
+      /** 极简模式输入卡的占位语（参考「Pitch your idea」）。 */
+      placeholderPitch: "说出你的想法…",
       ariaLabel: "发送消息",
       ready: "就绪",
       processing: "处理中…",
@@ -680,6 +700,27 @@ export const zhCN = {
   agents: {
     planFailed: "\n\n> 计划解析失败：planner 未返回有效子任务 JSON，任务已终止。",
   },
+  /** 协议层子代理（ACP subagent_update 宣告的 agent 内部子会话）。 */
+  subagent: {
+    label: "子代理",
+    active: "{count} 个子代理运行中",
+    activeOne: "1 个子代理运行中",
+    panelTitle: "子代理",
+    fallbackTitle: "子代理",
+    state: {
+      running: "运行中",
+      idle: "空闲",
+      requires_action: "等待操作",
+      unknown: "状态未知",
+    },
+    completed: "子代理「{title}」已完成",
+    completedDetail: "用时 {duration}",
+    failed: "子代理「{title}」执行出错",
+    cancelled: "子代理「{title}」已取消",
+    unknown: "子代理「{title}」状态暂时不可知",
+    /** 深度超限：嵌套过深时 UI 标注，但不丢弃事件。 */
+    depthExceeded: "嵌套层级过深，仅记录事件",
+  },
   cowork: {
     removeMember: "移除成员",
     title: "协作运行",
@@ -791,6 +832,40 @@ export const zhCN = {
     pausedHint: "预算触顶已暂停（{reason}）。信件都还在，抬高上限即可继续。",
     system: {
       roleInjected: "> 已注入角色说明与协作指令手册。",
+    },
+    /** run 级工具面：勾选本轮带给每个成员的 MCP 服务器与技能。 */
+    tooling: {
+      title: "本轮能力",
+      sub: "成员共享同一套工具面：勾选的 MCP 服务器与技能会带给每个成员。",
+      mcp: "MCP 服务器",
+      mcpEmpty: "设置里还没有 MCP 服务器。",
+      skills: "技能",
+      skillsEmpty: "源工作区还没有安装技能。",
+      skillsLoading: "正在扫描技能…",
+      skillsWorktreeOnly: "技能勾选只在 Worktree 隔离档位生效；当前档位下工作区就是源目录，所有已安装技能都可见。",
+      rest: "另有 {n} 项随设置默认带入（改这里只影响本轮）。",
+      declared: "本轮已声明 {names}",
+      skipped: "{name}（{reason}）",
+      skippedTitle: "被后端跳过：",
+    },
+    /** Git 集成：协作工作区里队友产出的提交。 */
+    commits: {
+      title: "提交",
+      branch: "分支",
+      refresh: "刷新",
+      empty: "还没有提交。成员提交代码后会出现在这里。",
+      noRepo: "不是 git 仓库，无法展示提交。",
+      fromRun: "本轮",
+      error: "读取提交失败",
+      diffLoading: "读取 diff…",
+      author: "作者",
+    },
+    run: {
+      membersTitle: "成员",
+      openMember: "打开 {name} 的会话",
+      transcriptTitle: "协作时间线",
+      openAuthor: "打开 {name} 的会话",
+      budget: "预算",
     },
     errors: {
       alreadyRunning: "已有协作运行在进行中，先结束它再开新的。",
@@ -1496,7 +1571,7 @@ export const zhCN = {
   errors: {
     acpStartFailed: "[ACP 启动失败] {detail}",
     acpNotSelected: "未选择 ACP 后端",
-    acpTransportUnavailable: "当前未配置可用 ACP 传输：本地 ACP 需桌面端（Tauri），远程 ACP 需配置 WebSocket endpoint。",
+    acpTransportUnavailable: "当前未配置可用 ACP 传输：本地 ACP 需宿主（桌面端 / 自托管服务端），远程 ACP 需配置 WebSocket endpoint。",
     workspaceUnresolvable: "无法解析工作区目录：请在设置中配置 workspaceDir",
     startFailed: "启动失败：{detail}",
     configFailed: "配置失败：{detail}",

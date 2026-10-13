@@ -195,6 +195,24 @@ export const enUS: MessageSchema = {
       document: "Document",
       focus: "Focus",
     },
+    minimal: "Minimal mode",
+    exitMinimal: "Exit minimal mode",
+  },
+  /** Minimal mode (see `minimal` in stores/layout and features/shell/MinimalSider). */
+  minimal: {
+    sessions: "Sessions",
+    newSession: "New",
+    sortLabel: "Sort",
+    sortRecent: "Last updated",
+    sortTitle: "Name",
+    filterLabel: "Filter",
+    filterOnlyActive: "Only current workspace",
+    agent: "Agent",
+    agentLabel: "Agent",
+    agentDisabled: "disabled",
+    agentSwitchFailed: "Failed to switch backend: {name}",
+    workspaceFallback: "General",
+    workspaceLabel: "Workspace",
   },
   web: {
     title: "Fetch web page",
@@ -570,6 +588,8 @@ export const enUS: MessageSchema = {
     composer: {
       placeholderNew: "Describe what you want done, then press Enter…",
       placeholderThread: "Type an instruction. Enter to send, Shift+Enter for newline…",
+      /** Minimal-mode composer placeholder (matches the reference "Pitch your idea"). */
+      placeholderPitch: "Pitch your idea…",
       ariaLabel: "Send message",
       ready: "Ready",
       processing: "Working…",
@@ -692,6 +712,27 @@ export const enUS: MessageSchema = {
   agents: {
     planFailed: "\n\n> Plan parse failed: planner did not return valid subtask JSON, run aborted.",
   },
+  /** Protocol-level subagents (agent-created child sessions announced via ACP subagent_update). */
+  subagent: {
+    label: "Subagent",
+    active: "{count} subagents running",
+    activeOne: "1 subagent running",
+    panelTitle: "Subagents",
+    fallbackTitle: "Subagent",
+    state: {
+      running: "Running",
+      idle: "Idle",
+      requires_action: "Waiting on you",
+      unknown: "Unknown",
+    },
+    completed: "Subagent “{title}” finished",
+    completedDetail: "took {duration}",
+    failed: "Subagent “{title}” failed",
+    cancelled: "Subagent “{title}” cancelled",
+    unknown: "Subagent “{title}” state is unknown",
+    /** Depth exceeded: nested too deep — annotate in UI but keep the events. */
+    depthExceeded: "Nesting too deep — events recorded only",
+  },
   cowork: {
     removeMember: "Remove member",
     title: "Cowork Run",
@@ -803,6 +844,41 @@ export const enUS: MessageSchema = {
     pausedHint: "Paused on budget ({reason}). Mail is retained — raise the limit to continue.",
     system: {
       roleInjected: "> Role brief and cowork protocol injected.",
+    },
+    /** Run-level tooling: pick the MCP servers and skills handed to every member this run. */
+    tooling: {
+      title: "Run capabilities",
+      sub: "Members share one tool surface: the selected MCP servers and skills are handed to each member.",
+      mcp: "MCP servers",
+      mcpEmpty: "No MCP servers configured yet.",
+      skills: "Skills",
+      skillsEmpty: "No skills installed in the source workspace yet.",
+      skillsLoading: "Scanning skills…",
+      skillsWorktreeOnly:
+        "Skill selection only applies in the Worktree isolation mode; in the current mode the workspace is the source directory, so every installed skill is visible.",
+      rest: "{n} more come from the settings default (changing this only affects this run).",
+      declared: "Declared this run: {names}",
+      skipped: "{name} ({reason})",
+      skippedTitle: "Skipped by backend:",
+    },
+    /** Git integration: commits produced by teammates in the cowork workspace. */
+    commits: {
+      title: "Commits",
+      branch: "Branch",
+      refresh: "Refresh",
+      empty: "No commits yet. Teammate commits show up here.",
+      noRepo: "Not a git repository — commits are unavailable.",
+      fromRun: "This run",
+      error: "Failed to read commits",
+      diffLoading: "Loading diff…",
+      author: "Author",
+    },
+    run: {
+      membersTitle: "Members",
+      openMember: "Open {name}'s session",
+      transcriptTitle: "Cowork timeline",
+      openAuthor: "Open {name}'s session",
+      budget: "Budget",
     },
     errors: {
       alreadyRunning: "A cowork run is already active — end it before starting another.",
@@ -1551,7 +1627,7 @@ export const enUS: MessageSchema = {
     acpStartFailed: "[ACP start failed] {detail}",
     acpNotSelected: "No ACP backend selected",
     acpTransportUnavailable:
-      "No usable ACP transport configured: local ACP needs the desktop (Tauri), remote ACP needs a WebSocket endpoint.",
+      "No usable ACP transport configured: local ACP needs a host (desktop app / self-hosted server), remote ACP needs a WebSocket endpoint.",
     workspaceUnresolvable: "Cannot resolve workspace directory: configure workspaceDir in Settings",
     startFailed: "Startup failed: {detail}",
     configFailed: "Config failed: {detail}",
