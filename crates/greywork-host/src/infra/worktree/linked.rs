@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use super::git::run_git;
-use super::AGENTS_DIR;
+use super::{create_symlink, AGENTS_DIR};
 
 /// 共享文件清单文件名。
 const LINKED_FILE: &str = "linked";
@@ -38,21 +38,6 @@ pub(super) fn is_safe_relative(entry: &str) -> bool {
             Component::ParentDir | Component::Prefix(_) | Component::RootDir
         )
     })
-}
-
-/// 创建符号链接：Unix 一条路径；Windows 按源是目录还是文件分流。
-#[cfg(unix)]
-fn create_symlink(src: &Path, dst: &Path) -> std::io::Result<()> {
-    std::os::unix::fs::symlink(src, dst)
-}
-
-#[cfg(windows)]
-fn create_symlink(src: &Path, dst: &Path) -> std::io::Result<()> {
-    if src.is_dir() {
-        std::os::windows::fs::symlink_dir(src, dst)
-    } else {
-        std::os::windows::fs::symlink_file(src, dst)
-    }
 }
 
 /// 按 `.agents/linked` 把源仓库里的共享文件以符号链接挂进新快照。

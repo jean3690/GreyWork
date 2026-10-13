@@ -12,8 +12,9 @@ pub fn worktree_provision(
     access: &dyn WorkspaceFs,
     source: String,
     prepare: bool,
+    skills: Option<Vec<String>>,
 ) -> Result<WorktreeProvisionDto, String> {
-    provision(access, &host.paths().home_dir, &source, prepare)
+    provision(access, &host.paths().home_dir, &source, prepare, skills)
 }
 
 pub fn worktree_release(
@@ -57,6 +58,9 @@ pub struct ProvisionArgs {
     /// 覆盖本字段，只读档一律夹成 false（见 `apps/server` 的 `overlay_args`）。
     #[serde(default)]
     pub prepare: bool,
+    /// 仅带入指定的技能 id 列表（空 = 全量带入）。主要用于 run 级选择。
+    #[serde(default)]
+    pub skills: Option<Vec<String>>,
 }
 
 #[derive(serde::Deserialize)]

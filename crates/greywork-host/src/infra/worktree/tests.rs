@@ -82,7 +82,7 @@ fn plain_dir_uses_copy_fallback() {
     std::fs::write(root.join("x.txt"), "x\n").expect("写文件");
     std::fs::create_dir(root.join("sub")).expect("建子目录");
     std::fs::write(root.join("sub/y.txt"), "y\n").expect("写子文件");
-    let dto = provision(&access, &home, &root.to_string_lossy(), false).expect("provision");
+    let dto = provision(&access, &home, &root.to_string_lossy(), false, None).expect("provision");
     assert_eq!(dto.kind, "copy");
     let target = PathBuf::from(&dto.root);
     assert!(target.join("x.txt").is_file());
@@ -96,7 +96,8 @@ fn plain_dir_uses_copy_fallback() {
         ))
     );
     // 幂等：同一 source 返回同一目录
-    let again = provision(&access, &home, &root.to_string_lossy(), false).expect("再次 provision");
+    let again =
+        provision(&access, &home, &root.to_string_lossy(), false, None).expect("再次 provision");
     assert_eq!(again.root, dto.root);
     release(&access, &home, &dto.root).expect("release");
     assert!(!target.exists());
@@ -112,7 +113,7 @@ fn copy_skips_git_and_app_data() {
     std::fs::write(root.join(".git"), "# 假 gitdir").expect("写 .git");
     std::fs::write(root.join(".greyWork"), "app data").expect("写 .greyWork");
     std::fs::write(root.join("keep.txt"), "k\n").expect("写保留文件");
-    let dto = provision(&access, &home, &root.to_string_lossy(), false).expect("provision");
+    let dto = provision(&access, &home, &root.to_string_lossy(), false, None).expect("provision");
     let target = PathBuf::from(&dto.root);
     assert!(target.join("keep.txt").is_file());
     assert!(!target.join(".git").exists());
@@ -128,7 +129,7 @@ fn git_repo_creates_real_worktree() {
     std::fs::create_dir_all(&repo).expect("建仓库目录");
     init_repo(&repo);
     std::fs::write(repo.join("new.txt"), "n\n").expect("写未提交文件");
-    let dto = provision(&access, &home, &repo.to_string_lossy(), false).expect("provision");
+    let dto = provision(&access, &home, &repo.to_string_lossy(), false, None).expect("provision");
     assert_eq!(dto.kind, "git");
     let target = PathBuf::from(&dto.root);
     assert!(target.is_dir());
@@ -137,7 +138,8 @@ fn git_repo_creates_real_worktree() {
     // 源仓库的未提交文件不会出现在新 worktree 里（独立 checkout）
     assert!(!target.join("new.txt").exists());
     // 幂等
-    let again = provision(&access, &home, &repo.to_string_lossy(), false).expect("再次 provision");
+    let again =
+        provision(&access, &home, &repo.to_string_lossy(), false, None).expect("再次 provision");
     assert_eq!(again.root, dto.root);
     // release 后 git 不再认识这个 worktree
     release(&access, &home, &dto.root).expect("release");
@@ -158,7 +160,7 @@ fn git_repo_worktree_uses_named_branch() {
     let repo = home.join("repo");
     std::fs::create_dir_all(&repo).expect("建仓库目录");
     init_repo(&repo);
-    let dto = provision(&access, &home, &repo.to_string_lossy(), false).expect("provision");
+    let dto = provision(&access, &home, &repo.to_string_lossy(), false, None).expect("provision");
     assert_eq!(dto.kind, "git");
     let target = PathBuf::from(&dto.root);
 
@@ -188,7 +190,7 @@ fn release_keeps_branch_and_commits() {
     let repo = home.join("repo");
     std::fs::create_dir_all(&repo).expect("建仓库目录");
     init_repo(&repo);
-    let dto = provision(&access, &home, &repo.to_string_lossy(), false).expect("provision");
+    let dto = provision(&access, &home, &repo.to_string_lossy(), false, None).expect("provision");
     let target = PathBuf::from(&dto.root);
     // 在快照里造一个提交（模拟 agent 的产出）
     std::fs::write(target.join("agent.txt"), "work\n").expect("写 agent 产物");
@@ -212,7 +214,7 @@ fn reprovision_reuses_existing_branch() {
     let repo = home.join("repo");
     std::fs::create_dir_all(&repo).expect("建仓库目录");
     init_repo(&repo);
-    let dto = provision(&access, &home, &repo.to_string_lossy(), false).expect("provision");
+    let dto = provision(&access, &home, &repo.to_string_lossy(), false, None).expect("provision");
     let target = PathBuf::from(&dto.root);
     std::fs::write(target.join("agent.txt"), "work\n").expect("写 agent 产物");
     git_in(&target, &["add", "-A"]);
@@ -220,7 +222,8 @@ fn reprovision_reuses_existing_branch() {
     release(&access, &home, &dto.root).expect("release");
 
     // 再派一次：目录名确定、分支已存在 → 应复用（挂到旧分支）而非重置或回落复制
-    let again = provision(&access, &home, &repo.to_string_lossy(), false).expect("再 provision");
+    let again =
+        provision(&access, &home, &repo.to_string_lossy(), false, None).expect("再 provision");
     assert_eq!(again.kind, "git", "应复用命名分支而不是回落复制");
     assert_eq!(again.root, dto.root);
     let target2 = PathBuf::from(&again.root);
@@ -240,7 +243,7 @@ fn git_snapshot_fixture(tag: &str) -> (PathBuf, WorkspaceFsAccess, WorktreeProvi
     let repo = home.join("repo");
     std::fs::create_dir_all(&repo).expect("建仓库目录");
     init_repo(&repo);
-    let dto = provision(&access, &home, &repo.to_string_lossy(), false).expect("provision");
+    let dto = provision(&access, &home, &repo.to_string_lossy(), false, None).expect("provision");
     assert_eq!(dto.kind, "git");
     (home, access, dto)
 }
@@ -306,7 +309,7 @@ fn snapshot_rejects_non_git_snapshot() {
     let plain = home.join("project");
     std::fs::create_dir_all(&plain).expect("建源目录");
     std::fs::write(plain.join("x.txt"), "x\n").expect("写文件");
-    let dto = provision(&access, &home, &plain.to_string_lossy(), false).expect("provision");
+    let dto = provision(&access, &home, &plain.to_string_lossy(), false, None).expect("provision");
     assert_eq!(dto.kind, "copy");
     assert!(snapshot(&access, &home, &dto.root).is_err());
     let _ = std::fs::remove_dir_all(home);
@@ -356,7 +359,7 @@ fn default_root_passes_through() {
     let home = canonical_home(&temp_dir("direct-home"));
     let base = store_fs::default_root(&home).expect("default root");
     let access = WorkspaceFsAccess::new(&base, base.join("gw-access.json")).expect("授权");
-    let dto = provision(&access, &home, &base.to_string_lossy(), false).expect("provision");
+    let dto = provision(&access, &home, &base.to_string_lossy(), false, None).expect("provision");
     assert_eq!(dto.kind, "direct");
     // 直通返回源的 strip 形态，与 provision 其余分支的返回值同形。
     assert_eq!(dto.root, strip(&base));
@@ -371,7 +374,7 @@ fn default_root_passes_through() {
 fn unauthorized_source_is_rejected() {
     let (home, access) = home_fixture("auth");
     let outside = temp_dir("auth-outside");
-    let result = provision(&access, &home, &outside.to_string_lossy(), false);
+    let result = provision(&access, &home, &outside.to_string_lossy(), false, None);
     assert!(result.is_err(), "worktree 不应暴露未授权源");
     let _ = std::fs::remove_dir_all(home);
     let _ = std::fs::remove_dir_all(outside);
@@ -403,7 +406,7 @@ fn release_rejects_outside_worktree_base() {
     std::fs::write(outside.join("x.txt"), "x").expect("写外部文件");
     let root = home.join("project");
     std::fs::create_dir_all(&root).expect("建源目录");
-    let dto = provision(&access, &home, &root.to_string_lossy(), false).expect("provision");
+    let dto = provision(&access, &home, &root.to_string_lossy(), false, None).expect("provision");
     // 同一授权根内、但不在 worktrees 基目录下的路径：拒绝（防删用户目录）
     let wrong = home.join("sessions");
     std::fs::create_dir_all(&wrong).expect("建目录");
@@ -432,10 +435,10 @@ fn list_reports_provisioned_snapshots() {
     std::fs::create_dir_all(&repo).expect("建仓库目录");
     init_repo(&repo);
 
-    let copied =
-        provision(&access, &home, &plain.to_string_lossy(), false).expect("provision 普通目录");
+    let copied = provision(&access, &home, &plain.to_string_lossy(), false, None)
+        .expect("provision 普通目录");
     let git_dto =
-        provision(&access, &home, &repo.to_string_lossy(), false).expect("provision 仓库");
+        provision(&access, &home, &repo.to_string_lossy(), false, None).expect("provision 仓库");
 
     let rows = list(&home).expect("list");
     assert_eq!(rows.len(), 2);
@@ -480,7 +483,7 @@ fn list_drops_released_entry() {
     let plain = home.join("project");
     std::fs::create_dir_all(&plain).expect("建源目录");
     std::fs::write(plain.join("x.txt"), "x\n").expect("写文件");
-    let dto = provision(&access, &home, &plain.to_string_lossy(), false).expect("provision");
+    let dto = provision(&access, &home, &plain.to_string_lossy(), false, None).expect("provision");
     assert_eq!(list(&home).expect("list").len(), 1);
 
     release(&access, &home, &dto.root).expect("release");
@@ -519,7 +522,7 @@ fn linked_manifest_symlinks_ignored_files() {
     git_in(&repo, &["add", "-A"]);
     git_in(&repo, &["commit", "-m", "add linked manifest"]);
 
-    let dto = provision(&access, &home, &repo.to_string_lossy(), false).expect("provision");
+    let dto = provision(&access, &home, &repo.to_string_lossy(), false, None).expect("provision");
     assert_eq!(dto.kind, "git");
     let link = PathBuf::from(&dto.root).join(".env");
     assert!(link.is_symlink(), ".env 应是符号链接");
@@ -550,7 +553,7 @@ fn linked_manifest_skips_unsafe_and_unignored_entries() {
     git_in(&repo, &["add", "-A"]);
     git_in(&repo, &["commit", "-m", "manifest"]);
 
-    let dto = provision(&access, &home, &repo.to_string_lossy(), false).expect("provision");
+    let dto = provision(&access, &home, &repo.to_string_lossy(), false, None).expect("provision");
     let target = PathBuf::from(&dto.root);
     assert!(target.join(".env").is_symlink(), "被忽略且存在的条目应链接");
     assert!(
@@ -565,6 +568,109 @@ fn linked_manifest_skips_unsafe_and_unignored_entries() {
         !home.join("escape").exists(),
         "逃逸条目不得在源树之外落链接"
     );
+    let _ = std::fs::remove_dir_all(home);
+}
+
+/// `.agents/skills` 里被 git 忽略的技能目录会被符号链接进快照，成员会话因此带上技能。
+#[cfg(unix)]
+#[test]
+fn skills_dir_symlinks_ignored_skills_into_snapshot() {
+    let (home, access) = home_fixture("skills");
+    let repo = home.join("repo");
+    std::fs::create_dir_all(&repo).expect("建仓库目录");
+    init_repo(&repo);
+    // 技能目录整体被忽略（agent 只读它，不进提交），清单与 .gitignore 进提交。
+    std::fs::write(repo.join(".gitignore"), ".agents/skills/\n").expect("写 .gitignore");
+    std::fs::create_dir_all(repo.join(".agents/skills/demo")).expect("建技能目录");
+    std::fs::write(repo.join(".agents/skills/demo/SKILL.md"), "# demo\n").expect("写 SKILL.md");
+    git_in(&repo, &["add", ".gitignore"]);
+    git_in(&repo, &["commit", "-m", "ignore skills"]);
+
+    let dto = provision(&access, &home, &repo.to_string_lossy(), false, None).expect("provision");
+    assert_eq!(dto.kind, "git");
+    let skill_file = PathBuf::from(&dto.root).join(".agents/skills/demo/SKILL.md");
+    assert!(skill_file.is_file(), "技能文件应随快照可见");
+    assert_eq!(
+        std::fs::read_to_string(&skill_file).expect("读技能文件"),
+        "# demo\n"
+    );
+    let _ = std::fs::remove_dir_all(home);
+}
+
+/// run 级勾选：只带入被选中的技能，未选的一律不进快照。
+#[cfg(unix)]
+#[test]
+fn skills_selection_only_links_chosen_entries() {
+    let (home, access) = home_fixture("skills-select");
+    let repo = home.join("repo");
+    std::fs::create_dir_all(&repo).expect("建仓库目录");
+    init_repo(&repo);
+    std::fs::write(repo.join(".gitignore"), ".agents/skills/\n").expect("写 .gitignore");
+    for id in ["alpha", "beta"] {
+        std::fs::create_dir_all(repo.join(".agents/skills").join(id)).expect("建技能目录");
+        std::fs::write(
+            repo.join(".agents/skills").join(id).join("SKILL.md"),
+            format!("# {id}\n"),
+        )
+        .expect("写 SKILL.md");
+    }
+    git_in(&repo, &["add", ".gitignore"]);
+    git_in(&repo, &["commit", "-m", "ignore skills"]);
+
+    let selected = vec!["alpha".to_string()];
+    let dto = provision(
+        &access,
+        &home,
+        &repo.to_string_lossy(),
+        false,
+        Some(selected),
+    )
+    .expect("provision");
+    let skills = PathBuf::from(&dto.root).join(".agents/skills");
+    assert!(skills.join("alpha/SKILL.md").is_file(), "选中的技能应带入");
+    assert!(!skills.join("beta").exists(), "未选中的技能不应带入");
+    let _ = std::fs::remove_dir_all(home);
+}
+
+/// 空勾选集（Some(vec![])）表示一个都不带 —— 与 `None`（全量）语义不同。
+#[cfg(unix)]
+#[test]
+fn skills_empty_selection_links_nothing() {
+    let (home, access) = home_fixture("skills-none");
+    let repo = home.join("repo");
+    std::fs::create_dir_all(&repo).expect("建仓库目录");
+    init_repo(&repo);
+    std::fs::write(repo.join(".gitignore"), ".agents/skills/\n").expect("写 .gitignore");
+    std::fs::create_dir_all(repo.join(".agents/skills/demo")).expect("建技能目录");
+    std::fs::write(repo.join(".agents/skills/demo/SKILL.md"), "# demo\n").expect("写 SKILL.md");
+    git_in(&repo, &["add", ".gitignore"]);
+    git_in(&repo, &["commit", "-m", "ignore skills"]);
+
+    let dto = provision(
+        &access,
+        &home,
+        &repo.to_string_lossy(),
+        false,
+        Some(Vec::new()),
+    )
+    .expect("provision");
+    let skills = PathBuf::from(&dto.root).join(".agents/skills");
+    assert!(!skills.join("demo").exists(), "空选择不应带入任何技能");
+    let _ = std::fs::remove_dir_all(home);
+}
+
+/// 复制兜底快照本就会带上技能目录（源里就有），无需链接。
+#[test]
+fn copy_snapshot_carries_skills() {
+    let (home, access) = home_fixture("skills-copy");
+    let root = home.join("project");
+    std::fs::create_dir_all(root.join(".agents/skills/demo")).expect("建技能目录");
+    std::fs::write(root.join(".agents/skills/demo/SKILL.md"), "# demo\n").expect("写 SKILL.md");
+    let dto = provision(&access, &home, &root.to_string_lossy(), false, None).expect("provision");
+    assert_eq!(dto.kind, "copy");
+    assert!(PathBuf::from(&dto.root)
+        .join(".agents/skills/demo/SKILL.md")
+        .is_file());
     let _ = std::fs::remove_dir_all(home);
 }
 
@@ -585,7 +691,7 @@ fn prepare_script_runs_when_enabled() {
     git_in(&repo, &["add", "-A"]);
     git_in(&repo, &["commit", "-m", "add prepare"]);
 
-    let dto = provision(&access, &home, &repo.to_string_lossy(), true).expect("provision");
+    let dto = provision(&access, &home, &repo.to_string_lossy(), true, None).expect("provision");
     assert!(
         PathBuf::from(&dto.root).join("prepared.marker").is_file(),
         "prepare 应在快照里跑出产物"
@@ -610,7 +716,7 @@ fn prepare_skipped_when_disabled() {
     git_in(&repo, &["add", "-A"]);
     git_in(&repo, &["commit", "-m", "add prepare"]);
 
-    let dto = provision(&access, &home, &repo.to_string_lossy(), false).expect("provision");
+    let dto = provision(&access, &home, &repo.to_string_lossy(), false, None).expect("provision");
     assert!(
         !PathBuf::from(&dto.root).join("prepared.marker").exists(),
         "未开启时不得执行 prepare"
@@ -631,7 +737,7 @@ fn prepare_failure_does_not_fail_provision() {
     git_in(&repo, &["add", "-A"]);
     git_in(&repo, &["commit", "-m", "add prepare"]);
 
-    let dto = provision(&access, &home, &repo.to_string_lossy(), true)
+    let dto = provision(&access, &home, &repo.to_string_lossy(), true, None)
         .expect("prepare 失败不应让 provision 失败");
     assert!(PathBuf::from(&dto.root).is_dir());
     let _ = std::fs::remove_dir_all(home);

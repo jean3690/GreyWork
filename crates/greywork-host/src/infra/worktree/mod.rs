@@ -25,6 +25,7 @@
 //! - [`dto`]：对外 DTO 与 provision 标记的读写；
 //! - [`git`]：底层 git 执行、slug / 指纹 / 目标目录 / 分支命名；
 //! - [`linked`]：`.agents/linked` 共享文件的符号链接；
+//! - [`skills`]：`.agents/skills` 已安装技能带进快照 + run 级收敛；
 //! - [`prepare`]：`.agents/prepare` 准备脚本；
 //! - [`provision`]：生命周期 `provision` / `release` / `list`；
 //! - [`snapshot`]：回合级快照与回退（`snapshot` / `restore`）；
@@ -36,6 +37,7 @@ mod git;
 mod linked;
 mod prepare;
 mod provision;
+mod skills;
 mod snapshot;
 
 #[cfg(test)]
@@ -57,6 +59,26 @@ const AGENTS_DIR: &str = ".agents";
 /// 去掉 Windows `\\?\` 前缀，交出 git / 前端都能认的路径。
 fn strip(raw: &Path) -> String {
     crate::path_safety::strip_verbatim_prefix(&raw.to_string_lossy())
+}
+
+/// 创建符号链接：Unix 一条路径；Windows 按源是目录还是文件分流。
+///
+/// `.agents/linked`（[`linked`]）与 `.agents/skills`（[`skills`]）共用同一条纪律：
+/// 直接把链接指向**源**文件 / 目录，而不是复制。Windows 上创建符号链接需要开发者
+/// 模式或管理员权限，失败时调用方只告警（功能降级，不是错误）。
+pub(super) fn create_symlink(src: &Path, dst: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(src, dst)
+    }
+    #[cfg(windows)]
+    {
+        if src.is_dir() {
+            std::os::windows::fs::symlink_dir(src, dst)
+        } else {
+            std::os::windows::fs::symlink_file(src, dst)
+        }
+    }
 }
 
 /// 把 `home` 折成 canonical 形态。

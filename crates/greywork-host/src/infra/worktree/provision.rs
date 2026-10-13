@@ -13,6 +13,7 @@ use super::git::{
 };
 use super::linked::apply_linked;
 use super::prepare::run_prepare;
+use super::skills::apply_skills;
 use super::{canonical_home, strip, WORKTREES_SUB_DIR};
 
 /// 递归复制目录快照：跳过 `.git`、`.greyWork`（应用私有数据）与**符号链接**
@@ -67,6 +68,7 @@ pub(super) fn provision(
     home: &Path,
     source_raw: &str,
     prepare: bool,
+    skills: Option<Vec<String>>,
 ) -> Result<WorktreeProvisionDto, String> {
     let source = access.resolve_existing(source_raw)?;
     if !source.is_dir() {
@@ -142,9 +144,13 @@ pub(super) fn provision(
     };
     // `.agents/linked`：把源里被 git 忽略的共享文件以符号链接挂进新快照。
     // 只在源是 git 仓库时有意义（清单本身依赖 git 忽略判定），非 git 源直接跳过。
-    if is_git_repo(&source) {
+    let source_is_git = is_git_repo(&source);
+    if source_is_git {
         apply_linked(&source, &target);
     }
+    // `.agents/skills`：把已安装的技能带进快照（默认全量）。已存在则跳过（幂等），
+    // 并与 `linked` 同样在 git 仓库时要求其条目被 git 忽略以减少工作树污染。
+    apply_skills(&source, &target, source_is_git, skills.as_deref());
     // `.agents/prepare`：由调用方按权限档决定是否执行（只读档不跑）。先 linked 后 prepare，
     // 好让脚本能用到刚挂进来的共享文件（如 .env）。
     if prepare {
