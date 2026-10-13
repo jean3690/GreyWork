@@ -1,0 +1,15 @@
+{
+  // 仅构建用：与 tsconfig.json 同源，但产出 CommonJS 到 out/（Electron 主进程 / preload 走
+  // CJS 最省心；preload 还在主窗 sandbox:false 下要求相对 require 可解析）。
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "outDir": "out",
+    "rootDir": "src",
+    "sourceMap": true
+  },
+  // 只编译 src：tsconfig.json 为了 lint/typecheck 把 tests 也纳入了，它们不该进 out/。
+  "include": ["src/**/*.ts"]
+}

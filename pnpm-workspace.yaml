@@ -13,6 +13,9 @@ allowBuilds:
   esbuild: false
   protobufjs: true
   vue-demi: false
+  # electron 的 postinstall 负责把运行时二进制解包到 node_modules/electron/dist；
+  # 不放开的话 `electron .` 起不来（缺 dist/electron）。
+  electron: true
 
 # patch 的键带精确版本，所以被 patch 的包在 package.json 里也必须**精确 pin**，
 # 不能写 range。踩过的坑：`@univerjs/*` 原先写 `^0.25.1`，而对 0.x 来说

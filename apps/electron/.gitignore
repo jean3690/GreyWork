@@ -1,0 +1,4 @@
+# 构建产物（tsc 输出）与打包产物
+out/
+release/
+*.log

@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // 主进程 + preload 跑在 Electron 的 Node 运行时里；DOM 类型只为 preload 的 File / Blob
+    // 拖放路径与 webUtils.getPathForFile 的签名服务（主进程不用 DOM）。
+    "lib": ["ESNext", "DOM"],
+    "types": ["node"],
+    "noEmit": true,
+    "module": "ESNext",
+    "moduleResolution": "bundler"
+  },
+  "include": ["src/**/*.ts", "tests/**/*.ts"]
+}
