@@ -130,11 +130,7 @@ describe("ModeSettingsPane · 浏览器态", () => {
 describe("ModeSettingsPane · 服务端钉住的档位", () => {
   it("GREYWORK_TIER 钉死档位：档位按钮与临时只读禁用，说明里带档位名", async () => {
     invokeMock.mockImplementation(async (command: string) =>
-      command === "sys_info"
-        ? { pinnedTier: "read-only", pinnedSandbox: false, trayAvailable: false }
-        : command === "worktree_list"
-          ? [SNAPSHOT]
-          : null,
+      command === "sys_info" ? { pinnedTier: "read-only", trayAvailable: false } : command === "worktree_list" ? [SNAPSHOT] : null,
     );
     const wrapper = await render();
 

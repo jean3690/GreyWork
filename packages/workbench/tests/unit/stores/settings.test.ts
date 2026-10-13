@@ -13,7 +13,7 @@ const localStorageStub = {
 vi.stubGlobal("localStorage", localStorageStub);
 vi.stubGlobal("window", { localStorage: localStorageStub });
 
-import { recommendedSandboxMode, useSettingsStore } from "@/stores/settings";
+import { useSettingsStore } from "@/stores/settings";
 
 beforeEach(() => {
   storage.clear();
@@ -163,27 +163,16 @@ describe("权限档位与沙盒联动", () => {
     expect(reloaded.effectivePermissionTier).toBe("full");
   });
 
-  it("沙盒档位往返持久化，旧快照缺失与非法值都迁移到 auto", () => {
+  it("沙盒已停用：快照里的旧 sandboxMode 被忽略，persist 也不再写出该字段", () => {
+    // 2026-10-13 用户决策：agent 自带权限模型，宿主不再套 OS 沙箱。
+    // bwrap 的 auto 档默认断网，对云端模型 agent 直接不可用，所以整层撤掉。
+    storage.set("greywork.settings", JSON.stringify({ sandboxMode: "full", permissionTier: "workspace" }));
     const settings = useSettingsStore();
-    expect(settings.sandboxMode).toBe("auto");
-    settings.sandboxMode = "fs";
+    expect("sandboxMode" in settings).toBe(false);
+
     settings.persist();
-    setActivePinia(createPinia());
-    expect(useSettingsStore().sandboxMode).toBe("fs");
-
-    storage.set("greywork.settings", JSON.stringify({ sandboxMode: "yolo" }));
-    setActivePinia(createPinia());
-    expect(useSettingsStore().sandboxMode).toBe("auto");
-
-    storage.set("greywork.settings", JSON.stringify({ permissionTier: "workspace" }));
-    setActivePinia(createPinia());
-    expect(useSettingsStore().sandboxMode).toBe("auto");
-  });
-
-  it("recommendedSandboxMode 默认选择自动隔离，网络放行不被权限档位隐式开启", () => {
-    expect(recommendedSandboxMode("read-only")).toBe("auto");
-    expect(recommendedSandboxMode("workspace")).toBe("auto");
-    expect(recommendedSandboxMode("full")).toBe("auto");
+    const persisted = JSON.parse(storage.get("greywork.settings") ?? "{}");
+    expect("sandboxMode" in persisted).toBe(false);
   });
 });
 

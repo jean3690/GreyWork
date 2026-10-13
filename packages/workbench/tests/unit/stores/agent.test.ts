@@ -1228,7 +1228,12 @@ describe("权限临时降级与每工作区配置记忆", () => {
 
     const agentStore = useAgentStore();
     await agentStore.dispatchToAcp("跑一下");
-    expect(h.startAgent).toHaveBeenCalledWith("opencode acp", "read-only", "auto", "/home/test");
+    // 沙箱已停用：startAgent 只剩 (command, tier, env) —— env 来自 provider 声明。
+    expect(h.startAgent).toHaveBeenCalledTimes(1);
+    const [cmd, tier, env] = h.startAgent.mock.calls[0];
+    expect(cmd).toBe("opencode acp");
+    expect(tier).toBe("read-only");
+    expect(env && typeof env === "object").toBe(true);
   });
 
   it("setTempReadOnly 把新档位推给在途 handle，回升同理", async () => {

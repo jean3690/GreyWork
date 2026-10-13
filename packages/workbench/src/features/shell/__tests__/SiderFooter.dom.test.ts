@@ -1,6 +1,8 @@
 // 侧栏底部账户行：身份展示 + 服务端态登出。
 //
-// 登出按钮只在服务端态出现（桌面壳是本地壳、浏览器预览没有宿主，都没有会话可退）；
+// 登出按钮只在**浏览器经服务端托管**时出现：桌面壳（Tauri / Electron）是本地壳，
+// 登出会把自己锁到登录门；浏览器预览态没有宿主。注意 Electron 壳跑的也是 `server` 态
+// （命令经 sidecar），所以判据必须同时看 `hasNativeShell()`。
 // 点击走二次确认，确认后调 host-ipc 的 logout() —— 后者内部会发「会话失效」信号，
 // AuthGate 据此重挂登录门，所以本组件不做任何跳转。
 //
@@ -10,11 +12,13 @@ import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 
 const host = vi.hoisted(() => ({
   runtimeMode: vi.fn<() => string>(() => "server"),
+  hasNativeShell: vi.fn<() => boolean>(() => false),
   logout: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock("@greywork/host-ipc", () => ({
   runtimeMode: host.runtimeMode,
+  hasNativeShell: host.hasNativeShell,
   logout: host.logout,
 }));
 
@@ -42,6 +46,7 @@ function confirmButtons(): HTMLButtonElement[] {
 
 beforeEach(() => {
   host.runtimeMode.mockReturnValue("server");
+  host.hasNativeShell.mockReturnValue(false);
   host.logout.mockClear();
 });
 
@@ -86,6 +91,15 @@ describe("SiderFooter · 登出", () => {
       expect(wrapper.find('[data-testid="sider-account"]').exists()).toBe(true);
       wrapper.unmount();
     }
+  });
+
+  it("Electron 壳（server 态 + 原生壳）不给登出按钮：登出会把自己锁到登录门", async () => {
+    host.runtimeMode.mockReturnValue("server");
+    host.hasNativeShell.mockReturnValue(true);
+    const wrapper = await mountFooter();
+
+    expect(wrapper.find('[data-testid="sider-signout"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="sider-account"]').exists()).toBe(true);
   });
 
   it("点登出先二次确认，确认后才调 logout()", async () => {

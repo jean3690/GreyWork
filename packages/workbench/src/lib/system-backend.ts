@@ -5,7 +5,7 @@
  * - 浏览器预览态：无宿主 → null（卡显示「无宿主诊断面」）。
  */
 
-import { invoke, hasHostCommands } from "@greywork/host-ipc";
+import { hasHostCommands, hostTray, invoke } from "@greywork/host-ipc";
 
 export interface SysInfo {
   version: string;
@@ -17,20 +17,17 @@ export interface SysInfo {
    * 宿主是否真的建出了系统托盘。
    *
    * 没有托盘时「关闭到托盘」是无效档位（宿主会把关闭行为钳回「关闭即退出」，
-   * 否则窗口藏起来后没有任何入口能恢复），设置页据此不给选。服务端恒 false。
+   * 否则窗口藏起来后没有任何入口能恢复），设置页据此不给选。
+   *
+   * **有原生壳时以壳的自答为准**（见下面 `info()`）：Electron 的托盘建在主进程里，而这份
+   * 快照是 sidecar 回答的 —— sidecar 没有托盘概念，恒报 false。纯服务端 / 浏览器预览态
+   * 没有原生壳，沿用快照里的 false。
    */
   trayAvailable: boolean;
   /** 物理内存总量（字节）；宿主取不到为 null（Windows 等平台回落渲染端探测）。 */
   totalMemoryBytes: number | null;
   /** 逻辑核数；取不到为 0。设备分级用它判低端（见 lib/device-tier.ts）。 */
   cpuCount: number;
-  /**
-   * 宿主是否钉死了 agent 沙箱（服务端配了 `GREYWORK_SANDBOX` 时为真）。
-   *
-   * 钉住后客户端传什么都会被 `policy::overlay_args` 改写成配置值 —— 设置页若还
-   * 让改沙盒档位就是一个骗人的开关，据此置灰并说明。桌面端没有配置覆盖，恒 false。
-   */
-  pinnedSandbox: boolean;
   /**
    * 宿主钉死的权限档位（服务端配了 `GREYWORK_TIER` 时有值）。
    *
@@ -48,6 +45,17 @@ export const systemBackend = {
   /** 拉取系统诊断快照；浏览器预览态返回 null。 */
   async info(): Promise<SysInfo | null> {
     if (!hasHostCommands()) return null;
-    return await invoke<SysInfo>("sys_info");
+    const info = await invoke<SysInfo>("sys_info");
+    // 有原生壳时托盘可用性以**壳**为准：Electron 的托盘在建主进程里，而这份快照由 sidecar
+    // 回答（它没有托盘，恒报 false）。照抄会让设置页在托盘可用的机器上说「不可用」，
+    // 连带把「关闭到托盘」钳成无效档位。
+    const tray = hostTray();
+    if (!tray) return info;
+    try {
+      return { ...info, trayAvailable: await tray.available() };
+    } catch {
+      // 问不到就沿用快照：不把「拿不准」渲染成「不可用」。
+      return info;
+    }
   },
 };

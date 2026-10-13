@@ -20,7 +20,6 @@ import {
   type McpServerEntry,
   type Radius,
   type RunMode,
-  type SandboxMode,
   type SkillSourceEntry,
   type ThemeId,
 } from "./types";
@@ -170,7 +169,6 @@ export function normalizeAcpConfigValues(raw: unknown): Record<string, string> {
 
 /* ===== 枚举合法值查表（applySaved 迁移时用） ===== */
 
-export const SANDBOX_MODE_VALUES: Record<SandboxMode, true> = { auto: true, off: true, fs: true, full: true };
 export const THEME_VALUES: Record<ThemeId, true> = {
   greywork: true,
   "night-blue": true,

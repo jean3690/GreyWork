@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
-import { runtimeMode } from "@greywork/host-ipc";
+import { hasNativeShell, runtimeMode } from "@greywork/host-ipc";
 import { i18n } from "@/i18n";
 import { useAgentStore } from "@/stores/agent";
 import { useAutomationStore, type AutomationTask } from "@/stores/automation";
@@ -30,13 +30,17 @@ const notices = useNoticeStore();
 const IS_SEED = new Set(["at-seed-1", "at-seed-2", "at-seed-3"]);
 
 /**
- * 是否是**服务端态**（浏览器经服务端托管）。
+ * 是否是**浏览器经服务端托管**（也就是「任务交给远端那台机器跑」）。
  *
- * 只有这一态才显示「任务落在哪、怎么无人值守」：桌面端的任务在自己库里，无关；
- * 浏览器预览态根本没有服务端，提 `GREYWORK_AUTOMATION_HOST_PRIMARY` 只会让人困惑。
- * 注意不能用 `hasHostCommands()` —— 它把 desktop 与 server 都算作 true，正好漏掉要提示的这一态。
+ * 只有这一态才显示「任务落在哪、怎么无人值守」：桌面端（含 Electron 壳）的任务在自己这台
+ * 机器上，无关；浏览器预览态根本没有服务端，提 `GREYWORK_AUTOMATION_HOST_PRIMARY` 只会让人
+ * 困惑。
+ *
+ * 两个判据缺一不可：`runtimeMode() === "server"` 只说明命令走服务端，Electron 壳也满足它；
+ * `hasNativeShell()` 才是「本机壳」的判据。也不能用 `hasHostCommands()` —— 它把 desktop 与
+ * server 都算作 true，正好漏掉要提示的这一态。
  */
-const serverHosted = runtimeMode() === "server";
+const serverHosted = runtimeMode() === "server" && !hasNativeShell();
 
 /** 待删除确认的任务 id（两步确认）；null = 无。 */
 const pendingDeleteId = ref<string | null>(null);
