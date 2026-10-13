@@ -13,7 +13,6 @@ on:
       - Dockerfile
       - .dockerignore
       - docker-compose.yml
-      - docker-compose.sandbox.yml
       - .env.example
       - apps/server/**
       - apps/desktop/**

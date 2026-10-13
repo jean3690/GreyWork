@@ -19,8 +19,12 @@ logs
 
 *.gen.ts
 pnpm-lock.yaml
-apps/desktop/src-tauri/gen
 # vendored 的 agent skills（markdown + 自带配置），不是本仓代码
 .agents
-# Rust 集成测试的 mock agent，eslint.config.js 同样跳过它们
-apps/desktop/src-tauri/tests/*.mjs
+# 待删的 Electron 迁移 PoC（游离于 workspace 之外的独立项目）
+electron
+# Electron 壳的构建产物（tsc 输出到 out/）与打包产物
+apps/electron/out
+apps/electron/release
+# ACP 集成测试的 mock agent（夹具，按协议可读性排版，不追 prettier 风格）
+apps/server/tests/mock-acp-agent.mjs

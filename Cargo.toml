@@ -1,15 +1,14 @@
 # GreyWork Rust workspace。
 #
-# 存在意义：桌面壳（`apps/desktop/src-tauri`）与 headless 服务端（`apps/server`，见
-# docs/architecture.md）共用同一份领域逻辑。领域逻辑收在 `crates/greywork-host`，
-# 两侧只做薄包装 —— 避免命令面出现两份会漂移的实现。
+# 存在意义：headless 服务端（`apps/server`，见 docs/architecture.md）与未来其他宿主共用
+# 同一份领域逻辑。领域逻辑收在 `crates/greywork-host`，宿主只做薄包装 —— 避免命令面
+# 出现两份会漂移的实现。
 #
 # 单一 `Cargo.lock` 在仓库根：CI 与 husky 的 `--locked` 都指向它，所以那两处的
-# cargo 调用必须从仓库根发起（用 `-p` 选包），不能再 `cd apps/desktop/src-tauri`。
+# cargo 调用必须从仓库根发起（用 `-p` 选包）。
 [workspace]
 resolver = "2"
 members = [
-  "apps/desktop/src-tauri",
   "apps/server",
   "crates/greywork-host",
 ]

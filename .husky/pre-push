@@ -7,7 +7,7 @@ pnpm lint && pnpm -r test
 # 只在本轮推送真的动了 Rust workspace 时才跑：纯前端 / 文档推送不必等一次 cargo 编译。
 # `@{push}` 解析不出来时（分支没有 upstream 等）git diff 会以 128 退出，落到 else
 # 分支照跑 —— 宁可多跑一次，不可漏。
-if git diff --quiet '@{push}..HEAD' -- apps/desktop/src-tauri crates Cargo.toml Cargo.lock 2>/dev/null; then
+if git diff --quiet '@{push}..HEAD' -- crates apps/server Cargo.toml Cargo.lock 2>/dev/null; then
   echo "[pre-push] 本次推送未触及 Rust workspace，跳过 Rust 检查"
 else
   # 关增量。clippy 与 test 的指纹互不相同，各自会建一整套增量会话目录，而 cargo
