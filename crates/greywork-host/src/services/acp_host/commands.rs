@@ -14,8 +14,6 @@ pub struct PermissionRespondArgs {
 pub struct StartArgs {
     pub agent_cmd: String,
     pub tier: Option<String>,
-    pub sandbox: Option<String>,
-    pub workspace: Option<String>,
     pub env: Option<std::collections::HashMap<String, String>>,
 }
 
@@ -57,6 +55,13 @@ pub struct SetConfigArgs {
 pub struct StopArgs {
     pub handle: u64,
     pub turn_id: Option<u64>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CancelSessionArgs {
+    pub handle: u64,
+    pub session_id: String,
 }
 
 #[derive(serde::Deserialize)]

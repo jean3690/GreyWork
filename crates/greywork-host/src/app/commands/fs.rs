@@ -46,6 +46,15 @@ macro_rules! fs_commands {
     { "fs_list_dir", auth: Auth::Required, desktop: false, binary: false,
         args: workspace_fs::PathArg,
         run: |ctx, a| async move { workspace_fs::fs_list_dir(&ctx.services.workspace, a.path).map(Json) } }
+    // 授权面唯一的命令入口（受 `policy::TRUSTED_HOST_ONLY` 守，不可信部署 403）。宿主壳本可
+    // 自行授权（Tauri 就是在 Rust 的 Drop 分支 / 对话框回调里做的），但渲染端拿到绝对路径
+    // 而宿主不知情的宿主只能显式声明。两条命令语义不同，见 `workspace_fs::authorize`。
+    { "fs_authorize_drop_paths", auth: Auth::Required, desktop: false, binary: false,
+        args: workspace_fs::AuthorizePathsArg,
+        run: |ctx, a| async move { workspace_fs::fs_authorize_drop_paths(&ctx.services.workspace, a.paths).map(|()| Json(serde_json::Value::Null)) } }
+    { "fs_authorize_picked_paths", auth: Auth::Required, desktop: false, binary: false,
+        args: workspace_fs::AuthorizePathsArg,
+        run: |ctx, a| async move { workspace_fs::fs_authorize_picked_paths(&ctx.services.workspace, a.paths).map(Json) } }
     { "fs_pick_files", auth: Auth::Required, desktop: true, binary: false,
         args: UnitArgs, run: |_ctx, _a| async move { Err::<Json<()>, String>("仅桌面端可用".into()) } }
 

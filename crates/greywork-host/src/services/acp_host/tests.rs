@@ -23,7 +23,9 @@ use super::policy::{
     blocked_paths, comparable_path, decide_permission, is_readonly_kind, is_within, is_write_kind,
     normalize_lexical, validate_cwd, PermissionTier, PermissionVerdict, SessionPolicy,
 };
-use super::prompt::{prompt_blocks, PromptUnit, PROMPT_MAX_BASE64_BYTES, PROMPT_MAX_UNITS};
+use super::prompt::{
+    acp_cancel_session, prompt_blocks, PromptUnit, PROMPT_MAX_BASE64_BYTES, PROMPT_MAX_UNITS,
+};
 use super::state::{AcpHost, PendingPermission, PermissionDecision};
 
 /// Windows 上 `.cmd` 垫片会被包成 `cmd /C <原命令>`（process_guard::shell_command）。
@@ -659,6 +661,16 @@ async fn set_tier_rejects_unknown_handle() {
     // 降级必须能被前端感知失败：未登记 handle 静默成功会让 UI 误报「已降为只读」
     let host = AcpHost::default();
     assert!(host.set_tier(7, PermissionTier::ReadOnly).await.is_err());
+}
+
+#[tokio::test]
+async fn cancel_session_rejects_unknown_handle() {
+    // 子代理取消要打到真实连接上；未登记 handle 必须显式报错，
+    // 否则「取消没生效」会被静默吞掉（与 set_tier 同一 fail-loud 语义）。
+    let host = std::sync::Arc::new(AcpHost::default());
+    assert!(acp_cancel_session(&host, 99, "sess-child".to_string())
+        .await
+        .is_err());
 }
 
 #[test]

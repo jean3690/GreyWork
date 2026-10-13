@@ -18,6 +18,7 @@ import { applyAppearance as applyAppearanceToDom } from "@/lib/theme";
 import { modeOfShortcut, visibilityOf, type LayoutMode } from "@/lib/layout-modes";
 import { syncCloseToTray, syncTrayLabels, useTrayBridge, type TrayLabels } from "@/lib/tray-bridge";
 import { useCloseGuard } from "@/lib/close-guard";
+import { useHostNotifications } from "@/lib/host-notifications";
 import { useQueueBridge } from "@/lib/queue-bridge";
 import { hasDirtyPreviewTabs, pendingDiscard, requestLeave } from "@/lib/preview-edit-guard";
 import { bootPlugins } from "@/plugins/runtime";
@@ -359,6 +360,8 @@ onMounted(() => {
   // 与托盘桥同为应用级接线，所以放在外壳而不是预览面板里；确认弹层的渲染点在
   // PreviewSider（它持有 saver 注册表，见 lib/close-guard.ts）。
   useCloseGuard();
+  // 服务端的 `host://notify` → 系统通知（Tauri 侧由 Rust 直接发，这里空转）。
+  useHostNotifications();
 });
 function syncSystemTheme(event: MediaQueryListEvent): void {
   systemDark.value = event.matches;

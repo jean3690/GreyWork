@@ -42,12 +42,12 @@ mod state;
 mod tests;
 
 pub use commands::{
-    DetectProgramsArgs, LoadSessionArgs, NewSessionArgs, PermissionRespondArgs, SendArgs,
-    SetConfigArgs, SetPermissionTierArgs, StartArgs, StopArgs,
+    CancelSessionArgs, DetectProgramsArgs, LoadSessionArgs, NewSessionArgs, PermissionRespondArgs,
+    SendArgs, SetConfigArgs, SetPermissionTierArgs, StartArgs, StopArgs,
 };
 pub use permission::acp_permission_respond;
 pub use probe::{acp_detect_programs, AgentProgramProbe};
-pub use prompt::{acp_send, acp_stop, PromptUnit};
+pub use prompt::{acp_cancel_session, acp_send, acp_stop, PromptUnit};
 pub use session::{
     acp_list, acp_load_session, acp_new_session, acp_set_config, acp_set_permission_tier,
 };

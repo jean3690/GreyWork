@@ -20,7 +20,6 @@ export type {
   AcpPermissionRequestPayload,
   AcpPromptResult,
   AcpPromptUnit,
-  AcpSandboxMode,
   AcpSessionConfigOption,
   AcpSessionInfo,
   AcpSessionOpened,

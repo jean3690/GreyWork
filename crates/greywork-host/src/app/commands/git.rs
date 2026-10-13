@@ -60,7 +60,16 @@ macro_rules! git_commands {
     // ---- worktree ----
     { "worktree_provision", auth: Auth::Required, desktop: false, binary: false,
         args: worktree::ProvisionArgs,
-        run: |ctx, a| async move { worktree::worktree_provision(ctx.host.as_ref(), ctx.services.workspace.as_ref(), a.source, a.prepare).map(Json) } }
+        run: |ctx, a| async move {
+            worktree::worktree_provision(
+                ctx.host.as_ref(),
+                ctx.services.workspace.as_ref(),
+                a.source,
+                a.prepare,
+                a.skills,
+            )
+            .map(Json)
+        } }
     { "worktree_release", auth: Auth::Required, desktop: false, binary: false,
         args: worktree::ReleaseArgs,
         run: |ctx, a| async move { worktree::worktree_release(ctx.host.as_ref(), ctx.services.workspace.as_ref(), a.root).map(Json) } }

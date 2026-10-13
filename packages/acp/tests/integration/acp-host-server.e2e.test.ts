@@ -8,7 +8,7 @@
  *
  * 链路：`createAcpClient()` → `TauriIpcTransport` → `@greywork/host-ipc` 的
  * `POST /api/command` + `WS /api/events` → 真 `greywork-server` → `AcpHost` → spawn 假 agent
- * （复用 `apps/desktop/src-tauri/tests/mock-acp-agent.mjs`），跑通
+ * （复用 `apps/server/tests/mock-acp-agent.mjs`），跑通
  * initialize → session/new → session/prompt → agent_message_chunk → prompt-done。
  *
  * Node 侧不改任何生产代码：`@greywork/host-ipc` 的 `runtime.ts` 本来就有给测试用的显式
@@ -38,7 +38,7 @@ const PASSWORD = "acp-e2e-secret";
 
 const repoRoot = resolve(fileURLToPath(new URL("../../../../", import.meta.url)));
 const serverBin = join(repoRoot, "target/debug/greywork-server");
-const mockAgent = join(repoRoot, "apps/desktop/src-tauri/tests/mock-acp-agent.mjs");
+const mockAgent = join(repoRoot, "apps/server/tests/mock-acp-agent.mjs");
 
 /** 假 agent 的固定应答，来自 mock-acp-agent.mjs。 */
 const MOCK_SESSION_ID = "sess-mock-001";
@@ -225,9 +225,7 @@ describe("跨语言 ACP：渲染端 client → 真服务端 → 真宿主 → �
 
     await waitUntil(() => helloSeen, "WS 就绪帧 host://hello（超时通常意味着 WS 鉴权失败或根本没连上）");
 
-    // 会话的工作目录：服务端启动时创建的默认已授权根，同时满足 validate_existing 与 validate_cwd。
-    const cwd = join(homeDir, ".greyWork");
-    handle = await client.startAgent(`node "${mockAgent.replace(/\\/g, "/")}"`, "read-only", "off", cwd);
+    handle = await client.startAgent(`node "${mockAgent.replace(/\\/g, "/")}"`, "read-only");
   });
 
   afterAll(async () => {
@@ -260,8 +258,8 @@ describe("跨语言 ACP：渲染端 client → 真服务端 → 真宿主 → �
     const started = await waitForEvent("started", "宿主完成 initialize");
     expect((started.payload as StartedPayload).handle).toBe(handle);
 
-    const cwd = join(homeDir, ".greyWork");
-    const opened = await acp.openSession(handle, cwd);
+    // 会话的工作目录：服务端启动时创建的默认已授权根（homeDir 下），满足 validate_cwd。
+    const opened = await acp.openSession(handle, join(homeDir, ".greyWork"));
     expect(opened.sessionId).toBe(MOCK_SESSION_ID);
     // 假 agent 在 session/new 里回了一个 model 选择器 —— 证明 configOptions 这条通路也通。
     expect(opened.configOptions.some((option) => option.id === "model")).toBe(true);
@@ -300,9 +298,8 @@ describe("跨语言 ACP：渲染端 client → 真服务端 → 真宿主 → �
 
   it("白名单外的 agent 程序被宿主拒绝（真实 process_guard 在请求路径上）", async () => {
     const acp = client as AcpClient;
-    const cwd = join(homeDir, ".greyWork");
     // 不 spawn 任何进程：校验在 validate_spawn_command 就拦下了。
-    await expect(acp.startAgent("definitely-not-allowed-agent acp", "read-only", "off", cwd)).rejects.toThrow(/is not in the allowed list/);
+    await expect(acp.startAgent("definitely-not-allowed-agent acp", "read-only")).rejects.toThrow(/is not in the allowed list/);
   });
 
   it("stop 回收会话并发出 stopped", async () => {

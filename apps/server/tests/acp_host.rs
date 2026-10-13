@@ -7,7 +7,7 @@
 //! `packages/acp/tests/integration/acp-host-server.e2e.test.ts`）。
 //!
 //! 注意本测试**直接调 `dispatch`**，不经过 HTTP 路由，所以 `policy::overlay_args` 不参与：
-//! sandbox/tier 由本测试显式传。那条覆盖由 `apps/server/tests/http.rs` 与 `policy.rs` 的单测负责。
+//! tier 由本测试显式传。那条覆盖由 `apps/server/tests/http.rs` 与 `policy.rs` 的单测负责。
 
 mod common;
 
@@ -26,8 +26,7 @@ use greywork_server::host::ServerEvent;
 /// 路径里的反斜杠换成正斜杠并加引号，与 `acp_flow.rs` 同一处理：
 /// `AcpAgent::from_str` 走 POSIX `shell_words`，Windows 风格路径会被拆坏。
 fn mock_agent_cmd() -> String {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../apps/desktop/src-tauri/tests/mock-acp-agent.mjs");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/mock-acp-agent.mjs");
     format!("node \"{}\"", path.to_string_lossy().replace('\\', "/"))
 }
 
@@ -92,8 +91,6 @@ async fn acp_host_drives_a_full_turn_through_dispatch() {
         json!({
             "agentCmd": mock_agent_cmd(),
             "tier": "read-only",
-            // CI 里没有 bwrap，显式关掉，避免探针噪音。
-            "sandbox": "off",
             "workspace": root,
         }),
     )
@@ -182,7 +179,6 @@ async fn acp_start_rejects_program_outside_the_allowlist() {
         json!({
             "agentCmd": "definitely-not-allowed-agent acp",
             "tier": "read-only",
-            "sandbox": "off",
             "workspace": root,
         }),
         ctx,

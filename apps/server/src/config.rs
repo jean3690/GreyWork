@@ -33,10 +33,16 @@ pub struct ServerConfig {
     pub agent_programs: Vec<String>,
     /// 预授权工作区根（headless 无原生选择器，只能在配置里给）。
     pub workspace_roots: Vec<PathBuf>,
-    /// 沙盒策略（`auto` | `off` | `fs` | `full`）；服务端用它覆盖请求里的同名字段。
-    pub sandbox: Option<String>,
     /// 权限档位（`read-only` | `workspace` | `full`）；服务端用它覆盖请求里的同名字段。
     pub tier: Option<String>,
+    /// **本机可信宿主**：客户端与服务端跑在同一台机器上（Electron 桌面壳在环回上拉起的 sidecar）。
+    ///
+    /// 置真后解除两处「网络暴露部署」的 fail-closed 加固：
+    /// 1. `tier` 被清空 —— `acp_start` / `acp_set_permission_tier` 不再被配置值覆盖；
+    /// 2. 放行 `db_agents_sync`（agent 后端目录的真源），`acp_start` 也改读 DB 里启用的后端目录。
+    ///
+    /// **绝不要在网络暴露的部署里开启**：它把「客户端能改什么」放宽到桌面壳的程度。
+    pub trusted_host: bool,
     /// cookie 是否带 `Secure`（在 TLS 反代之后应置 true）。
     pub secure_cookie: bool,
     /// 非空时，对所有非 GET/HEAD 请求校验 `Origin` 必须在此白名单内。
@@ -78,9 +84,9 @@ impl Default for ServerConfig {
             password: None,
             agent_programs: Vec::new(),
             workspace_roots: Vec::new(),
-            // fail-closed：档位默认最严；沙盒默认 auto（bwrap 可用则 fs，不可用降级 off 并告警）。
-            sandbox: Some("auto".to_string()),
+            // fail-closed：档位默认最严。
             tier: Some("read-only".to_string()),
+            trusted_host: false,
             secure_cookie: false,
             allowed_origins: Vec::new(),
             frame_origins: Vec::new(),
@@ -149,9 +155,6 @@ impl ServerConfig {
                 .map(PathBuf::from)
                 .collect();
         }
-        if let Some(value) = env_str("GREYWORK_SANDBOX") {
-            self.sandbox = Some(value);
-        }
         if let Some(value) = env_str("GREYWORK_TIER") {
             self.tier = Some(value);
         }
@@ -170,6 +173,9 @@ impl ServerConfig {
         if let Some(value) = env_str("GREYWORK_STATIC_DIR") {
             self.static_dir = Some(PathBuf::from(value));
         }
+        // 收尾归一，放在**最后**：可信宿主不论 `tier` 来自配置文件还是 `GREYWORK_TIER`，
+        // 一律不再钉住 —— 显式声明可信优先于钉具体值。
+        apply_trusted_host(self, env_str("GREYWORK_TRUSTED_HOST").as_deref());
         Ok(())
     }
 }
@@ -179,7 +185,6 @@ impl ServerConfig {
 const PATH_LIST_SEP: char = ';';
 #[cfg(not(windows))]
 const PATH_LIST_SEP: char = ':';
-
 /// 默认数据目录：`GREYWORK_DATA_DIR` 或 `<home>/.greyWork-server`。
 pub fn default_data_dir() -> PathBuf {
     if let Some(dir) = std::env::var_os("GREYWORK_DATA_DIR") {
@@ -242,6 +247,27 @@ fn parse_bool(value: &str) -> bool {
         value.trim().to_ascii_lowercase().as_str(),
         "1" | "true" | "yes" | "on"
     )
+}
+
+/// 应用可信宿主开关（`GREYWORK_TRUSTED_HOST`），并解除随之而来的档位钳制。
+///
+/// 钳制（`policy::overlay_args` 拿配置值覆盖 `acp_start` / `acp_set_permission_tier` 的
+/// tier）是给**网络暴露的自托管服务端**做的 fail-closed 加固：远端会话不该自行提权、
+/// 也不该借 `worktree_provision` 跑仓库里的脚本。但 Electron 桌面壳是**本机可信宿主**，它把
+/// sidecar 当自己的后端用，用户在 UI 选的档位必须原样生效 —— 于是清成 `None`，`overlay_args`
+/// 不再插入覆盖值，`sys_info` 也随之报 `pinnedTier=null`，设置页的档位选择器跟着恢复可选。
+///
+/// 同一开关还放宽了命令面与 agent 目录来源（见 `policy::TRUSTED_HOST_ONLY` 与
+/// `CommandContext::include_db_agent_programs`）—— 它们与档位钳制是同一条信任轴，不该拆成两个开关。
+///
+/// 单独成函数是为了能脱开环境变量做单测（与本进程其他线程并发地 `set_var` 是数据竞争）。
+fn apply_trusted_host(config: &mut ServerConfig, raw: Option<&str>) {
+    if raw.is_some_and(parse_bool) {
+        config.trusted_host = true;
+    }
+    if config.trusted_host {
+        config.tier = None;
+    }
 }
 
 /* ===== 密码 bootstrap ===== */
@@ -386,6 +412,43 @@ mod tests {
         for falsy in ["0", "false", "", "no", "off"] {
             assert!(!parse_bool(falsy), "{falsy} 应为假");
         }
+    }
+
+    #[test]
+    fn trusted_host_clears_pinned_tier() {
+        let mut config = ServerConfig::default();
+        assert_eq!(config.tier.as_deref(), Some("read-only"));
+        assert!(!config.trusted_host, "默认不可信");
+
+        apply_trusted_host(&mut config, Some("1"));
+        assert!(config.trusted_host);
+        assert!(config.tier.is_none(), "可信宿主应清掉档位钳制");
+    }
+
+    #[test]
+    fn trusted_host_stays_off_by_default_and_for_falsy_values() {
+        for raw in [None, Some("0"), Some("false"), Some("no"), Some("")] {
+            let mut config = ServerConfig::default();
+            apply_trusted_host(&mut config, raw);
+            assert!(!config.trusted_host, "{raw:?} 不该开启可信宿主");
+            assert_eq!(
+                config.tier.as_deref(),
+                Some("read-only"),
+                "{raw:?} 不该解除档位钳制"
+            );
+        }
+    }
+
+    #[test]
+    fn trusted_host_wins_over_explicit_tier_pin() {
+        // 同一开关不论档位来自配置文件还是 env，都不能被钉回去。
+        let mut config = ServerConfig {
+            tier: Some("workspace".to_string()),
+            trusted_host: true,
+            ..ServerConfig::default()
+        };
+        apply_trusted_host(&mut config, None);
+        assert!(config.tier.is_none());
     }
 
     #[test]

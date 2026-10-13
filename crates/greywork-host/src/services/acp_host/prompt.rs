@@ -243,3 +243,30 @@ pub async fn acp_stop(
     );
     Ok(())
 }
+
+/// 取消**指定会话**的当前工作（发 ACP `session/cancel` 通知，不回收进程、不关会话）。
+///
+/// 与 `acp_stop` 的区别：`acp_stop` 面向本 handle 的主会话（turn_id=None 时整会话回收），
+/// 本函数面向**同一连接内的任意会话 id** —— 主要给协议层子代理用（agent 内部子会话共享
+/// 同一条 ACP 连接与 handle，但 sessionId 不同于主会话）。RFD: Subagent Sessions 规定
+/// 子代理的单独取消用现有 `session/cancel` 指向该子会话 id，因此这里按 sessionId 精确取消。
+///
+/// 目标会话不存在时由 agent 自行忽略（session/cancel 是通知，无回执），这里仅校验 handle 在册。
+/// 不 `drop(sessions)` 后再发：conn 在 session 内，需在锁保护下借用；发送是同步入队，开销极小。
+pub async fn acp_cancel_session(
+    state: &Arc<AcpHost>,
+    handle: u64,
+    session_id: String,
+) -> Result<(), String> {
+    let sessions = state.sessions.lock().await;
+    let session = sessions
+        .get(&handle)
+        .ok_or_else(|| format!("unknown handle {handle}"))?;
+    session
+        .conn
+        .send_notification(CancelNotification::new(
+            agent_client_protocol::schema::v1::SessionId::from(session_id),
+        ))
+        .map_err(|error| format!("cancel session failed: {error}"))?;
+    Ok(())
+}

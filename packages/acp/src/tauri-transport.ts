@@ -2,7 +2,6 @@ import { invoke, listen, type UnlistenFn } from "@greywork/host-ipc";
 import type {
   AcpEventEnvelope,
   AcpPromptUnit,
-  AcpSandboxMode,
   AcpSessionConfigOption,
   AcpSessionInfo,
   AcpSessionOpened,
@@ -18,14 +17,8 @@ const EVENT_NAME = "acp://event";
 export class TauriIpcTransport implements AcpTransport {
   readonly id = "tauri-ipc" as const;
 
-  async startAgent(
-    agentCmd: string,
-    tier: PermissionTier,
-    sandbox?: AcpSandboxMode,
-    workspace?: string | null,
-    env?: Record<string, string>,
-  ): Promise<number> {
-    return invoke<number>("acp_start", { agentCmd, tier, sandbox, workspace, env });
+  async startAgent(agentCmd: string, tier: PermissionTier, env?: Record<string, string>): Promise<number> {
+    return invoke<number>("acp_start", { agentCmd, tier, env });
   }
 
   async setPermissionTier(handle: number, tier: PermissionTier): Promise<void> {
@@ -67,6 +60,10 @@ export class TauriIpcTransport implements AcpTransport {
 
   async stop(handle: number, turnId?: number): Promise<void> {
     await invoke("acp_stop", { handle, turnId });
+  }
+
+  async cancelSession(handle: number, sessionId: string): Promise<void> {
+    await invoke("acp_cancel_session", { handle, sessionId });
   }
 
   async respondPermission(requestId: number, optionId: string | null): Promise<void> {

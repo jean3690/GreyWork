@@ -18,7 +18,6 @@
     "@agentclientprotocol/sdk": "^1.5.0",
     "@greywork/core": "workspace:*",
     "@greywork/host-ipc": "workspace:*",
-    "@tauri-apps/api": "^2.12.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {

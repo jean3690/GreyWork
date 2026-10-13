@@ -29,6 +29,10 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 # LLM 流式响应按字节块处理。
 bytes = "1"
 
+# 媒体预览的 Range 请求解析（`bytes=start-end` / 后缀 / 开区间）。自己手写这段是经典的
+# 出错点，而这个 crate 已在依赖树里（桌面壳的 gwmedia 协议用它），不引入新的下载。
+http-range = "0.1"
+
 # 文本文件读取要按编码解码 —— Windows 记事本默认存 GBK/GB18030（简中「ANSI」）或
 # UTF-16，strict UTF-8 读会报错或读出乱码。encoding_rs 负责 BOM 嗅探与解码，
 # chardetng 负责无 BOM 时的编码检测（两者均来自 Firefox 的编码栈）。

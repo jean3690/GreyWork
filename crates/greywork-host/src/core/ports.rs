@@ -34,7 +34,10 @@ pub trait WorkspaceFs: Send + Sync {
 
 /// 工作区**授权写入面**：把用户动作（系统选择器 / OS 拖放）产生的路径纳入授权集合。
 ///
-/// 只由宿主壳（桌面 / 服务端）在收到用户动作时调用；普通 IPC 命令不得自行扩大授权面。
+/// 只由宿主壳（桌面 / 服务端）在收到用户动作时调用；普通 IPC 命令不得自行扩大授权面 ——
+/// 唯一的例外是 `fs_authorize_drop_paths`：渲染端能拿到绝对路径、宿主却不知道用户拖过什么
+/// 的宿主（Electron / 自托管服务端）只能由渲染端声明。那条命令由服务端策略
+/// `TRUSTED_HOST_ONLY` 守着，不可信部署下直接 403。
 pub trait WorkspaceAuthorizer: Send + Sync {
     /// 授权单个（已存在的）文件或目录。
     fn authorize_selected_path(&self, path: &Path) -> Result<PathBuf, String>;

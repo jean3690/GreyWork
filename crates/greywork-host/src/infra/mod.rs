@@ -6,7 +6,6 @@ pub mod db;
 pub mod git;
 pub mod http;
 pub mod process_guard;
-pub mod sandbox;
 pub mod sheet;
 pub mod store_fs;
 pub mod workspace_fs;

@@ -4,6 +4,7 @@ pub mod auth;
 pub mod command;
 pub mod events;
 pub mod health;
+pub mod media;
 pub mod static_site;
 
 use axum::routing::{get, post};
@@ -17,6 +18,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/health", get(health::health))
         .route("/api/commands", get(command::list_commands))
         .route("/api/command", post(command::run_command))
+        .route("/api/media", get(media::media))
         .route("/api/events", get(events::events))
         .route("/api/login", post(auth::login))
         .route("/api/logout", post(auth::logout))

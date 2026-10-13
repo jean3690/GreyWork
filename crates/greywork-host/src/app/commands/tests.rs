@@ -64,12 +64,13 @@ fn test_ctx(tmp: &Path) -> CommandContext {
         }),
         // 空列表 = 只放行内置白名单（headless 语义）。
         agent_programs: Arc::new(Vec::new()),
+        // 不可信默认：DB 是客户端可写的，拿它当 spawn 白名单等于把 RCE 面交出去。
+        include_db_agent_programs: false,
         // 非空样例：既覆盖「宿主白名单被如实回给渲染端」，也让下面的冒烟断言有东西可断。
         frame_origins: Arc::new(vec!["https://docs.example.com".to_string()]),
         host_facts: sys::HostFacts {
             version: "9.9.9-test".to_string(),
             tray_available: false,
-            pinned_sandbox: true,
             pinned_tier: Some("read-only".to_string()),
         },
     }
@@ -98,11 +99,12 @@ const DESKTOP_ONLY: &[&str] = &[
     "set_tray_labels",
     "close_main_window",
     "open_external",
+    "plugin_notify",
 ];
 
 #[test]
 fn commands_table_shape() {
-    assert_eq!(COMMANDS.len(), 165, "命令总数应为 165");
+    assert_eq!(COMMANDS.len(), 170, "命令总数应为 170");
 
     // 命令名唯一。
     let mut names: Vec<&str> = COMMANDS.iter().map(|c| c.name).collect();
@@ -158,6 +160,12 @@ async fn dispatch_smoke_db_settings_load() {
         .expect_err("reveal_path 应被拒绝");
     assert!(error.contains("仅桌面端可用"), "实际错误：{error}");
 
+    // 系统通知同样是桌面专属：headless 服务端拒绝。
+    let error = dispatch("plugin_notify", Value::Null, &ctx)
+        .await
+        .expect_err("plugin_notify 应被拒绝");
+    assert!(error.contains("仅桌面端可用"), "实际错误：{error}");
+
     // sys_info 走得通：宿主侧事实从 ctx 注入，如实回传（服务端不再谎报）。
     let out = dispatch("sys_info", Value::Null, &ctx)
         .await
@@ -167,7 +175,6 @@ async fn dispatch_smoke_db_settings_load() {
     };
     assert_eq!(value["version"], "9.9.9-test");
     assert_eq!(value["trayAvailable"], serde_json::json!(false));
-    assert_eq!(value["pinnedSandbox"], serde_json::json!(true));
     assert_eq!(value["pinnedTier"], serde_json::json!("read-only"));
 
     // 未知命令。
@@ -195,6 +202,38 @@ async fn dispatch_smoke_db_settings_load() {
     assert_eq!(
         value["embeddableFrameOrigins"],
         serde_json::json!(["https://docs.example.com"])
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn extra_agent_programs_unions_config_and_db_only_under_trusted_host() {
+    let tmp = std::env::temp_dir().join(format!("gw-cmd-agent-programs-{}", std::process::id()));
+    let mut ctx = test_ctx(&tmp);
+    ctx.agent_programs = Arc::new(vec!["cfg-agent".to_string()]);
+    ctx.services
+        .db
+        .sync_agent_providers(&[crate::db::AgentProviderDto {
+            id: "custom-1".to_string(),
+            name: "My Agent".to_string(),
+            kind: "acp".to_string(),
+            command: "/opt/bin/my-agent --acp".to_string(),
+            enabled: true,
+            env: None,
+        }])
+        .expect("sync providers");
+
+    // 不可信（默认）：只见配置里那份冻结列表 —— DB 是客户端可写的，不能拿它当 spawn 白名单。
+    assert_eq!(ctx.extra_agent_programs(), vec!["cfg-agent".to_string()]);
+
+    // 可信本机宿主：并上 DB 里启用的后端（首 token 的 basename），用户刚加的后端立刻可起。
+    ctx.include_db_agent_programs = true;
+    let mut programs = ctx.extra_agent_programs();
+    programs.sort();
+    assert_eq!(
+        programs,
+        vec!["cfg-agent".to_string(), "my-agent".to_string()]
     );
 
     let _ = std::fs::remove_dir_all(&tmp);

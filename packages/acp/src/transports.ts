@@ -17,7 +17,6 @@ export interface AcpSessionInfo {
 }
 
 /** 沙盒策略：auto = 可用时启用文件系统隔离；off 必须由用户显式选择。 */
-export type AcpSandboxMode = "auto" | "off" | "fs" | "full";
 
 export interface AcpPromptResult {
   stopReason?: string;
@@ -148,18 +147,11 @@ export interface AcpTransport {
   readonly id: "tauri-ipc" | "websocket";
   /** Web transports are available only after an endpoint is configured. */
   readonly available?: boolean;
-  /** sandbox 非 off 时宿主以 OS 沙盒包裹 agent；workspace 为沙盒可写锚定目录（桌面端必需）。 */
   /**
    * 启动 agent 进程。`env` 是该后端的启动环境变量（设置里配的 API key 之类）：
    * 桌面宿主净化后注入子进程；远程传输没有本地进程可注入，参数被忽略。
    */
-  startAgent(
-    agentCmd: string,
-    tier: PermissionTier,
-    sandbox?: AcpSandboxMode,
-    workspace?: string | null,
-    env?: Record<string, string>,
-  ): Promise<number>;
+  startAgent(agentCmd: string, tier: PermissionTier, env?: Record<string, string>): Promise<number>;
   /**
    * 改写在途会话的权限档位（临时降级/回升）。桌面宿主按 handle 存档位并在每条
    * 权限请求上重新读取，因此改档立即生效、不必重启 agent 进程。
@@ -178,6 +170,12 @@ export interface AcpTransport {
   prompt(handle: number, text: string, units?: readonly AcpPromptUnit[]): Promise<{ turnId: number }>;
   /** 停止：传 turnId 仅取消该回合（agent 进程保留）；缺省停止整个会话。 */
   stop(handle: number, turnId?: number): Promise<void>;
+  /**
+   * 取消某会话的当前工作：发 ACP `session/cancel` 通知（不回收进程、不关会话）。
+   * 用于协议层子代理（subagent_update 宣告的子会话）：目标 sessionId 可能不是本 handle
+   * 的主会话，因此按 sessionId 精确取消，而不是按 handle。
+   */
+  cancelSession(handle: number, sessionId: string): Promise<void>;
   respondPermission(requestId: number, optionId: string | null): Promise<void>;
   list(): Promise<AcpSessionInfo[]>;
   onEvent(listener: (event: AcpEventEnvelope) => void): Promise<() => void>;

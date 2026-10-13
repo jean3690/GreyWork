@@ -289,7 +289,9 @@ impl crate::core::ports::WorkspaceAuthorizer for WorkspaceFsAccess {
     }
 }
 
+mod authorize;
 mod dto;
+mod media;
 mod read;
 mod resolve;
 mod transfer;
@@ -300,7 +302,9 @@ use resolve::*;
 #[cfg(test)]
 mod tests;
 
+pub use authorize::*;
 pub use dto::*;
+pub use media::*;
 pub use read::*;
 pub use transfer::*;
 pub use write::*;

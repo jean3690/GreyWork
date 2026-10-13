@@ -20,15 +20,12 @@ use crate::process_guard;
 use super::env::{handshake_timeout_secs, sanitize_env, stderr_hint, ALLOWED_AGENT_PROGRAMS};
 use super::events::classify_notification;
 use super::permission::resolve_permission;
-use super::policy::{validate_cwd, PermissionTier};
+use super::policy::PermissionTier;
 use super::state::{emit, AcpHost, AcpSession};
 
 /// 启动外部 ACP agent 子进程并完成 initialize 握手，返回主机句柄 id。
 ///
-/// `sandbox` 取沙盒策略（"auto" | "off" | "fs" | "full"）：未知值拒绝；auto
-/// 在 bwrap 可用时启用 fs，不可用时记录明确告警后直启。
-/// `env` 是该后端的启动环境变量（设置里配的 API key 之类），净化后注入子进程；
-/// 沙盒开启时同样生效（bwrap 不清空环境，只覆盖 HOME）。
+/// `env` 是该后端的启动环境变量（设置里配的 API key 之类），净化后注入子进程。
 ///
 /// `extra_programs` 是「在 [`ALLOWED_AGENT_PROGRAMS`] 之外额外放行」的程序名，由**调用方**
 /// 决定来源：桌面端传 `db.enabled_agent_programs()`（用户自配后端目录），服务端传配置里
@@ -40,11 +37,8 @@ pub async fn acp_start(
     host: Arc<dyn HostContext>,
     state: &Arc<AcpHost>,
     extra_programs: &[String],
-    access: &dyn crate::core::ports::WorkspaceFs,
     agent_cmd: String,
     tier: Option<String>,
-    sandbox: Option<String>,
-    workspace: Option<String>,
     env: Option<std::collections::HashMap<String, String>>,
 ) -> Result<u64, String> {
     // 但仅限「用户已在目录里启用」的程序（目录真源归 Rust，渲染端不可自封）。
@@ -53,45 +47,12 @@ pub async fn acp_start(
     allowed.extend(extra_programs.iter().map(String::as_str));
     let command = process_guard::validate_spawn_command(&agent_cmd, &allowed)?;
     // 冷启动窗口按「用户原始命令」判断：npx 型后端首次运行要下载包，需放宽到 120s。
-    // 之后的包装会把首 token 换掉（沙盒是 bwrap、Windows 是 cmd），拿包装后的串判断会失准。
+    // 之后的包装会把首 token 换掉（Windows 是 cmd），拿包装后的串判断会失准。
     let handshake_secs = handshake_timeout_secs(&command);
     let tier = PermissionTier::parse(tier.as_deref());
 
-    let requested_mode = crate::sandbox::SandboxMode::parse(sandbox.as_deref())?;
-    let sandbox_available = crate::sandbox::sandbox_available();
-    let (mode, degraded) = requested_mode.resolve(sandbox_available);
-    if degraded {
-        // 不可用的两种情形：非 Linux（bwrap 只有 Linux 有），或 Linux 上 bwrap 装了却
-        // 建不出沙盒（容器里缺命名空间权限，见 sandbox::bwrap_functional 的告警）。
-        // 无论哪种都不能让 agent 起不来 —— 设置可能是从别的机器同步过来的。降级但留痕。
-        crate::log::warn(
-            "sandbox",
-            format!(
-                "沙盒档位 {requested_mode:?} 在本机不可用：降级为 off，\
-                 ACP agent 将以无 OS 隔离状态启动（权限档位仍然生效）"
-            ),
-        );
-    }
-    let cwd = workspace
-        .as_deref()
-        .map(|raw| {
-            access
-                .validate_existing(raw)
-                .and_then(|path| validate_cwd(&path.to_string_lossy()))
-        })
-        .transpose()?;
-    let command = if mode == crate::sandbox::SandboxMode::Off {
-        command
-    } else {
-        // mode != Off 只可能来自 resolve 的「bwrap 可用」分支，无需再查可用性。
-        let cwd = cwd
-            .as_deref()
-            .ok_or_else(|| "sandbox: workspace is required when sandbox is enabled".to_string())?;
-        // home_dir 取自 HostPaths（桌面侧由 Tauri 的 `home_dir()` 在启动期填好）。
-        // 不用裸 `HOME`：Windows 上对应的是 `USERPROFILE`，只读 `HOME` 会拿不到值，
-        // agent 的配置目录就静默不挂载。路径在进程启动时已解析，这里必然有效。
-        crate::sandbox::wrap_command(mode, cwd, Some(&host.paths().home_dir), &command)?
-    };
+    // 工作区路径的解析与校验在 `acp_new_session` / `acp_load_session` 里做（那里才是
+    // 真正消费它的地方）；这里只管把 agent 进程拉起来。
 
     let handle_id = state.next_id.fetch_add(1, Ordering::SeqCst);
     let mut env_vars = sanitize_env(env)?;

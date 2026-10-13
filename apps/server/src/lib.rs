@@ -4,7 +4,7 @@
 //! `greywork_host::commands`），本 crate 只补三样宿主能力：
 //! - **传输**：HTTP 命令端点 + WebSocket 事件总线（[`ServerHost`] 把事件推上广播通道）；
 //! - **内置登录**：密码 → 会话 cookie / Bearer；
-//! - **安全策略**：冻结 agent 白名单、拒绝 `db_agents_sync`、夹紧 sandbox/tier、
+//! - **安全策略**：冻结 agent 白名单、拒绝 `db_agents_sync`、夹紧 tier、
 //!   预置授权根（见 [`policy`] 与 [`config`]）。
 //!
 //! 与桌面壳对称：桌面用 Tauri IPC + `TauriHost`，服务端用 HTTP/WS + [`ServerHost`]，
@@ -107,6 +107,26 @@ pub async fn run() -> Result<(), String> {
     // 补一次登录 shell PATH 解析（容器里通常失败即回退继承的 PATH，无副作用）。
     greywork_host::process_guard::init_login_path();
 
+    // 可信宿主是「本机」语义，与「网络暴露」互斥。配错组合必须喊出来 —— 它等于把
+    // 「改 agent 后端目录 / 自选沙箱档位」的能力交给网络上的任何客户端。
+    if config.trusted_host {
+        if bind_is_loopback(&config.bind) {
+            greywork_host::log::info(
+                "server",
+                "可信宿主：解除档位钳制、放行 db_agents_sync、acp_start 改读 DB 后端目录",
+            );
+        } else {
+            greywork_host::log::warn(
+                "server",
+                format!(
+                    "GREYWORK_TRUSTED_HOST 已开启但监听 {} 为非环回地址：这会把「可改 agent 后端目录 / \
+                     自选沙箱与权限档位」的能力交给网络上的任何客户端。请关闭该开关，或把监听改回环回。",
+                    config.bind
+                ),
+            );
+        }
+    }
+
     // 授权面：默认根 + 配置预置根。headless 没有原生选择器，运行期不能新增根。
     let default_root = greywork_host::store_fs::default_root(&home)?;
     let access = greywork_host::workspace_fs::WorkspaceFsAccess::new(
@@ -181,16 +201,21 @@ pub async fn run() -> Result<(), String> {
             wecom: Arc::new(greywork_host::wecom::WecomHost::default()),
         }),
         // 冻结白名单：来自配置，不读 DB（DB 可被客户端改写，是 RCE 面）。
+        // 可信本机宿主下再并上 DB 里启用的后端目录（`include_db_agent_programs`）。
         agent_programs: Arc::new(config.agent_programs.clone()),
+        include_db_agent_programs: config.trusted_host,
         // 本服务端 CSP 的 frame-src 白名单：与 middleware 拼策略用的是同一份配置，
         // 这样 `office_host_info` 回给渲染端的白名单就是**真的**（而非桌面常量）。
         frame_origins: Arc::new(config.frame_origins.clone()),
-        // 宿主侧事实：版本是服务端自己的 crate 版本；沙箱/档位的钉住判定与
+        // 宿主侧事实：版本是服务端自己的 crate 版本；档位的钉住判定与
         // `policy::overlay_args` 的覆盖条件同源（配置有值才算钉住）。
+        //
+        // `tray_available` 恒 false 是**如实**的：托盘属于壳，headless server 没有它。
+        // 但 Electron 壳也走 server 态，所以渲染端有原生壳时会改问壳（见 workbench 的
+        // `lib/system-backend.ts`）—— 这里不要试图去猜壳的托盘状态。
         host_facts: greywork_host::sys::HostFacts {
             version: env!("CARGO_PKG_VERSION").to_string(),
             tray_available: false,
-            pinned_sandbox: config.sandbox.is_some(),
             pinned_tier: config.tier.clone(),
         },
     });

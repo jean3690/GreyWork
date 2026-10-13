@@ -68,3 +68,16 @@ pub struct TransferArg {
     pub from: String,
     pub to: String,
 }
+
+/// 路径授权入参（`fs_authorize_drop_paths` / `fs_authorize_picked_paths` 共用）。
+///
+/// 桌面壳在 Rust 侧收到 OS 拖放/对话框结果时就地授权（`lib.rs` 的 Drop 分支、`store_fs.rs`
+/// 的对话框回调），所以这两条命令对它是多余的；它们服务的是**渲染端能拿到绝对路径、宿主却
+/// 不知道用户干了什么**的宿主（Electron / 自托管服务端，路径来自 `webUtils.getPathForFile`
+/// 或主进程的 `dialog.showOpenDialog`）。不显式声明的话，随后的 `fs_read_*` 会以
+/// 「路径未获用户授权」拒绝。
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthorizePathsArg {
+    pub paths: Vec<String>,
+}

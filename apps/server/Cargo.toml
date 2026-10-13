@@ -21,8 +21,9 @@ path = "src/main.rs"
 greywork-host = { path = "../../crates/greywork-host" }
 
 # axum 0.8 与锁里既有的 hyper 1.x / tower 0.5 / http 1.x 同代，新增面最小。
-# 只显式打开 ws（WebSocket）；http1/json/tokio 必需。同源部署，无需 CORS。
-axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "ws"] }
+# 只显式打开 ws（WebSocket）与 query（媒体路由的 `?path=`）；http1/json/tokio 必需。同源
+# 部署，无需 CORS。
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "ws", "query"] }
 
 # 同源托管构建产物（SPA）。fs=ServeDir/ServeFile；set-header=按路径写缓存头；
 # compression-*= 对 ~27MB 前端产物做 gzip/br（只作用于静态子路由，API 不压缩）。
