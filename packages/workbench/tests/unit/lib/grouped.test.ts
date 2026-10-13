@@ -111,3 +111,31 @@ describe("groupSessions 分组逻辑", () => {
     expect(groups).toEqual([]);
   });
 });
+
+describe("groupSessions 排序档", () => {
+  const rows = [
+    session("a", "banana", "p-gw-main", 100),
+    session("b", "apple", "p-gw-main", 300),
+    session("c", "cherry", "p-gw-main", 200),
+  ];
+
+  it("缺省（recent）：组内按 updatedAt 倒序", () => {
+    const groups = groupSessions({ workspaces, sessions: rows });
+    expect(groups[0]?.sessions.map((s) => s.id)).toEqual(["b", "c", "a"]);
+  });
+
+  it("title：组内按标题 A→Z（localeCompare 走语言相关排序）", () => {
+    const groups = groupSessions({ workspaces, sessions: rows, sort: "title" });
+    expect(groups[0]?.sessions.map((s) => s.title)).toEqual(["apple", "banana", "cherry"]);
+  });
+
+  it("title：兜底行（p-general + 未绑定）合并后也按标题排", () => {
+    const groups = groupSessions({
+      workspaces,
+      sessions: [session("x", "zebra", null, 300), session("y", "ant", "p-general", 100)],
+      sort: "title",
+    });
+    const general = groups.find((g) => g.general);
+    expect(general?.sessions.map((s) => s.title)).toEqual(["ant", "zebra"]);
+  });
+});

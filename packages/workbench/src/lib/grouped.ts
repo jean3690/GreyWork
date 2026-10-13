@@ -15,6 +15,9 @@ export interface HistorySession {
   updatedAt: number;
 }
 
+/** 组内会话排序：`recent` = 最近更新在前（默认）；`title` = 标题 A→Z（`localeCompare`）。 */
+export type SessionSort = "recent" | "title";
+
 export interface HistoryGroup {
   id: string | null;
   name: string;
@@ -37,6 +40,8 @@ export interface GroupingInput {
    * 这里把它们滤掉，避免同一会话在侧栏出现两次（见 features/team/CoworkSiderSection）。
    */
   excludeIds?: ReadonlySet<string>;
+  /** 组内会话排序；缺省 `recent`（保持既有行为）。 */
+  sort?: SessionSort;
 }
 
 export function groupSessions(input: GroupingInput): HistoryGroup[] {
@@ -44,13 +49,17 @@ export function groupSessions(input: GroupingInput): HistoryGroup[] {
   const exclude = input.excludeIds;
   const generalId = input.workspaces.find((workspace) => workspace.id === "p-general")?.id ?? null;
 
+  /** 会话比较：缺省按 updatedAt 倒序；`title` 档按标题（`localeCompare` 走语言相关排序）。 */
+  const compare = (a: HistorySession, b: HistorySession): number =>
+    input.sort === "title" ? a.title.localeCompare(b.title) : b.updatedAt - a.updatedAt;
+
   const groupOf = (workspaceId: string | null): HistorySession[] =>
     input.sessions
       .filter((session) => session.workspaceId === workspaceId)
       .filter((session) => !exclude?.has(session.id))
-      .sort((a, b) => b.updatedAt - a.updatedAt)
       .map((session) => ({ id: session.id, title: session.title, updatedAt: session.updatedAt }))
-      .filter((row) => !keyword || row.title.toLowerCase().includes(keyword));
+      .filter((row) => !keyword || row.title.toLowerCase().includes(keyword))
+      .sort(compare);
 
   const groups: HistoryGroup[] = input.workspaces
     .filter((workspace) => workspace.id !== "p-general")
@@ -60,8 +69,8 @@ export function groupSessions(input: GroupingInput): HistoryGroup[] {
 
   const freeRows = groupOf(null);
   const generalRows = generalId ? groupOf(generalId) : [];
-  // 两路会话合并后重排：兜底行对外只承诺「按更新时间倒序」，不承诺 null 的排在 p-general 前
-  const combined = [...freeRows, ...generalRows].sort((a, b) => b.updatedAt - a.updatedAt);
+  // 两路会话合并后按当前排序档重排：兜底行对外只承诺「按所选档排序」，不承诺 null 的相对位置
+  const combined = [...freeRows, ...generalRows].sort(compare);
   if (!keyword || combined.length) {
     groups.push({ id: generalId, name: generalId ? "普通对话" : "未分组", general: true, sessions: combined });
   }

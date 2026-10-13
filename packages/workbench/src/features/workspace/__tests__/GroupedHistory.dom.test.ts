@@ -331,3 +331,19 @@ describe("GroupedHistorySessions · 大量会话虚拟窗口", () => {
     expect(wrapper.text()).toContain("历史会话 011");
   });
 });
+
+// 极简侧栏的「筛选」：只看当前工作区那一行（其余行整行隐去）。
+describe("GroupedHistory · 只看当前工作区", () => {
+  it("开启后只保留当前工作区那一行", () => {
+    const wrapper = mount(GroupedHistory, { props: { activeSessionId: null, onlyActiveWorkspace: true } });
+    expect(wrapper.findAll(ROW).map((row) => row.attributes("data-testid"))).toEqual(["workspace-row-w-alpha"]);
+  });
+
+  it("切成未绑定（null）时保留兜底行", async () => {
+    const wrapper = mount(GroupedHistory, { props: { activeSessionId: null, onlyActiveWorkspace: true } });
+    useWorkspaceStore().setActiveWorkspace(null);
+    await nextTick();
+
+    expect(wrapper.findAll(ROW).map((row) => row.attributes("data-testid"))).toEqual(["workspace-row-p-general"]);
+  });
+});

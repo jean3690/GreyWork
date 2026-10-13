@@ -32,7 +32,7 @@ const turnsLabel = computed<string>(() => {
 </script>
 
 <template>
-  <section class="mx-auto min-h-0 h-full w-full max-w-[860px] overflow-y-auto px-4 py-6 sm:px-6">
+  <section class="mx-auto min-h-0 h-full w-full max-w-[1080px] overflow-y-auto px-4 py-6 sm:px-6">
     <div class="mb-1 flex items-center gap-2">
       <h1 class="font-display text-[20px] font-bold tracking-tight text-foreground">{{ t("cowork.title") }}</h1>
       <span v-if="cowork.status" class="rounded-full px-2 py-0.5 text-[10px] font-medium" :class="runBadge[cowork.status]">
