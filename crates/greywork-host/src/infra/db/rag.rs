@@ -1,7 +1,7 @@
 //! 本地 RAG 索引的库侧读写：按「授权工作区根 + 文件」存分块与向量。
 
 use rusqlite::{params, OptionalExtension};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::dto::{RagChunkDto, RagChunkRow};
 use super::Db;
@@ -75,27 +75,45 @@ impl Db {
 
     /// 删掉某根下**不在 keep 集合里**的文件行（清理已删除 / 改名的文件）。返回删除的路径数。
     pub fn rag_prune_files(&self, root: &str, keep: &[String]) -> Result<usize, String> {
-        let conn = self.conn.lock();
-        let mut stmt = conn
-            .prepare("SELECT DISTINCT path FROM rag_chunks WHERE root = ?1")
-            .map_err(|e| format!("准备 RAG 清理查询失败: {e}"))?;
-        let rows = stmt
-            .query_map(params![root], |row| row.get::<_, String>(0))
-            .map_err(|e| format!("查询 RAG 待清理路径失败: {e}"))?;
-        let mut stale = Vec::new();
-        for row in rows {
-            let path = row.map_err(|e| format!("读取 RAG 路径失败: {e}"))?;
-            if !keep.iter().any(|kept| kept == &path) {
-                stale.push(path);
+        let mut conn = self.conn.lock();
+        // keep 先收成 HashSet：旧写法对库内每个路径线性扫一遍 keep，是
+        // O(库内路径数 × keep 数) 的二次复杂度——上万文件的根上就是上亿次字符串比较。
+        let keep: HashSet<&str> = keep.iter().map(String::as_str).collect();
+        let stale: Vec<String> = {
+            let mut stmt = conn
+                .prepare("SELECT DISTINCT path FROM rag_chunks WHERE root = ?1")
+                .map_err(|e| format!("准备 RAG 清理查询失败: {e}"))?;
+            let rows = stmt
+                .query_map(params![root], |row| row.get::<_, String>(0))
+                .map_err(|e| format!("查询 RAG 待清理路径失败: {e}"))?;
+            let mut stale = Vec::new();
+            for row in rows {
+                let path = row.map_err(|e| format!("读取 RAG 路径失败: {e}"))?;
+                if !keep.contains(path.as_str()) {
+                    stale.push(path);
+                }
+            }
+            stale
+        };
+        if stale.is_empty() {
+            return Ok(0);
+        }
+        // 逐条 DELETE 包在**一个**事务里：否则每条各自一次隐式事务、各一次 fsync，
+        // 批量清理（目录改名会一次性失效整棵子树）时是数量级的差别。
+        let tx = conn
+            .transaction()
+            .map_err(|e| format!("开启 RAG 清理事务失败: {e}"))?;
+        {
+            let mut stmt = tx
+                .prepare("DELETE FROM rag_chunks WHERE root = ?1 AND path = ?2")
+                .map_err(|e| format!("准备 RAG 清理语句失败: {e}"))?;
+            for path in &stale {
+                stmt.execute(params![root, path])
+                    .map_err(|e| format!("清理 RAG 过期文件失败: {e}"))?;
             }
         }
-        for path in &stale {
-            conn.execute(
-                "DELETE FROM rag_chunks WHERE root = ?1 AND path = ?2",
-                params![root, path],
-            )
-            .map_err(|e| format!("清理 RAG 过期文件失败: {e}"))?;
-        }
+        tx.commit()
+            .map_err(|e| format!("提交 RAG 清理事务失败: {e}"))?;
         Ok(stale.len())
     }
 
