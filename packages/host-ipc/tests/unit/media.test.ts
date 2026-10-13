@@ -45,7 +45,20 @@ describe("mediaStreamUrl", () => {
     expect(mocks.convertFileSrc).toHaveBeenCalledWith("/ws/clips/take.mp4", "gwmedia");
   });
 
-  it("服务端 / 浏览器预览：返回 null，且根本不碰 convertFileSrc", () => {
+  it("服务端态：同源 /api/media 地址（路径整条百分号编码）", () => {
+    vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "server" });
+    expect(mediaStreamUrl("/ws/clips/take.mp4")).toBe("/api/media?path=%2Fws%2Fclips%2Ftake.mp4");
+    expect(mocks.convertFileSrc).not.toHaveBeenCalled();
+  });
+
+  it("服务端态：带特殊字符的路径编码后仍可被 `?path=` 完整还原", () => {
+    vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "server" });
+    const url = mediaStreamUrl("/ws/片 名&x=1.mp4");
+    const path = new URL(url ?? "", "http://x").searchParams.get("path");
+    expect(path).toBe("/ws/片 名&x=1.mp4");
+  });
+
+  it("浏览器预览：返回 null，且根本不碰 convertFileSrc", () => {
     stubDesktop();
     expect(mediaStreamUrl("/ws/clips/take.mp4")).toBeNull();
     expect(mocks.convertFileSrc).not.toHaveBeenCalled();

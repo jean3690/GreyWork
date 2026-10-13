@@ -16,7 +16,7 @@
  */
 import { computed, defineAsyncComponent, ref, toRef } from "vue";
 import { useI18n } from "vue-i18n";
-import { isTauriRuntime } from "@greywork/core";
+import { hasNativeShell } from "@greywork/host-ipc";
 import GridTable from "@/features/preview/GridTable.vue";
 import PreviewModeSwitch from "@/features/preview/PreviewModeSwitch.vue";
 import Icon from "@/features/shared/Icon.vue";
@@ -61,7 +61,7 @@ function onSheetChange(event: Event): void {
 }
 
 /** 磁盘孪生路径；浏览器态恒为 null（没有磁盘通道，按钮留着只会点了没反应）。 */
-const externalPath = computed(() => (isTauriRuntime() ? resolveTabDiskPath(props.tab) : null));
+const externalPath = computed(() => (hasNativeShell() ? resolveTabDiskPath(props.tab) : null));
 
 async function openExternal(): Promise<void> {
   const path = externalPath.value;

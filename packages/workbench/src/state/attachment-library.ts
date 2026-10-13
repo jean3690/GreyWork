@@ -11,11 +11,9 @@
  * 浏览器态没有文件系统，只能保留内联副本（限额由 attachments.ts 单独收紧，
  * 通用文件在浏览器态直接不收）。
  */
-import { invoke } from "@greywork/host-ipc";
-import { isTauriRuntime, joinPath } from "@greywork/core";
-import { hasHostCommands } from "@greywork/host-ipc";
+import { hasHostCommands, hostClipboard, hostPicker, invoke, type HostPicker } from "@greywork/host-ipc";
+import { joinPath } from "@greywork/core";
 
-import { readImage } from "@tauri-apps/plugin-clipboard-manager";
 import {
   ATTACHMENT_LIMITS,
   BROWSER_IMAGE_MAX_EDGE,
@@ -176,12 +174,12 @@ async function accept(candidates: readonly Candidate[], existing: readonly Attac
 
 /** 打开文件选择器（多选，图片 + 文本）。取消/失败 → 空数组。 */
 export async function pickAttachments(existing: readonly Attachment[] = []): Promise<Attachment[]> {
-  // 两个判断必须分开：原生选择器（fs_pick_files）是桌面专属命令，服务端态只能用
+  // 两个判断必须分开：原生选择器是桌面专属能力（Tauri / Electron），纯服务端与浏览器只能用
   // 浏览器 input 兜底；但「落盘存储」在服务端同样可用，所以校验/限额按 hasHostCommands 走。
-  const nativePicker = isTauriRuntime();
+  const picker = hostPicker();
   const hasStorage = hasHostCommands();
   try {
-    const candidates = nativePicker ? await candidatesFromDialog() : await candidatesFromInput();
+    const candidates = picker ? await candidatesFromDialog(picker) : await candidatesFromInput();
     return await accept(candidates, existing, hasStorage);
   } catch (error) {
     notifyReadFailed(t("chat.attachPickerFailed"), error instanceof Error ? error.message : String(error));
@@ -189,9 +187,9 @@ export async function pickAttachments(existing: readonly Attachment[] = []): Pro
   }
 }
 
-async function candidatesFromDialog(): Promise<Candidate[]> {
+async function candidatesFromDialog(picker: HostPicker): Promise<Candidate[]> {
   // purpose="media"：不限扩展名 —— 通用文件（PDF / 压缩包 / Office 文档）也要能选。
-  const paths = await invoke<string[]>("fs_pick_files", { purpose: "media", multiple: true });
+  const paths = await picker.pickFiles({ purpose: "media", multiple: true });
   return candidatesFromPaths(paths);
 }
 
@@ -275,24 +273,12 @@ async function candidatesFromFiles(files: readonly File[]): Promise<Candidate[]>
 /* ===== 采集：剪贴板 ===== */
 
 /**
- * 读剪贴板里的图片（桌面端专用）。
- *
- * WebKitGTK 下 HTML5 paste 事件拿不到剪贴板里的图片，必须走宿主插件；
- * 插件给的是 RGBA 原始像素，经 canvas 编码成 PNG —— 这样不用为「RGBA → PNG」
- * 单独引一个 Rust 图像编码依赖。
+ * 读剪贴板里的图片。可靠通道按运行时分叉收在 `hostClipboard().readImagePng()` 门面里
+ * （Tauri 插件 RGBA→PNG / Electron 主进程 clipboard / 浏览器 Web API）：WebKit 下 HTML5
+ * paste 拿不到剪贴板图片，必须走宿主，这里只调门面拿 PNG 字节。
  */
 export async function attachmentsFromClipboard(existing: readonly Attachment[] = []): Promise<Attachment[]> {
-  if (!isTauriRuntime() || typeof document === "undefined") return [];
-  let bytes: Uint8Array | null;
-  try {
-    const image = await readImage();
-    const size = await image.size();
-    const rgba = await image.rgba();
-    bytes = await rgbaToPng(rgba, size.width, size.height);
-  } catch {
-    // 剪贴板里没有图片（或插件不可用）：静默——用户按 Ctrl+V 贴文本是常态。
-    return [];
-  }
+  const bytes = await hostClipboard().readImagePng();
   if (!bytes) return [];
   const name = `clipboard-${new Date().toISOString().replace(/[:.]/g, "-")}.png`;
   return accept([{ name, mime: "image/png", size: bytes.length, bytes }], existing, true);
@@ -343,19 +329,6 @@ async function reencodeImage(bytes: Uint8Array, mime: string): Promise<Uint8Arra
   } finally {
     URL.revokeObjectURL(url);
   }
-}
-
-/** 剪贴板 RGBA 原始像素 → PNG 字节。 */
-async function rgbaToPng(rgba: Uint8Array, width: number, height: number): Promise<Uint8Array | null> {
-  if (!width || !height || rgba.length < width * height * 4) return null;
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return null;
-  const pixels = new Uint8ClampedArray(rgba.buffer, rgba.byteOffset, width * height * 4);
-  ctx.putImageData(new ImageData(pixels, width, height), 0, 0);
-  return canvasToPngBytes(canvas);
 }
 
 /* ===== 落库 ===== */

@@ -12,3 +12,4 @@ export * from "./events";
 export * from "./session";
 export * from "./commands";
 export * from "./media";
+export * from "./shell";

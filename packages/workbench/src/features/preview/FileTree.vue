@@ -6,7 +6,8 @@
  * 组件实例，而展平后只有一个列表，缩进靠 padding。行为完全一样，代价低一个量级。
  */
 import { computed, nextTick, onMounted, ref } from "vue";
-import { isTauriRuntime, joinPath, normalizePath } from "@greywork/core";
+import { joinPath, normalizePath } from "@greywork/core";
+import { hasNativeShell } from "@greywork/host-ipc";
 import { useVirtualizer } from "@tanstack/vue-virtual";
 import Icon from "@/features/shared/Icon.vue";
 import Hint from "@/features/shared/Hint.vue";
@@ -32,8 +33,8 @@ const preview = usePreviewStore();
 /** 外壳组件不装 i18n 插件也要能渲染（测试直接 mount 本组件），故用全局实例而非 useI18n。 */
 const t = i18n.global.t;
 
-/** 只有桌面端才有磁盘通道；浏览器里绑定路径也读不出树，入口就不该出现。 */
-const canBind = isTauriRuntime();
+/** 只有原生桌面壳才有磁盘通道；纯服务端 / 浏览器里绑定路径也读不出树，入口就不该出现。 */
+const canBind = hasNativeShell();
 const binding = ref(false);
 
 const rootTitle = computed(() => {

@@ -1,13 +1,13 @@
 /**
  * 用系统默认程序打开文件（预览面板「用系统应用打开」）。
  *
- * 走宿主命令 `open_path`（sys.rs → opener 插件），与 `reveal_path` 同一授权面：
- * 路径必须先获用户授权，渲染端不能拿它探测或打开任意本机路径。
- * 浏览器态没有磁盘通道，返回 false 让调用方给出说明，而不是抛错打断渲染。
+ * 走宿主应用面 `hostApp().openPath`（Tauri: `open_path` 命令 → opener 插件；Electron:
+ * 主进程 `shell.openPath`），与 `reveal_path` 同一授权面：路径必须先获用户授权，
+ * 渲染端不能拿它探测或打开任意本机路径。无原生宿主返回 false 让调用方给出说明，
+ * 而不是抛错打断渲染。
  */
 
-import { invoke } from "@greywork/host-ipc";
-import { isTauriRuntime } from "@greywork/core";
+import { hostApp } from "@greywork/host-ipc";
 import type { PreviewTab } from "../stores/preview";
 
 /**
@@ -22,11 +22,12 @@ export function resolveTabDiskPath(tab: PreviewTab): string | null {
   return tab.diskPath ?? null;
 }
 
-/** 用系统默认程序打开某磁盘路径；浏览器态或打开失败返回 false（不抛）。 */
+/** 用系统默认程序打开某磁盘路径；无原生宿主或打开失败返回 false（不抛）。 */
 export async function openWithSystemApp(path: string): Promise<boolean> {
-  if (!isTauriRuntime()) return false;
+  const app = hostApp();
+  if (!app) return false;
   try {
-    await invoke("open_path", { path });
+    await app.openPath(path);
     return true;
   } catch (error) {
     // 路径可能已被移动/删除，或系统里没有能处理该类型的程序；都不该让预览崩掉

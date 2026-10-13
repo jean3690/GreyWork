@@ -32,7 +32,11 @@ vi.mock("@/state/workspaceFiles", () => ({
   readTextFile: h.readTextFile,
   readMediaFile: vi.fn(),
 }));
-vi.mock("@greywork/host-ipc", () => ({ hasHostCommands: h.hasHostCommands, mediaStreamUrl: () => null }));
+vi.mock("@greywork/host-ipc", () => ({
+  hasHostCommands: h.hasHostCommands,
+  hasNativeShell: () => h.hasHostCommands(),
+  mediaStreamUrl: () => null,
+}));
 
 vi.mock("maplibre-gl", () => {
   class MapLibreMap {

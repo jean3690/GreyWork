@@ -15,7 +15,6 @@ const h = vi.hoisted(() => ({
   loadHostSystem: vi.fn<() => Promise<void>>(),
   initDeviceTier: vi.fn<() => void>(),
   show: vi.fn<() => Promise<void>>(),
-  getWindow: vi.fn(),
   runtimeMode: vi.fn<() => "desktop" | "server" | "browser-preview">(() => "desktop"),
   initRuntimeMode: vi.fn<() => Promise<string>>(),
   appPlugin: (app: unknown) => {
@@ -26,6 +25,11 @@ const h = vi.hoisted(() => ({
 vi.mock("@greywork/host-ipc", () => ({
   runtimeMode: h.runtimeMode,
   initRuntimeMode: h.initRuntimeMode,
+  hostApp: () => null,
+  // 窗口显示走 host-ipc 的 hostWindow 门面（内部按运行时选 Tauri / Electron 后端）。
+  hostWindow: () => ({ show: h.show }),
+  // App.vue 的拖放接线：无原生拖放面 → 走 HTML5（这里只保证 bootstrap 不报错）。
+  hostDragDrop: () => null,
 }));
 
 vi.mock("@greywork/workbench", () => ({
@@ -41,12 +45,6 @@ vi.mock("@greywork/workbench", () => ({
   isPhysicalPointInDropzone: () => Promise.resolve(false),
   usePreviewStore: () => ({ open: () => undefined }),
 }));
-vi.mock("@tauri-apps/api/window", () => ({
-  getCurrentWindow: () => h.getWindow(),
-}));
-vi.mock("@tauri-apps/api/webview", () => ({
-  getCurrentWebview: () => ({ onDragDropEvent: () => Promise.resolve(() => undefined) }),
-}));
 
 describe("bootstrap", () => {
   beforeEach(() => {
@@ -59,7 +57,6 @@ describe("bootstrap", () => {
     h.boot.mockResolvedValue(undefined);
     h.loadHostSystem.mockResolvedValue(undefined);
     h.show.mockResolvedValue(undefined);
-    h.getWindow.mockReturnValue({ show: h.show });
     // 默认按桌面态：既有的「不挡挂载」用例都建立在 mount 同步发生之上。
     h.runtimeMode.mockReset().mockReturnValue("desktop");
     h.initRuntimeMode.mockReset().mockResolvedValue("desktop");
@@ -154,7 +151,6 @@ describe("运行时判定接线", () => {
     h.boot.mockResolvedValue(undefined);
     h.loadHostSystem.mockResolvedValue(undefined);
     h.show.mockResolvedValue(undefined);
-    h.getWindow.mockReturnValue({ show: h.show });
   });
 
   it("桌面态零探测：不调 initRuntimeMode，同步挂载", async () => {

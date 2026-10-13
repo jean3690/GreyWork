@@ -1,7 +1,6 @@
 import { createApp, nextTick } from "vue";
 import { createPinia } from "pinia";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { initRuntimeMode, runtimeMode } from "@greywork/host-ipc";
+import { hostWindow, initRuntimeMode, runtimeMode } from "@greywork/host-ipc";
 import App from "./App.vue";
 import { bootInstalledMarketPlugins, createAppRouter, i18n, initDeviceTier, loadHostSystem } from "@greywork/workbench";
 import "./tailwind.css";
@@ -96,17 +95,17 @@ async function bootstrap(): Promise<void> {
     });
   }
 
-  // 防白屏闪烁：tauri.conf.json 配 visible:false，窗口等首帧画完再显示。
+  // 防白屏闪烁：窗口以 visible:false / show:false 起手，等首帧画完再显示。
   // 两个 rAF 之间留一个 nextTick，确保 Vue 首帧布局与主题 data-theme 都已落 DOM。
   await nextTick();
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
       try {
-        void getCurrentWindow()
-          .show()
+        void hostWindow()
+          ?.show()
           .catch(() => {});
       } catch {
-        // 非 Tauri 运行（浏览器预览 devUrl）：无窗口概念，忽略。
+        // 非桌面壳运行（浏览器预览 devUrl / 纯服务端）：无窗口概念，忽略。
       }
       mark("shown");
       reportStartup(pluginsMs);

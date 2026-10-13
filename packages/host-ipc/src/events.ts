@@ -26,6 +26,21 @@ export interface HostEvent<T> {
 /** 服务端每次（重）连都会先发的帧，也是「可以重新 hydrate 了」的信号。 */
 export const HOST_HELLO_EVENT = "host://hello";
 
+/**
+ * 宿主「面向用户的通知」事件。
+ *
+ * 只有**没有系统通知面**的宿主会推它：服务端（Electron 的 sidecar / 自托管 Web）走这条；
+ * Tauri 的 `HostContext::notify` 直接在 Rust 里发系统通知，事件从不进渲染端。
+ * 事件是有损的，断线期间的丢就丢了 —— 通知不该在重连后补一堆旧事。
+ */
+export const HOST_NOTIFY_EVENT = "host://notify";
+
+/** `HOST_NOTIFY_EVENT` 的载荷（与 `apps/server/src/host.rs` 的 `notify` 逐字对齐）。 */
+export interface HostNotifyPayload {
+  title: string;
+  body: string;
+}
+
 const EVENTS_PATH = "/api/events";
 const INITIAL_RETRY_MS = 500;
 const MAX_RETRY_MS = 30_000;

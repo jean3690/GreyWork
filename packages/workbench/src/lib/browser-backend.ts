@@ -8,7 +8,7 @@
  * 子 webview 渲染的是不可信远端内容：宿主侧不给它任何 capability，远端 origin 的
  * IPC 被 Tauri 按 origin 拒绝 —— 这里的所有调用都发自主窗口，与页面内容无关。
  */
-import { hasHostCommands, invoke, listen } from "@greywork/host-ipc";
+import { hostApp, hostBrowser } from "@greywork/host-ipc";
 
 /** 槽位矩形：窗口客户区坐标，逻辑像素（CSS px），口径与宿主 `sanitize_rect` 一致。 */
 export interface BrowserRect {
@@ -42,67 +42,70 @@ export function normalizeBrowserUrl(input: string): string {
   return `https://${trimmed}`;
 }
 
+const host = hostBrowser();
+
 export const browserBackend = {
-  /** 仅桌面端可用；浏览器态 / 服务端态调用方据此降级而非静默失败。 */
-  supported: (): boolean => hasHostCommands(),
+  /** 仅宿主态可用（Tauri 子 webview / Electron WebContentsView）；其余运行时降级而非静默失败。 */
+  supported: (): boolean => host !== null,
 
-  /** 打开（或复用）唯一的子 webview，导航到 `url` 并对齐到 `rect`。 */
+  /** 打开（或复用）唯一子视图，导航到 `url` 并对齐到 `rect`。 */
   async open(url: string, rect: BrowserRect): Promise<void> {
-    await invoke<void>("browser_open", { url, x: rect.x, y: rect.y, width: rect.width, height: rect.height });
+    await host?.open(url, rect);
   },
 
-  /** 把子 webview 对齐到新的槽位矩形（面板宽度 / 窗口尺寸 / 布局变化时）。 */
+  /** 把子视图对齐到新的槽位矩形（面板宽度 / 窗口尺寸 / 布局变化时）。 */
   async setBounds(rect: BrowserRect): Promise<void> {
-    await invoke<void>("browser_set_bounds", { x: rect.x, y: rect.y, width: rect.width, height: rect.height });
+    await host?.setBounds(rect);
   },
 
-  /** 显示 / 隐藏子 webview。遮挡（宿主弹层打开）与失焦时必须藏，否则原生层盖住一切。 */
+  /** 显示 / 隐藏子视图。遮挡（宿主弹层打开）与失焦时必须藏，否则原生层盖住一切。 */
   async setVisible(visible: boolean): Promise<void> {
-    await invoke<void>("browser_set_visible", { visible });
+    await host?.setVisible(visible);
   },
 
   async navigate(url: string): Promise<void> {
-    await invoke<void>("browser_navigate", { url });
+    await host?.navigate(url);
   },
 
   async back(): Promise<void> {
-    await invoke<void>("browser_back");
+    await host?.back();
   },
 
   async forward(): Promise<void> {
-    await invoke<void>("browser_forward");
+    await host?.forward();
   },
 
   async reload(): Promise<void> {
-    await invoke<void>("browser_reload");
+    await host?.reload();
   },
 
   async stop(): Promise<void> {
-    await invoke<void>("browser_stop");
+    await host?.stop();
   },
 
-  /** 销毁子 webview（浏览器标签被关掉时）。 */
+  /** 销毁子视图（浏览器标签被关掉时）。 */
   async close(): Promise<void> {
-    await invoke<void>("browser_close");
+    await host?.close();
   },
 
   /**
    * 订阅宿主回推的状态（URL / 标题 / loading / 前进后退可用性）。
-   * 返回解绑函数；非桌面态（browser-preview 会抛）直接返回 no-op，调用方无需先判 supported。
+   * 返回解绑函数；非宿主态直接返回 no-op，调用方无需先判 supported。
    */
   async onState(callback: (state: BrowserStateEvent) => void): Promise<() => void> {
-    if (!hasHostCommands()) return () => {};
-    return listen<BrowserStateEvent>("browser:state", (event) => callback(event.payload));
+    if (!host) return () => {};
+    return host.onState(callback);
   },
 };
 
 /**
- * 用系统浏览器打开地址（`open_external` 是桌面专属命令，失败回落 `window.open`）。
+ * 用系统浏览器打开地址（走宿主应用面 `hostApp().openExternal`；无原生宿主回落 `window.open`）。
  * 与 update-backend 的处理同构 —— 那份是更新检查专用，这里面向预览面板。
  */
 export async function openInSystemBrowser(url: string): Promise<void> {
-  if (hasHostCommands()) {
-    await invoke<void>("open_external", { url });
+  const app = hostApp();
+  if (app) {
+    await app.openExternal(url);
     return;
   }
   window.open(url, "_blank", "noopener");

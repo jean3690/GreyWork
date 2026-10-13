@@ -11,9 +11,11 @@ import { useSessionStore } from "@/stores/session";
 import { useSettingsStore, type PermTier } from "@/stores/settings";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useNoticeStore } from "@/stores/notice";
+import { useLayoutStore } from "@/stores/layout";
 import type { Attachment, MessageComment, ThreadMessage } from "@/types";
 import AcpSessionConfig from "@/features/conversation/AcpSessionConfig.vue";
 import AgentProviderBar from "@/features/conversation/AgentProviderBar.vue";
+import MinimalComposer from "@/features/guid/MinimalComposer.vue";
 import Icon from "@/features/shared/Icon.vue";
 import Hint from "@/features/shared/Hint.vue";
 import ContextMenuRegion from "@/features/shared/ContextMenuRegion.vue";
@@ -29,6 +31,7 @@ import { copySelection, cutSelection, hasTextSelection, pasteInto, selectAllText
 import ConversationMessage from "@/features/conversation/ConversationMessage.vue";
 import ConfirmDialog from "@/features/settings/ConfirmDialog.vue";
 import SessionStatusIndicator from "@/features/shared/SessionStatusIndicator.vue";
+import SubagentIndicator from "@/features/conversation/SubagentIndicator.vue";
 import AttachmentTray from "@/features/conversation/AttachmentTray.vue";
 import SlashCommandMenu from "@/features/conversation/SlashCommandMenu.vue";
 import { useAttachments } from "@/lib/use-attachments";
@@ -53,6 +56,7 @@ const sessionStore = useSessionStore();
 const settings = useSettingsStore();
 const workspaceStore = useWorkspaceStore();
 const notice = useNoticeStore();
+const layout = useLayoutStore();
 
 const draft = ref("");
 /** 选区评论草稿（预览划词 → 评论）：发送时挂到消息上，发后清空。 */
@@ -369,6 +373,7 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
           <div class="truncate text-[10px] text-dim2">{{ workspaceName }}</div>
         </div>
         <div class="flex shrink-0 items-center gap-1.5">
+          <SubagentIndicator />
           <SessionStatusIndicator :status="status" chip />
           <span class="flex h-5 items-center gap-1 rounded-full border border-line bg-panel-2 px-2 text-[10.5px] text-dim">
             <Icon name="robot" :size="10" />
@@ -437,7 +442,7 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
 
       <div class="shrink-0 border-t border-line-2 bg-panel px-4 py-3 sm:px-6">
         <div class="mx-auto flex w-full max-w-[860px] flex-col gap-2.5">
-          <AgentProviderBar />
+          <AgentProviderBar v-if="!layout.minimal" />
           <!-- 选区评论草稿：挂在本条消息上的批注（展示被引用的原文片段），发送后渲染为注解。 -->
           <div v-if="comments.length" data-testid="comment-draft" class="flex flex-col gap-1.5">
             <div class="flex items-center gap-2 text-[10px] text-dim2">
@@ -498,7 +503,42 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
               </button>
             </div>
           </div>
+          <!-- 极简模式：精简输入卡。管线仍归本页（send / 附件 / 斜杠 / 评论 / 待发队列），
+               经 props + 具名 slot 注入，与引导页共用同一个 MinimalComposer。 -->
+          <MinimalComposer
+            v-if="layout.minimal"
+            v-model="draft"
+            :busy="turnActive"
+            :can-send="canSend"
+            :placeholder="composerPlaceholder"
+            class="mx-auto"
+            data-attachment-dropzone
+            @submit="send"
+            @attach="pickAttachmentFiles"
+            @keydown="onKeydown"
+            @paste="onComposerPaste"
+            @blur="dismissSlashMenu"
+            @dragover="onComposerDragOver"
+            @dragleave="onComposerDragLeave"
+            @drop="onComposerDrop"
+          >
+            <template #tray>
+              <AttachmentTray :items="attachmentItems" @remove="removeAttachment" />
+            </template>
+            <template #menu>
+              <SlashCommandMenu
+                v-if="slashOpen"
+                :items="slashItems"
+                :active-index="slashActiveIndex"
+                @select="selectSlashCommand"
+                @update:active-index="slashActiveIndex = $event"
+              />
+            </template>
+          </MinimalComposer>
+
+          <!-- 完整外壳：原输入卡（附件托盘 + 文本区 + 会话配置行 + 动作行 + 斜杠菜单） -->
           <div
+            v-else
             data-attachment-dropzone
             data-testid="composer-card"
             class="relative flex w-full flex-col gap-2 rounded-[calc(16px*var(--gw-radius-scale))] border bg-panel-2 p-3 shadow-[0_8px_24px_rgba(0,0,0,0.1)] transition-[border-color,box-shadow] focus-within:border-cyan/50 focus-within:shadow-[0_10px_28px_rgba(0,0,0,0.14)]"

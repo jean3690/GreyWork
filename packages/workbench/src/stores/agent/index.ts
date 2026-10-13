@@ -59,6 +59,14 @@ export const useAgentStore = defineStore("agent", () => {
     acpUsage: state.acpUsage,
     acpThoughtText: state.acpThoughtText,
     acpCommands: state.acpCommands,
+    protocolSubagents: state.protocolSubagents,
+    /** 协议层子代理：取消其当前工作（需其宣告了 capabilities.cancel）。 */
+    cancelSubagent: runtime.cancelSubagent,
+    /** 协议层子代理：会话间消息 / 自身转录读取面。 */
+    subagentMessagesOf: runtime.subagentMessagesOf,
+    subagentTranscriptOf: runtime.subagentTranscriptOf,
+    /** 协议层子代理：树深度（供 UI 缩进嵌套）。 */
+    subagentDepthOf: runtime.subagentDepthOf,
     /** 后端目录启动接管完成信号（null = 浏览器态无后端）。 */
     providersHydrated: state.providersHydrated,
     agentDetection: state.agentDetection,

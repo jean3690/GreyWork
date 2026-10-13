@@ -15,7 +15,7 @@ import type { BrowserStateEvent } from "@/lib/browser-backend";
 const h = vi.hoisted(() => ({
   invoke: vi.fn<(command: string, ...args: unknown[]) => Promise<void>>(async () => undefined),
   listen: vi.fn<(event: string, handler: (event: { payload: unknown }) => void) => Promise<() => void>>(async () => () => {}),
-  stateHandler: null as null | ((event: { payload: BrowserStateEvent }) => void),
+  stateHandler: null as null | ((event: { payload: unknown }) => void),
   store: {
     available: true,
     collapsed: false,
@@ -32,10 +32,26 @@ vi.mock("@greywork/host-ipc", () => ({
     h.stateHandler = handler;
     return h.listen(event, handler);
   },
-}));
-
-vi.mock("@tauri-apps/api/window", () => ({
-  getCurrentWindow: () => ({
+  // hostBrowser 的 Tauri 分支：命令名 / 参数名与宿主对齐（真映射的单测在 host-ipc shell.test）。
+  hostBrowser: () => ({
+    open: (url: string, rect: { x: number; y: number; width: number; height: number }) =>
+      h.invoke("browser_open", { url, x: rect.x, y: rect.y, width: rect.width, height: rect.height }),
+    setBounds: (rect: { x: number; y: number; width: number; height: number }) =>
+      h.invoke("browser_set_bounds", { x: rect.x, y: rect.y, width: rect.width, height: rect.height }),
+    setVisible: (visible: boolean) => h.invoke("browser_set_visible", { visible }),
+    navigate: (url: string) => h.invoke("browser_navigate", { url }),
+    back: () => h.invoke("browser_back"),
+    forward: () => h.invoke("browser_forward"),
+    reload: () => h.invoke("browser_reload"),
+    stop: () => h.invoke("browser_stop"),
+    close: () => h.invoke("browser_close"),
+    onState: (handler: (state: unknown) => void) => {
+      h.stateHandler = (event) => handler(event.payload);
+      return h.listen("browser:state", h.stateHandler);
+    },
+  }),
+  // 窗口焦点订阅（原生层遮挡策略）：经 hostWindow 门面。
+  hostWindow: () => ({
     onFocusChanged: async () => () => {},
   }),
 }));

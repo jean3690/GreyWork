@@ -11,8 +11,7 @@
  * 检查/打开链接都走宿主：渲染端 CSP 的 connect-src 只放行 self+ipc，直连 GitHub 会被拦。
  */
 
-import { invoke, hasHostCommands, hostVersion, runtimeMode } from "@greywork/host-ipc";
-import { getVersion } from "@tauri-apps/api/app";
+import { invoke, hasHostCommands, hostApp, hostVersion } from "@greywork/host-ipc";
 
 /** 本项目仓库地址（GitHub 图标点击即跳这里）。 */
 export const REPO_URL = "https://github.com/jean3690/GreyWork";
@@ -58,12 +57,12 @@ export const updateBackend = {
   },
 
   /**
-   * 当前应用版本：桌面取 Tauri 版本，服务端取启动探测时 `/api/health` 留下的宿主版本
-   * （见 host-ipc 的 `hostVersion`）。浏览器预览态没有宿主版本信息，返回 null。
+   * 当前应用版本：有原生宿主（Tauri / Electron）取宿主应用版本；纯服务端自托管取启动探测时
+   * `/api/health` 留下的宿主版本（见 host-ipc 的 `hostVersion`）。浏览器预览态返回 null。
    */
   async currentVersion(): Promise<string | null> {
-    if (runtimeMode() === "desktop") return getVersion();
-    return hostVersion();
+    const native = hostApp();
+    return native ? native.version() : hostVersion();
   },
 
   /** 检查更新：桌面与服务端都走 manual（GitHub 最新 Release），浏览器预览态 unsupported。 */
@@ -93,10 +92,11 @@ export const updateBackend = {
     };
   },
 
-  /** 打开外部链接：桌面用系统默认浏览器；服务端/浏览器态回落到新标签页。 */
+  /** 打开外部链接：有原生宿主用系统默认浏览器；服务端/浏览器态回落到新标签页。 */
   async openExternal(url: string): Promise<void> {
-    if (runtimeMode() === "desktop") {
-      await invoke("open_external", { url });
+    const native = hostApp();
+    if (native) {
+      await native.openExternal(url);
       return;
     }
     window.open(url, "_blank", "noopener");

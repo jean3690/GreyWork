@@ -14,7 +14,7 @@
  * 不改 activeId，所以后台就地更新不会把人从文件树里拽走。
  */
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
-import { isTauriRuntime } from "@greywork/core";
+import { hasNativeShell } from "@greywork/host-ipc";
 import Icon from "@/features/shared/Icon.vue";
 import Hint from "@/features/shared/Hint.vue";
 import FileTree from "@/features/preview/FileTree.vue";
@@ -82,7 +82,7 @@ const widthStyle = computed(() => ({ width: `${preview.effectiveWidthPx}px` }));
  */
 const externalPath = computed(() => {
   const tab = preview.activeTab;
-  if (!tab || !isTauriRuntime()) return null;
+  if (!tab || !hasNativeShell()) return null;
   return resolveTabDiskPath(tab);
 });
 

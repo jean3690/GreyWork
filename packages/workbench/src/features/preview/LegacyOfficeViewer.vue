@@ -13,7 +13,7 @@
  * 不再发生这件事。字节用于嗅探容器类型与展示文件体积（byteLength，无需额外 stat）。
  */
 import { computed, ref, toRef, watch } from "vue";
-import { isTauriRuntime } from "@greywork/core";
+import { hasNativeShell } from "@greywork/host-ipc";
 import { sniffOfficeContainer, type OfficeContainer } from "@/lib/legacy-office";
 import { formatBytes } from "@/lib/attachments";
 import { openWithSystemApp, resolveTabDiskPath } from "@/lib/open-external";
@@ -97,7 +97,7 @@ const showSystemAppHint = computed(() => actualFormat.value === null);
  * 浏览器态恒为 null，没有磁盘通道，按钮留着只会点了没反应。
  */
 const externalPath = computed(() => {
-  if (!isTauriRuntime()) return null;
+  if (!hasNativeShell()) return null;
   return resolveTabDiskPath(props.tab);
 });
 

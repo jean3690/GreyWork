@@ -1,5 +1,6 @@
 // 输入卡附件链路：选择 / 粘贴 → 托盘 chip → 删除 → 发送时随消息落库并派发。
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { nextTick } from "vue";
 import { mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import type { Attachment } from "@/types";
@@ -53,6 +54,7 @@ import { useAgentStore } from "@/stores/agent";
 import { useChatStore } from "@/stores/chat";
 import { useSessionStore } from "@/stores/session";
 import { useSettingsStore } from "@/stores/settings";
+import { useLayoutStore } from "@/stores/layout";
 
 function draft(id: string): Attachment {
   return { id, kind: "image", name: `${id}.png`, mime: "image/png", size: 4, dataUrl: "data:image/png;base64,QUJD" };
@@ -196,5 +198,30 @@ describe("ConversationView · 输入卡附件", () => {
     expect(units).toEqual([{ type: "image", data: "QUJD", mimeType: "image/png" }]);
     agent.stopAcp();
     useChatStore().clearSim();
+  });
+});
+
+// 极简模式下对话页输入区换成精简输入卡（与引导页共用 MinimalComposer），管线不变。
+describe("ConversationView · 极简模式输入卡", () => {
+  it("极简下渲染精简输入卡、隐藏完整输入卡；退出后恢复", async () => {
+    const { wrapper } = await mountConversation();
+    const layout = useLayoutStore();
+    expect(wrapper.find('[data-testid="composer-card"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="minimal-composer"]').exists()).toBe(false);
+
+    try {
+      layout.setMinimal(true);
+      await nextTick();
+
+      expect(wrapper.find('[data-testid="minimal-composer"]').exists()).toBe(true);
+      expect(wrapper.find('[data-testid="composer-card"]').exists()).toBe(false);
+
+      layout.setMinimal(false);
+      await nextTick();
+      expect(wrapper.find('[data-testid="composer-card"]').exists()).toBe(true);
+    } finally {
+      // 布局偏好会落盘：清掉，免得住后用例的新 pinia 读到 minimal=true
+      layout.setMinimal(false);
+    }
   });
 });

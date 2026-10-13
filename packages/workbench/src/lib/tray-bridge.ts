@@ -1,52 +1,36 @@
 /**
- * 系统托盘 ↔ 渲染端的桥。
+ * 系统托盘 ↔ 渲染端的桥，经 `@greywork/host-ipc` 的 `hostTray()` 门面抹平后端
+ * （Tauri: src-tauri/src/tray.rs；Electron: electron/electron/main.ts）。
  *
- * 托盘本体在 Rust 侧（apps/desktop/src-tauri/src/tray.rs）：菜单事件经 `app.emit`
- * 广播到前端，这里订阅后转成应用内动作（新建对话 / 打开设置由 Shell 提供）。
+ * 两件「宿主需要一个渲染端才持有的值」在这里下发：
+ * - 「关闭到托盘」偏好：存在设置快照里，宿主要在关窗时读它决定拦不拦，由 Shell 的 watch 调
+ *   `syncCloseToTray`（immediate 先送默认/缓存值，设置库水合后若不同再送一次，不丢偏好）。
+ * - 托盘菜单文案：宿主不持有语言，Shell 在语言切换时整份重推 `syncTrayLabels`。
  *
- * 另外两件事也在这里，共同点是「宿主需要一个渲染端才持有的值」：
- * - 「关闭到托盘」偏好：存在设置快照里，而宿主要在 CloseRequested 里读它才能决定拦不拦，
- *   由 Shell 的 watch 调 syncCloseToTray。顺序：watch immediate 先送当前（默认 / 本地缓存）
- *   值；设置从库水合完成后若真值不同会再触发一次，因此不会丢偏好。
- * - 托盘菜单文案：宿主不持有语言，由 Shell 在语言切换时重推 syncTrayLabels。
- *
- * 浏览器态一律空转（没有 IPC 宿主，invoke / listen 必然失败）。
+ * 菜单点击经宿主事件广播回来，`useTrayBridge` 订阅后转成应用内动作。
+ * 无窗口宿主（服务端 / 浏览器态）一律空转。
  */
-import { isTauriRuntime } from "@greywork/core";
-import { invoke, listen, type UnlistenFn } from "@greywork/host-ipc";
+import { hostTray, type TrayLabels } from "@greywork/host-ipc";
 
-/** 与 src-tauri/src/tray.rs 的事件名常量同名 —— 改一边必须改另一边。 */
-const EVENT_NEW_CHAT = "tray:new-chat";
-const EVENT_OPEN_SETTINGS = "tray:open-settings";
+export type { TrayLabels };
 
-/**
- * 托盘菜单文案（与 src-tauri/src/tray.rs 的 `TrayLabels` 字段同名，camelCase）。
- * 宿主不持有语言，语言切换时整份重推。
- */
-export interface TrayLabels {
-  toggleWindow: string;
-  newChat: string;
-  settings: string;
-  quit: string;
-  /** 首次隐藏窗口时的提示正文；空串则不发系统通知。 */
-  hiddenHint: string;
-}
-
-/** 把「关闭到托盘」同步给宿主；浏览器态静默跳过。 */
+/** 把「关闭到托盘」同步给宿主；无托盘宿主静默跳过。 */
 export async function syncCloseToTray(enabled: boolean): Promise<void> {
-  if (!isTauriRuntime()) return;
+  const tray = hostTray();
+  if (!tray) return;
   try {
-    await invoke("set_close_to_tray", { enabled });
+    await tray.setCloseToTray(enabled);
   } catch (error: unknown) {
     console.error("[tray] 同步「关闭到托盘」偏好失败", error);
   }
 }
 
-/** 把托盘菜单文案同步给宿主；浏览器态静默跳过。 */
+/** 把托盘菜单文案同步给宿主；无托盘宿主静默跳过。 */
 export async function syncTrayLabels(labels: TrayLabels): Promise<void> {
-  if (!isTauriRuntime()) return;
+  const tray = hostTray();
+  if (!tray) return;
   try {
-    await invoke("set_tray_labels", { labels });
+    await tray.setLabels(labels);
   } catch (error: unknown) {
     console.error("[tray] 同步托盘菜单文案失败", error);
   }
@@ -58,29 +42,23 @@ export interface TrayBridgeHandlers {
 }
 
 /**
- * 订阅托盘菜单事件，返回解绑函数。
- *
- * 事件名是自定义的 `tray:` 前缀（不是 Tauri 保留的 `tauri://`），走普通 listen。
- * listen 是异步落地的：期间若组件已卸载，落地后要立刻退订，否则会漏掉解绑。
+ * 订阅托盘菜单事件，返回解绑函数。订阅是异步落地的：期间若组件已卸载，落地后立刻退订。
  */
 export function useTrayBridge(handlers: TrayBridgeHandlers): () => void {
-  if (!isTauriRuntime()) return () => {};
+  const tray = hostTray();
+  if (!tray) return () => {};
 
-  const unlisteners: UnlistenFn[] = [];
+  let dispose = (): void => {};
   let disposed = false;
 
   void (async () => {
     try {
-      const [offNewChat, offOpenSettings] = await Promise.all([
-        listen(EVENT_NEW_CHAT, () => handlers.onNewChat()),
-        listen(EVENT_OPEN_SETTINGS, () => handlers.onOpenSettings()),
-      ]);
+      const off = await tray.onEvent({ newChat: handlers.onNewChat, openSettings: handlers.onOpenSettings });
       if (disposed) {
-        offNewChat();
-        offOpenSettings();
+        off();
         return;
       }
-      unlisteners.push(offNewChat, offOpenSettings);
+      dispose = off;
     } catch (error: unknown) {
       console.error("[tray] 订阅托盘事件失败", error);
     }
@@ -88,7 +66,6 @@ export function useTrayBridge(handlers: TrayBridgeHandlers): () => void {
 
   return () => {
     disposed = true;
-    for (const off of unlisteners) off();
-    unlisteners.length = 0;
+    dispose();
   };
 }

@@ -61,8 +61,17 @@ vi.mock("@/lib/worktree-backend", () => ({
   },
 }));
 
+import type * as HostIpc from "@greywork/host-ipc";
+
 const readText = vi.fn<() => Promise<string>>();
-vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({ readText: () => readText() }));
+vi.mock("@greywork/host-ipc", async (importOriginal) => ({
+  ...(await importOriginal<typeof HostIpc>()),
+  hostClipboard: () => ({
+    writeText: vi.fn(() => Promise.resolve()),
+    readText: () => readText(),
+    readImagePng: vi.fn(() => Promise.resolve(null)),
+  }),
+}));
 
 import ConversationView from "@/features/conversation/ConversationView.vue";
 import { createAppRouter } from "@/router";

@@ -7,8 +7,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 
+import type * as HostIpc from "@greywork/host-ipc";
+
 const readText = vi.fn<() => Promise<string>>();
-vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({ readText: () => readText() }));
+vi.mock("@greywork/host-ipc", async (importOriginal) => ({
+  ...(await importOriginal<typeof HostIpc>()),
+  hostClipboard: () => ({
+    writeText: vi.fn(() => Promise.resolve()),
+    readText: () => readText(),
+    readImagePng: vi.fn(() => Promise.resolve(null)),
+  }),
+}));
 
 const copyText = vi.fn<(text: string) => Promise<void>>();
 vi.mock("@/lib/clipboard", () => ({ copyText: (text: string) => copyText(text) }));

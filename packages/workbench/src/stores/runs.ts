@@ -155,7 +155,7 @@ export const useRunsStore = defineStore("runs", () => {
       // 编排子任务的工作区取自设置项 / 宿主私有根，**不跟随当前打开的对话**：
       // 批次可能由自动化任务在后台派发，那时「活动对话」与它无关。
       const workspace = await isolateForRun(await resolveWorkspaceDir());
-      handle = await acp.startAgent(provider.command, settings.effectivePermissionTier, settings.sandboxMode, workspace);
+      handle = await acp.startAgent(provider.command, settings.effectivePermissionTier);
       const { sessionId } = await acp.openSession(handle, workspace, settings.enabledMcpServers);
       const { threadId, message } = chat.startAcpTurn(sub.prompt, sub.role);
       subtaskSessions.set(sub.id, { handle, sessionId, threadId, messageId: message.id });

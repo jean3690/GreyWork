@@ -30,6 +30,11 @@ export const ICONS: Readonly<Record<string, readonly IconShape[]>> = {
   "arrow-left": [p("M42 24H6"), p("M17 13L6 24L17 35")],
   "arrow-right": [p("M6 24H42"), p("M31 13L42 24L31 35")],
   sidebar: [p("M6 12C6 9.2 8.2 7 11 7H37C39.8 7 42 9.2 42 12V36C42 38.8 39.8 41 37 41H11C8.2 41 6 38.8 6 36V12Z"), l(19, 7, 19, 41)],
+  /** `sidebar` 的水平镜像：竖条落在右侧，用于「右栏」开合键（面板字形，不用箭头）。 */
+  "sidebar-right": [
+    p("M6 12C6 9.2 8.2 7 11 7H37C39.8 7 42 9.2 42 12V36C42 38.8 39.8 41 37 41H11C8.2 41 6 38.8 6 36V12Z"),
+    l(29, 7, 29, 41),
+  ],
   "expand-left": [p("M10 24H38"), p("M28 16L20 24L28 32")],
   "expand-right": [p("M38 24H10"), p("M20 16L28 24L20 32")],
   robot: [
