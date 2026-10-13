@@ -35,6 +35,11 @@ export interface CodePluginRuntime {
     fps?: number;
     width?: number;
     height?: number;
+    /**
+     * 指针回传（缺省 false）：声明 true 时宿主把画布指针事件交给 worker 的
+     * `registerPointer` 处理器，返回的状态补丁并入同一份渲染状态。
+     */
+    pointer?: boolean;
   };
 }
 
@@ -51,7 +56,7 @@ export interface MarketPluginManifest {
   /** 缺省保持 v1 声明式包兼容；worker 包必须提供 runtime。 */
   kind?: "declarative" | "worker";
   runtime?: CodePluginRuntime;
-  /** 字符串或 { capability, hosts } 对象；安装期 Rust 侧校验形态。 */
+  /** 字符串或 { capability, hosts, methods?, paths?, maxBytes?, schedule? } 对象；安装期 Rust 侧校验形态。 */
   requires: CapabilityGrantSpec[];
   /** 可选脱窗声明（window.floating 能力配套）：宿主开透明置顶窗渲染该包画布。 */
   window?: PluginWindowDecl;

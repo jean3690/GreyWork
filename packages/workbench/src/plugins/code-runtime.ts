@@ -3,6 +3,24 @@ import type { DeclarativeValue, InstalledPluginPackage } from "./market-types";
 export type CodePluginState = Readonly<Record<string, DeclarativeValue>>;
 export type CodePluginPatch = Record<string, DeclarativeValue>;
 
+/** 归一化指针事件类型：宿主把画布上的指针交互回传 worker 的 registerPointer 处理器。 */
+export type PluginPointerType = "down" | "move" | "up" | "cancel" | "leave";
+
+/**
+ * 归一化指针事件：宿主在派发前把客户端坐标换算成画布坐标并裁剪到画布内
+ * （x∈[0,width] / y∈[0,height]），同时给出 [0,1] 归一化坐标（nx/ny）与按键位。
+ * 事件在宿主侧构造 —— worker 只拿到有界、封闭枚举的数据，无需自证清白。
+ */
+export interface PluginPointerEvent {
+  type: PluginPointerType;
+  x: number;
+  y: number;
+  nx: number;
+  ny: number;
+  buttons: number;
+  pointerId: number;
+}
+
 /**
  * 宿主能力代理：由 market.ts 注入（闭包持有 pluginId 与 loader）。
  * worker 内 `greywork.call(capability, args)` 的唯一出口 —— 鉴权、限域、审计全部在宿主侧。
@@ -13,6 +31,13 @@ interface WorkerInvokeRequest {
   type: "invoke";
   requestId: number;
   handler: string;
+  state: CodePluginState;
+}
+
+interface WorkerPointerRequest {
+  type: "pointer";
+  requestId: number;
+  event: PluginPointerEvent;
   state: CodePluginState;
 }
 
@@ -43,6 +68,11 @@ export interface CodePluginRuntime {
   invoke(handler: string, state: CodePluginState): Promise<CodePluginPatch | void>;
   /** 渲染调用：worker render handler 返回任意 JSON（指令集校验在消费方）。 */
   invokeRaw(handler: string, state: CodePluginState): Promise<unknown>;
+  /**
+   * 指针回传：把宿主归一化后的画布指针事件交给 worker 的 registerPointer 处理器，
+   * 返回状态补丁（与动作同通道语义，isPatch 校验）。仅声明 render.pointer 的包会调用。
+   */
+  dispatchPointer(event: PluginPointerEvent, state: CodePluginState): Promise<CodePluginPatch | void>;
   dispose(): void;
 }
 
@@ -66,7 +96,24 @@ globalThis.greywork = Object.freeze({
     if (!/^[a-z0-9][a-z0-9._:-]{0,95}$/.test(name) || typeof handler !== "function") {
       throw new TypeError("invalid GreyWork action handler");
     }
+    if (name === "schedule" || name === "pointer") {
+      throw new Error('"' + name + '" is reserved for registerSchedule/registerPointer; pick another action name');
+    }
     handlers[name] = handler;
+  },
+  // 后台定时处理器：宿主在挂载面存活期间按声明间隔调用（handler = "schedule"）。
+  // 与动作同通道（invoke → patch）：返回的状态补丁并入区域状态。
+  registerSchedule(handler) {
+    if (typeof handler !== "function") throw new TypeError("invalid GreyWork schedule handler");
+    if (handlers.schedule !== undefined) throw new Error("schedule handler already registered");
+    handlers.schedule = handler;
+  },
+  // 指针处理器：宿主把画布指针事件（down/move/up/cancel/leave）回传到这里，
+  // 返回状态补丁（与动作同语义）。仅当 manifest 声明 render.pointer 时宿主才会派发。
+  registerPointer(handler) {
+    if (typeof handler !== "function") throw new TypeError("invalid GreyWork pointer handler");
+    if (handlers.pointer !== undefined) throw new Error("pointer handler already registered");
+    handlers.pointer = handler;
   },
   call(capability, args) {
     if (typeof capability !== "string" || !/^[a-z0-9][a-z0-9._:-]{0,95}$/.test(capability)) {
@@ -81,11 +128,18 @@ globalThis.greywork = Object.freeze({
 });
 self.addEventListener("message", async (event) => {
   const message = event.data;
-  if (!message || message.type !== "invoke") return;
+  if (!message || (message.type !== "invoke" && message.type !== "pointer")) return;
   try {
-    const handler = handlers[message.handler];
-    if (!handler) throw new Error("unknown plugin action: " + message.handler);
-    const patch = await handler(Object.freeze({ ...message.state }));
+    let patch;
+    if (message.type === "pointer") {
+      const handler = handlers.pointer;
+      if (!handler) throw new Error("plugin did not register a pointer handler");
+      patch = await handler(Object.freeze({ ...message.event }), Object.freeze({ ...message.state }));
+    } else {
+      const handler = handlers[message.handler];
+      if (!handler) throw new Error("unknown plugin action: " + message.handler);
+      patch = await handler(Object.freeze({ ...message.state }));
+    }
     self.postMessage({ type: "result", requestId: message.requestId, patch });
   } catch (error) {
     self.postMessage({ type: "result", requestId: message.requestId, error: error instanceof Error ? error.message : String(error) });
@@ -221,6 +275,23 @@ export function createWorkerCodePluginRuntime(
       }, INVOCATION_TIMEOUT_MS);
       pending.set(requestId, { resolve, reject, timeout });
       worker.postMessage({ type: "invoke", requestId, handler, state } satisfies WorkerInvokeRequest);
+      return promise;
+    },
+    dispatchPointer(event, state) {
+      if (disposed) return Promise.reject(new Error("plugin worker is disposed"));
+      const requestId = nextRequestId++;
+      const { promise, resolve, reject } = Promise.withResolvers<CodePluginPatch | void>();
+      const timeout = window.setTimeout(() => {
+        pending.delete(requestId);
+        reject(new Error(`plugin pointer event timed out after ${INVOCATION_TIMEOUT_MS}ms`));
+      }, INVOCATION_TIMEOUT_MS);
+      pending.set(requestId, {
+        resolve: resolve as (patch: unknown) => void,
+        reject,
+        timeout,
+        validate: (value: unknown) => isPatch(value),
+      });
+      worker.postMessage({ type: "pointer", requestId, event, state } satisfies WorkerPointerRequest);
       return promise;
     },
     dispose() {

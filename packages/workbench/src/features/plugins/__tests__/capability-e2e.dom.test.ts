@@ -97,6 +97,22 @@ greywork.registerAction("fetch-ip", async () => {
 });
 `;
 
+/** net.fetch v2：POST 携带 body，路径由 manifest 模板收口。 */
+const demoPostWorkerPluginCode = `
+greywork.registerAction("post-meta", async () => {
+  try {
+    const response = await greywork.call("net.fetch", {
+      url: "https://api.github.com/graphql",
+      method: "POST",
+      body: '{"q":1}',
+    });
+    return { status: \`HTTP \${response.status} · POST 成功\` };
+  } catch (error) {
+    return { status: \`POST 被拒：\${error.message}\` };
+  }
+});
+`;
+
 /** 把 worker 出站 host-call 消息接到宿主 loader（模拟 code-runtime 的路由职责）。 */
 function attachHostDispatch(
   worker: { posted: unknown[]; respond: (message: unknown) => void },
@@ -209,6 +225,94 @@ describe("demo.worker 能力调用全链路", () => {
 
     const patch = (await patchPromise) as Record<string, unknown>;
     expect(String(patch.status)).toMatch(/allowlist/);
+    expect(transportCalls).toBe(0);
+
+    setNetFetchTransportForHost(null);
+    resetCapabilityAuditForTest();
+  });
+
+  it("net.fetch v2：声明的 POST + 路径模板全链路放行，body 透传宿主", async () => {
+    resetCapabilityAuditForTest();
+    const transports: Array<Record<string, unknown>> = [];
+    setNetFetchTransportForHost(async (request) => {
+      transports.push(request as unknown as Record<string, unknown>);
+      return { status: 200, ok: true, headers: {}, body: "{}" };
+    });
+
+    const loader = createCapabilityLoader();
+    loader.register({
+      id: "demo.worker",
+      name: "Worker 代码插件",
+      version: "1.1.0",
+      requires: [
+        {
+          capability: "net.fetch",
+          hosts: ["api.github.com"],
+          methods: ["GET", "POST"],
+          paths: ["/graphql"],
+        },
+      ],
+    });
+    loader.grantCapability("demo.worker", "net.fetch");
+    await loader.activate("demo.worker");
+
+    const worker = createSimulatedWorker(demoPostWorkerPluginCode);
+    const dispatchHostCalls = attachHostDispatch(worker, loader, "demo.worker");
+
+    const patchPromise = worker.invoke("post-meta", { status: "等待执行" });
+    await pump();
+    dispatchHostCalls();
+    await pump();
+
+    const patch = (await patchPromise) as Record<string, unknown>;
+    expect(patch.status).toBe("HTTP 200 · POST 成功");
+    expect(transports).toHaveLength(1);
+    expect(transports[0]).toMatchObject({
+      method: "POST",
+      body: '{"q":1}',
+      methods: ["GET", "POST"],
+      paths: ["/graphql"],
+    });
+
+    setNetFetchTransportForHost(null);
+    resetCapabilityAuditForTest();
+  });
+
+  it("net.fetch v2：POST 路径不在模板内被 broker 拒绝（不触达 transport）", async () => {
+    resetCapabilityAuditForTest();
+    let transportCalls = 0;
+    setNetFetchTransportForHost(async () => {
+      transportCalls += 1;
+      return { status: 200, ok: true, headers: {}, body: "{}" };
+    });
+
+    const loader = createCapabilityLoader();
+    loader.register({
+      id: "demo.worker",
+      name: "Worker 代码插件",
+      version: "1.1.0",
+      requires: [
+        {
+          capability: "net.fetch",
+          hosts: ["api.github.com"],
+          methods: ["POST"],
+          paths: ["/graphql"],
+        },
+      ],
+    });
+    loader.grantCapability("demo.worker", "net.fetch");
+    await loader.activate("demo.worker");
+
+    const worker = createSimulatedWorker(demoPostWorkerPluginCode.replace("/graphql", "/other"));
+    const dispatchHostCalls = attachHostDispatch(worker, loader, "demo.worker");
+
+    const patchPromise = worker.invoke("post-meta", { status: "等待执行" });
+    await pump();
+    dispatchHostCalls();
+    await pump();
+
+    const patch = (await patchPromise) as Record<string, unknown>;
+    expect(String(patch.status)).toMatch(/path is not in the plugin allowlist/);
     expect(transportCalls).toBe(0);
 
     setNetFetchTransportForHost(null);

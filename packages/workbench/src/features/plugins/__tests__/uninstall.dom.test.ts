@@ -55,6 +55,7 @@ beforeEach(async () => {
   market.setCodePluginRuntimeFactoryForTest(() => ({
     invoke: () => Promise.resolve(undefined),
     invokeRaw: () => Promise.resolve([]),
+    dispatchPointer: () => Promise.resolve(undefined),
     dispose: () => undefined,
   }));
   invokeCalls.length = 0;

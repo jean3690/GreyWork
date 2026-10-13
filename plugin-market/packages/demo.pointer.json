@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "manifest": {
+    "id": "demo.pointer",
+    "name": "可点画布演示",
+    "version": "1.0.0",
+    "description": "渲染指针事件演示：manifest 在 render 里声明 \"pointer\": true，宿主把画布上的 pointerdown/move/up（坐标已裁到画布内、含 [0,1] 归一化坐标）回传 worker 的 registerPointer 处理器；handler 返回的状态补丁与动作同路径并入渲染状态，下一帧即可见。事件与补丁都在宿主侧白名单校验 —— worker 依旧零 DOM。",
+    "kind": "worker",
+    "runtime": {
+      "type": "worker",
+      "entry": "https://raw.githubusercontent.com/OWNER/REPO/COMMIT/demo.pointer.js",
+      "sha256": "REPLACE_WITH_64_LOWERCASE_HEX",
+      "render": { "handler": "draw", "fps": 12, "width": 220, "height": 160, "pointer": true }
+    },
+    "requires": [],
+    "contributes": {
+      "modes": [
+        {
+          "id": "demo-pointer",
+          "title": "可点画布",
+          "icon": "magic",
+          "page": {
+            "eyebrow": "Marketplace plugin · pointer",
+            "heading": "可点画布",
+            "body": "在画布上按下、拖动、松开试试：宿主把指针事件归一化后交给 worker 的 `registerPointer` 处理器，返回的状态补丁并入下一帧。坐标以画布为参照、已裁进画布范围；`nx`/`ny` 是 [0,1] 归一化坐标，便于与画布尺寸解耦。画布本身仍只画白名单 SVG 指令，worker 无 DOM、无副作用。",
+            "fields": [
+              { "key": "x", "label": "落点 X", "kind": "number", "default": 110, "min": 0, "max": 512, "step": 1 },
+              { "key": "y", "label": "落点 Y", "kind": "number", "default": 80, "min": 0, "max": 512, "step": 1 },
+              { "key": "clicks", "label": "按下次数", "kind": "number", "default": 0, "min": 0, "step": 1 },
+              { "key": "note", "label": "落点备注", "kind": "text", "default": "(110, 80)", "maxLength": 32 },
+              { "key": "last_event", "label": "最近事件", "kind": "text", "default": "尚未交互", "maxLength": 16 }
+            ],
+            "outputs": [
+              { "label": "落点", "valueKey": "note" },
+              { "label": "按下次数", "valueKey": "clicks", "suffix": "次" },
+              { "label": "最近事件", "valueKey": "last_event" }
+            ],
+            "actions": [{ "id": "reset", "label": "清空", "style": "danger", "operation": { "type": "reset" } }]
+          }
+        }
+      ]
+    }
+  }
+}

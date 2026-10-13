@@ -3,8 +3,9 @@ use sha2::{Digest, Sha256};
 use super::dto::{
     CapabilityRequirement, CodePluginRuntime, DeclarativeAction, DeclarativeContributions,
     DeclarativeField, DeclarativeMode, DeclarativeOperation, DeclarativeOutput, DeclarativePage,
-    MarketPluginManifest, MarketRegionAction, MarketUiRegionContribution, PluginKind,
-    PluginPackage, PluginRegistry, PluginRegistryEntry, PluginWindowDecl, RenderLoop,
+    ManifestSchedule, ManifestScheduleKind, MarketPluginManifest, MarketRegionAction,
+    MarketUiRegionContribution, PluginKind, PluginPackage, PluginRegistry, PluginRegistryEntry,
+    PluginWindowDecl, RenderLoop,
 };
 use super::install::{install_package_at, list_installed_at};
 use super::net_fetch::validate_plugin_fetch_url;
@@ -141,6 +142,7 @@ fn window_declaration_requires_the_floating_capability() {
             fps: Some(12),
             width: Some(160),
             height: Some(140),
+            pointer: false,
         }),
     });
     package.manifest.window = Some(PluginWindowDecl {
@@ -218,6 +220,7 @@ fn ui_region_contributions_require_worker_render_and_bounded_shape() {
                 fps: Some(12),
                 width: Some(160),
                 height: Some(140),
+                pointer: false,
             }),
         });
         package.manifest.contributes.ui_regions = regions;
@@ -294,6 +297,7 @@ fn render_loop_validation_bounds_handler_fps_and_canvas() {
         fps: None,
         width: None,
         height: None,
+        pointer: false,
     }));
     assert!(validate_package(&ok).is_ok());
 
@@ -303,6 +307,7 @@ fn render_loop_validation_bounds_handler_fps_and_canvas() {
         fps: Some(0),
         width: None,
         height: None,
+        pointer: false,
     }));
     assert!(validate_package(&bad_fps).is_err());
     bad_fps
@@ -332,6 +337,7 @@ fn render_loop_validation_bounds_handler_fps_and_canvas() {
         fps: None,
         width: Some(0),
         height: Some(100),
+        pointer: false,
     }));
     assert!(validate_package(&bad_size).is_err());
     bad_size
@@ -351,6 +357,7 @@ fn render_loop_validation_bounds_handler_fps_and_canvas() {
         fps: None,
         width: None,
         height: None,
+        pointer: false,
     }));
     assert!(validate_package(&bad_handler).is_err());
 }
@@ -398,41 +405,340 @@ fn installs_lists_updates_and_uninstalls_inside_root() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// net.fetch 参数化声明构造器（v2 字段齐全，减少测试样板）。
+fn net_fetch_requirement(
+    hosts: &[&str],
+    methods: &[&str],
+    paths: &[&str],
+    max_bytes: Option<u32>,
+) -> CapabilityRequirement {
+    CapabilityRequirement::Parameterized {
+        capability: "net.fetch".into(),
+        hosts: hosts.iter().map(|host| host.to_string()).collect(),
+        methods: methods.iter().map(|method| method.to_string()).collect(),
+        paths: paths.iter().map(|path| path.to_string()).collect(),
+        max_bytes,
+        schedule: None,
+    }
+}
+
 #[test]
 fn net_fetch_requirements_require_a_valid_host_allowlist() {
+    let validate = |requirement| {
+        let mut package = demo_package();
+        package.manifest.requires = vec![requirement];
+        validate_package(&package)
+    };
+
     // 无 hosts 白名单的字符串形态：拒绝。
-    let mut package = demo_package();
-    package.manifest.requires = vec![CapabilityRequirement::Plain("net.fetch".into())];
-    assert!(validate_package(&package).is_err());
+    assert!(validate(CapabilityRequirement::Plain("net.fetch".into())).is_err());
 
     // 参数化形态 + 合法 hosts：通过。
-    let mut package = demo_package();
-    package.manifest.requires = vec![CapabilityRequirement::Parameterized {
-        capability: "net.fetch".into(),
-        hosts: vec!["api.github.com".into(), "example.org".into()],
-    }];
-    assert!(validate_package(&package).is_ok());
+    assert!(validate(net_fetch_requirement(
+        &["api.github.com", "example.org"],
+        &[],
+        &[],
+        None
+    ))
+    .is_ok());
 
     // 越权：net.fetch 之外的能力不接受参数。
-    let mut package = demo_package();
-    package.manifest.requires = vec![CapabilityRequirement::Parameterized {
+    assert!(validate(CapabilityRequirement::Parameterized {
         capability: "plugin-admin".into(),
         hosts: vec!["api.github.com".into()],
-    }];
-    assert!(validate_package(&package).is_err());
+        methods: vec![],
+        paths: vec![],
+        max_bytes: None,
+        schedule: None,
+    })
+    .is_err());
 
     // 非法 host：协议 / 通配 / 单标签。
     for host in ["https://api.github.com", "*.github.com", "localhost"] {
-        let mut package = demo_package();
-        package.manifest.requires = vec![CapabilityRequirement::Parameterized {
-            capability: "net.fetch".into(),
-            hosts: vec![host.into()],
-        }];
         assert!(
-            validate_package(&package).is_err(),
+            validate(net_fetch_requirement(&[host], &[], &[], None)).is_err(),
             "host {host} should be rejected"
         );
     }
+}
+
+#[test]
+fn net_fetch_v2_requirements_validate_methods_paths_and_bytes() {
+    let validate = |requirement| {
+        let mut package = demo_package();
+        package.manifest.requires = vec![requirement];
+        validate_package(&package)
+    };
+
+    // POST 带上路径模板：通过；同时支持 `**` 与段内 `*`。
+    assert!(validate(net_fetch_requirement(
+        &["api.github.com"],
+        &["GET", "POST"],
+        &["/repos/*/issues", "/graphql", "/v1/**"],
+        None
+    ))
+    .is_ok());
+
+    // 声明 POST 却没有路径模板：拒绝。
+    let error = validate(net_fetch_requirement(
+        &["api.github.com"],
+        &["POST"],
+        &[],
+        None,
+    ))
+    .unwrap_err();
+    assert!(error.contains("POST requires"), "{error}");
+
+    // 未声明 POST 却带 paths：拒绝。
+    let error = validate(net_fetch_requirement(
+        &["api.github.com"],
+        &["GET"],
+        &["/x"],
+        None,
+    ))
+    .unwrap_err();
+    assert!(error.contains("only allowed when POST"), "{error}");
+
+    // 非法方法 / 重复方法：拒绝。
+    assert!(validate(net_fetch_requirement(
+        &["api.github.com"],
+        &["DELETE"],
+        &[],
+        None
+    ))
+    .is_err());
+    assert!(validate(net_fetch_requirement(
+        &["api.github.com"],
+        &["GET", "GET"],
+        &[],
+        None
+    ))
+    .is_err());
+
+    // 非法路径模板：不以 `/` 开头 / 含空白 / 过长 / 超过 8 条。
+    assert!(validate(net_fetch_requirement(
+        &["api.github.com"],
+        &["POST"],
+        &["repos/*"],
+        None
+    ))
+    .is_err());
+    assert!(validate(net_fetch_requirement(
+        &["api.github.com"],
+        &["POST"],
+        &["/a b"],
+        None
+    ))
+    .is_err());
+    let long = format!("/{}", "a".repeat(200));
+    assert!(validate(net_fetch_requirement(
+        &["api.github.com"],
+        &["POST"],
+        &[long.as_str()],
+        None
+    ))
+    .is_err());
+    let many: Vec<String> = (0..9).map(|index| format!("/p{index}")).collect();
+    let many_refs: Vec<&str> = many.iter().map(String::as_str).collect();
+    assert!(validate(net_fetch_requirement(
+        &["api.github.com"],
+        &["POST"],
+        &many_refs,
+        None
+    ))
+    .is_err());
+
+    // maxBytes 边界：1 KiB 与 8 MiB 通过；越界拒绝。
+    assert!(validate(net_fetch_requirement(
+        &["api.github.com"],
+        &[],
+        &[],
+        Some(1024)
+    ))
+    .is_ok());
+    assert!(validate(net_fetch_requirement(
+        &["api.github.com"],
+        &[],
+        &[],
+        Some(8 * 1024 * 1024)
+    ))
+    .is_ok());
+    assert!(validate(net_fetch_requirement(
+        &["api.github.com"],
+        &[],
+        &[],
+        Some(512)
+    ))
+    .is_err());
+    assert!(validate(net_fetch_requirement(
+        &["api.github.com"],
+        &[],
+        &[],
+        Some(8 * 1024 * 1024 + 1)
+    ))
+    .is_err());
+}
+
+#[test]
+fn schedule_requirements_require_a_valid_interval_declaration() {
+    let validate_schedule = |min: u32| {
+        let mut package = demo_package();
+        package.manifest.requires = vec![CapabilityRequirement::Parameterized {
+            capability: "schedule".into(),
+            hosts: vec![],
+            methods: vec![],
+            paths: vec![],
+            max_bytes: None,
+            schedule: Some(ManifestSchedule {
+                kind: ManifestScheduleKind::Interval,
+                min,
+            }),
+        }];
+        validate_package(&package)
+    };
+
+    // 字符串形态：拒绝（定时必须参数化声明）。
+    let mut package = demo_package();
+    package.manifest.requires = vec![CapabilityRequirement::Plain("schedule".into())];
+    let error = validate_package(&package).unwrap_err();
+    assert!(error.contains("requires an interval"), "{error}");
+
+    // 参数化形态 + 合法间隔：通过。
+    assert!(validate_schedule(60).is_ok());
+
+    // 边界：5 分钟（下界）与 24 小时（上界）通过。
+    for min in [5, 24 * 60] {
+        assert!(validate_schedule(min).is_ok(), "min {min} 应通过");
+    }
+
+    // 越界：拒绝。
+    for min in [4, 24 * 60 + 1] {
+        let error = validate_schedule(min).unwrap_err();
+        assert!(error.contains("between 5 and 1440"), "min {min}: {error}");
+    }
+
+    // 缺参数：拒绝。
+    let mut package = demo_package();
+    package.manifest.requires = vec![CapabilityRequirement::Parameterized {
+        capability: "schedule".into(),
+        hosts: vec![],
+        methods: vec![],
+        paths: vec![],
+        max_bytes: None,
+        schedule: None,
+    }];
+    let error = validate_package(&package).unwrap_err();
+    assert!(error.contains("requires schedule parameters"), "{error}");
+
+    // 带 hosts：拒绝。
+    let mut package = demo_package();
+    package.manifest.requires = vec![CapabilityRequirement::Parameterized {
+        capability: "schedule".into(),
+        hosts: vec!["api.github.com".into()],
+        methods: vec![],
+        paths: vec![],
+        max_bytes: None,
+        schedule: Some(ManifestSchedule {
+            kind: ManifestScheduleKind::Interval,
+            min: 60,
+        }),
+    }];
+    let error = validate_package(&package).unwrap_err();
+    assert!(error.contains("does not accept hosts"), "{error}");
+
+    // schedule 参数不能挂到其它能力上（net.fetch 亦然）。
+    let mut package = demo_package();
+    package.manifest.requires = vec![CapabilityRequirement::Parameterized {
+        capability: "net.fetch".into(),
+        hosts: vec![],
+        methods: vec![],
+        paths: vec![],
+        max_bytes: None,
+        schedule: Some(ManifestSchedule {
+            kind: ManifestScheduleKind::Interval,
+            min: 60,
+        }),
+    }];
+    let error = validate_package(&package).unwrap_err();
+    assert!(error.contains("does not accept schedule"), "{error}");
+
+    // net.fetch 参数不能挂到其它能力上。
+    let mut package = demo_package();
+    package.manifest.requires = vec![CapabilityRequirement::Parameterized {
+        capability: "notify".into(),
+        hosts: vec![],
+        methods: vec!["GET".into()],
+        paths: vec![],
+        max_bytes: None,
+        schedule: None,
+    }];
+    let error = validate_package(&package).unwrap_err();
+    assert!(error.contains("does not accept parameters"), "{error}");
+
+    // schedule 也不能夹带 net.fetch 参数。
+    let mut package = demo_package();
+    package.manifest.requires = vec![CapabilityRequirement::Parameterized {
+        capability: "schedule".into(),
+        hosts: vec![],
+        methods: vec![],
+        paths: vec![],
+        max_bytes: Some(2048),
+        schedule: Some(ManifestSchedule {
+            kind: ManifestScheduleKind::Interval,
+            min: 60,
+        }),
+    }];
+    let error = validate_package(&package).unwrap_err();
+    assert!(error.contains("net.fetch parameters"), "{error}");
+}
+
+#[test]
+fn plugin_net_fetch_path_templates_match_segments_and_globs() {
+    use super::net_fetch::plugin_fetch_path_matches;
+
+    // 精确段匹配。
+    assert!(plugin_fetch_path_matches("/graphql", "/graphql"));
+    assert!(!plugin_fetch_path_matches("/graphql/v2", "/graphql"));
+    // 段内单星。
+    assert!(plugin_fetch_path_matches(
+        "/repos/octocat/issues",
+        "/repos/*/issues"
+    ));
+    assert!(!plugin_fetch_path_matches(
+        "/repos/octocat/pulls",
+        "/repos/*/issues"
+    ));
+    // 单星不跨段。
+    assert!(!plugin_fetch_path_matches(
+        "/repos/a/b/issues",
+        "/repos/*/issues"
+    ));
+    // 段内部分通配。
+    assert!(plugin_fetch_path_matches("/repos/api-v3", "/repos/api-*"));
+    // `**` 跨零个或多个段。
+    assert!(plugin_fetch_path_matches("/v1/a/b/c", "/v1/**"));
+    assert!(plugin_fetch_path_matches("/v1/", "/v1/**"));
+    assert!(!plugin_fetch_path_matches("/v2/a", "/v1/**"));
+}
+
+#[test]
+fn schedule_requirement_parses_from_demo_json_shape() {
+    // demo.schedule.json 的 requires 原样：省略 hosts 字段也要能解析（serde default）+ 过校验。
+    let requirement: CapabilityRequirement = serde_json::from_value(serde_json::json!({
+        "capability": "schedule",
+        "schedule": { "kind": "interval", "min": 5 }
+    }))
+    .expect("schedule requirement parses");
+    assert!(super::package::validate_requirement(&requirement).is_ok());
+
+    // 非法 kind 在反序列化即失败（枚举封闭）。
+    assert!(
+        serde_json::from_value::<CapabilityRequirement>(serde_json::json!({
+            "capability": "schedule",
+            "schedule": { "kind": "cron", "min": 5 }
+        }))
+        .is_err()
+    );
 }
 
 #[test]
@@ -579,4 +885,72 @@ fn shipped_market_packages_pass_validation() {
             "package sha256 matches registry ({file_name})"
         );
     }
+}
+
+#[test]
+fn demo_fetch_package_parses_and_validates() {
+    // demo.fetch.json 是 net.fetch v2 的「就绪未发布」演示包：解析 + 校其能力声明，
+    // 保证 v2 声明形态（hosts/methods/paths/maxBytes）与文档示例一致。
+    // entry / sha256 是待发布占位（未发布包不校全量 package）。
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../plugin-market/packages/demo.fetch.json"
+    );
+    let Ok(bytes) = std::fs::read(path) else {
+        // 仓库外构建（单独打包本 crate）跳过。
+        return;
+    };
+    let package: PluginPackage = serde_json::from_slice(&bytes).expect("demo.fetch.json parses");
+    assert_eq!(package.manifest.id, "demo.fetch");
+    assert!(
+        !package.manifest.requires.is_empty(),
+        "demo.fetch declares its net.fetch requirement"
+    );
+    for requirement in &package.manifest.requires {
+        super::package::validate_requirement(requirement)
+            .unwrap_or_else(|error| panic!("demo.fetch requires validates: {error}"));
+    }
+}
+
+#[test]
+fn demo_pointer_package_parses_and_validates() {
+    // demo.pointer.json 是「渲染指针事件」的「就绪未发布」演示包：解析 + 校 render.pointer
+    // 声明形态（entry / sha256 是待发布占位，不校全量发布包，只把占位换成合法值后过 validate）。
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../plugin-market/packages/demo.pointer.json"
+    );
+    let Ok(bytes) = std::fs::read(path) else {
+        // 仓库外构建（单独打包本 crate）跳过。
+        return;
+    };
+    let package: PluginPackage = serde_json::from_slice(&bytes).expect("demo.pointer.json parses");
+    assert_eq!(package.manifest.id, "demo.pointer");
+    let render = package
+        .manifest
+        .runtime
+        .as_ref()
+        .and_then(|runtime| runtime.render.as_ref())
+        .expect("demo.pointer declares a render loop");
+    assert!(render.pointer, "demo.pointer opts into pointer events");
+
+    // 把发布占位替换为合法 entry/sha256，其余声明必须与真实发布包同等通过 validate。
+    let mut probe = package;
+    if let Some(runtime) = probe.manifest.runtime.as_mut() {
+        runtime.entry =
+            "https://raw.githubusercontent.com/acme/plugins/main/demo.pointer.js".into();
+        runtime.sha256 = "a".repeat(64);
+    }
+    validate_package(&probe).expect("demo.pointer declaration validates");
+}
+
+#[test]
+fn render_loop_pointer_flag_defaults_false_and_parses_true() {
+    // 老包缺 pointer 字段 → false（schemaVersion 1 兼容）；显式 true → 解析为 true。
+    let without: RenderLoop =
+        serde_json::from_str(r#"{"handler":"draw"}"#).expect("render without pointer parses");
+    assert!(!without.pointer);
+    let with: RenderLoop = serde_json::from_str(r#"{"handler":"draw","pointer":true}"#)
+        .expect("render with pointer parses");
+    assert!(with.pointer);
 }

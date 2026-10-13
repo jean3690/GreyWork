@@ -1,5 +1,6 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type * as HostIpc from "@greywork/host-ipc";
 
 const windowMock = vi.hoisted(() => ({
   label: "plugin-window-demo.pet",
@@ -7,7 +8,10 @@ const windowMock = vi.hoisted(() => ({
   close: vi.fn(() => Promise.resolve()),
 }));
 
-vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => windowMock }));
+vi.mock("@greywork/host-ipc", async (importOriginal) => ({
+  ...(await importOriginal<typeof HostIpc>()),
+  hostWindow: () => windowMock,
+}));
 vi.mock("@/plugins/market", () => ({ installedMarketPlugins: { value: [] } }));
 
 import PluginWindowView from "@/features/plugins/PluginWindowView.vue";

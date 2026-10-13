@@ -55,6 +55,7 @@ function mountRegion(pluginPackage: InstalledPluginPackage) {
   const manifest = adaptInstalledPlugin(pluginPackage, {
     invoke: vi.fn(async (): Promise<Record<string, DeclarativeValue> | void> => undefined),
     invokeRaw: vi.fn(async (): Promise<unknown> => []),
+    dispatchPointer: vi.fn(async (): Promise<Record<string, DeclarativeValue> | void> => undefined),
     dispose: vi.fn(),
   });
   const uiRegion = manifest.contributes!.uiRegions![0]!;

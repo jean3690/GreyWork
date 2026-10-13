@@ -1,4 +1,4 @@
-import { hasHostCommands, invoke } from "@greywork/host-ipc";
+import { hasHostCommands, hostPlugins, invoke } from "@greywork/host-ipc";
 import { computed, ref } from "vue";
 import { adaptInstalledPlugin } from "./declarative";
 import { createWorkerCodePluginRuntime, type CodePluginRuntime, type CodePluginRuntimeFactory } from "./code-runtime";
@@ -13,7 +13,7 @@ import {
   unregisterPlugin,
 } from "./runtime";
 import { useCapabilityLoader } from "./current";
-import { setNetFetchTransportForHost } from "./capabilities";
+import { setNetFetchTransportForHost, setPluginFsTransportForHost, setPluginNotifyTransportForHost } from "./capabilities";
 import { closePluginWindow } from "./plugin-window";
 
 /**
@@ -31,13 +31,35 @@ export function initPluginHostTransport(): void {
         url: request.url,
         method: request.method,
         headers: Object.entries(request.headers ?? {}),
+        body: request.body,
         allowedHosts: request.allowedHosts,
+        methods: request.methods,
+        paths: request.paths,
+        maxBytes: request.maxBytes,
       },
     });
     const headers: Record<string, string> = {};
     for (const [key, value] of response.headers ?? []) headers[key] = value;
     return { status: response.status, ok: response.ok, headers, body: response.body };
   });
+  setPluginFsTransportForHost(async (request) => {
+    const response = await invoke<{
+      bytes: number;
+      totalBytes: number;
+      data?: string;
+      entries?: { name: string; dir: boolean; bytes: number }[];
+      removed?: boolean;
+      exists?: boolean;
+    }>("plugin_fs", { request });
+    return response;
+  });
+  // notify 是**桌面专属**能力（Tauri / Electron）：只在有原生桌面壳时注册传输层。
+  // 纯服务端（自托管 web）不注册，插件调用会按「无宿主」失败并记审计 —— 这正是
+  // capabilities.ts 对 notify 的既有约定，也避免去 invoke `plugin_notify` 撞 403。
+  const plugins = hostPlugins();
+  if (plugins) {
+    setPluginNotifyTransportForHost((request) => plugins.notify(request));
+  }
 }
 
 /** 用户可覆盖为自己的 GitHub raw index；空串表示尚未配置线上目录。 */

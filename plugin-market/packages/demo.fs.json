@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "manifest": {
+    "id": "demo.fs",
+    "name": "文件沙箱便签",
+    "version": "1.0.0",
+    "description": "fs.scoped 能力演示：把备注写进插件私有沙箱文件（<app_data>/plugins/<id>/files/，每插件 8 MiB），重启后仍在；仅桌面/服务端宿主可用。",
+    "kind": "worker",
+    "runtime": {
+      "type": "worker",
+      "entry": "https://raw.githubusercontent.com/OWNER/REPO/COMMIT/demo.fs.js",
+      "sha256": "REPLACE_WITH_64_LOWERCASE_HEX"
+    },
+    "requires": ["fs.scoped"],
+    "contributes": {
+      "modes": [
+        {
+          "id": "demo-fs",
+          "title": "文件便签",
+          "icon": "folder",
+          "page": {
+            "eyebrow": "Marketplace plugin · fs.scoped",
+            "heading": "沙箱文件便签",
+            "body": "一条备注落在插件自己的私有文件区（fs.scoped）里：相对路径、每个插件互相隔离、总量 8 MiB。保存后重启应用，点「读取」即可从磁盘上的 `<app_data>/plugins/demo.fs/files/notes/hello.txt` 读回。",
+            "fields": [
+              {
+                "key": "note",
+                "label": "备注",
+                "kind": "text",
+                "default": "第一条文件便签",
+                "maxLength": 200
+              },
+              {
+                "key": "status",
+                "label": "最近动作",
+                "kind": "text",
+                "default": "尚未操作",
+                "maxLength": 120
+              }
+            ],
+            "outputs": [
+              {
+                "label": "当前备注",
+                "valueKey": "note"
+              },
+              {
+                "label": "动作",
+                "valueKey": "status"
+              }
+            ],
+            "actions": [
+              {
+                "id": "save",
+                "label": "保存",
+                "style": "primary",
+                "operation": {
+                  "type": "invoke",
+                  "handler": "save"
+                }
+              },
+              {
+                "id": "load",
+                "label": "读取",
+                "style": "secondary",
+                "operation": {
+                  "type": "invoke",
+                  "handler": "load"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

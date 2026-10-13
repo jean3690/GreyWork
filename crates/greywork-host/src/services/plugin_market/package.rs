@@ -1,36 +1,161 @@
 //! manifest 与包的整体校验（能力、区域、窗口声明）。
 
-use super::dto::{CapabilityRequirement, DeclarativeOperation, MarketPluginManifest, PluginKind};
+use super::dto::{
+    CapabilityRequirement, DeclarativeOperation, ManifestScheduleKind, MarketPluginManifest,
+    PluginKind,
+};
 use super::validate::{
     validate_dir_key, validate_github_url, validate_key, validate_page, validate_sha256,
     validate_version,
 };
+use super::{MAX_PLUGIN_FETCH_BYTES_CEILING, MIN_PLUGIN_FETCH_BYTES};
+
+/// schedule 间隔下界（分钟）：5 分钟，防高频空转。
+const SCHEDULE_MIN_MIN: u32 = 5;
+/// schedule 间隔上界（分钟）：24 小时。
+const SCHEDULE_MAX_MIN: u32 = 24 * 60;
+
+/// net.fetch 允许声明的 HTTP 方法全集（缺省子集为 GET/HEAD）。
+const NET_FETCH_ALLOWED_METHODS: [&str; 3] = ["GET", "HEAD", "POST"];
+/// net.fetch `paths` 模板条数上界（仅 POST 需要）。
+const NET_FETCH_MAX_PATHS: usize = 8;
+/// net.fetch 单个路径模板长度上界。
+const NET_FETCH_MAX_PATH_LEN: usize = 128;
 
 pub(super) fn validate_requirement(requirement: &CapabilityRequirement) -> Result<(), String> {
     match requirement {
         CapabilityRequirement::Plain(capability) => {
             validate_key(capability, "required capability")?;
-            if capability == "net.fetch" {
-                return Err("net.fetch requires a host allowlist: use { \"capability\": \"net.fetch\", \"hosts\": [...] }".to_string());
+            match capability.as_str() {
+                "net.fetch" => Err("net.fetch requires a host allowlist: use { \"capability\": \"net.fetch\", \"hosts\": [...] }".to_string()),
+                "schedule" => Err("schedule requires an interval: use { \"capability\": \"schedule\", \"schedule\": { \"kind\": \"interval\", \"min\": 60 } }".to_string()),
+                _ => Ok(()),
             }
-            Ok(())
         }
-        CapabilityRequirement::Parameterized { capability, hosts } => {
+        CapabilityRequirement::Parameterized {
+            capability,
+            hosts,
+            methods,
+            paths,
+            max_bytes,
+            schedule,
+        } => {
             validate_key(capability, "required capability")?;
-            if capability != "net.fetch" {
-                return Err(format!(
+            match capability.as_str() {
+                "net.fetch" => {
+                    if schedule.is_some() {
+                        return Err("net.fetch does not accept schedule parameters".to_string());
+                    }
+                    validate_net_fetch_params(hosts, methods, paths, *max_bytes)?;
+                    Ok(())
+                }
+                "schedule" => {
+                    if !hosts.is_empty() {
+                        return Err(
+                            "schedule does not accept hosts; use schedule::interval parameters"
+                                .to_string(),
+                        );
+                    }
+                    if !methods.is_empty() || !paths.is_empty() || max_bytes.is_some() {
+                        return Err(
+                            "schedule does not accept net.fetch parameters (methods/paths/maxBytes)"
+                                .to_string(),
+                        );
+                    }
+                    let Some(declared) = schedule else {
+                        return Err("schedule requires schedule parameters: { \"kind\": \"interval\", \"min\": 60 }".to_string());
+                    };
+                    if declared.kind != ManifestScheduleKind::Interval {
+                        return Err("schedule kind must be \"interval\"".to_string());
+                    }
+                    if !(SCHEDULE_MIN_MIN..=SCHEDULE_MAX_MIN).contains(&declared.min) {
+                        return Err(format!(
+                            "schedule interval must be between {SCHEDULE_MIN_MIN} and {SCHEDULE_MAX_MIN} minutes"
+                        ));
+                    }
+                    Ok(())
+                }
+                _ => Err(format!(
                     "capability {capability} does not accept parameters; use the plain string form"
-                ));
+                )),
             }
-            if hosts.is_empty() || hosts.len() > 16 {
-                return Err("net.fetch hosts allowlist must contain 1-16 entries".to_string());
-            }
-            for host in hosts {
-                validate_host(host)?;
-            }
-            Ok(())
         }
     }
+}
+
+/// net.fetch 参数化声明校验：hosts 白名单 + 可选 methods / paths / maxBytes。
+///
+/// 语义（与前端 broker 同构；此处是安装期第一道门）：
+/// - `methods` 缺省 = GET/HEAD；只能是 GET/HEAD/POST 的子集；
+/// - 声明 `POST` 时必须给出 1-8 条路径模板（POST 只对这些模板开放），否则 `paths` 必须为空；
+/// - `maxBytes` 在 1 KiB .. 8 MiB 之间（缺省 1 MiB）。
+fn validate_net_fetch_params(
+    hosts: &[String],
+    methods: &[String],
+    paths: &[String],
+    max_bytes: Option<u32>,
+) -> Result<(), String> {
+    if hosts.is_empty() || hosts.len() > 16 {
+        return Err("net.fetch hosts allowlist must contain 1-16 entries".to_string());
+    }
+    for host in hosts {
+        validate_host(host)?;
+    }
+    let mut seen_methods = std::collections::HashSet::new();
+    for method in methods {
+        if !NET_FETCH_ALLOWED_METHODS.contains(&method.as_str()) {
+            return Err(format!(
+                "net.fetch method must be one of GET/HEAD/POST, got {method}"
+            ));
+        }
+        if !seen_methods.insert(method.as_str()) {
+            return Err(format!("net.fetch duplicate method: {method}"));
+        }
+    }
+    let declares_post = methods.iter().any(|method| method == "POST");
+    if declares_post {
+        if paths.is_empty() || paths.len() > NET_FETCH_MAX_PATHS {
+            return Err(format!(
+                "net.fetch POST requires 1-{NET_FETCH_MAX_PATHS} path templates"
+            ));
+        }
+        for path in paths {
+            validate_path_template(path)?;
+        }
+    } else if !paths.is_empty() {
+        return Err("net.fetch paths is only allowed when POST is declared".to_string());
+    }
+    if let Some(bytes) = max_bytes {
+        if !(MIN_PLUGIN_FETCH_BYTES as u32..=MAX_PLUGIN_FETCH_BYTES_CEILING as u32).contains(&bytes)
+        {
+            return Err(format!(
+                "net.fetch maxBytes must be between {MIN_PLUGIN_FETCH_BYTES} and {MAX_PLUGIN_FETCH_BYTES_CEILING}"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// 路径模板：以 `/` 开头、≤128 字符、仅 ASCII 安全字符 + `*` 通配（`*` 段内、`**` 跨段）。
+fn validate_path_template(template: &str) -> Result<(), String> {
+    if !template.starts_with('/') {
+        return Err(format!(
+            "net.fetch path template must start with '/': {template}"
+        ));
+    }
+    if template.len() > NET_FETCH_MAX_PATH_LEN {
+        return Err(format!(
+            "net.fetch path template exceeds {NET_FETCH_MAX_PATH_LEN} characters"
+        ));
+    }
+    if !template.chars().all(|c| {
+        c.is_ascii_alphanumeric() || matches!(c, '/' | '-' | '_' | '.' | '~' | '*' | '%' | ':')
+    }) {
+        return Err(format!(
+            "net.fetch path template has invalid characters: {template}"
+        ));
+    }
+    Ok(())
 }
 
 /// manifest 是否声明了 `window.floating` 能力。

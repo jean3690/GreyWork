@@ -13,7 +13,9 @@
 //! - [`http`]：限额下载（读取上限 + 超时）；
 //! - [`install`]：安装 / 列举 / 拉取校验；
 //! - [`commands`]：对外命令（catalog / preview / install / list / uninstall）；
-//! - [`net_fetch`]：前端 net.fetch 能力的宿主侧代理。
+//! - [`net_fetch`]：前端 net.fetch 能力的宿主侧代理；
+//! - [`plugin_fs`]：前端 fs.scoped 能力的宿主侧沙箱；
+//! - [`plugin_notify`]：前端 notify 能力的宿主侧校验与归属合成（投递在桌面壳）。
 
 mod commands;
 mod dto;
@@ -21,6 +23,8 @@ mod http;
 mod install;
 mod net_fetch;
 mod package;
+mod plugin_fs;
+mod plugin_notify;
 mod registry;
 mod validate;
 
@@ -35,11 +39,14 @@ pub use commands::{
 pub use dto::{
     CapabilityRequirement, CodePluginRuntime, DeclarativeAction, DeclarativeContributions,
     DeclarativeField, DeclarativeMode, DeclarativeOperation, DeclarativeOutput, DeclarativePage,
-    MarketPluginManifest, MarketRegionAction, MarketUiRegionContribution, PluginInstallReport,
-    PluginKind, PluginPackage, PluginRegistry, PluginRegistryEntry, PluginWindowDecl, RenderLoop,
+    ManifestSchedule, ManifestScheduleKind, MarketPluginManifest, MarketRegionAction,
+    MarketUiRegionContribution, PluginInstallReport, PluginKind, PluginPackage, PluginRegistry,
+    PluginRegistryEntry, PluginWindowDecl, RenderLoop,
 };
 pub use net_fetch::{plugin_net_fetch, PluginFetchRequest, PluginFetchResponse};
 pub use package::declares_window_floating;
+pub use plugin_fs::{plugin_fs, PluginFsEntry, PluginFsOp, PluginFsRequest, PluginFsResponse};
+pub use plugin_notify::{compose_plugin_notify, PluginNotifyRequest, PluginNotifyResponse};
 pub use validate::{validate_dir_key, validate_key};
 
 use std::time::Duration;
@@ -47,7 +54,12 @@ use std::time::Duration;
 const MAX_REGISTRY_BYTES: usize = 512 * 1024;
 const MAX_PACKAGE_BYTES: usize = 512 * 1024;
 const MAX_CODE_BYTES: usize = 1024 * 1024;
-const MAX_PLUGIN_FETCH_BYTES: usize = 1024 * 1024;
+/// net.fetch 未声明 `maxBytes` 时的默认上下行字节上限（1 MiB）。
+const DEFAULT_PLUGIN_FETCH_BYTES: usize = 1024 * 1024;
+/// net.fetch `maxBytes` 声明下界（1 KiB）：低于此值无实际用途。
+const MIN_PLUGIN_FETCH_BYTES: usize = 1024;
+/// net.fetch `maxBytes` 声明硬上限（8 MiB）：纵深防御，声明再大也封顶。
+const MAX_PLUGIN_FETCH_BYTES_CEILING: usize = 8 * 1024 * 1024;
 const READ_TIMEOUT: Duration = Duration::from_secs(20);
 const PLUGIN_FETCH_TIMEOUT: Duration = Duration::from_secs(15);
 const ALLOWED_GITHUB_HOSTS: [&str; 4] = [

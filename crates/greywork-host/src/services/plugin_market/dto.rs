@@ -59,7 +59,7 @@ pub struct PluginWindowDecl {
 }
 
 /// manifest `requires` 项：字符串 = 无参数；对象 = 带资源参数
-/// （目前仅 net.fetch 的 hosts 域名白名单）。
+/// （net.fetch 的 hosts / methods / paths / maxBytes 白名单；schedule 的定时参数）。
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum CapabilityRequirement {
@@ -68,7 +68,34 @@ pub enum CapabilityRequirement {
         capability: String,
         #[serde(default)]
         hosts: Vec<String>,
+        /// net.fetch 专属：允许的 HTTP 方法子集（缺省 = `GET`/`HEAD`）。
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        methods: Vec<String>,
+        /// net.fetch 专属：`POST` 允许的路径模板（仅当声明了 `POST` 时必填）。
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        paths: Vec<String>,
+        /// net.fetch 专属：单次上下行字节上限（缺省 1 MiB，封顶 8 MiB）。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_bytes: Option<u32>,
+        /// schedule 能力专属：定时参数（其它能力不得携带）。
+        #[serde(default)]
+        schedule: Option<ManifestSchedule>,
     },
+}
+
+/// schedule 能力的定时参数：`{ "kind": "interval", "min": 60 }`。
+/// 执行侧（工作台调度器）按 min 分钟为周期唤醒 worker 的 registerSchedule 处理器。
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct ManifestSchedule {
+    pub kind: ManifestScheduleKind,
+    pub min: u32,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ManifestScheduleKind {
+    /// 固定间隔（分钟）：宿主按周期唤醒；挂载面不在内存时跳过，下次激活补结算一次。
+    Interval,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -99,6 +126,10 @@ pub struct RenderLoop {
     pub fps: Option<u32>,
     pub width: Option<u32>,
     pub height: Option<u32>,
+    /// 指针回传：声明 true 时宿主把画布指针事件（down/move/up/cancel/leave）归一化后
+    /// 交给 worker 的 `registerPointer` 处理器；缺省 false（老包不受影响）。
+    #[serde(default)]
+    pub pointer: bool,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]

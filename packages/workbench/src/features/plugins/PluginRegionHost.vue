@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useDeclarativePluginState } from "@/plugins/declarative-state";
 import type { MarketUiRegionContribution, CodePluginRuntime, DeclarativeValue, PluginWindowDecl } from "@/plugins/market-types";
+import type { PluginPointerEvent } from "@/plugins/code-runtime";
 import { isPluginCapabilityGranted } from "@/plugins/runtime";
+import { attachScheduledClock, detachScheduledClock } from "@/plugins/scheduler";
 import { openPluginWindow } from "@/plugins/plugin-window";
 import PluginRenderLoop from "@/features/plugins/PluginRenderLoop.vue";
 import Hint from "@/features/shared/Hint.vue";
@@ -25,8 +27,19 @@ const props = defineProps<{
   render: NonNullable<CodePluginRuntime["render"]>;
   invoke: (handler: string, state: Readonly<Record<string, DeclarativeValue>>) => Promise<Record<string, DeclarativeValue> | void>;
   invokeRaw: (handler: string, state: Readonly<Record<string, DeclarativeValue>>) => Promise<unknown>;
+  /** 指针通道（render.pointer 声明时由 adapter 传入）：worker registerPointer 返回补丁。 */
+  dispatchPointer?: (
+    event: PluginPointerEvent,
+    state: Readonly<Record<string, DeclarativeValue>>,
+  ) => Promise<Record<string, DeclarativeValue> | void>;
   /** 脱窗声明（window.floating 能力）：非空时显示「弹出桌面」入口。 */
   windowDecl?: PluginWindowDecl;
+  /**
+   * 定时声明（schedule 能力已声明并授权时由 adapter 传入）。非空 = 本挂载面挂钟：
+   * 存活期间按 everyMin 唤醒 worker 的 registerSchedule 处理器；不在内存时跳过、
+   * 下次挂载补结算一次。
+   */
+  schedule?: { everyMin: number } | null;
 }>();
 
 const state = useDeclarativePluginState(`${props.pluginId}/region/${props.regionId}`, []);
@@ -53,6 +66,13 @@ async function openFloatingWindow(): Promise<void> {
 /** 渲染通道：worker render handler（raw 指令流）。 */
 const renderChannel = (handler: string, current: Readonly<Record<string, DeclarativeValue>>) => props.invokeRaw(handler, current);
 
+/** 指针补丁：与动作同路径全量合并进区域状态（isPatch 已保证原始值）。 */
+function applyPointerPatch(patch: Record<string, DeclarativeValue>): void {
+  for (const [key, value] of Object.entries(patch)) {
+    state[key] = value;
+  }
+}
+
 /** 动作：invoke 后把 patch 全量合并进区域状态（primitive 白名单由 isPatch 保证）。 */
 async function runAction(actionId: string): Promise<void> {
   if (busyAction.value) return;
@@ -71,6 +91,26 @@ async function runAction(actionId: string): Promise<void> {
     busyAction.value = null;
   }
 }
+
+/** 定时唤醒：挂载面存活期间按声明间隔触发 registerSchedule 处理器（补丁与动作同路径合并）。 */
+onMounted(() => {
+  if (!props.schedule) return;
+  void attachScheduledClock({
+    pluginId: props.pluginId,
+    regionId: props.regionId,
+    everyMin: props.schedule.everyMin,
+    state: () => ({ ...state }),
+    applyPatch: (patch) => {
+      for (const [patchKey, patchValue] of Object.entries(patch)) {
+        state[patchKey] = patchValue;
+      }
+    },
+    invoke: props.invoke,
+  });
+});
+onUnmounted(() => {
+  detachScheduledClock(props.pluginId, props.regionId);
+});
 </script>
 
 <template>
@@ -83,6 +123,9 @@ async function runAction(actionId: string): Promise<void> {
       :width="contribution.width ?? props.render.width ?? 160"
       :height="contribution.height ?? props.render.height ?? 140"
       :fps="props.render.fps ?? 12"
+      :pointer="props.render.pointer === true"
+      :pointerChannel="props.dispatchPointer"
+      :onPointerPatch="applyPointerPatch"
     />
     <div v-if="canFloat" class="flex justify-center">
       <Hint :text="'在桌面弹出透明悬浮窗（' + (props.windowDecl?.width ?? 0) + '×' + (props.windowDecl?.height ?? 0) + '）'" multiline>

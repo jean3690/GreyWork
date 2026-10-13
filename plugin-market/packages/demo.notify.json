@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "manifest": {
+    "id": "demo.notify",
+    "name": "通知演示",
+    "version": "1.0.0",
+    "description": "notify 能力演示：点一下弹一条系统通知（标题自动带 [demo.notify] 归属前缀；每分钟最多 10 条；仅桌面端可用）。",
+    "kind": "worker",
+    "runtime": {
+      "type": "worker",
+      "entry": "https://raw.githubusercontent.com/OWNER/REPO/COMMIT/demo.notify.js",
+      "sha256": "REPLACE_WITH_64_LOWERCASE_HEX"
+    },
+    "requires": ["notify"],
+    "contributes": {
+      "modes": [
+        {
+          "id": "demo-notify",
+          "title": "通知演示",
+          "icon": "bell",
+          "page": {
+            "eyebrow": "Marketplace plugin · notify",
+            "heading": "弹一条系统通知",
+            "body": "系统通知由宿主 Tauri 通知模块投递（窗口不可见也能弹）；标题会被宿主前缀 [插件 id]（归属不可伪造），正文只放行换行。窗口可见时宿主也可能改用页面内 Toast。",
+            "fields": [
+              {
+                "key": "title",
+                "label": "标题",
+                "kind": "text",
+                "default": "构建完成",
+                "maxLength": 64
+              },
+              {
+                "key": "body",
+                "label": "正文",
+                "kind": "text",
+                "default": "所有测试通过",
+                "maxLength": 240
+              },
+              {
+                "key": "status",
+                "label": "最近动作",
+                "kind": "text",
+                "default": "尚未操作",
+                "maxLength": 120
+              }
+            ],
+            "outputs": [
+              {
+                "label": "标题",
+                "valueKey": "title"
+              },
+              {
+                "label": "动作",
+                "valueKey": "status"
+              }
+            ],
+            "actions": [
+              {
+                "id": "ping",
+                "label": "发通知",
+                "style": "primary",
+                "operation": {
+                  "type": "invoke",
+                  "handler": "ping"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

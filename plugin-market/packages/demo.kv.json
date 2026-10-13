@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "manifest": {
+    "id": "demo.kv",
+    "name": "KV 便签",
+    "version": "1.0.0",
+    "description": "storage.kv 能力演示：把备注存进插件私有存储（任意 JSON、按插件隔离、256 KiB 配额），重启后仍在。",
+    "kind": "worker",
+    "runtime": {
+      "type": "worker",
+      "entry": "https://raw.githubusercontent.com/OWNER/REPO/COMMIT/demo.kv.js",
+      "sha256": "REPLACE_WITH_64_LOWERCASE_HEX"
+    },
+    "requires": ["storage.kv"],
+    "contributes": {
+      "modes": [
+        {
+          "id": "demo-kv",
+          "title": "KV 便签",
+          "icon": "magic",
+          "page": {
+            "eyebrow": "Marketplace plugin · storage.kv",
+            "heading": "插件便签",
+            "body": "一条备注同时存在于两处：页面字段（宿主声明式状态）与插件私有存储 storage.kv。保存后重启应用，点「读取」即可验证私有存储的数据仍在 —— 字段状态重置不影响它。",
+            "fields": [
+              {
+                "key": "note",
+                "label": "备注",
+                "kind": "text",
+                "default": "第一条便签",
+                "maxLength": 200
+              },
+              {
+                "key": "status",
+                "label": "最近动作",
+                "kind": "text",
+                "default": "尚未操作",
+                "maxLength": 120
+              }
+            ],
+            "outputs": [
+              {
+                "label": "当前备注",
+                "valueKey": "note"
+              },
+              {
+                "label": "动作",
+                "valueKey": "status"
+              }
+            ],
+            "actions": [
+              {
+                "id": "save",
+                "label": "保存",
+                "style": "primary",
+                "operation": {
+                  "type": "invoke",
+                  "handler": "save"
+                }
+              },
+              {
+                "id": "load",
+                "label": "读取",
+                "style": "secondary",
+                "operation": {
+                  "type": "invoke",
+                  "handler": "load"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}
