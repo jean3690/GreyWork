@@ -1,16 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type * as GreyworkCore from "@greywork/core";
-
-const mocks = vi.hoisted(() => ({
-  isTauriRuntime: vi.fn<() => boolean>(() => false),
-  tauriInvoke: vi.fn(),
-}));
-
-vi.mock("@greywork/core", async (importOriginal) => ({
-  ...(await importOriginal<typeof GreyworkCore>()),
-  isTauriRuntime: mocks.isTauriRuntime,
-}));
-vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.tauriInvoke }));
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 const OVERRIDE_KEY = "__GREYWORK_RUNTIME__";
 
@@ -28,29 +16,8 @@ function errorResponse(status: number, body: string, contentType = "application/
   return new Response(body, { status, headers: { "content-type": contentType } });
 }
 
-beforeEach(() => {
-  mocks.isTauriRuntime.mockReturnValue(false);
-  mocks.tauriInvoke.mockReset();
-});
-
 afterEach(() => {
   vi.unstubAllGlobals();
-});
-
-describe("invoke —— desktop", () => {
-  it("直通 Tauri invoke，不做任何加工，且保持实参个数", async () => {
-    mocks.isTauriRuntime.mockReturnValue(true);
-    mocks.tauriInvoke.mockResolvedValue({ foo: "bar" });
-    stubWindow();
-    const { invoke } = await freshBarrel();
-
-    await expect(invoke("db_settings_load")).resolves.toEqual({ foo: "bar" });
-    // 无参调用不补 undefined：调用点用 toHaveBeenCalledWith("cmd") 断言，多一个实参会失配。
-    expect(mocks.tauriInvoke).toHaveBeenCalledWith("db_settings_load");
-
-    await invoke("worktree_list", { workspaceId: "w1" });
-    expect(mocks.tauriInvoke).toHaveBeenLastCalledWith("worktree_list", { workspaceId: "w1" });
-  });
 });
 
 describe("invoke —— server", () => {

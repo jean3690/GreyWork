@@ -6,8 +6,8 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       include: ["src/**"],
-      // barrel 出口与 Tauri IPC 胶水（需桌面运行时）不计入门禁
-      exclude: ["src/index.ts", "src/tauri-transport.ts", "src/**/*.d.ts"],
+      // barrel 出口不计入门禁（host-transport 现在有直接契约测试，参与门槛）
+      exclude: ["src/index.ts", "src/**/*.d.ts"],
       // vitest 5 的 coverage-v8 改用 AST 精确重映射，数值较 v3 偏低；门槛按 5.x 实测重校（2026-09-28）。
       thresholds: { statements: 74, lines: 78, branches: 52, functions: 72 },
     },

@@ -3,8 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
-const invokeMock = vi.mocked((await import("@tauri-apps/api/core")).invoke);
+vi.mock("@greywork/host-ipc", async (importOriginal) => ({
+  ...(await importOriginal()),
+  invoke: vi.fn(),
+}));
+const invokeMock = vi.mocked((await import("@greywork/host-ipc")).invoke);
 
 import WebPageViewer from "@/features/preview/WebPageViewer.vue";
 import { clearWebArticleCache, fetchArticle } from "@/lib/web-fetch";
@@ -22,7 +25,7 @@ function stubHostHtml(html: string, finalUrl = "https://example.com/"): void {
 const ARTICLE_HTML = "<html><head><title>标题</title></head><body><article><p>正文段落</p></article></body></html>";
 
 beforeEach(() => {
-  (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
+  (window as unknown as { __TAURI_INTERNALS__?: unknown }).__GREYWORK_RUNTIME__ = "server";
   clearWebArticleCache();
   invokeMock.mockReset();
   setActivePinia(createPinia());

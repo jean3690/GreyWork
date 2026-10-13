@@ -18,14 +18,16 @@ const h = vi.hoisted(() => ({
 
 vi.mock("@greywork/core", async (importOriginal) => ({
   ...(await importOriginal<typeof GreyWorkCore>()),
-  isTauriRuntime: () => h.isTauri(),
 }));
 vi.mock("@/lib/workspace-dir", () => ({ resolveWorkspaceRoot: () => h.resolveRoot() }));
 vi.mock("@/lib/conversation-folder", () => ({ activeConversationFolder: () => null }));
 vi.mock("@/lib/artifact-dir", () => ({ activeWorkspaceFolder: () => null }));
 
 const invokeMock = vi.fn();
-vi.mock("@tauri-apps/api/core", () => ({ invoke: (...args: unknown[]) => invokeMock(...args) }));
+vi.mock("@greywork/host-ipc", async (importOriginal) => ({
+  ...(await importOriginal()),
+  invoke: (...args: unknown[]) => invokeMock(...args),
+}));
 
 import { useGitStore } from "@/stores/git";
 
@@ -45,7 +47,7 @@ const changed = (overrides: Partial<Record<string, unknown>> = {}) => ({
 beforeEach(() => {
   setActivePinia(createPinia());
   vi.clearAllMocks();
-  h.isTauri.mockReturnValue(true);
+  vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "server" });
   h.resolveRoot.mockResolvedValue({ dir: "/ws", bound: true });
   invokeMock.mockImplementation((cmd: string) => {
     if (cmd === "git_changes") return Promise.resolve([changed()]);
@@ -58,7 +60,7 @@ beforeEach(() => {
 
 describe("useGitStore", () => {
   it("浏览器态回落空态：不解析根、不建服务、无错误", async () => {
-    h.isTauri.mockReturnValue(false);
+    vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "browser-preview" });
     const git = useGitStore();
     await git.refresh();
     expect(git.root).toBeNull();

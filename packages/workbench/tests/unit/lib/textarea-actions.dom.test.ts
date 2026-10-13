@@ -79,7 +79,7 @@ describe("copySelection / cutSelection", () => {
 
 describe("pasteInto", () => {
   it("桌面态走插件 readText，插入到光标处并派发 input", async () => {
-    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+    (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = "server";
     readText.mockResolvedValue("INSERTED");
     const el = makeTextarea("ab");
     el.setSelectionRange(1, 1);
@@ -94,7 +94,7 @@ describe("pasteInto", () => {
   });
 
   it("替换选区而不是插入", async () => {
-    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+    (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = "server";
     readText.mockResolvedValue("X");
     const el = makeTextarea("abc");
     el.setSelectionRange(0, 3);
@@ -103,7 +103,7 @@ describe("pasteInto", () => {
   });
 
   it("读剪贴板失败：不抛错，给一条提示", async () => {
-    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+    (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = "server";
     readText.mockRejectedValue(new Error("no permission"));
     const el = makeTextarea("ab");
     await expect(pasteInto(el)).resolves.toBeUndefined();
@@ -111,7 +111,7 @@ describe("pasteInto", () => {
   });
 
   it("空剪贴板：不改动内容", async () => {
-    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+    (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = "server";
     readText.mockResolvedValue("");
     const el = makeTextarea("ab");
     await pasteInto(el);

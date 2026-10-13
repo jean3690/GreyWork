@@ -12,17 +12,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
-import { invoke } from "@tauri-apps/api/core";
 import type { OfficeProviderConfig } from "@greywork/shell";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+vi.mock("@greywork/host-ipc", async (importOriginal) => ({
+  ...(await importOriginal()),
+  invoke: vi.fn(),
+}));
 
 import PreviewSurface from "@/features/preview/PreviewSurface.vue";
 import { useNoticeStore } from "@/stores/notice";
 import { useSettingsStore } from "@/stores/settings";
 import type { PreviewTab } from "@/stores/preview";
 
-const invokeMock = vi.mocked(invoke);
+const invokeMock = vi.mocked((await import("@greywork/host-ipc")).invoke);
 
 const RECIPE = {
   method: "POST" as const,
@@ -77,13 +79,13 @@ async function settle(): Promise<void> {
   }
 }
 
-function overrideRuntime(mode: "desktop" | "server" | "browser-preview"): void {
+function overrideRuntime(mode: "server" | "browser-preview"): void {
   (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = mode;
 }
 
 /** 桌面态 + 注册 provider + 挂载预览区。 */
 function mountSurface(providers: readonly OfficeProviderConfig[] = [], tab: PreviewTab = docxTab()): VueWrapper {
-  overrideRuntime("desktop");
+  overrideRuntime("server");
   const settings = useSettingsStore();
   for (const entry of providers) settings.upsertServiceProvider(entry);
   return mount(PreviewSurface, { props: { tab } });

@@ -34,9 +34,8 @@ import type {
 } from "./transports";
 import type { PermissionTier } from "./permissions";
 import { boundedPermissionRawInput } from "./permissions";
-import { isTauriRuntime } from "./transports";
 import { hasHostCommands, hostApp } from "@greywork/host-ipc";
-import { TauriIpcTransport } from "./tauri-transport";
+import { HostCommandTransport } from "./host-transport";
 export class RemoteAcpUnsupportedError extends Error {
   constructor(message = "remote ACP WebSocket endpoint is not configured") {
     super(message);
@@ -408,10 +407,9 @@ export function createAcpClient(transport?: AcpTransport): AcpClient {
 }
 
 function defaultTransport(): AcpTransport {
-  return hasHostCommands() ? new TauriIpcTransport() : new WebSocketTransport();
+  return hasHostCommands() ? new HostCommandTransport() : new WebSocketTransport();
 }
 
-export { isTauriRuntime };
 
 /** 桌面端默认工作区目录（用户主目录）；无原生宿主（服务端 / Web）返回 null。 */
 export async function desktopHomeDir(): Promise<string | null> {

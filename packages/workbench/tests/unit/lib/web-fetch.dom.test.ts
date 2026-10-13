@@ -2,14 +2,17 @@
 // URL 归一化；以及 fetchArticle 经宿主抓取后写缓存（mock invoke）。
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
-const invokeMock = vi.mocked((await import("@tauri-apps/api/core")).invoke);
+vi.mock("@greywork/host-ipc", async (importOriginal) => ({
+  ...(await importOriginal()),
+  invoke: vi.fn(),
+}));
+const invokeMock = vi.mocked((await import("@greywork/host-ipc")).invoke);
 
 import { clearWebArticleCache, extractReadable, fetchArticle, getCachedArticle, normalizeUrl } from "@/lib/web-fetch";
 
 beforeEach(() => {
   // DOMParser 来自真实 window，这里只补 Tauri 运行时标记（不能用 stubGlobal 换掉 window）
-  (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
+  (window as unknown as { __TAURI_INTERNALS__?: unknown }).__GREYWORK_RUNTIME__ = "server";
   clearWebArticleCache();
   invokeMock.mockReset();
 });

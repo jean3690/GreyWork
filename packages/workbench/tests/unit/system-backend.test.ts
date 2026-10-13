@@ -4,8 +4,11 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
-const invokeMock = vi.mocked((await import("@tauri-apps/api/core")).invoke);
+vi.mock("@greywork/host-ipc", async (importOriginal) => ({
+  ...(await importOriginal()),
+  invoke: vi.fn(),
+}));
+const invokeMock = vi.mocked((await import("@greywork/host-ipc")).invoke);
 
 import { systemBackend } from "@/lib/system-backend";
 
@@ -28,7 +31,7 @@ describe("system-backend 双态", () => {
 
   beforeEach(() => {
     installLocalStorage();
-    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
+    vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "server" });
     invokeMock.mockReset();
   });
   afterEach(() => {
@@ -74,6 +77,20 @@ describe("system-backend 双态", () => {
     };
     let calls = 0;
     invokeMock.mockImplementation(() => Promise.resolve(++calls === 1 ? snapshot : { trayAvailable: true }));
+    // 有原生壳时 info() 改问壳的自答（bridge.tray.available），这里给一个真 bridge。
+    vi.stubGlobal("window", {
+      __GREYWORK_RUNTIME__: "server",
+      __GREYWORK_SHELL__: {
+        window: {},
+        tray: {
+          available: () => Promise.resolve(true),
+          setCloseToTray: vi.fn(),
+          setLabels: vi.fn(),
+          onNewChat: vi.fn(),
+          onOpenSettings: vi.fn(),
+        },
+      },
+    });
 
     const info = await systemBackend.info();
     expect(info?.trayAvailable).toBe(true);

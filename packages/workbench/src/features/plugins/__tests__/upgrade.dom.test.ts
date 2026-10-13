@@ -11,7 +11,8 @@ import type * as GreyworkCore from "@greywork/core";
 const invokeHandlers: Record<string, (args: Record<string, unknown>) => unknown> = {};
 const invokeCalls: string[] = [];
 
-vi.mock("@tauri-apps/api/core", () => ({
+vi.mock("@greywork/host-ipc", async (importOriginal) => ({
+  ...(await importOriginal()),
   invoke: vi.fn(async (command: string, args: Record<string, unknown>) => {
     invokeCalls.push(command);
     const handler = invokeHandlers[command];
@@ -49,6 +50,7 @@ function installedPackage(id: string, version: string): Record<string, unknown> 
 }
 
 beforeEach(async () => {
+  (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = "server";
   injectStorage();
   setActivePinia(createPinia());
   // jsdom 无 Worker：注入假 worker runtime（升级路径不关心 worker 内部）。

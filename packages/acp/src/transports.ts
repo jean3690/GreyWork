@@ -1,9 +1,4 @@
-/** ACP 传输抽象：desktop 走 Tauri IPC（Rust 主机），web 走远程 WebSocket。 */
-
-import { isTauriRuntime } from "@greywork/core";
-import type { PermissionTier } from "./permissions";
-
-export { isTauriRuntime };
+/** ACP 传输抽象：宿主托管（Electron 壳 / 自托管服务端）走宿主命令，web 走远程 WebSocket。 */
 
 export interface AcpEventEnvelope {
   kind: string;

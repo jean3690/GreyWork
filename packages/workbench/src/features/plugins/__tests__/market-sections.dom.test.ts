@@ -5,13 +5,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as GreyWorkCore from "@greywork/core";
 import { DOMWrapper, flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
-import { invoke } from "@tauri-apps/api/core";
 import McpMarketSection from "@/features/plugins/McpMarketSection.vue";
 import SkillsMarketSection from "@/features/plugins/SkillsMarketSection.vue";
 import { i18n } from "@/i18n";
 import { useSettingsStore } from "@/stores/settings";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+vi.mock("@greywork/host-ipc", async (importOriginal) => ({
+  ...(await importOriginal()),
+  invoke: vi.fn(),
+}));
 vi.mock("@greywork/core", async (importOriginal) => {
   const actual = await importOriginal<typeof GreyWorkCore>();
   return { ...actual, isTauriRuntime: () => true };
@@ -20,7 +22,7 @@ vi.mock("@/lib/workspace-dir", () => ({
   resolveWorkspaceRoot: () => Promise.resolve({ dir: "/ws/proj", bound: true }),
 }));
 
-const invokeMock = vi.mocked(invoke);
+const invokeMock = vi.mocked((await import("@greywork/host-ipc")).invoke);
 const mounted: VueWrapper[] = [];
 
 /** 注册表条目样例（可直登记的 http remote）。 */
@@ -86,6 +88,7 @@ function fakeHost(): void {
 }
 
 beforeEach(() => {
+  (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = "server";
   window.localStorage.clear();
   setActivePinia(createPinia());
   vi.clearAllMocks();

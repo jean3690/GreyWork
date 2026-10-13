@@ -153,15 +153,6 @@ describe("运行时判定接线", () => {
     h.show.mockResolvedValue(undefined);
   });
 
-  it("桌面态零探测：不调 initRuntimeMode，同步挂载", async () => {
-    h.runtimeMode.mockReturnValue("desktop");
-
-    await import("../../src/main");
-
-    expect(h.initRuntimeMode).not.toHaveBeenCalled();
-    expect(document.querySelector("#app")?.childElementCount).toBeGreaterThan(0);
-  });
-
   it("非桌面态：先探测运行时再挂载，探测未回来之前不挂载", async () => {
     h.runtimeMode.mockReturnValue("server");
     let settleRuntime!: (mode: string) => void;

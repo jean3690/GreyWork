@@ -4,8 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
-const invokeMock = vi.mocked((await import("@tauri-apps/api/core")).invoke);
+vi.mock("@greywork/host-ipc", async (importOriginal) => ({
+  ...(await importOriginal()),
+  invoke: vi.fn(),
+}));
+const invokeMock = vi.mocked((await import("@greywork/host-ipc")).invoke);
 
 import { i18n } from "@/i18n";
 import ModeSettingsPane from "@/features/settings/ModeSettingsPane.vue";
@@ -20,7 +23,7 @@ beforeEach(() => {
   setActivePinia(createPinia());
   invokeMock.mockReset();
   // 桌面态：isTauriRuntime() 看 window 上有没有 __TAURI_INTERNALS__。
-  (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
+  (window as unknown as { __TAURI_INTERNALS__?: unknown }).__GREYWORK_RUNTIME__ = "server";
   i18n.global.locale.value = "zh-CN";
   invokeMock.mockImplementation(async (command: string) => (command === "worktree_list" ? [SNAPSHOT] : null));
 });
@@ -118,10 +121,11 @@ describe("ModeSettingsPane · 隔离快照回收", () => {
 
 describe("ModeSettingsPane · 浏览器态", () => {
   it("无宿主：快照面板标只读并禁用释放，不往返 IPC", async () => {
-    delete (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+    // 覆盖 beforeEach 的 server 桩：本 describe 是浏览器态。
+    (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = "browser-preview";
     const wrapper = await render();
 
-    expect(wrapper.text()).toContain("查看与释放需要桌面版（Tauri）");
+    expect(wrapper.text()).toContain("查看与释放需要桌面应用。");
     expect(invokeMock).not.toHaveBeenCalledWith("worktree_list");
     expect(wrapper.findAll('[data-testid="worktree-row"]')).toHaveLength(0);
   });

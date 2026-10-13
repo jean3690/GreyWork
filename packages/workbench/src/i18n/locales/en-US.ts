@@ -1137,7 +1137,7 @@ export const enUS: MessageSchema = {
     mcpRegister: "Register",
     mcpStdioOnly: "stdio / no remote endpoint",
     mcpNoResults: "No matching server",
-    mcpDesktopOnly: "The browser preview has no host commands: browsing the official registry needs the desktop app (Tauri).",
+    mcpDesktopOnly: "The browser preview has no host commands: browsing the official registry needs the desktop app.",
     mcpUnsupportedTransport: "Remote transport {transports} is not supported yet",
     mcpUnsupportedPackages: "Package types {types} cannot be registered in one click (only npm / pypi)",
     mcpNoDraft: "This entry has nothing to register automatically",
@@ -1155,7 +1155,7 @@ export const enUS: MessageSchema = {
     skillsReinstall: "Reinstall",
     skillsInstalls: "{count} installs",
     skillsNoResults: "No matching skill",
-    skillsDesktopOnly: "Read-only in the browser preview: installing and removing need the desktop app (Tauri).",
+    skillsDesktopOnly: "Read-only in the browser preview: installing and removing need the desktop app.",
     skillsSourcesHint:
       "Add or remove sources (and GitHub references) in Settings → Skills; installs are written by the host with path sanitising and size limits.",
     skillsConfirmInstall: 'Install "{name}" into the current workspace? A skill with the same id gets overwritten.',

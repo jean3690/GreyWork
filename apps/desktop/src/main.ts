@@ -1,6 +1,6 @@
 import { createApp, nextTick } from "vue";
 import { createPinia } from "pinia";
-import { hostWindow, initRuntimeMode, runtimeMode } from "@greywork/host-ipc";
+import { hostWindow, initRuntimeMode } from "@greywork/host-ipc";
 import App from "./App.vue";
 import { bootInstalledMarketPlugins, createAppRouter, i18n, initDeviceTier, loadHostSystem } from "@greywork/workbench";
 import "./tailwind.css";
@@ -71,9 +71,9 @@ async function bootstrap(): Promise<void> {
   // 运行时判定：必须在 mount 之前落地 —— AuthGate 与各处守卫都同步读 runtimeMode()，
   // 探测结果晚一步写下来，服务端态就会被误判成 browser-preview（登录门不弹、能力全禁）。
   //
-  // 桌面态在这里零 await 短路：渲染端有 __TAURI_INTERNALS__，同步即可判定，既不探测
-  // /api/health 也不查 /api/session，不给首帧前加任何网络往返。
-  if (runtimeMode() !== "desktop") await initRuntimeMode();
+  // 显式覆盖在 initRuntimeMode 里零 I/O 短路（测试 / 调试注入）；正常启动探测同源
+  // /api/health 与 /api/session，给首帧前加一次本地回环请求（sidecar 场景是毫秒级）。
+  await initRuntimeMode();
 
   mark("mountStart");
   const app = createApp(App).use(i18n).use(createPinia()).use(createAppRouter());

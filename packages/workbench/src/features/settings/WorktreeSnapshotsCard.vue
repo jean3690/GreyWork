@@ -114,7 +114,7 @@ function rootSlug(root: string): string {
     <p class="mb-3 text-[11px] leading-relaxed text-dim2">
       运行模式选 Worktree 时，宿主每轮派生一份快照（git 仓库是真 worktree，普通目录是整目录复制）； agent
       的写入落在快照里，不会回到你的工作区。快照不会自动过期，用完在这里释放。
-      <template v-if="!hostAvailable">浏览器预览态只读：查看与释放需要桌面版（Tauri）。</template>
+      <template v-if="!hostAvailable">浏览器预览态只读：查看与释放需要桌面应用。</template>
     </p>
 
     <p v-if="error" class="mb-2 whitespace-pre-line text-[11px] text-destructive">{{ error }}</p>

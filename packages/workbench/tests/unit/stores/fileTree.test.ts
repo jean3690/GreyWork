@@ -19,7 +19,6 @@ const h = vi.hoisted(() => ({
 
 vi.mock("@greywork/core", async (importOriginal) => ({
   ...(await importOriginal<typeof GreyWorkCore>()),
-  isTauriRuntime: () => h.isTauri(),
 }));
 vi.mock("@/state/workspaceFiles", () => ({
   listDir: (path: string) => h.listDir(path),
@@ -52,7 +51,6 @@ const entry = (name: string, kind: "file" | "directory", parent = "/ws") => ({
 beforeEach(() => {
   setActivePinia(createPinia());
   vi.clearAllMocks();
-  h.isTauri.mockReturnValue(false);
   h.resolveRoot.mockResolvedValue({ dir: "/ws", bound: true });
   h.pickFolder.mockResolvedValue(null);
   h.bindFolder.mockResolvedValue({ moved: 0, missing: [] });
@@ -73,7 +71,7 @@ describe("数据源选择", () => {
   });
 
   it("桌面态载入真实目录第一层，目录排在文件前", async () => {
-    h.isTauri.mockReturnValue(true);
+  vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "server" });
     h.listDir.mockResolvedValue([entry("b.md", "file"), entry("src", "directory"), entry("a.md", "file")]);
 
     const tree = useFileTreeStore();
@@ -86,7 +84,7 @@ describe("数据源选择", () => {
   });
 
   it("根目录读失败：报错文案可见，同时回落 vfs 让面板仍有内容", async () => {
-    h.isTauri.mockReturnValue(true);
+  vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "server" });
     h.listDir.mockRejectedValue(new Error("打开目录失败: permission denied"));
 
     const tree = useFileTreeStore();
@@ -100,7 +98,7 @@ describe("数据源选择", () => {
 
 describe("展开与懒加载", () => {
   it("首次展开才 listDir，再次展开复用已加载的子节点", async () => {
-    h.isTauri.mockReturnValue(true);
+  vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "server" });
     h.listDir.mockResolvedValueOnce([entry("src", "directory")]);
     const tree = useFileTreeStore();
     await tree.refresh();
@@ -122,6 +120,7 @@ describe("展开与懒加载", () => {
   });
 
   it("vfs 模式下展开只切状态，不碰磁盘", async () => {
+    vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "browser-preview" });
     const tree = useFileTreeStore();
     await tree.refresh();
     await tree.toggle("reports");
@@ -130,7 +129,7 @@ describe("展开与懒加载", () => {
   });
 
   it("单个目录读失败：标成空目录并收起，其余节点不受影响", async () => {
-    h.isTauri.mockReturnValue(true);
+  vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "server" });
     h.listDir.mockResolvedValueOnce([entry("locked", "directory"), entry("a.md", "file")]);
     const tree = useFileTreeStore();
     await tree.refresh();
@@ -144,7 +143,7 @@ describe("展开与懒加载", () => {
   });
 
   it("对文件调 toggle 不会去 listDir（只有目录可展开）", async () => {
-    h.isTauri.mockReturnValue(true);
+  vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "server" });
     h.listDir.mockResolvedValueOnce([entry("a.md", "file")]);
     const tree = useFileTreeStore();
     await tree.refresh();
@@ -156,7 +155,7 @@ describe("展开与懒加载", () => {
   it("Windows 反斜杠路径同样能展开：前缀匹配不依赖分隔符", async () => {
     // Rust canonicalize 在 Windows 上回的是 `\\?\C:\ws\src` 这类反斜杠路径；
     // 之前按 `${node.path}/` 拼前缀，findNode 永远找不到节点，点目录没反应。
-    h.isTauri.mockReturnValue(true);
+  vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "server" });
     h.resolveRoot.mockResolvedValue({ dir: "C:\\ws", bound: true });
     h.listDir.mockResolvedValueOnce([{ name: "src", kind: "directory", origin: "C:\\ws\\src" }]);
     const tree = useFileTreeStore();
@@ -173,7 +172,7 @@ describe("展开与懒加载", () => {
 
 describe("工作区文件夹绑定", () => {
   it("兜底目录标记为未绑定：界面据此提示「这不是你的项目目录」", async () => {
-    h.isTauri.mockReturnValue(true);
+  vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "server" });
     h.resolveRoot.mockResolvedValue({ dir: "/home/jean", bound: false });
 
     const tree = useFileTreeStore();
@@ -185,7 +184,7 @@ describe("工作区文件夹绑定", () => {
   });
 
   it("用户在选择框里取消：不绑定、不重载", async () => {
-    h.isTauri.mockReturnValue(true);
+  vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "server" });
     const tree = useFileTreeStore();
     await tree.refresh();
     const callsBefore = h.listDir.mock.calls.length;
@@ -197,7 +196,7 @@ describe("工作区文件夹绑定", () => {
   });
 
   it("选中文件夹：绑到当前激活工作区并重载树", async () => {
-    h.isTauri.mockReturnValue(true);
+  vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "server" });
     h.pickFolder.mockResolvedValue("/data/project");
     h.resolveRoot.mockResolvedValue({ dir: "/data/project", bound: true });
 
@@ -223,7 +222,7 @@ describe("工作区文件夹绑定", () => {
 describe("文件树增删改", () => {
   /** 桌面态 + 一层目录（src/ 与 a.md）。 */
   async function diskTree() {
-    h.isTauri.mockReturnValue(true);
+  vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "server" });
     h.listDir.mockResolvedValueOnce([entry("src", "directory"), entry("a.md", "file")]);
     const tree = useFileTreeStore();
     await tree.refresh();
@@ -320,6 +319,7 @@ describe("文件树增删改", () => {
   });
 
   it("vfs 模式：增删改直接拒绝（宿主命令只认授权根）", async () => {
+    vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "browser-preview" });
     const tree = useFileTreeStore();
     await tree.refresh(); // 浏览器态 → vfs
     expect(tree.mode).toBe("vfs");

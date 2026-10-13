@@ -1,8 +1,4 @@
-/** LLM 直连传输抽象：desktop 走 Tauri IPC（Rust 宿主 reqwest），web 无直连通道。 */
-
-import { isTauriRuntime } from "@greywork/core";
-
-export { isTauriRuntime };
+/** LLM 直连传输抽象：宿主托管（Electron 壳 / 自托管服务端）走宿主命令，web 无直连通道。 */
 
 export interface LlmEventEnvelope {
   kind: "llm-delta" | "llm-thinking-delta" | "llm-done" | "llm-error" | "llm-tool-call" | "llm-tool-result";

@@ -6,7 +6,6 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
-import { isTauriRuntime } from "@greywork/core";
 import type * as GreyWorkCore from "@greywork/core";
 
 const h = vi.hoisted(() => ({
@@ -17,10 +16,12 @@ const h = vi.hoisted(() => ({
 
 vi.mock("@/lib/conversation-folder", () => ({ activeConversationFolder: () => h.conversationFolder() }));
 vi.mock("@/lib/artifact-dir", () => ({ activeWorkspaceFolder: () => h.workspaceFolder() }));
-vi.mock("@tauri-apps/api/core", () => ({ invoke: (...args: unknown[]) => h.invoke(...args) }));
+vi.mock("@greywork/host-ipc", async (importOriginal) => ({
+  ...(await importOriginal()),
+  invoke: (...args: unknown[]) => h.invoke(...args),
+}));
 vi.mock("@greywork/core", async (importOriginal) => ({
   ...(await importOriginal<typeof GreyWorkCore>()),
-  isTauriRuntime: vi.fn(),
 }));
 
 import { resolveWorkspaceRoot } from "@/lib/workspace-dir";
@@ -32,7 +33,7 @@ beforeEach(() => {
   h.conversationFolder.mockReturnValue(null);
   h.workspaceFolder.mockReturnValue(null);
   h.invoke.mockResolvedValue("/home/jean/.greyWork");
-  vi.mocked(isTauriRuntime).mockReturnValue(true);
+  vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "server" });
 });
 
 describe("resolveWorkspaceRoot", () => {
@@ -62,7 +63,7 @@ describe("resolveWorkspaceRoot", () => {
   });
 
   it("浏览器态没有本机工作区时抛错，而不是返回伪路径", async () => {
-    vi.mocked(isTauriRuntime).mockReturnValue(false);
+    vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "browser-preview" });
     await expect(resolveWorkspaceRoot()).rejects.toThrow();
     expect(h.invoke).not.toHaveBeenCalled();
   });

@@ -12,13 +12,18 @@ import type * as GreyworkCore from "@greywork/core";
 const invokeHandlers: Record<string, (args: Record<string, unknown>) => unknown> = {};
 const invokeCalls: string[] = [];
 
-vi.mock("@tauri-apps/api/core", () => ({
-  invoke: vi.fn(async (command: string, args: Record<string, unknown>) => {
+const invokeMock = vi.hoisted(() =>
+  vi.fn(async (command: string, args: Record<string, unknown>) => {
     invokeCalls.push(command);
     const handler = invokeHandlers[command];
     if (!handler) throw new Error(`no mock for command: ${command}`);
     return handler(args);
   }),
+);
+
+vi.mock("@greywork/host-ipc", async (importOriginal) => ({
+  ...(await importOriginal()),
+  invoke: invokeMock,
 }));
 
 vi.mock("@greywork/core", async (importOriginal) => {
@@ -50,6 +55,17 @@ function installedPackage(id: string, version: string): Record<string, unknown> 
 
 beforeEach(async () => {
   injectStorage();
+  // 桌面态 = 宿主托管：bootInstalledMarketPlugins 的闸门是 hasHostCommands()。
+  (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = "server";
+  // 悬浮窗回收走 bridge.plugins（Electron 主进程托管窗口）——桩方法路由回 invoke 记录。
+  (window as unknown as Record<string, unknown>).__GREYWORK_SHELL__ = {
+    window: {},
+    plugins: {
+      notify: (request: unknown) => invokeMock("plugin_notify", { request } as Record<string, unknown>),
+      openWindow: (pluginId: string) => invokeMock("plugin_window_open", { pluginId } as Record<string, unknown>),
+      closeWindow: (pluginId: string) => invokeMock("plugin_window_close", { pluginId } as Record<string, unknown>),
+    },
+  };
   setActivePinia(createPinia());
   const market = await import("@/plugins/market");
   market.setCodePluginRuntimeFactoryForTest(() => ({

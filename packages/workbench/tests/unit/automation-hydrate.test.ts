@@ -8,11 +8,12 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
-import { invoke } from "@tauri-apps/api/core";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
-const invokeMock = vi.mocked(invoke);
-vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn().mockResolvedValue(() => {}) }));
+vi.mock("@greywork/host-ipc", async (importOriginal) => ({
+  ...(await importOriginal()),
+  invoke: vi.fn(),
+}));
+const invokeMock = vi.mocked((await import("@greywork/host-ipc")).invoke);
 
 import { useAutomationStore } from "../../src/stores/automation";
 import { useAgentStore } from "../../src/stores/agent";
@@ -77,7 +78,7 @@ const dbTasks = [
 describe("automation store 桌面接管（SQLite 真源）", () => {
   beforeEach(() => {
     installLocalStorage();
-    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
+    vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "server" });
     invokeMock.mockReset();
     setActivePinia(createPinia());
   });
@@ -173,7 +174,7 @@ describe("automation 到期队列消费（consumeDue）", () => {
 
   beforeEach(() => {
     installLocalStorage();
-    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
+    vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "server" });
     invokeMock.mockReset();
     setActivePinia(createPinia());
     queue = [

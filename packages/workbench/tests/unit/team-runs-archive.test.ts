@@ -41,9 +41,11 @@ vi.mock("@greywork/acp", () => ({
   desktopHomeDir: () => h.homeDir(),
 }));
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
-const invokeMock = vi.mocked((await import("@tauri-apps/api/core")).invoke);
-vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn().mockResolvedValue(() => {}) }));
+vi.mock("@greywork/host-ipc", async (importOriginal) => ({
+  ...(await importOriginal()),
+  invoke: vi.fn(),
+}));
+const invokeMock = vi.mocked((await import("@greywork/host-ipc")).invoke);
 
 import { useRunsStore } from "@/stores/runs";
 
@@ -166,7 +168,7 @@ describe("agent 编排存档（桌面态：SQLite 真源）", () => {
   beforeEach(() => {
     installLocalStorage();
     vi.useFakeTimers();
-    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
+    vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "server" });
     setActivePinia(createPinia());
     h.isAvailable.mockImplementation(() => false);
     h.listener = null;

@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import type * as GreyworkCore from "@greywork/core";
 
 const mocks = vi.hoisted(() => ({
-  isTauriRuntime: vi.fn<() => boolean>(() => false),
   pluginWriteText: vi.fn(() => Promise.resolve()),
   pluginReadText: vi.fn(() => Promise.resolve("")),
   invoke: vi.fn<(command: string, ...args: unknown[]) => Promise<unknown>>(() => Promise.resolve()),
@@ -28,16 +27,6 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@greywork/core", async (importOriginal) => ({
   ...(await importOriginal<typeof GreyworkCore>()),
-  isTauriRuntime: mocks.isTauriRuntime,
-}));
-vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => mocks.tauriWindow }));
-vi.mock("@tauri-apps/api/webview", () => ({ getCurrentWebview: () => ({ onDragDropEvent: mocks.onDragDropEvent }) }));
-vi.mock("@tauri-apps/api/app", () => ({ getVersion: () => mocks.getVersion() }));
-vi.mock("@tauri-apps/api/path", () => ({ homeDir: () => mocks.homeDir() }));
-vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({
-  writeText: mocks.pluginWriteText,
-  readText: mocks.pluginReadText,
-  readImage: () => mocks.readImage(),
 }));
 vi.mock("../../src/invoke", () => ({ invoke: mocks.invoke }));
 vi.mock("../../src/events", () => ({ listen: mocks.listen }));
@@ -69,7 +58,6 @@ function stubElectron(clipboard: ClipboardBridge | null): void {
 }
 
 beforeEach(() => {
-  mocks.isTauriRuntime.mockReset().mockReturnValue(false);
   mocks.pluginWriteText.mockClear();
   mocks.pluginReadText.mockClear();
   mocks.invoke.mockReset().mockResolvedValue(undefined);
@@ -97,11 +85,6 @@ beforeEach(() => {
 });
 
 describe("hasWindowControls", () => {
-  it("Tauri 运行时为真", () => {
-    mocks.isTauriRuntime.mockReturnValue(true);
-    vi.stubGlobal("window", {});
-    expect(hasWindowControls()).toBe(true);
-  });
 
   it("Electron bridge 存在为真", () => {
     stubElectron({ writeText: vi.fn(), readText: vi.fn(), readImagePng: vi.fn() });
@@ -129,14 +112,6 @@ describe("hostClipboard 按运行时选后端", () => {
     expect(mocks.pluginWriteText).not.toHaveBeenCalled();
   });
 
-  it("Tauri：走插件（WebKit 下 Web API 静默丢字）", async () => {
-    mocks.isTauriRuntime.mockReturnValue(true);
-    vi.stubGlobal("window", {});
-
-    await hostClipboard().writeText("hi");
-
-    expect(mocks.pluginWriteText).toHaveBeenCalledWith("hi");
-  });
 
   it("浏览器态：走 Web API，不碰插件", async () => {
     const writeText = vi.fn(() => Promise.resolve());
@@ -193,51 +168,10 @@ describe("hostBrowser 按运行时选后端", () => {
   });
 
   // 命令名 / 参数名必须和宿主 browser.rs 的 browser_* 一一对应，漂移了只有运行时才炸。
-  it("Tauri：rect 拆成 x/y/width/height，命令名对齐宿主", async () => {
-    mocks.isTauriRuntime.mockReturnValue(true);
-    vi.stubGlobal("window", {});
-    const host = hostBrowser();
 
-    await host?.open("https://e.com", { x: 10.5, y: 0, width: 480, height: 300 });
-    expect(mocks.invoke).toHaveBeenCalledWith("browser_open", { url: "https://e.com", x: 10.5, y: 0, width: 480, height: 300 });
-
-    await host?.setBounds({ x: 0, y: 0, width: 100, height: 100 });
-    expect(mocks.invoke).toHaveBeenCalledWith("browser_set_bounds", { x: 0, y: 0, width: 100, height: 100 });
-
-    await host?.setVisible(false);
-    expect(mocks.invoke).toHaveBeenCalledWith("browser_set_visible", { visible: false });
-
-    await host?.navigate("https://e.com/b");
-    expect(mocks.invoke).toHaveBeenCalledWith("browser_navigate", { url: "https://e.com/b" });
-  });
-
-  it("Tauri：back/forward/reload/stop/close 为无参命令", async () => {
-    mocks.isTauriRuntime.mockReturnValue(true);
-    vi.stubGlobal("window", {});
-    const host = hostBrowser();
-
-    await host?.back();
-    await host?.forward();
-    await host?.reload();
-    await host?.stop();
-    await host?.close();
-
-    expect(mocks.invoke.mock.calls.map(([command]) => command)).toEqual([
-      "browser_back",
-      "browser_forward",
-      "browser_reload",
-      "browser_stop",
-      "browser_close",
-    ]);
-  });
 });
 
 describe("hasNativeShell（桌面专属命令的守卫）", () => {
-  it("Tauri 为真", () => {
-    mocks.isTauriRuntime.mockReturnValue(true);
-    vi.stubGlobal("window", {});
-    expect(hasNativeShell()).toBe(true);
-  });
 
   it("Electron bridge 存在为真", () => {
     stubElectron({ writeText: vi.fn(), readText: vi.fn(), readImagePng: vi.fn() });
@@ -259,15 +193,6 @@ describe("hostWindow 按运行时选后端", () => {
     await expect(host?.scaleFactor()).resolves.toBe(3);
   });
 
-  it("Tauri：show / scaleFactor 委派 getCurrentWindow", async () => {
-    mocks.isTauriRuntime.mockReturnValue(true);
-    vi.stubGlobal("window", {});
-    const host = hostWindow();
-    await host?.show();
-    await expect(host?.scaleFactor()).resolves.toBe(2);
-    expect(mocks.tauriWindow.show).toHaveBeenCalledTimes(1);
-    expect(mocks.tauriWindow.scaleFactor).toHaveBeenCalledTimes(1);
-  });
 });
 
 describe("hostApp 应用面", () => {
@@ -287,15 +212,6 @@ describe("hostApp 应用面", () => {
     expect(openPath).toHaveBeenCalledWith("/a/b");
   });
 
-  it("Tauri：revealPath / openPath 走宿主命令", async () => {
-    mocks.isTauriRuntime.mockReturnValue(true);
-    vi.stubGlobal("window", {});
-    const app = hostApp();
-    await app?.revealPath("/a/b");
-    await app?.openPath("/a/b");
-    expect(mocks.invoke).toHaveBeenCalledWith("reveal_path", { path: "/a/b" });
-    expect(mocks.invoke).toHaveBeenCalledWith("open_path", { path: "/a/b" });
-  });
 });
 
 describe("hostDragDrop", () => {
@@ -306,23 +222,6 @@ describe("hostDragDrop", () => {
     expect(hostDragDrop()).toBeNull();
   });
 
-  it("Tauri：包 onDragDropEvent 并把无 paths 的变体归一为空数组", async () => {
-    mocks.isTauriRuntime.mockReturnValue(true);
-    vi.stubGlobal("window", {});
-    mocks.onDragDropEvent.mockImplementation((handler) => {
-      handler({ payload: { type: "drop", position: { x: 1, y: 2 }, paths: ["/a"] } });
-      handler({ payload: { type: "over", position: { x: 3, y: 4 } } });
-      return Promise.resolve(() => {});
-    });
-
-    const payloads: unknown[] = [];
-    await hostDragDrop()?.onDragDrop((payload) => payloads.push(payload));
-
-    expect(payloads).toEqual([
-      { type: "drop", position: { x: 1, y: 2 }, paths: ["/a"] },
-      { type: "over", position: { x: 3, y: 4 }, paths: [] },
-    ]);
-  });
 });
 
 describe("authorizeDroppedPaths", () => {
@@ -340,12 +239,6 @@ describe("authorizeDroppedPaths", () => {
     expect(mocks.invoke).not.toHaveBeenCalled();
   });
 
-  it("桌面态：Tauri 已在 Rust 侧授权，不发命令（发了只会撞未知命令）", async () => {
-    mocks.isTauriRuntime.mockReturnValue(true);
-    vi.stubGlobal("window", {});
-    await authorizeDroppedPaths(["/tmp/a.txt"]);
-    expect(mocks.invoke).not.toHaveBeenCalled();
-  });
 
   it("浏览器预览态：静默跳过（此态也拿不到磁盘路径）", async () => {
     vi.stubGlobal("window", {});
@@ -418,31 +311,14 @@ describe("hostPicker 按运行时选后端", () => {
     expect(mocks.invoke).not.toHaveBeenCalled();
   });
 
-  it("Tauri：走 fs_pick_files / pick_workspace_folder 命令", async () => {
-    mocks.isTauriRuntime.mockReturnValue(true);
-    vi.stubGlobal("window", {});
-    const picker = hostPicker();
-
-    mocks.invoke.mockResolvedValueOnce(["/p"]);
-    await expect(picker?.pickFiles({ purpose: "workspace", multiple: false })).resolves.toEqual(["/p"]);
-    expect(mocks.invoke).toHaveBeenCalledWith("fs_pick_files", { purpose: "workspace", multiple: false });
-
-    await picker?.pickWorkspaceFolder();
-    expect(mocks.invoke).toHaveBeenCalledWith("pick_workspace_folder");
-  });
 });
 
 describe("hostNotify 系统通知面", () => {
-  it("无原生壳返回 null（Tauri 侧由 Rust 直接发通知，事件不进渲染端）", () => {
+  it("无原生壳返回 null（无桥即无通知面）", () => {
     vi.stubGlobal("window", {});
     expect(hostNotify()).toBeNull();
   });
 
-  it("Tauri 也返回 null：bridge 不存在", () => {
-    mocks.isTauriRuntime.mockReturnValue(true);
-    vi.stubGlobal("window", {});
-    expect(hostNotify()).toBeNull();
-  });
 
   it("Electron：委派 bridge.notify.system，文案原样不加前缀", async () => {
     const system = vi.fn(() => Promise.resolve());
@@ -476,21 +352,6 @@ describe("hostPlugins 按运行时选后端", () => {
     expect(closeWindow).toHaveBeenCalledWith("p");
   });
 
-  it("Tauri：走 plugin_notify / plugin_window_* 命令", async () => {
-    mocks.isTauriRuntime.mockReturnValue(true);
-    vi.stubGlobal("window", {});
-    const plugins = hostPlugins();
-
-    mocks.invoke.mockResolvedValueOnce({ title: "[p] t", body: "b" });
-    await plugins?.notify({ pluginId: "p", title: "t", body: "b" });
-    expect(mocks.invoke).toHaveBeenCalledWith("plugin_notify", { request: { pluginId: "p", title: "t", body: "b" } });
-
-    await plugins?.openWindow("p");
-    expect(mocks.invoke).toHaveBeenCalledWith("plugin_window_open", { pluginId: "p" });
-
-    await plugins?.closeWindow("p");
-    expect(mocks.invoke).toHaveBeenCalledWith("plugin_window_close", { pluginId: "p" });
-  });
 });
 
 describe("hostWindow 各控制方法", () => {
@@ -529,43 +390,7 @@ describe("hostWindow 各控制方法", () => {
     expect(hostWindow()).toBeNull();
   });
 
-  it("Tauri：窗口控制委派 getCurrentWindow", async () => {
-    mocks.isTauriRuntime.mockReturnValue(true);
-    vi.stubGlobal("window", {});
-    const host = hostWindow();
-    await host?.minimize();
-    await host?.toggleMaximize();
-    await host?.close();
-    await expect(host?.isMaximized()).resolves.toBe(false);
-    await host?.startDragging();
-    expect(mocks.tauriWindow.minimize).toHaveBeenCalledTimes(1);
-    expect(mocks.tauriWindow.startDragging).toHaveBeenCalledTimes(1);
-  });
 
-  it("Tauri：onResized / onFocusChanged 归一事件载荷", async () => {
-    mocks.isTauriRuntime.mockReturnValue(true);
-    vi.stubGlobal("window", {});
-    let resized: (() => void) | undefined;
-    let focus: ((event: { payload: boolean }) => void) | undefined;
-    mocks.tauriWindow.onResized.mockImplementation((cb) => {
-      resized = cb;
-      return Promise.resolve(() => {});
-    });
-    mocks.tauriWindow.onFocusChanged.mockImplementation((cb) => {
-      focus = cb;
-      return Promise.resolve(() => {});
-    });
-
-    const host = hostWindow();
-    const onResized = vi.fn();
-    const onFocus = vi.fn();
-    await host?.onResized(onResized);
-    await host?.onFocusChanged(onFocus);
-    resized?.();
-    focus?.({ payload: true });
-    expect(onResized).toHaveBeenCalledTimes(1);
-    expect(onFocus).toHaveBeenCalledWith(true);
-  });
 });
 
 describe("closeGuardHost 按运行时选后端", () => {
@@ -596,39 +421,6 @@ describe("closeGuardHost 按运行时选后端", () => {
     expect(w.onExitRequested).toHaveBeenCalledTimes(1);
   });
 
-  it("Tauri：走宿主命令，且 onCloseRequested 一律拦下", async () => {
-    mocks.isTauriRuntime.mockReturnValue(true);
-    vi.stubGlobal("window", {});
-    let closeCb: ((event: { preventDefault: () => void }) => void) | undefined;
-    mocks.tauriWindow.onCloseRequested.mockImplementation((cb) => {
-      closeCb = cb;
-      return Promise.resolve(() => {});
-    });
-    const guard = closeGuardHost();
-
-    await guard?.syncUnsavedChanges(false);
-    expect(mocks.invoke).toHaveBeenCalledWith("set_unsaved_changes", { unsaved: false });
-    await guard?.requestClose();
-    expect(mocks.invoke).toHaveBeenCalledWith("close_main_window");
-    await guard?.confirmExit();
-    expect(mocks.invoke).toHaveBeenCalledWith("confirm_exit");
-
-    const handler = vi.fn();
-    await guard?.onCloseRequested(handler);
-    const preventDefault = vi.fn();
-    closeCb?.({ preventDefault });
-    expect(preventDefault).toHaveBeenCalledTimes(1);
-    expect(handler).toHaveBeenCalledTimes(1);
-
-    let exitHandler: (() => void) | undefined;
-    mocks.listen.mockImplementation((_event: string, cb: () => void) => {
-      exitHandler = cb;
-      return Promise.resolve(() => {});
-    });
-    await guard?.onExitRequested(handler);
-    exitHandler?.();
-    expect(handler).toHaveBeenCalledTimes(2);
-  });
 });
 
 describe("hostClipboard 读写图片/文本", () => {
@@ -641,14 +433,6 @@ describe("hostClipboard 读写图片/文本", () => {
     await expect(clip.readImagePng()).resolves.toEqual(new Uint8Array([1, 2]));
   });
 
-  it("Tauri：readText 走插件；readImagePng 在无 document 时返回 null", async () => {
-    mocks.isTauriRuntime.mockReturnValue(true);
-    vi.stubGlobal("window", {});
-    const clip = hostClipboard();
-    await expect(clip.readText()).resolves.toBe("");
-    await expect(clip.readImagePng()).resolves.toBeNull();
-    expect(mocks.pluginReadText).toHaveBeenCalledTimes(1);
-  });
 
   it("浏览器态：readText 走 Web API，readImagePng 无 read 时返回 null", async () => {
     const readText = vi.fn(() => Promise.resolve("web"));
@@ -659,35 +443,7 @@ describe("hostClipboard 读写图片/文本", () => {
     await expect(clip.readImagePng()).resolves.toBeNull();
   });
 
-  it("Tauri：readImagePng 把 RGBA 编码成 PNG", async () => {
-    mocks.isTauriRuntime.mockReturnValue(true);
-    vi.stubGlobal("window", {});
-    // node 环境没有 canvas / ImageData：用最小替身走通 RGBA→PNG 编码分支。
-    vi.stubGlobal("ImageData", class {});
-    const png = new Uint8Array([1, 2, 3]);
-    vi.stubGlobal("document", {
-      createElement: () => ({
-        width: 0,
-        height: 0,
-        getContext: () => ({ putImageData: () => undefined }),
-        toBlob: (resolve: (blob: Blob | null) => void) => resolve(new Blob([png], { type: "image/png" })),
-      }),
-    });
-    mocks.readImage.mockResolvedValue({
-      size: () => Promise.resolve({ width: 1, height: 1 }),
-      rgba: () => Promise.resolve(new Uint8Array(4)),
-    });
 
-    await expect(hostClipboard().readImagePng()).resolves.toEqual(png);
-  });
-
-  it("Tauri：读取剪贴板图片失败时返回 null", async () => {
-    mocks.isTauriRuntime.mockReturnValue(true);
-    vi.stubGlobal("window", {});
-    vi.stubGlobal("document", { createElement: () => ({}) });
-    mocks.readImage.mockRejectedValue(new Error("no image"));
-    await expect(hostClipboard().readImagePng()).resolves.toBeNull();
-  });
 
   it("浏览器态：readImagePng 经 clipboard.read 取图像项", async () => {
     const png = new Uint8Array([9]);
@@ -741,17 +497,6 @@ describe("hostApp 版本 / 主目录 / 外链 / 拖入路径", () => {
     expect(hostApp()?.pathForDroppedFile(new File([], "f"))).toBeNull();
   });
 
-  it("Tauri：version/homeDir 走 JS API，外链走命令，拖入路径恒 null", async () => {
-    mocks.isTauriRuntime.mockReturnValue(true);
-    vi.stubGlobal("window", {});
-    const host = hostApp();
-    expect(host).not.toBeNull();
-    await expect(host?.version()).resolves.toBe("1.2.3");
-    await expect(host?.homeDir()).resolves.toBe("/home/tauri");
-    await host?.openExternal("https://e.com");
-    expect(mocks.invoke).toHaveBeenCalledWith("open_external", { url: "https://e.com" });
-    expect(host?.pathForDroppedFile(new File([], "f"))).toBeNull();
-  });
 });
 
 describe("hostTray 按运行时选后端", () => {
@@ -784,44 +529,7 @@ describe("hostTray 按运行时选后端", () => {
     expect(offSettings).toHaveBeenCalledTimes(1);
   });
 
-  it("Tauri：available 读 sys_info 如实回报，命令 + 事件走宿主", async () => {
-    mocks.isTauriRuntime.mockReturnValue(true);
-    vi.stubGlobal("window", {});
-    const tray = hostTray();
 
-    // 托盘是 Rust 建的，可用性只有那侧知道 —— 这里必须如实回报，不能乐观为真：
-    // 托盘建不出来的机器上，消费方（设置页）会把它当成「可用」。
-    mocks.invoke.mockResolvedValueOnce({ trayAvailable: false });
-    await expect(tray?.available()).resolves.toBe(false);
-    expect(mocks.invoke).toHaveBeenCalledWith("sys_info");
-
-    await tray?.setCloseToTray(false);
-    expect(mocks.invoke).toHaveBeenCalledWith("set_close_to_tray", { enabled: false });
-    const labels = { toggleWindow: "a", newChat: "b", settings: "c", quit: "d", hiddenHint: "e" };
-    await tray?.setLabels(labels);
-    expect(mocks.invoke).toHaveBeenCalledWith("set_tray_labels", { labels });
-
-    const newChat = vi.fn();
-    const openSettings = vi.fn();
-    const listeners = new Map<string, () => void>();
-    mocks.listen.mockImplementation((event: string, cb: () => void) => {
-      listeners.set(event, cb);
-      return Promise.resolve(() => {});
-    });
-    const off = await tray?.onEvent({ newChat, openSettings });
-    listeners.get("tray:new-chat")?.();
-    listeners.get("tray:open-settings")?.();
-    expect(newChat).toHaveBeenCalledTimes(1);
-    expect(openSettings).toHaveBeenCalledTimes(1);
-    off?.();
-  });
-
-  it("Tauri：sys_info 没报 trayAvailable 时（老宿主）不至误判为不可用", async () => {
-    mocks.isTauriRuntime.mockReturnValue(true);
-    vi.stubGlobal("window", {});
-    mocks.invoke.mockResolvedValueOnce({ version: "1.0.0" });
-    await expect(hostTray()?.available()).resolves.toBe(true);
-  });
 });
 
 describe("hostBrowser onState 订阅", () => {
@@ -860,18 +568,4 @@ describe("hostBrowser onState 订阅", () => {
     expect(onState).toHaveBeenCalledWith(handler);
   });
 
-  it("Tauri：listen browser:state 并解包 payload", async () => {
-    mocks.isTauriRuntime.mockReturnValue(true);
-    vi.stubGlobal("window", {});
-    let cb: ((event: { payload: unknown }) => void) | undefined;
-    mocks.listen.mockImplementation((_event: string, handler: (event: { payload: unknown }) => void) => {
-      cb = handler;
-      return Promise.resolve(() => {});
-    });
-    const handler = vi.fn();
-    await hostBrowser()?.onState(handler);
-    const state = { url: "https://e.com", title: "t", loading: false, canGoBack: false, canGoForward: false };
-    cb?.({ payload: state });
-    expect(handler).toHaveBeenCalledWith(state);
-  });
 });

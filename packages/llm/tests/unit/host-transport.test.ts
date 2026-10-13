@@ -5,20 +5,16 @@ const h = vi.hoisted(() => ({
   invoke: vi.fn(),
 }));
 
-vi.mock("@tauri-apps/api/core", () => ({
+vi.mock("@greywork/host-ipc", () => ({
   invoke: (cmd: string, args?: unknown) => h.invoke(cmd, args),
 }));
-vi.mock("@tauri-apps/api/event", () => ({
-  listen: vi.fn(() => Promise.resolve(() => undefined)),
-}));
+import { HostLlmTransport } from "../../src/host-transport";
 
-import { TauriLlmTransport } from "../../src/tauri-transport";
-
-describe("TauriLlmTransport", () => {
+describe("HostLlmTransport", () => {
   it("chat 透传 reasoningEffort 到 llm_chat_start", async () => {
     h.invoke.mockResolvedValue(7);
-    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
-    const transport = new TauriLlmTransport();
+    vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "server" });
+    const transport = new HostLlmTransport();
     const id = await transport.chat({
       baseUrl: "https://api.example.com",
       model: "gpt-test",
@@ -45,8 +41,8 @@ describe("TauriLlmTransport", () => {
 
   it("reasoningEffort 缺省时传空字符串（宿主按 auto 处理）", async () => {
     h.invoke.mockResolvedValue(1);
-    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
-    const transport = new TauriLlmTransport();
+    vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "server" });
+    const transport = new HostLlmTransport();
     await transport.chat({ baseUrl: "https://x", model: "m", messages: [] });
     expect(h.invoke).toHaveBeenCalledWith("llm_chat_start", {
       baseUrl: "https://x",
@@ -64,16 +60,16 @@ describe("TauriLlmTransport", () => {
 
   it("采样参数显式设置时原样上行", async () => {
     h.invoke.mockResolvedValue(5);
-    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
-    const transport = new TauriLlmTransport();
+    vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "server" });
+    const transport = new HostLlmTransport();
     await transport.chat({ baseUrl: "https://x", model: "m", messages: [], temperature: 0.2, maxTokens: 512 });
     expect(h.invoke).toHaveBeenCalledWith("llm_chat_start", expect.objectContaining({ temperature: 0.2, maxTokens: 512 }));
     vi.unstubAllGlobals();
   });
 
   it("listModels / embed / transcribe 打到对应宿主命令", async () => {
-    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
-    const transport = new TauriLlmTransport();
+    vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "server" });
+    const transport = new HostLlmTransport();
 
     h.invoke.mockResolvedValueOnce(["m1", "m2"]);
     await expect(transport.listModels({ baseUrl: "http://localhost:11434" })).resolves.toEqual(["m1", "m2"]);
@@ -108,8 +104,8 @@ describe("TauriLlmTransport", () => {
 
   it("自定义请求头原样上行（{{ENV}} 占位由宿主解析）", async () => {
     h.invoke.mockResolvedValue(3);
-    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
-    const transport = new TauriLlmTransport();
+    vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "server" });
+    const transport = new HostLlmTransport();
     await transport.chat({
       baseUrl: "https://x",
       model: "m",
@@ -125,8 +121,8 @@ describe("TauriLlmTransport", () => {
 
   it("clientToken 原样上行（并行流靠它分流）", async () => {
     h.invoke.mockResolvedValue(2);
-    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
-    const transport = new TauriLlmTransport();
+    vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "server" });
+    const transport = new HostLlmTransport();
     await transport.chat({ baseUrl: "https://x", model: "m", messages: [], clientToken: "turn-1" });
     expect(h.invoke).toHaveBeenCalledWith("llm_chat_start", expect.objectContaining({ clientToken: "turn-1" }));
     vi.unstubAllGlobals();
@@ -134,8 +130,8 @@ describe("TauriLlmTransport", () => {
 
   it("agentRun 打到 llm_agent_start，参数形状与 chat 一致外加 maxRounds", async () => {
     h.invoke.mockResolvedValue(9);
-    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
-    const transport = new TauriLlmTransport();
+    vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "server" });
+    const transport = new HostLlmTransport();
     const id = await transport.agentRun({
       baseUrl: "http://localhost:11434",
       model: "qwen2.5",
@@ -161,8 +157,8 @@ describe("TauriLlmTransport", () => {
 
   it("agentRun 缺省 maxRounds 传 null（宿主取自己的默认值并硬夹上限）", async () => {
     h.invoke.mockResolvedValue(1);
-    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
-    const transport = new TauriLlmTransport();
+    vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "server" });
+    const transport = new HostLlmTransport();
     await transport.agentRun({ baseUrl: "http://x", model: "m", messages: [] });
     expect(h.invoke).toHaveBeenCalledWith("llm_agent_start", expect.objectContaining({ maxRounds: null }));
     vi.unstubAllGlobals();
@@ -170,8 +166,8 @@ describe("TauriLlmTransport", () => {
 
   it("stopAgent 打到 llm_agent_stop（与 stop 是不同的宿主句柄表）", async () => {
     h.invoke.mockResolvedValue(undefined);
-    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
-    const transport = new TauriLlmTransport();
+    vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "server" });
+    const transport = new HostLlmTransport();
     await transport.stopAgent(9);
     expect(h.invoke).toHaveBeenCalledWith("llm_agent_stop", { requestId: 9 });
     vi.unstubAllGlobals();

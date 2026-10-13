@@ -7,8 +7,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
-const invokeMock = vi.mocked((await import("@tauri-apps/api/core")).invoke);
+vi.mock("@greywork/host-ipc", async (importOriginal) => ({
+  ...(await importOriginal()),
+  invoke: vi.fn(),
+}));
+const invokeMock = vi.mocked((await import("@greywork/host-ipc")).invoke);
 
 import { i18n } from "@/i18n";
 import SystemSettingsPane from "@/features/settings/SystemSettingsPane.vue";
@@ -36,7 +39,7 @@ beforeEach(() => {
   window.localStorage.clear();
   setActivePinia(createPinia());
   invokeMock.mockReset();
-  (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
+  (window as unknown as { __TAURI_INTERNALS__?: unknown }).__GREYWORK_RUNTIME__ = "server";
   i18n.global.locale.value = "zh-CN";
 });
 
@@ -47,7 +50,15 @@ afterEach(() => {
 });
 
 async function render(info: boolean | "browser" | Record<string, unknown> = true): Promise<VueWrapper> {
-  if (info === "browser") delete (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+  const w = window as unknown as Record<string, unknown>;
+  if (info === "browser") {
+    w.__GREYWORK_RUNTIME__ = "browser-preview";
+    delete w.__GREYWORK_SHELL__;
+  } else {
+    // 桌面态 = Electron 壳：关于卡的「桌面应用」标签读 hasNativeShell()（bridge 判定）。
+    w.__GREYWORK_RUNTIME__ = "server";
+    w.__GREYWORK_SHELL__ = { window: {} };
+  }
   invokeMock.mockImplementation(async (command: string) =>
     command === "sys_info" ? sysInfo(typeof info === "object" ? info : { trayAvailable: info === true }) : null,
   );

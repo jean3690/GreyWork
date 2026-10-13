@@ -4,10 +4,14 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { invoke } from "@tauri-apps/api/core";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
-const invokeMock = vi.mocked(invoke);
+const bridge = vi.hoisted(() => ({ revealPath: vi.fn() }));
+
+vi.mock("@greywork/host-ipc", async (importOriginal) => ({
+  ...(await importOriginal()),
+  invoke: vi.fn(),
+}));
+const invokeMock = vi.mocked((await import("@greywork/host-ipc")).invoke);
 
 import { revealInFolder } from "../../../src/lib/reveal";
 
@@ -22,19 +26,22 @@ describe("revealInFolder", () => {
     expect(invokeMock).not.toHaveBeenCalled();
   });
 
-  describe("桌面态", () => {
+  describe("桌面态（Electron bridge）", () => {
     beforeEach(() => {
-      vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
+      vi.stubGlobal("window", {
+        __GREYWORK_RUNTIME__: "server",
+        __GREYWORK_SHELL__: { window: {}, app: { revealPath: bridge.revealPath } },
+      });
     });
 
-    it("以 reveal_path + path 调用宿主并回 true", async () => {
-      invokeMock.mockResolvedValue(undefined);
+    it("以 hostApp().revealPath 调用宿主并回 true", async () => {
+      bridge.revealPath.mockResolvedValue(undefined);
       expect(await revealInFolder("/home/u/.greyWork/artifacts/report.md")).toBe(true);
-      expect(invokeMock).toHaveBeenCalledWith("reveal_path", { path: "/home/u/.greyWork/artifacts/report.md" });
+      expect(bridge.revealPath).toHaveBeenCalledWith("/home/u/.greyWork/artifacts/report.md");
     });
 
     it("宿主拒绝（路径已删）时回 false 而不抛", async () => {
-      invokeMock.mockRejectedValue(new Error("路径不存在"));
+      bridge.revealPath.mockRejectedValue(new Error("路径不存在"));
       vi.spyOn(console, "error").mockImplementation(() => undefined);
       expect(await revealInFolder("/gone/x.md")).toBe(false);
     });

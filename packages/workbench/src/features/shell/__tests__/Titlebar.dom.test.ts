@@ -50,7 +50,9 @@ describe("标题栏窗口控制键", () => {
     h.onResized.mockClear();
     h.isMaximized.mockResolvedValue(false);
     h.resized.handler = null;
-    vi.stubGlobal("__TAURI_INTERNALS__", {});
+    // 桌面态 = Electron 壳：hasWindowControls 读 bridge，hostWindow 已在模块级 mock。
+    (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = "server";
+    (window as unknown as Record<string, unknown>).__GREYWORK_SHELL__ = { window: { label: "main" } };
   });
 
   afterEach(() => {
@@ -89,6 +91,9 @@ describe("标题栏窗口控制键", () => {
 
   it("浏览器态不渲染控制键", async () => {
     vi.unstubAllGlobals();
+    // 该用例在本 describe 之后运行：清掉前面塞进真 window 的桌面态标记。
+    delete (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__;
+    delete (window as unknown as Record<string, unknown>).__GREYWORK_SHELL__;
     const wrapper = await mountTitlebar();
 
     expect(wrapper.find('[data-testid="win-controls"]').exists()).toBe(false);
@@ -109,7 +114,9 @@ describe("标题栏 macOS 适配", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     hostOs.value = null;
-    vi.stubGlobal("__TAURI_INTERNALS__", {});
+    // 桌面态 = Electron 壳：hasWindowControls 读 bridge，hostWindow 已在模块级 mock。
+    (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = "server";
+    (window as unknown as Record<string, unknown>).__GREYWORK_SHELL__ = { window: { label: "main" } };
   });
 
   afterEach(() => {
@@ -162,7 +169,9 @@ describe("标题栏侧栏开合键", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     hostOs.value = null;
-    vi.stubGlobal("__TAURI_INTERNALS__", {});
+    // 桌面态 = Electron 壳：hasWindowControls 读 bridge，hostWindow 已在模块级 mock。
+    (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = "server";
+    (window as unknown as Record<string, unknown>).__GREYWORK_SHELL__ = { window: { label: "main" } };
   });
 
   afterEach(() => {
@@ -194,7 +203,9 @@ describe("标题栏窗口控制键隔离线", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     hostOs.value = null;
-    vi.stubGlobal("__TAURI_INTERNALS__", {});
+    // 桌面态 = Electron 壳：hasWindowControls 读 bridge，hostWindow 已在模块级 mock。
+    (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = "server";
+    (window as unknown as Record<string, unknown>).__GREYWORK_SHELL__ = { window: { label: "main" } };
   });
 
   afterEach(() => {
@@ -220,6 +231,8 @@ describe("标题栏窗口控制键隔离线", () => {
 
   it("浏览器态没有窗口三键，隔离线一并消失", async () => {
     vi.unstubAllGlobals();
+    delete (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__;
+    delete (window as unknown as Record<string, unknown>).__GREYWORK_SHELL__;
     const wrapper = await mountTitlebar();
 
     expect(wrapper.find('[data-testid="win-controls-divider"]').exists()).toBe(false);
@@ -229,7 +242,9 @@ describe("标题栏窗口控制键隔离线", () => {
 describe("标题栏右栏开关", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
-    vi.stubGlobal("__TAURI_INTERNALS__", {});
+    // 桌面态 = Electron 壳：hasWindowControls 读 bridge，hostWindow 已在模块级 mock。
+    (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = "server";
+    (window as unknown as Record<string, unknown>).__GREYWORK_SHELL__ = { window: { label: "main" } };
   });
 
   afterEach(() => {
@@ -260,7 +275,9 @@ describe("标题栏右栏开关", () => {
 describe("标题栏工作区栏开关", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
-    vi.stubGlobal("__TAURI_INTERNALS__", {});
+    // 桌面态 = Electron 壳：hasWindowControls 读 bridge，hostWindow 已在模块级 mock。
+    (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = "server";
+    (window as unknown as Record<string, unknown>).__GREYWORK_SHELL__ = { window: { label: "main" } };
   });
 
   afterEach(() => {
@@ -298,7 +315,9 @@ describe("标题栏活动面板开关", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     window.localStorage.clear();
-    vi.stubGlobal("__TAURI_INTERNALS__", {});
+    // 桌面态 = Electron 壳：hasWindowControls 读 bridge，hostWindow 已在模块级 mock。
+    (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = "server";
+    (window as unknown as Record<string, unknown>).__GREYWORK_SHELL__ = { window: { label: "main" } };
   });
 
   afterEach(() => {
@@ -339,7 +358,9 @@ describe("标题栏搜索", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     window.localStorage.clear();
-    vi.stubGlobal("__TAURI_INTERNALS__", {});
+    // 桌面态 = Electron 壳：hasWindowControls 读 bridge，hostWindow 已在模块级 mock。
+    (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = "server";
+    (window as unknown as Record<string, unknown>).__GREYWORK_SHELL__ = { window: { label: "main" } };
   });
 
   afterEach(() => {
@@ -386,7 +407,9 @@ describe("标题栏搜索", () => {
 describe("标题栏极简模式", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
-    vi.stubGlobal("__TAURI_INTERNALS__", {});
+    // 桌面态 = Electron 壳：hasWindowControls 读 bridge，hostWindow 已在模块级 mock。
+    (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = "server";
+    (window as unknown as Record<string, unknown>).__GREYWORK_SHELL__ = { window: { label: "main" } };
   });
 
   afterEach(() => {

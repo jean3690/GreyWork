@@ -5,20 +5,12 @@ import { defineConfigWithVueTs, vueTsConfigs } from "@vue/eslint-config-typescri
 import prettierConfig from "eslint-config-prettier";
 
 /**
- * Tauri 传输层与宿主能力只能经 @greywork/host-ipc 门面访问。
- *
- * 与 Rust 侧「crates/greywork-host 不得依赖 tauri」的 CI 守卫同构：桌面 Tauri IPC 与服务端
- * HTTP/WS 的差异被收敛在那一个包里，上层代码不感知运行时。绕过门面直接 import 的代码在
- * 服务端/Electron 模式下编得过、跑不通（缺 __TAURI_INTERNALS__），是最难排查的一类问题。
- *
- * 覆盖全部 `@tauri-apps/*` 子路径（core / event / window / webview / app / path / plugin-*）：
- * 早期只禁了 core / event，于是 api/window、api/webview、plugin-clipboard-manager 被绕过。
- *
- * 注意：no-restricted-imports 管不到动态 import()，写新代码时别用动态 import 绕它。
+ * Tauri 壳已移除：`@tauri-apps/*` 在本仓是彻底不存在的依赖，直接 import 只会解析失败。
+ * 规则保留为「防回归」——宿主能力一律走 @greywork/host-ipc 门面。
  */
 const TAURI_TRANSPORT = {
   group: ["@tauri-apps/**"],
-  message: "Tauri 传输/宿主能力只允许经 @greywork/host-ipc 门面（全仓唯一的 Tauri 出口）。",
+  message: "Tauri 壳已移除：宿主能力一律经 @greywork/host-ipc 门面。",
 };
 
 /** packages 不得反向依赖 apps/*。 */

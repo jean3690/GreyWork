@@ -52,7 +52,6 @@
     "@lezer/highlight": "^1.2.3",
     "@lucide/vue": "^1.48.0",
     "@tanstack/vue-virtual": "^3.13.39",
-    "@tauri-apps/api": "^2.12.0",
     "@univerjs/core": "0.25.1",
     "@univerjs/design": "0.25.1",
     "@univerjs/docs": "0.25.1",

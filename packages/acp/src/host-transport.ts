@@ -13,8 +13,8 @@ import type { PermissionTier } from "./permissions";
 
 const EVENT_NAME = "acp://event";
 
-/** 宿主传输：经 @greywork/host-ipc 门面调用 Rust ACP 主机（acp_host.rs）——桌面走 Tauri IPC，服务端走 HTTP。 */
-export class TauriIpcTransport implements AcpTransport {
+/** 宿主传输：经 @greywork/host-ipc 门面调用 Rust ACP 主机（acp_host）。类名是 Tauri 壳时代的沿袭。 */
+export class HostCommandTransport implements AcpTransport {
   readonly id = "tauri-ipc" as const;
 
   async startAgent(agentCmd: string, tier: PermissionTier, env?: Record<string, string>): Promise<number> {

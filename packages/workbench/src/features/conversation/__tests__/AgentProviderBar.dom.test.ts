@@ -45,7 +45,10 @@ vi.mock("@greywork/acp", () => ({
   desktopHomeDir: () => h.homeDir(),
 }));
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: (...args: unknown[]) => (h.invoke as (...a: unknown[]) => Promise<unknown>)(...args) }));
+vi.mock("@greywork/host-ipc", async (importOriginal) => ({
+  ...(await importOriginal()),
+  invoke: (...args: unknown[]) => (h.invoke as (...a: unknown[]) => Promise<unknown>)(...args),
+}));
 
 function options(withEffort: boolean) {
   const configOptions = [
@@ -355,7 +358,7 @@ describe("AgentProviderBar · ACP 会话配置选择器", () => {
 describe("AgentProviderBar · 安装状态探测与胶囊标注", () => {
   /** 模拟桌面运行时（__TAURI_INTERNALS__ 注入 → isTauriRuntime()=true → agentsBackend.detect 走 invoke）。 */
   beforeEach(() => {
-    (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
+    (window as unknown as { __TAURI_INTERNALS__?: unknown }).__GREYWORK_RUNTIME__ = "server";
   });
   afterEach(() => {
     delete (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;

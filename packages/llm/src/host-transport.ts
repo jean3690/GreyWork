@@ -13,8 +13,8 @@ import type {
 
 const EVENT_NAME = "llm://event";
 
-/** 宿主传输：经 @greywork/host-ipc 门面调用 Rust LLM 宿主（llm.rs，密钥宿主侧解析）——桌面走 Tauri IPC，服务端走 HTTP。 */
-export class TauriLlmTransport implements LlmClient {
+/** 宿主传输：经 @greywork/host-ipc 门面调用 Rust LLM 宿主（密钥宿主侧解析）。类名是 Tauri 壳时代的沿袭。 */
+export class HostLlmTransport implements LlmClient {
   readonly available = true;
 
   isAvailable(): boolean {

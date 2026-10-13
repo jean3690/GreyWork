@@ -5,9 +5,9 @@
  * 渲染端据此决定「调之前就别调」或「灰显并说明」—— 与其调了 403 再解释，不如
  * 先知道。
  *
- * **只服务服务端态**：桌面态的命令可用性由 `isTauriRuntime()` 表达（桌面专属命令
- * 全在它后面），不重复建模；浏览器预览态没有宿主。两种情况都返回 `null`，调用方
- * 以 null 为「无目录」处理（fail-open，不误禁）。
+ * **只服务服务端态**（Electron 壳 / 自托管 Web）：桌面专属命令由壳自己实现（见
+ * `apps/electron/src/shared/desktop-only.ts`），不重复建模；浏览器预览态没有宿主。
+ * 两种非服务端情况都返回 `null`，调用方以 null 为「无目录」处理（fail-open，不误禁）。
  */
 
 import { API_BASE } from "./error";

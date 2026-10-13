@@ -9,14 +9,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DOMWrapper, flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
-import { invoke } from "@tauri-apps/api/core";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+vi.mock("@greywork/host-ipc", async (importOriginal) => ({
+  ...(await importOriginal()),
+  invoke: vi.fn(),
+}));
 
 import ServicesSettingsPane from "@/features/settings/ServicesSettingsPane.vue";
 import { useSettingsStore } from "@/stores/settings";
 
-const invokeMock = vi.mocked(invoke);
+const invokeMock = vi.mocked((await import("@greywork/host-ipc")).invoke);
 
 const mounted: VueWrapper[] = [];
 
@@ -33,7 +35,7 @@ function mountPane(): VueWrapper {
   return wrapper;
 }
 
-function overrideRuntime(mode: "desktop" | "server" | "browser-preview"): void {
+function overrideRuntime(mode: "server" | "browser-preview"): void {
   (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = mode;
 }
 
@@ -148,7 +150,7 @@ describe("ServicesSettingsPane 配置链路", () => {
 
 describe("ServicesSettingsPane 宿主事实", () => {
   it("桌面态：显示宿主可内嵌白名单与未设置的凭证变量名", async () => {
-    overrideRuntime("desktop");
+    overrideRuntime("server");
     invokeMock.mockResolvedValue({
       embeddableFrameOrigins: ["https://docs.example.com"],
       envPresent: [],
@@ -164,7 +166,7 @@ describe("ServicesSettingsPane 宿主事实", () => {
   it("白名单为空时如实说明「宿主未允许任何外部域名」，而不是显示成空白", async () => {
     // 桌面态与服务端态在这一页走的是同一条路径（都 `hasHostCommands()` 为真、都走
     // `office_host_info`）；差异在宿主侧怎么算白名单，由 Rust 侧用例覆盖。
-    overrideRuntime("desktop");
+    overrideRuntime("server");
     invokeMock.mockResolvedValue({ embeddableFrameOrigins: [], envPresent: [], envMissing: [] });
     const wrapper = mountPane();
     await flushPromises();
