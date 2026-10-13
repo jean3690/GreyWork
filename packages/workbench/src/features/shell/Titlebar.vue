@@ -1,8 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { isTauriRuntime } from "@greywork/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import type { UnlistenFn } from "@greywork/host-ipc";
+import { hasWindowControls as hasHostWindowControls, hostWindow, type UnlistenFn } from "@greywork/host-ipc";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { usePreviewStore } from "@/stores/preview";
 import { useWorkspacePanelStore } from "@/stores/workspacePanel";
@@ -67,7 +65,7 @@ const activeWorkspace = computed(
 );
 
 /** 浏览器态没有宿主窗口可控，整组控制键不渲染。 */
-const hasWindowControls = isTauriRuntime();
+const hasWindowControls = hasHostWindowControls();
 /**
  * 是否 macOS。`hostOs` 未回来时按 false 走 —— 也就是 Windows/Linux 的既有布局。
  *
@@ -114,29 +112,31 @@ const iconButton =
 const groupDivider = "mx-1 h-4 w-px shrink-0 self-center bg-line-2";
 
 async function syncMaximized(): Promise<void> {
+  const win = hostWindow();
+  if (!win) return;
   try {
-    maximized.value = await getCurrentWindow().isMaximized();
+    maximized.value = await win.isMaximized();
   } catch (error: unknown) {
     console.error("[titlebar] 读取窗口最大化状态失败", error);
   }
 }
 
 function minimizeWindow(): void {
-  getCurrentWindow()
-    .minimize()
+  hostWindow()
+    ?.minimize()
     .catch((error: unknown) => console.error("[titlebar] 最小化失败", error));
 }
 
 function toggleMaximizeWindow(): void {
-  // 只发命令，maximized 由 tauri://resize 回灌：双击标题栏走的是同一条路，两边不会各记一份状态。
-  getCurrentWindow()
-    .toggleMaximize()
+  // 只发命令，maximized 由 resize 事件回灌：双击标题栏走的是同一条路，两边不会各记一份状态。
+  hostWindow()
+    ?.toggleMaximize()
     .catch((error: unknown) => console.error("[titlebar] 最大化/还原失败", error));
 }
 
 function closeWindow(): void {
-  getCurrentWindow()
-    .close()
+  hostWindow()
+    ?.close()
     .catch((error: unknown) => console.error("[titlebar] 关闭窗口失败", error));
 }
 
@@ -200,7 +200,7 @@ onMounted(async () => {
   if (!hasWindowControls) return;
   await syncMaximized();
   try {
-    unlistenResized = await getCurrentWindow().onResized(() => void syncMaximized());
+    unlistenResized = (await hostWindow()?.onResized(() => void syncMaximized())) ?? null;
   } catch (error: unknown) {
     console.error("[titlebar] 监听窗口尺寸变化失败", error);
   }

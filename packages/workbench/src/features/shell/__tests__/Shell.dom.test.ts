@@ -39,21 +39,23 @@ import { cancelDiscard, pendingDiscard } from "@/lib/preview-edit-guard";
 import { ref } from "vue";
 
 const Titlebar = {
-  props: ["collapsed", "showSiderToggle"],
-  emits: ["toggle-sider"],
-  template: `<div data-testid="titlebar" :data-collapsed="collapsed" :data-sider-toggle="showSiderToggle" />`,
+  props: ["collapsed", "showSiderToggle", "minimal"],
+  emits: ["toggle-sider", "toggle-minimal"],
+  template: `<div data-testid="titlebar" :data-collapsed="collapsed" :data-sider-toggle="showSiderToggle" :data-minimal="minimal" />`,
 };
 const SettingsDialog = {
   props: ["open", "section"],
   template: `<div data-testid="settings-dialog" :data-open="open" :data-section="section" />`,
 };
+// 四个外壳面板用显式 testid stub：极简模式要断言「哪个在场 / 哪个不在场」。
 const stubs = {
   Titlebar,
   SettingsDialog,
-  Sider: true,
-  PreviewSider: true,
-  WorkspacePanel: true,
-  ActivityBand: true,
+  Sider: { template: `<div data-testid="sider-stub" />` },
+  MinimalSider: { template: `<div data-testid="minimal-sider-stub" />` },
+  PreviewSider: { template: `<div data-testid="preview-sider-stub" />` },
+  WorkspacePanel: { template: `<div data-testid="workspace-panel-stub" />` },
+  ActivityBand: { template: `<div data-testid="activity-band-stub" />` },
   WorkspaceOverlayRegions: true,
   NoticeHost: true,
   PermissionPromptHost: true,
@@ -341,5 +343,99 @@ describe("Shell 窄屏收拢右栏：先保存再卸载", () => {
     await settle();
 
     expect(preview.available).toBe(false);
+  });
+});
+
+/**
+ * 极简模式（stores/layout 的 `minimal`）：换壳层，不换面板偏好的持久值。
+ */
+describe("Shell 极简模式", () => {
+  it("开启：极简侧栏在、完整 Sider 与工作区 / 活动带不渲染；预览面板保留；标题栏收到 minimal", async () => {
+    const wrapper = mountShell();
+    // 基线：完整外壳
+    expect(wrapper.find('[data-testid="sider-stub"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="minimal-sider-stub"]').exists()).toBe(false);
+
+    useLayoutStore().setMinimal(true);
+    await nextTick();
+
+    expect(wrapper.find('[data-testid="minimal-sider-stub"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="sider-stub"]').exists()).toBe(false);
+    // 预览面板在极简下仍挂载（顶栏有右栏开合键），只是默认收起
+    expect(wrapper.find('[data-testid="preview-sider-stub"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="workspace-panel-stub"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="activity-band-stub"]').exists()).toBe(false);
+    expect(wrapper.get('[data-testid="titlebar"]').attributes("data-minimal")).toBe("true");
+  });
+
+  it("左栏开合：toggleSider 收起后 MinimalSider 整个隐去，再按一次恢复", async () => {
+    const wrapper = mountShell();
+    useLayoutStore().setMinimal(true);
+    await nextTick();
+    expect(wrapper.find('[data-testid="minimal-sider-stub"]').exists()).toBe(true);
+
+    wrapper.getComponent(Titlebar).vm.$emit("toggle-sider");
+    await nextTick();
+    expect(wrapper.find('[data-testid="minimal-sider-stub"]').exists()).toBe(false);
+
+    wrapper.getComponent(Titlebar).vm.$emit("toggle-sider");
+    await nextTick();
+    expect(wrapper.find('[data-testid="minimal-sider-stub"]').exists()).toBe(true);
+  });
+
+  it("进入极简收起预览、退出还原为进极简前的折叠态", async () => {
+    mountShell();
+    const preview = usePreviewStore();
+    preview.setCollapsed(false); // 先手动展开，才能验「还原」
+
+    useLayoutStore().setMinimal(true);
+    await nextTick();
+    expect(preview.collapsed).toBe(true);
+
+    useLayoutStore().setMinimal(false);
+    await nextTick();
+    expect(preview.collapsed).toBe(false);
+  });
+
+  it("标题栏的 toggle-minimal 事件把偏好翻转", async () => {
+    const wrapper = mountShell();
+    wrapper.getComponent(Titlebar).vm.$emit("toggle-minimal");
+    await nextTick();
+    expect(useLayoutStore().minimal).toBe(true);
+  });
+
+  it("极简下 Ctrl+B 不拨左栏；Ctrl+2 先退出极简再应用该布局档", async () => {
+    const wrapper = mountShell();
+    useLayoutStore().setMinimal(true);
+    await nextTick();
+
+    await press({ key: "b", ctrlKey: true });
+    expect(useLayoutStore().minimal).toBe(true);
+    expect(useLayoutStore().sidebarCollapsed).toBe(false);
+
+    await press({ key: "2", code: "Digit2", ctrlKey: true });
+    expect(useLayoutStore().minimal).toBe(false);
+    expect(useLayoutStore().sidebarCollapsed).toBe(false);
+    expect(usePreviewStore().collapsed).toBe(true);
+    expect(wrapper.find('[data-testid="minimal-sider-stub"]').exists()).toBe(false);
+  });
+
+  it("窄屏极简：默认收起（无侧栏），左栏开合键拉出抽屉", async () => {
+    const wrapper = mountShell();
+    useLayoutStore().setMinimal(true);
+
+    Object.defineProperty(window, "innerWidth", { value: 500, configurable: true });
+    window.dispatchEvent(new Event("resize"));
+    await nextTick();
+    expect(wrapper.find('[data-testid="minimal-sider-stub"]').exists()).toBe(false);
+
+    wrapper.getComponent(Titlebar).vm.$emit("toggle-sider");
+    await nextTick();
+    expect(wrapper.find('[data-testid="minimal-sider-stub"]').exists()).toBe(true);
+
+    // 还原视口，免得住后用例带上窄屏态
+    Object.defineProperty(window, "innerWidth", { value: 1024, configurable: true });
+    window.dispatchEvent(new Event("resize"));
+    await nextTick();
   });
 });

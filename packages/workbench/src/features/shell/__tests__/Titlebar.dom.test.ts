@@ -4,6 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
+import type * as HostIpc from "@greywork/host-ipc";
 
 const h = vi.hoisted(() => ({
   minimize: vi.fn(() => Promise.resolve()),
@@ -20,7 +21,10 @@ h.onResized.mockImplementation((handler: () => void) => {
   return Promise.resolve(h.unlisten);
 });
 
-vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => h }));
+vi.mock("@greywork/host-ipc", async (importOriginal) => ({
+  ...(await importOriginal<typeof HostIpc>()),
+  hostWindow: () => h,
+}));
 vi.mock("vue-router", () => ({ useRoute: () => ({ path: "/assistants" }), useRouter: () => ({ push: vi.fn() }) }));
 
 import Titlebar from "@/features/shell/Titlebar.vue";
@@ -375,5 +379,54 @@ describe("标题栏搜索", () => {
     await flushPromises();
     expect(wrapper.get('[data-testid="titlebar-search"]').attributes("aria-expanded")).toBe("false");
     wrapper.unmount();
+  });
+});
+
+// 极简模式顶栏：只保留拖拽区 + 窗口控制键 + 工作区胶囊 + 退出键，隐藏完整外壳的入口簇。
+describe("标题栏极简模式", () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.stubGlobal("__TAURI_INTERNALS__", {});
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("非极简：渲染完整入口簇 + 进入极简的按钮，点击 emit toggleMinimal", async () => {
+    const wrapper = await mountTitlebar();
+
+    expect(wrapper.find('[data-testid="titlebar-search"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="titlebar-panels"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="titlebar-minimal-exit"]').exists()).toBe(false);
+
+    await wrapper.get('[data-testid="titlebar-minimal-enter"]').trigger("click");
+    expect(wrapper.emitted("toggleMinimal")).toHaveLength(1);
+  });
+
+  it("极简：隐藏搜索 / GitHub / 更新 / 面板簇，只留左栏开合 + 右栏开合 + 退出键与窗口控制键", async () => {
+    const wrapper = await mountTitlebar({ minimal: true });
+    const preview = usePreviewStore();
+
+    expect(wrapper.find('[data-testid="titlebar-search"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="titlebar-github"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="titlebar-update"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="titlebar-panels"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="titlebar-minimal-enter"]').exists()).toBe(false);
+    // 拖拽区与窗口控制键不能丢（无边框窗口靠它们）
+    expect(wrapper.get("header").attributes("data-tauri-drag-region")).toBeDefined();
+    expect(wrapper.find('[data-testid="win-controls"]').exists()).toBe(true);
+
+    // 左栏开合：emit toggleSider（状态归 Shell）
+    await wrapper.get('[data-testid="titlebar-minimal-sider-toggle"]').trigger("click");
+    expect(wrapper.emitted("toggleSider")).toHaveLength(1);
+
+    // 右栏开合：直接拨预览 store
+    const before = preview.collapsed;
+    await wrapper.get('[data-testid="titlebar-minimal-preview-toggle"]').trigger("click");
+    expect(preview.collapsed).toBe(!before);
+
+    await wrapper.get('[data-testid="titlebar-minimal-exit"]').trigger("click");
+    expect(wrapper.emitted("toggleMinimal")).toHaveLength(1);
   });
 });
