@@ -15,12 +15,22 @@
 //!
 //! 失败一律**不静默降级**：这里返回 `Err`，由渲染端决定回落本地 viewer 并把原因显示出来。
 
+mod oauth;
+mod store;
+
 use std::collections::HashMap;
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::workspace_fs::{self, WorkspaceFsAccess};
+
+/// 凭证请求头模板里的保留占位符：由宿主代入**已存的 OAuth access_token**。
+///
+/// 它的存在即「开关」——配方（或附加请求头）里写了它，就表示这份配方走 OAuth 取件，
+/// 此时必须随调用传入 [`PreviewOpenArgs::oauth`]；不写则行为与「只认 `{{ENV_VAR}}`」的今天完全一致。
+const OAUTH_TOKEN_PLACEHOLDER: &str = "{{OAUTH_ACCESS_TOKEN}}";
 
 /// 包体形态：整文件原始字节。
 const BODY_RAW: &str = "raw-bytes";
@@ -67,6 +77,83 @@ pub struct PreviewOpenArgs {
     /// 附加请求头（值支持 `{{ENV_VAR}}` 占位符）。
     #[serde(default)]
     pub headers: Option<HashMap<String, String>>,
+    /// OAuth 取件配置。**只有配方里用了 `{{OAUTH_ACCESS_TOKEN}}` 时才需要**：
+    /// 此时凭证来自「已扫码授权的 access_token」（见 `store` 模块），而不是环境变量。
+    #[serde(default)]
+    pub oauth: Option<OAuthAccessArgs>,
+}
+
+/// OAuth 取件的客户端配置（渲染端只传「公开」部分；`client_secret` 由宿主从环境变量取）。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OAuthAccessArgs {
+    /// 开放平台应用的 client_id。
+    pub client_id: String,
+    /// `client_secret` 所在的**环境变量名**；宿主读值，密钥绝不进渲染端 / 落盘 / 日志。
+    #[serde(default)]
+    pub client_secret_env: Option<String>,
+    /// 授权端点（缺省走腾讯文档官方端点）。
+    #[serde(default)]
+    pub authorize_url: Option<String>,
+    /// 换 token 端点（缺省走腾讯文档官方端点）。
+    #[serde(default)]
+    pub token_url: Option<String>,
+    /// 回调地址（须与开放平台登记的一致）。
+    pub redirect_uri: String,
+    /// 申请的 scope（缺省 `all`）。
+    #[serde(default)]
+    pub scope: Option<String>,
+}
+
+impl OAuthAccessArgs {
+    /// 归一成 OAuth 客户端配置，缺省项落到官方端点。
+    fn client_config(&self) -> oauth::OAuthClientConfig {
+        let mut config =
+            oauth::OAuthClientConfig::new(self.client_id.clone(), self.redirect_uri.clone());
+        if let Some(url) = self
+            .authorize_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|u| !u.is_empty())
+        {
+            config.authorize_url = url.to_string();
+        }
+        if let Some(url) = self
+            .token_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|u| !u.is_empty())
+        {
+            config.token_url = url.to_string();
+        }
+        config.scope = self
+            .scope
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        config
+    }
+
+    /// 从环境变量取 `client_secret`；未配置变量名 / 未设值 → 指路错误。
+    fn client_secret(&self) -> Result<String, String> {
+        let name = self.client_secret_env.as_deref().unwrap_or_default().trim();
+        if name.is_empty() {
+            return Err(
+                "未提供 clientSecretEnv：client_secret 必须由宿主从环境变量读取（不进渲染端）"
+                    .into(),
+            );
+        }
+        let value = std::env::var(name).unwrap_or_default();
+        if value.trim().is_empty() {
+            return Err(format!(
+                "未设置云端 Office 应用密钥：先在本机终端执行 {}，再从同一终端启动 GreyWork\
+                 （设置页 → 服务 可查看/修改变量名）",
+                crate::llm::env_set_hint(name, cfg!(windows))
+            ));
+        }
+        Ok(value)
+    }
 }
 
 /// `office_preview_open` 的结果。
@@ -228,6 +315,30 @@ fn ensure_credential(credential_env: Option<&str>) -> Result<(), String> {
     Ok(())
 }
 
+/// 配方（凭证头或任一附加头）里是否用到 OAuth token 占位符 —— 即「是否走 OAuth 取件」。
+fn uses_oauth_token(args: &PreviewOpenArgs) -> bool {
+    let in_credential = args
+        .recipe
+        .credential_header
+        .as_deref()
+        .is_some_and(|header| header.contains(OAUTH_TOKEN_PLACEHOLDER));
+    let in_headers = args
+        .headers
+        .iter()
+        .flatten()
+        .any(|(_, value)| value.contains(OAUTH_TOKEN_PLACEHOLDER));
+    in_credential || in_headers
+}
+
+/// 把 token 占位符替换成实际值。`token` 为 `None`（非 OAuth 路径）时原样返回 ——
+/// 此时若模板里仍残留占位符，会由 `resolve_header_placeholders` 以「未设置环境变量」的形式显式报错。
+fn substitute_oauth_token(template: &str, token: Option<&str>) -> String {
+    match token {
+        Some(token) => template.replace(OAUTH_TOKEN_PLACEHOLDER, token),
+        None => template.to_string(),
+    }
+}
+
 /* ===== 宿主侧事实查询 ===== */
 
 /// 桌面壳**静态** CSP 里放行的 `frame-src` 来源（三个预设厂商的文档域名）。
@@ -326,11 +437,27 @@ fn normalize_frame_origins(origins: &[String]) -> Vec<String> {
 /// 错误分三类，都带可操作的说明：配方不合法（配置页填错）、凭证缺失（环境变量）、
 /// 厂商返回失败（URL 或响应结构对不上）。
 pub async fn open_preview(
+    data_dir: &Path,
     workspace: &WorkspaceFsAccess,
     args: PreviewOpenArgs,
 ) -> Result<PreviewResult, String> {
     validate_recipe(&args.recipe)?;
-    ensure_credential(args.credential_env.as_deref())?;
+
+    // 凭证来源二选一：配方里用了 `{{OAUTH_ACCESS_TOKEN}}` → 取已存的 OAuth access_token；
+    // 否则沿用「从环境变量解析」的老路（`credential_env` 为空 = 本地/无鉴权服务）。
+    let oauth_token = if uses_oauth_token(&args) {
+        let oauth_args = args.oauth.as_ref().ok_or_else(|| {
+            format!(
+                "配方使用了 {OAUTH_TOKEN_PLACEHOLDER}，但调用未提供 oauth 配置\
+                 （请在服务配置里填好 clientId / clientSecretEnv / redirectUri）"
+            )
+        })?;
+        let secret = oauth_args.client_secret()?;
+        Some(store::resolve_access_token(data_dir, &oauth_args.client_config(), &secret).await?)
+    } else {
+        ensure_credential(args.credential_env.as_deref())?;
+        None
+    };
 
     let bytes = workspace_fs::fs_read_binary(workspace, args.path.clone())?;
     let filename = filename_of(&args.path);
@@ -353,11 +480,13 @@ pub async fn open_preview(
     };
 
     for (key, value) in args.headers.iter().flatten() {
-        request = request.header(key, crate::llm::resolve_header_placeholders(value)?);
+        let value = substitute_oauth_token(value, oauth_token.as_deref());
+        request = request.header(key, crate::llm::resolve_header_placeholders(&value)?);
     }
     if let Some((name, value)) =
         split_header_template(args.recipe.credential_header.as_deref().unwrap_or_default())?
     {
+        let value = substitute_oauth_token(&value, oauth_token.as_deref());
         request = request.header(name, crate::llm::resolve_header_placeholders(&value)?);
     }
 
@@ -676,15 +805,19 @@ mod tests {
         std::fs::write(&file, b"PK-fake-docx").expect("write");
 
         let access = WorkspaceFsAccess::new(&root, root.join("ledger.json")).expect("access");
+        let data_dir = std::env::temp_dir().join(format!("gw-office-data-{}", std::process::id()));
+        std::fs::create_dir_all(&data_dir).expect("mkdir data");
         let mut recipe = recipe();
         recipe.url = format!("http://{addr}/upload?name={{filename}}");
         let result = open_preview(
+            &data_dir,
             &access,
             PreviewOpenArgs {
                 path: file.to_string_lossy().to_string(),
                 recipe,
                 credential_env: None,
                 headers: Some(HashMap::from([("X-Org".to_string(), "acme".to_string())])),
+                oauth: None,
             },
         )
         .await
@@ -740,13 +873,18 @@ mod tests {
         std::fs::write(&outside, b"x").expect("write");
 
         let access = WorkspaceFsAccess::new(&root, root.join("ledger.json")).expect("access");
+        let data_dir =
+            std::env::temp_dir().join(format!("gw-office-deny-data-{}", std::process::id()));
+        std::fs::create_dir_all(&data_dir).expect("mkdir data");
         let error = open_preview(
+            &data_dir,
             &access,
             PreviewOpenArgs {
                 path: outside.to_string_lossy().to_string(),
                 recipe: recipe(),
                 credential_env: None,
                 headers: None,
+                oauth: None,
             },
         )
         .await
@@ -755,5 +893,132 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_file(&outside);
+    }
+
+    /// OAuth 路径：上传请求头里带的是**已存 token**（不是环境变量），且不需要 `credential_env`。
+    #[tokio::test]
+    async fn open_preview_uses_stored_oauth_token() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        std::env::set_var(
+            "GREYWORK_TEST_OFFICE_OAUTH_SECRET",
+            "app-secret-not-a-secret",
+        );
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let seen = std::sync::Arc::new(parking_lot::Mutex::new(String::new()));
+        let seen_writer = std::sync::Arc::clone(&seen);
+        tokio::spawn(async move {
+            if let Ok((mut stream, _)) = listener.accept().await {
+                let mut buffer = vec![0u8; 8192];
+                let read = stream.read(&mut buffer).await.unwrap_or(0);
+                *seen_writer.lock() = String::from_utf8_lossy(&buffer[..read]).to_string();
+                let body = r#"{"data":{"url":"https://docs.qq.com/d/99"}}"#;
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(response.as_bytes()).await;
+                let _ = stream.flush().await;
+                let _ = stream.shutdown().await;
+            }
+        });
+
+        let root = std::env::temp_dir().join(format!("gw-office-oauth-{}", std::process::id()));
+        std::fs::create_dir_all(&root).expect("mkdir");
+        let file = root.join("报告.docx");
+        std::fs::write(&file, b"PK-fake").expect("write");
+        let access = WorkspaceFsAccess::new(&root, root.join("ledger.json")).expect("access");
+
+        let data_dir =
+            std::env::temp_dir().join(format!("gw-office-oauth-data-{}", std::process::id()));
+        std::fs::create_dir_all(&data_dir).expect("mkdir data");
+        let token = "stored-oauth-token";
+        store::save(
+            &data_dir,
+            &oauth::TokenSet {
+                access_token: token.into(),
+                refresh_token: Some("r1".into()),
+                expires_at: oauth::now_ms() + 3_600_000,
+                scope: Some("all".into()),
+                user_id: Some("u1".into()),
+                client_id: Some("cid".into()),
+            },
+        )
+        .expect("save token");
+
+        let mut recipe = recipe();
+        recipe.url = format!("http://{addr}/upload?name={{filename}}");
+        recipe.credential_header = Some(format!("Access-Token: {OAUTH_TOKEN_PLACEHOLDER}"));
+        let result = open_preview(
+            &data_dir,
+            &access,
+            PreviewOpenArgs {
+                path: file.to_string_lossy().to_string(),
+                recipe,
+                credential_env: None,
+                headers: None,
+                oauth: Some(OAuthAccessArgs {
+                    client_id: "cid".into(),
+                    client_secret_env: Some("GREYWORK_TEST_OFFICE_OAUTH_SECRET".into()),
+                    authorize_url: None,
+                    token_url: None,
+                    redirect_uri: "https://localhost/cb".into(),
+                    scope: None,
+                }),
+            },
+        )
+        .await
+        .expect("upload ok");
+
+        assert_eq!(result.url, "https://docs.qq.com/d/99");
+        let request = seen.lock().clone();
+        assert!(
+            request
+                .to_lowercase()
+                .contains(&format!("access-token: {token}")),
+            "上传头要带已存 token：{request}"
+        );
+        assert!(
+            !request.contains(OAUTH_TOKEN_PLACEHOLDER),
+            "占位符不得以原文形式出现在请求里：{request}"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&data_dir);
+    }
+
+    /// 配方用了 OAuth 占位符却没给 `oauth` 配置 → 明确报错，而不是拿空头去撞 401。
+    #[test]
+    fn uses_oauth_token_detects_placeholder_and_reports_missing_config() {
+        let mut args = PreviewOpenArgs {
+            path: "a.docx".into(),
+            recipe: recipe(),
+            credential_env: None,
+            headers: None,
+            oauth: None,
+        };
+        assert!(!uses_oauth_token(&args), "默认配方不带占位符");
+        args.recipe.credential_header = Some(format!("Access-Token: {OAUTH_TOKEN_PLACEHOLDER}"));
+        assert!(uses_oauth_token(&args), "凭证头里的占位符要被识别");
+        args.recipe.credential_header = None;
+        args.headers = Some(HashMap::from([(
+            "X-Token".to_string(),
+            OAUTH_TOKEN_PLACEHOLDER.to_string(),
+        )]));
+        assert!(uses_oauth_token(&args), "附加头里的占位符同样算数");
+        assert_eq!(
+            substitute_oauth_token("Bearer {{OAUTH_ACCESS_TOKEN}}", Some("t")),
+            "Bearer t"
+        );
+        assert_eq!(
+            substitute_oauth_token("{{ENV}}", None),
+            "{{ENV}}",
+            "非 OAuth 路径原样返回，交给 ENV 解析器报错"
+        );
     }
 }
