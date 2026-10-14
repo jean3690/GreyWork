@@ -20,6 +20,26 @@ macro_rules! office_commands {
                 .await
                 .map(Json) } }
 
+    // ---- office：扫码授权（OAuth 2.0 授权码流） ----
+    // 宿主**不持有在飞会话**：begin 生成 state 后交渲染端保管，submit 时原样回传校验；
+    // 令牌按 client_id 落在 `<app_data>/office/credentials.json`。因此不需要新的 host 结构，
+    // 桌面与服务端共用这一份（见 services/office/auth.rs 的模块注释）。
+    { "office_oauth_begin", auth: Auth::Required, desktop: false, binary: false,
+        args: office::OAuthBeginArgs,
+        run: |_ctx, a| async move { office::oauth_begin(a).map(Json) } }
+    { "office_oauth_submit", auth: Auth::Required, desktop: false, binary: false,
+        args: office::OAuthSubmitArgs,
+        run: |ctx, a| async move {
+            office::oauth_submit(&ctx.host.paths().app_data_dir, a).await.map(Json) } }
+    { "office_oauth_status", auth: Auth::Required, desktop: false, binary: false,
+        args: office::OAuthStatusArgs,
+        run: |ctx, a| async move {
+            Ok::<_, String>(Json(office::oauth_status(&ctx.host.paths().app_data_dir, a))) } }
+    { "office_oauth_logout", auth: Auth::Required, desktop: false, binary: false,
+        args: office::OAuthLogoutArgs,
+        run: |ctx, a| async move {
+            office::oauth_logout(&ctx.host.paths().app_data_dir, a).map(Json) } }
+
         }
     };
 }

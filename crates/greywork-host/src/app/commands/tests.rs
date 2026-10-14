@@ -104,7 +104,7 @@ const DESKTOP_ONLY: &[&str] = &[
 
 #[test]
 fn commands_table_shape() {
-    assert_eq!(COMMANDS.len(), 170, "命令总数应为 170");
+    assert_eq!(COMMANDS.len(), 174, "命令总数应为 174");
 
     // 命令名唯一。
     let mut names: Vec<&str> = COMMANDS.iter().map(|c| c.name).collect();
@@ -203,6 +203,47 @@ async fn dispatch_smoke_db_settings_load() {
         value["embeddableFrameOrigins"],
         serde_json::json!(["https://docs.example.com"])
     );
+
+    // office 扫码授权：三条不发网络请求的命令经 dispatch 走得通
+    // （`office_oauth_submit` 要真换 token，端到端在 services/office/auth.rs 里）。
+    let out = dispatch(
+        "office_oauth_begin",
+        serde_json::json!({ "client": { "clientId": "cid", "redirectUri": "https://localhost/cb" } }),
+        &ctx,
+    )
+    .await
+    .expect("dispatch office_oauth_begin");
+    let CommandOutput::Json(value) = out else {
+        panic!("office_oauth_begin 应返回 JSON");
+    };
+    assert!(value["authorizeUrl"]
+        .as_str()
+        .is_some_and(|url| url.starts_with("https://docs.qq.com/oauth/v2/authorize")));
+    assert_eq!(
+        value["state"].as_str().map(|state| state.len()),
+        Some(32),
+        "state 应是 32 位十六进制"
+    );
+
+    let out = dispatch(
+        "office_oauth_status",
+        serde_json::json!({ "clientId": "cid" }),
+        &ctx,
+    )
+    .await
+    .expect("dispatch office_oauth_status");
+    let CommandOutput::Json(value) = out else {
+        panic!("office_oauth_status 应返回 JSON");
+    };
+    assert_eq!(value["authorized"], serde_json::json!(false));
+
+    dispatch(
+        "office_oauth_logout",
+        serde_json::json!({ "clientId": "cid" }),
+        &ctx,
+    )
+    .await
+    .expect("dispatch office_oauth_logout");
 
     let _ = std::fs::remove_dir_all(&tmp);
 }

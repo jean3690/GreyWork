@@ -6,11 +6,6 @@
 //! **`client_secret` 一律由调用方从环境变量取**（见 `OAuthAccessArgs::client_secret`），
 //! 绝不进落盘 / 日志 / 渲染端。连请求失败的诊断也不带完整 URL —— 用 `Error::without_url`
 //! 剥掉，否则 query 里的 `client_secret` 会顺着错误信息回渲染端。
-//!
-//! 本模块的**授权起点**原语（[`build_authorize_url`] / [`parse_callback`] / [`CallbackOutcome`] /
-//! [`exchange_code`]）供下一批的 `office_oauth_begin/poll` 命令面调用，本批先把内核落全、
-//! 暂未被生产代码引用，故整体放行 dead_code。
-#![allow(dead_code)]
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -52,6 +47,74 @@ impl OAuthClientConfig {
             scope: None,
         }
     }
+}
+
+/// OAuth 客户端配置的**传输形状**（渲染端只传「公开」部分；`client_secret` 由宿主从环境变量取）。
+///
+/// 一份 DTO 服务三处：`office_preview_open` 的取件、`office_oauth_begin` 的拼授权 URL、
+/// `office_oauth_submit` 的换 token —— 三处需要的字段本就是同一组，各写一份迟早漂移。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OAuthClientArgs {
+    /// 开放平台应用的 client_id。
+    pub client_id: String,
+    /// `client_secret` 所在的**环境变量名**；宿主读值，密钥绝不进渲染端 / 落盘 / 日志。
+    #[serde(default)]
+    pub client_secret_env: Option<String>,
+    /// 授权端点（缺省走腾讯文档官方端点）。
+    #[serde(default)]
+    pub authorize_url: Option<String>,
+    /// 换 token 端点（缺省走腾讯文档官方端点）。
+    #[serde(default)]
+    pub token_url: Option<String>,
+    /// 回调地址（须与开放平台登记的一致）。
+    pub redirect_uri: String,
+    /// 申请的 scope（缺省 `all`）。
+    #[serde(default)]
+    pub scope: Option<String>,
+}
+
+impl OAuthClientArgs {
+    /// 归一成 [`OAuthClientConfig`]，缺省项落到官方端点。
+    ///
+    /// 各字段都去空白：`client_id` 同时是令牌落盘的键（见 [`super::store`]），两边归一方式必须一致，
+    /// 否则会出现「存进去了却读不到」。
+    pub(crate) fn client_config(&self) -> OAuthClientConfig {
+        let mut config = OAuthClientConfig::new(self.client_id.trim(), self.redirect_uri.trim());
+        if let Some(url) = non_blank(self.authorize_url.as_deref()) {
+            config.authorize_url = url.to_string();
+        }
+        if let Some(url) = non_blank(self.token_url.as_deref()) {
+            config.token_url = url.to_string();
+        }
+        config.scope = non_blank(self.scope.as_deref()).map(str::to_string);
+        config
+    }
+
+    /// 从环境变量取 `client_secret`；未配置变量名 / 未设值 → 指路错误。
+    pub(crate) fn client_secret(&self) -> Result<String, String> {
+        let name = self.client_secret_env.as_deref().unwrap_or_default().trim();
+        if name.is_empty() {
+            return Err(
+                "未提供 clientSecretEnv：client_secret 必须由宿主从环境变量读取（不进渲染端）"
+                    .into(),
+            );
+        }
+        let value = std::env::var(name).unwrap_or_default();
+        if value.trim().is_empty() {
+            return Err(format!(
+                "未设置云端 Office 应用密钥：先在本机终端执行 {}，再从同一终端启动 GreyWork\
+                 （设置页 → 服务 可查看/修改变量名）",
+                crate::llm::env_set_hint(name, cfg!(windows))
+            ));
+        }
+        Ok(value)
+    }
+}
+
+/// 取可选字符串的非空去空白视图；空串 / 缺省一律当「没给」。
+fn non_blank(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|text| !text.is_empty())
 }
 
 /// 已授权的令牌集合（落盘即此形状）。
