@@ -300,6 +300,59 @@ describe("跨语言 ACP：渲染端 client → 真服务端 → 真宿主 → �
     await expect(acp.startAgent("definitely-not-allowed-agent acp", "read-only")).rejects.toThrow(/is not in the allowed list/);
   });
 
+  it("权限链路 · read-only 档只读工具带 Allow 选项：宿主 AutoAllow，回合正常结束", async () => {
+    const acp = client as AcpClient;
+    const from = events.length;
+    const { turnId } = await acp.prompt(handle, "perm-allow");
+
+    // 宿主按档位代决：read-only 档下只读工具 + allow_once → AutoAllow，不打扰用户。
+    const auto = await waitForEvent("permission-auto", "宿主自动放行只读工具", from);
+    const autoPayload = auto.payload as { auto?: boolean; chosen?: string | null; kind?: string };
+    expect(autoPayload.auto).toBe(true);
+    expect(autoPayload.kind).toBe("read");
+    expect(autoPayload.chosen).toBe("allow-once");
+
+    // 宿主把 Selected 回传给 agent，agent 据此以 end_turn 收尾 —— 证明裁决真的回到了 agent 手里。
+    const done = await waitForEvent("prompt-done", "AutoAllow 后回合结束", from);
+    const donePayload = done.payload as PromptDonePayload;
+    expect(donePayload.turnId).toBe(turnId);
+    expect(donePayload.error).toBeUndefined();
+    expect(donePayload.response?.stopReason).toBe("end_turn");
+
+    // AutoAllow 不该弹卡：这条回合里没有转发前端的 permission-request。
+    expect(events.slice(from).some((event) => event.kind === "permission-request")).toBe(false);
+  });
+
+  it("权限链路 · read-only 档只读工具无 Allow 选项：转发前端确认，裁决回传唤醒 agent", async () => {
+    const acp = client as AcpClient;
+    const from = events.length;
+    const { turnId } = await acp.prompt(handle, "perm-ask");
+
+    // 无可放行选项 → Ask：宿主登记 pending 并下发 permission-request 给前端。
+    const request = await waitForEvent("permission-request", "宿主转发前端确认", from);
+    const payload = request.payload as {
+      requestId: number;
+      auto?: boolean;
+      kind?: string;
+      toolCallId?: string;
+      options?: unknown[];
+    };
+    expect(payload.auto).toBe(false);
+    expect(payload.kind).toBe("read");
+    expect(typeof payload.requestId).toBe("number");
+    expect(typeof payload.toolCallId).toBe("string");
+    expect(payload.options).toEqual([]);
+
+    // 用户拒绝（optionId=null）→ 宿主以 Cancelled 应答 agent → agent 以 cancelled 收尾。
+    await acp.respondPermission(payload.requestId, null);
+
+    const done = await waitForEvent("prompt-done", "裁决后回合结束", from);
+    const donePayload = done.payload as PromptDonePayload;
+    expect(donePayload.turnId).toBe(turnId);
+    expect(donePayload.error).toBeUndefined();
+    expect(donePayload.response?.stopReason).toBe("cancelled");
+  });
+
   it("stop 回收会话并发出 stopped", async () => {
     const acp = client as AcpClient;
     await acp.stop(handle);
