@@ -43,7 +43,7 @@ const mockAgent = join(repoRoot, "apps/server/tests/mock-acp-agent.mjs");
 /** 假 agent 的固定应答，来自 mock-acp-agent.mjs。 */
 const MOCK_SESSION_ID = "sess-mock-001";
 
-/* ===== 宿主事件载荷（与 crates/greywork-host/src/acp_host.rs 的 emit 对齐） ===== */
+/* ===== 宿主事件载荷（与 crates/greywork-host/src/services/acp_host/ 的 emit 对齐） ===== */
 
 interface StartedPayload {
   handle: number;
@@ -147,9 +147,7 @@ describe("跨语言 ACP：渲染端 client → 真服务端 → 真宿主 → �
         GREYWORK_DATA_DIR: dataDir,
         GREYWORK_HOME_DIR: homeDir,
         GREYWORK_PASSWORD: PASSWORD,
-        // 沙盒在 CI 里不可用，显式关掉；顺带让 `policy::overlay_args` 把它钉成 off。
-        GREYWORK_SANDBOX: "off",
-        // 同理钉住档位。注意：这条门禁**不验证**档位语义（echo 流程不发权限请求）。
+        // 钉住档位：权限相关用例依赖此档位的判定（见文件末尾的「权限」用例）。
         GREYWORK_TIER: "read-only",
       },
     });

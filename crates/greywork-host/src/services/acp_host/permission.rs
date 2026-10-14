@@ -133,6 +133,21 @@ pub(super) async fn resolve_permission(
             ));
         }
         PermissionVerdict::AutoCancel => {
+            // Full 档但 agent 没给任何 Allow 选项：无从放行，只能取消。这里必须发事件 ——
+            // 否则这条工具调用会**无声消失**，用户既看不到卡片也看不到记录。
+            emit(
+                host,
+                "permission-blocked",
+                serde_json::json!({
+                    "auto": true,
+                    "chosen": null,
+                    "toolCallId": request.tool_call.tool_call_id.to_string(),
+                    "title": request.tool_call.fields.title,
+                    "kind": kind_label(request.tool_call.fields.kind),
+                    "reason": "no-allow-option",
+                    "locations": permission_locations(&request),
+                }),
+            );
             return RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled);
         }
         PermissionVerdict::Ask => {}

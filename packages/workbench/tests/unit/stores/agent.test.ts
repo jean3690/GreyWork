@@ -258,11 +258,18 @@ describe("dispatchToAcp 写入对话流", () => {
         chosen: "allow",
         toolCallId: "tc-0",
         kind: "read",
-        options: [],
+        options: [{ optionId: "allow", name: "允许", kind: "allow_once" }],
       },
     });
     chat.flushPendingContent();
-    expect(list[1]?.content).toContain("宿主自动批准");
+    // 宿主自动放行不再往正文追加纯文本，改为消息里留一条 auto 痕（chosen optionId → 选项名）。
+    expect(list[1]?.permissions?.[0]).toMatchObject({
+      toolCallId: "tc-0",
+      kind: "read",
+      choice: "允许",
+      source: "auto",
+    });
+    expect(list[1]?.content).not.toContain("宿主自动批准");
 
     // prompt ack（回合仍在进行）→ prompt-done 才收尾
     turn.resolve({ turnId: 7, stopReason: "end_turn" });
@@ -868,7 +875,7 @@ describe("权限请求与裁决", () => {
     });
   });
 
-  it("permission-blocked（宿主锚定拦截）向流内追加通知，不打断流", async () => {
+  it("permission-blocked（宿主锚定拦截）留一条 blocked 痕，不打断流", async () => {
     h.startAgent.mockResolvedValue(7);
     h.openSession.mockResolvedValue({ sessionId: "session-1", configOptions: [] });
     const turn = deferred<unknown>();
@@ -891,14 +898,56 @@ describe("权限请求与裁决", () => {
       },
     });
     chat.flushPendingContent();
-    expect(chat.threads[chat.activeThreadId]?.at(-1)?.content).toContain("宿主拦截");
-    expect(chat.threads[chat.activeThreadId]?.at(-1)?.content).toContain("/etc/passwd");
+    // 宿主拦截同样只留痕（带 reason），不再往正文追加纯文本。
+    const blockedTrace = chat.threads[chat.activeThreadId]?.at(-1)?.permissions?.[0];
+    expect(blockedTrace).toMatchObject({
+      toolCallId: "tc-4",
+      title: "编辑 /etc/passwd",
+      kind: "edit",
+      source: "blocked",
+      reason: "outside-workspace",
+      choice: null,
+      paths: ["/etc/passwd"],
+    });
+    expect(chat.threads[chat.activeThreadId]?.at(-1)?.content).not.toContain("宿主拦截");
     expect(agentStore.acpBusy).toBe(true);
 
     turn.resolve({ turnId: 7 });
     await pending;
     emit({ kind: "prompt-done", payload: { turnId: 7, response: {} } });
     expect(agentStore.acpBusy).toBe(false);
+  });
+
+  it("permission-blocked（AutoCancel：无 Allow 选项可放行）留一条 no-allow-option 痕", async () => {
+    h.startAgent.mockResolvedValue(7);
+    h.openSession.mockResolvedValue({ sessionId: "session-1", configOptions: [] });
+    h.prompt.mockResolvedValue({ turnId: 99 });
+    const agentStore = useAgentStore();
+    const chat = useChatStore();
+    await agentStore.dispatchToAcp("跑个命令");
+
+    // 宿主 Full 档遇到 agent 只给了拒绝类选项 → AutoCancel，发 permission-blocked 且 reason=no-allow-option。
+    emit({
+      kind: "permission-blocked",
+      payload: {
+        auto: true,
+        chosen: null,
+        toolCallId: "tc-40",
+        title: "curl example.com",
+        kind: "execute",
+        reason: "no-allow-option",
+        locations: [],
+      },
+    });
+
+    expect(chat.threads[chat.activeThreadId]?.at(-1)?.permissions?.[0]).toMatchObject({
+      toolCallId: "tc-40",
+      title: "curl example.com",
+      kind: "execute",
+      source: "blocked",
+      reason: "no-allow-option",
+      choice: null,
+    });
   });
 });
 describe("会话配置选择器（session/set_config_option）", () => {

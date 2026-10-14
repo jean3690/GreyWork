@@ -111,6 +111,15 @@ const traceAllowed = computed(() => Boolean(props.trace && props.trace.source !=
 const traceLabel = computed(() => {
   const trace = props.trace;
   if (!trace) return "";
+  if (trace.source === "blocked") {
+    const key =
+      trace.reason === "outside-workspace"
+        ? "chatView.permission.decidedBlockedOutside"
+        : trace.reason === "no-allow-option"
+          ? "chatView.permission.decidedBlockedNoOption"
+          : "chatView.permission.decidedBlockedReadOnly";
+    return t(key);
+  }
   if (trace.source === "timeout") return t("chatView.permission.decidedTimeout");
   if (!trace.choice) return t("chatView.permission.decidedDeny");
   return t(trace.source === "auto" ? "chatView.permission.decidedAuto" : "chatView.permission.decidedAllow", {
@@ -120,6 +129,7 @@ const traceLabel = computed(() => {
 
 const traceIcon = computed(() => {
   if (traceAllowed.value) return "check-one";
+  if (props.trace?.source === "blocked") return "shield";
   return props.trace?.source === "timeout" ? "clock" : "close-one";
 });
 

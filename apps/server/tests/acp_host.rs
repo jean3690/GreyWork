@@ -1,7 +1,7 @@
 //! `AcpHost` 命令面直测：走 `commands::dispatch` 跑完 start → new_session → send → stop。
 //!
-//! 为什么要有它：仓库里原有的 6 个 ACP 集成测试（`apps/desktop/src-tauri/tests/acp_*.rs`
-//! 等）**全部绕开了 `AcpHost`**，直接拿 `agent_client_protocol` 的 client 去连 agent，
+//! 为什么要有它：仓库里原有的 6 个 ACP 集成测试**全部绕开了 `AcpHost`**，直接拿
+//! `agent_client_protocol` 的 client 去连 agent，
 //! 于是 `acp_start` / `acp_new_session` / `acp_send` 这几条真实命令——也就是前端唯一会走的
 //! 那几条——一直零覆盖。这里用同一份假 agent 把它们补齐（跨语言的对应物见
 //! `packages/acp/tests/integration/acp-host-server.e2e.test.ts`）。
@@ -23,8 +23,8 @@ use greywork_server::host::ServerEvent;
 
 /// 与桌面侧共用同一份假 agent——两份副本迟早会漂移。
 ///
-/// 路径里的反斜杠换成正斜杠并加引号，与 `acp_flow.rs` 同一处理：
-/// `AcpAgent::from_str` 走 POSIX `shell_words`，Windows 风格路径会被拆坏。
+/// 路径里的反斜杠换成正斜杠并加引号：`AcpAgent::from_str` 走 POSIX `shell_words`，
+/// Windows 风格路径会被拆坏。
 fn mock_agent_cmd() -> String {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/mock-acp-agent.mjs");
     format!("node \"{}\"", path.to_string_lossy().replace('\\', "/"))

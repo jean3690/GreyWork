@@ -51,7 +51,13 @@ pub async fn acp_new_session(
     let session_id = response.session_id.clone();
     let id_str = session_id.to_string();
     let config_options = serde_json::to_value(response.config_options.unwrap_or_default())
-        .unwrap_or_else(|_| serde_json::Value::Array(Vec::new()));
+        .unwrap_or_else(|error| {
+            crate::log::warn(
+                "acp",
+                format!("session/new 的 configOptions 序列化失败，回填空数组：{error}"),
+            );
+            serde_json::Value::Array(Vec::new())
+        });
     session.session_id = Some(session_id);
     emit(
         host.as_ref(),
@@ -113,7 +119,13 @@ pub async fn acp_load_session(
         .map_err(|error| format!("session/load failed: {error}"))?;
     let id_str = session_id;
     let config_options = serde_json::to_value(response.config_options.unwrap_or_default())
-        .unwrap_or_else(|_| serde_json::Value::Array(Vec::new()));
+        .unwrap_or_else(|error| {
+            crate::log::warn(
+                "acp",
+                format!("session/load 的 configOptions 序列化失败，回填空数组：{error}"),
+            );
+            serde_json::Value::Array(Vec::new())
+        });
     // 仅请求成功后才有状态改写：session_id 回写 + 工作区锚定基准更新。
     // 失败路径必须保持原样——锚定若提前换成新 cwd，回落 new 前旧会话的
     // 越界拦截会按错误基准判定。
@@ -178,7 +190,13 @@ pub async fn acp_set_config(
         .await
         .map_err(|error| format!("session/set_config_option failed: {error}"))?;
 
-    Ok(serde_json::to_value(&response).unwrap_or(serde_json::Value::Null))
+    Ok(serde_json::to_value(&response).unwrap_or_else(|error| {
+        crate::log::warn(
+            "acp",
+            format!("session/set_config_option 响应序列化失败，回填 null：{error}"),
+        );
+        serde_json::Value::Null
+    }))
 }
 
 /// 改写在途会话的权限档位（前端「临时只读」开关；未知档位串 fail-closed 到 ReadOnly）。

@@ -1,12 +1,12 @@
 # @greywork/acp
 
-GreyWork 的 ACP（Agent Client Protocol）控制面客户端：会话传输（Tauri IPC / WebSocket）、权限档位映射与事件模型，与 Rust 侧 `acp_host` 对称。
+GreyWork 的 ACP（Agent Client Protocol）控制面客户端：会话传输（宿主 IPC / WebSocket）、权限档位映射与事件模型，与 Rust 侧 `acp_host` 对称。
 
 内部包使用源码直出，无需构建即可被上层应用消费；`@greywork/integrations` 以 `AcpAgentAdapter` 组合本包客户端。
 
 ## 外部 Agent 前置条件
 
-- 桌面端通过 Rust `acp_host` spawn ACP agent（`opencode acp` / `claude` / `gemini` 等内置预设，见 `acp_host.rs::ALLOWED_AGENT_PROGRAMS`），走 stdio JSON-RPC。用户可在 设置 → Agent「新增后端」自配启动命令；自配程序需在本机已安装且在目录中启用，宿主以 `db.enabled_agent_programs` 扩展放行面，shell 元字符拒绝不变。
+- 桌面端通过 Rust `acp_host` spawn ACP agent（`opencode acp` / `claude` / `gemini` 等内置预设，见 `acp_host/env.rs::ALLOWED_AGENT_PROGRAMS`），走 stdio JSON-RPC。用户可在 设置 → Agent「新增后端」自配启动命令；自配程序需在本机已安装且在目录中启用，宿主以 `db.enabled_agent_programs` 扩展放行面，shell 元字符拒绝不变。
 - OpenCode ≥ 1.18：`opencode acp` 即 server 模式。会话级模型 / 推理力度 / 模式选择走 ACP 原生 `session/set_config_option`：宿主在 session/new 返回中带出 `configOptions`，ChatView 的「ACP · 会话配置」下拉直接切换；未配置模型的 agent 需在其自身配置（`~/.config/opencode/opencode.json`）里给默认值。
 
 ## WebSocket 远程连接

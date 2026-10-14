@@ -22,6 +22,7 @@ import { createSubagentSlice } from "./subagent";
 import { CONNECT_ABORTED, t, looksLikeMissingBinary } from "./shared";
 import type { AgentStoreState, SubagentMessage, SubagentTranscript } from "./state";
 import type { TurnApi } from "./turn";
+import type { PermissionTrace } from "../../types";
 
 export interface RuntimeDeps {
   state: AgentStoreState;
@@ -189,28 +190,12 @@ export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi 
         const payload = event.payload as { availableCommands?: unknown };
         state.acpCommands.value = normalizeAcpCommands(payload.availableCommands);
       } else if (event.kind === "permission-auto") {
-        // 宿主按档位自动决策（daily 只读 / auto 直通）：追加一行通知，不打断流
-        const payload = event.payload as AcpPermissionRequestPayload;
-        if (locals.acpStream && locals.acpThreadId) {
-          state.chat.appendMessageContent(
-            locals.acpStream.id,
-            t("errors.autoApproved", { title: payload.title ?? payload.kind, choice: payload.chosen ?? "" }),
-            locals.acpThreadId,
-          );
-        }
+        // 宿主按档位自动放行（只读档放行只读工具 / 工作区档放行界内写）：留痕卡，不打断流。
+        gate.recordHostDecision(event.payload as AcpPermissionRequestPayload, "auto");
       } else if (event.kind === "permission-blocked") {
-        // 宿主权限拦截（只读档 / 工作区越界）：通知流记录，不打断流
-        const payload = event.payload as { title?: string | null; kind?: string; reason?: string; locations?: string[] };
-        if (locals.acpStream && locals.acpThreadId) {
-          const detail =
-            payload.reason === "read-only"
-              ? t("errors.readOnlyBlocked", { title: payload.title ?? payload.kind ?? "write" })
-              : t("errors.blockedOutsideWorkspace", {
-                  title: payload.title ?? payload.kind ?? "write",
-                  paths: (payload.locations ?? []).join("、"),
-                });
-          state.chat.appendMessageContent(locals.acpStream.id, detail, locals.acpThreadId);
-        }
+        // 宿主拦截（只读档拦写/执行、工作区越界、Full 档无 Allow 选项可放行）：留痕卡 + 记原因。
+        const payload = event.payload as AcpPermissionRequestPayload & { reason?: PermissionTrace["reason"] };
+        gate.recordHostDecision(payload, "blocked", payload.reason);
       } else if (event.kind === "config-options") {
         // 后端确认后的全量配置快照（set_config_option 响应 / ConfigOptionUpdate 通知）：
         // 回填选择器控件——对齐 GreyWork useAcpConfigOptions 的 snapshot 观测。
@@ -444,8 +429,10 @@ export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi 
           adoptOpenedSession(opened, threadId);
           restoredSessionId = opened.sessionId;
           await settleReplay(opened.sessionId);
-        } catch {
-          // 回落：清掉恢复标记，下面还是走 session/new（保持孤立分支可读）。
+        } catch (error) {
+          // 回落：清掉恢复标记，下面还是走 session/new。刻意不弹错误通知（保证「发送必达」），
+          // 但留一条日志 —— 否则「恢复失败」这件事完全无迹可寻。
+          console.warn("[acp] session/load 恢复失败，回落新建会话：", error);
           restoredSessionId = null;
         }
       }

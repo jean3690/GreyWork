@@ -231,8 +231,13 @@ export interface PermissionTrace {
   command: string | null;
   /** 用户看到的选项名（或拒绝文案）；null = 拒绝 / 取消。 */
   choice: string | null;
-  /** 谁做的决定：用户点选 / 宿主按档位自动 / 超时兜底取消。 */
-  source: "user" | "auto" | "timeout";
+  /**
+   * 谁做的决定：用户点选 / 宿主按档位自动放行 / 宿主拦截 / 超时兜底取消。
+   * `blocked` = 宿主在请求到达用户前就拒绝（只读档、工作区越界、agent 未给可放行的 Allow 选项）。
+   */
+  source: "user" | "auto" | "timeout" | "blocked";
+  /** 仅 `blocked` 用：拦截原因，决定徽标文案。 */
+  reason?: "read-only" | "outside-workspace" | "no-allow-option";
   decidedAt: number;
 }
 

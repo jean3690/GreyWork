@@ -178,4 +178,15 @@ describe("PermissionCard · 只读留痕", () => {
 
     expect(wrapper.get('[data-testid="permission-trace-badge"]').text()).toContain("始终允许");
   });
+
+  it("宿主拦截的留痕按原因标徽标（只读档 / 越界 / 无允许项）", () => {
+    const outside = mountTrace({ ...trace, choice: null, source: "blocked", reason: "outside-workspace" });
+    expect(outside.get('[data-testid="permission-trace-badge"]').text()).toContain("工作区之外");
+
+    const readOnly = mountTrace({ ...trace, choice: null, source: "blocked", reason: "read-only" });
+    expect(readOnly.get('[data-testid="permission-trace-badge"]').text()).toContain("只读档");
+
+    const noOption = mountTrace({ ...trace, choice: null, source: "blocked", reason: "no-allow-option" });
+    expect(noOption.get('[data-testid="permission-trace-badge"]').text()).toContain("没有可放行的选项");
+  });
 });

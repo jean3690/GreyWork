@@ -15,8 +15,7 @@ export interface AgentProviderConfig {
   /** 展示图标（lib/icons 图标名）；缺省由 agentProviderIcon 兜底。 */
   icon?: string;
   /**
-   * 启动环境变量（如 API key）：随 spawn 注入 agent 进程，沙盒开启时同样生效
-   * （bwrap 不清空环境，只覆盖 HOME）。缺省 = 继承宿主环境。
+   * 启动环境变量（如 API key）：随 spawn 注入 agent 进程。缺省 = 继承宿主环境。
    */
   env?: Record<string, string>;
 }
