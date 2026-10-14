@@ -7,8 +7,10 @@
  */
 import { app, type BrowserWindow } from "electron";
 
+import { isDevServerEnabled, sidecarOrigin } from "../shared/dev-server-spec";
 import { loadOrCreateCredentials } from "./auth";
 import { destroyBrowserView } from "./browser-view";
+import { startDevServer, stopDevServer } from "./dev-server";
 import { registerIpc } from "./ipc";
 import { serverBinaryPath } from "./paths";
 import { startServer, stopServer } from "./sidecar";
@@ -19,6 +21,11 @@ let mainWindow: BrowserWindow | null = null;
 let sidecarPort = 0;
 /** sidecar 的登录密码。窗口重建（macOS 点 Dock 图标）时要再用一次。 */
 let sidecarPassword = "";
+/**
+ * 渲染端载入的 origin。热更态是 Vite dev server（`/api` 反代到 sidecar），否则是 sidecar 同源。
+ * 主窗与插件悬浮窗都读它 —— 两处必须是同一个 origin，否则会混用两份产物 / 两份会话。
+ */
+let rendererOrigin = "";
 let quitting = false;
 
 /** 托盘 / 关窗守卫共用的宿主面：窗口是懒取（托盘可能先于窗口建成）。 */
@@ -36,7 +43,13 @@ const trayHost: TrayHost = {
  * 复用同一份 sidecar 端口与密码：sidecar 还活着，没必要（也不该）重启一个后端。
  */
 async function openMainWindow(): Promise<void> {
-  const win = await createMainWindow({ port: sidecarPort, password: sidecarPassword, tray: trayHost });
+  const win = await createMainWindow({
+    port: sidecarPort,
+    password: sidecarPassword,
+    origin: rendererOrigin,
+    openDevTools: process.env.GREYWORK_ELECTRON_DEVTOOLS === "1",
+    tray: trayHost,
+  });
   mainWindow = win;
   win.on("closed", () => {
     destroyBrowserView(win);
@@ -61,6 +74,7 @@ app.on("activate", () => {
 app.on("before-quit", () => {
   quitting = true;
   stopServer();
+  stopDevServer();
 });
 
 // 单实例守卫（对齐 tauri-plugin-single-instance）：重复启动不再起第二个进程，而是把已有窗口叫回来。
@@ -88,9 +102,17 @@ if (!app.requestSingleInstanceLock()) {
         }
       });
 
+      // 渲染端 origin：默认 sidecar 同源托管；热更态改由 Vite dev server 提供（顺序不能反 ——
+      // Vite 的 `/api` 反代 target 就是刚起的 sidecar 端口）。
+      rendererOrigin = sidecarOrigin(sidecar.port);
+      if (isDevServerEnabled(app.isPackaged, process.env)) {
+        rendererOrigin = (await startDevServer({ sidecarPort: sidecar.port })).origin;
+        console.log(`[dev] 热更模式：渲染端载入 ${rendererOrigin}`);
+      }
+
       registerIpc({
         window: () => mainWindow,
-        port: () => sidecarPort,
+        rendererOrigin: () => rendererOrigin,
         quit: trayHost.quit,
       });
 

@@ -67,7 +67,7 @@ async function waitHealth(port: number, timeoutMs = 20_000): Promise<void> {
  * claude / gemini，表现为「agent 列表为空」。这里用登录 shell 取真实 PATH（非 Windows），
  * 再兜底拼上常见用户 bin 目录，去重保序。
  */
-function userShellPath(): string {
+export function userShellPath(): string {
   const base = process.env.PATH ?? "";
   if (process.platform === "win32") return base;
   const parts: string[] = [];

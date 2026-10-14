@@ -42,9 +42,10 @@ function readPluginPackage(pluginId: string): PluginPackageShape | null {
 
 /**
  * 打开（或前置）插件的悬浮窗；幂等 —— 已存在则置顶并聚焦。
- * `port` 是 sidecar 端口，窗口据此从同一源载入 SPA。
+ * `origin` 是渲染端当前 origin（sidecar 同源或 Vite dev server），窗口据此从同一源载入 SPA；
+ * 它用默认 session，主窗为该 origin 注入的 `gw_session` cookie 自动共享。
  */
-export function openPluginWindow(pluginId: string, port: number): void {
+export function openPluginWindow(pluginId: string, origin: string): void {
   const label = `${PLUGIN_WINDOW_LABEL_PREFIX}${pluginId}`;
   const already = windows.get(label);
   if (already && !already.isDestroyed()) {
@@ -87,7 +88,7 @@ export function openPluginWindow(pluginId: string, port: number): void {
   });
   windows.set(label, win);
   win.on("closed", () => windows.delete(label));
-  void win.loadURL(`http://127.0.0.1:${port}/#/plugin-window`).catch(() => undefined);
+  void win.loadURL(`${origin}/#/plugin-window`).catch(() => undefined);
 }
 
 /** 关闭插件的悬浮窗（卸载 / 停用插件时渲染端调用）；不存在即静默成功。 */

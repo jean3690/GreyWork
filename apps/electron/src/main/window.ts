@@ -1,5 +1,6 @@
 /**
- * 主窗口：无边框 `BrowserWindow`（对齐 Tauri 的 `decorations: false`），载入 sidecar 托管的 SPA。
+ * 主窗口：无边框 `BrowserWindow`（对齐 Tauri 的 `decorations: false`），载入 `options.origin`
+ * 下的 SPA —— 生产是 sidecar 同源托管，dev 热更态是 Vite dev server（见 `MainWindowOptions.origin`）。
  *
  * 拖拽：Electron 没有 Tauri 的 `startDragging()`，改用 CSS `-webkit-app-region`。渲染端的
  * Titlebar 沿用 Tauri 的 `data-tauri-drag-region` 标记，这里在页面加载后注入一段样式把它翻译
@@ -18,8 +19,18 @@ import { hideToTray, isCloseToTray, isTrayAvailable, type TrayHost } from "./tra
 import { loadWindowState, saveWindowState, scheduleSaveWindowState } from "./window-state";
 
 export interface MainWindowOptions {
+  /** sidecar 端口：`/api/login` 换 token 用（与渲染端 origin 未必同端口，见 `origin`）。 */
   readonly port: number;
   readonly password: string;
+  /**
+   * 渲染端载入的 origin（含协议与端口）。热更态是 Vite dev server，否则是 sidecar 同源。
+   *
+   * cookie 也写在这个 origin 上：cookie 按 **host** 存（端口无关），所以它必须与 `loadURL`
+   * 的 host 逐字一致，否则登录门会弹出来（见 `dev-server-spec` 里对 `127.0.0.1` 的说明）。
+   */
+  readonly origin: string;
+  /** 是否自动打开 DevTools（热更调试用，默认关）。 */
+  readonly openDevTools?: boolean;
   /** 关闭到托盘时要用的宿主回调（托盘本体在 tray.ts）。 */
   readonly tray: TrayHost;
 }
@@ -98,7 +109,7 @@ export async function createMainWindow(options: MainWindowOptions): Promise<Brow
   const token = await sessionToken(options.port, options.password);
   if (token !== null) {
     await win.webContents.session.cookies.set({
-      url: `http://127.0.0.1:${options.port}/`,
+      url: `${options.origin}/`,
       name: "gw_session",
       value: token,
       httpOnly: true,
@@ -110,6 +121,7 @@ export async function createMainWindow(options: MainWindowOptions): Promise<Brow
     console.warn("[auth] 自动登录失败：窗口将回落到登录门");
   }
 
-  void win.loadURL(`http://127.0.0.1:${options.port}/`);
+  if (options.openDevTools) win.webContents.openDevTools({ mode: "detach" });
+  void win.loadURL(`${options.origin}/`);
   return win;
 }

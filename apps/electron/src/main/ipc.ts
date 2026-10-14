@@ -18,8 +18,8 @@ import { applyTrayLabels, hideToTray, isCloseToTray, isTrayAvailable, setCloseTo
 export interface IpcHost {
   /** 当前主窗（可能尚未创建 / 已关闭）。 */
   window: () => BrowserWindow | null;
-  /** sidecar 端口：插件悬浮窗据此从同一源载入 SPA。 */
-  port: () => number;
+  /** 渲染端当前 origin：插件悬浮窗据此从同一源载入 SPA（热更态是 Vite，否则 sidecar 同源）。 */
+  rendererOrigin: () => string;
   /** 真正退出应用（守卫放行后）。 */
   quit: () => void;
 }
@@ -115,7 +115,7 @@ export function registerIpc(host: IpcHost): void {
     return notifyPlugin({ pluginId, title, body });
   });
   ipcMain.handle(IPC.plugins.openWindow, (_event, pluginId: unknown) => {
-    if (typeof pluginId === "string") openPluginWindow(pluginId, host.port());
+    if (typeof pluginId === "string") openPluginWindow(pluginId, host.rendererOrigin());
   });
   ipcMain.handle(IPC.plugins.closeWindow, (_event, pluginId: unknown) => {
     if (typeof pluginId === "string") closePluginWindow(pluginId);

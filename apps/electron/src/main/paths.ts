@@ -42,6 +42,11 @@ export function staticDir(): string {
   return path.join(requireRepoRoot(), "apps", "desktop", "dist");
 }
 
+/** 桌面端前端包目录：dev server（Vite）以它为 cwd 启动。 */
+export function desktopDir(): string {
+  return path.join(requireRepoRoot(), "apps", "desktop");
+}
+
 /** preload 脚本路径（主窗与插件悬浮窗共用同一份白名单桥）。 */
 export function preloadPath(): string {
   return path.join(__dirname, "..", "preload", "index.js");
