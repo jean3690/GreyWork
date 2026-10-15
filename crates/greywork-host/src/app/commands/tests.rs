@@ -14,6 +14,7 @@ use crate::qq::QqHost;
 use crate::rag::RagHost;
 use crate::sys;
 use crate::telegram::TelegramHost;
+use crate::terminal::TerminalHost;
 use crate::wechat::WechatHost;
 use crate::wecom::WecomHost;
 use crate::workspace_fs::WorkspaceFsAccess;
@@ -42,7 +43,7 @@ fn test_ctx(tmp: &Path) -> CommandContext {
         paths: HostPaths::new(tmp.join("home"), data_dir),
     });
     CommandContext {
-        host,
+        host: Arc::clone(&host),
         services: Arc::new(Services {
             db: Arc::new(Db::open_in_memory().expect("db")),
             workspace: Arc::new(
@@ -52,6 +53,7 @@ fn test_ctx(tmp: &Path) -> CommandContext {
             llm: Arc::new(LlmHost::default()),
             agent: Arc::new(LlmAgentHost::default()),
             rag: Arc::new(RagHost::default()),
+            terminal: Arc::new(TerminalHost::new(Arc::clone(&host))),
         }),
         channels: Arc::new(Channels {
             wechat: Arc::new(WechatHost::default()),
@@ -73,6 +75,8 @@ fn test_ctx(tmp: &Path) -> CommandContext {
             tray_available: false,
             pinned_tier: Some("read-only".to_string()),
         },
+        // 测试环境不依赖宿主 PATH：显式给 None = 不可用（`office_convert_info` 冒烟据此断言）。
+        soffice: crate::office::SofficeTool::for_test(None),
     }
 }
 
@@ -104,7 +108,7 @@ const DESKTOP_ONLY: &[&str] = &[
 
 #[test]
 fn commands_table_shape() {
-    assert_eq!(COMMANDS.len(), 174, "命令总数应为 174");
+    assert_eq!(COMMANDS.len(), 182, "命令总数应为 182");
 
     // 命令名唯一。
     let mut names: Vec<&str> = COMMANDS.iter().map(|c| c.name).collect();
@@ -127,7 +131,7 @@ fn commands_table_shape() {
     expected.sort_unstable();
     assert_eq!(desktop_only, expected, "桌面专属集合必须与计划一致");
 
-    // binary 命令恰 3 条。
+    // binary 命令恰 4 条。
     let mut binary: Vec<&str> = COMMANDS
         .iter()
         .filter(|c| c.binary)
@@ -136,7 +140,12 @@ fn commands_table_shape() {
     binary.sort_unstable();
     assert_eq!(
         binary,
-        vec!["channel_take_media", "fs_read_binary", "fs_read_media"]
+        vec![
+            "channel_take_media",
+            "fs_read_binary",
+            "fs_read_media",
+            "office_convert_to_pdf"
+        ]
     );
 
     // 桌面专属与 binary 不相交。
@@ -203,6 +212,16 @@ async fn dispatch_smoke_db_settings_load() {
         value["embeddableFrameOrigins"],
         serde_json::json!(["https://docs.example.com"])
     );
+
+    // office 本地转换：零参可用性查询经 dispatch 走得通；测试 ctx 注入的是「无 soffice」。
+    let out = dispatch("office_convert_info", Value::Null, &ctx)
+        .await
+        .expect("dispatch office_convert_info");
+    let CommandOutput::Json(value) = out else {
+        panic!("office_convert_info 应返回 JSON");
+    };
+    assert_eq!(value["available"], serde_json::json!(false));
+    assert!(value["path"].is_null());
 
     // office 扫码授权：三条不发网络请求的命令经 dispatch 走得通
     // （`office_oauth_submit` 要真换 token，端到端在 services/office/auth.rs 里）。

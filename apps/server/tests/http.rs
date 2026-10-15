@@ -187,14 +187,20 @@ async fn list_commands_exposes_metadata() {
     // 从共享表派生而不是写死数字：命令数随 greywork-host 涨落，写死会在下次加命令时
     // 变成一条「明明没问题却红」的假警报。
     assert_eq!(commands.len(), COMMANDS.len(), "命令总数应与共享表一致");
-    let binary: Vec<&str> = commands
+    let mut binary: Vec<&str> = commands
         .iter()
         .filter(|meta| meta["binary"] == true)
         .map(|meta| meta["name"].as_str().unwrap())
         .collect();
+    binary.sort_unstable();
     assert_eq!(
         binary,
-        vec!["channel_take_media", "fs_read_binary", "fs_read_media"]
+        vec![
+            "channel_take_media",
+            "fs_read_binary",
+            "fs_read_media",
+            "office_convert_to_pdf"
+        ]
     );
 
     // available 如实回传「本宿主可不可调」：桌面专属与黑名单都是 false，

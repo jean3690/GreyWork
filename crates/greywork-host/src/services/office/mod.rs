@@ -16,12 +16,16 @@
 //! 失败一律**不静默降级**：这里返回 `Err`，由渲染端决定回落本地 viewer 并把原因显示出来。
 
 mod auth;
+mod convert;
 mod oauth;
 mod store;
 
 pub use auth::{
     oauth_begin, oauth_logout, oauth_status, oauth_submit, OAuthBeginArgs, OAuthBeginResult,
     OAuthLogoutArgs, OAuthStatus, OAuthStatusArgs, OAuthSubmitArgs,
+};
+pub use convert::{
+    convert_info, convert_to_pdf, ConvertArgs, ConvertInfo, SofficeSource, SofficeTool,
 };
 pub use oauth::OAuthClientArgs;
 

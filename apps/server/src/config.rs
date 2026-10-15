@@ -71,6 +71,12 @@ pub struct ServerConfig {
     /// `apps/desktop/dist`；`<exe 同目录>/dist` 这种默认对从 `target/debug` 起的人更是惊吓。
     /// Docker 里显式设 `GREYWORK_STATIC_DIR=/app/dist`。
     pub static_dir: Option<PathBuf>,
+    /// LibreOffice `soffice` 可执行文件的**显式路径**覆盖（`GREYWORK_SOFFICE_PATH`）。
+    ///
+    /// 缺省 = 按 PATH 探测（Docker 镜像内 apt 装的 `/usr/bin/soffice` 即在 PATH 上），
+    /// 再退化到 macOS 应用包。只影响 Office 文档的「高保真(PDF)」预览 —— 探测不到时
+    /// 预览回落到自研解析器，不影响其它功能。配了却不可用会在预览时明确报错。
+    pub soffice_path: Option<PathBuf>,
 }
 
 impl Default for ServerConfig {
@@ -93,6 +99,7 @@ impl Default for ServerConfig {
             // fail-safe：默认不接管执行权。升级上来的部署不会因为换了版本就突然自己跑任务。
             automation_host_primary: false,
             static_dir: None,
+            soffice_path: None,
         }
     }
 }
@@ -172,6 +179,9 @@ impl ServerConfig {
         }
         if let Some(value) = env_str("GREYWORK_STATIC_DIR") {
             self.static_dir = Some(PathBuf::from(value));
+        }
+        if let Some(value) = env_str("GREYWORK_SOFFICE_PATH") {
+            self.soffice_path = Some(PathBuf::from(value));
         }
         // 收尾归一，放在**最后**：可信宿主不论 `tier` 来自配置文件还是 `GREYWORK_TIER`，
         // 一律不再钉住 —— 显式声明可信优先于钉具体值。
@@ -402,6 +412,12 @@ mod tests {
     fn split_list_trims_and_drops_empties() {
         assert_eq!(split_list("a, b ,,c", ','), vec!["a", "b", "c"]);
         assert!(split_list("  ", ',').is_empty());
+    }
+
+    /// soffice 路径默认不配：按 PATH 探测（Docker 内 /usr/bin/soffice 即在 PATH 上）。
+    #[test]
+    fn soffice_path_defaults_to_none() {
+        assert!(ServerConfig::default().soffice_path.is_none());
     }
 
     #[test]

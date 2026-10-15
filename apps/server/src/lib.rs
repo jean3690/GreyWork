@@ -190,6 +190,9 @@ pub async fn run() -> Result<(), String> {
             llm: Arc::new(greywork_host::llm::LlmHost::default()),
             agent: Arc::new(greywork_host::llm::LlmAgentHost::default()),
             rag: Arc::new(greywork_host::rag::RagHost::default()),
+            terminal: Arc::new(greywork_host::terminal::TerminalHost::new(Arc::clone(
+                &host,
+            ))),
         }),
         channels: Arc::new(Channels {
             wechat: Arc::new(greywork_host::wechat::WechatHost::default()),
@@ -218,6 +221,9 @@ pub async fn run() -> Result<(), String> {
             tray_available: false,
             pinned_tier: config.tier.clone(),
         },
+        // LibreOffice headless：显式配置优先，否则探测 PATH（Docker 镜像内 apt 装的
+        // `/usr/bin/soffice` 即在 PATH 上）。探测不到时 Office 预览回落原生解析器。
+        soffice: greywork_host::office::SofficeTool::discover(config.soffice_path.as_deref()),
     });
 
     let state = AppState {
@@ -256,7 +262,44 @@ fn generated_password_banner(plaintext: &str) -> String {
     )
 }
 
-/// 优雅退出：Ctrl-C 或（unix）SIGTERM —— 容器 stop 发的是 SIGTERM，必须处理。
+/// 是否按「stdin 关闭即退出」运行（`GREYWORK_EXIT_ON_STDIN_EOF=1`，只有 Electron sidecar 会设）。
+fn exit_on_stdin_eof(value: Option<&str>) -> bool {
+    matches!(value, Some("1"))
+}
+
+/// 等 stdin 读到 EOF：`GREYWORK_EXIT_ON_STDIN_EOF=1` 时 stdin 是父进程（Electron 壳）持有的
+/// 管道，父进程一消失写端就关，这里随即返回。
+///
+/// 刻意用一根**普通线程**而不是 `tokio::io::stdin()`：后者内部走 blocking 池，读到一半被丢下
+/// 会让运行时退出时还等它，反而卡住收尾；普通线程在进程退出时直接随进程结束，不拖后腿。
+async fn stdin_closed() {
+    let (done, closed) = tokio::sync::oneshot::channel::<()>();
+    std::thread::spawn(move || {
+        use std::io::Read;
+        let mut stdin = std::io::stdin().lock();
+        let mut scratch = [0u8; 256];
+        loop {
+            // 管道里不会有内容：读到 0（EOF）或出错，都说明父进程没了。
+            match stdin.read(&mut scratch) {
+                Ok(0) | Err(_) => break,
+                Ok(_) => {}
+            }
+        }
+        let _ = done.send(());
+    });
+    let _ = closed.await;
+}
+
+/// 优雅退出：Ctrl-C、（unix）SIGTERM，或（sidecar 模式）父进程消失。
+///
+/// 「父进程消失」这一路是给 Electron sidecar 的：主进程被**强杀**时（WSLg 崩溃 → X 连接中断
+/// → Chromium `FATAL: Failed to shutdown` / SIGTRAP，或直接 SIGKILL）`before-quit` 不跑、
+/// SIGTERM 也不发，sidecar 就会变成孤儿，一直占着端口和数据目录 —— 下次启动只能顺延端口，
+/// origin 一变渲染层读到的就是另一份 localStorage，用户表现为「工作区/设置又没了」。故
+/// sidecar 以 `GREYWORK_EXIT_ON_STDIN_EOF=1` 拉起，父死子死（管道那端见 apps/electron 的
+/// `SIDECAR_STDIO`）。
+///
+/// 默认**不**启用：当守护进程 / 容器跑时 stdin 往往本就是已关闭的，无条件监听会一启动就退。
 async fn shutdown_signal() {
     let ctrl_c = async {
         let _ = tokio::signal::ctrl_c().await;
@@ -273,9 +316,18 @@ async fn shutdown_signal() {
     #[cfg(not(unix))]
     let terminate = std::future::pending::<()>();
 
+    let parent_gone = async {
+        if !exit_on_stdin_eof(std::env::var("GREYWORK_EXIT_ON_STDIN_EOF").ok().as_deref()) {
+            std::future::pending::<()>().await;
+        }
+        stdin_closed().await;
+        greywork_host::log::warn("server", "父进程已退出（stdin 关闭），sidecar 随之一并退出");
+    };
+
     tokio::select! {
         _ = ctrl_c => {}
         _ = terminate => {}
+        _ = parent_gone => {}
     }
     greywork_host::log::info("server", "收到退出信号，正在关闭");
 }
@@ -297,7 +349,17 @@ fn bind_is_loopback(bind: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::bind_is_loopback;
+    use super::{bind_is_loopback, exit_on_stdin_eof};
+
+    /// 「父死子死」必须显式开启：守护进程 / 容器跑时 stdin 常常本就是关的。
+    #[test]
+    fn stdin_eof_exit_is_opt_in() {
+        assert!(exit_on_stdin_eof(Some("1")));
+        assert!(!exit_on_stdin_eof(Some("0")));
+        assert!(!exit_on_stdin_eof(Some("true")));
+        assert!(!exit_on_stdin_eof(Some("")));
+        assert!(!exit_on_stdin_eof(None));
+    }
 
     #[test]
     fn loopback_binds_are_recognized() {

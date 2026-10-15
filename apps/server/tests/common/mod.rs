@@ -87,7 +87,7 @@ fn make_state(tmp: &Path, config: ServerConfig) -> AppState {
     }
     let db = Arc::new(greywork_host::db::Db::open_in_memory().unwrap());
     let ctx = Arc::new(CommandContext {
-        host,
+        host: Arc::clone(&host),
         services: Arc::new(Services {
             db,
             workspace: Arc::new(access),
@@ -95,6 +95,9 @@ fn make_state(tmp: &Path, config: ServerConfig) -> AppState {
             llm: Arc::new(greywork_host::llm::LlmHost::default()),
             agent: Arc::new(greywork_host::llm::LlmAgentHost::default()),
             rag: Arc::new(greywork_host::rag::RagHost::default()),
+            terminal: Arc::new(greywork_host::terminal::TerminalHost::new(Arc::clone(
+                &host,
+            ))),
         }),
         channels: Arc::new(Channels {
             wechat: Arc::new(greywork_host::wechat::WechatHost::default()),
@@ -114,6 +117,8 @@ fn make_state(tmp: &Path, config: ServerConfig) -> AppState {
             tray_available: false,
             pinned_tier: config.tier.clone(),
         },
+        // 测试不依赖宿主 PATH：显式不可用，`office_convert_info` 结果确定。
+        soffice: greywork_host::office::SofficeTool::for_test(None),
     });
     let sessions = Arc::new(
         SessionStore::new(&hash_password(PASSWORD).unwrap(), Duration::from_secs(3600)).unwrap(),

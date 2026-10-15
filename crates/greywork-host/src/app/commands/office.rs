@@ -40,6 +40,20 @@ macro_rules! office_commands {
         run: |ctx, a| async move {
             office::oauth_logout(&ctx.host.paths().app_data_dir, a).map(Json) } }
 
+    // ---- office：本地 LibreOffice 高保真转换（B 驱动层，按需调用外部工具） ----
+    // 与云端预览并列的第二种「保真」路径：不外发，用宿主本机的 soffice 把文档转成 PDF。
+    // `office_convert_info` 回宿主是否装了 soffice（渲染端据此决定默认走不走 PDF）；
+    // `office_convert_to_pdf` 回裸 PDF 字节（binary），前端直接喂给 PdfViewer。
+    { "office_convert_info", auth: Auth::Required, desktop: false, binary: false,
+        args: UnitArgs,
+        run: |ctx, _a| async move { Ok::<_, String>(Json(office::convert_info(&ctx.soffice))) } }
+    { "office_convert_to_pdf", auth: Auth::Required, desktop: false, binary: true,
+        args: office::ConvertArgs,
+        run: |ctx, a| async move {
+            office::convert_to_pdf(
+                &ctx.host.paths().app_data_dir, &ctx.services.workspace, &ctx.soffice, a,
+            ).await.map(Bin) } }
+
         }
     };
 }

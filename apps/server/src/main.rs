@@ -164,6 +164,7 @@ fn print_help() {
            GREYWORK_PASSWORD_HASH / GREYWORK_PASSWORD\n  \
            GREYWORK_AGENT_PROGRAMS / GREYWORK_WORKSPACE_ROOTS\n  \
            GREYWORK_TIER / GREYWORK_SECURE_COOKIE / GREYWORK_ALLOWED_ORIGINS\n  \
-           GREYWORK_STATIC_DIR                 前端构建产物目录（配了即同源托管 SPA；缺 index.html 会启动失败）"
+           GREYWORK_STATIC_DIR                 前端构建产物目录（配了即同源托管 SPA；缺 index.html 会启动失败）\n  \
+           GREYWORK_SOFFICE_PATH               LibreOffice soffice 显式路径（缺省按 PATH 探测）"
     );
 }

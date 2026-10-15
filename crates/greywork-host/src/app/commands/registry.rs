@@ -19,13 +19,14 @@ use crate::llm::{LlmAgentHost, LlmHost};
 use crate::qq::QqHost;
 use crate::rag::RagHost;
 use crate::telegram::TelegramHost;
+use crate::terminal::TerminalHost;
 use crate::wechat::WechatHost;
 use crate::wecom::WecomHost;
 use crate::workspace_fs::WorkspaceFsAccess;
 use crate::{
     acp_host, bundled_skills, channel_media, db, dingtalk, discord, feishu, git, llm, mcp,
-    mcp_registry, office, plugin_market, qq, rag, sheet, skills_market, store_fs, sys, telegram,
-    update, web_fetch, wechat, wecom, workspace_fs, worktree,
+    mcp_registry, office, plugin_market, qq, rag, sheet, shell, skills_market, store_fs, sys,
+    telegram, update, web_fetch, wechat, wecom, workspace_fs, worktree,
 };
 
 /// 命令的鉴权要求。
@@ -71,6 +72,8 @@ pub struct Services {
     /// 本机 agent 回合的状态（请求 id + 可中止句柄）；与 `llm` 独立，见 `llm::agent`。
     pub agent: Arc<LlmAgentHost>,
     pub rag: Arc<RagHost>,
+    /// 交互式终端会话宿主（真 PTY；`terminal_*` 命令）。
+    pub terminal: Arc<TerminalHost>,
 }
 
 /// 聊天通道宿主集合（7 条通道）。
@@ -125,6 +128,11 @@ pub struct CommandContext {
     /// 与 `agent_programs` / `frame_origins` 同一注入风格。桌面端不构造
     /// `CommandContext`（其 `#[tauri::command]` 包装自行填 [`sys::HostFacts`]）。
     pub host_facts: sys::HostFacts,
+    /// LibreOffice headless 的解析结果（显式配置优先，否则 PATH 探测 / macOS 应用包）。
+    ///
+    /// 与 `frame_origins` / `host_facts` 同一注入风格：共享层无从得知宿主装没装 soffice，
+    /// 只能由宿主在构造时探测一次注入。`office_convert_*` 两个命令消费它。
+    pub soffice: office::SofficeTool,
 }
 
 impl CommandContext {
@@ -288,8 +296,10 @@ use super::llm::llm_commands;
 use super::markets::markets_commands;
 use super::office::office_commands;
 use super::rag::rag_commands;
+use super::shell::shell_commands;
 use super::sys::sys_commands;
+use super::terminal::terminal_commands;
 
 // 领域链入口：顺序**只此一处**决定 `COMMANDS`/`dispatch` 的行序。
 // 各领域文件只负责把自己那批命令行追加进来。
-sys_commands! { [acp_commands llm_commands rag_commands office_commands markets_commands channels_commands fs_commands git_commands db_commands app_commands command_table] }
+sys_commands! { [acp_commands llm_commands rag_commands office_commands markets_commands channels_commands shell_commands terminal_commands fs_commands git_commands db_commands app_commands command_table] }
