@@ -35,7 +35,14 @@ FROM debian:bookworm-slim AS runtime
 # git：git_* 命令走系统 git CLI；ca-certificates：出站 HTTPS（模型 / 通道）验证根证书。
 # ACP agent 运行时（node / npx / python3 / uvx …）本镜像不含 —— 按需在派生镜像里装，
 # 并用 GREYWORK_AGENT_PROGRAMS 显式放行（白名单是冻结的，只信配置，不读 DB）。
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git \
+#
+# LibreOffice（writer + impress，够覆盖 docx/pptx/.doc/.ppt）：本仓「高保真(PDF)」预览的
+# 转换引擎。用 --no-install-recommends 只装两个组件而非完整 libreoffice，缩镜像体积；
+# soffice 在 /usr/bin，运行时 PATH 探测即可找到，无需 GREYWORK_SOFFICE_PATH。
+# fonts-noto-cjk：中文文档转 PDF 才能正确嵌字，否则 CJK 文本缺字变成方框。
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates git \
+    libreoffice-writer libreoffice-impress fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/*
 # 非 root 运行；挂载 /data 卷时注意宿主目录属主应为 uid=10001。
 #

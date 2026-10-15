@@ -10,6 +10,15 @@
 
 ### 新增
 
+- **Office 文档「高保真(PDF)」预览（LibreOffice 本地转换）**：docx / pptx / 老格式（.doc / .ppt 等）
+  现在可在原生 viewer 与 LibreOffice 转换出的 PDF 之间切换（viewer 工具栏的「原生 / 高保真(PDF)」）。
+  - 高保真路径经宿主 `office_convert_to_pdf` 命令调起 `soffice --convert-to pdf`，字节直接交给既有
+    `PdfViewer`，补上原生解析器缺失的页眉页脚 / 分栏 / 分页符 / 脚注等版式；转换失败一律回落原生 viewer 并提示。
+  - 默认走高保真**当且仅当**宿主探测到可用的 soffice（`office_convert_info`）；桌面端探测系统安装的
+    soffice，服务端 Docker 镜像已内置 `libreoffice-writer` + `libreoffice-impress` + `fonts-noto-cjk`。
+  - `GREYWORK_SOFFICE_PATH` 可锁定到特定 soffice 可执行文件；指向不可用会记为「配置了但不可用」而非静默回落。
+  - 表格族（xlsx / xls）**不**走转换：转 PDF 只会丢掉 Univer 的可交互表格与分析视图。
+
 - **团队协作（Cowork）控制台重做 + 本轮能力勾选 + 队友提交**：起跑表单拆成「目标 / 成员 / 本轮能力」
   三张卡，运行中改成对话优先布局（群聊式时间线为主、邮件列表为次，右侧挂任务板），并新增提交卡。
   - **run 级能力**：起跑时可勾选本轮带给每个成员的 MCP 服务器与技能（默认跟设置里已启用 / 全量技能）；

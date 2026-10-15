@@ -171,7 +171,8 @@ Loaded as `defaults → <data_dir>/server.json → GREYWORK_* env vars` (env win
 `frame_origins` (`GREYWORK_FRAME_ORIGINS`, see [Security headers](#security-headers)),
 `automation_host_primary` (`GREYWORK_AUTOMATION_HOST_PRIMARY`, see
 [Automations](#automations)), `static_dir` (`GREYWORK_STATIC_DIR`, see
-[Static hosting](#static-hosting-spa)).
+[Static hosting](#static-hosting-spa)), `soffice_path` (`GREYWORK_SOFFICE_PATH`, see
+[Office preview](#office-preview-native-vs-high-fidelity-libreoffice)).
 
 Password bootstrap, in priority order:
 
@@ -455,6 +456,29 @@ Two read caps live in the host, not the renderer (`crates/greywork-host/src/infr
 renderer can ask for a per-kind budget but can never raise the host's hard cap. Both are **errors**
 when exceeded, never truncation — a half file surfaces as "corrupt format", which is far harder to
 diagnose than a size message.
+
+### Office preview: native vs. high-fidelity (LibreOffice)
+
+Office documents have **two** rendering paths, chosen per tab by a viewer-level switch
+(`OfficeViewSwitch`, shown only for covered kinds):
+
+- **Native** (`docx` → `DocViewer`, `pptx` → `SlideViewer`, `legacy-office` → `LegacyOfficeViewer`):
+  in-house OOXML parsers. They re-flow to panel width and support in-place text editing, but have
+  known fidelity gaps (headers/footers, columns, page breaks, footnotes, fields, floating objects).
+- **High-fidelity (PDF)**: the host runs LibreOffice headless (`soffice --convert-to pdf`, service in
+  `crates/greywork-host/src/services/office/convert.rs`) and the renderer feeds the bytes to the
+  existing `PdfViewer`. This closes the fidelity gaps but is read-only.
+
+**Priority** in `PreviewSurface.vue`: a configured cloud Office provider wins (user opted into a
+third-party service); otherwise a covered kind defaults to high-fidelity **iff** the host reports
+LibreOffice available (`office_convert_info`), else native. Any conversion failure falls back to the
+native viewer **with** a notice — never a silent dead end.
+
+The converter is the B driver layer (on-demand external tool), **not** an embedded engine: it is
+invoked only when a user opens an office file with LibreOffice present, returns PDF bytes via the
+`office_convert_to_pdf` binary command, and cleans up its scratch profile per run. Spreadsheet kinds
+(`xlsx`/`xls`) are deliberately excluded — converting them to PDF throws away Univer's interactive
+table and analysis views for a static print layout.
 
 ### Media playback: stream, don't buffer
 

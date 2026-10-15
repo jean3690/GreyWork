@@ -62,6 +62,12 @@ The desktop app is an **Electron** app (`apps/electron`). The shell only spawns 
 `greywork-server` as a sidecar and loads the **same renderer build** (`apps/desktop/dist`) from
 it — no second copy of the domain logic, no separate frontend build.
 
+The sidecar listens on a **stable loopback port** (persisted in `userData/sidecar-port.json`,
+default `17844`, bumped only on collision). This is load-bearing, not cosmetic: the renderer
+persists the workspace list, sessions, settings and layout in `localStorage`, which browsers key
+by **origin** (scheme + host + *port*). A random per-launch port would mint a fresh, empty origin
+on every start — the user-visible symptom is "my workspaces/settings disappear every launch".
+
 Build order matters (the root script `pnpm electron:package` chains it all):
 
 ```sh
@@ -115,6 +121,9 @@ ships the same Vue renderer as a same-origin SPA behind a password login. A mult
    (rustls); `rusqlite` compiles bundled SQLite with the base image's C toolchain.
 3. **runtime** (`debian:bookworm-slim`) carries just the binary, the built SPA at `/app/web`,
    `ca-certificates` and `git`. It runs as a non-root user and serves `0.0.0.0:8787`.
+   **LibreOffice** (`libreoffice-writer` + `libreoffice-impress`, plus `fonts-noto-cjk` for CJK
+   glyphs) is also installed here so the "high-fidelity (PDF)" office preview works out of the box;
+   `soffice` is on `PATH`, so no `GREYWORK_SOFFICE_PATH` is needed in the default image.
 
 ```sh
 # 0) 可选：cp .env.example .env —— 三种密码来源 / 授权面 / 安全开关 / 自动化任务与
