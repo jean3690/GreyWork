@@ -102,6 +102,57 @@ describe("ServicesSettingsPane 配置链路", () => {
     expect(settings.officeProviders.find((provider) => provider.id === "wps365")?.recipe).toBeUndefined();
   });
 
+  it("编辑服务商填好 OAuth 配置：落库并出现授权徽标与「授权」按钮", async () => {
+    const wrapper = mountPane();
+    const settings = useSettingsStore();
+
+    await wrapper.get('[data-testid="office-provider-edit-tencent-docs"]').trigger("click");
+    await flushPromises();
+    await dialog().find('[data-testid="office-provider-oauth-client-id"]').setValue("cid-1");
+    await dialog().find('[data-testid="office-provider-oauth-redirect-uri"]').setValue("https://localhost/callback");
+    await dialog().find('[data-testid="office-provider-save"]').trigger("click");
+    await flushPromises();
+
+    const stored = settings.officeProviders.find((provider) => provider.id === "tencent-docs");
+    expect(stored?.oauth).toMatchObject({ clientId: "cid-1", redirectUri: "https://localhost/callback" });
+    expect(wrapper.find('[data-testid="office-provider-auth-tencent-docs"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="office-provider-authorize-tencent-docs"]').exists()).toBe(true);
+  });
+
+  it("OAuth 半填就地报错、不落库（与配方同一哲学：填全或留空）", async () => {
+    const wrapper = mountPane();
+    const settings = useSettingsStore();
+
+    await wrapper.get('[data-testid="office-provider-edit-tencent-docs"]').trigger("click");
+    await flushPromises();
+    await dialog().find('[data-testid="office-provider-oauth-client-id"]').setValue("cid-1");
+    await dialog().find('[data-testid="office-provider-save"]').trigger("click");
+    await flushPromises();
+
+    expect(dialog().text()).toContain("回调地址");
+    expect(settings.officeProviders.find((provider) => provider.id === "tencent-docs")?.oauth).toBeUndefined();
+  });
+
+  it("点「授权」打开扫码授权弹窗", async () => {
+    const settings = useSettingsStore();
+    settings.upsertServiceProvider({
+      id: "tencent-docs",
+      name: "腾讯文档",
+      family: "office",
+      kind: "tencent-docs",
+      enabled: true,
+      oauth: { clientId: "cid-1", redirectUri: "https://localhost/callback" },
+    });
+    const wrapper = mountPane();
+    await flushPromises();
+
+    await wrapper.get('[data-testid="office-provider-authorize-tencent-docs"]').trigger("click");
+    await flushPromises();
+
+    expect(document.body.textContent).toContain("扫码授权");
+    expect(document.body.querySelector('[data-testid="office-oauth-open"]')).not.toBeNull();
+  });
+
   it("新增服务商：落库并自动选中", async () => {
     const wrapper = mountPane();
     const settings = useSettingsStore();

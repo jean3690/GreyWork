@@ -16,12 +16,15 @@ import { computed, onMounted, ref, watch } from "vue";
 import { hasHostCommands } from "@greywork/host-ipc";
 import type { OfficeProviderConfig } from "@greywork/shell";
 import Icon from "@/features/shared/Icon.vue";
+import OfficeOAuthDialog from "@/features/settings/OfficeOAuthDialog.vue";
 import OfficeProviderFormDialog, { type OfficeProviderDraftPayload } from "@/features/settings/OfficeProviderFormDialog.vue";
 import { useSettingsStore } from "@/stores/settings";
+import { useOfficeAuthStore, officeAuthLabel } from "@/stores/office-auth";
 import { useOfficeHostStore } from "@/stores/office-host";
 
 const settings = useSettingsStore();
 const host = useOfficeHostStore();
+const auth = useOfficeAuthStore();
 
 /** 浏览器预览态没有宿主命令，这一页的开关都无从生效 —— 如实说明，而不是给点了没反应的按钮。 */
 const hostAvailable = hasHostCommands();
@@ -47,9 +50,30 @@ function refreshHostFacts(): void {
   void host.loadEnvPresence(declaredEnvNames.value);
 }
 
-onMounted(refreshHostFacts);
+/** 已配授权（填了 clientId）的服务商 id 清单 —— 一次问宿主它们的授权状态。 */
+const oauthClientIds = computed(() => [
+  ...new Set(settings.officeProviders.map((provider) => provider.oauth?.clientId.trim()).filter((id): id is string => Boolean(id))),
+]);
+
+function refreshAuthStatuses(): void {
+  if (!hostAvailable) return;
+  for (const clientId of oauthClientIds.value) void auth.refreshStatus(clientId);
+}
+
+onMounted(() => {
+  refreshHostFacts();
+  refreshAuthStatuses();
+});
 // 变量名清单随用户增删服务商而变，标出的「未设置」必须跟着走。
 watch(declaredEnvNames, refreshHostFacts);
+// 同理：刚填好 clientId 的服务商，授权徽标要立刻有值（而不是停在「授权未知」）。
+watch(oauthClientIds, refreshAuthStatuses);
+
+/** 行内授权徽标：没配授权就不显示（调用方据此 v-if）。 */
+function authLabelFor(provider: OfficeProviderConfig): ReturnType<typeof officeAuthLabel> {
+  const clientId = provider.oauth?.clientId.trim();
+  return officeAuthLabel(clientId ? auth.statuses[clientId] : undefined);
+}
 
 function setEnabled(provider: OfficeProviderConfig, enabled: boolean): void {
   settings.upsertServiceProvider({ ...provider, enabled });
@@ -97,6 +121,19 @@ function removeDraft(): void {
   if (!current) return;
   settings.removeServiceProvider(current.id);
   closeDialog();
+}
+
+const oauthDialogOpen = ref(false);
+const oauthDialogProvider = ref<OfficeProviderConfig | null>(null);
+
+function startAuthorize(provider: OfficeProviderConfig): void {
+  oauthDialogProvider.value = provider;
+  oauthDialogOpen.value = true;
+}
+
+function closeOAuthDialog(): void {
+  oauthDialogOpen.value = false;
+  oauthDialogProvider.value = null;
 }
 </script>
 
@@ -152,6 +189,27 @@ function removeDraft(): void {
             <span class="shrink-0 text-[11px]" :class="provider.recipe ? 'text-accent' : 'text-dim2'">
               {{ provider.recipe ? "配方已填" : "未填配方" }}
             </span>
+            <span
+              v-if="provider.oauth"
+              class="shrink-0 text-[11px]"
+              :class="{
+                'text-accent': authLabelFor(provider).tone === 'ok',
+                'text-amber': authLabelFor(provider).tone === 'warn',
+                'text-dim2': authLabelFor(provider).tone === 'muted',
+              }"
+              :data-testid="`office-provider-auth-${provider.id}`"
+            >
+              {{ authLabelFor(provider).text }}
+            </span>
+          </button>
+          <button
+            v-if="provider.oauth"
+            type="button"
+            class="shrink-0 cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-0.5 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
+            :data-testid="`office-provider-authorize-${provider.id}`"
+            @click="startAuthorize(provider)"
+          >
+            授权
           </button>
           <button
             type="button"
@@ -199,5 +257,7 @@ function removeDraft(): void {
       @remove="removeDraft"
       @cancel="closeDialog"
     />
+
+    <OfficeOAuthDialog :open="oauthDialogOpen" :provider="oauthDialogProvider" @close="closeOAuthDialog" />
   </div>
 </template>

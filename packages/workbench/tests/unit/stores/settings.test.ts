@@ -453,6 +453,42 @@ describe("第三方服务配置 serviceProviders", () => {
     expect(settings.officeProviders.find((provider) => provider.id === "custom")?.recipe).toBeUndefined();
   });
 
+  it("OAuth 配置：字段齐全时保留，缺 clientId 或 redirectUri 时整块丢弃", () => {
+    const settings = useSettingsStore();
+    settings.upsertServiceProvider({
+      id: "tencent-docs",
+      name: "腾讯文档",
+      family: "office",
+      kind: "tencent-docs",
+      enabled: true,
+      oauth: {
+        clientId: "cid-123",
+        clientSecretEnv: "TENCENT_DOCS_SECRET",
+        redirectUri: "https://localhost/callback",
+        scope: "all",
+        authorizeUrl: "https://docs.qq.com/oauth/v2/authorize",
+        tokenUrl: "https://docs.qq.com/oauth/v2/token",
+      },
+    });
+    const stored = settings.officeProviders.find((provider) => provider.id === "tencent-docs");
+    expect(stored?.oauth).toMatchObject({
+      clientId: "cid-123",
+      clientSecretEnv: "TENCENT_DOCS_SECRET",
+      redirectUri: "https://localhost/callback",
+    });
+
+    // 缺 redirectUri → 整块丢弃（留半块配置只会在点「扫码授权」时才炸）。
+    settings.upsertServiceProvider({
+      id: "custom",
+      name: "自建",
+      family: "office",
+      kind: "custom",
+      enabled: true,
+      oauth: { clientId: "cid", redirectUri: "" },
+    });
+    expect(settings.officeProviders.find((provider) => provider.id === "custom")?.oauth).toBeUndefined();
+  });
+
   it("kind 不属于该族清单 → 拒收（拼错的值会让预览永远走不到云端）", () => {
     const settings = useSettingsStore();
     // 拼错的 kind 正是本用例要验的输入，只能绕过类型 —— 类型层面本就不该允许它。

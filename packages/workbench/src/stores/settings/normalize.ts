@@ -104,6 +104,8 @@ export function normalizeServiceProvider(raw: unknown): ServiceProviderConfig | 
     if (typeof record.docsUrl === "string" && record.docsUrl !== "") office.docsUrl = record.docsUrl;
     const recipe = normalizeOfficeRecipe(record.recipe);
     if (recipe) office.recipe = recipe;
+    const oauth = normalizeOfficeOAuth(record.oauth);
+    if (oauth) office.oauth = oauth;
     return office;
   }
   // 其余三族本期只有信封字段，原样返回（各自的专属字段在后面加族时补齐）。
@@ -130,6 +132,26 @@ function normalizeOfficeRecipe(raw: unknown): OfficeProviderConfig["recipe"] {
     recipe.credentialHeader = record.credentialHeader;
   }
   return recipe;
+}
+
+/**
+ * 归一化扫码授权配置；`clientId` / `redirectUri` 缺一即整块丢弃。
+ *
+ * 与配方同一条哲学：**填全或留空**。缺 `clientId` 就没法换 token、缺 `redirectUri` 授权页会
+ * 直接拒绝，留半块配置只会在点「扫码授权」时才炸 —— 不如读入时就当作没配。
+ */
+function normalizeOfficeOAuth(raw: unknown): OfficeProviderConfig["oauth"] {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
+  const record = raw as Record<string, unknown>;
+  const clientId = typeof record.clientId === "string" ? record.clientId.trim() : "";
+  const redirectUri = typeof record.redirectUri === "string" ? record.redirectUri.trim() : "";
+  if (clientId === "" || redirectUri === "") return undefined;
+  const oauth: NonNullable<OfficeProviderConfig["oauth"]> = { clientId, redirectUri };
+  if (typeof record.clientSecretEnv === "string" && record.clientSecretEnv !== "") oauth.clientSecretEnv = record.clientSecretEnv;
+  if (typeof record.scope === "string" && record.scope !== "") oauth.scope = record.scope;
+  if (typeof record.authorizeUrl === "string" && record.authorizeUrl !== "") oauth.authorizeUrl = record.authorizeUrl;
+  if (typeof record.tokenUrl === "string" && record.tokenUrl !== "") oauth.tokenUrl = record.tokenUrl;
+  return oauth;
 }
 
 /** 本地 AI 配置的读入归一：缺字段落默认、非法值丢弃（一条坏配置不该让整份设置失效）。 */
