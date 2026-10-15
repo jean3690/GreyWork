@@ -57,8 +57,8 @@ export const zhCN = {
     collapsePreview: "折叠预览面板",
     expandWorkspace: "展开工作区面板",
     collapseWorkspace: "折叠工作区面板",
-    expandActivity: "展开活动面板",
-    collapseActivity: "收起活动面板",
+    expandTerminal: "展开终端面板",
+    collapseTerminal: "收起终端面板",
     noWorkspace: "未绑定工作区",
   },
   /* 右键菜单文案：按区域分组，与 lib/context-menu.ts 的构建器一一对应。 */
@@ -112,7 +112,7 @@ export const zhCN = {
       toggleSidebar: "切换侧栏",
       togglePreview: "切换预览面板",
       toggleWorkspace: "切换工作区面板",
-      toggleActivity: "切换活动面板",
+      toggleTerminal: "切换终端面板",
       newChat: "新建对话",
       openSettings: "打开设置",
     },
@@ -193,10 +193,8 @@ export const zhCN = {
       document: "文档",
       focus: "专注",
     },
-    minimal: "极简模式",
-    exitMinimal: "退出极简模式",
   },
-  /** 极简模式（见 stores/layout 的 minimal 与 features/shell/MinimalSider）。 */
+  /** 极简外壳的侧栏与输入卡（features/shell/MinimalSider、features/guid/MinimalComposer）。 */
   minimal: {
     sessions: "会话",
     newSession: "新建",
@@ -207,10 +205,26 @@ export const zhCN = {
     filterOnlyActive: "只看当前工作区",
     agent: "Agent",
     agentLabel: "智能体",
-    agentDisabled: "未启用",
     agentSwitchFailed: "切换后端失败：{name}",
     workspaceFallback: "普通对话",
     workspaceLabel: "工作区",
+    /** ACP 会话配置块：默认收起成一行摘要，点开才铺开完整配置簇。 */
+    configLabel: "会话配置",
+    configExpand: "展开会话配置",
+    configCollapse: "收起会话配置",
+    configUnset: "跟随 CLI",
+  },
+  /** 底部终端面板（见 features/terminal/TerminalPanel）。 */
+  terminal: {
+    title: "终端",
+    collapse: "收起终端面板",
+    newTab: "新建终端",
+    closeTab: "关闭标签页 {name}",
+    restart: "重启终端",
+    shell: "终端环境",
+    starting: "正在启动 shell…",
+    startingHint: "启动会先加载你的 shell 配置（如 .bashrc / .zshrc）；装了 nvm / conda 之类可能较慢。",
+    empty: "还没有终端会话。",
   },
   web: {
     title: "抓取网页",
@@ -264,6 +278,9 @@ export const zhCN = {
       label: "预览模式",
       table: "表格",
       analysis: "分析",
+      officeLabel: "Office 视图",
+      officeNative: "原生",
+      officePdf: "高保真（PDF）",
     },
     common: {
       loading: "读取中…",
@@ -344,6 +361,12 @@ export const zhCN = {
         frameBlocked:
           "云端预览要内嵌 {origin}，但当前宿主允许内嵌的只有 {allowed} —— 已切回本地查看。桌面端的允许列表写死在打包配置里，无法自行添加；服务端请把该 origin 加进 GREYWORK_FRAME_ORIGINS。",
         frameBlockedNone: "（无）",
+      },
+      officePdf: {
+        title: "LibreOffice",
+        needsDisk: "该文件需位于磁盘上（或已落盘）才能用 LibreOffice 转换。",
+        failedTitle: "LibreOffice 转换不可用",
+        fellBack: "「{name}」已改用原生查看（LibreOffice 不可用）",
       },
       sheet: {
         notLoaded: "表格尚未加载完成",
@@ -593,6 +616,17 @@ export const zhCN = {
       emptyTitle: "新对话已就绪",
       emptyHint: "输入指令开始工作，回车发送。",
       placeholderQueued: "当前回合进行中，Enter 加入待发队列…",
+      /** 空会话建议卡：点击填入草稿（不发送）。label 是卡片标题，text 是填进输入框的正文。 */
+      suggest: {
+        explore: "了解这个项目",
+        exploreText: "帮我快速了解这个仓库：技术栈、目录结构、主要模块和启动方式。",
+        plan: "规划下一步任务",
+        planText: "根据当前工作区状态，帮我规划接下来要做的任务，并拆解成可执行的步骤。",
+        review: "审查最近改动",
+        reviewText: "检查最近的代码改动，找出潜在问题和可以优化的地方。",
+        docs: "撰写使用文档",
+        docsText: "为当前项目的主要功能撰写一份简明的使用文档。",
+      },
     },
     /** 待发队列（M5）：回合进行中发出的指令先入队，回合结束后自动补发。 */
     queue: {
@@ -609,6 +643,7 @@ export const zhCN = {
       remove: "移除评论",
     },
     busy: "任务执行中…",
+    messageCopied: "已复制",
     plan: "计划",
     speedBoost: "速度 ×1.5",
     shield: "权限档位",

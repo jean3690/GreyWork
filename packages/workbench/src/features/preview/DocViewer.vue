@@ -17,6 +17,7 @@ import { computed, onBeforeUnmount, ref, toRef, watch } from "vue";
 import DocxBlocks from "@/features/preview/DocxBlocks.vue";
 import PreviewExternalButton from "@/features/preview/PreviewExternalButton.vue";
 import { usePreviewBinary } from "@/lib/preview-content";
+import OfficeViewSwitch from "@/features/preview/OfficeViewSwitch.vue";
 import { parseDocx, type ParsedDocx } from "@/lib/docx-parse";
 import { patchDocxText } from "@/lib/docx-serialize";
 import { registerPreviewSaver, unregisterPreviewSaver, writePreviewBytes } from "@/lib/preview-save";
@@ -107,6 +108,7 @@ onBeforeUnmount(() => unregisterPreviewSaver(props.tab.id));
   <div class="flex size-full min-h-0 flex-col overflow-hidden">
     <div class="flex shrink-0 items-center gap-2 border-b border-line px-3 py-1 text-[11px] text-dim2">
       <span>{{ summary }}</span>
+      <OfficeViewSwitch :tab="tab" />
     </div>
 
     <p v-if="loading" class="px-4 py-3 text-[12px] text-dim2">{{ t("preview.common.loading") }}</p>

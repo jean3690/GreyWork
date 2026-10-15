@@ -58,8 +58,8 @@ export const enUS: MessageSchema = {
     collapsePreview: "Collapse preview panel",
     expandWorkspace: "Expand workspace panel",
     collapseWorkspace: "Collapse workspace panel",
-    expandActivity: "Expand activity panel",
-    collapseActivity: "Collapse activity panel",
+    expandTerminal: "Expand terminal panel",
+    collapseTerminal: "Collapse terminal panel",
     noWorkspace: "No workspace bound",
   },
   /* Context-menu labels: grouped by region, mirroring lib/context-menu.ts builders. */
@@ -113,7 +113,7 @@ export const enUS: MessageSchema = {
       toggleSidebar: "Toggle sidebar",
       togglePreview: "Toggle preview panel",
       toggleWorkspace: "Toggle workspace panel",
-      toggleActivity: "Toggle activity panel",
+      toggleTerminal: "Toggle terminal panel",
       newChat: "New conversation",
       openSettings: "Open settings",
     },
@@ -195,10 +195,8 @@ export const enUS: MessageSchema = {
       document: "Document",
       focus: "Focus",
     },
-    minimal: "Minimal mode",
-    exitMinimal: "Exit minimal mode",
   },
-  /** Minimal mode (see `minimal` in stores/layout and features/shell/MinimalSider). */
+  /** The minimal shell's sidebar and composer (features/shell/MinimalSider, features/guid/MinimalComposer). */
   minimal: {
     sessions: "Sessions",
     newSession: "New",
@@ -209,10 +207,26 @@ export const enUS: MessageSchema = {
     filterOnlyActive: "Only current workspace",
     agent: "Agent",
     agentLabel: "Agent",
-    agentDisabled: "disabled",
     agentSwitchFailed: "Failed to switch backend: {name}",
     workspaceFallback: "General",
     workspaceLabel: "Workspace",
+    /** ACP session config block: collapsed to a summary row by default, expand for the full cluster. */
+    configLabel: "Session config",
+    configExpand: "Expand session config",
+    configCollapse: "Collapse session config",
+    configUnset: "Use CLI model",
+  },
+  /** Bottom terminal panel (see features/terminal/TerminalPanel). */
+  terminal: {
+    title: "Terminal",
+    collapse: "Collapse terminal panel",
+    newTab: "New terminal",
+    closeTab: "Close tab {name}",
+    restart: "Restart terminal",
+    shell: "Terminal environment",
+    starting: "Starting shell…",
+    startingHint: "Startup loads your shell config (e.g. .bashrc / .zshrc); things like nvm / conda can make it slow.",
+    empty: "No terminal session yet.",
   },
   web: {
     title: "Fetch web page",
@@ -267,6 +281,9 @@ export const enUS: MessageSchema = {
       label: "Preview mode",
       table: "Table",
       analysis: "Analyze",
+      officeLabel: "Office view",
+      officeNative: "Native",
+      officePdf: "High-fidelity (PDF)",
     },
     common: {
       loading: "Loading…",
@@ -348,6 +365,12 @@ export const enUS: MessageSchema = {
         frameBlocked:
           "Cloud preview needs to embed {origin}, but this host only allows {allowed} — fell back to the local viewer. On desktop the allow-list is baked into the build; on a server, add the origin to GREYWORK_FRAME_ORIGINS.",
         frameBlockedNone: "(none)",
+      },
+      officePdf: {
+        title: "LibreOffice",
+        needsDisk: "This file must be on disk (or have been saved) before it can be converted with LibreOffice.",
+        failedTitle: "LibreOffice conversion unavailable",
+        fellBack: "“{name}” is now shown in the native viewer (LibreOffice unavailable)",
       },
       sheet: {
         notLoaded: "The spreadsheet is not loaded yet",
@@ -596,6 +619,17 @@ export const enUS: MessageSchema = {
       emptyTitle: "New conversation ready",
       emptyHint: "Type an instruction to get started; press Enter to send.",
       placeholderQueued: "A turn is running — press Enter to queue this message…",
+      /** Empty-thread suggestion cards: clicking fills the draft (never sends). */
+      suggest: {
+        explore: "Explore this project",
+        exploreText: "Give me a quick tour of this repo: stack, layout, main modules, and how to run it.",
+        plan: "Plan the next task",
+        planText: "Based on the current workspace, plan what to do next and break it into concrete steps.",
+        review: "Review recent changes",
+        reviewText: "Review the recent code changes and point out potential issues or improvements.",
+        docs: "Write usage docs",
+        docsText: "Write concise usage documentation for the main features of this project.",
+      },
     },
     /** Pending queue (M5): instructions sent mid-turn are queued and auto-sent when the turn ends. */
     queue: {
@@ -612,6 +646,7 @@ export const enUS: MessageSchema = {
       remove: "Remove comment",
     },
     busy: "Executing task…",
+    messageCopied: "Copied",
     plan: "Plan",
     speedBoost: "Speed ×1.5",
     shield: "Permission tier",
@@ -1468,7 +1503,7 @@ export const enUS: MessageSchema = {
       openSettings: "Manage MCP servers (Settings → MCP)",
     },
     skills: {
-      desktopOnly: "Read-only in the browser preview: scanning skills needs the desktop app (Tauri).",
+      desktopOnly: "Read-only in the browser preview: scanning skills needs the desktop app.",
       scanning: "Scanning…",
       empty: "No skill installed in the workspace yet — search and install under Settings → Skills.",
       openSettings: "Install / manage skills (Settings → Skills)",

@@ -32,6 +32,13 @@ export type PreviewSource = "vfs" | "disk" | "web";
  */
 export type PreviewMode = "table" | "analysis";
 
+/**
+ * Office 文档（docx / pptx / 老格式 .doc/.ppt 等）的两种呈现方式。
+ * `native` 走本仓自研解析器（可按正文重排、可就地编辑文本）；`pdf` 走 LibreOffice
+ * 转 PDF 的「高保真」版式（补页眉页脚 / 分栏 / 分页符 / 脚注，但只读）。
+ */
+export type OfficeViewMode = "native" | "pdf";
+
 export interface PreviewTab {
   id: string;
   /** `vfs` 为 VFS 相对路径，`disk` 为磁盘绝对路径。 */
@@ -55,6 +62,14 @@ export interface PreviewTab {
    * 会让它们全部编译不过，而它们与本功能无关。
    */
   mode?: PreviewMode;
+  /**
+   * Office 文档的当前呈现方式，缺省视作「soffice 可用则 pdf，否则 native」。
+   *
+   * 与 `mode` 同款可选字段：默认解析在 PreviewSurface / `OfficeViewSwitch` 里做，不写进
+   * tab —— 同样是怕把十几处测试构造的字面量击穿。一旦用户显式切换过，这里就记下选择，
+   * 覆盖「soffice 是否在场」这一动态事实。
+   */
+  officeView?: OfficeViewMode;
 }
 
 interface PreviewPrefs {
@@ -220,6 +235,16 @@ export const usePreviewStore = defineStore("preview", () => {
   }
 
   /**
+   * 切换某个 tab 的 Office 文档呈现方式（native / pdf 高保真）。
+   *
+   * 不动 revision：只是换个渲染器，内容没变。与 `setMode` 同样的考量 —— 动 revision 会让
+   * viewer 重读一遍文件，切换模式的代价就变成「重新解析一次几 MB 的文档」。
+   */
+  function setOfficeView(id: string, view: OfficeViewMode): void {
+    tabs.value = tabs.value.map((tab) => (tab.id === id ? { ...tab, officeView: view } : tab));
+  }
+
+  /**
    * 给已打开的 tab 记上磁盘孪生路径（产物落盘后到达）。
    *
    * 不复用 `open()`：它命中同路径就走早退分支，新参数会被静默丢掉 —— 而
@@ -378,6 +403,7 @@ export const usePreviewStore = defineStore("preview", () => {
     setName,
     reload,
     setMode,
+    setOfficeView,
     attachDiskPath,
     activate,
     moveTab,

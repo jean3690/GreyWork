@@ -18,6 +18,7 @@ import { sniffOfficeContainer, type OfficeContainer } from "@/lib/legacy-office"
 import { formatBytes } from "@/lib/attachments";
 import { openWithSystemApp, resolveTabDiskPath } from "@/lib/open-external";
 import { usePreviewBinary } from "@/lib/preview-content";
+import OfficeViewSwitch from "@/features/preview/OfficeViewSwitch.vue";
 import { i18n } from "@/i18n";
 import type { PreviewTab } from "@/stores/preview";
 import { notify } from "@/stores/notice";
@@ -119,6 +120,7 @@ async function openExternal(): Promise<void> {
   <div class="flex size-full min-h-0 flex-col overflow-hidden">
     <div class="flex shrink-0 items-center gap-2 border-b border-line px-3 py-1 text-[11px] text-dim2">
       <span>{{ summary }}</span>
+      <OfficeViewSwitch :tab="tab" />
     </div>
 
     <p v-if="loading" class="px-4 py-3 text-[12px] text-dim2">{{ t("preview.common.loading") }}</p>

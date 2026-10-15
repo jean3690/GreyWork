@@ -13,10 +13,11 @@ import { isTextSelectableKind } from "@/lib/selection";
 import { recallPixelScroll, rememberPixelScroll } from "@/lib/preview-scroll";
 import { cloudOfficeProviderFor } from "@/lib/office-preview";
 import { useSettingsStore } from "@/stores/settings";
+import { useOfficeConvertStore } from "@/stores/office-convert";
 import { notify } from "@/stores/notice";
 import { i18n } from "@/i18n";
 import type { ViewerKind } from "@/lib/viewer";
-import type { PreviewTab } from "@/stores/preview";
+import type { OfficeViewMode, PreviewTab } from "@/stores/preview";
 
 const t = i18n.global.t;
 
@@ -55,6 +56,21 @@ const VIEWERS: Record<ViewerKind, Component> = {
 const CLOUD_VIEWER = makeViewer(() => import("@/features/preview/CloudOfficeViewer.vue"));
 
 /**
+ * LibreOffice 高保真 viewer：经 `office_convert_to_pdf` 把文件转 PDF，再交给 `PdfViewer`。
+ * 只接管 docx / pptx / 老格式（见 `COVERED_OFFICE_KINDS`）—— xlsx/xls 仍走 Univer / calamine，
+ * 转换只会丢掉可交互的表格与分析能力。
+ */
+const OFFICE_PDF_VIEWER = makeViewer(() => import("@/features/preview/OfficePdfViewer.vue"));
+
+/**
+ * 走 LibreOffice 高保真的 kind。
+ *
+ * 与云端 office 的 `CLOUD_OFFICE_KINDS` 不同：云端还能接管 xlsx/xls（换更保真的在线编辑），
+ * 而本地转换对这些**没有意义**（转出来的 PDF 是打印分页版式，丢掉可交互的表格）。
+ */
+const COVERED_OFFICE_KINDS: ReadonlySet<ViewerKind> = new Set<ViewerKind>(["docx", "pptx", "legacy-office"]);
+
+/**
  * 云端 Office 分支：命中时顶掉该 kind 的本地 viewer。
  *
  * **回落是一等公民**：云端任一步失败（没配好、凭证没 export、厂商拒绝、网络不通）都要
@@ -63,35 +79,64 @@ const CLOUD_VIEWER = makeViewer(() => import("@/features/preview/CloudOfficeView
  * 不告知的话用户只会觉得「配置没生效」，那是这个问题最难排查的形态。
  */
 const settings = useSettingsStore();
+/** soffice 可用性：决定 covered kind 默认走「高保真(PDF)」还是「原生 viewer」。 */
+const convert = useOfficeConvertStore();
 const cloudFailedTabs = ref(new Set<string>());
+/** 本地转换失败回落原生 viewer 的 tab（与云端各自独立记，互不串）。 */
+const officePdfFailedTabs = ref(new Set<string>());
 
 const cloudProvider = computed(() => cloudOfficeProviderFor(props.tab, settings.officeProviders, settings.selectedOfficeProviderId));
 
+/**
+ * covered kind 的生效呈现方式：显式选择优先，否则「soffice 可用则 pdf，否则 native」。
+ *
+ * 落到 `officeView` 上的默认解析集中在这里与 `OfficeViewSwitch` 两处，但共用同一表达式，
+ * 不会漂移：用户一旦显式点过切换，`tab.officeView` 就固定，覆盖 soffice 是否在场这一动态事实。
+ */
+const effectiveOfficeView = computed<OfficeViewMode>(() => props.tab.officeView ?? (convert.available ? "pdf" : "native"));
+
 const activeViewer = computed<Component>(() => {
+  // 云端优先：用户显式配置了第三方云服务就走它（不受本地转换影响）。
   if (cloudProvider.value && !cloudFailedTabs.value.has(props.tab.id)) return CLOUD_VIEWER;
+  // covered kind 且未因失败回落原生 → 走 LibreOffice 高保真。
+  if (COVERED_OFFICE_KINDS.has(props.tab.kind) && !officePdfFailedTabs.value.has(props.tab.id) && effectiveOfficeView.value === "pdf") {
+    return OFFICE_PDF_VIEWER;
+  }
   return VIEWERS[props.tab.kind];
 });
 
 /**
- * 监听器**只在云端 viewer 上绑**。
+ * 监听器**只在会回落的 viewer 上绑**（云端 / Office 高保真）。
  *
  * 本地 viewer 没声明 `fallback` 事件，而它们的根都是单个元素 —— 未声明的监听器会静默降级成
  * 根元素上的原生监听器（`addEventListener("fallback")`），不报警告、也永远不会触发，只是每次
  * 预览都白挂一个。用 `v-on` 传对象而不是模板里写死 `@fallback`，就是为了让它跟着 activeViewer 走。
  */
-const viewerListeners = computed(() => (activeViewer.value === CLOUD_VIEWER ? { fallback: onCloudFallback } : {}));
+const viewerListeners = computed(() =>
+  activeViewer.value === CLOUD_VIEWER || activeViewer.value === OFFICE_PDF_VIEWER ? { fallback: onFallback } : {},
+);
 
-/** 云端失败：切回本地并如实说明原因（同一 tab 不重复刷屏，按 id 记一次）。 */
-function onCloudFallback(reason: string): void {
-  if (cloudFailedTabs.value.has(props.tab.id)) return;
-  // Set 就地改不会触发响应式，必须换一个新的（Vue 3 的 ref 浅层比较）。
-  cloudFailedTabs.value = new Set(cloudFailedTabs.value).add(props.tab.id);
-  notify({
-    kind: "warning",
-    key: `cloud-office-fallback:${props.tab.id}`,
-    title: t("preview.viewer.cloudOffice.fellBack", { name: props.tab.name }),
-    detail: reason,
-  });
+/** 云端 / 本地转换任一失败：切回原生 viewer 并如实说明原因（同一 tab 不重复刷屏，按 id 记一次）。 */
+function onFallback(reason: string): void {
+  if (officePdfFailedTabs.value.has(props.tab.id) || cloudFailedTabs.value.has(props.tab.id)) return;
+  if (activeViewer.value === CLOUD_VIEWER) {
+    // Set 就地改不会触发响应式，必须换一个新的（Vue 3 的 ref 浅层比较）。
+    cloudFailedTabs.value = new Set(cloudFailedTabs.value).add(props.tab.id);
+    notify({
+      kind: "warning",
+      key: `cloud-office-fallback:${props.tab.id}`,
+      title: t("preview.viewer.cloudOffice.fellBack", { name: props.tab.name }),
+      detail: reason,
+    });
+  } else {
+    officePdfFailedTabs.value = new Set(officePdfFailedTabs.value).add(props.tab.id);
+    notify({
+      kind: "warning",
+      key: `office-pdf-fallback:${props.tab.id}`,
+      title: t("preview.viewer.officePdf.fellBack", { name: props.tab.name }),
+      detail: reason,
+    });
+  }
 }
 
 /**
@@ -151,7 +196,10 @@ watch(
   { flush: "pre" },
 );
 
-onMounted(() => void restoreScroll(props.tab.id));
+onMounted(() => {
+  void convert.ensure();
+  void restoreScroll(props.tab.id);
+});
 onBeforeUnmount(() => saveScrollOf(props.tab.id));
 </script>
 
