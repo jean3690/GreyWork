@@ -34,6 +34,8 @@ export interface TrayLabels {
 export interface TrayHost {
   window: () => BrowserWindow | null;
   quit: () => void;
+  /** 窗口不存在时重建（macOS 关掉主窗后，托盘菜单仍应可用）。 */
+  openWindow?: () => Promise<BrowserWindow | null>;
 }
 
 const DEFAULT_LABELS: TrayLabels = {
@@ -85,12 +87,25 @@ function currentWindow(host: TrayHost): BrowserWindow | null {
 
 function toggleWindow(host: TrayHost): void {
   const win = currentWindow(host);
-  if (!win) return;
+  if (!win) {
+    // macOS：窗口已关但进程还在，托盘点击应把窗口建回来。
+    void host.openWindow?.();
+    return;
+  }
   if (win.isVisible() && !win.isMinimized()) win.hide();
   else {
     win.show();
     win.focus();
   }
+}
+
+/** 托盘菜单动作：没有窗口时先重建，再显示并执行。 */
+async function withWindow(host: TrayHost, action: (win: BrowserWindow) => void): Promise<void> {
+  const win = currentWindow(host) ?? (await host.openWindow?.());
+  if (!win) return;
+  win.show();
+  win.focus();
+  action(win);
 }
 
 /** 隐藏到托盘，并在首次隐藏时弹一次「仍在后台运行」系统通知。 */
@@ -114,17 +129,13 @@ function rebuildMenu(host: TrayHost): void {
       {
         label: labels.newChat,
         click: () => {
-          const win = currentWindow(host);
-          win?.show();
-          win?.webContents.send(IPC.tray.newChat);
+          void withWindow(host, (win) => win.webContents.send(IPC.tray.newChat));
         },
       },
       {
         label: labels.settings,
         click: () => {
-          const win = currentWindow(host);
-          win?.show();
-          win?.webContents.send(IPC.tray.openSettings);
+          void withWindow(host, (win) => win.webContents.send(IPC.tray.openSettings));
         },
       },
       { type: "separator" },

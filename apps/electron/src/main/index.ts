@@ -37,6 +37,10 @@ const trayHost: TrayHost = {
   // 只调 app.quit()：让 before-quit 的退出守卫先跑。真正的退出标记在那里置位，
   // 有未保存改动时渲染端会收到 exitRequested 并决定收口。
   quit: () => app.quit(),
+  openWindow: async () => {
+    if (!mainWindow) await openMainWindow();
+    return mainWindow;
+  },
 };
 
 /**
