@@ -349,6 +349,35 @@ export const useTerminalStore = defineStore("terminal", () => {
     }
   }
 
+  /** 拖拽重排：把标签移到目标下标（与预览栏同语义：下标是原数组里的落点）。 */
+  function moveTab(sessionId: string, toIndex: number): void {
+    const from = tabs.value.findIndex((tab) => tab.sessionId === sessionId);
+    if (from === -1) return;
+    const target = Math.max(0, Math.min(toIndex, tabs.value.length - 1));
+    if (target === from) return;
+    const next = [...tabs.value];
+    const [moved] = next.splice(from, 1);
+    next.splice(target, 0, moved);
+    tabs.value = next;
+    persist();
+  }
+
+  /** 重命名标签页（空标题视为取消：保留原名，不让标签变成无法辨认的空块）。 */
+  function renameTab(sessionId: string, title: string): void {
+    const next = title.trim();
+    if (!next) return;
+    update(sessionId, (tab) => (tab.title === next ? tab : { ...tab, title: next }));
+    persist();
+  }
+
+  /** 按顺序切到上/下一个标签（Ctrl+PageUp / PageDown），循环。 */
+  function cycleTab(delta: number): void {
+    if (tabs.value.length < 2) return;
+    const index = tabs.value.findIndex((tab) => tab.sessionId === activeId.value);
+    const next = index === -1 ? 0 : (index + delta + tabs.value.length) % tabs.value.length;
+    setActive(tabs.value[next].sessionId);
+  }
+
   /**
    * 会话已启动（TerminalView 收到 `terminal_open` 成功，或接回了已有会话）。
    * 同时打上 `attached`：面板因视口变化被卸载重挂时，视图据此接上而不是重复开会话。
@@ -394,6 +423,9 @@ export const useTerminalStore = defineStore("terminal", () => {
     closeTab,
     restartTab,
     setActive,
+    moveTab,
+    renameTab,
+    cycleTab,
     markRunning,
     markExited,
     markError,

@@ -12,12 +12,12 @@
  *
  * 可用性由 Shell 的视口同步回灌（`terminal.available`），标题栏开关与面板读同一处。
  */
-import { computed, onMounted } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, type ComponentPublicInstance } from "vue";
 import Icon from "@/features/shared/Icon.vue";
 import Hint from "@/features/shared/Hint.vue";
 import TerminalView from "@/features/terminal/TerminalView.vue";
 import { TERMINAL_PANEL_HEIGHT_PX } from "@/lib/layout";
-import { useTerminalStore, type TerminalStatus } from "@/stores/terminal";
+import { useTerminalStore, type TerminalStatus, type TerminalTab } from "@/stores/terminal";
 import { i18n } from "@/i18n";
 
 const terminal = useTerminalStore();
@@ -59,11 +59,97 @@ function onShellChange(event: Event): void {
   terminal.setPendingShell((event.target as HTMLSelectElement).value);
 }
 
+/* ===== 标签操作：拖拽重排 / 双击重命名 / 中键关闭 ===== */
+
+/** 正在被拖的标签 id（用来给其它标签降透明度，给一个「拖到了哪」的反馈）。 */
+const draggingId = ref<string | null>(null);
+/** 正在重命名的标签 id 与草稿（同一时刻只有一个）。 */
+const renamingId = ref("");
+const renameDraft = ref("");
+
+function onTabDragStart(event: DragEvent, sessionId: string): void {
+  draggingId.value = sessionId;
+  // 塞个非空载荷只是让拖拽影像合法（Firefox 要求 dataTransfer 非空才触发 dragstart）。
+  event.dataTransfer?.setData("text/plain", sessionId);
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+}
+
+function onTabDrop(event: DragEvent, index: number): void {
+  event.preventDefault();
+  const sessionId = draggingId.value;
+  draggingId.value = null;
+  if (sessionId) terminal.moveTab(sessionId, index);
+}
+
+/** 中键关闭（终端 / 浏览器标签页的通行约定）；左键 auxclick 不误关。 */
+function onTabAuxclick(event: MouseEvent, sessionId: string): void {
+  if (event.button !== 1) return;
+  event.preventDefault();
+  terminal.closeTab(sessionId);
+}
+
+function startRename(tab: TerminalTab): void {
+  renamingId.value = tab.sessionId;
+  renameDraft.value = tab.title;
+}
+
+function commitRename(): void {
+  const sessionId = renamingId.value;
+  if (!sessionId) return;
+  renamingId.value = "";
+  terminal.renameTab(sessionId, renameDraft.value);
+}
+
+function cancelRename(): void {
+  renamingId.value = "";
+}
+
+/** 重命名输入框挂载即聚焦并全选（直接敲新名字，不用先点一下）。 */
+function focusRenameInput(element: Element | ComponentPublicInstance | null): void {
+  if (!(element instanceof HTMLInputElement)) return;
+  element.focus();
+  element.select();
+}
+
+/**
+ * 终端快捷键（面板挂载期间全局生效，与 Shell 的 Ctrl+` / Ctrl+1~4 不重叠）：
+ * - `Ctrl/Cmd+Shift+T` 新建标签 —— 面板收起时也生效，按完即展开（否则得先点面板）；
+ * - `Ctrl/Cmd+Shift+W` 关闭当前标签；
+ * - `Ctrl/Cmd+PageUp/PageDown` 前后切标签（循环）。
+ *
+ * 带 Shift 的组合不会被 xterm 当成 shell 输入；切标签只在面板展开时响应 —— 收起状态下
+ * 看不见结果，静默改激活项只会让人下次展开时莫名其妙。
+ */
+function onWindowKeydown(event: KeyboardEvent): void {
+  if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+
+  if (event.shiftKey && event.code === "KeyT") {
+    event.preventDefault();
+    void terminal.addTab();
+    return;
+  }
+  if (!terminal.open) return;
+  if (event.shiftKey && event.code === "KeyW") {
+    event.preventDefault();
+    if (terminal.activeId) terminal.closeTab(terminal.activeId);
+    return;
+  }
+  if (!event.shiftKey && (event.code === "PageUp" || event.code === "PageDown")) {
+    event.preventDefault();
+    terminal.cycleTab(event.code === "PageDown" ? 1 : -1);
+  }
+}
+
 // 挂载即接回宿主里仍在跑的会话（渲染进程重载 / 面板重挂），再按偏好决定是否补一个新会话。
 onMounted(() => {
+  window.addEventListener("keydown", onWindowKeydown);
   void terminal.hydrate().then(() => {
     if (terminal.open) void terminal.ensureTab();
   });
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("keydown", onWindowKeydown);
 });
 </script>
 
@@ -84,15 +170,35 @@ onMounted(() => {
         <!-- 标签栏：溢出横向滚动；每个标签 = 一个 shell 会话 -->
         <div data-testid="terminal-tabs" class="flex h-full min-w-0 flex-1 items-center gap-1 overflow-x-auto">
           <div
-            v-for="tab in terminal.tabs"
+            v-for="(tab, index) in terminal.tabs"
             :key="tab.sessionId"
             data-testid="terminal-tab"
-            :class="tabClass(tab.sessionId)"
+            :data-tab-id="tab.sessionId"
+            :draggable="renamingId !== tab.sessionId"
+            :class="[tabClass(tab.sessionId), draggingId && draggingId !== tab.sessionId ? 'opacity-60' : '']"
             role="presentation"
             @click="terminal.setActive(tab.sessionId)"
+            @dblclick="startRename(tab)"
+            @auxclick="onTabAuxclick($event, tab.sessionId)"
+            @dragstart="onTabDragStart($event, tab.sessionId)"
+            @dragover.prevent
+            @drop="onTabDrop($event, index)"
+            @dragend="draggingId = null"
           >
             <span class="size-1.5 shrink-0 rounded-full" :class="dotClass(tab.status)" aria-hidden="true" />
-            <span class="max-w-[140px] cursor-pointer truncate" :title="tab.cwd || tab.title">
+            <input
+              v-if="renamingId === tab.sessionId"
+              :ref="focusRenameInput"
+              v-model="renameDraft"
+              data-testid="terminal-tab-rename"
+              class="h-4 w-[88px] min-w-0 rounded-[calc(4px*var(--gw-radius-scale))] border border-line bg-panel px-1 text-[11.5px] text-foreground outline-none"
+              :aria-label="t('terminal.rename')"
+              @click.stop
+              @keydown.enter.prevent="commitRename"
+              @keydown.esc.prevent="cancelRename"
+              @blur="commitRename"
+            />
+            <span v-else class="max-w-[140px] cursor-pointer truncate" :title="tab.cwd || tab.title">
               {{ tab.title }}
             </span>
             <button

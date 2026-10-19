@@ -222,6 +222,7 @@ export const enUS: MessageSchema = {
     collapse: "Collapse terminal panel",
     newTab: "New terminal",
     closeTab: "Close tab {name}",
+    rename: "Rename tab",
     restart: "Restart terminal",
     shell: "Terminal environment",
     starting: "Starting shell…",

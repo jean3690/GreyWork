@@ -220,6 +220,7 @@ export const zhCN = {
     collapse: "收起终端面板",
     newTab: "新建终端",
     closeTab: "关闭标签页 {name}",
+    rename: "重命名标签页",
     restart: "重启终端",
     shell: "终端环境",
     starting: "正在启动 shell…",

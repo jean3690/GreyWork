@@ -75,6 +75,11 @@ async function settle(): Promise<void> {
   await flushPromises();
 }
 
+/** 在 window 上派发键盘事件（全局快捷键挂在 window 上）。 */
+function press(init: KeyboardEventInit): void {
+  window.dispatchEvent(new KeyboardEvent("keydown", { ...init, cancelable: true }));
+}
+
 beforeEach(() => {
   localStorage.clear();
   setActivePinia(createPinia());
@@ -298,5 +303,94 @@ describe("TerminalPanel", () => {
       attached: true,
     });
     expect(wrapper.find('[data-testid="terminal-view-stub"]').exists()).toBe(true);
+  });
+
+  it("快捷键 Ctrl+Shift+T 新建（收起时也展开），Ctrl+Shift+W 关闭当前", async () => {
+    mountPanel();
+    await settle();
+    const terminal = useTerminalStore();
+    expect(terminal.open).toBe(false);
+
+    press({ code: "KeyT", key: "T", ctrlKey: true, shiftKey: true });
+    await settle();
+    expect(terminal.open).toBe(true);
+    expect(terminal.tabs).toHaveLength(1);
+
+    press({ code: "KeyW", key: "W", ctrlKey: true, shiftKey: true });
+    await settle();
+    expect(terminal.tabs).toHaveLength(0);
+    expect(backend.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("快捷键 Ctrl+PageDown / PageUp 循环切换标签", async () => {
+    const wrapper = mountPanel();
+    await settle();
+    const terminal = useTerminalStore();
+    await wrapper.get('[data-testid="terminal-new-tab"]').trigger("click");
+    await settle();
+    await wrapper.get('[data-testid="terminal-new-tab"]').trigger("click");
+    await settle();
+
+    const [first, second] = terminal.tabs.map((tab) => tab.sessionId);
+    expect(terminal.activeId).toBe(second);
+
+    press({ code: "PageDown", key: "PageDown", ctrlKey: true });
+    expect(terminal.activeId).toBe(first);
+    press({ code: "PageUp", key: "PageUp", ctrlKey: true });
+    expect(terminal.activeId).toBe(second);
+  });
+
+  it("双击标签重命名：回车提交，Esc 取消", async () => {
+    const wrapper = mountPanel();
+    await settle();
+    await wrapper.get('[data-testid="terminal-new-tab"]').trigger("click");
+    await settle();
+
+    await wrapper.get('[data-testid="terminal-tab"]').trigger("dblclick");
+    await wrapper.get('[data-testid="terminal-tab-rename"]').setValue("部署窗口");
+    await wrapper.get('[data-testid="terminal-tab-rename"]').trigger("keydown.enter");
+    expect(useTerminalStore().tabs[0].title).toBe("部署窗口");
+
+    await wrapper.get('[data-testid="terminal-tab"]').trigger("dblclick");
+    await wrapper.get('[data-testid="terminal-tab-rename"]').setValue("临时");
+    await wrapper.get('[data-testid="terminal-tab-rename"]').trigger("keydown.esc");
+    expect(useTerminalStore().tabs[0].title).toBe("部署窗口");
+  });
+
+  it("拖拽标签重排顺序", async () => {
+    const wrapper = mountPanel();
+    await settle();
+    await wrapper.get('[data-testid="terminal-new-tab"]').trigger("click");
+    await settle();
+    await wrapper.get('[data-testid="terminal-new-tab"]').trigger("click");
+    await settle();
+
+    const terminal = useTerminalStore();
+    const [first, second] = terminal.tabs.map((tab) => tab.sessionId);
+    const tabEls = wrapper.findAll('[data-testid="terminal-tab"]');
+    await tabEls[0].trigger("dragstart", { dataTransfer: { setData: vi.fn(), effectAllowed: "" } });
+    await tabEls[1].trigger("drop");
+    await settle();
+
+    expect(terminal.tabs.map((tab) => tab.sessionId)).toEqual([second, first]);
+  });
+
+  it("中键关闭标签，左键 auxclick 不误关", async () => {
+    const wrapper = mountPanel();
+    await settle();
+    await wrapper.get('[data-testid="terminal-new-tab"]').trigger("click");
+    await settle();
+    await wrapper.get('[data-testid="terminal-new-tab"]').trigger("click");
+    await settle();
+
+    const terminal = useTerminalStore();
+    const tabEls = wrapper.findAll('[data-testid="terminal-tab"]');
+    await tabEls[0].trigger("auxclick", { button: 0 });
+    expect(terminal.tabs).toHaveLength(2);
+
+    await tabEls[0].trigger("auxclick", { button: 1 });
+    await settle();
+    expect(terminal.tabs).toHaveLength(1);
+    expect(backend.close).toHaveBeenCalledTimes(1);
   });
 });
