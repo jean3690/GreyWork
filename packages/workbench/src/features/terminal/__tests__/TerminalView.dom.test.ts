@@ -31,6 +31,14 @@ const mocks = vi.hoisted(() => {
     write: vi.fn(),
     resize: vi.fn(),
     close: vi.fn(),
+    findNext: vi.fn(),
+    findPrevious: vi.fn(),
+    clearDecorations: vi.fn(),
+    /** `onDidChangeResults` 注册的回调（模拟 addon 推结果计数）。 */
+    searchResults: [] as ((event: { resultIndex: number; resultCount: number }) => void)[],
+    /** `WebLinksAddon` 拿到的点击处理器。 */
+    linkHandler: null as ((event: MouseEvent, uri: string) => void) | null,
+    openExternal: vi.fn(),
   };
 });
 
@@ -47,7 +55,26 @@ vi.mock("@xterm/addon-fit", () => ({
     fit = mocks.fit;
   },
 }));
+vi.mock("@xterm/addon-search", () => ({
+  SearchAddon: class {
+    findNext = mocks.findNext;
+    findPrevious = mocks.findPrevious;
+    clearDecorations = mocks.clearDecorations;
+    onDidChangeResults(callback: (event: { resultIndex: number; resultCount: number }) => void) {
+      mocks.searchResults.push(callback);
+      return { dispose: () => undefined };
+    }
+  },
+}));
+vi.mock("@xterm/addon-web-links", () => ({
+  WebLinksAddon: class {
+    constructor(handler: (event: MouseEvent, uri: string) => void) {
+      mocks.linkHandler = handler;
+    }
+  },
+}));
 vi.mock("@xterm/xterm/css/xterm.css", () => ({}));
+vi.mock("@/lib/browser-backend", () => ({ openInSystemBrowser: mocks.openExternal }));
 
 vi.mock("@greywork/host-ipc", () => ({
   declareFront: () => undefined,
@@ -79,8 +106,8 @@ const TAB: TerminalTab = {
 };
 
 const mounted: VueWrapper[] = [];
-function mountView(tab: TerminalTab = TAB): VueWrapper {
-  const wrapper = mount(TerminalView, { props: { tab } });
+function mountView(tab: TerminalTab = TAB, props: Record<string, unknown> = {}): VueWrapper {
+  const wrapper = mount(TerminalView, { props: { tab, ...props } });
   mounted.push(wrapper);
   return wrapper;
 }
@@ -110,6 +137,12 @@ beforeEach(() => {
   });
   mocks.write.mockReset().mockResolvedValue(undefined);
   mocks.resize.mockReset().mockResolvedValue(undefined);
+  mocks.findNext.mockReset();
+  mocks.findPrevious.mockReset();
+  mocks.clearDecorations.mockReset();
+  mocks.searchResults.length = 0;
+  mocks.linkHandler = null;
+  mocks.openExternal.mockReset().mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -223,5 +256,53 @@ describe("TerminalView", () => {
     mocks.listeners.get("terminal://data")!({ payload: { sessionId: "s1", data: btoa("hi") } });
     await flushPromises();
     expect(wrapper.find('[data-testid="terminal-starting"]').exists()).toBe(false);
+  });
+
+  it("查找：输入即增量查找，回车下一个 / Shift+回车上一个，Esc 关闭", async () => {
+    const wrapper = mountView(TAB, { searchOpen: true });
+    await flushPromises();
+
+    const input = wrapper.get('[data-testid="terminal-search-input"]');
+    await input.setValue("error");
+    expect(mocks.findNext).toHaveBeenLastCalledWith("error", expect.objectContaining({ incremental: true }));
+
+    await input.trigger("keydown", { key: "Enter" });
+    expect(mocks.findNext).toHaveBeenLastCalledWith("error", expect.objectContaining({ incremental: false }));
+
+    await input.trigger("keydown", { key: "Enter", shiftKey: true });
+    expect(mocks.findPrevious).toHaveBeenCalledWith("error", expect.objectContaining({ decorations: expect.any(Object) }));
+
+    await input.trigger("keydown", { key: "Escape" });
+    expect(wrapper.emitted("closeSearch")).toHaveLength(1);
+  });
+
+  it("查找结果显示「第几个/共几个」，无匹配给提示", async () => {
+    const wrapper = mountView(TAB, { searchOpen: true });
+    await flushPromises();
+    await wrapper.get('[data-testid="terminal-search-input"]').setValue("x");
+    expect(mocks.searchResults).toHaveLength(1);
+
+    mocks.searchResults[0]({ resultIndex: 1, resultCount: 4 });
+    await flushPromises();
+    expect(wrapper.get('[data-testid="terminal-search"]').text()).toContain("2/4");
+
+    mocks.searchResults[0]({ resultIndex: -1, resultCount: 0 });
+    await flushPromises();
+    expect(wrapper.get('[data-testid="terminal-search"]').text()).toContain("无匹配");
+  });
+
+  it("终端里的链接要 Ctrl/Cmd+点击才交给系统浏览器", async () => {
+    mountView();
+    await flushPromises();
+    expect(mocks.linkHandler).toBeTypeOf("function");
+
+    const plain = { ctrlKey: false, metaKey: false, preventDefault: vi.fn() } as unknown as MouseEvent;
+    mocks.linkHandler!(plain, "https://example.com");
+    expect(mocks.openExternal).not.toHaveBeenCalled();
+
+    const modified = { ctrlKey: true, metaKey: false, preventDefault: vi.fn() } as unknown as MouseEvent;
+    mocks.linkHandler!(modified, "https://example.com");
+    expect(mocks.openExternal).toHaveBeenCalledWith("https://example.com");
+    expect(modified.preventDefault).toHaveBeenCalled();
   });
 });

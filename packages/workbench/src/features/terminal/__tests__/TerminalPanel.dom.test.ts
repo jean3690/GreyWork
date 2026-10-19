@@ -38,8 +38,8 @@ vi.mock("@/features/terminal/TerminalView.vue", async () => {
   return {
     default: defineComponent({
       name: "TerminalViewStub",
-      props: { tab: { type: Object, required: true } },
-      emits: ["opened", "exited", "failed"],
+      props: { tab: { type: Object, required: true }, searchOpen: { type: Boolean, default: false } },
+      emits: ["opened", "exited", "failed", "closeSearch"],
       setup(props, { emit }) {
         onMounted(() => {
           const sessionId = (props.tab as { sessionId: string }).sessionId;
@@ -48,7 +48,11 @@ vi.mock("@/features/terminal/TerminalView.vue", async () => {
           else if (backend.view.mode === "exited") emit("exited", sessionId);
           else emit("failed", sessionId, "boom");
         });
-        return () => h("div", { "data-testid": "terminal-view-stub" });
+        return () =>
+          h("div", {
+            "data-testid": "terminal-view-stub",
+            "data-search-open": props.searchOpen ? "true" : "false",
+          });
       },
     }),
   };
@@ -64,7 +68,8 @@ import { useTerminalStore } from "@/stores/terminal";
 
 const mounted: VueWrapper[] = [];
 function mountPanel(): VueWrapper {
-  const wrapper = mount(TerminalPanel);
+  // 挂到 document 上：Ctrl+F 的用例要把面板内元素的事件冒泡到 window。
+  const wrapper = mount(TerminalPanel, { attachTo: document.body });
   mounted.push(wrapper);
   return wrapper;
 }
@@ -320,6 +325,25 @@ describe("TerminalPanel", () => {
     await settle();
     expect(terminal.tabs).toHaveLength(0);
     expect(backend.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("Ctrl+F 只在焦点位于终端面板内时打开查找", async () => {
+    const wrapper = mountPanel();
+    await settle();
+    await wrapper.get('[data-testid="terminal-new-tab"]').trigger("click");
+    await settle();
+
+    // 事件目标是 window（面板外）：不接管，留给编辑器 / 浏览器的查找。
+    press({ code: "KeyF", key: "f", ctrlKey: true });
+    await settle();
+    expect(wrapper.get('[data-testid="terminal-view-stub"]').attributes("data-search-open")).toBe("false");
+
+    // 事件从面板内的标签栏冒泡上来：接管并打开查找。
+    wrapper
+      .get('[data-testid="terminal-tabs"]')
+      .element.dispatchEvent(new KeyboardEvent("keydown", { code: "KeyF", key: "f", ctrlKey: true, bubbles: true, cancelable: true }));
+    await settle();
+    expect(wrapper.get('[data-testid="terminal-view-stub"]').attributes("data-search-open")).toBe("true");
   });
 
   it("快捷键 Ctrl+PageDown / PageUp 循环切换标签", async () => {

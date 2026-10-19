@@ -226,6 +226,11 @@ export const zhCN = {
     starting: "正在启动 shell…",
     startingHint: "启动会先加载你的 shell 配置（如 .bashrc / .zshrc）；装了 nvm / conda 之类可能较慢。",
     empty: "还没有终端会话。",
+    search: "查找",
+    searchNoResults: "无匹配",
+    searchPrevious: "上一个匹配",
+    searchNext: "下一个匹配",
+    searchClose: "关闭查找",
   },
   web: {
     title: "抓取网页",

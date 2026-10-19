@@ -12,7 +12,7 @@
  *
  * 可用性由 Shell 的视口同步回灌（`terminal.available`），标题栏开关与面板读同一处。
  */
-import { computed, onBeforeUnmount, onMounted, ref, type ComponentPublicInstance } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch, type ComponentPublicInstance } from "vue";
 import Icon from "@/features/shared/Icon.vue";
 import Hint from "@/features/shared/Hint.vue";
 import TerminalView from "@/features/terminal/TerminalView.vue";
@@ -33,6 +33,15 @@ const selectClass =
 
 /** 激活标签页（无标签页时为 null）。 */
 const active = computed(() => terminal.activeTab);
+
+/** 面板根元素：判断 Ctrl+F 的焦点是否落在终端里（否则留给编辑器 / 浏览器）。 */
+const panelEl = ref<HTMLElement | null>(null);
+
+/** 查找条只属于激活标签：切标签 / 收起面板时一并关掉。 */
+const searchOpen = ref(false);
+watch([() => terminal.activeId, () => terminal.open], () => {
+  searchOpen.value = false;
+});
 
 /** 已结束的激活标签页（shell 退出 / 启动失败）：「重启」入口只对它显示，避免误点杀掉活会话。 */
 const deadTab = computed(() =>
@@ -115,47 +124,59 @@ function focusRenameInput(element: Element | ComponentPublicInstance | null): vo
  * 终端快捷键（面板挂载期间全局生效，与 Shell 的 Ctrl+` / Ctrl+1~4 不重叠）：
  * - `Ctrl/Cmd+Shift+T` 新建标签 —— 面板收起时也生效，按完即展开（否则得先点面板）；
  * - `Ctrl/Cmd+Shift+W` 关闭当前标签；
- * - `Ctrl/Cmd+PageUp/PageDown` 前后切标签（循环）。
+ * - `Ctrl/Cmd+PageUp/PageDown` 前后切标签（循环）；
+ * - `Ctrl/Cmd+F` 打开查找（只在焦点位于终端面板内时接管，否则会抢走编辑器的查找）。
  *
- * 带 Shift 的组合不会被 xterm 当成 shell 输入；切标签只在面板展开时响应 —— 收起状态下
- * 看不见结果，静默改激活项只会让人下次展开时莫名其妙。
+ * 监听放在捕获阶段并 `stopPropagation`：xterm 的 textarea 在冒泡阶段把按键原样送进 PTY，
+ * 不拦的话 Ctrl+F / Ctrl+Shift+W 会一边执行动作一边给 shell 发控制字符。
  */
 function onWindowKeydown(event: KeyboardEvent): void {
   if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
 
   if (event.shiftKey && event.code === "KeyT") {
     event.preventDefault();
+    event.stopPropagation();
     void terminal.addTab();
     return;
   }
   if (!terminal.open) return;
+  if (!event.shiftKey && event.code === "KeyF") {
+    if (!panelEl.value?.contains(event.target as Node)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    searchOpen.value = true;
+    return;
+  }
   if (event.shiftKey && event.code === "KeyW") {
     event.preventDefault();
+    event.stopPropagation();
     if (terminal.activeId) terminal.closeTab(terminal.activeId);
     return;
   }
   if (!event.shiftKey && (event.code === "PageUp" || event.code === "PageDown")) {
     event.preventDefault();
+    event.stopPropagation();
     terminal.cycleTab(event.code === "PageDown" ? 1 : -1);
   }
 }
 
 // 挂载即接回宿主里仍在跑的会话（渲染进程重载 / 面板重挂），再按偏好决定是否补一个新会话。
 onMounted(() => {
-  window.addEventListener("keydown", onWindowKeydown);
+  window.addEventListener("keydown", onWindowKeydown, true);
   void terminal.hydrate().then(() => {
     if (terminal.open) void terminal.ensureTab();
   });
 });
 
 onBeforeUnmount(() => {
-  window.removeEventListener("keydown", onWindowKeydown);
+  window.removeEventListener("keydown", onWindowKeydown, true);
 });
 </script>
 
 <template>
   <section
     v-if="terminal.available"
+    ref="panelEl"
     data-testid="terminal-panel"
     class="relative shrink-0 overflow-hidden bg-panel-2 transition-[height] duration-150"
     :class="terminal.open ? 'border-t border-line-2' : ''"
@@ -225,6 +246,19 @@ onBeforeUnmount(() => {
             <span class="truncate font-mono">{{ active.cwd }}</span>
           </span>
 
+          <!-- 查找当前标签的滚动输出（Ctrl/Cmd+F 同效） -->
+          <Hint v-if="active" :text="t('terminal.search')">
+            <button
+              type="button"
+              data-testid="terminal-search-open"
+              :class="buttonClass"
+              :aria-label="t('terminal.search')"
+              @click="searchOpen = true"
+            >
+              <Icon name="search" :size="13" />
+            </button>
+          </Hint>
+
           <!-- 选终端环境：决定「下一个新标签」用哪个 shell -->
           <select
             v-if="terminal.shells.length"
@@ -277,7 +311,14 @@ onBeforeUnmount(() => {
       <!-- 内容区：收起时 v-show 隐藏但保持挂载，终端滚动历史不丢 -->
       <div v-show="terminal.open" class="relative min-h-0 flex-1 bg-[#0a111b]">
         <div v-for="tab in terminal.tabs" v-show="tab.sessionId === terminal.activeId" :key="tab.sessionId" class="absolute inset-0">
-          <TerminalView :tab="tab" @opened="terminal.markRunning" @exited="terminal.markExited" @failed="terminal.markError" />
+          <TerminalView
+            :tab="tab"
+            :search-open="terminal.activeId === tab.sessionId && searchOpen"
+            @opened="terminal.markRunning"
+            @exited="terminal.markExited"
+            @failed="terminal.markError"
+            @close-search="searchOpen = false"
+          />
         </div>
 
         <!-- 空态：启动失败 / 无可会话时给一个明确的「新建」入口 -->

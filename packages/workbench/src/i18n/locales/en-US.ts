@@ -228,6 +228,11 @@ export const enUS: MessageSchema = {
     starting: "Starting shell…",
     startingHint: "Startup loads your shell config (e.g. .bashrc / .zshrc); things like nvm / conda can make it slow.",
     empty: "No terminal session yet.",
+    search: "Find",
+    searchNoResults: "No matches",
+    searchPrevious: "Previous match",
+    searchNext: "Next match",
+    searchClose: "Close find",
   },
   web: {
     title: "Fetch web page",

@@ -14,16 +14,20 @@
  * 非激活标签用 `v-show` 隐藏但保持挂载：切标签不重建终端、不丢滚动历史。
  * 会话生命周期（开/关/重启/状态）收在 store，这里只负责「已有 sessionId 的渲染与 IO」。
  */
-import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { FitAddon } from "@xterm/addon-fit";
+import { SearchAddon } from "@xterm/addon-search";
+import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { listen } from "@greywork/host-ipc";
+import Icon from "@/features/shared/Icon.vue";
+import { openInSystemBrowser } from "@/lib/browser-backend";
 import { terminalBackend } from "@/lib/terminal-backend";
 import type { TerminalTab } from "@/stores/terminal";
 import { i18n } from "@/i18n";
 
-const props = defineProps<{ tab: TerminalTab }>();
+const props = defineProps<{ tab: TerminalTab; searchOpen?: boolean }>();
 /** 外壳组件不装 i18n 插件也要能渲染，故用全局实例而非 useI18n。 */
 const t = i18n.global.t;
 
@@ -36,11 +40,13 @@ const emit = defineEmits<{
   (event: "opened", sessionId: string): void;
   (event: "exited", sessionId: string): void;
   (event: "failed", sessionId: string, message: string): void;
+  (event: "closeSearch"): void;
 }>();
 
 const host = ref<HTMLElement | null>(null);
 let term: Terminal | null = null;
 let fit: FitAddon | null = null;
+let search: SearchAddon | null = null;
 let observer: ResizeObserver | null = null;
 let stopData: (() => void) | null = null;
 let stopExit: (() => void) | null = null;
@@ -49,6 +55,79 @@ let live = false;
 /** 会话已建立、但 shell 还没吐过任何输出（rc 还在跑）：亮「正在启动」，首屏数据一到即收。 */
 const showSpinner = ref(false);
 let spinnerTimer: ReturnType<typeof setTimeout> | null = null;
+
+/* ===== 查找（@xterm/addon-search） ===== */
+
+const searchInput = ref<HTMLInputElement | null>(null);
+const query = ref("");
+/** `3/12` 形式的结果计数；空串 = 没有可显示的计数。 */
+const resultText = ref("");
+const noResults = ref(false);
+
+/** 高亮配色与 THEME 同源（xterm 只认字面颜色）。 */
+const SEARCH_DECORATIONS = {
+  matchBackground: "#28344a",
+  matchBorder: "#7aa2f7",
+  matchOverviewRuler: "#7aa2f7",
+  activeMatchBackground: "#7aa2f7",
+  activeMatchBorder: "#c0caf5",
+  activeMatchColorOverviewRuler: "#7aa2f7",
+} as const;
+
+function clearSearch(): void {
+  search?.clearDecorations();
+  resultText.value = "";
+  noResults.value = false;
+}
+
+/** 增量查找（输入时）/ 跳到下一个（回车）。 */
+function findNext(incremental: boolean): void {
+  if (!search) return;
+  const text = query.value;
+  if (!text) {
+    clearSearch();
+    return;
+  }
+  search.findNext(text, { incremental, decorations: SEARCH_DECORATIONS });
+}
+
+function findPrevious(): void {
+  if (!search || !query.value) return;
+  search.findPrevious(query.value, { decorations: SEARCH_DECORATIONS });
+}
+
+function onSearchKeydown(event: KeyboardEvent): void {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.shiftKey) findPrevious();
+    else findNext(false);
+    return;
+  }
+  if (event.key === "Escape") {
+    event.preventDefault();
+    event.stopPropagation();
+    emit("closeSearch");
+  }
+}
+
+// 面板用 Ctrl/Cmd+F 打开查找；关闭时清掉高亮、把焦点还给终端。
+watch(
+  () => props.searchOpen,
+  (open) => {
+    if (!open) {
+      clearSearch();
+      term?.focus();
+      return;
+    }
+    void nextTick(() => {
+      searchInput.value?.focus();
+      searchInput.value?.select();
+      // 重新打开时把上次的关键词重新高亮出来。
+      if (query.value) findNext(false);
+    });
+  },
+);
 
 function clearSpinner(): void {
   if (spinnerTimer) {
@@ -139,6 +218,30 @@ async function start(): Promise<void> {
   instance.open(element);
   term = instance;
   fit = fitAddon;
+
+  // 查找：结果计数由 addon 推回来（需要开 decorations 才会触发）。
+  const searchAddon = new SearchAddon();
+  instance.loadAddon(searchAddon);
+  search = searchAddon;
+  searchAddon.onDidChangeResults(({ resultIndex, resultCount }) => {
+    if (!query.value) {
+      resultText.value = "";
+      noResults.value = false;
+      return;
+    }
+    // resultIndex 为 -1 表示高亮数量超过上限（仍可前后跳，只是没有「第几个」）。
+    resultText.value = resultCount === 0 ? "" : resultIndex >= 0 ? `${resultIndex + 1}/${resultCount}` : String(resultCount);
+    noResults.value = resultCount === 0;
+  });
+
+  // 链接：终端里单击常是选词 / 定位，Ctrl/Cmd+点击才交给系统浏览器（桌面终端的通行约定）。
+  instance.loadAddon(
+    new WebLinksAddon((event, uri) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      void openInSystemBrowser(uri);
+    }),
+  );
   fitIfVisible();
   // shell 起来到回提示符之间是空屏，超过延迟就亮进度（见 SPINNER_DELAY_MS）。
   spinnerTimer = setTimeout(() => {
@@ -216,6 +319,7 @@ onBeforeUnmount(() => {
   observer = null;
   stopData?.();
   stopExit?.();
+  search = null;
   term?.dispose();
   term = null;
   fit = null;
@@ -225,6 +329,57 @@ onBeforeUnmount(() => {
 <template>
   <div class="relative h-full w-full">
     <div ref="host" data-testid="terminal-view" class="h-full w-full" />
+
+    <!-- 查找条：Ctrl/Cmd+F 打开；Enter 下一个 / Shift+Enter 上一个 / Esc 关闭 -->
+    <div
+      v-if="searchOpen"
+      data-testid="terminal-search"
+      class="absolute end-2 top-2 z-10 flex items-center gap-0.5 rounded-[calc(6px*var(--gw-radius-scale))] border border-line bg-panel/95 px-1 py-0.5 shadow-lg"
+    >
+      <Icon name="search" :size="11" class="mx-0.5 shrink-0 text-dim2" />
+      <input
+        ref="searchInput"
+        v-model="query"
+        data-testid="terminal-search-input"
+        class="h-5 w-[150px] bg-transparent px-0.5 text-[11.5px] text-foreground outline-none placeholder:text-dim2"
+        :placeholder="t('terminal.search')"
+        :aria-label="t('terminal.search')"
+        @input="findNext(true)"
+        @keydown="onSearchKeydown"
+      />
+      <span v-if="noResults" class="px-1 text-[10.5px] text-dim2">{{ t("terminal.searchNoResults") }}</span>
+      <span v-else-if="resultText" class="px-1 text-[10.5px] tabular-nums text-dim2">{{ resultText }}</span>
+      <button
+        type="button"
+        data-testid="terminal-search-previous"
+        class="grid size-5 shrink-0 cursor-pointer place-items-center rounded-[calc(4px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground"
+        :aria-label="t('terminal.searchPrevious')"
+        :title="t('terminal.searchPrevious')"
+        @click="findPrevious"
+      >
+        <Icon name="up" :size="11" />
+      </button>
+      <button
+        type="button"
+        data-testid="terminal-search-next"
+        class="grid size-5 shrink-0 cursor-pointer place-items-center rounded-[calc(4px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground"
+        :aria-label="t('terminal.searchNext')"
+        :title="t('terminal.searchNext')"
+        @click="findNext(false)"
+      >
+        <Icon name="down" :size="11" />
+      </button>
+      <button
+        type="button"
+        data-testid="terminal-search-close"
+        class="grid size-5 shrink-0 cursor-pointer place-items-center rounded-[calc(4px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground"
+        :aria-label="t('terminal.searchClose')"
+        :title="t('terminal.searchClose')"
+        @click="emit('closeSearch')"
+      >
+        <Icon name="close" :size="10" />
+      </button>
+    </div>
 
     <!-- shell 启动期（跑 rc）空屏提示：不挡输入，首屏输出一到即消失 -->
     <div v-if="showSpinner" data-testid="terminal-starting" class="pointer-events-none absolute inset-x-0 top-0 flex justify-center pt-2">
