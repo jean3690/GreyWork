@@ -417,4 +417,88 @@ describe("TerminalPanel", () => {
     expect(terminal.tabs).toHaveLength(1);
     expect(backend.close).toHaveBeenCalledTimes(1);
   });
+
+  it("分屏：单标签时新开一个放右栏；点右栏标签对调；再点取消", async () => {
+    const wrapper = mountPanel();
+    await settle();
+    await wrapper.get('[data-testid="terminal-new-tab"]').trigger("click");
+    await settle();
+    const terminal = useTerminalStore();
+    const first = terminal.activeId;
+
+    await wrapper.get('[data-testid="terminal-split"]').trigger("click");
+    await settle();
+
+    expect(terminal.tabs).toHaveLength(2);
+    expect(terminal.activeId).toBe(first);
+    const splitId = terminal.splitId;
+    expect(splitId).not.toBe(first);
+    expect(wrapper.findAll('[data-testid="terminal-pane"]').map((pane) => pane.attributes("data-pane"))).toEqual(["main", "split"]);
+
+    // 点右栏的标签：两边对调，避免同一会话挂两个 xterm。
+    const splitIndex = terminal.tabs.findIndex((tab) => tab.sessionId === splitId);
+    await wrapper.findAll('[data-testid="terminal-tab"]')[splitIndex].trigger("click");
+    expect(terminal.activeId).toBe(splitId);
+    expect(terminal.splitId).toBe(first);
+
+    await wrapper.get('[data-testid="terminal-split"]').trigger("click");
+    expect(terminal.splitId).toBe("");
+    expect(wrapper.findAll('[data-testid="terminal-pane"]').map((pane) => pane.attributes("data-pane"))).toEqual(["hidden", "main"]);
+  });
+
+  it("关掉右栏的标签：分屏自动收起", async () => {
+    const wrapper = mountPanel();
+    await settle();
+    await wrapper.get('[data-testid="terminal-new-tab"]').trigger("click");
+    await settle();
+    await wrapper.get('[data-testid="terminal-new-tab"]').trigger("click");
+    await settle();
+
+    const terminal = useTerminalStore();
+    const splitId = terminal.tabs[0].sessionId;
+    terminal.setSplit(splitId);
+    expect(terminal.splitId).toBe(splitId);
+
+    await wrapper.findAll('[data-testid="terminal-tab"]')[0].get('[data-testid="terminal-tab-close"]').trigger("click");
+    await settle();
+    expect(terminal.splitId).toBe("");
+  });
+
+  it("高度可调并落盘：方向键 ±8（Shift 40）、Home/End 到上下限、双击复位", async () => {
+    const wrapper = mountPanel();
+    await settle();
+    const terminal = useTerminalStore();
+    terminal.setOpen(true);
+    await settle();
+    const handle = wrapper.get('[data-testid="terminal-resize-handle"]');
+    const start = terminal.heightPx;
+
+    await handle.trigger("keydown", { key: "ArrowUp" });
+    expect(terminal.heightPx).toBe(start + 8);
+    await handle.trigger("keydown", { key: "ArrowUp", shiftKey: true });
+    expect(terminal.heightPx).toBe(start + 48);
+    await handle.trigger("keydown", { key: "End" });
+    expect(terminal.heightPx).toBe(720);
+    await handle.trigger("keydown", { key: "Home" });
+    expect(terminal.heightPx).toBe(120);
+    await handle.trigger("dblclick");
+    expect(terminal.heightPx).toBe(240);
+
+    expect(JSON.parse(window.localStorage.getItem("greywork.terminal") ?? "{}")).toMatchObject({ heightPx: 240 });
+  });
+
+  it("拖拽上边缘调高：向上拖 80px 就高 80px", async () => {
+    const wrapper = mountPanel();
+    await settle();
+    const terminal = useTerminalStore();
+    terminal.setOpen(true);
+    await settle();
+    const start = terminal.heightPx;
+
+    const handle = wrapper.get('[data-testid="terminal-resize-handle"]').element;
+    handle.dispatchEvent(new MouseEvent("pointerdown", { clientY: 400, button: 0, bubbles: true }));
+    window.dispatchEvent(new MouseEvent("pointermove", { clientY: 320 }));
+    window.dispatchEvent(new MouseEvent("pointerup", { clientY: 320 }));
+    expect(terminal.heightPx).toBe(start + 80);
+  });
 });

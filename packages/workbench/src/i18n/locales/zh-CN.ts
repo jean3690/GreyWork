@@ -231,6 +231,9 @@ export const zhCN = {
     searchPrevious: "上一个匹配",
     searchNext: "下一个匹配",
     searchClose: "关闭查找",
+    split: "分屏",
+    unsplit: "取消分屏",
+    resize: "调整终端高度",
   },
   web: {
     title: "抓取网页",

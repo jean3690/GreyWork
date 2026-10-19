@@ -97,6 +97,8 @@ export const ICONS: Readonly<Record<string, readonly IconShape[]>> = {
   lightning: [p("M26 5L12 27H21L20 43L36 18H26L29 5Z")],
   folder: [p("M7 13C7 11.3 8.3 10 10 10H19L23 16H38C39.7 16 41 17.3 41 19V35C41 36.7 39.7 38 38 38H10C8.3 38 7 36.7 7 35V13Z")],
   terminal: [p("M6 8H42V40H6V8Z"), p("M14 30L22 24L14 18"), l(28, 32, 36, 32)],
+  /** 分屏：终端外框 + 中间竖线。 */
+  split: [p("M6 8H42V40H6V8Z"), l(24, 8, 24, 40)],
   earth: [c(24, 24, 18), l(6, 24, 42, 24), p("M24 6C31 13 31 35 24 42C17 35 17 13 24 6Z")],
   shield: [p("M24 5L39 11V23C39 33 32 39 24 43C16 39 9 33 9 23V11L24 5Z")],
   "check-one": [c(24, 24, 18), p("M16 25L22 31L33 20")],

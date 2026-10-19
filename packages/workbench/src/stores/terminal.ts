@@ -1,6 +1,7 @@
 import { createJsonStorage } from "@greywork/core";
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
+import { clampTerminalHeight, TERMINAL_PANEL_HEIGHT_PX } from "@/lib/layout";
 import { terminalBackend, type ShellInfo, type TerminalSessionInfo } from "@/lib/terminal-backend";
 import { activeConversationFolder } from "@/lib/conversation-folder";
 import { activeWorkspaceFolder } from "@/lib/artifact-dir";
@@ -15,9 +16,9 @@ import { resolveWorkspaceDir } from "@/lib/workspace-dir";
  * `features/terminal/TerminalView.vue` 里 —— store 不碰 DOM，这样「开标签 → 会话就位」
  * 这条路径可单测，不用挂载 xterm。
  *
- * 持久化只存 `open` 偏好 + 标签页清单（会话 id / 标题 / 目录 / shell）；标签的**运行状态**
- * 不落盘，由 `hydrate()` 用宿主 `terminal_list` 校准。渲染进程重载（或面板被卸载重挂）后，
- * 仍在跑的 PTY 会被接回同一个标签页 —— 进程不会因为界面刷新而丢。
+ * 持久化只存 `open` 偏好 + 标签页清单（会话 id / 标题 / 目录 / shell）+ 分屏会话 id + 面板高度；
+ * 标签的**运行状态**不落盘，由 `hydrate()` 用宿主 `terminal_list` 校准。渲染进程重载（或面板
+ * 被卸载重挂）后，仍在跑的 PTY 会被接回同一个标签页 —— 进程不会因为界面刷新而丢。
  *
  * 工作目录跟随**当前工作区**：新标签页在「当前对话绑定的工作区文件夹 → 激活工作区文件夹 →
  * 设置项 / 应用私有 `~/.greyWork`」里启动，与 ACP 会话、文件树、Git 面板同一条解析链
@@ -67,6 +68,10 @@ interface TerminalPrefs {
   tabs?: PersistedTab[];
   /** 上次激活的会话 id。 */
   activeId?: string;
+  /** 右侧分屏显示的会话 id（空 / 缺失 = 不分屏）。 */
+  splitId?: string;
+  /** 面板高度（含标题条）；缺失用默认值。 */
+  heightPx?: number;
 }
 
 function isPersistedTab(value: unknown): value is PersistedTab {
@@ -79,9 +84,11 @@ function isPrefs(value: unknown): value is TerminalPrefs {
   if (typeof value !== "object" || value === null) return false;
   const prefs = value as Record<string, unknown>;
   if (typeof prefs.open !== "boolean") return false;
-  // 旧版本只存了 `open`：缺 `tabs` / `activeId` 仍算合法（向后兼容）。
+  // 旧版本只存了 `open`：缺 `tabs` / `activeId` / `splitId` / `heightPx` 仍算合法（向后兼容）。
   if (prefs.tabs !== undefined && (!Array.isArray(prefs.tabs) || !prefs.tabs.every(isPersistedTab))) return false;
-  return prefs.activeId === undefined || typeof prefs.activeId === "string";
+  if (prefs.activeId !== undefined && typeof prefs.activeId !== "string") return false;
+  if (prefs.splitId !== undefined && typeof prefs.splitId !== "string") return false;
+  return prefs.heightPx === undefined || (typeof prefs.heightPx === "number" && Number.isFinite(prefs.heightPx));
 }
 
 const prefsStorage = createJsonStorage<TerminalPrefs>("greywork.terminal", isPrefs);
@@ -95,11 +102,15 @@ export const useTerminalStore = defineStore("terminal", () => {
    * 由 Shell 的视口同步回灌，与 preview.available / activity.available 同一来源与断点。
    */
   const available = ref(true);
+  /** 面板高度（含标题条）：拖上边缘调整，偏好落盘。 */
+  const heightPx = ref(clampTerminalHeight(savedPrefs?.heightPx ?? TERMINAL_PANEL_HEIGHT_PX));
 
   /** 打开的标签页（顺序即展示顺序）。 */
   const tabs = ref<TerminalTab[]>([]);
   /** 当前激活标签页的 sessionId；无标签页时为空串。 */
   const activeId = ref("");
+  /** 右侧分屏显示的会话 id；空串 = 不分屏。 */
+  const splitId = ref("");
 
   /** 本机可用 shell（`terminal_shells` 拉取）。 */
   const shells = ref<ShellInfo[]>([]);
@@ -125,6 +136,8 @@ export const useTerminalStore = defineStore("terminal", () => {
 
   /** 当前激活标签页（无则不返回）。 */
   const activeTab = computed(() => tabs.value.find((tab) => tab.sessionId === activeId.value) ?? tabs.value[0] ?? null);
+  /** 右侧分屏的标签页（不分屏 / 会话已关时返回 null）。 */
+  const splitTab = computed(() => tabs.value.find((tab) => tab.sessionId === splitId.value) ?? null);
 
   function persist(): void {
     prefsStorage.write({
@@ -137,7 +150,22 @@ export const useTerminalStore = defineStore("terminal", () => {
         shellLabel,
       })),
       activeId: activeId.value,
+      splitId: splitId.value,
+      heightPx: heightPx.value,
     });
+  }
+
+  /** 调面板高度（拖拽 / 键盘共用）；落盘的是夹紧后的值。 */
+  function setHeight(value: number): void {
+    heightPx.value = clampTerminalHeight(value);
+    persist();
+  }
+
+  /** 设置右侧分屏；空串 / 未知会话 / 与激活项相同都视为关闭分屏。 */
+  function setSplit(sessionId: string): void {
+    const valid = sessionId !== "" && sessionId !== activeId.value && tabs.value.some((tab) => tab.sessionId === sessionId);
+    splitId.value = valid ? sessionId : "";
+    persist();
   }
 
   function setOpen(value: boolean): void {
@@ -271,6 +299,11 @@ export const useTerminalStore = defineStore("terminal", () => {
       const savedActive = savedPrefs?.activeId;
       activeId.value = savedActive && restored.some((tab) => tab.sessionId === savedActive) ? savedActive : restored[0].sessionId;
     }
+    // 分屏只在那个会话也接回来了才恢复；否则静默退化成单栏。
+    const savedSplit = savedPrefs?.splitId;
+    if (savedSplit && savedSplit !== activeId.value && tabs.value.some((tab) => tab.sessionId === savedSplit)) {
+      splitId.value = savedSplit;
+    }
     persist();
   }
 
@@ -327,6 +360,7 @@ export const useTerminalStore = defineStore("terminal", () => {
     if (activeId.value === sessionId) {
       activeId.value = tabs.value[Math.min(index, tabs.value.length - 1)]?.sessionId ?? "";
     }
+    if (splitId.value === sessionId) splitId.value = "";
     persist();
     void terminalBackend.close(sessionId).catch(() => {
       // 会话可能已退出 / 未真正建立，关闭失败无所谓。
@@ -343,10 +377,13 @@ export const useTerminalStore = defineStore("terminal", () => {
   }
 
   function setActive(sessionId: string): void {
-    if (tabs.value.some((tab) => tab.sessionId === sessionId)) {
-      activeId.value = sessionId;
-      persist();
+    if (!tabs.value.some((tab) => tab.sessionId === sessionId)) return;
+    if (splitId.value && splitId.value === sessionId) {
+      // 点的是右侧分屏：两边对调。否则同一个会话会挂两个 xterm，输出会重复渲染。
+      splitId.value = activeId.value;
     }
+    activeId.value = sessionId;
+    persist();
   }
 
   /** 拖拽重排：把标签移到目标下标（与预览栏同语义：下标是原数组里的落点）。 */
@@ -403,9 +440,12 @@ export const useTerminalStore = defineStore("terminal", () => {
   return {
     open,
     available,
+    heightPx,
     tabs,
     activeId,
+    splitId,
     activeTab,
+    splitTab,
     shells,
     pendingShellId,
     cwd,
@@ -414,6 +454,8 @@ export const useTerminalStore = defineStore("terminal", () => {
     setOpen,
     toggle,
     setAvailable,
+    setHeight,
+    setSplit,
     syncCwd,
     loadShells,
     hydrate,

@@ -2,9 +2,12 @@
 /**
  * 底部终端面板：多标签交互式终端（真 PTY）。
  *
- * 形态与 ActivityBand 一致 —— 底部通栏、高度在 0 ↔ `TERMINAL_PANEL_HEIGHT_PX` 间过渡、
- * 收起时内容保持挂载（`v-show`，滚动历史与运行中的会话都不丢）。区别只在内容：一条标签栏
- * （标签 = 独立 shell 会话）+ 每个标签一个 xterm 视图（见 `TerminalView`）。
+ * 形态与 ActivityBand 一致 —— 底部通栏、高度在 0 ↔ 偏好高度间过渡（上边缘可拖拽 / 键盘调高，
+ * 偏好落盘），收起时内容保持挂载（`v-show`，滚动历史与运行中的会话都不丢）。区别只在内容：
+ * 一条标签栏（标签 = 独立 shell 会话）+ 每个标签一个 xterm 视图（见 `TerminalView`）。
+ *
+ * 支持左右分屏：右栏显示另一个标签（`terminal.splitId`），两个窗格各挂一个真 xterm；
+ * 分屏只改窗格几何，不重挂组件，所以滚动历史不丢。
  *
  * 它是**交互式**的：每个标签页是一个真 PTY 子进程，`vim` / `top` / 密码输入都可用。
  * 会话生命周期（开/关/重启、选 shell、启动目录）收在 store（`useTerminalStore`）；这里
@@ -16,7 +19,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch, type ComponentPublicI
 import Icon from "@/features/shared/Icon.vue";
 import Hint from "@/features/shared/Hint.vue";
 import TerminalView from "@/features/terminal/TerminalView.vue";
-import { TERMINAL_PANEL_HEIGHT_PX } from "@/lib/layout";
+import { MAX_TERMINAL_PANEL_PX, MIN_TERMINAL_PANEL_PX, TERMINAL_PANEL_HEIGHT_PX } from "@/lib/layout";
 import { useTerminalStore, type TerminalStatus, type TerminalTab } from "@/stores/terminal";
 import { i18n } from "@/i18n";
 
@@ -42,6 +45,98 @@ const searchOpen = ref(false);
 watch([() => terminal.activeId, () => terminal.open], () => {
   searchOpen.value = false;
 });
+
+/* ===== 分屏 ===== */
+
+/** 右侧分屏的标签页（不分屏时为 null）。 */
+const splitTab = computed(() => terminal.splitTab);
+
+/** 某个标签是否在可见窗格里（分屏时是左右两栏，否则只有激活项）。 */
+function paneVisible(tab: TerminalTab): boolean {
+  if (!splitTab.value) return tab.sessionId === terminal.activeId;
+  return tab.sessionId === terminal.activeId || tab.sessionId === splitTab.value.sessionId;
+}
+
+/** 窗格几何：不分屏铺满，分屏各占一半（绝对定位，切分屏不重挂 xterm）。 */
+function paneStyle(tab: TerminalTab): Record<string, string> {
+  if (!splitTab.value) return { left: "0", right: "0" };
+  return tab.sessionId === terminal.activeId ? { left: "0", right: "50%" } : { left: "50%", right: "0" };
+}
+
+/**
+ * 分屏 / 取消分屏。没有第二个标签时先开一个（把原来的激活项留在左栏，
+ * 新会话放右栏），这样「点分屏」永远有东西可看。
+ */
+async function toggleSplit(): Promise<void> {
+  if (terminal.splitId) {
+    terminal.setSplit("");
+    return;
+  }
+  const other = terminal.tabs.find((tab) => tab.sessionId !== terminal.activeId);
+  if (other) {
+    terminal.setSplit(other.sessionId);
+    return;
+  }
+  const previous = terminal.activeId;
+  const created = await terminal.addTab();
+  if (!created) return;
+  if (previous) terminal.setActive(previous);
+  terminal.setSplit(created);
+}
+
+/* ===== 高度拖拽（偏好落盘） ===== */
+
+/** 拖拽调高的进行中控制器（卸载时中止，避免监听器泄漏）。 */
+let resizeDrag: AbortController | null = null;
+/** 正在拖拽：关掉高度过渡，否则面板会追着鼠标慢半拍。 */
+const resizing = ref(false);
+
+function onResizeStart(event: PointerEvent): void {
+  if (event.button !== 0) return;
+  event.preventDefault();
+  resizeDrag?.abort();
+  const controller = new AbortController();
+  resizeDrag = controller;
+  resizing.value = true;
+  const startY = event.clientY;
+  const startHeight = terminal.heightPx;
+  const previousCursor = document.body.style.cursor;
+  const previousSelect = document.body.style.userSelect;
+  document.body.style.cursor = "row-resize";
+  document.body.style.userSelect = "none";
+  const finish = (): void => {
+    controller.abort();
+    resizeDrag = null;
+    resizing.value = false;
+    document.body.style.cursor = previousCursor;
+    document.body.style.userSelect = previousSelect;
+  };
+  window.addEventListener(
+    "pointermove",
+    (move) => {
+      // 面板贴着窗口底边：鼠标往上（clientY 变小）→ 面板变高。
+      terminal.setHeight(startHeight + (startY - move.clientY));
+    },
+    { signal: controller.signal },
+  );
+  window.addEventListener("pointerup", finish, { signal: controller.signal });
+  window.addEventListener("pointercancel", finish, { signal: controller.signal });
+}
+
+/** 键盘调高：方向键 ±8px（Shift 步进 40），Home/End 到上下限。 */
+function onResizeKeydown(event: KeyboardEvent): void {
+  const step = event.shiftKey ? 40 : 8;
+  if (event.key === "ArrowUp") terminal.setHeight(terminal.heightPx + step);
+  else if (event.key === "ArrowDown") terminal.setHeight(terminal.heightPx - step);
+  else if (event.key === "Home") terminal.setHeight(MIN_TERMINAL_PANEL_PX);
+  else if (event.key === "End") terminal.setHeight(MAX_TERMINAL_PANEL_PX);
+  else return;
+  event.preventDefault();
+}
+
+function resetHeight(): void {
+  terminal.setHeight(TERMINAL_PANEL_HEIGHT_PX);
+}
 
 /** 已结束的激活标签页（shell 退出 / 启动失败）：「重启」入口只对它显示，避免误点杀掉活会话。 */
 const deadTab = computed(() =>
@@ -170,6 +265,8 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onWindowKeydown, true);
+  resizeDrag?.abort();
+  resizeDrag = null;
 });
 </script>
 
@@ -178,11 +275,29 @@ onBeforeUnmount(() => {
     v-if="terminal.available"
     ref="panelEl"
     data-testid="terminal-panel"
-    class="relative shrink-0 overflow-hidden bg-panel-2 transition-[height] duration-150"
-    :class="terminal.open ? 'border-t border-line-2' : ''"
-    :style="{ height: terminal.open ? `${TERMINAL_PANEL_HEIGHT_PX}px` : '0px' }"
+    class="relative shrink-0 overflow-hidden bg-panel-2"
+    :class="[terminal.open ? 'border-t border-line-2' : '', resizing ? 'transition-none' : 'transition-[height] duration-150']"
+    :style="{ height: terminal.open ? `min(${terminal.heightPx}px, 72vh)` : '0px' }"
     :aria-hidden="terminal.open ? undefined : 'true'"
   >
+    <!-- 高度拖拽把手：贴着面板上边缘；双击复位到默认高度 -->
+    <div
+      v-if="terminal.open"
+      data-testid="terminal-resize-handle"
+      class="group absolute inset-x-0 top-0 z-20 flex h-1.5 cursor-row-resize items-start justify-center"
+      role="separator"
+      aria-orientation="horizontal"
+      :aria-label="t('terminal.resize')"
+      :aria-valuemin="MIN_TERMINAL_PANEL_PX"
+      :aria-valuemax="MAX_TERMINAL_PANEL_PX"
+      :aria-valuenow="terminal.heightPx"
+      tabindex="0"
+      @pointerdown="onResizeStart"
+      @keydown="onResizeKeydown"
+      @dblclick="resetHeight"
+    >
+      <span class="pointer-events-none h-0.5 w-full bg-transparent transition-colors group-hover:bg-cyan" />
+    </div>
     <div class="flex h-full flex-col">
       <!-- 标题条：与活动面板/右栏区段条同一节奏 -->
       <div class="flex h-[34px] shrink-0 items-center gap-2 border-b border-line px-3">
@@ -274,6 +389,20 @@ onBeforeUnmount(() => {
             </option>
           </select>
 
+          <!-- 分屏：把另一个标签放到右栏；只有一个标签时先开一个 -->
+          <Hint v-if="active" :text="terminal.splitId ? t('terminal.unsplit') : t('terminal.split')">
+            <button
+              type="button"
+              data-testid="terminal-split"
+              :class="[buttonClass, terminal.splitId ? 'text-cyan' : '']"
+              :aria-label="terminal.splitId ? t('terminal.unsplit') : t('terminal.split')"
+              :aria-pressed="terminal.splitId ? 'true' : 'false'"
+              @click="toggleSplit"
+            >
+              <Icon name="split" :size="13" />
+            </button>
+          </Hint>
+
           <Hint v-if="deadTab" :text="t('terminal.restart')">
             <button
               type="button"
@@ -310,7 +439,17 @@ onBeforeUnmount(() => {
 
       <!-- 内容区：收起时 v-show 隐藏但保持挂载，终端滚动历史不丢 -->
       <div v-show="terminal.open" class="relative min-h-0 flex-1 bg-[#0a111b]">
-        <div v-for="tab in terminal.tabs" v-show="tab.sessionId === terminal.activeId" :key="tab.sessionId" class="absolute inset-0">
+        <!-- 窗格用绝对定位：分屏只改几何，不重挂 xterm（滚动历史与订阅都不受影响） -->
+        <div
+          v-for="tab in terminal.tabs"
+          v-show="paneVisible(tab)"
+          :key="tab.sessionId"
+          data-testid="terminal-pane"
+          :data-pane="tab.sessionId === terminal.activeId ? 'main' : tab.sessionId === splitTab?.sessionId ? 'split' : 'hidden'"
+          class="absolute inset-y-0"
+          :class="splitTab && tab.sessionId === splitTab.sessionId ? 'border-s border-line' : ''"
+          :style="paneStyle(tab)"
+        >
           <TerminalView
             :tab="tab"
             :search-open="terminal.activeId === tab.sessionId && searchOpen"

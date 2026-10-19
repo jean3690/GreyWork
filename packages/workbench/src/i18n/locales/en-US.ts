@@ -233,6 +233,9 @@ export const enUS: MessageSchema = {
     searchPrevious: "Previous match",
     searchNext: "Next match",
     searchClose: "Close find",
+    split: "Split",
+    unsplit: "Unsplit",
+    resize: "Resize terminal panel",
   },
   web: {
     title: "Fetch web page",
