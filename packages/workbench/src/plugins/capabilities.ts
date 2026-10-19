@@ -886,6 +886,122 @@ const fsScopedCapability: CapabilityDefinition = {
 };
 
 // ---------------------------------------------------------------------------
+// workspace.read 传输（宿主授权工作区的只读访问；无宿主时调用直接失败）
+// ---------------------------------------------------------------------------
+
+export type PluginWorkspaceOp = "roots" | "read";
+
+/** 一个已授权的工作区根。 */
+export interface PluginWorkspaceRoot {
+  /** 绝对路径。 */
+  path: string;
+  /** 目录名（展示用）。 */
+  name: string;
+}
+
+/** 宿主侧（Rust `plugin_workspace` 命令）返回的扁平结构。 */
+export interface PluginWorkspaceHostResponse {
+  roots?: PluginWorkspaceRoot[];
+  path?: string;
+  name?: string;
+  data?: string;
+  /** 文件**总**字节数（配合 `truncated` 判断）。 */
+  bytes?: number;
+  truncated?: boolean;
+  exists?: boolean;
+}
+
+/**
+ * workspace.read 传输层：桌面/服务端态由外壳注入 IPC 代理。宿主侧复用
+ * `WorkspaceFsAccess::resolve_existing`（不新建白名单）并做 256 KiB 预览截断；
+ * 无宿主时 invoke 直接失败，与 fs.scoped 同一约定。
+ */
+export type PluginWorkspaceTransport = (request: {
+  pluginId: string;
+  op: PluginWorkspaceOp;
+  path?: string;
+}) => Promise<PluginWorkspaceHostResponse>;
+
+let workspaceTransport: PluginWorkspaceTransport | null = null;
+
+/** 桌面态由外壳注入 IPC 传输；传 null 恢复「无宿主即失败」。 */
+export function setPluginWorkspaceTransportForHost(transport: PluginWorkspaceTransport | null): void {
+  workspaceTransport = transport;
+}
+
+// ---------------------------------------------------------------------------
+// 能力实现：workspace.read
+// ---------------------------------------------------------------------------
+
+const WORKSPACE_PATH_MAX_CHARS = 4096;
+
+interface WorkspaceReadArgs {
+  op: PluginWorkspaceOp;
+  path?: string;
+}
+
+function isWorkspaceReadArgs(value: unknown): value is WorkspaceReadArgs {
+  if (typeof value !== "object" || value === null) return false;
+  const args = value as Record<string, unknown>;
+  if (args.op !== "roots" && args.op !== "read") return false;
+  if (args.op === "roots") return args.path === undefined;
+  return typeof args.path === "string" && args.path.trim() !== "" && args.path.length <= WORKSPACE_PATH_MAX_CHARS;
+}
+
+const workspaceReadCapability: CapabilityDefinition = {
+  id: "workspace.read",
+  title: "读取工作区",
+  description:
+    "只读访问用户已授权的工作区：roots 列出授权根，read 读取根内文本文件（单次最多 256 KiB，超出截断；二进制/目录拒绝）。路径必须落在授权根内 —— 不会新建第二张白名单，也不能写。",
+  danger: "high",
+  async invoke(args, ctx) {
+    if (!isWorkspaceReadArgs(args)) {
+      throw new Error("workspace.read requires { op: roots|read, path? }");
+    }
+    const audit = (outcome: "ok" | "denied" | "error", detail: string): void => {
+      ctx.audit({
+        plugin: ctx.pluginId,
+        capability: "workspace.read",
+        at: new Date().toISOString(),
+        outcome,
+        detail: detail.slice(0, 200),
+      });
+    };
+    if (!workspaceTransport) {
+      audit("denied", "no host transport: workspace.read requires the desktop/server host");
+      throw new Error("workspace.read requires a desktop or server host");
+    }
+
+    let response: PluginWorkspaceHostResponse;
+    try {
+      response = await workspaceTransport({
+        pluginId: ctx.pluginId,
+        op: args.op,
+        path: args.op === "read" ? args.path : undefined,
+      });
+    } catch (error) {
+      audit("error", `host: ${String(error).slice(0, 180)}`);
+      throw error;
+    }
+
+    if (args.op === "roots") {
+      const roots = response.roots ?? [];
+      audit("ok", `roots (${roots.length})`);
+      return { roots };
+    }
+    audit("ok", `read ${response.path ?? args.path}`);
+    return {
+      exists: !!response.exists,
+      path: response.path ?? args.path ?? "",
+      name: response.name ?? "",
+      data: response.data ?? "",
+      bytes: response.bytes ?? 0,
+      truncated: !!response.truncated,
+    };
+  },
+};
+
+// ---------------------------------------------------------------------------
 // notify 传输（系统通知是桌面专属；无宿主时调用失败并留 denied 审计）
 // ---------------------------------------------------------------------------
 
@@ -1020,6 +1136,7 @@ export const CAPABILITY_REGISTRY: Readonly<Record<string, CapabilityDefinition>>
   [netFetchCapability.id]: netFetchCapability,
   [storageKvCapability.id]: storageKvCapability,
   [fsScopedCapability.id]: fsScopedCapability,
+  [workspaceReadCapability.id]: workspaceReadCapability,
   [notifyCapability.id]: notifyCapability,
   [scheduleCapability.id]: scheduleCapability,
   [pluginAdminCapability.id]: pluginAdminCapability,

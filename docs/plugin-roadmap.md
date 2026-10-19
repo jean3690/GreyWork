@@ -13,14 +13,14 @@
 
 机制侧是完备的，能力侧是收缩的：
 
-| 维度     | 现状                                                                                                                                                |
-| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 生命周期 | Cordis 微内核注册/启停/卸载、`dependsOn` 拓扑、被依赖拒卸（`loader.ts`）✅                                                                          |
-| 安全     | 包 SHA-256、registry ed25519 签名、按插件隔离授权、worker 无 DOM/无定时器 ✅                                                                        |
-| 能力目录 | `net.fetch`（GET/HEAD + 声明式 POST/路径模板/配额）、`storage.kv`、`fs.scoped`、`notify`、`schedule`、`window.floating`、`plugin-admin`（不可调用） |
-| 贡献面   | 3 种：全页 `modes`、3 个宿主 `uiRegions`、悬浮窗 `window`                                                                                           |
-| 渲染     | 封闭 SVG 指令白名单（`circle/ellipse/rect/path/text/group`）+ 指针事件回传（`render.pointer` → `registerPointer`，坐标有界、补丁同动作通道）        |
-| 分发     | 单 registry、`entry` 钉死 GitHub commit、无 dev 模式                                                                                                |
+| 维度     | 现状                                                                                                                                                                  |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 生命周期 | Cordis 微内核注册/启停/卸载、`dependsOn` 拓扑、被依赖拒卸（`loader.ts`）✅                                                                                            |
+| 安全     | 包 SHA-256、registry ed25519 签名、按插件隔离授权、worker 无 DOM/无定时器 ✅                                                                                          |
+| 能力目录 | `net.fetch`（GET/HEAD + 声明式 POST/路径模板/配额）、`storage.kv`、`fs.scoped`、`workspace.read`、`notify`、`schedule`、`window.floating`、`plugin-admin`（不可调用） |
+| 贡献面   | 3 种：全页 `modes`、3 个宿主 `uiRegions`、悬浮窗 `window`                                                                                                             |
+| 渲染     | 封闭 SVG 指令白名单（`circle/ellipse/rect/path/text/group`）+ 指针事件回传（`render.pointer` → `registerPointer`，坐标有界、补丁同动作通道）                          |
+| 分发     | 单 registry、`entry` 钉死 GitHub commit、无 dev 模式                                                                                                                  |
 
 **扩展点是且仅是三条**：能力目录（加能力）、贡献面（加挂载点）、分发通道（加体验）。下面是按这三条展开的分期路线图。
 
@@ -67,14 +67,14 @@
 
 这是质变的一档：把宿主已经存在的领域能力逐个暴露，插件开始能碰「工作台的数据」。
 
-| 能力                | 解决什么                                                   | 关键设计                                                                                                | 宿主已有的地基                                         |
-| ------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| `workspace.read`    | 插件读授权工作区内的文件（只读，隔离每个 root）            | 复用 `WorkspaceFsAccess` 的授权根解析，**不新建第二张白名单**；调用返回 sanitized 内容预览；高危：中-高 | `infra/workspace_fs/`（`resolve_existing` 即天然防线） |
-| `llm.chat`          | 插件做「智能动作」（摘要、分类、翻译）                     | 一次模型回合，凭证永远在宿主侧；插件只能传 prompt/模型参数模板，不能抄走 key；限流与 agent 共用额度     | `services/llm/`、`llm_chat_start`                      |
-| `mcp.connect`       | 插件声明要连某个 MCP server，复用现有 MCP 市场与客户端     | 插件 manifest 里声明 server 配置，宿主代理连接与调用（插件不直接持凭证）；危险级按暴露的工具面定        | `services/mcp*.rs`、`McpMarketSection.vue`             |
-| `clipboard`         | 插件读/写系统剪贴板                                        | 复用宿主剪贴板桥（桌面壳主进程 / 浏览器降级）；读剪贴板默认拒绝、写入默认允许但可配置             | `packaging.md` 的「No Runtime Web Clipboard」设计约束  |
-| `artifacts.publish` | 插件把产物（文本/JSON/小文件）送进会话产物面板，用户可预览 | 写入宿主产物目录，复用预览 viewer 分发（`lib/viewer.ts`）                                               | `activity.artifacts`、`ViewerKind` 表                  |
-| 多窗口/窗口控制 v2  | 悬浮窗只有开/关                                            | `window.floating` 扩展：标题、置顶切换、透明度、位置持久化、多实例；句柄仍不交插件                      | `plugin_window.rs`                                     |
+| 能力                | 解决什么                                                   | 关键设计                                                                                                                                                                                                                                    | 宿主已有的地基                                                                                                                                                                                                                |
+| ------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `workspace.read`    | 插件读授权工作区内的文件（只读，隔离每个 root）            | ✅ **已实现**：复用 `WorkspaceFsAccess::resolve_existing` / `authorized_roots`（**不新建第二张白名单**）；`roots` 列授权根，`read` 只读根内文本文件（单次 256 KiB 截断、二进制/目录拒绝、授权失败与不存在同一句错误）；无宿主时 denied 审计 | `infra/workspace_fs/`；`plugin_workspace.rs` 的 `plugin_workspace`；`capabilities.ts` 的 `workspaceReadCapability`；单测 `plugin_workspace.rs` + `tests/unit/plugins/capabilities.workspace.test.ts`；demo `demo.workspace.*` |
+| `llm.chat`          | 插件做「智能动作」（摘要、分类、翻译）                     | 一次模型回合，凭证永远在宿主侧；插件只能传 prompt/模型参数模板，不能抄走 key；限流与 agent 共用额度                                                                                                                                         | `services/llm/`、`llm_chat_start`                                                                                                                                                                                             |
+| `mcp.connect`       | 插件声明要连某个 MCP server，复用现有 MCP 市场与客户端     | 插件 manifest 里声明 server 配置，宿主代理连接与调用（插件不直接持凭证）；危险级按暴露的工具面定                                                                                                                                            | `services/mcp*.rs`、`McpMarketSection.vue`                                                                                                                                                                                    |
+| `clipboard`         | 插件读/写系统剪贴板                                        | 复用宿主剪贴板桥（桌面壳主进程 / 浏览器降级）；读剪贴板默认拒绝、写入默认允许但可配置                                                                                                                                                       | `packaging.md` 的「No Runtime Web Clipboard」设计约束                                                                                                                                                                         |
+| `artifacts.publish` | 插件把产物（文本/JSON/小文件）送进会话产物面板，用户可预览 | 写入宿主产物目录，复用预览 viewer 分发（`lib/viewer.ts`）                                                                                                                                                                                   | `activity.artifacts`、`ViewerKind` 表                                                                                                                                                                                         |
+| 多窗口/窗口控制 v2  | 悬浮窗只有开/关                                            | `window.floating` 扩展：标题、置顶切换、透明度、位置持久化、多实例；句柄仍不交插件                                                                                                                                                          | `plugin_window.rs`                                                                                                                                                                                                            |
 
 **P1 完成判据**：出现「读取工作区 README → LLM 总结 → 写入产物面板 → 一键复制」的插件，全部动作都可见、可审计、可撤销授权。
 
@@ -114,21 +114,21 @@
 
 > danger 与授权形态仅为草案，落地时按惯例逐一评审（`net.fetch` 是「声明式参数授权」的样板）。
 
-| 能力                 | 危险级   | 授权形态                               | 依赖面                                        | 归属阶段          |
-| -------------------- | -------- | -------------------------------------- | --------------------------------------------- | ----------------- |
-| `storage.kv`         | low      | 字符串                                 | 前端模块                                      | P0                |
-| `fs.scoped`          | medium   | 字符串                                 | Rust 新增 `plugin_fs_*` → 已新增 `plugin_fs`  | P0 ✅             |
-| `notify`             | low      | 字符串                                 | 已有 `notify.rs` → 已落地 `plugin_notify`     | P0 ✅             |
-| `schedule`           | low      | `{kind:"interval", min}`               | 前端调度器（工作台持有 worker）               | P0 ✅             |
-| `net.fetch` v2       | medium   | `{hosts, methods?, paths?, maxBytes?}` | `net_fetch.rs` 扩展（`stream` 留后续）        | P0 ✅（流式待做） |
-| `window.floating` v2 | medium   | `{windows:[...]}`                      | `plugin_window.rs`                            | P1                |
-| `workspace.read`     | high     | root 白名单                            | `workspace_fs` 复用                           | P1                |
-| `llm.chat`           | high     | 模型模板白名单                         | `services/llm`                                | P1                |
-| `mcp.connect`        | high     | server 配置声明                        | `services/mcp*`                               | P1                |
-| `clipboard`          | medium   | 读默认拒/写默认许                      | 宿主剪贴板桥（Electron 主进程）               | P1                |
-| `artifacts.publish`  | medium   | 字符串                                 | 产物目录 + viewer                             | P1                |
-| `run.command`        | **不做** | —                                      | 至多经 `process_guard` 白名单给**用户自签**包 | 长期              |
-| `wasm` 运行时        | —        | —                                      | 宿主嵌入式解释器                              | P3                |
+| 能力                 | 危险级   | 授权形态                               | 依赖面                                          | 归属阶段          |
+| -------------------- | -------- | -------------------------------------- | ----------------------------------------------- | ----------------- |
+| `storage.kv`         | low      | 字符串                                 | 前端模块                                        | P0                |
+| `fs.scoped`          | medium   | 字符串                                 | Rust 新增 `plugin_fs_*` → 已新增 `plugin_fs`    | P0 ✅             |
+| `notify`             | low      | 字符串                                 | 已有 `notify.rs` → 已落地 `plugin_notify`       | P0 ✅             |
+| `schedule`           | low      | `{kind:"interval", min}`               | 前端调度器（工作台持有 worker）                 | P0 ✅             |
+| `net.fetch` v2       | medium   | `{hosts, methods?, paths?, maxBytes?}` | `net_fetch.rs` 扩展（`stream` 留后续）          | P0 ✅（流式待做） |
+| `window.floating` v2 | medium   | `{windows:[...]}`                      | `plugin_window.rs`                              | P1                |
+| `workspace.read`     | high     | root 白名单                            | `workspace_fs` 复用 → 已落地 `plugin_workspace` | P1 ✅             |
+| `llm.chat`           | high     | 模型模板白名单                         | `services/llm`                                  | P1                |
+| `mcp.connect`        | high     | server 配置声明                        | `services/mcp*`                                 | P1                |
+| `clipboard`          | medium   | 读默认拒/写默认许                      | 宿主剪贴板桥（Electron 主进程）                 | P1                |
+| `artifacts.publish`  | medium   | 字符串                                 | 产物目录 + viewer                               | P1                |
+| `run.command`        | **不做** | —                                      | 至多经 `process_guard` 白名单给**用户自签**包   | 长期              |
+| `wasm` 运行时        | —        | —                                      | 宿主嵌入式解释器                                | P3                |
 
 ---
 

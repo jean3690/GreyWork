@@ -945,6 +945,36 @@ fn demo_pointer_package_parses_and_validates() {
 }
 
 #[test]
+fn demo_workspace_package_parses_and_validates() {
+    // demo.workspace.json 是 workspace.read 的「就绪未发布」演示包：声明式页面 + 能力声明
+    // 必须与真实发布包同等通过 validate（entry / sha256 是占位，先换成合法值）。
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../plugin-market/packages/demo.workspace.json"
+    );
+    let Ok(bytes) = std::fs::read(path) else {
+        // 仓库外构建（单独打包本 crate）跳过。
+        return;
+    };
+    let mut package: PluginPackage =
+        serde_json::from_slice(&bytes).expect("demo.workspace.json parses");
+    assert_eq!(package.manifest.id, "demo.workspace");
+    assert!(
+        package.manifest.requires.iter().any(|requirement| matches!(
+            requirement,
+            CapabilityRequirement::Plain(id) if id == "workspace.read"
+        )),
+        "demo.workspace declares workspace.read"
+    );
+    if let Some(runtime) = package.manifest.runtime.as_mut() {
+        runtime.entry =
+            "https://raw.githubusercontent.com/acme/plugins/main/demo.workspace.js".into();
+        runtime.sha256 = "a".repeat(64);
+    }
+    validate_package(&package).expect("demo.workspace declaration validates");
+}
+
+#[test]
 fn render_loop_pointer_flag_defaults_false_and_parses_true() {
     // 老包缺 pointer 字段 → false（schemaVersion 1 兼容）；显式 true → 解析为 true。
     let without: RenderLoop =

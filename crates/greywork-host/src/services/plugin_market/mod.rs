@@ -15,6 +15,7 @@
 //! - [`commands`]：对外命令（catalog / preview / install / list / uninstall）；
 //! - [`net_fetch`]：前端 net.fetch 能力的宿主侧代理；
 //! - [`plugin_fs`]：前端 fs.scoped 能力的宿主侧沙箱；
+//! - [`plugin_workspace`]：前端 workspace.read 能力的宿主侧只读入口；
 //! - [`plugin_notify`]：前端 notify 能力的宿主侧校验与归属合成（投递在桌面壳）。
 
 mod commands;
@@ -25,6 +26,7 @@ mod net_fetch;
 mod package;
 mod plugin_fs;
 mod plugin_notify;
+mod plugin_workspace;
 mod registry;
 mod validate;
 
@@ -47,6 +49,10 @@ pub use net_fetch::{plugin_net_fetch, PluginFetchRequest, PluginFetchResponse};
 pub use package::declares_window_floating;
 pub use plugin_fs::{plugin_fs, PluginFsEntry, PluginFsOp, PluginFsRequest, PluginFsResponse};
 pub use plugin_notify::{compose_plugin_notify, PluginNotifyRequest, PluginNotifyResponse};
+pub use plugin_workspace::{
+    plugin_workspace, PluginWorkspaceOp, PluginWorkspaceRequest, PluginWorkspaceResponse,
+    PluginWorkspaceRoot,
+};
 pub use validate::{validate_dir_key, validate_key};
 
 use std::time::Duration;
