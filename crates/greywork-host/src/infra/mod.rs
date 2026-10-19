@@ -7,6 +7,8 @@ pub mod git;
 pub mod http;
 pub mod process_guard;
 pub mod sheet;
+pub mod shell;
 pub mod store_fs;
+pub mod terminal;
 pub mod workspace_fs;
 pub mod worktree;

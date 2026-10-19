@@ -163,8 +163,9 @@ mod tests {
     fn save_load_roundtrip_and_clear() {
         let dir = temp_dir("roundtrip");
         assert!(load(&dir, CLIENT).is_none(), "没存过 → None");
-        save(&dir, CLIENT, &token()).expect("save");
-        assert_eq!(load(&dir, CLIENT), Some(token()));
+        let expected = token();
+        save(&dir, CLIENT, &expected).expect("save");
+        assert_eq!(load(&dir, CLIENT), Some(expected));
         clear(&dir, CLIENT).expect("clear");
         assert!(load(&dir, CLIENT).is_none(), "清掉后 → None");
         clear(&dir, CLIENT).expect("重复 clear 不报错");

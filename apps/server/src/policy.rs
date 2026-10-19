@@ -27,10 +27,23 @@ use crate::config::ServerConfig;
 /// `fs_authorize_drop_paths` / `fs_authorize_picked_paths`：把渲染端给的路径写进授权账本。
 /// 这是授权面唯一的命令入口 —— 不可信部署下它们会变成「任何客户端都能授权任意路径」，与
 /// `WorkspaceAuthorizer` 的「只由宿主壳在收到用户动作时调用」直接冲突，所以默认必须关着。
+///
+/// `shell_run`：终端命令运行器，交给登录 shell 跑任意命令。它刻意**不走** agent 的
+/// 白名单 + 元字符校验（那正是终端的用途），因此是比 `acp_start` 更宽的 spawn 面；不可信
+/// 部署（网络另一端能连上）下必须关着，否则等于把 RCE 面交给任何拿到会话的客户端。
+///
+/// `terminal_*`：交互式终端（真 PTY）。比 `shell_run` 更宽（可持续交互、能跑 vim/top 等
+/// 任意程序），是同一安全语义下最该关的一组；只有可信本机宿主才放行。
 pub const TRUSTED_HOST_ONLY: &[&str] = &[
     "db_agents_sync",
     "fs_authorize_drop_paths",
     "fs_authorize_picked_paths",
+    "shell_run",
+    "terminal_close",
+    "terminal_open",
+    "terminal_resize",
+    "terminal_shells",
+    "terminal_write",
 ];
 
 pub fn is_denied(command: &str, trusted_host: bool) -> bool {

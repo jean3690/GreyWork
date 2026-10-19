@@ -65,6 +65,9 @@ sha1 = "0.10"
 # 都在它里面。宿主只保留 SDK 管不到的那层：状态机、凭证落盘（0600）、入站媒体落地、
 # 事件与命令、发送者策略（见 src/wechat.rs）。
 wechatbot = "0.4"
+# 交互式终端（`terminal_*` 命令）：真 PTY 才能跑 vim/top、密码输入、彩色提示符。
+# Unix 走 openpty，Windows 走 ConPTY（portable-pty 内部处理）；见 infra/terminal。
+portable-pty = "0.9.0"
 
 # Unix 上按进程组回收子进程树要 killpg(2)（见 process_guard::kill_process_tree）。
 # Windows 走 taskkill，用不到，故限定平台。
