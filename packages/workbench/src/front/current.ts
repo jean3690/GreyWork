@@ -5,37 +5,27 @@
  * **之前**写入一次。为什么不走 `provide/inject`：读它的不止组件树内的东西（`lib/nav-items`
  * 是纯函数，「我是哪个前端」不该要求调用方先拿到一个组件实例），而且测试里要能直接换。
  *
- * 缺省是 `ALL_FEATURES_FRONT`，于是：
- * - 现有 `createAppRouter()` / `buildNavItems(modes)` 的调用方（含 25 处测试）不带参也照旧；
- * - 某个组件被单独挂载（如 Sider 的单测）时拿到的是全量前端，与拆分前行为一致。
+ * 缺省值**刻意不存在**（2026-10-19 改）：`currentFront()` 在 Shell、nav-items、router 的
+ * **运行期**被调用，只要它引用着全量集合，每个特性（连同其路由 chunk）对**每一个**前端都可达，
+ * `apps/web` 自然也躲不掉。实测（有缺省时）：web 与 desktop 都是 259 个 chunk、JS 字节数
+ * 相差不到 0.02%，`channels` 的 `dingtalk` 仍在 web 包里。
  *
- * ## 已知限制：这个缺省让「按端分叉」省不下包体积（2026-10-14 实测）
+ * 去掉缺省后，没被某端 import 的特性才真正从产物里消失。代价是「忘记声明」会立刻抛错，
+ * 而不是静默拿到全量：
+ * - 前端入口必须在 mount 前 `setFront(<该端的 FrontSpec>)`（apps/desktop / apps/web 各自声明）；
+ * - 组件测试由 `tests/vitest.dom.setup.ts` 统一 `setFront(ALL_FEATURES_FRONT)`，
+ *   单独挂载某个组件时行为与拆分前一致。
  *
- * `currentFront()` 被 `Shell.vue`、`lib/nav-items`、`router/index.ts` 在**运行期**调用，而它的
- * 缺省值是全量集合 —— 于是每个特性（连同其 `() => import(...)` 的路由 chunk）对**每一个**前端
- * 都可达，`apps/web` 自然也躲不掉。实测：web 与 desktop 两个产物都是 259 个 chunk、JS 字节数
- * 相差不到 0.02%，`channels` 的 `dingtalk` 仍在 web 包里；`ALL_FEATURES_FRONT` 的 label
- *（`桌面端（全特性）`）会出现在 web 的入口 chunk 里，可以直接 grep 它当反例。
- *
- * 排除了两个「看起来很像」的原因（都做了对照实验）：
- * - **不是** tree-shaking 被字符串注册表破坏：`front/all.ts` 与 `front/web.ts` 都是逐个静态
- *   import，没有 `FEATURES[id]` 查表。
- * - **不是** `package.json` 缺 `sideEffects`，也不是入口那个 dev-only 的
- *   `import("@greywork/workbench")` 动态导入：给 workbench 的 `sideEffects` 补上只匹配 CSS 的 glob（`**` 下的 `*.css`）
- *   只省下约 2KB；去掉那次动态导入，产物**一个字节都没变**。
- *
- * 真正的原因就是这一行的缺省本身：全量前端被一个运行期可达的模块级变量引用着，没有剪枝余地。
- * 要让 web 真的瘦下来，得去掉缺省（未声明即抛错），让入口与测试都显式传 front —— 那是**独立
- * 一轮**的改动（约 25 处调用点）。本阶段刻意不动：S4 的验收是「两端各自装载、web 不装托盘/
- * 关闭守卫与桌面专属导航」，那是**运行期**的差异，已经达成。
+ * 排除了两个「看起来很像」的原因（都做过对照实验）：不是 tree-shaking 被字符串注册表破坏
+ * （`front/all.ts` / `front/web.ts` 都是逐个静态 import，没有 `FEATURES[id]` 查表），
+ * 也不是 `package.json` 缺 `sideEffects`（补上只省约 2KB）。
  *
  * **`setFront` 只该由前端入口调用**，且必须在 mount 前 —— 导航项与路由都在那一刻定下。
  */
 import { declareFront } from "@greywork/host-ipc";
-import { ALL_FEATURES_FRONT } from "./all";
 import type { FrontSpec } from "./types";
 
-let current: FrontSpec = ALL_FEATURES_FRONT;
+let current: FrontSpec | null = null;
 
 /**
  * 设定当前前端。入口在 mount 前调用；测试可在用例里改，用完自己改回去。
@@ -54,5 +44,8 @@ export function setFront(front: FrontSpec): void {
  * 组件求值期或纯函数内的同步读取，缓存会让入口的设定（或测试的替换）失效。
  */
 export function currentFront(): FrontSpec {
+  if (!current) {
+    throw new Error("当前前端未声明：入口必须在 mount 前调用 setFront(<FrontSpec>)");
+  }
   return current;
 }

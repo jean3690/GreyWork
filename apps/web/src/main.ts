@@ -2,15 +2,10 @@ import { createApp, nextTick } from "vue";
 import { createPinia } from "pinia";
 import { initRuntimeMode } from "@greywork/host-ipc";
 import App from "./App.vue";
-import {
-  WEB_FRONT,
-  bootInstalledMarketPlugins,
-  createAppRouter,
-  i18n,
-  initDeviceTier,
-  loadHostSystem,
-  setFront,
-} from "@greywork/workbench";
+import { bootInstalledMarketPlugins, createAppRouter, i18n, initDeviceTier, loadHostSystem, setFront } from "@greywork/workbench";
+// 前端集合走子路径：barrel 里放任何一份都会让另一端也把它拖进产物，
+// 那样「Web 端更瘦」就只是运行期差异（见 workbench/src/front/current.ts）。
+import { WEB_FRONT } from "@greywork/workbench/front/web";
 // Tailwind 入口是**全仓共享**的那一份（主题令牌只此一处，见 workbench/src/tailwind.css）。
 import "@greywork/workbench/tailwind.css";
 
@@ -84,9 +79,9 @@ async function bootstrap(): Promise<void> {
 
   mark("mountStart");
   // 前端身份必须在 mount 之前落地：路由表与外壳接线都在 setup / mount 期同步读它。
-  // Web 端**显式**声明自己那一份，不吃 `currentFront()` 的缺省 —— 理由同桌面端（见
-  // front/all.ts）：缺省服务于「不关心是哪一端」的测试与无参调用，生产入口搭它的便车，
-  // 等于把「缺省恰好等于本端」变成一个没人写下来的约定。
+  // Web 端**显式**声明自己那一份：`currentFront()` 没有缺省值，未声明就抛错。
+  // 集合本身走子路径 import，保证没被本端引用的特性真正从产物里消失
+  //（见 workbench 的 front/current.ts）。
   setFront(WEB_FRONT);
   const app = createApp(App).use(i18n).use(createPinia()).use(createAppRouter());
   app.mount("#app");
@@ -102,11 +97,13 @@ async function bootstrap(): Promise<void> {
   //（生产构建中 import.meta.env.DEV 为 false，整段被 tree-shake 移除）。
   if (import.meta.env.DEV) {
     void import("@greywork/workbench").then((m) => {
+      // 前端身份是「多前端」唯一的可观测证据：特性集与外壳接线都由它派生。
+      // 取值而不是挂函数：mount 之后身份不再变，e2e 直接读对象即可（也少一个未覆盖函数）。
+      const front = m.currentFront();
       (window as unknown as Record<string, unknown>).__gw = {
         workspaceFs: m.workspaceFs,
         appEvents: m.appEvents,
-        // 前端身份是「多前端」唯一的可观测证据：特性集与外壳接线都由它派生。
-        front: () => ({ id: m.currentFront().id, features: m.currentFront().features.map((feature) => feature.id) }),
+        front: { id: front.id, features: front.features.map((feature) => feature.id) },
       };
     });
   }

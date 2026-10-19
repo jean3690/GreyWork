@@ -21,7 +21,7 @@ const h = vi.hoisted(() => ({
   setFront: vi.fn<(front: unknown) => void>(),
   // 前端集合只作为「被声明的那个对象」的身份标记，内容由 workbench 自己的单测锁
   //（packages/workbench/tests/unit/front/web.test.ts）—— 这里不重复维护一份特性清单。
-  WEB_FRONT: Object.freeze({ id: "web" }),
+  WEB_FRONT: Object.freeze({ id: "web", features: [{ id: "guid" }, { id: "conversation" }] }),
   appPlugin: (app: unknown) => {
     void app;
   },
@@ -40,13 +40,16 @@ vi.mock("@greywork/workbench", () => ({
   // 前端身份：入口在 mount 前声明本端是哪一端，路由表与外壳接线都由它派生
   //（见 workbench 的 front/types.ts）。缺了它 bootstrap 会在 mount 之前抛。
   setFront: (front: unknown) => h.setFront(front),
-  WEB_FRONT: h.WEB_FRONT,
+  // __gw 钩子读它来暴露「本端装了哪些特性」（e2e 断言多前端子集）。
+  currentFront: () => h.WEB_FRONT,
   i18n: { install: h.appPlugin },
   workspaceFs: {},
   appEvents: {},
   Shell: { name: "ShellStub", template: '<div data-testid="shell-stub" />' },
   AuthGate: { name: "AuthGateStub", template: "<div><slot /></div>" },
 }));
+
+vi.mock("@greywork/workbench/front/web", () => ({ WEB_FRONT: h.WEB_FRONT }));
 
 /**
  * 把上一条用例遗留的 rAF 排空。
@@ -93,6 +96,9 @@ describe("bootstrap", () => {
       const gw = (window as unknown as { __gw?: { appEvents?: unknown } }).__gw;
       expect(gw?.appEvents).toBeDefined();
     });
+    // __gw.front 是 e2e 断言「多前端」的入口：必须是本端声明的身份 + 特性 id 列表。
+    const gw = (window as unknown as { __gw: { front: { id: string; features: string[] } } }).__gw;
+    expect(gw.front).toEqual({ id: "web", features: ["guid", "conversation"] });
   });
   it("打点分段里没有「显示窗口」这一段 —— 本端没有窗口可显示", async () => {
     performance.mark("gw:entry");

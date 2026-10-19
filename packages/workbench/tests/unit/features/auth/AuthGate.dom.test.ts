@@ -18,6 +18,7 @@ const h = vi.hoisted(() => ({
 }));
 
 vi.mock("@greywork/host-ipc", () => ({
+  declareFront: () => undefined,
   runtimeMode: h.runtimeMode,
   hasSession: h.hasSession,
   login: h.login,

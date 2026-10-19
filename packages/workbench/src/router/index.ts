@@ -21,7 +21,8 @@ import type { FrontSpec } from "@/front/types";
  * 视图全部懒加载：ConversationView 的对话 store 链会把 ExcelJS / pptxgenjs /
  * jszip 焊进出入口 chunk，让从不产表格/幻灯的用户在开屏就解析这几百 KB 写入器。
  *
- * `front` 缺省取当前前端，因此既有调用方（含测试）不带参时行为与拆分前一致。
+ * `front` 缺省取当前前端（入口已在 mount 前 `setFront`；测试 setup 声明全量集合），
+ * 因此 `createAppRouter()` 不带参仍按当前前端拼表。
  */
 export function createAppRouter(front: FrontSpec = currentFront()): Router {
   const routes: RouteRecordRaw[] = [

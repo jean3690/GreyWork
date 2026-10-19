@@ -70,6 +70,10 @@ jobs:
       - name: Build (web + desktop renderer)
         run: pnpm build
 
+      # 产物级守卫：web 里不能出现它没启用的特性 chunk（多前端剪枝真的生效）。
+      - name: Front bundle guard
+        run: node scripts/front-bundle-guard.mjs
+
   renderer-e2e:
     name: Renderer smoke (e2e)
     runs-on: ubuntu-latest

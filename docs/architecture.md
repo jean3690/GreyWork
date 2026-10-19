@@ -144,10 +144,16 @@ Two rules keep this from silently bloating the bundle:
 1. **Feature sets are static imports, not a lookup table.** `front/all.ts` imports each feature
    explicitly so Rollup can drop the ones no frontend references; a `Record<FeatureId, Feature>`
    lookup would retain every view.
-2. **A production entry must declare its own spec** — `apps/desktop/src/main.ts` uses
-   `ALL_FEATURES_FRONT`, `apps/web/src/main.ts` uses `WEB_FRONT`. Relying on the default
-   (`currentFront()`, which equals the full set) is reserved for tests and context-free callers, so
-   narrowing the default can never silently starve a real app.
+2. **A production entry must declare its own spec, and there is no default** — `apps/desktop/src/main.ts`
+   imports `ALL_FEATURES_FRONT`, `apps/web/src/main.ts` imports `WEB_FRONT`, both from their own
+   `@greywork/workbench/front/*` subpath (never the barrel). `currentFront()` throws until `setFront()`
+   has run, so a missing declaration fails loudly instead of silently loading the full set. Component
+   tests get the full set from `tests/vitest.dom.setup.ts`.
+
+   Removing the default is what makes the split pay for itself: while `currentFront()` referenced the
+   full set, every frontend emitted every feature's route chunks (web and desktop had the same chunk
+   count and differed by <0.02% in bytes). With the default gone, `apps/web` no longer contains
+   `TeamView` / `AssistantsView` / channel views at all.
 
 `apps/web` deliberately omits `channels` (opening a browser tab must not dial every IM channel),
 `team` and `assistants`; it keeps `guid`, `conversation`, `automation` and `plugins`. Its smoke e2e

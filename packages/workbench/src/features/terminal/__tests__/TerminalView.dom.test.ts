@@ -50,6 +50,7 @@ vi.mock("@xterm/addon-fit", () => ({
 vi.mock("@xterm/xterm/css/xterm.css", () => ({}));
 
 vi.mock("@greywork/host-ipc", () => ({
+  declareFront: () => undefined,
   listen: vi.fn(async (event: string, handler: (payload: { payload: unknown }) => void) => {
     mocks.listeners.set(event, handler);
     return () => mocks.listeners.delete(event);

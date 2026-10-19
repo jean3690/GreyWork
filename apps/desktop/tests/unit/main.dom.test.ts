@@ -44,7 +44,6 @@ vi.mock("@greywork/workbench", () => ({
   // 前端身份：入口在 mount 前声明本端是哪一端，路由表与外壳接线都由它派生
   //（见 workbench 的 front/types.ts）。缺了它 bootstrap 会在 mount 之前抛。
   setFront: (front: unknown) => h.setFront(front),
-  ALL_FEATURES_FRONT: h.ALL_FEATURES_FRONT,
   i18n: { install: h.appPlugin },
   workspaceFs: {},
   appEvents: {},
@@ -53,6 +52,8 @@ vi.mock("@greywork/workbench", () => ({
   isPhysicalPointInDropzone: () => Promise.resolve(false),
   usePreviewStore: () => ({ open: () => undefined }),
 }));
+
+vi.mock("@greywork/workbench/front/all", () => ({ ALL_FEATURES_FRONT: h.ALL_FEATURES_FRONT }));
 
 describe("bootstrap", () => {
   beforeEach(() => {

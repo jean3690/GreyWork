@@ -7,7 +7,7 @@ import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 
 const h = vi.hoisted(() => ({ login: vi.fn<(password: string) => Promise<void>>() }));
 
-vi.mock("@greywork/host-ipc", () => ({ login: h.login }));
+vi.mock("@greywork/host-ipc", () => ({ login: h.login, declareFront: () => undefined }));
 
 import { i18n } from "@/i18n";
 import LoginView from "@/features/auth/LoginView.vue";

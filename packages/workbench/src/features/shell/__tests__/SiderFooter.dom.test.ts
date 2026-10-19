@@ -20,6 +20,7 @@ vi.mock("@greywork/host-ipc", () => ({
   runtimeMode: host.runtimeMode,
   hasNativeShell: host.hasNativeShell,
   logout: host.logout,
+  declareFront: () => undefined,
 }));
 
 import SiderFooter from "@/features/shell/SiderFooter.vue";

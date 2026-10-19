@@ -26,6 +26,7 @@ const h = vi.hoisted(() => ({
 }));
 
 vi.mock("@greywork/host-ipc", () => ({
+  declareFront: () => undefined,
   hasHostCommands: () => true,
   invoke: h.invoke,
   listen: (event: string, handler: (event: { payload: unknown }) => void) => {

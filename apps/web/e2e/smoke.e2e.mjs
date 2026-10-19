@@ -64,7 +64,7 @@ try {
 
   // 前端身份：Web 端必须拿到 WEB_FRONT 的子集，而不是缺省的全量前端。
   // 这条断言才是「一个后端、多个前端」真正落地的证据 —— 侧栏入口/路由都由它派生。
-  const front = await page.evaluate(() => window.__gw.front());
+  const front = await page.evaluate(() => window.__gw.front);
   if (front.id !== "web") throw new Error(`前端身份应为 web，实际是 ${front.id}`);
   for (const id of ["guid", "conversation", "automation", "plugins"]) {
     if (!front.features.includes(id)) throw new Error(`WEB_FRONT 缺少特性 ${id}：${front.features.join(",")}`);

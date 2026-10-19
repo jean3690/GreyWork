@@ -1,5 +1,5 @@
 /**
- * 「全特性」前端：默认值，也是桌面端在 S1 阶段实际用的那一份。
+ * 「全特性」前端：桌面端实际用的那一份。
  *
  * ## 为什么特性集必须静态 import，不能按 id 查表
  *
@@ -10,17 +10,12 @@
  * 静态 import + 字面量数组能让剪枝照常发生：没被任何前端 import 的 feature 直接消失。
  * 特性内部的视图仍然用 `() => import(...)`，路由级代码分割不受影响。
  *
- * ## 为什么它现在等于「桌面端」
+ * ## 它不再是谁的缺省值
  *
- * 今天只有桌面端一个前端，且它开满全部特性 —— 所以这份集合在 S1 里同时承担两个角色：
- * 「`createAppRouter()` / `buildNavItems()` 不带参时的行为」（25 处测试 + 3 个组件这么调）
- * 与「S4 之前桌面端的特性集」。
- *
- * 桌面端的入口**显式**声明它（`apps/desktop/src/main.ts` 的 `setFront(ALL_FEATURES_FRONT)`），
- * 而不是吃缺省 —— 缺省服务于「不关心是哪一端」的测试，生产入口搭它的便车会把
- * 「缺省恰好等于桌面」变成没人写下来的约定，S4 时谁改窄了缺省，桌面端会静默跟着变瘦。
- * 等 S4 拆出 `apps/web`，桌面端会多一份自己的 `apps/desktop/src/front.ts`（届时各端特性集
- * 真正分叉），而这份退化为「全量集合」：测试的缺省与 `apps/desktop` 的声明都用它。
+ * 这份集合只被两处 import：`apps/desktop` 的入口（显式 `setFront`）与组件测试的 setup
+ * （`tests/vitest.dom.setup.ts`，让单组件挂载有全量路由可用）。`front/current.ts` 里**没有**
+ * 指向它的缺省 —— 否则 web 入口会经由运行期可达的 `currentFront()` 把全部特性拖进产物。
+ * 它通过 `@greywork/workbench/front/all` 子路径导入，不进 barrel。
  */
 import type { FrontSpec } from "./types";
 import { guidFeature } from "@/features/guid/spec";
