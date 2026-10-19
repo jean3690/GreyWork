@@ -9,11 +9,13 @@
  * 防白屏：`show: false` 起手，等 `ready-to-show` 再显示（渲染端还会在首帧后再调一次
  * `hostWindow().show()`，Electron 下那是空操作）。
  */
-import { BrowserWindow } from "electron";
+import { BrowserWindow, screen } from "electron";
 
 import { IPC, WINDOW_LABEL_ARG } from "../shared/channels";
+import { placeWindow } from "../shared/window-placement";
 import { sessionToken } from "./auth";
 import * as guard from "./close-guard";
+import { guardNavigation } from "./navigation";
 import { preloadPath } from "./paths";
 import { hideToTray, isCloseToTray, isTrayAvailable, type TrayHost } from "./tray";
 import { loadWindowState, saveWindowState, scheduleSaveWindowState } from "./window-state";
@@ -43,7 +45,11 @@ const DRAG_CSS = `
 `;
 
 export async function createMainWindow(options: MainWindowOptions): Promise<BrowserWindow> {
-  const state = loadWindowState();
+  // 显示器拓扑可能变过（拔掉外接屏 / 改分辨率）：越界的坐标要拉回来，否则窗口起在屏幕外。
+  const state = placeWindow(
+    loadWindowState(),
+    screen.getAllDisplays().map((display) => display.workArea),
+  );
   const win = new BrowserWindow({
     x: state.x,
     y: state.y,
@@ -68,6 +74,9 @@ export async function createMainWindow(options: MainWindowOptions): Promise<Brow
   });
   if (state.maximized) win.maximize();
 
+  // 自家 SPA 之外一律不许导航（远端页面会继承 preload 的宿主能力）。
+  guardNavigation(win.webContents, options.origin);
+
   win.once("ready-to-show", () => win.show());
   win.webContents.on("did-finish-load", () => void win.webContents.insertCSS(DRAG_CSS));
 
@@ -87,6 +96,20 @@ export async function createMainWindow(options: MainWindowOptions): Promise<Brow
   win.on("blur", () => {
     if (!win.isDestroyed()) win.webContents.send(IPC.window.focus, false);
   });
+
+  // 渲染进程崩溃：先重载一次（多数是瞬时故障）；同一窗口再崩就销毁，避免无限重载循环。
+  let reloadedAfterCrash = false;
+  win.webContents.on("render-process-gone", (_event, details) => {
+    if (details.reason === "clean-exit" || win.isDestroyed()) return;
+    console.error(`[window] 渲染进程退出（${details.reason}）`);
+    if (reloadedAfterCrash) {
+      win.destroy();
+      return;
+    }
+    reloadedAfterCrash = true;
+    win.reload();
+  });
+  win.on("unresponsive", () => console.warn("[window] 渲染进程无响应"));
 
   // 关闭守卫：守卫已放行 → 真关；有未保存改动 → 拦下交渲染端决定（带 2s 兜底）；
   // 有托盘且开了「关闭到托盘」→ 隐藏；再否则放行。

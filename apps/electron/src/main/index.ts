@@ -10,8 +10,11 @@ import { app, type BrowserWindow } from "electron";
 import { isDevServerEnabled, sidecarOrigin } from "../shared/dev-server-spec";
 import { loadOrCreateCredentials } from "./auth";
 import { destroyBrowserView } from "./browser-view";
+import * as guard from "./close-guard";
 import { startDevServer, stopDevServer } from "./dev-server";
 import { registerIpc } from "./ipc";
+import { installFileLogging } from "./logger";
+import { installApplicationMenu } from "./menu";
 import { serverBinaryPath } from "./paths";
 import { startServer, stopServer } from "./sidecar";
 import { createTray, type TrayHost } from "./tray";
@@ -31,10 +34,9 @@ let quitting = false;
 /** 托盘 / 关窗守卫共用的宿主面：窗口是懒取（托盘可能先于窗口建成）。 */
 const trayHost: TrayHost = {
   window: () => mainWindow,
-  quit: () => {
-    quitting = true;
-    app.quit();
-  },
+  // 只调 app.quit()：让 before-quit 的退出守卫先跑。真正的退出标记在那里置位，
+  // 有未保存改动时渲染端会收到 exitRequested 并决定收口。
+  quit: () => app.quit(),
 };
 
 /**
@@ -57,6 +59,9 @@ async function openMainWindow(): Promise<void> {
   });
 }
 
+// Windows 通知 / 任务栏分组要靠 AppUserModelID；值必须与 electron-builder 的 appId 一致。
+if (process.platform === "win32") app.setAppUserModelId("com.greywork.desktop");
+
 app.on("window-all-closed", () => {
   // macOS 惯例：关掉所有窗不退出应用（Dock 仍在）。其余平台关窗即退。
   if (process.platform !== "darwin") app.quit();
@@ -71,8 +76,25 @@ app.on("activate", () => {
   });
 });
 
-app.on("before-quit", () => {
+app.on("before-quit", (event) => {
+  if (quitting) return;
+  const win = mainWindow;
+  // 有未保存改动时拦下退出，交给渲染端走保存 / 确认流程；确认后 confirmExit() 会
+  // 先 release() 再 app.quit()，这次 before-quit 就能通过。
+  if (win && !win.isDestroyed() && guard.shouldInterceptExit(true)) {
+    event.preventDefault();
+    // 关闭到托盘后窗口是隐藏的：确认弹层要能被看见。
+    win.show();
+    win.focus();
+    guard.handExitToRenderer(win);
+    return;
+  }
   quitting = true;
+});
+
+// sidecar / Vite 必须等窗口真正收完再停：退出守卫可能把 before-quit 拦下来（用户取消），
+// 那时后端还得活着；will-quit 不会被取消，是唯一安全的收尾点。
+app.on("will-quit", () => {
   stopServer();
   stopDevServer();
 });
@@ -82,7 +104,15 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on("second-instance", () => {
-    if (!mainWindow) return;
+    // 窗口被关掉但进程还活着（macOS）：重复启动应该把窗口建回来，而不是什么都不做。
+    if (!mainWindow) {
+      if (sidecarPort) {
+        void openMainWindow().catch((error: unknown) => {
+          console.error("[electron] 二次启动重开主窗失败：", error);
+        });
+      }
+      return;
+    }
     if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.show();
     mainWindow.focus();
@@ -91,6 +121,10 @@ if (!app.requestSingleInstanceLock()) {
   app
     .whenReady()
     .then(async () => {
+      // 先装日志：后面的 sidecar / 登录 / 窗口失败才有落盘现场。
+      installFileLogging();
+      installApplicationMenu({ dev: !app.isPackaged });
+
       const credentials = loadOrCreateCredentials(serverBinaryPath());
       const sidecar = await startServer(credentials.hash);
       sidecarPort = sidecar.port;

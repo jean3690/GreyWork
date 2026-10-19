@@ -94,11 +94,14 @@ async function pickPort(preferred: number): Promise<number> {
   throw new Error(`从 ${preferred} 起连续 ${PORT_ATTEMPTS} 个端口都被占用，无法起 sidecar`);
 }
 
-/** 轮询 `/api/health` 直到 200 或超时。 */
-async function waitHealth(port: number, timeoutMs = 20_000): Promise<void> {
+/** 轮询 `/api/health` 直到 200 或超时；子进程提前退出立刻失败，不白等满超时。 */
+async function waitHealth(port: number, child: ChildProcess, timeoutMs = 20_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   const url = `http://127.0.0.1:${port}/api/health`;
   for (;;) {
+    if (child.exitCode !== null) {
+      throw new Error(`greywork-server 启动后立即退出（code=${child.exitCode}）`);
+    }
     try {
       const response = await fetch(url);
       if (response.ok) return;
@@ -178,7 +181,20 @@ export async function startServer(passwordHash: string): Promise<Sidecar> {
     running = null;
     console.error(`[sidecar] greywork-server 退出，code=${code}`);
   });
-  await waitHealth(port);
+  try {
+    // spawn 失败（二进制缺失 / 无执行权限）走 'error' 事件，不会体现在 exitCode 上 ——
+    // 不 race 的话要白等满 20s 健康检查超时。
+    await Promise.race([
+      waitHealth(port, child),
+      new Promise<never>((_resolve, reject) => {
+        child.once("error", (error) => reject(new Error(`无法启动 greywork-server：${error.message}`)));
+      }),
+    ]);
+  } catch (error) {
+    child.kill();
+    if (running === child) running = null;
+    throw error;
+  }
   console.log(`[sidecar] greywork-server 就绪：http://127.0.0.1:${port}/`);
   return { port, process: child };
 }

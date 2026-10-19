@@ -15,6 +15,7 @@ import { BrowserWindow } from "electron";
 
 import { WINDOW_LABEL_ARG } from "../shared/channels";
 import { canOpenPluginWindow, clampWindowSize } from "../shared/plugin-eligibility";
+import { guardNavigation } from "./navigation";
 import { pluginsRoot, preloadPath } from "./paths";
 
 /** 窗口 label 前缀（渲染端 `PluginWindowView` 按它反查插件）。 */
@@ -88,6 +89,7 @@ export function openPluginWindow(pluginId: string, origin: string): void {
   });
   windows.set(label, win);
   win.on("closed", () => windows.delete(label));
+  guardNavigation(win.webContents, origin);
   void win.loadURL(`${origin}/#/plugin-window`).catch(() => undefined);
 }
 

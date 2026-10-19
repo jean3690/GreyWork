@@ -96,6 +96,8 @@ export async function sessionToken(port: number, password: string): Promise<stri
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ password }),
+      // 健康检查已通过，登录不该无限等：后端卡住时让窗口尽快回落登录门。
+      signal: AbortSignal.timeout(5000),
     });
     if (!response.ok) return null;
     const data: unknown = await response.json();

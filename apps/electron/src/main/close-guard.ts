@@ -27,6 +27,30 @@ export function shouldInterceptClose(): boolean {
   return unsaved && !released;
 }
 
+/**
+ * 退出路径（Cmd+Q / 托盘「退出」/ 系统注销）该不该拦。
+ *
+ * 有未保存改动、守卫尚未放行、且窗口还在 —— 三条缺一不可。窗口已销毁时弹不出确认层，
+ * 再拦只会把应用卡在「退不掉又没法问」的死局里。
+ */
+export function exitShouldBlock(unsavedFlag: boolean, releasedFlag: boolean, hasWindow: boolean): boolean {
+  return unsavedFlag && !releasedFlag && hasWindow;
+}
+
+/** 当前退出路径是否该拦（读模块状态，供 `before-quit` 使用）。 */
+export function shouldInterceptExit(hasWindow: boolean): boolean {
+  return exitShouldBlock(unsaved, released, hasWindow);
+}
+
+/**
+ * 把退出决定权交给渲染端（`onExitRequested` → 保存 / 确认 → `confirmExit`）。
+ *
+ * 与点 X 不同，这条路径没有兜底超时：渲染端可能正在展示保存确认，强制超时会丢数据。
+ */
+export function handExitToRenderer(win: BrowserWindow): void {
+  win.webContents.send(IPC.closeGuard.exitRequested);
+}
+
 export function isReleased(): boolean {
   return released;
 }

@@ -97,7 +97,11 @@ function toggleWindow(host: TrayHost): void {
 export function hideToTray(host: TrayHost): void {
   currentWindow(host)?.hide();
   if (!hiddenHintShown && labels.hiddenHint) {
-    sendSystemNotification("GreyWork", labels.hiddenHint);
+    sendSystemNotification("GreyWork", labels.hiddenHint, () => {
+      const win = currentWindow(host);
+      win?.show();
+      win?.focus();
+    });
     hiddenHintShown = true;
   }
 }

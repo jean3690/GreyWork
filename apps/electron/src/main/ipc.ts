@@ -2,11 +2,16 @@
  * 主进程 IPC 注册：把 preload 暴露的白名单通道接到具体实现上。
  *
  * 通道名一律取自 `shared/channels.ts`（单一真源），与 `preload/index.ts` 逐条对应。
+ *
+ * **来源校验**：所有通道都只接受与 `rendererOrigin` 同源的调用。preload 桥只注入自家
+ * SPA，但导航被绕过 / 未来加了远端内容时，这一层是最后一道闸 —— 远端页面不该能调
+ * `openPath`、剪贴板或托盘。
  */
 import { app, clipboard, ipcMain } from "electron";
-import type { BrowserWindow } from "electron";
+import type { BrowserWindow, IpcMainInvokeEvent } from "electron";
 
 import { IPC } from "../shared/channels";
+import { isSameOrigin } from "../shared/navigation";
 import * as browserView from "./browser-view";
 import * as guard from "./close-guard";
 import { notifyPlugin, sendSystemNotification } from "./notify";
@@ -34,23 +39,49 @@ function trayHost(host: IpcHost): TrayHost {
   return { window: host.window, quit: host.quit };
 }
 
+/** 通知被点击时把主窗叫回来（可能已隐藏到托盘 / 最小化）。 */
+function focusMainWindow(host: IpcHost): void {
+  const win = host.window();
+  if (!win || win.isDestroyed()) return;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+}
+
+/** 调用方是否来自渲染端 origin（主窗 / 插件悬浮窗 / dev server 同源）。 */
+function isTrustedSender(event: IpcMainInvokeEvent, origin: string): boolean {
+  const url = event.senderFrame?.url;
+  return typeof url === "string" && isSameOrigin(url, origin);
+}
+
 export function registerIpc(host: IpcHost): void {
+  /** 统一包一层来源校验；不可信调用直接拒绝（渲染端拿到 rejected promise）。 */
+  const on = (channel: string, handler: (...args: unknown[]) => unknown): void => {
+    ipcMain.handle(channel, (event, ...args: unknown[]) => {
+      if (!isTrustedSender(event, host.rendererOrigin())) {
+        console.warn(`[ipc] 拒绝不可信来源的调用：${channel}（${event.senderFrame?.url ?? "unknown"}）`);
+        throw new Error("IPC call from an untrusted origin");
+      }
+      return handler(...args);
+    });
+  };
+
   /* ===== 窗口控制 ===== */
-  ipcMain.handle(IPC.window.minimize, () => host.window()?.minimize());
-  ipcMain.handle(IPC.window.toggleMaximize, () => {
+  on(IPC.window.minimize, () => host.window()?.minimize());
+  on(IPC.window.toggleMaximize, () => {
     const win = host.window();
     if (!win) return;
     if (win.isMaximized()) win.unmaximize();
     else win.maximize();
   });
-  ipcMain.handle(IPC.window.close, () => host.window()?.close());
-  ipcMain.handle(IPC.window.isMaximized, () => host.window()?.isMaximized() ?? false);
+  on(IPC.window.close, () => host.window()?.close());
+  on(IPC.window.isMaximized, () => host.window()?.isMaximized() ?? false);
 
   /* ===== 关闭—退出守卫 ===== */
-  ipcMain.handle(IPC.closeGuard.syncUnsaved, (_event, unsaved: unknown) => {
+  on(IPC.closeGuard.syncUnsaved, (unsaved) => {
     guard.setUnsaved(unsaved === true);
   });
-  ipcMain.handle(IPC.closeGuard.requestClose, () => {
+  on(IPC.closeGuard.requestClose, () => {
     // 渲染端已放行：有托盘且开了「关闭到托盘」则隐藏，否则清守卫后正常关窗
     // （关窗回调里 guard.isReleased() 为真，不再拦）。
     guard.release();
@@ -62,79 +93,79 @@ export function registerIpc(host: IpcHost): void {
     }
     win.close();
   });
-  ipcMain.handle(IPC.closeGuard.confirmExit, () => {
+  on(IPC.closeGuard.confirmExit, () => {
     guard.release();
     host.quit();
   });
 
   /* ===== 剪贴板：走主进程 electron.clipboard（Chromium 下可靠，不触发 Web 权限提示）===== */
-  ipcMain.handle(IPC.clipboard.writeText, (_event, text: unknown) => clipboard.writeText(asString(text)));
-  ipcMain.handle(IPC.clipboard.readText, () => clipboard.readText());
-  ipcMain.handle(IPC.clipboard.readImagePng, () => {
+  on(IPC.clipboard.writeText, (text) => clipboard.writeText(asString(text)));
+  on(IPC.clipboard.readText, () => clipboard.readText());
+  on(IPC.clipboard.readImagePng, () => {
     const image = clipboard.readImage();
     return image.isEmpty() ? null : image.toPNG();
   });
 
   /* ===== 应用信息 / 外部打开 ===== */
-  ipcMain.handle(IPC.app.version, () => app.getVersion());
-  ipcMain.handle(IPC.app.homeDir, () => app.getPath("home"));
-  ipcMain.handle(IPC.app.openExternal, (_event, url: unknown) => (typeof url === "string" ? openExternal(url) : undefined));
-  ipcMain.handle(IPC.app.revealPath, (_event, target: unknown) => {
+  on(IPC.app.version, () => app.getVersion());
+  on(IPC.app.homeDir, () => app.getPath("home"));
+  on(IPC.app.openExternal, (url) => (typeof url === "string" ? openExternal(url) : undefined));
+  on(IPC.app.revealPath, (target) => {
     if (typeof target === "string") revealPath(target);
   });
-  ipcMain.handle(IPC.app.openPath, (_event, target: unknown) => (typeof target === "string" ? openPath(target) : undefined));
+  on(IPC.app.openPath, (target) => (typeof target === "string" ? openPath(target) : undefined));
 
   /* ===== 系统托盘（本体在 tray.ts）===== */
-  ipcMain.handle(IPC.tray.available, () => isTrayAvailable());
-  ipcMain.handle(IPC.tray.setCloseToTray, (_event, enabled: unknown) => setCloseToTray(enabled === true));
-  ipcMain.handle(IPC.tray.setLabels, (_event, labels: unknown) => applyTrayLabels(trayHost(host), labels));
+  on(IPC.tray.available, () => isTrayAvailable());
+  on(IPC.tray.setCloseToTray, (enabled) => setCloseToTray(enabled === true));
+  on(IPC.tray.setLabels, (labels) => applyTrayLabels(trayHost(host), labels));
 
   /* ===== 内嵌浏览器子视图（WebContentsView，本体在 browser-view.ts）===== */
-  ipcMain.handle(IPC.browser.open, (_event, url: unknown, rect: unknown) => {
+  on(IPC.browser.open, (url, rect) => {
     const win = host.window();
     if (win && typeof url === "string") browserView.openBrowser(win, url, rect);
   });
-  ipcMain.handle(IPC.browser.setBounds, (_event, rect: unknown) => browserView.setBrowserBounds(rect));
-  ipcMain.handle(IPC.browser.setVisible, (_event, visible: unknown) => browserView.setBrowserVisible(visible === true));
-  ipcMain.handle(IPC.browser.navigate, (_event, url: unknown) => {
+  on(IPC.browser.setBounds, (rect) => browserView.setBrowserBounds(rect));
+  on(IPC.browser.setVisible, (visible) => browserView.setBrowserVisible(visible === true));
+  on(IPC.browser.navigate, (url) => {
     if (typeof url === "string") browserView.navigateBrowser(url);
   });
-  ipcMain.handle(IPC.browser.back, () => browserView.browserGoBack());
-  ipcMain.handle(IPC.browser.forward, () => browserView.browserGoForward());
-  ipcMain.handle(IPC.browser.reload, () => browserView.browserReload());
-  ipcMain.handle(IPC.browser.stop, () => browserView.browserStop());
-  ipcMain.handle(IPC.browser.close, () => browserView.destroyBrowserView(host.window()));
+  on(IPC.browser.back, () => browserView.browserGoBack());
+  on(IPC.browser.forward, () => browserView.browserGoForward());
+  on(IPC.browser.reload, () => browserView.browserReload());
+  on(IPC.browser.stop, () => browserView.browserStop());
+  on(IPC.browser.close, () => browserView.destroyBrowserView(host.window()));
 
   /* ===== 插件宿主面：系统通知 + 悬浮窗（本体在 notify.ts / plugin-window.ts）===== */
-  ipcMain.handle(IPC.plugins.notify, (_event, request: unknown) => {
+  on(IPC.plugins.notify, (request) => {
     if (!request || typeof request !== "object") throw new Error("notify request must be an object");
     const { pluginId, title, body } = request as Record<string, unknown>;
     if (typeof pluginId !== "string" || typeof title !== "string" || typeof body !== "string") {
       throw new Error("notify requires string pluginId / title / body");
     }
-    return notifyPlugin({ pluginId, title, body });
+    return notifyPlugin({ pluginId, title, body }, () => focusMainWindow(host));
   });
-  ipcMain.handle(IPC.plugins.openWindow, (_event, pluginId: unknown) => {
+  on(IPC.plugins.openWindow, (pluginId) => {
     if (typeof pluginId === "string") openPluginWindow(pluginId, host.rendererOrigin());
   });
-  ipcMain.handle(IPC.plugins.closeWindow, (_event, pluginId: unknown) => {
+  on(IPC.plugins.closeWindow, (pluginId) => {
     if (typeof pluginId === "string") closePluginWindow(pluginId);
   });
 
   /* ===== 通用系统通知（不带归属前缀；服务端的 `host://notify` 事件落到这里）===== */
-  ipcMain.handle(IPC.notify.system, (_event, title: unknown, body: unknown) => {
+  on(IPC.notify.system, (title, body) => {
     if (typeof title !== "string" || typeof body !== "string") return;
-    sendSystemNotification(title, body);
+    sendSystemNotification(title, body, () => focusMainWindow(host));
   });
 
   /* ===== 原生文件 / 目录选择器（本体在 picker.ts）=====
    * 只负责弹窗取路径；把路径写进授权账本由渲染端调 `fs_authorize_picked_paths` 完成
    * （账本归 sidecar 所有，主进程够不着）。见 picker.ts 的说明。 */
-  ipcMain.handle(IPC.picker.openFiles, (_event, options: unknown) => {
+  on(IPC.picker.openFiles, (options) => {
     if (!options || typeof options !== "object") throw new Error("openFiles requires options");
     const { purpose, multiple } = options as Record<string, unknown>;
     if (typeof purpose !== "string") throw new Error("openFiles requires a string purpose");
     return openFiles({ purpose, multiple: multiple === true }, host.window());
   });
-  ipcMain.handle(IPC.picker.openDirectory, () => openDirectory(host.window()));
+  on(IPC.picker.openDirectory, () => openDirectory(host.window()));
 }

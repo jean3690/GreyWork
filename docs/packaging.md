@@ -120,6 +120,13 @@ actual installers are produced in `release.yml` and attached to the draft Releas
 `apps/electron` in step — electron-builder reads the shell's own `package.json`, so drift shows
 up as an installer whose version does not match the release tag.
 
+Runtime logs: the shell mirrors main-process `console.*` output to `<userData>/logs/main.log`
+(rotated to `main.log.1` at 5 MiB), including sidecar spawn/exit, auto-login failures and renderer
+crashes. Packaged builds have no terminal, so this file is the first thing to ask for in a bug
+report. `userData` is Electron's per-app data directory (`~/.config/<app>` on Linux,
+`%APPDATA%\<app>` on Windows, `~/Library/Application Support/<app>` on macOS); in development the
+app name comes from the package name, in packaged builds from `productName` (`GreyWork`).
+
 ## Windows development prerequisites
 
 - Rust with the **MSVC** toolchain (`stable-x86_64-pc-windows-msvc`), Node 20+ and

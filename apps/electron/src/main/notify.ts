@@ -13,22 +13,24 @@ import { Notification } from "electron";
 
 import { composePluginNotify, type PluginNotifyRequest } from "../shared/notify-compose";
 
-/** 发一条系统通知；不支持 / 失败只记日志。 */
-export function sendSystemNotification(title: string, body: string): void {
+/** 发一条系统通知；不支持 / 失败只记日志。`onClick` 用于把用户带回应用。 */
+export function sendSystemNotification(title: string, body: string, onClick?: () => void): void {
   try {
     if (!Notification.isSupported()) {
       console.warn("[notify] 当前环境不支持系统通知，已丢弃：", title);
       return;
     }
-    new Notification({ title, body }).show();
+    const notification = new Notification({ title, body });
+    if (onClick) notification.on("click", onClick);
+    notification.show();
   } catch (error) {
     console.warn("[notify] 发送失败（已忽略）：", error);
   }
 }
 
 /** 插件通知：组装归属前缀后直接发（文案组装见 shared/notify-compose.ts）。 */
-export function notifyPlugin(request: PluginNotifyRequest): { title: string; body: string } {
+export function notifyPlugin(request: PluginNotifyRequest, onClick?: () => void): { title: string; body: string } {
   const composed = composePluginNotify(request);
-  sendSystemNotification(composed.title, composed.body);
+  sendSystemNotification(composed.title, composed.body, onClick);
   return composed;
 }
