@@ -7,13 +7,11 @@
  * Markdown 渲染。与桌面端的 smoke.e2e.mjs 是同一条链，但**不依赖任何原生壳** ——
  * 这正是「Web 端是同一个后端的另一个前端」最小可证的形态。
  *
- * ⚠️ 已知缺口：本文件写得比桌面端更保守。它**没有**断言 WEB_FRONT 的特性子集生效
- *（「有自动化任务入口、没有团队入口」），因为侧栏是否渲染取决于当前布局档位，
- * 而写这份文件时本机的 Playwright 浏览器缓存与 playwright-core 版本不匹配、跑不起来，
- * 无法实测。等缓存修好后补上那条断言（它才是「多前端」真正落地与否的证据）。
+ * ⚠️ 顺序有讲究：先等预览面板挂载（事件总线在 `PreviewSider` 的 setup 里订阅），
+ * 再 emit `preview:request` —— 事件总线不重放，早一步发就是「面板还没开始听」。
  *
  * 依赖 playwright-core（本包已有）+ 本机 Playwright 浏览器缓存（~/.cache/ms-playwright）；
- * 无缓存时先 `npx playwright-core install chromium`。
+ * 无缓存时先 `npx playwright-core install chromium-headless-shell`。
  */
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -64,6 +62,20 @@ try {
   await page.goto(BASE, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => Boolean(window.__gw), null, { timeout: 30_000 });
 
+  // 前端身份：Web 端必须拿到 WEB_FRONT 的子集，而不是缺省的全量前端。
+  // 这条断言才是「一个后端、多个前端」真正落地的证据 —— 侧栏入口/路由都由它派生。
+  const front = await page.evaluate(() => window.__gw.front());
+  if (front.id !== "web") throw new Error(`前端身份应为 web，实际是 ${front.id}`);
+  for (const id of ["guid", "conversation", "automation", "plugins"]) {
+    if (!front.features.includes(id)) throw new Error(`WEB_FRONT 缺少特性 ${id}：${front.features.join(",")}`);
+  }
+  for (const id of ["channels", "team", "assistants"]) {
+    if (front.features.includes(id)) throw new Error(`WEB_FRONT 不该包含特性 ${id}`);
+  }
+
+  // 先等预览面板挂载（事件订阅发生在它的 setup 里），再注入产物并触发预览。
+  await page.locator('[data-testid="preview-section-preview"]').waitFor({ timeout: 20_000 });
+
   // 工作区种子已有默认文件；写一个 e2e 专属文件，走 preview:request 联动预览面板。
   await page.evaluate(async () => {
     const gw = window.__gw;
@@ -72,7 +84,6 @@ try {
   });
 
   await page.getByText("Web 端体检通过").waitFor({ timeout: 20_000 });
-  await page.locator('[data-testid="preview-section-preview"]').waitFor({ timeout: 10_000 });
 
   const shellMounted = await page.evaluate(() => (document.querySelector("#app")?.childElementCount ?? 0) > 0);
   if (!shellMounted) throw new Error("Shell 未能挂载到 #app");

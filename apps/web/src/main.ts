@@ -97,13 +97,16 @@ async function bootstrap(): Promise<void> {
   // 同样**不 await** —— 它是信息性的，不该挡首帧。
   void loadHostSystem();
 
-  // Dev-only e2e 钩子：暴露内存 FS 与事件总线，便于 Playwright 注入产物并触发预览
+  // Dev-only e2e 钩子：暴露内存 FS、事件总线与当前前端契约，便于 Playwright 注入产物、
+  // 触发预览并断言「本端到底装了哪些特性」。
   //（生产构建中 import.meta.env.DEV 为 false，整段被 tree-shake 移除）。
   if (import.meta.env.DEV) {
     void import("@greywork/workbench").then((m) => {
       (window as unknown as Record<string, unknown>).__gw = {
         workspaceFs: m.workspaceFs,
         appEvents: m.appEvents,
+        // 前端身份是「多前端」唯一的可观测证据：特性集与外壳接线都由它派生。
+        front: () => ({ id: m.currentFront().id, features: m.currentFront().features.map((feature) => feature.id) }),
       };
     });
   }

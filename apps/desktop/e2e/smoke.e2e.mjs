@@ -4,10 +4,10 @@
  * 断言预览面板渲染出内容。
  *
  * 覆盖的链：bootstrap → 壳层挂载 → preview store → 事件桥 → VFS 读取 → Markdown 渲染。
- * Tauri 专属路径（getCurrentWebview 等）在浏览器态静默降级，是引擎盖保证的既定分支。
+ * 原生壳专属能力（窗口/托盘/通知等）在浏览器态静默降级，是引擎盖保证的既定分支。
  *
  * 依赖 playwright-core（desktop 已有）+ 本机 Playwright 浏览器缓存
- * （~/.cache/ms-playwright）；无缓存时先 `npx playwright-core install chromium`。
+ * （~/.cache/ms-playwright）；无缓存时先 `npx playwright-core install chromium-headless-shell`。
  */
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -57,6 +57,10 @@ try {
   await page.goto(BASE, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => Boolean(window.__gw), null, { timeout: 30_000 });
 
+  // 先等预览面板挂载（事件总线在 PreviewSider 的 setup 里订阅）再 emit：
+  // 事件总线不重放，早一步发就是「面板还没开始听」。
+  await page.locator('[data-testid="preview-section-preview"]').waitFor({ timeout: 20_000 });
+
   // 工作区种子已有默认文件；写一个 e2e 专属文件，走 preview:request 联动预览面板。
   await page.evaluate(async () => {
     const gw = window.__gw;
@@ -65,9 +69,8 @@ try {
   });
 
   await page.getByText("体检通过").waitFor({ timeout: 20_000 });
-  await page.locator('[data-testid="preview-section-preview"]').waitFor({ timeout: 10_000 });
 
-  const shellMounted = await page.evaluate(() => document.querySelector("#app")?.childElementCount ?? 0 > 0);
+  const shellMounted = await page.evaluate(() => (document.querySelector("#app")?.childElementCount ?? 0) > 0);
   if (!shellMounted) throw new Error("Shell 未能挂载到 #app");
 
   console.log("SMOKE_OK: renderer 启动 → __gw 注入 → preview:request → Markdown 渲染 全链路通");
