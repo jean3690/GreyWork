@@ -53,26 +53,31 @@ Each palette has `light` and `dark` variants.
 --gw-statusbar-h: 24px     /* Bottom status bar */
 ```
 
-### Minimal mode（极简模式）
+### Shell（恒定极简）
 
-A persisted shell toggle (`minimal` in `stores/layout.ts`, key `greywork.layout`) that swaps the
-**chrome**, not the panel layout: a slim sidebar (`features/shell/MinimalSider.vue`) replaces the
-full `Sider`; the titlebar drops its search / GitHub / update clusters (`Titlebar.vue`'s `minimal`
-branch keeps the drag region + window controls + a left-panel toggle + the workspace pill + a
-right-panel toggle + an exit). Both panel toggles use **panel glyphs** (`sidebar` / `sidebar-right`
-from `lib/icons.ts`), never arrows — the state is carried by the aria-label, matching the
-reference. The left toggle collapses the slim sidebar away entirely (on narrow viewports it starts
-collapsed and opens as an overlay drawer, like the full `Sider`); the right toggle drives the
-**retained** preview panel (`PreviewSider` still mounts — entering minimal collapses it, exiting
-restores the pre-minimal state, so the toggle is idempotent). The workspace
-panel and activity band are not rendered in minimal. The center stays the router view: on
-`/guid` **and** on `/conversation/:id` the composer is the streamlined
-`features/guid/MinimalComposer.vue` card (chips + textarea + action row), driven by each view's
-existing dispatch pipeline (the full composer is untouched and returns on exit).
+There is exactly one shell — no mode toggle, no full-shell alternative. The chrome is fixed:
 
-Minimal is deliberately **not** a fifth entry in `lib/layout-modes.ts`: that model's invariant is
-"mode = a function of the two panel visibilities", and a chrome swap cannot be expressed that way.
-It is an orthogonal boolean axis; `stores/layout`'s `mode` returns `null` while it is on.
+- **Sidebar** — `features/shell/MinimalSider.vue`: a slim sidebar with quick entries
+  (`lib/nav-items.ts`) and the session history. It deliberately omits the full `Sider`'s collapse
+  rail, brand toggle, `SiderRegions` (plugin sidebar groups) and `CoworkSiderSection` (cowork run
+  nesting). Collapse/expand lives in the titlebar's left toggle; on narrow viewports the sidebar
+  starts collapsed and opens as an overlay drawer.
+- **Titlebar** — `features/shell/Titlebar.vue`: one unconditional cluster on the left (sidebar
+  toggle / search / GitHub / update) and one panel cluster on the right (preview / workspace /
+  terminal), plus the workspace pill and the window controls. Panel toggles use **panel glyphs**
+  (`sidebar` / `sidebar-right` / `terminal` from `lib/icons.ts`), never arrows — the state is
+  carried by the aria-label. The sidebar toggle is gated by the front's `shell.panels.sider`
+  declaration; each panel toggle by its store's `available`.
+- **Composer** — on `/guid` **and** on `/conversation/:id` the composer is the streamlined
+  `features/guid/MinimalComposer.vue` card (workspace chips + textarea + action row, plus a
+  separate `AcpSessionConfig` block under it when routed to ACP), driven by each view's existing
+  dispatch pipeline.
+- **Panels** — preview / workspace / terminal are retained, each with its own titlebar toggle.
+  The activity band is not rendered: the plugin `activityPanel` regions have no host.
+
+The center stays the router view. All four panel shortcuts (`Ctrl/Cmd+B` / `E` / `\` / `` ` ``)
+work unconditionally; the layout-mode shortcuts (`Ctrl/Cmd+1..4`) still drive the two panel
+visibilities through `lib/layout-modes.ts`.
 
 ## Typography
 

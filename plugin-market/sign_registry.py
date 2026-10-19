@@ -5,7 +5,7 @@
     python3 sign_registry.py            # 用 .signing-key.pem 签名 registry.json（就地写入 signature）
     python3 sign_registry.py --verify   # 用宿主硬编码公钥验签当前 registry.json
 
-约定（必须与 apps/desktop/src-tauri/src/plugin_market.rs 的 verify 端逐字节一致）：
+约定（必须与 crates/greywork-host/src/services/plugin_market/registry.rs 的 verify 端逐字节一致）：
     消息 = registry 去掉 signature 字段后的 serde_json::to_vec 输出。
     serde 序列化结构体按字段声明序：schemaVersion, plugins[{id, name, version,
     description, author, downloadUrl, sha256}]，Option::None 字段跳过

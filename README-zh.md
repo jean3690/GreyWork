@@ -50,7 +50,7 @@ GreyWork 把外部编码智能体（走 **Agent Client Protocol**）与本机 Op
 
 **平台**
 
-- Tauri 2 桌面外壳（Linux / macOS / Windows）+ Rust 宿主 + Vue 3 渲染层。
+- Electron 桌面外壳（Linux / macOS / Windows）+ headless Rust 服务端 + Vue 3 渲染层。
 - 中英双语界面（zh-CN / en-US）；界面跑在浏览器里时，宿主能力自动降级为只读提示。
 
 ## 技术栈
@@ -154,7 +154,7 @@ GreyWork 把渲染层当作对原生宿主不可信：
 - 工作区根目录授权限定文件、Git 与进程执行范围。
 - 自由进程执行走沙箱与守卫。
 - 通道与模型供应商凭证以 `0600` 存放在应用数据目录，且不进设置快照。
-- Tauri 窗口配置了严格 CSP。
+- 应用窗口配置了严格 CSP。
 
 ## 贡献
 

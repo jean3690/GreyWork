@@ -16,7 +16,7 @@
 //   2. `sha256sum packages/demo.schedule.js`，把 runtime.entry 钉到推送后的提交 SHA，
 //      并把 hash 填进 runtime.sha256（entry 必须 pin commit，不能是分支）；
 //   3. registry.json 增加条目 → `python3 sign_registry.py --verify`
-//      → `cd apps/desktop/src-tauri && cargo test plugin_market`。
+//      → `cargo test -p greywork-host plugin_market`。
 
 /** 后台定时处理器：宿主到点唤醒，巡检次数 +1（与手动动作共用区域状态）。 */
 greywork.registerSchedule(async (state) => {

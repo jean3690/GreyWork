@@ -36,7 +36,7 @@
 3. **默认拒绝、最小特权、可审计**：每个新能力都要定 danger 级、授权形态（字符串 or 带参数的
    对象）、调用时校权，审计进入现有 `capabilityAuditLog`。
 4. **服务端（headless）同步受益**：能力实现尽量落在 `greywork_host`（桌面/server 共享），
-   Tauri 侧只留薄壳。
+   宿主壳只留薄壳。
 
 ---
 
@@ -72,7 +72,7 @@
 | `workspace.read`    | 插件读授权工作区内的文件（只读，隔离每个 root）            | 复用 `WorkspaceFsAccess` 的授权根解析，**不新建第二张白名单**；调用返回 sanitized 内容预览；高危：中-高 | `infra/workspace_fs/`（`resolve_existing` 即天然防线） |
 | `llm.chat`          | 插件做「智能动作」（摘要、分类、翻译）                     | 一次模型回合，凭证永远在宿主侧；插件只能传 prompt/模型参数模板，不能抄走 key；限流与 agent 共用额度     | `services/llm/`、`llm_chat_start`                      |
 | `mcp.connect`       | 插件声明要连某个 MCP server，复用现有 MCP 市场与客户端     | 插件 manifest 里声明 server 配置，宿主代理连接与调用（插件不直接持凭证）；危险级按暴露的工具面定        | `services/mcp*.rs`、`McpMarketSection.vue`             |
-| `clipboard`         | 插件读/写系统剪贴板                                        | 复用 `@tauri-apps/plugin-clipboard-manager`（桌面）；读剪贴板默认拒绝、写入默认允许但可配置             | `packaging.md` 的「No Runtime Web Clipboard」设计约束  |
+| `clipboard`         | 插件读/写系统剪贴板                                        | 复用宿主剪贴板桥（桌面壳主进程 / 浏览器降级）；读剪贴板默认拒绝、写入默认允许但可配置             | `packaging.md` 的「No Runtime Web Clipboard」设计约束  |
 | `artifacts.publish` | 插件把产物（文本/JSON/小文件）送进会话产物面板，用户可预览 | 写入宿主产物目录，复用预览 viewer 分发（`lib/viewer.ts`）                                               | `activity.artifacts`、`ViewerKind` 表                  |
 | 多窗口/窗口控制 v2  | 悬浮窗只有开/关                                            | `window.floating` 扩展：标题、置顶切换、透明度、位置持久化、多实例；句柄仍不交插件                      | `plugin_window.rs`                                     |
 
@@ -125,7 +125,7 @@
 | `workspace.read`     | high     | root 白名单                            | `workspace_fs` 复用                           | P1                |
 | `llm.chat`           | high     | 模型模板白名单                         | `services/llm`                                | P1                |
 | `mcp.connect`        | high     | server 配置声明                        | `services/mcp*`                               | P1                |
-| `clipboard`          | medium   | 读默认拒/写默认许                      | tauri 插件                                    | P1                |
+| `clipboard`          | medium   | 读默认拒/写默认许                      | 宿主剪贴板桥（Electron 主进程）               | P1                |
 | `artifacts.publish`  | medium   | 字符串                                 | 产物目录 + viewer                             | P1                |
 | `run.command`        | **不做** | —                                      | 至多经 `process_guard` 白名单给**用户自签**包 | 长期              |
 | `wasm` 运行时        | —        | —                                      | 宿主嵌入式解释器                              | P3                |

@@ -166,7 +166,7 @@ GreyWork treats the renderer as untrusted with respect to the native host:
 - Free-form process execution is guarded and sandboxed.
 - Channel and provider credentials are stored with `0600` permissions in the app data directory and
   are excluded from settings snapshots.
-- A strict CSP is configured for the Tauri window.
+- A strict CSP is configured for the app window.
 
 ## Contributing
 

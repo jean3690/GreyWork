@@ -87,9 +87,9 @@ rendered as a mail list instead of a transcript.
 - **Why it was separate:** this executes a script shipped inside the repository, so it
   needed its own security review and could not ride along with A1a. The three concerns
   called out when it was scoped are all addressed:
-  - **Tier gating (fail-closed).** `prepare` defaults **false** everywhere: the Tauri
-    command takes `prepare: Option<bool>` and the host `ProvisionArgs` marks it
-    `#[serde(default)]`. The renderer (`lib/workspace-dir.ts`) only opts in when
+  - **Tier gating (fail-closed).** `prepare` defaults **false** everywhere: the host
+    `ProvisionArgs` marks `prepare` `#[serde(default)]`. The renderer
+    (`lib/workspace-dir.ts`) only opts in when
     `permissionTier !== "read-only"`, and — the load-bearing part — the server clamps it
     regardless of what the renderer sends: `overlay_args` in `apps/server/src/policy.rs`
     forces `prepare = false` when `tier == "read-only"`, exactly like `acp_start`'s
@@ -102,9 +102,9 @@ rendered as a mail list instead of a transcript.
 - **Failure is warn-only.** A non-zero exit, timeout, or spawn error logs a warning and
   the checkout is still provisioned — matching A1a's "a bad manifest never fails
   provisioning" posture.
-- **Touch points:** `crates/greywork-host/src/infra/worktree.rs` (+ tests),
-  `crates/greywork-host/src/infra/git.rs` (`run_capture` → `pub(crate)`),
-  `crates/greywork-host/src/app/commands/git.rs`, `apps/desktop/src-tauri/src/worktree.rs`,
+- **Touch points:** `crates/greywork-host/src/infra/worktree/` (+ tests),
+  `crates/greywork-host/src/infra/git/` (`run_capture` → `pub(crate)`),
+  `crates/greywork-host/src/app/commands/git.rs`,
   `apps/server/src/policy.rs` (+ test), `packages/workbench/src/lib/workspace-dir.ts`.
 - **Cost:** medium (done).
 

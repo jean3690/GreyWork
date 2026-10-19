@@ -12,7 +12,7 @@
 //   2. `sha256sum packages/demo.fetch.json`，把 runtime.entry 钉到推送后的提交 SHA，
 //      并把 hash 填进 runtime.sha256（entry 必须 pin commit，不能是分支）；
 //   3. registry.json 增加条目 → `python3 sign_registry.py --verify`
-//      → `cd apps/desktop/src-tauri && cargo test plugin_market`。
+//      → `cargo test -p greywork-host plugin_market`。
 
 function readMessage(state) {
   return typeof state.message === "string" && state.message.trim() !== "" ? state.message.trim() : "hello greywork";

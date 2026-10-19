@@ -50,7 +50,7 @@ A package file is a `PluginPackage`:
 }
 ```
 
-Validation lives in `apps/desktop/src-tauri/src/plugin_market.rs` (`validate_package`); a package that
+Validation lives in `crates/greywork-host/src/services/plugin_market/package.rs` (`validate_package`); a package that
 fails it is rejected before it touches disk. Key bounds: `entry` must be an allowed GitHub HTTPS host,
 `sha256` lowercase hex, render `fps` 1-60, canvas 1-512 px, `uiRegions` titles 1-80 chars, region
 action labels ≤20 chars, mode titles ≤120, headings ≤160, eyebrow ≤120, body ≤16 KiB.
