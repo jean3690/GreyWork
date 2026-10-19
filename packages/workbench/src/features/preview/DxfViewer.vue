@@ -16,6 +16,7 @@ import Icon from "@/features/shared/Icon.vue";
 import PreviewExternalButton from "@/features/preview/PreviewExternalButton.vue";
 import { usePreviewText } from "@/lib/preview-content";
 import { parseDxf, type DxfDrawing } from "@/lib/dxf";
+import { isHorizontalWheel, wheelDeltaX, wheelZoomFactor } from "@/lib/zoom";
 import { i18n } from "@/i18n";
 import type { PreviewTab } from "@/stores/preview";
 
@@ -44,6 +45,9 @@ const zoomPercent = computed(() => {
   const ratio = fitScale.value > 0 ? scale.value / fitScale.value : 1;
   return `${Math.round(ratio * 100)}%`;
 });
+
+/** 按钮每一档的倍率：与滚轮一格（100px ≈ 1.22×）接近，切换输入方式时不跳档。 */
+const ZOOM_STEP = 1.25;
 
 const stats = computed(() => {
   const d = drawing.value;
@@ -193,16 +197,24 @@ function onWheel(event: WheelEvent): void {
   event.preventDefault();
   const host = stage.value;
   if (!host) return;
+  // 触控板横扫是「挪图」不是「缩放」：照 delta 平移，和地图手势一致。
+  if (isHorizontalWheel(event)) {
+    offset.value = { x: offset.value.x - wheelDeltaX(event), y: offset.value.y };
+    userAdjusted = true;
+    scheduleDraw();
+    return;
+  }
   const rect = host.getBoundingClientRect();
-  // deltaY 每格约 100：0.0015 的指数让一格 ≈ 16% 缩放，触控板也不会过冲。
-  const factor = Math.exp(-event.deltaY * 0.0015);
+  const factor = wheelZoomFactor(event);
+  if (factor === 1) return;
   zoomAt(scale.value * factor, event.clientX - rect.left, event.clientY - rect.top);
 }
 
 let dragStart: { pointerId: number; x: number; y: number; offsetX: number; offsetY: number } | null = null;
 
 function onPointerDown(event: PointerEvent): void {
-  if (event.button !== 0 || !drawing.value) return;
+  // 左键与中键都拖图：中键是 CAD / 地图类工具的惯例，按住就能挪，不弹自动滚动。
+  if ((event.button !== 0 && event.button !== 1) || !drawing.value) return;
   event.preventDefault();
   dragStart = {
     pointerId: event.pointerId,
@@ -294,12 +306,18 @@ const toolButtonClass =
         data-testid="dxf-zoom-out"
         :class="toolButtonClass"
         :aria-label="t('preview.dxf.zoomOut')"
-        @click="zoomBy(1 / 1.25)"
+        @click="zoomBy(1 / ZOOM_STEP)"
       >
         <Icon name="minus" :size="12" />
       </button>
       <span class="w-10 shrink-0 text-center tabular-nums" data-testid="dxf-zoom-level">{{ zoomPercent }}</span>
-      <button type="button" data-testid="dxf-zoom-in" :class="toolButtonClass" :aria-label="t('preview.dxf.zoomIn')" @click="zoomBy(1.25)">
+      <button
+        type="button"
+        data-testid="dxf-zoom-in"
+        :class="toolButtonClass"
+        :aria-label="t('preview.dxf.zoomIn')"
+        @click="zoomBy(ZOOM_STEP)"
+      >
         <Icon name="plus" :size="12" />
       </button>
       <button type="button" data-testid="dxf-fit" :class="toolButtonClass" :aria-label="t('preview.dxf.fit')" @click="fit()">
@@ -321,6 +339,7 @@ const toolButtonClass =
         @pointermove="onPointerMove"
         @pointerup="onPointerUp"
         @pointercancel="onPointerUp"
+        @dblclick="fit()"
       >
         <canvas ref="canvas" data-testid="dxf-canvas" class="block size-full" />
       </div>
