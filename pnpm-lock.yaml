@@ -58,6 +58,9 @@ importers:
         specifier: ^3.5.43
         version: 3.5.43(typescript@5.6.2)
     devDependencies:
+      '@greywork/vite-config':
+        specifier: workspace:*
+        version: link:../../packages/vite-config
       '@tailwindcss/vite':
         specifier: ^4.0.0
         version: 4.3.3(vite@8.3.1(@types/node@22.20.1)(jiti@2.7.0)(yaml@2.9.1))
@@ -118,6 +121,67 @@ importers:
       vitest:
         specifier: ^5.0.2
         version: 5.0.2(@types/node@22.20.1)(@vitest/coverage-v8@5.0.2)(happy-dom@20.14.5)(vite@8.3.1(@types/node@22.20.1)(jiti@2.7.0)(yaml@2.9.1))
+
+  apps/web:
+    dependencies:
+      '@greywork/host-ipc':
+        specifier: workspace:*
+        version: link:../../packages/host-ipc
+      '@greywork/workbench':
+        specifier: workspace:*
+        version: link:../../packages/workbench
+      pinia:
+        specifier: ^4.0.3
+        version: 4.0.3(@vue/devtools-api@8.2.1)(typescript@5.6.2)(vue@3.5.43(typescript@5.6.2))
+      vue:
+        specifier: ^3.5.43
+        version: 3.5.43(typescript@5.6.2)
+    devDependencies:
+      '@greywork/vite-config':
+        specifier: workspace:*
+        version: link:../../packages/vite-config
+      '@tailwindcss/vite':
+        specifier: ^4.0.0
+        version: 4.3.3(vite@8.3.1(@types/node@22.20.1)(jiti@2.7.0)(yaml@2.9.1))
+      '@vitejs/plugin-vue':
+        specifier: ^6.0.9
+        version: 6.0.9(vite@8.3.1(@types/node@22.20.1)(jiti@2.7.0)(yaml@2.9.1))(vue@3.5.43(typescript@5.6.2))
+      '@vitest/coverage-v8':
+        specifier: ^5.0.2
+        version: 5.0.2(vitest@5.0.2)
+      '@vue/test-utils':
+        specifier: ^2.5.1
+        version: 2.5.1(@vue/compiler-dom@3.5.43)(@vue/server-renderer@3.5.43)(vue@3.5.43(typescript@5.6.2))
+      cross-env:
+        specifier: ^10.1.0
+        version: 10.1.0
+      happy-dom:
+        specifier: ^20.14.5
+        version: 20.14.5
+      playwright-core:
+        specifier: ^1.63.0
+        version: 1.63.0
+      tailwindcss:
+        specifier: ^4.0.0
+        version: 4.3.3
+      tw-animate-css:
+        specifier: ^1.4.0
+        version: 1.4.0
+      typescript:
+        specifier: ~5.6.2
+        version: 5.6.2
+      vite:
+        specifier: ^8.3.1
+        version: 8.3.1(@types/node@22.20.1)(jiti@2.7.0)(yaml@2.9.1)
+      vite-plugin-static-copy:
+        specifier: ^4.1.1
+        version: 4.1.1(vite@8.3.1(@types/node@22.20.1)(jiti@2.7.0)(yaml@2.9.1))
+      vitest:
+        specifier: ^5.0.2
+        version: 5.0.2(@types/node@22.20.1)(@vitest/coverage-v8@5.0.2)(happy-dom@20.14.5)(vite@8.3.1(@types/node@22.20.1)(jiti@2.7.0)(yaml@2.9.1))
+      vue-tsc:
+        specifier: ^3.3.11
+        version: 3.3.11(typescript@5.6.2)
 
   packages/acp:
     dependencies:
@@ -285,6 +349,25 @@ importers:
         specifier: ^5.0.2
         version: 5.0.2(@types/node@22.20.1)(@vitest/coverage-v8@5.0.2)(happy-dom@20.14.5)(vite@8.3.1(@types/node@22.20.1)(jiti@2.7.0)(yaml@2.9.1))
 
+  packages/vite-config:
+    dependencies:
+      '@tailwindcss/vite':
+        specifier: ^4.0.0
+        version: 4.3.3(vite@8.3.1(@types/node@22.20.1)(jiti@2.7.0)(yaml@2.9.1))
+      '@vitejs/plugin-vue':
+        specifier: ^6.0.9
+        version: 6.0.9(vite@8.3.1(@types/node@22.20.1)(jiti@2.7.0)(yaml@2.9.1))(vue@3.5.43(typescript@5.6.2))
+      vite:
+        specifier: ^8.3.1
+        version: 8.3.1(@types/node@22.20.1)(jiti@2.7.0)(yaml@2.9.1)
+      vite-plugin-static-copy:
+        specifier: ^4.1.1
+        version: 4.1.1(vite@8.3.1(@types/node@22.20.1)(jiti@2.7.0)(yaml@2.9.1))
+    devDependencies:
+      typescript:
+        specifier: ~5.6.2
+        version: 5.6.2
+
   packages/workbench:
     dependencies:
       '@codemirror/commands':
@@ -437,6 +520,12 @@ importers:
       '@vueuse/core':
         specifier: ^15.0.0
         version: 15.0.0(vue@3.5.43(typescript@5.6.2))
+      '@xterm/addon-fit':
+        specifier: ^0.11.0
+        version: 0.11.0
+      '@xterm/xterm':
+        specifier: ^6.0.0
+        version: 6.0.0
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1
@@ -2299,6 +2388,12 @@ packages:
   '@xmldom/xmldom@0.9.12':
     resolution: {integrity: sha512-5AXjrcMClTryPe9LgZrygpB1lj7s0S9E0+W+AHaVKAVyHanafK86iPSvG5xHVSp/jC+VH1UXu0TAEmY279xH7A==}
     engines: {node: '>=14.6'}
+
+  '@xterm/addon-fit@0.11.0':
+    resolution: {integrity: sha512-jYcgT6xtVYhnhgxh3QgYDnnNMYTcf8ElbxxFzX0IZo+vabQqSPAjC3c1wJrKB5E19VwQei89QCiZZP86DCPF7g==}
+
+  '@xterm/xterm@6.0.0':
+    resolution: {integrity: sha512-TQwDdQGtwwDt+2cgKDLn0IRaSxYu1tSUjgKarSDkUM0ZNiSRXFpjxEsvc/Zgc5kq5omJ+V0a8/kIM2WD3sMOYg==}
 
   abbrev@5.0.0:
     resolution: {integrity: sha512-/XrFJgzQQQHpti1raDJC6m4ws6aNktmjBlhk8Fdlk7LwCEuDoieEJJY9OFHjfiFJFFRM2tK+Ky/IsfbbmlMu1w==}
@@ -7003,6 +7098,10 @@ snapshots:
 
   '@xmldom/xmldom@0.9.12': {}
 
+  '@xterm/addon-fit@0.11.0': {}
+
+  '@xterm/xterm@6.0.0': {}
+
   abbrev@5.0.0: {}
 
   acorn-jsx@5.3.2(acorn@8.18.0):
@@ -8962,7 +9061,7 @@ snapshots:
     dependencies:
       nanoid: 3.3.19
       picocolors: 1.1.1
-      source-map-js: 1.2.1
+      source-map-js: 1.2.2
 
   potpack@2.1.0: {}
 

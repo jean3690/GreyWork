@@ -11,13 +11,15 @@
   "scripts": {
     "dev": "pnpm --filter @greywork/desktop dev",
     "dev:desktop": "pnpm --filter @greywork/desktop dev",
-    "build": "pnpm --filter @greywork/desktop build",
+    "dev:web": "pnpm --filter @greywork/web dev",
+    "build": "pnpm run build:web && pnpm run build:desktop",
+    "build:web": "pnpm --filter @greywork/web build",
     "build:desktop": "pnpm --filter @greywork/desktop build",
     "electron:dev": "pnpm --filter @greywork/electron dev",
     "electron:start": "pnpm --filter @greywork/electron start",
     "electron:build": "pnpm --filter @greywork/electron build",
     "electron:typecheck": "pnpm --filter @greywork/electron typecheck",
-    "electron:prep": "cargo build --release -p greywork-server && pnpm --filter @greywork/desktop build && pnpm --filter @greywork/electron build",
+    "electron:prep": "cargo build --release -p greywork-server && pnpm run build:web && pnpm run build:desktop && pnpm --filter @greywork/electron build",
     "electron:package": "pnpm run electron:prep && pnpm --filter @greywork/electron package",
     "electron:package:dir": "pnpm run electron:prep && pnpm --filter @greywork/electron package:dir",
     "version:sync": "node scripts/version-sync.mjs",
@@ -32,7 +34,8 @@
     "format:check": "prettier --check .",
     "disks": "node scripts/disks-reclaim.mjs",
     "disks:reclaim": "node scripts/disks-reclaim.mjs --apply",
-    "prepare": "husky"
+    "prepare": "husky",
+    "electron:dev:fresh": "node scripts/electron-dev-fresh.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

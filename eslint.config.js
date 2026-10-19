@@ -38,9 +38,13 @@ export default defineConfigWithVueTs(
       "**/logs/**",
       "pnpm-lock.yaml",
       "apps/desktop/e2e/**",
+      // 各前端的 e2e 同理：无类型、不进 tsconfig 的 project service（apps/web 与桌面端走同一条约定）。
+      "apps/web/e2e/**",
       // 原样直出的静态资源（logo / vscode-icons / 首帧引导脚本）：不经打包器、也不属于
       // 任何 tsconfig 的 project service，交给 eslint 解析只会报 parsing error。
-      "apps/desktop/public/**",
+      // 位置在 workbench 包下：这批资源由**所有前端共享**（各 app 的 publicDir 都指过去，
+      // 见 packages/vite-config 的默认值），不再属于某一个前端。
+      "packages/workbench/public/**",
       // ACP 集成测试的 mock agent：夹具 .mjs，不属于任何 tsconfig project service
       //（与 allowDefaultProject 不能加通配条目的约束一致，见 2026-09 的 eslint 调优）。
       "apps/server/tests/mock-acp-agent.mjs",

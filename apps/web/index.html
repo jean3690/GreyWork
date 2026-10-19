@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GreyWork</title>
+    <!-- 首帧外观 + 启动打点：外链（同源）而非内联 —— 与桌面端同一条约束，理由见
+         tests/unit/index-html.test.ts 与 public/boot.css 顶部说明。
+         这三份资源来自**共享** publicDir（packages/workbench/public）；本端是部署里的根路径
+         那一端，所以这里就是根路径写法，不随 base 变化。 -->
+    <script src="/boot.js"></script>
+    <link rel="stylesheet" href="/boot.css" />
+  </head>
+
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
