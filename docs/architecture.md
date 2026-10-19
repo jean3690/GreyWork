@@ -566,6 +566,20 @@ untouched. Features are split into point / line / polygon layers by `geometry-ty
 mixing all three is normal), and the view is fitted to the data's bounding box, computed in
 `lib/geojson.ts` as a pure function so it can be unit-tested without MapLibre.
 
+### CAD: DXF in, DWG out
+
+`DxfViewer.vue` previews ASCII DXF with a plain 2D canvas (no WebGL). `lib/dxf.ts` normalizes
+LINE / LWPOLYLINE / POLYLINE (including bulge arcs) / CIRCLE / ARC / ELLIPSE / SPLINE (fit or
+control points) / TEXT / MTEXT / POINT / SOLID / 3DFACE / INSERT / DIMENSION into polylines, texts
+and dots; block references are expanded with translation / rotation / scale (depth-capped), and the
+total point count is capped at 200k so a site plan cannot freeze the renderer. The viewer owns the
+viewport: wheel zoom anchored at the cursor, drag pan, zoom buttons and fit-to-extent. Re-exporting
+the file resets the viewport because the drawing extents usually change.
+
+DWG / DWF are proprietary binary containers with no pure-JS decoder. They map to `legacy-cad`, which
+states that explicitly and offers "open with system app" (or save a DXF copy). Do **not** route them
+to `raw`: binary decoded as UTF-8 is mojibake with no error.
+
 ## Design Principles
 
 - **Thin Rust, Fat TypeScript**: UI and orchestration logic live in TS; Rust provides the command surface, process hosting, and system access. Agents keep their own permission models — the host no longer sandboxes them at the OS level.

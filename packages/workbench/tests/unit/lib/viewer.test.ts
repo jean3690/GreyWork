@@ -42,6 +42,10 @@ describe("kindOfPath", () => {
     ["scene.gltf", "3d"],
     ["districts.geojson", "gis"],
     ["districts.shp", "gis"],
+    // CAD：DXF 是文本、DWG/DWF 是专有二进制 —— 两者必须分开，否则 DWG 会被当文本读成乱码。
+    ["plan.dxf", "cad"],
+    ["plan.dwg", "legacy-cad"],
+    ["plan.dwf", "legacy-cad"],
     // .json 刻意留给代码视图：绝大多数 .json 是普通数据，归到 gis 会让它们失去代码视图。
     ["data.json", "code"],
   ])("%s → %s", (path, kind) => {
@@ -68,14 +72,14 @@ describe("kindOfPath", () => {
 });
 
 describe("isBinaryKind", () => {
-  it.each<ViewerKind>(["xlsx", "xls", "docx", "pptx", "pdf", "image", "video", "3d", "gis", "legacy-office"])(
+  it.each<ViewerKind>(["xlsx", "xls", "docx", "pptx", "pdf", "image", "video", "3d", "gis", "legacy-cad", "legacy-office"])(
     "%s 必须按二进制读",
     (kind) => {
       expect(isBinaryKind(kind)).toBe(true);
     },
   );
 
-  it.each<ViewerKind>(["md", "html", "csv", "code", "diff", "raw"])("%s 按文本读", (kind) => {
+  it.each<ViewerKind>(["md", "html", "csv", "code", "diff", "raw", "cad"])("%s 按文本读", (kind) => {
     expect(isBinaryKind(kind)).toBe(false);
   });
 
@@ -90,6 +94,12 @@ describe("isBinaryKind", () => {
     for (const path of ["a.glb", "a.gltf", "a.geojson", "a.shp"]) {
       expect(isBinaryKind(kindOfPath(path))).toBe(true);
     }
+  });
+
+  it("DXF 是文本、DWG 是二进制：走错通道分别是乱码与「文件损坏」", () => {
+    expect(isBinaryKind(kindOfPath("a.dxf"))).toBe(false);
+    expect(isBinaryKind(kindOfPath("a.dwg"))).toBe(true);
+    expect(isBinaryKind(kindOfPath("a.dwf"))).toBe(true);
   });
 });
 

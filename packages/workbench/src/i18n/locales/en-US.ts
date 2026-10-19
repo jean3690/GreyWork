@@ -362,6 +362,11 @@ export const enUS: MessageSchema = {
         unsupported: "Preview unsupported",
         systemAppHint: "Use the “Open with system app” button below to view the original in the Office app on this machine.",
       },
+      legacyCad: {
+        label: "CAD drawing",
+        unsupported: "Cannot preview .dwg / .dwf drawings",
+        hint: "DWG / DWF are proprietary Autodesk binary formats with no usable browser decoder. Save a copy as .dxf to preview it here, or open the original with a system app.",
+      },
       cloudOffice: {
         title: "Cloud Office",
         failed: "The cloud viewer could not obtain a document URL",
@@ -502,6 +507,15 @@ export const enUS: MessageSchema = {
       features: "{count} features",
       fit: "Fit extent",
       parseFailed: "Couldn't parse this vector file: {detail}",
+    },
+    dxf: {
+      entities: "{count} entities",
+      skipped: "{count} unsupported",
+      truncated: "Drawing too large; showing the first part only",
+      zoomIn: "Zoom in",
+      zoomOut: "Zoom out",
+      fit: "Fit extent",
+      parseFailed: "Couldn't parse this DXF: {detail}",
     },
     pdf: {
       rendered: "Rendered {done} / {total} pages",

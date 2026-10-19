@@ -22,6 +22,8 @@ export type ViewerKind =
   | "video"
   | "3d"
   | "gis"
+  | "cad"
+  | "legacy-cad"
   | "web"
   | "browser"
   | "raw"
@@ -77,6 +79,12 @@ const EXT_KIND: Record<string, ViewerKind> = {
   // 需要地图预览就把扩展名改成 .geojson。
   geojson: "gis",
   shp: "gis",
+  // CAD：DXF 是文本（ASCII），由 dxf-parser 归一化后画到 canvas；DWG / DWF 是
+  // Autodesk 的专有二进制容器，纯前端没有可用解码器 —— 归到 legacy-cad 明确提示，
+  // 而不是按文本读成乱码。
+  dxf: "cad",
+  dwg: "legacy-cad",
+  dwf: "legacy-cad",
   ts: "code",
   tsx: "code",
   js: "code",
@@ -115,6 +123,7 @@ const BINARY_KINDS: ReadonlySet<ViewerKind> = new Set<ViewerKind>([
   "video",
   "3d",
   "gis",
+  "legacy-cad",
   "legacy-office",
 ]);
 

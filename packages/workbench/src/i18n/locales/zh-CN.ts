@@ -359,6 +359,11 @@ export const zhCN = {
         unsupported: "不支持预览",
         systemAppHint: "可以点下面的「用系统应用打开」用本机的 Office 查看原文件。",
       },
+      legacyCad: {
+        label: "CAD 图纸",
+        unsupported: "不支持预览 .dwg / .dwf 图纸",
+        hint: "DWG / DWF 是 Autodesk 的专有二进制格式，浏览器里没有可用的解码器。可以在 CAD 软件里另存为 .dxf 后再预览，或直接用系统应用打开原文件。",
+      },
       cloudOffice: {
         title: "云端 Office",
         failed: "云端预览没能取到文档地址",
@@ -499,6 +504,15 @@ export const zhCN = {
       features: "{count} 个要素",
       fit: "适应范围",
       parseFailed: "无法解析这个矢量文件：{detail}",
+    },
+    dxf: {
+      entities: "{count} 个实体",
+      skipped: "{count} 个实体未支持",
+      truncated: "图形过大，仅显示前一部分",
+      zoomIn: "放大",
+      zoomOut: "缩小",
+      fit: "适应范围",
+      parseFailed: "无法解析这个 DXF：{detail}",
     },
     pdf: {
       rendered: "已渲染 {done} / 共 {total} 页",
