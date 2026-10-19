@@ -59,10 +59,11 @@ function onShellChange(event: Event): void {
   terminal.setPendingShell((event.target as HTMLSelectElement).value);
 }
 
-// 挂载即拉一次 shell 列表；若上次退出时面板是展开的，补一个会话（见 store.setOpen）。
+// 挂载即接回宿主里仍在跑的会话（渲染进程重载 / 面板重挂），再按偏好决定是否补一个新会话。
 onMounted(() => {
-  void terminal.loadShells();
-  if (terminal.open) void terminal.ensureTab();
+  void terminal.hydrate().then(() => {
+    if (terminal.open) void terminal.ensureTab();
+  });
 });
 </script>
 

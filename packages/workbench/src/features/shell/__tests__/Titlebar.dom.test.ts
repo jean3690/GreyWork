@@ -337,11 +337,12 @@ describe("标题栏终端面板开关", () => {
     await button.trigger("click");
     expect(terminal.open).toBe(true);
     expect(wrapper.get('[data-testid="titlebar-terminal-toggle"]').attributes("aria-label")).toBe("收起终端面板");
-    expect(window.localStorage.getItem("greywork.terminal")).toBe('{"open":true}');
+    // 落盘内容还带标签页清单，这里只关心 open 开关。
+    expect(JSON.parse(window.localStorage.getItem("greywork.terminal") ?? "{}")).toMatchObject({ open: true });
 
     await wrapper.get('[data-testid="titlebar-terminal-toggle"]').trigger("click");
     expect(terminal.open).toBe(false);
-    expect(window.localStorage.getItem("greywork.terminal")).toBe('{"open":false}');
+    expect(JSON.parse(window.localStorage.getItem("greywork.terminal") ?? "{}")).toMatchObject({ open: false });
   });
 
   it("宿主不可用（窄屏 / 浏览器预览态）时开关一并消失", async () => {

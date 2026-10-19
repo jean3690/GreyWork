@@ -10,6 +10,7 @@ import { createPinia, setActivePinia } from "pinia";
 
 const backend = vi.hoisted(() => ({
   shells: vi.fn(),
+  list: vi.fn(),
   open: vi.fn(),
   write: vi.fn(),
   resize: vi.fn(),
@@ -23,6 +24,7 @@ vi.mock("@/lib/terminal-backend", () => ({
   terminalBackend: {
     supported: () => true,
     shells: backend.shells,
+    list: backend.list,
     open: backend.open,
     write: backend.write,
     resize: backend.resize,
@@ -86,6 +88,7 @@ beforeEach(() => {
     ],
     defaultId: "zsh",
   });
+  backend.list.mockReset().mockResolvedValue([]);
   backend.open.mockReset().mockResolvedValue({ sessionId: "s", cwd: "/ws/proj", shellId: "zsh", shellLabel: "Zsh" });
   backend.write.mockReset().mockResolvedValue(undefined);
   backend.resize.mockReset().mockResolvedValue(undefined);
@@ -229,5 +232,71 @@ describe("TerminalPanel", () => {
 
     await wrapper.get('[data-testid="terminal-collapse"]').trigger("click");
     expect(terminal.open).toBe(false);
+  });
+
+  it("渲染进程重载后接回宿主里仍在跑的会话，不再重复开会话", async () => {
+    localStorage.setItem(
+      "greywork.terminal",
+      JSON.stringify({
+        open: true,
+        tabs: [{ sessionId: "old-1", title: "Zsh 1", cwd: "/stale", shellId: "zsh", shellLabel: "Zsh" }],
+        activeId: "old-1",
+      }),
+    );
+    backend.list.mockResolvedValue([{ sessionId: "old-1", cwd: "/ws/proj", shellId: "zsh", shellLabel: "Zsh" }]);
+
+    const wrapper = mountPanel();
+    await settle();
+
+    const terminal = useTerminalStore();
+    expect(backend.list).toHaveBeenCalledTimes(1);
+    expect(terminal.tabs).toHaveLength(1);
+    // 目录 / shell 以宿主为准（落盘的可能已过期），标签接上而不是新开。
+    expect(terminal.tabs[0]).toMatchObject({
+      sessionId: "old-1",
+      cwd: "/ws/proj",
+      status: "running",
+      attached: true,
+    });
+    expect(terminal.activeId).toBe("old-1");
+    expect(wrapper.find('[data-testid="terminal-view-stub"]').exists()).toBe(true);
+  });
+
+  it("偏好里的会话已经不在宿主里：丢弃过期标签，展开时新开一个", async () => {
+    localStorage.setItem(
+      "greywork.terminal",
+      JSON.stringify({
+        open: true,
+        tabs: [{ sessionId: "gone", title: "Zsh 1", cwd: "/ws/proj", shellId: "zsh", shellLabel: "Zsh" }],
+        activeId: "gone",
+      }),
+    );
+    backend.list.mockResolvedValue([]);
+
+    const wrapper = mountPanel();
+    await settle();
+
+    const terminal = useTerminalStore();
+    expect(terminal.tabs).toHaveLength(1);
+    expect(terminal.tabs[0].sessionId).not.toBe("gone");
+    expect(terminal.tabs[0].status).toBe("running");
+    expect(wrapper.get('[data-testid="terminal-cwd"]').text()).toContain("/ws/proj");
+  });
+
+  it("宿主里有会话但偏好里没有：补成标签接回（孤儿回收）", async () => {
+    backend.list.mockResolvedValue([{ sessionId: "ghost", cwd: "/ws/proj", shellId: "bash", shellLabel: "Bash" }]);
+
+    const wrapper = mountPanel();
+    await settle();
+
+    const terminal = useTerminalStore();
+    expect(terminal.tabs).toHaveLength(1);
+    expect(terminal.tabs[0]).toMatchObject({
+      sessionId: "ghost",
+      title: "Bash 1",
+      status: "running",
+      attached: true,
+    });
+    expect(wrapper.find('[data-testid="terminal-view-stub"]').exists()).toBe(true);
   });
 });

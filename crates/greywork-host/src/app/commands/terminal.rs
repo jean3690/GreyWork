@@ -15,6 +15,10 @@ macro_rules! terminal_commands {
     { "terminal_shells", auth: Auth::Required, desktop: false, binary: false,
         args: UnitArgs,
         run: |ctx, _a| async move { Ok(Json(ctx.services.terminal.catalog())) } }
+    // 列出仍在跑的会话：渲染进程重载 / 面板重挂后据此把标签页接回去。
+    { "terminal_list", auth: Auth::Required, desktop: false, binary: false,
+        args: UnitArgs,
+        run: |ctx, _a| async move { Ok(Json(ctx.services.terminal.list())) } }
     // 开一个新会话：起 PTY + shell 子进程，输出经 `terminal://data` 事件流式下发。
     { "terminal_open", auth: Auth::Required, desktop: false, binary: false,
         args: crate::terminal::OpenArgs,

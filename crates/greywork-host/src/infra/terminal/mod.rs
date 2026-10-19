@@ -18,7 +18,8 @@
 //! - **退出**：读线程见 EOF 后发 `terminal://exit`。
 //!
 //! 会话不因前端断连而回收（多标签、面板开合都要保活）；标签页关闭时显式 `close`，
-//! 进程退出时 [`Drop`] 兜底杀干净。
+//! 进程退出时 [`Drop`] 兜底杀干净。渲染进程重载后靠 [`TerminalHost::list`] 把标签接回去
+//! —— 会话清单在宿主侧，前端那份只是它的投影。
 
 mod shells;
 #[cfg(test)]
@@ -106,13 +107,27 @@ pub struct CloseArgs {
     pub session_id: String,
 }
 
-/// 一条活动会话：主端（改尺寸 / 写）、子进程（杀）、退出标记。
+/// `terminal_list` 的条目：渲染端重载后据此把标签页接回仍在跑的 shell。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LiveSession {
+    pub session_id: String,
+    /// 实际启动目录（用户 shell 里 `cd` 之后不会更新 —— 那是 shell 自己的状态）。
+    pub cwd: String,
+    pub shell_id: String,
+    pub shell_label: String,
+}
+
+/// 一条活动会话：主端（改尺寸 / 写）、子进程（杀）、退出标记、建会话时的展示元数据。
 struct Session {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     child: Box<dyn Child + Send + Sync>,
     /// 读线程在 EOF 时置真；写 / 改尺寸据此短路（进程没了，再写只会报错）。
     exited: Arc<AtomicBool>,
+    cwd: String,
+    shell_id: String,
+    shell_label: String,
 }
 
 /// 交互式终端宿主：会话表 + 事件出口。建一次，跨请求复用（见 `Services`）。
@@ -134,6 +149,39 @@ impl TerminalHost {
     /// 本机可用的终端环境（`terminal_shells`）。
     pub fn catalog(&self) -> ShellCatalog {
         shells::catalog()
+    }
+
+    /// 列出仍在跑的会话（`terminal_list`）。
+    ///
+    /// 渲染进程重载 / 面板被卸载后，前端凭这份清单把标签页接回去 —— 否则 PTY 会一直
+    /// 挂到宿主退出。**顺带回收已退出但没被 `close` 的会话**（用户敲了 `exit` 却没关标签）：
+    /// 它们对前端已没有价值，留着只会让清单越来越长。
+    pub fn list(&self) -> Vec<LiveSession> {
+        let mut sessions = self.sessions.lock();
+        sessions.retain(|_, session| {
+            if session.lock().exited.load(Ordering::Relaxed) {
+                // 进程已退出：再 kill 一次是无害的，主要是让 `Child` 被回收。
+                kill_session(session);
+                false
+            } else {
+                true
+            }
+        });
+        let mut live: Vec<LiveSession> = sessions
+            .iter()
+            .map(|(session_id, session)| {
+                let guard = session.lock();
+                LiveSession {
+                    session_id: session_id.clone(),
+                    cwd: guard.cwd.clone(),
+                    shell_id: guard.shell_id.clone(),
+                    shell_label: guard.shell_label.clone(),
+                }
+            })
+            .collect();
+        // HashMap 顺序不稳定：给前端一个确定的次序（前端只把它当「额外会话」的排序）。
+        live.sort_by(|left, right| left.session_id.cmp(&right.session_id));
+        live
     }
 
     /// 开一个新会话：起 PTY + shell 子进程，挂上读线程推 `terminal://data`。
@@ -208,6 +256,7 @@ impl TerminalHost {
             Arc::clone(&exited),
         );
 
+        let cwd_text = cwd.display().to_string();
         self.sessions.lock().insert(
             session_id.clone(),
             Arc::new(Mutex::new(Session {
@@ -215,12 +264,15 @@ impl TerminalHost {
                 writer,
                 child,
                 exited,
+                cwd: cwd_text.clone(),
+                shell_id: shell.id.clone(),
+                shell_label: shell.label.clone(),
             })),
         );
 
         Ok(OpenResult {
             session_id,
-            cwd: cwd.display().to_string(),
+            cwd: cwd_text,
             shell_id: shell.id,
             shell_label: shell.label,
         })

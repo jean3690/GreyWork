@@ -165,6 +165,55 @@ fn open_streams_output_and_close_removes_session() {
 
 #[cfg(unix)]
 #[test]
+fn list_reports_metadata_and_drops_closed_sessions() {
+    let (host, _events) = recording();
+    let (access, project) = access("list");
+    let terminal = TerminalHost::new(host);
+
+    let first = terminal
+        .open(&access, open_args(Some(&project)))
+        .expect("开终端");
+    let second = terminal
+        .open(&access, open_args(Some(&project)))
+        .expect("开终端");
+
+    let live = terminal.list();
+    assert_eq!(live.len(), 2, "两个会话都应列出");
+    let entry = live
+        .iter()
+        .find(|session| session.session_id == first.session_id)
+        .expect("应列出第一个会话");
+    assert_eq!(entry.cwd, first.cwd);
+    assert_eq!(entry.shell_id, first.shell_id);
+    assert_eq!(entry.shell_label, first.shell_label);
+
+    terminal.close(&first.session_id);
+    let live = terminal.list();
+    assert_eq!(live.len(), 1, "关掉的会话不应再列出");
+    assert_eq!(live[0].session_id, second.session_id);
+
+    terminal.close(&second.session_id);
+}
+
+#[cfg(unix)]
+#[test]
+fn list_prunes_sessions_whose_shell_exited() {
+    let (host, _events) = recording();
+    let (access, project) = access("prune");
+    let terminal = TerminalHost::new(host);
+    let opened = terminal
+        .open(&access, open_args(Some(&project)))
+        .expect("开终端");
+
+    terminal.write(&opened.session_id, "exit\n").expect("退出");
+    assert!(
+        wait_for(|| terminal.list().is_empty()),
+        "shell 退出后应从会话表回收"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn resize_is_accepted_while_alive() {
     let (host, _events) = recording();
     let (access, project) = access("resize");

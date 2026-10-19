@@ -49,12 +49,29 @@ export interface TerminalOpenResult {
   shellLabel: string;
 }
 
+/** 宿主里仍在跑的一个会话（`terminal_list` 的条目）。 */
+export interface TerminalSessionInfo {
+  sessionId: string;
+  /** 启动目录（shell 里 `cd` 之后不会更新）。 */
+  cwd: string;
+  shellId: string;
+  shellLabel: string;
+}
+
 export const terminalBackend = {
   /** 是否有宿主可跑终端：桌面端与服务端为真，浏览器预览态为假。 */
   supported: (): boolean => hasHostCommands(),
 
   /** 本机可用的终端环境。 */
   shells: (): Promise<ShellCatalog> => invoke<ShellCatalog>("terminal_shells"),
+
+  /**
+   * 宿主里仍在跑的会话。
+   *
+   * 渲染进程重载后，标签页清单（内存态）没了，但 PTY 子进程还活着 —— 凭这份清单把
+   * 标签接回去；不接的话这些会话就成了孤儿，一直挂到宿主退出。宿主顺带回收已退出的会话。
+   */
+  list: (): Promise<TerminalSessionInfo[]> => invoke<TerminalSessionInfo[]>("terminal_list"),
 
   /** 开一个新会话（起 PTY + shell）。 */
   open: (options: TerminalOpenOptions): Promise<TerminalOpenResult> =>

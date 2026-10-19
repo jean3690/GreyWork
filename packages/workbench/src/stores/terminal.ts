@@ -1,7 +1,7 @@
 import { createJsonStorage } from "@greywork/core";
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
-import { terminalBackend, type ShellInfo } from "@/lib/terminal-backend";
+import { terminalBackend, type ShellInfo, type TerminalSessionInfo } from "@/lib/terminal-backend";
 import { activeConversationFolder } from "@/lib/conversation-folder";
 import { activeWorkspaceFolder } from "@/lib/artifact-dir";
 import { resolveWorkspaceDir } from "@/lib/workspace-dir";
@@ -15,7 +15,9 @@ import { resolveWorkspaceDir } from "@/lib/workspace-dir";
  * `features/terminal/TerminalView.vue` 里 —— store 不碰 DOM，这样「开标签 → 会话就位」
  * 这条路径可单测，不用挂载 xterm。
  *
- * 持久化只存 `open` 偏好；标签页与会话是会话内状态（进程不可跨重启复用）。
+ * 持久化只存 `open` 偏好 + 标签页清单（会话 id / 标题 / 目录 / shell）；标签的**运行状态**
+ * 不落盘，由 `hydrate()` 用宿主 `terminal_list` 校准。渲染进程重载（或面板被卸载重挂）后，
+ * 仍在跑的 PTY 会被接回同一个标签页 —— 进程不会因为界面刷新而丢。
  *
  * 工作目录跟随**当前工作区**：新标签页在「当前对话绑定的工作区文件夹 → 激活工作区文件夹 →
  * 设置项 / 应用私有 `~/.greyWork`」里启动，与 ACP 会话、文件树、Git 面板同一条解析链
@@ -42,15 +44,44 @@ export interface TerminalTab {
   status: TerminalStatus;
   /** 启动失败时的错误文案。 */
   error?: string;
+  /**
+   * 宿主里这个会话**已经开着**（本端开过，或从上次渲染进程接回）。
+   * 视图挂载时据此直接接上，而不是再 `terminal_open` 一次 —— 后者会撞「会话 id 已存在」。
+   * 面板因视口变化被卸载重挂时同样靠它避免重复开会话。
+   */
+  attached?: boolean;
+}
+
+/** 落盘的标签页字段：运行状态 / 错误不持久化，恢复时以宿主清单为准。 */
+interface PersistedTab {
+  sessionId: string;
+  title: string;
+  cwd: string;
+  shellId: string;
+  shellLabel: string;
 }
 
 interface TerminalPrefs {
   open: boolean;
+  /** 上次退出时开着的标签页（顺序即展示顺序）。 */
+  tabs?: PersistedTab[];
+  /** 上次激活的会话 id。 */
+  activeId?: string;
+}
+
+function isPersistedTab(value: unknown): value is PersistedTab {
+  if (typeof value !== "object" || value === null) return false;
+  const tab = value as Record<string, unknown>;
+  return ["sessionId", "title", "cwd", "shellId", "shellLabel"].every((key) => typeof tab[key] === "string");
 }
 
 function isPrefs(value: unknown): value is TerminalPrefs {
   if (typeof value !== "object" || value === null) return false;
-  return typeof (value as Record<string, unknown>).open === "boolean";
+  const prefs = value as Record<string, unknown>;
+  if (typeof prefs.open !== "boolean") return false;
+  // 旧版本只存了 `open`：缺 `tabs` / `activeId` 仍算合法（向后兼容）。
+  if (prefs.tabs !== undefined && (!Array.isArray(prefs.tabs) || !prefs.tabs.every(isPersistedTab))) return false;
+  return prefs.activeId === undefined || typeof prefs.activeId === "string";
 }
 
 const prefsStorage = createJsonStorage<TerminalPrefs>("greywork.terminal", isPrefs);
@@ -96,7 +127,17 @@ export const useTerminalStore = defineStore("terminal", () => {
   const activeTab = computed(() => tabs.value.find((tab) => tab.sessionId === activeId.value) ?? tabs.value[0] ?? null);
 
   function persist(): void {
-    prefsStorage.write({ open: open.value });
+    prefsStorage.write({
+      open: open.value,
+      tabs: tabs.value.map(({ sessionId, title, cwd, shellId, shellLabel }) => ({
+        sessionId,
+        title,
+        cwd,
+        shellId,
+        shellLabel,
+      })),
+      activeId: activeId.value,
+    });
   }
 
   function setOpen(value: boolean): void {
@@ -156,6 +197,83 @@ export const useTerminalStore = defineStore("terminal", () => {
     pendingShellId.value = shellId;
   }
 
+  /** 恢复只跑一次（成功时）；宿主暂时不可用则允许下次挂载重试。 */
+  let hydrateRequest: Promise<void> | null = null;
+
+  /**
+   * 接回宿主里仍在跑的会话（面板挂载时调用，幂等）。
+   *
+   * 渲染进程重载后内存里的标签页没了，但 PTY 还活着。顺序：
+   * 1. 按上次落盘的顺序，只保留宿主里仍在跑的会话（其余视为宿主已重启，直接丢弃）；
+   * 2. 宿主里有、落盘里没有的会话补成新标签（上次没来得及落盘 / 偏好被清）—— 不然它们
+   *    就成了没人认领的孤儿进程；
+   * 3. 没有宿主（浏览器预览）或宿主不可用：保持空清单，由 `ensureTab` 决定是否新开。
+   *
+   * 接回的标签一律 `attached: true`、`status: "running"`：视图只订阅、不再 `terminal_open`。
+   * 断开期间 shell 的输出不会重放（事件总线不缓存），重连后是干净屏。
+   *
+   * 会话清单是**宿主全局**的：这里按「单窗口」假设全部认领。多窗口同时连同一宿主时会共享
+   * 同一批 PTY（输入互相可见），不在当前形态内。
+   */
+  async function hydrate(): Promise<void> {
+    if (hydrateRequest) return hydrateRequest;
+    hydrateRequest = restore();
+    return hydrateRequest;
+  }
+
+  async function restore(): Promise<void> {
+    if (!terminalBackend.supported()) return;
+    let live: TerminalSessionInfo[];
+    try {
+      // 会话清单与 shell 列表互不依赖，并行问。
+      [live] = await Promise.all([terminalBackend.list(), loadShells()] as const);
+    } catch {
+      // 宿主暂时不可用：别把「没问到」当成「没有会话」，下次挂载再试。
+      hydrateRequest = null;
+      return;
+    }
+
+    const byId = new Map(live.map((session) => [session.sessionId, session]));
+    const restored: TerminalTab[] = [];
+    for (const saved of savedPrefs?.tabs ?? []) {
+      const session = byId.get(saved.sessionId);
+      if (!session) continue;
+      byId.delete(saved.sessionId);
+      restored.push({
+        ...saved,
+        cwd: session.cwd,
+        shellId: session.shellId,
+        shellLabel: session.shellLabel,
+        status: "running",
+        attached: true,
+      });
+    }
+    // 宿主里还有、落盘里没有的会话：补成新标签，别让 PTY 变成没人认领的孤儿。
+    for (const session of byId.values()) {
+      const label = session.shellLabel || session.shellId || "shell";
+      const count = restored.filter((tab) => tab.shellLabel === label).length + 1;
+      restored.push({
+        sessionId: session.sessionId,
+        title: `${label} ${count}`,
+        cwd: session.cwd,
+        shellId: session.shellId,
+        shellLabel: label,
+        status: "running",
+        attached: true,
+      });
+    }
+    if (restored.length === 0) return;
+
+    // 恢复期间用户可能已经点了「新建」：保留新标签，把接回的会话排在前面。
+    const known = new Set(tabs.value.map((tab) => tab.sessionId));
+    tabs.value = [...restored.filter((tab) => !known.has(tab.sessionId)), ...tabs.value];
+    if (!tabs.value.some((tab) => tab.sessionId === activeId.value)) {
+      const savedActive = savedPrefs?.activeId;
+      activeId.value = savedActive && restored.some((tab) => tab.sessionId === savedActive) ? savedActive : restored[0].sessionId;
+    }
+    persist();
+  }
+
   function nextSessionId(): string {
     labelSeq += 1;
     return `term-${Date.now().toString(36)}-${labelSeq}-${Math.random().toString(36).slice(2, 8)}`;
@@ -209,6 +327,7 @@ export const useTerminalStore = defineStore("terminal", () => {
     if (activeId.value === sessionId) {
       activeId.value = tabs.value[Math.min(index, tabs.value.length - 1)]?.sessionId ?? "";
     }
+    persist();
     void terminalBackend.close(sessionId).catch(() => {
       // 会话可能已退出 / 未真正建立，关闭失败无所谓。
     });
@@ -224,12 +343,18 @@ export const useTerminalStore = defineStore("terminal", () => {
   }
 
   function setActive(sessionId: string): void {
-    if (tabs.value.some((tab) => tab.sessionId === sessionId)) activeId.value = sessionId;
+    if (tabs.value.some((tab) => tab.sessionId === sessionId)) {
+      activeId.value = sessionId;
+      persist();
+    }
   }
 
-  /** 会话已启动（TerminalView 收到 `terminal_open` 成功）。 */
+  /**
+   * 会话已启动（TerminalView 收到 `terminal_open` 成功，或接回了已有会话）。
+   * 同时打上 `attached`：面板因视口变化被卸载重挂时，视图据此接上而不是重复开会话。
+   */
   function markRunning(sessionId: string): void {
-    update(sessionId, (tab) => ({ ...tab, status: "running" }));
+    update(sessionId, (tab) => ({ ...tab, status: "running", attached: true }));
   }
 
   /** 进程退出（`terminal://exit`）。 */
@@ -262,6 +387,7 @@ export const useTerminalStore = defineStore("terminal", () => {
     setAvailable,
     syncCwd,
     loadShells,
+    hydrate,
     setPendingShell,
     addTab,
     ensureTab,

@@ -40,6 +40,7 @@ pub const TRUSTED_HOST_ONLY: &[&str] = &[
     "fs_authorize_picked_paths",
     "shell_run",
     "terminal_close",
+    "terminal_list",
     "terminal_open",
     "terminal_resize",
     "terminal_shells",

@@ -184,6 +184,30 @@ describe("TerminalView", () => {
     expect(wrapper.emitted("failed")?.[0]).toEqual(["s1", "终端需要可信本机宿主"]);
   });
 
+  it("已接上的会话只订阅、不再开会话（渲染进程重载后接回）", async () => {
+    const wrapper = mountView({ ...TAB, status: "running", attached: true });
+    await flushPromises();
+
+    expect(mocks.open).not.toHaveBeenCalled();
+    expect(wrapper.emitted("opened")?.[0]).toEqual(["s1"]);
+    // 不是在起 shell，别亮「正在启动」。
+    expect(wrapper.find('[data-testid="terminal-starting"]').exists()).toBe(false);
+
+    // 接上之后输入照常回写。
+    onDataHandler()("ls\r");
+    await flushPromises();
+    expect(mocks.write).toHaveBeenCalledWith("s1", "ls\r");
+  });
+
+  it("接回的标签已退出：不重开、不发 opened", async () => {
+    const wrapper = mountView({ ...TAB, status: "exited", attached: true });
+    await flushPromises();
+
+    expect(mocks.open).not.toHaveBeenCalled();
+    expect(wrapper.emitted("opened")).toBeUndefined();
+    expect(wrapper.find('[data-testid="terminal-starting"]').exists()).toBe(false);
+  });
+
   it("启动慢时先亮「正在启动 shell」，首屏输出一到即收", async () => {
     const wrapper = mountView();
     await flushPromises();

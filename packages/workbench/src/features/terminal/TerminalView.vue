@@ -8,6 +8,9 @@
  * 3. 再 `terminal_open` —— 顺序不能反，否则 shell 已回显的首屏提示符会在订阅生效前发出而丢掉；
  * 4. 键盘输入经 `terminal_write` 回写，容器尺寸变化经 `terminal_resize` 通知内核。
  *
+ * `tab.attached` 为真表示会话**已经开在宿主里**（渲染进程重载后接回、面板卸载重挂）：
+ * 此时跳过 `terminal_open`，只订阅事件接上 —— 再开一次会撞「会话 id 已存在」。
+ *
  * 非激活标签用 `v-show` 隐藏但保持挂载：切标签不重建终端、不丢滚动历史。
  * 会话生命周期（开/关/重启/状态）收在 store，这里只负责「已有 sessionId 的渲染与 IO」。
  */
@@ -167,16 +170,29 @@ async function start(): Promise<void> {
       if (live) void terminalBackend.resize(sessionId, cols, rows);
     });
 
-    await terminalBackend.open({
-      sessionId,
-      cwd: props.tab.cwd || undefined,
-      shell: props.tab.shellId || undefined,
-      cols: instance.cols,
-      rows: instance.rows,
-    });
-    live = true;
-    emit("opened", sessionId);
-    instance.focus();
+    if (props.tab.attached) {
+      // 宿主里这个会话还开着（渲染进程重载 / 面板被卸载重挂）：只接上，不再开一个。
+      // 断开期间的输出不会重放 —— 事件总线不缓存，重连后是干净屏，敲一下回车即有提示符。
+      clearSpinner();
+      if (props.tab.status === "exited" || props.tab.status === "error") {
+        instance.write("\r\n\x1b[2m[进程已退出]\x1b[0m\r\n");
+      } else {
+        live = true;
+        emit("opened", sessionId);
+        instance.focus();
+      }
+    } else {
+      await terminalBackend.open({
+        sessionId,
+        cwd: props.tab.cwd || undefined,
+        shell: props.tab.shellId || undefined,
+        cols: instance.cols,
+        rows: instance.rows,
+      });
+      live = true;
+      emit("opened", sessionId);
+      instance.focus();
+    }
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));
   }
