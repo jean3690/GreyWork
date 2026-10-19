@@ -164,6 +164,51 @@ describe("能力授权与持久化", () => {
   });
 });
 
+describe("晚到注册按存档补激活（市场清单与 boot 并发）", () => {
+  async function activateLate(id: string): Promise<void> {
+    const { activateRegisteredPluginFromArchive } = await import("@/plugins/runtime");
+    await activateRegisteredPluginFromArchive(id);
+  }
+
+  it("boot 之后注册的插件：启停存档含它即自动激活并写回活跃集", async () => {
+    await boot();
+    registerPlugin({ id: "ext.late", name: "晚到插件", version: "1.0.0" });
+    storageHolder.localStorage?.setItem("greywork.plugins.enabled", JSON.stringify([...BUILTIN_PLUGINS.map((m) => m.id), "ext.late"]));
+    await activateLate("ext.late");
+    expect(isPluginEnabled("ext.late")).toBe(true);
+    expect(storageHolder.localStorage?.getItem("greywork.plugins.enabled")).toContain("ext.late");
+  });
+
+  it("存档不含该 id：保持休眠（用户从未启用过）", async () => {
+    await boot();
+    registerPlugin({ id: "ext.fresh", name: "新装插件", version: "1.0.0" });
+    await activateLate("ext.fresh");
+    expect(isPluginEnabled("ext.fresh")).toBe(false);
+  });
+
+  it("缺授权的晚到插件：激活失败只容错，不崩启动链", async () => {
+    await boot();
+    registerPlugin({ id: "ext.gated", name: "需授权晚到", version: "1.0.0", requires: ["storage.kv"] });
+    storageHolder.localStorage?.setItem("greywork.plugins.enabled", JSON.stringify([...BUILTIN_PLUGINS.map((m) => m.id), "ext.gated"]));
+    await activateLate("ext.gated");
+    expect(isPluginEnabled("ext.gated")).toBe(false);
+    // 存档不被改写：失败的补激活不许把「事实上的活跃集」写回去误导下次启动。
+    expect(JSON.parse(storageHolder.localStorage?.getItem("greywork.plugins.enabled") ?? "[]")).toContain("ext.gated");
+  });
+
+  it("boot 之前调补激活：等 boot 门闩落地后再动作（授权重放先于门禁判定）", async () => {
+    registerPlugin({ id: "ext.race", name: "竞态插件", version: "1.0.0" });
+    storageHolder.localStorage?.setItem("greywork.plugins.enabled", JSON.stringify(["ext.race"]));
+    const pending = activateLate("ext.race");
+    // 门闩未落地：此时 loader 还没重放授权、内置还没注册完，不该抢跑。
+    expect(isPluginEnabled("ext.race")).toBe(false);
+    await boot();
+    await pending;
+    // boot 的 wanted 集已把它激活（boot 前注册者走原路径），补激活幂等不报错。
+    expect(isPluginEnabled("ext.race")).toBe(true);
+  });
+});
+
 describe("运行期注册", () => {
   it("registerPlugin 追加第三方清单，enable 后计入活跃集", async () => {
     await boot();

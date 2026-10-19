@@ -1,8 +1,12 @@
 // 渲染层用例：解析逻辑在 lib/markdown.test.ts 覆盖，这里只验「块 → DOM 语义标签」的落地，
 // 尤其是 h1–h6 层级、ul/ol 真实嵌套、表格对齐与 v-html 缺席（注入防线）。
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { mount } from "@vue/test-utils";
 import MarkdownText from "@/features/shared/MarkdownText.vue";
+
+const h = vi.hoisted(() => ({ writeText: vi.fn<(text: string) => Promise<void>>() }));
+
+vi.mock("@/lib/clipboard", () => ({ copyText: (text: string) => h.writeText(text) }));
 
 function render(content: string) {
   return mount(MarkdownText, { props: { content } });
@@ -69,6 +73,31 @@ describe("MarkdownText · 行内与块级其余类型", () => {
     expect(wrapper.findAll(".md-code__lines span").map((s) => s.text())).toEqual(["1", "2"]);
     expect(wrapper.find(".md-code__copy").exists()).toBe(true);
     expect(wrapper.find("pre code").text()).toBe("line1\nline2");
+  });
+
+  it("点复制把代码正文（不含行号）交给剪贴板，并把 aria-label 翻成「已复制」", async () => {
+    h.writeText.mockResolvedValue(undefined);
+    const wrapper = render("```ts src/main.ts\nline1\nline2\n```");
+
+    const button = wrapper.get(".md-code__copy");
+    expect(button.attributes("aria-label")).toBe("复制代码");
+
+    await button.trigger("click");
+    // 行号是展示件，不该混进剪贴板内容
+    expect(h.writeText).toHaveBeenCalledWith("line1\nline2");
+    expect(wrapper.get(".md-code__copy").attributes("aria-label")).toBe("已复制");
+  });
+
+  it("多个代码块各归各：点第二个只高亮第二个", async () => {
+    h.writeText.mockResolvedValue(undefined);
+    const wrapper = render("```js\na\n```\n\n```py\nb\n```");
+
+    const buttons = wrapper.findAll(".md-code__copy");
+    expect(buttons).toHaveLength(2);
+
+    await buttons[1].trigger("click");
+    expect(h.writeText).toHaveBeenCalledWith("b");
+    expect(wrapper.findAll(".md-code__copy").map((b) => b.attributes("aria-label"))).toEqual(["复制代码", "已复制"]);
   });
 
   it("段落内换行渲染为 br 而非合并成一行", () => {

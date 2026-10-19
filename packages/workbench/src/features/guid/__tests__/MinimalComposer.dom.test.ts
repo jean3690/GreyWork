@@ -1,3 +1,4 @@
+import { nextTick } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DOMWrapper, flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
@@ -95,6 +96,84 @@ describe("MinimalComposer 极简输入卡", () => {
     const wrapper = mountComposer();
     expect(wrapper.find('[data-testid="minimal-composer-config"]').exists()).toBe(false);
   });
+
+  it("ACP 配置块默认收起：出折叠头 + 当前模型摘要，点开才铺开配置簇", async () => {
+    const agent = useAgentStore();
+    agent.routeToAcp = true;
+    agent.acpConfigOptions = [
+      {
+        id: "model",
+        name: "Model",
+        type: "select",
+        currentValue: "gpt-5",
+        options: [
+          { value: "gpt-5", name: "GPT-5" },
+          { value: "local", name: "Local" },
+        ],
+      },
+    ];
+
+    const wrapper = mountComposer();
+    await flushPromises();
+
+    const toggle = wrapper.get('[data-testid="minimal-composer-config-toggle"]');
+    // 默认收起：折叠头显示模型摘要，aria-expanded 明示状态
+    expect(toggle.attributes("aria-expanded")).toBe("false");
+    expect(toggle.text()).toContain("GPT-5");
+    // 配置簇保持挂载（v-show）——切换后端 / 重连时能即时反映，不丢焦点
+    expect(wrapper.findComponent(AcpSessionConfig).exists()).toBe(true);
+
+    await toggle.trigger("click");
+    expect(wrapper.get('[data-testid="minimal-composer-config-toggle"]').attributes("aria-expanded")).toBe("true");
+
+    await toggle.trigger("click");
+    expect(wrapper.get('[data-testid="minimal-composer-config-toggle"]').attributes("aria-expanded")).toBe("false");
+  });
+
+  it("模型无值时摘要回落「跟随 CLI」占位", async () => {
+    const agent = useAgentStore();
+    agent.routeToAcp = true;
+    agent.acpConfigOptions = [{ id: "model", name: "Model", type: "select", currentValue: null, options: [] }];
+
+    const wrapper = mountComposer();
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="minimal-composer-config-toggle"]').text()).toContain("跟随 CLI");
+  });
+});
+
+describe("MinimalComposer 文本区自适应高度", () => {
+  it("内容变多时按 scrollHeight 撑高，超上限封顶；清空回落最小高度", async () => {
+    // happy-dom 不做布局，scrollHeight 恒为 0 —— 用属性桩给出可控的量高结果，只验证「取值口径」。
+    const wrapper = mountComposer();
+    const el = wrapper.get("textarea").element as HTMLTextAreaElement;
+    let fake = 68;
+    Object.defineProperty(el, "scrollHeight", { configurable: true, get: () => fake });
+
+    await wrapper.get("textarea").setValue("一行");
+    await nextTick();
+    expect(el.style.height).toBe("68px");
+
+    fake = 400; // 远超 176 上限 → 封顶，不允许输入卡无限长高把消息流挤没
+    await wrapper.get("textarea").setValue("长文本".repeat(40));
+    await nextTick();
+    expect(el.style.height).toBe("176px");
+
+    fake = 68;
+    await wrapper.get("textarea").setValue("");
+    await nextTick();
+    expect(el.style.height).toBe("68px");
+  });
+
+  it("外部改草稿（如建议卡填入 / 取回待发）也触发重算，不只监听 input", async () => {
+    const wrapper = mountComposer();
+    const el = wrapper.get("textarea").element as HTMLTextAreaElement;
+    Object.defineProperty(el, "scrollHeight", { configurable: true, get: () => 132 });
+
+    await wrapper.setProps({ modelValue: "外部填入的草稿" });
+    await nextTick();
+    expect(el.style.height).toBe("132px");
+  });
 });
 
 describe("MinimalComposer 配置下拉", () => {
@@ -115,23 +194,17 @@ describe("MinimalComposer 配置下拉", () => {
     wrapper.unmount();
   });
 
-  it("Agent 胶囊：Local 走 switchToLocalLlm，ACP 后端走 activateAcpProvider", async () => {
+  it("Agent 胶囊：选择 ACP 后端走 activateAcpProvider（不再提供 Local 项）", async () => {
     const agent = useAgentStore();
     agent.agentProviders = [{ id: "codex", name: "Codex", kind: "acp", command: "codex", enabled: true }];
-    const localSpy = vi.spyOn(agent, "switchToLocalLlm").mockResolvedValue(undefined);
     const activateSpy = vi.spyOn(agent, "activateAcpProvider").mockResolvedValue(null);
 
     const wrapper = mountComposer();
     await wrapper.get('[data-testid="minimal-composer-agent"]').trigger("click");
     await flushPromises();
     expect(document.body.textContent).toContain("Codex");
+    expect(document.body.querySelector('[data-testid="minimal-agent-local"]')).toBeNull();
 
-    await menuItem("minimal-agent-local").trigger("click");
-    await flushPromises();
-    expect(localSpy).toHaveBeenCalledTimes(1);
-
-    await wrapper.get('[data-testid="minimal-composer-agent"]').trigger("click");
-    await flushPromises();
     await menuItem("minimal-agent-codex").trigger("click");
     await flushPromises();
     expect(activateSpy).toHaveBeenCalledWith("codex");

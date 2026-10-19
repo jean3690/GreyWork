@@ -6,7 +6,7 @@
  * 每段思考各自折叠，工具批次就地展开细节。没有 segments 的消息（历史档 / 纯文本回复）
  * 退化为一段正文，不需要单独一套渲染路径。
  */
-import { computed, ref } from "vue";
+import { computed, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import MarkdownText from "@/features/shared/MarkdownText.vue";
 import ArtifactCards from "@/features/activity/ArtifactCards.vue";
@@ -19,6 +19,7 @@ import AutomationConfirmCard from "@/features/conversation/AutomationConfirmCard
 import PermissionCard from "@/features/conversation/PermissionCard.vue";
 import Icon from "@/features/shared/Icon.vue";
 import Hint from "@/features/shared/Hint.vue";
+import { copyText } from "@/lib/clipboard";
 import { appEvents } from "@/events";
 import { useAgentStore } from "@/stores/agent";
 import { useChatStore } from "@/stores/chat";
@@ -29,8 +30,9 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/compone
 import type { Attachment, MessageSegment, ThreadMessage, ToolActivity } from "@/types";
 
 const props = withDefaults(defineProps<{ message: ThreadMessage; threadId?: string }>(), { threadId: "" });
-/** 点作者头像/名：群聊时间线据此打开该成员的完整会话（1:1 会话不设 authorId，不会触发）。 */
-const emit = defineEmits<{ authorClick: [authorId: string] }>();
+/** 点作者头像/名：群聊时间线据此打开该成员的完整会话（1:1 会话不设 authorId，不会触发）。
+ *  回退：只带快照的用户消息出现该键，交回 ConversationView 的确认弹层（快照恢复不归本组件）。 */
+const emit = defineEmits<{ authorClick: [authorId: string]; rewind: [message: ThreadMessage] }>();
 
 const { t } = useI18n();
 const agent = useAgentStore();
@@ -101,11 +103,32 @@ function activitiesOf(segment: Extract<MessageSegment, { kind: "tools" }>): Tool
 function timeLabel(ts: number): string {
   return new Date(ts).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
 }
+
+/* ===== 消息操作条（复制 / 回退）=====
+ * 此前这两个动作只挂在右键菜单里，可发现性差；现在常驻在时间戳旁（低对比、hover 提亮），
+ * 复制对两条角色都给，回退只给带回合起点快照的用户消息（判定与 ConversationView.canRewind 同源）。 */
+const copied = ref(false);
+let copiedTimer: number | undefined;
+
+async function copyBody(): Promise<void> {
+  if (!message.value.content) return;
+  await copyText(message.value.content);
+  copied.value = true;
+  window.clearTimeout(copiedTimer);
+  copiedTimer = window.setTimeout(() => (copied.value = false), 1500);
+}
+
+/** 可回退：带快照的用户消息，且当前没有回合在跑（跑着的时候回退会撞上工作区写入）。 */
+function canRewind(): boolean {
+  return message.value.role === "user" && Boolean(message.value.snapshotRef) && !turnActive.value;
+}
+
+onUnmounted(() => window.clearTimeout(copiedTimer));
 </script>
 
 <template>
   <!-- data-ctx/data-message-id：会话页的右键菜单靠它认出「右键的是哪条消息」（见 ConversationView）。 -->
-  <article class="flex flex-col" data-ctx="message" :data-message-id="message.id">
+  <article class="group/msg flex flex-col" data-ctx="message" :data-message-id="message.id">
     <!-- 作者行（群聊时间线专属）：头像 + 名，点开该作者的完整会话。user 侧右对齐。 -->
     <button
       v-if="author"
@@ -230,6 +253,37 @@ function timeLabel(ts: number): string {
            裁决后卡片消失，但记录留在消息流里，回看能知道当时批了什么。 -->
       <PermissionCard v-for="trace in message.permissions ?? []" :key="trace.toolCallId" :trace="trace" />
       <span class="text-[10px] text-dim2">{{ timeLabel(message.ts) }}</span>
+    </div>
+    <!-- 消息操作条：复制 / 回退（带快照的用户消息）。默认隐藏、hover 或键盘聚焦时浮现，
+         不占常驻视觉噪声；按钮仍是真按钮（focus-within 可达），不靠 hover 才能用。 -->
+    <div
+      v-if="message.content"
+      data-testid="message-actions"
+      class="mt-0.5 flex items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover/msg:opacity-100"
+      :class="message.role === 'user' ? 'mr-1 justify-end' : 'ml-0.5'"
+    >
+      <Hint :text="copied ? t('chat.messageCopied') : t('contextMenu.message.copyBody')" multiline>
+        <button
+          type="button"
+          data-testid="message-copy"
+          class="grid size-5 shrink-0 cursor-pointer place-items-center rounded-[calc(5px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          :aria-label="t('contextMenu.message.copyBody')"
+          @click="copyBody"
+        >
+          <Icon :name="copied ? 'check' : 'copy'" :size="12" />
+        </button>
+      </Hint>
+      <Hint v-if="canRewind()" :text="t('contextMenu.message.rewind')">
+        <button
+          type="button"
+          data-testid="message-rewind"
+          class="grid size-5 shrink-0 cursor-pointer place-items-center rounded-[calc(5px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel-2 hover:text-destructive focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          :aria-label="t('contextMenu.message.rewind')"
+          @click="emit('rewind', message)"
+        >
+          <Icon name="rotate-left" :size="12" />
+        </button>
+      </Hint>
     </div>
   </article>
   <!-- 浏览器态图片附件没有磁盘通道可开预览面板，用组件内灯箱兜底。

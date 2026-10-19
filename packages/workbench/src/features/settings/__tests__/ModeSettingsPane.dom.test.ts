@@ -22,8 +22,8 @@ beforeEach(() => {
   window.localStorage.clear();
   setActivePinia(createPinia());
   invokeMock.mockReset();
-  // 桌面态：isTauriRuntime() 看 window 上有没有 __TAURI_INTERNALS__。
-  (window as unknown as { __TAURI_INTERNALS__?: unknown }).__GREYWORK_RUNTIME__ = "server";
+  // 服务端态：runtimeMode() 读 window 上的 __GREYWORK_RUNTIME__。
+  (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = "server";
   i18n.global.locale.value = "zh-CN";
   invokeMock.mockImplementation(async (command: string) => (command === "worktree_list" ? [SNAPSHOT] : null));
 });

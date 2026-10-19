@@ -5,7 +5,7 @@ import type { MarketUiRegionContribution, CodePluginRuntime, DeclarativeValue, P
 import type { PluginPointerEvent } from "@/plugins/code-runtime";
 import { isPluginCapabilityGranted } from "@/plugins/runtime";
 import { attachScheduledClock, detachScheduledClock } from "@/plugins/scheduler";
-import { openPluginWindow } from "@/plugins/plugin-window";
+import { hasPluginWindowHost, openPluginWindow } from "@/plugins/plugin-window";
 import PluginRenderLoop from "@/features/plugins/PluginRenderLoop.vue";
 import Hint from "@/features/shared/Hint.vue";
 
@@ -47,8 +47,12 @@ const busyAction = ref<string | null>(null);
 const actionError = ref("");
 const pluginWindowBusy = ref(false);
 const pluginWindowError = ref("");
-/** 脱窗入口可见性：插件声明了 window 且「该插件」的 window.floating 已授权。 */
-const canFloat = computed(() => Boolean(props.windowDecl) && isPluginCapabilityGranted(props.pluginId, "window.floating"));
+/**
+ * 脱窗入口可见性：插件声明了 window、「该插件」的 window.floating 已授权、
+ * 且当前运行时真有悬浮窗宿主（桌面壳）。浏览器/纯服务端下 openPluginWindow 是
+ * no-op —— 入口直接不出现，而不是点了没反应。
+ */
+const canFloat = computed(() => Boolean(props.windowDecl) && isPluginCapabilityGranted(props.pluginId, "window.floating") && hasPluginWindowHost());
 
 async function openFloatingWindow(): Promise<void> {
   if (pluginWindowBusy.value) return;

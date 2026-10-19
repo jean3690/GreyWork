@@ -284,15 +284,15 @@ describe("buildTitlebarItems", () => {
       toggleSidebar: vi.fn(),
       togglePreview: vi.fn(),
       toggleWorkspace: vi.fn(),
-      toggleActivity: vi.fn(),
+      toggleTerminal: vi.fn(),
       newChat,
       openSettings: vi.fn(),
       previewAvailable: false,
       workspaceAvailable: true,
-      activityAvailable: false,
+      terminalAvailable: false,
     });
     expect(findItem(entries, "contextMenu.titlebar.togglePreview").disabled).toBe(true);
-    expect(findItem(entries, "contextMenu.titlebar.toggleActivity").disabled).toBe(true);
+    expect(findItem(entries, "contextMenu.titlebar.toggleTerminal").disabled).toBe(true);
     expect(findItem(entries, "contextMenu.titlebar.toggleWorkspace").disabled).toBe(false);
     findItem(entries, "contextMenu.titlebar.newChat").onSelect();
     expect(newChat).toHaveBeenCalledOnce();

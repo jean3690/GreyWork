@@ -214,7 +214,7 @@ function confirmResetSources(): void {
         扫描工作区 <b>{{ skills.workspace?.dir ?? ".agents/skills" }}</b> 的磁盘源（外部 agent 手动放入的技能也会出现）。
         <template v-if="skills.workspace && !skills.workspace.root.bound">当前未绑定工作区，回落设置项 / 应用私有目录。</template>
         <template v-else-if="skills.workspace?.root.bound">已绑定当前工作区。</template>
-        <template v-if="!skills.hostAvailable">浏览器预览态只读：安装/卸载需要桌面版（Tauri）。</template>
+        <template v-if="!skills.hostAvailable">浏览器预览态只读：安装/卸载需要桌面版。</template>
       </p>
 
       <p v-if="skills.installedError" class="mb-2 text-[11px] text-destructive">{{ skills.installedError }}</p>

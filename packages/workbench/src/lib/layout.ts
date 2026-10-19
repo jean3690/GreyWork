@@ -36,6 +36,12 @@ export const PREVIEW_TAB_BAR_HEIGHT = 34;
  */
 export const ACTIVITY_BAND_HEIGHT_PX = 220;
 
+/**
+ * 底部终端面板高度（含标题条）：固定高 + 输出区内部滚动；v1 不做拖拽调高。
+ * 比活动面板稍高，给命令输出多一点可视行数。收起 = 高度归零（过渡），内容保持挂载。
+ */
+export const TERMINAL_PANEL_HEIGHT_PX = 240;
+
 /** 左栏插件分组宿主最大高：超出内部滚动，防止单个高分组把会话历史压垮。 */
 export const SIDEBAR_REGIONS_MAX_HEIGHT_PX = 240;
 

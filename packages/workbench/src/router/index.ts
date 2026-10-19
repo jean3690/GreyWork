@@ -1,7 +1,9 @@
 import { createRouter, createWebHashHistory, type Router, type RouteRecordRaw } from "vue-router";
+import { currentFront } from "@/front/current";
+import type { FrontSpec } from "@/front/types";
 
 /**
- * GreyWork 外壳路由（hash 模式，兼容 Tauri 桌面端）。
+ * GreyWork 外壳路由（hash 模式，桌面端与 Web 端共用一份产物形态）。
  * 「一比一复刻」路径树：
  *   /guid           全新对话引导页
  *   /conversation/  单 Agent 对话（历史会话）
@@ -12,22 +14,21 @@ import { createRouter, createWebHashHistory, type Router, type RouteRecordRaw } 
  *
  * 设置不是路由：它是 Shell 持有的弹窗（components/SettingsDialog.vue），状态不进 URL。
  *
+ * **路由表由前端声明拼装**（`front.features[].routes`），这里只留两条外壳约定：
+ * 根路径重定向与兜底重定向。某个前端不启用某特性，它的路由就不存在 —— 于是深链接进来
+ * 会落到兜底（`/guid`），而不是渲染一个该前端根本不该有的页面。
+ *
  * 视图全部懒加载：ConversationView 的对话 store 链会把 ExcelJS / pptxgenjs /
  * jszip 焊进出入口 chunk，让从不产表格/幻灯的用户在开屏就解析这几百 KB 写入器。
+ *
+ * `front` 缺省取当前前端，因此既有调用方（含测试）不带参时行为与拆分前一致。
  */
-export function createAppRouter(): Router {
+export function createAppRouter(front: FrontSpec = currentFront()): Router {
   const routes: RouteRecordRaw[] = [
+    // 落地页是外壳约定，不是某个特性的一部分 —— 但**它假定 guid 特性在场**：
+    // 不带 guid 的前端必须自己决定落到哪（见 FrontSpec 的说明）。
     { path: "/", redirect: "/guid" },
-    { path: "/guid", component: () => import("@/features/guid/GuidView.vue") },
-    { path: "/conversation/:conversationId?", component: () => import("@/features/conversation/ConversationView.vue") },
-    { path: "/assistants", component: () => import("@/features/assistants/AssistantsView.vue") },
-    // 远程通道的单联系人会话页（微信那侧的对端在左、本机回复在右）
-    { path: "/remote/:peerId", component: () => import("@/features/channels/RemoteConversationView.vue") },
-    { path: "/scheduled", component: () => import("@/features/automation/AutomationView.vue") },
-    { path: "/team", component: () => import("@/features/team/TeamView.vue") },
-    { path: "/plugin/:modeId", component: () => import("@/features/plugins/PluginView.vue") },
-    // 插件悬浮窗口内容（透明置顶小窗加载 #/plugin-window；Shell 按 meta.bare 只出 router-view）。
-    { path: "/plugin-window", component: () => import("@/features/plugins/PluginWindowView.vue"), meta: { bare: true } },
+    ...front.features.flatMap((feature) => feature.routes ?? []),
     { path: "/:pathMatch(.*)*", redirect: "/guid" },
   ];
 

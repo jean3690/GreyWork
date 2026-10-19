@@ -33,7 +33,7 @@ export const worktreeBackend = {
 
   /** 释放（删除）一个快照目录。宿主侧只接受 `~/.greyWork/worktrees` 之下的路径。 */
   async release(root: string): Promise<void> {
-    if (!hasHostCommands()) throw new Error("浏览器预览态无法释放隔离快照：需要桌面版（Tauri）");
+    if (!hasHostCommands()) throw new Error("浏览器预览态无法释放隔离快照：需要桌面版");
     await invoke("worktree_release", { root });
   },
 
@@ -42,13 +42,13 @@ export const worktreeBackend = {
    * 只对 git 隔离快照（kind=git）有效；其余情况宿主直接报错，调用方按「无快照」处理。
    */
   async snapshot(root: string): Promise<string> {
-    if (!hasHostCommands()) throw new Error("浏览器预览态无法做工作区快照：需要桌面版（Tauri）");
+    if (!hasHostCommands()) throw new Error("浏览器预览态无法做工作区快照：需要桌面版");
     return await invoke<string>("worktree_snapshot", { root });
   },
 
   /** 把工作区硬回退到某个快照 ref（严格等于快照：快照之后新建的文件会被删除）。 */
   async restore(root: string, reference: string): Promise<void> {
-    if (!hasHostCommands()) throw new Error("浏览器预览态无法回退工作区：需要桌面版（Tauri）");
+    if (!hasHostCommands()) throw new Error("浏览器预览态无法回退工作区：需要桌面版");
     await invoke("worktree_restore", { root, reference });
   },
 };

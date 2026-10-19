@@ -2,12 +2,19 @@
 /* shadcn-vue 组件的弹层动效（animate-in/out、fade-in-0、zoom-in-95、slide-in-*）。 */
 @import "tw-animate-css";
 
-/* Tailwind v4 entry for @omniforge/desktop (Tauri webview).
-   Preflight intentionally omitted (theme + utilities only) to avoid resetting
-   Naive UI base styles. @source scans workspace package source so utilities work
-   inside shared packages too. */
-@source "../../../packages/*/src/**/*.{vue,ts,js}";
+/* Tailwind v4 入口 —— **所有前端共用这一份**：各 app 的 main.ts 都 import
+   `@greywork/workbench/tailwind.css`。
+
+   原先住在 apps/desktop/src/tailwind.css。多前端之后各端各留一份，就是把这 120 行主题令牌
+   （--radius 派生链、chrome 色族、动效基线、视口高度链）复制 N 份，必然漂移。它跟着组件源码
+   一起住在 workbench 里，下面几条 @source 也就指回本包与各 app。
+
+   Preflight 仍是刻意省略的（只出 theme + utilities），免得重置 Naive UI 的基础样式。
+   ⚠️ @source 的基准是**本文件所在目录**（tailwind v4 的规则），不是各 app 的 vite root ——
+   所以这几条写的是「从这里出发」的相对路径。 */
 @source "./**/*.{vue,ts,js}";
+@source "../../../packages/*/src/**/*.{vue,ts,js}";
+@source "../../../apps/*/src/**/*.{vue,ts,js}";
 
 /* shadcn 组件里的 dark: 变体对齐本项目的外观机制。
    Tailwind v4 默认把 dark: 解析成 prefers-color-scheme，而本项目的明暗由

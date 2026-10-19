@@ -11,8 +11,8 @@ const invokeMock = vi.mocked((await import("@greywork/host-ipc")).invoke);
 import { clearWebArticleCache, extractReadable, fetchArticle, getCachedArticle, normalizeUrl } from "@/lib/web-fetch";
 
 beforeEach(() => {
-  // DOMParser 来自真实 window，这里只补 Tauri 运行时标记（不能用 stubGlobal 换掉 window）
-  (window as unknown as { __TAURI_INTERNALS__?: unknown }).__GREYWORK_RUNTIME__ = "server";
+  // DOMParser 来自真实 window，这里只补运行时标记（不能用 stubGlobal 换掉 window）
+  (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = "server";
   clearWebArticleCache();
   invokeMock.mockReset();
 });

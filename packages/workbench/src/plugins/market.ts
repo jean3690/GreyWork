@@ -5,6 +5,7 @@ import { createWorkerCodePluginRuntime, type CodePluginRuntime, type CodePluginR
 import { clearDeclarativePluginState } from "./declarative-state";
 import type { InstalledPluginPackage, MarketPluginManifest, PluginInstallReport, PluginRegistryEntry } from "./market-types";
 import {
+  activateRegisteredPluginFromArchive,
   clearPluginCapabilityGrants,
   isPluginEnabled,
   pluginManifests,
@@ -138,6 +139,8 @@ function registerInstalled(packages: readonly InstalledPluginPackage[]): void {
     try {
       registerPlugin(adaptInstalledPlugin(pluginPackage, runtime));
       registeredInstalledIds.add(id);
+      // 清单与 boot 并发：boot 之后才注册的插件按启停存档补激活（boot 之前注册的由 wanted 集覆盖）。
+      void activateRegisteredPluginFromArchive(id);
     } catch (error) {
       runtime?.dispose();
       codeRuntimes.delete(id);

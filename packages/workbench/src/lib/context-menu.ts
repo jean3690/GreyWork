@@ -288,13 +288,13 @@ export interface TitlebarMenuActions {
   toggleSidebar: () => void;
   togglePreview: () => void;
   toggleWorkspace: () => void;
-  toggleActivity: () => void;
+  toggleTerminal: () => void;
   newChat: () => void;
   openSettings: () => void;
   /** 面板可用性 / 折叠态：不可用的面板项直接禁用（与标题栏按钮的显隐同源）。 */
   previewAvailable: boolean;
   workspaceAvailable: boolean;
-  activityAvailable: boolean;
+  terminalAvailable: boolean;
 }
 
 export function buildTitlebarItems(t: Translate, actions: TitlebarMenuActions): ContextMenuItem[] {
@@ -302,7 +302,7 @@ export function buildTitlebarItems(t: Translate, actions: TitlebarMenuActions): 
     item(t("contextMenu.titlebar.toggleSidebar"), actions.toggleSidebar, { icon: "sidebar" }),
     item(t("contextMenu.titlebar.togglePreview"), actions.togglePreview, { icon: "sidebar", disabled: !actions.previewAvailable }),
     item(t("contextMenu.titlebar.toggleWorkspace"), actions.toggleWorkspace, { icon: "folder", disabled: !actions.workspaceAvailable }),
-    item(t("contextMenu.titlebar.toggleActivity"), actions.toggleActivity, { icon: "up", disabled: !actions.activityAvailable }),
+    item(t("contextMenu.titlebar.toggleTerminal"), actions.toggleTerminal, { icon: "terminal", disabled: !actions.terminalAvailable }),
     separator(),
     item(t("contextMenu.titlebar.newChat"), actions.newChat, { icon: "plus" }),
     item(t("contextMenu.titlebar.openSettings"), actions.openSettings, { icon: "setting" }),

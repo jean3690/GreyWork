@@ -32,6 +32,15 @@ export function setPluginWindowHostForTest(next: PluginWindowHost | null): void 
   hostOverride = next;
 }
 
+/**
+ * 当前运行时是否存在可用的悬浮窗宿主（桌面壳或测试注入）。
+ * UI 面据此决定「弹出桌面」入口是否出现 —— 纯服务端/浏览器下 openPluginWindow 是静默 no-op，
+ * 按钮留着只会让用户点了没反应；入口本就不该出现（对标 notify 无壳不注册传输的约定）。
+ */
+export function hasPluginWindowHost(): boolean {
+  return hostOverride !== null || hostPlugins() !== null;
+}
+
 export async function openPluginWindow(pluginId: string): Promise<void> {
   const host = await resolveHost();
   if (!host) return;

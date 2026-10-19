@@ -5,13 +5,15 @@ import { createCapabilityLoader } from "@/plugins/loader";
 import { setCapabilityLoaderForTest } from "@/plugins/current";
 import { resetPluginRuntime } from "@/plugins/runtime";
 import { adaptInstalledPlugin } from "@/plugins/declarative";
+import { hasPluginWindowHost, setPluginWindowHostForTest } from "@/plugins/plugin-window";
 import type { DeclarativeValue, InstalledPluginPackage } from "@/plugins/market-types";
 
 /**
  * 脱窗能力（window.floating）UI 面：
  * - 适配层把 window 声明传给区域宿主；
- * - 「弹出桌面」按钮仅在插件声明 window 且能力已授权时出现；
- * - 未授权时按钮隐藏（门禁先于命令）。
+ * - 「弹出桌面」按钮仅在插件声明 window、能力已授权且**存在悬浮窗宿主**时出现；
+ * - 未授权时按钮隐藏（门禁先于命令）；无宿主（浏览器/纯服务端）同样隐藏 ——
+ *   openPluginWindow 在那两种运行时是静默 no-op，入口不该出现。
  */
 
 const windowPluginPackage: InstalledPluginPackage = {
@@ -64,23 +66,29 @@ function mountRegion(pluginPackage: InstalledPluginPackage) {
 
 const wrappers: ReturnType<typeof mount>[] = [];
 
+const stubWindowHost = { open: vi.fn(async (): Promise<void> => undefined), close: vi.fn(async (): Promise<void> => undefined) };
+
 beforeEach(() => {
   window.localStorage.clear();
   setActivePinia(createPinia());
   setCapabilityLoaderForTest(createCapabilityLoader());
   resetPluginRuntime();
+  // happy-dom 无 Electron 桥：默认「无悬浮窗宿主」。需要按钮出现的用例自行注入桩。
+  setPluginWindowHostForTest(null);
 });
 
 afterEach(() => {
   for (const w of wrappers) w.unmount();
   wrappers.length = 0;
   setCapabilityLoaderForTest(null);
+  setPluginWindowHostForTest(null);
   resetPluginRuntime();
   window.localStorage.clear();
 });
 
 describe("window.floating 脱窗门禁", () => {
-  it("声明 window + 授权后，区域宿主显示「弹出桌面」按钮", async () => {
+  it("声明 window + 授权 + 有悬浮窗宿主：区域宿主显示「弹出桌面」按钮", async () => {
+    setPluginWindowHostForTest(stubWindowHost);
     const { bootPlugins, grantPluginCapability } = await import("@/plugins/runtime");
     await bootPlugins();
     grantPluginCapability("demo.pet", "window.floating");
@@ -91,7 +99,19 @@ describe("window.floating 脱窗门禁", () => {
     expect(wrapper.find('[data-testid="plugin-window-open-demo.pet"]').exists()).toBe(true);
   });
 
+  it("声明 window + 授权，但无悬浮窗宿主（浏览器/纯服务端）：按钮同样不出现", async () => {
+    expect(hasPluginWindowHost()).toBe(false);
+    const { bootPlugins, grantPluginCapability } = await import("@/plugins/runtime");
+    await bootPlugins();
+    grantPluginCapability("demo.pet", "window.floating");
+    const { component } = mountRegion(windowPluginPackage);
+    const wrapper = mount(component);
+    wrappers.push(wrapper);
+    expect(wrapper.find('[data-testid="plugin-window-open-demo.pet"]').exists()).toBe(false);
+  });
+
   it("授权只按插件隔离：给别的插件授权不放行本插件的脱窗按钮", async () => {
+    setPluginWindowHostForTest(stubWindowHost);
     const { bootPlugins, grantPluginCapability } = await import("@/plugins/runtime");
     await bootPlugins();
     grantPluginCapability("demo.other", "window.floating");

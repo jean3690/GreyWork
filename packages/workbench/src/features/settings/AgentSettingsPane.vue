@@ -599,8 +599,8 @@ async function removeAgentDraft(): Promise<void> {
         </div>
       </div>
       <p class="mt-2 text-[11px] text-dim2">
-        启用后出现在发送条上方的后端选择胶囊；停用当前后端会自动切回 Local。标「首次启动下载」的后端由 npx 按需拉取，无需预装。＋
-        新增后端可填任意 ACP 启动命令（如
+        勾选即启用：只有已启用的后端才会出现在发送条上方的 ACP 选择条里，未启用的会从选择条隐藏。停用当前后端会自动切回
+        Local。标「首次启动下载」的后端由 npx 按需拉取，无需预装。＋ 新增后端可填任意 ACP 启动命令（如
         <code class="font-mono">my-agent acp</code>
         ）；自配后端仅限本机已安装的程序，含 shell 元字符的命令会被宿主拒绝。每行的图标可随时点开更换（预设后端也可换），图标只影响展示。
       </p>

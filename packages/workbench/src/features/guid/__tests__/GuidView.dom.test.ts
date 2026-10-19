@@ -23,25 +23,18 @@ beforeEach(() => {
 });
 
 describe("GuidView", () => {
-  it("渲染输入卡与运行模式指示", async () => {
+  it("渲染精简输入卡", async () => {
     const { wrapper } = await mountGuid();
+    expect(wrapper.find('[data-testid="minimal-composer"]').exists()).toBe(true);
     expect(wrapper.find('textarea[aria-label="发送消息"]').exists()).toBe(true);
-    expect(wrapper.text()).toContain("发送");
-    expect(wrapper.text()).toContain("运行环境：本地");
   });
 
-  it("配置选择独占输入框下方一行，不与发送按钮同级", async () => {
+  it("输入卡：附件入口在左、发送键在右（各带自己的 testid，别用「第几个 button」定位）", async () => {
     const { wrapper } = await mountGuid();
-    const textarea = wrapper.get('textarea[aria-label="发送消息"]');
-    const configRow = wrapper.get('[data-testid="composer-config-row"]');
-    const actionRow = wrapper.get('[data-testid="composer-action-row"]');
-
-    expect(textarea.element.nextElementSibling).toBe(configRow.element);
-    expect(configRow.element.nextElementSibling).toBe(actionRow.element);
-    expect(configRow.find("button").exists()).toBe(false);
-    // 操作行左侧是附件入口，发送按钮在右侧（各带自己的 testid，别用「第几个 button」定位）
-    expect(actionRow.find('[data-testid="composer-attach"]').exists()).toBe(true);
-    expect(actionRow.get('[data-testid="composer-send"]').text()).toContain("发送");
+    const card = wrapper.get('[data-testid="minimal-composer"]');
+    expect(card.find('textarea[aria-label="发送消息"]').exists()).toBe(true);
+    expect(card.find('[data-testid="minimal-composer-attach"]').exists()).toBe(true);
+    expect(card.get('[data-testid="minimal-composer-send"]').attributes("aria-label")).toBe("发送");
   });
 
   it("输入后回车：建新会话、落下用户消息、跳到该会话", async () => {

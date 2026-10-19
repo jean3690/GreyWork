@@ -2,8 +2,17 @@ import { createApp, nextTick } from "vue";
 import { createPinia } from "pinia";
 import { hostWindow, initRuntimeMode } from "@greywork/host-ipc";
 import App from "./App.vue";
-import { bootInstalledMarketPlugins, createAppRouter, i18n, initDeviceTier, loadHostSystem } from "@greywork/workbench";
-import "./tailwind.css";
+import {
+  ALL_FEATURES_FRONT,
+  bootInstalledMarketPlugins,
+  createAppRouter,
+  i18n,
+  initDeviceTier,
+  loadHostSystem,
+  setFront,
+} from "@greywork/workbench";
+// Tailwind 入口是**全仓共享**的那一份（主题令牌只此一处，见 workbench/src/tailwind.css）。
+import "@greywork/workbench/tailwind.css";
 
 /* ===== 启动基线打点 =====
  * 起点 `gw:entry` 在 index.html 的同步脚本里（入口模块解析求值之前），这里补齐后续各点，
@@ -76,6 +85,12 @@ async function bootstrap(): Promise<void> {
   await initRuntimeMode();
 
   mark("mountStart");
+  // 前端身份必须在 mount 之前落地：路由表与外壳接线都在 setup / mount 期同步读它。
+  // 桌面端要的是「全部特性」那一个集合，这里**显式**声明而不是吃 `currentFront()` 的缺省 ——
+  // 缺省值服务于「不关心是哪一端」的测试与无参调用（25 处 createAppRouter / 3 处 buildNavItems），
+  // 让生产入口也搭它的便车，等于把「缺省恰好等于桌面」变成一个没人写下来的约定：
+  // S4 加 apps/web 时若谁把缺省改窄，桌面端会静默跟着变瘦。声明在哪一端是哪一个，是这一端的事。
+  setFront(ALL_FEATURES_FRONT);
   const app = createApp(App).use(i18n).use(createPinia()).use(createAppRouter());
   app.mount("#app");
   mark("mounted");

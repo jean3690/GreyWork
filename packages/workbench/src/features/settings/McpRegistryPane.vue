@@ -137,7 +137,7 @@ function onOpenChange(next: boolean): void {
           v-if="!hostAvailable"
           class="rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2.5 py-1.5 text-[11px] leading-relaxed text-dim2"
         >
-          浏览器预览态无宿主命令，官方 Registry 浏览需要桌面版（Tauri）。
+          浏览器预览态无宿主命令，官方 Registry 浏览需要桌面版。
         </p>
         <p v-else-if="error" class="text-[11px] text-destructive">{{ error }}</p>
         <p v-else-if="searched && results.length === 0 && !searching" class="px-1 text-[11px] text-dim2">没有匹配的服务器。</p>

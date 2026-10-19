@@ -91,10 +91,10 @@ describe("ConversationView · ACP 回合阶段可见性", () => {
     expect(agentStore.routeToAcp).toBe(true);
 
     agentStore.dispatchToAcp("你好");
-    // 阶段一：正文与思考都未开始 → 「正在思考…」占位 + 底栏「处理中…」
+    // 阶段一：正文与思考都未开始 → 「正在思考…」占位 + 输入卡的忙碌指示（转圈）
     await vi.waitFor(() => {
       expect(wrapper.text()).toContain("正在思考…");
-      expect(wrapper.text()).toContain("处理中…");
+      expect(wrapper.find('[data-testid="minimal-composer-busy"]').exists()).toBe(true);
     });
 
     // 阶段二：思考增量到达 → 占位消失、当前思考段自动展开可见推理

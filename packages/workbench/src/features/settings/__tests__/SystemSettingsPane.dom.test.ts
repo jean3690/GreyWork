@@ -39,7 +39,7 @@ beforeEach(() => {
   window.localStorage.clear();
   setActivePinia(createPinia());
   invokeMock.mockReset();
-  (window as unknown as { __TAURI_INTERNALS__?: unknown }).__GREYWORK_RUNTIME__ = "server";
+  (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = "server";
   i18n.global.locale.value = "zh-CN";
 });
 

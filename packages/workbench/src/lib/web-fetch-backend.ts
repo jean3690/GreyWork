@@ -20,7 +20,7 @@ export const webFetchBackend = {
 
   async fetch(url: string): Promise<WebFetchResult> {
     if (!hasHostCommands()) {
-      throw new Error("web fetch requires the desktop runtime (Tauri host)");
+      throw new Error("web fetch requires the desktop runtime (host)");
     }
     return invoke<WebFetchResult>("web_fetch", { request: { url } });
   },

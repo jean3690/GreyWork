@@ -9,20 +9,15 @@ import { useSettingsStore } from "@/stores/settings";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { usePreviewStore } from "@/stores/preview";
 import { useWorkspacePanelStore } from "@/stores/workspacePanel";
-import { useActivityStore } from "@/stores/activity";
+import { useTerminalStore } from "@/stores/terminal";
 import { useLayoutStore } from "@/stores/layout";
-import { useRemoteAssistantStore } from "@/stores/remote-assistant";
 import { appEvents } from "@/events";
-import { i18n } from "@/i18n";
 import { applyAppearance as applyAppearanceToDom } from "@/lib/theme";
 import { modeOfShortcut, visibilityOf, type LayoutMode } from "@/lib/layout-modes";
-import { syncCloseToTray, syncTrayLabels, useTrayBridge, type TrayLabels } from "@/lib/tray-bridge";
-import { useCloseGuard } from "@/lib/close-guard";
-import { useHostNotifications } from "@/lib/host-notifications";
-import { useQueueBridge } from "@/lib/queue-bridge";
 import { hasDirtyPreviewTabs, pendingDiscard, requestLeave } from "@/lib/preview-edit-guard";
-import { bootPlugins } from "@/plugins/runtime";
-import Sider from "@/features/shell/Sider.vue";
+import { terminalBackend } from "@/lib/terminal-backend";
+import { currentFront } from "@/front/current";
+import { SHELL_WIRINGS, type ShellWiringContext } from "@/features/shell/wiring";
 import MinimalSider from "@/features/shell/MinimalSider.vue";
 import Titlebar from "@/features/shell/Titlebar.vue";
 import NoticeHost from "@/features/shell/NoticeHost.vue";
@@ -31,16 +26,16 @@ import WorkspaceOverlayRegions from "@/features/shell/WorkspaceOverlayRegions.vu
 
 /**
  * 首屏不渲染的四块改成异步组件：它们整棵子树（设置面含全部设置分区、预览外壳、
- * 文件树、底部活动带）原本被静态 import 焊进入口 chunk，白白让首帧多下约 47 KiB gzip。
+ * 文件树、终端面板）原本被静态 import 焊进入口 chunk，白白让首帧多下约 47 KiB gzip。
  * 实测入口 810 KiB → 645 KiB raw（254 → 207 KiB gzip）。
  *
  * 桌面端 chunk 从本地文件加载、落地是毫秒级；设置是「点开才用」的模态，
- * 右栏/活动带也都在 mount 之后才由 store 打开，因此首次渲染并不同步依赖它们。
+ * 右栏/终端也都在 mount 之后才由 store 打开，因此首次渲染并不同步依赖它们。
  */
 const SettingsDialog = defineAsyncComponent(() => import("@/features/settings/SettingsDialog.vue"));
 const PreviewSider = defineAsyncComponent(() => import("@/features/preview/PreviewSider.vue"));
 const WorkspacePanel = defineAsyncComponent(() => import("@/features/workspace/WorkspacePanel.vue"));
-const ActivityBand = defineAsyncComponent(() => import("@/features/activity/ActivityBand.vue"));
+const TerminalPanel = defineAsyncComponent(() => import("@/features/terminal/TerminalPanel.vue"));
 
 /**
  * GreyWork 风格外壳：标题栏 + 左侧栏 + 内容区（router-view）+ 右侧预览面板。
@@ -63,50 +58,26 @@ const sessionStore = useSessionStore();
 const workspaceStore = useWorkspaceStore();
 const preview = usePreviewStore();
 const workspace = useWorkspacePanelStore();
-const activity = useActivityStore();
+const terminal = useTerminalStore();
 const layout = useLayoutStore();
 
 /**
- * 极简模式开关（见 stores/layout 的 `minimal`）：换一整套精简外壳 —— 极简顶栏 + 瘦身侧栏。
- * 预览面板保留（顶栏有右栏开合键），工作区栏 / 活动带整体不渲染。
+ * 本前端的外壳声明：装哪几条宿主接线、渲染哪几块面板（见 front/types.ts）。
+ * 在这里读一次就定下 —— 入口必须在 mount 前 setFront，到 setup 期它不会再变。
+ *
+ * `panels` 同时是视口判断的**上界**（见 syncViewport）：视口只能再往回收，
+ * 不能打开一块该前端根本没有的面板。
  */
-const minimal = computed(() => layout.minimal);
-
-function toggleMinimal(): void {
-  layout.setMinimal(!layout.minimal);
-}
+const front = currentFront();
+const shellSpec = front.shell;
 
 /**
- * 进极简时把预览面板收起来（极简默认干净），退出时还原进极简前的折叠态。
- *
- * 只记「进极简那一刻的值」并在退出时还回去，不落盘、不动别的面板 —— 这样极简的开关
- * 对预览面板是幂等的（进来干净、出去回到原样），也不会污染用户的持久化偏好。
- *
- * `flush: "sync"` 是必须的：Ctrl+1..4 会先退出极简、紧接着 applyLayoutMode 拨预览，
- * 两者在同一 tick 内。异步 flush 的话这个还原动作会排在 applyLayoutMode 之后，把刚拨好的
- * 档位覆盖掉；同步 flush 保证「先还原、后按档位设定」的顺序。
+ * 外壳接线按声明装配。`setup` 期这一段不能挪进 onMounted：队列桥要在 store 触发补发之前
+ * 就位（见 features/shell/wiring.ts）。unmount 时统一调用 mount 返回的解绑函数。
  */
-let previewCollapsedBeforeMinimal: boolean | null = null;
-watch(
-  minimal,
-  (on) => {
-    if (on) {
-      previewCollapsedBeforeMinimal = preview.collapsed;
-      preview.setCollapsed(true);
-      return;
-    }
-    if (previewCollapsedBeforeMinimal !== null) {
-      preview.setCollapsed(previewCollapsedBeforeMinimal);
-      previewCollapsedBeforeMinimal = null;
-    }
-  },
-  { flush: "sync" },
-);
-
-// 命令队列的补发要经 dispatchIntent 分流（否则 ACP 会话的待发指令会走本地 LLM）。
-// 与托盘桥 / 关闭守卫同为应用级接线，故挂在外壳；队列补发在 store 内触发，桥必须在
-// setup 期就位，所以这里同步调用而不是放进 onMounted。
-useQueueBridge();
+const wiringCtx: ShellWiringContext = { onNewChat: handleNewChat, openSettings };
+const wiringDisposers: (() => void)[] = [];
+for (const id of shellSpec.wiring) SHELL_WIRINGS[id].setup?.(wiringCtx);
 
 const darkMedia =
   typeof window !== "undefined" && typeof window.matchMedia === "function" ? window.matchMedia("(prefers-color-scheme: dark)") : null;
@@ -132,10 +103,14 @@ const isMobile = ref(false);
  * 有效态与偏好必须分开：窄屏下左栏是抽屉，开关都是瞬态的，写回偏好会让用户
  * 在窄屏开一次抽屉就把桌面的偏好改掉。所以只有桌面下才回写（见下面的 watch）。
  */
-const collapsed = ref(layout.sidebarCollapsed);
+// 初值也要带上前端门：没有侧栏的前端若先按偏好渲染出侧栏、等 syncViewport 在 mount 里
+// 才收起，中间那一帧就是一次可见的闪动。
+const collapsed = ref(!shellSpec.panels.sider || layout.sidebarCollapsed);
 
+// 没有侧栏的前端也要挡住回写：那种前端下 collapsed 恒为 true（见 syncViewport），
+// 放它回写等于每次启动都把用户存的偏好覆盖成「收起」。
 watch(collapsed, (value) => {
-  if (!isMobile.value) layout.sidebarCollapsed = value;
+  if (!isMobile.value && shellSpec.panels.sider) layout.sidebarCollapsed = value;
 });
 
 // 偏好也可能被别的入口改（标题栏的布局指示器会同时拨两个面板），要回灌到有效态。
@@ -204,25 +179,33 @@ function syncViewport(): void {
   isMobile.value = mobile;
   // 窄屏默认收起，让内容区拿满宽度；用户手动展开后交给 toggle 决定。
   // 从窄屏回到桌面时恢复偏好 —— 否则「我收起了左栏」这个偏好只在重启后才生效。
-  collapsed.value = mobile ? true : layout.sidebarCollapsed;
+  // 没有侧栏的前端恒收起（顶栏的开合键也不渲染，见模板）。
+  collapsed.value = !shellSpec.panels.sider || (mobile ? true : layout.sidebarCollapsed);
   // 右栏在窄屏不渲染。这个判断只在这里做一次，Titlebar 的开关按钮读同一个 store 字段，
   // 不再各自写一个断点（那正是 640–768px 之间「按钮可见但面板不存在」的来源）。
   // 但卸载前要先兜住未保存的编辑，见 collapsePreviewForNarrow。
-  if (mobile) {
+  //
+  // `shellSpec.panels` 是最外层的一道**上界**，不是与视口并列的条件：每次 resize 都重算，
+  // 所以前端约束必须在这里，否则「窄屏 → 拉回桌面」那一步会把它冲掉
+  //（表现为给 Web 端凭空展开一块它没有的预览栏）。
+  if (!shellSpec.panels.preview) {
+    preview.setAvailable(false);
+  } else if (mobile) {
     collapsePreviewForNarrow();
   } else {
     narrowDeferred = false;
     preview.setAvailable(true);
   }
-  workspace.setAvailable(!mobile);
-  // 底部活动面板与右栏同源同断点：产物点开进右栏预览，窄屏两条都没意义。
-  activity.setAvailable(!mobile);
+  workspace.setAvailable(shellSpec.panels.workspace && !mobile);
+  // 终端面板：前端声明 + 非窄屏 + 有宿主可跑命令（浏览器预览态没有宿主，整块不渲染）。
+  terminal.setAvailable(shellSpec.panels.terminal && !mobile && terminalBackend.supported());
 }
 
 /**
  * 全局快捷键与抽屉的键盘退路。
  *
- * - Ctrl/Cmd+N 新对话 · Ctrl/Cmd+B 折叠/展开侧栏 · Ctrl/Cmd+E 工作区栏 · Ctrl/Cmd+\ 预览面板。
+ * - Ctrl/Cmd+N 新对话 · Ctrl/Cmd+B 折叠/展开侧栏 · Ctrl/Cmd+E 工作区栏 · Ctrl/Cmd+\ 预览面板 ·
+ *   Ctrl/Cmd+` 终端面板。
  * - Ctrl/Cmd+1~4 布局模式（三栏 / 对话 / 文档 / 专注）—— 只是把上面两个开关一起拨到位，
  *   所以不存在「模式与面板状态不一致」的可能。按 event.code 匹配，见 lib/layout-modes.ts。
  *   集中注册在这一个函数里：以后要上命令面板时，把这些 key 挪进面板注册表即可。
@@ -239,14 +222,10 @@ function onWindowKeydown(event: KeyboardEvent): void {
       handleNewChat();
       return;
     }
-    // 极简模式下没有可拨的面板：单栏开关（B / E / \）变 no-op，避免拨一个不存在的面板。
-    if (minimal.value && (key === "b" || key === "e" || key === "\\")) {
-      event.preventDefault();
-      return;
-    }
     if (key === "b") {
       event.preventDefault();
-      collapsed.value = !collapsed.value;
+      // 没有侧栏的前端：快捷键 no-op（顶栏那个开合键也不渲染了，键盘不该留一条后门）。
+      if (shellSpec.panels.sider) collapsed.value = !collapsed.value;
       return;
     }
     if (key === "e") {
@@ -259,11 +238,15 @@ function onWindowKeydown(event: KeyboardEvent): void {
       if (preview.available) preview.toggle();
       return;
     }
+    // Ctrl/Cmd+` 终端面板。按 event.code 匹配（键盘布局差异）。
+    if (event.code === "Backquote") {
+      event.preventDefault();
+      if (terminal.available) terminal.toggle();
+      return;
+    }
     const layoutMode: LayoutMode | null = modeOfShortcut(event.code);
     if (layoutMode) {
       event.preventDefault();
-      // 布局档要求完整外壳在场：先退出极简，再拨到位（否则会卡在「有档位、无面板」的状态）。
-      if (minimal.value) layout.setMinimal(false);
       applyLayoutMode(layoutMode);
       return;
     }
@@ -308,60 +291,23 @@ function observeMainRow(): void {
 watch([() => workspace.collapsed, () => workspace.widthPx, () => preview.collapsed, () => preview.widthPx], () => syncReserves());
 
 /**
- * 「关闭到托盘」同步给宿主：宿主在 CloseRequested 里读它决定拦不拦（见 src-tauri/src/tray.rs）。
- * immediate 让默认 / 本地缓存值先落地；设置从 SQLite 水合完成后若真值不同会再触发一次，
- * 因此不会出现「偏好是关到托盘、宿主却按关闭即退出拦」的错配。
- *
- * 宿主还会再叠一道可用性钳制：托盘没建出来时这个偏好不生效（否则窗口藏起来没入口恢复）。
+ * 挂载后才有意义的事：视口同步、全局键盘、ResizeObserver，以及前端声明要装的那几条
+ * mount 期接线。「关闭到托盘」偏好与托盘菜单文案的同步不在这里 —— 它们与托盘桥同属
+ * `tray` 接线，已随 `features/shell/wiring.ts` 一起按声明装配。
  */
-watch(
-  () => settings.closeToTray,
-  (enabled) => void syncCloseToTray(enabled),
-  { immediate: true },
-);
-
-/**
- * 托盘菜单文案同步给宿主。宿主侧菜单是原生控件、不认 vue-i18n，所以每次切语言都要
- * 整份重推（见 src-tauri/src/tray.rs 的 set_tray_labels）。immediate 让启动时就落地，
- * 覆盖掉宿主构建菜单时用的那套占位文案。
- */
-function currentTrayLabels(): TrayLabels {
-  const t = i18n.global.t;
-  return {
-    toggleWindow: t("trayMenu.toggleWindow"),
-    newChat: t("trayMenu.newChat"),
-    settings: t("trayMenu.settings"),
-    quit: t("trayMenu.quit"),
-    hiddenHint: t("trayMenu.hiddenHint"),
-  };
-}
-watch(
-  () => i18n.global.locale.value,
-  () => void syncTrayLabels(currentTrayLabels()),
-  { immediate: true },
-);
-
-/** 托盘事件订阅的解绑函数（浏览器态是空函数）。 */
-let disposeTrayBridge: (() => void) | null = null;
-
 onMounted(() => {
   syncViewport();
   window.addEventListener("resize", syncViewport);
   window.addEventListener("keydown", onWindowKeydown);
   darkMedia?.addEventListener("change", syncSystemTheme);
   observeMainRow();
-  // 微内核接线：注册内置插件清单并激活（幂等，见 plugins/runtime）。
-  void bootPlugins();
-  // 远程助手：注册通道事件、按设置自动连接（幂等；浏览器态内部直接跳过）。
-  void useRemoteAssistantStore().init();
-  // 系统托盘：把菜单事件转成应用内动作（新建对话 / 打开设置）。宿主已先显示并聚焦窗口。
-  disposeTrayBridge = useTrayBridge({ onNewChat: handleNewChat, onOpenSettings: openSettings });
-  // 关窗 / 退出守卫：拦下「有未保存改动」的退出，交给预览那套先保存再走。
-  // 与托盘桥同为应用级接线，所以放在外壳而不是预览面板里；确认弹层的渲染点在
-  // PreviewSider（它持有 saver 注册表，见 lib/close-guard.ts）。
-  useCloseGuard();
-  // 服务端的 `host://notify` → 系统通知（Tauri 侧由 Rust 直接发，这里空转）。
-  useHostNotifications();
+  // 特性自己的启动（插件运行时 / 六条通道的监听注册）：只在启用了该特性的前端上跑。
+  for (const feature of front.features) void feature.setup?.();
+  // 外壳级接线里需要在挂载后才装的那几条（托盘 / 关窗守卫 / 系统通知）。
+  for (const id of shellSpec.wiring) {
+    const dispose = SHELL_WIRINGS[id].mount?.(wiringCtx);
+    if (dispose) wiringDisposers.push(dispose);
+  }
 });
 function syncSystemTheme(event: MediaQueryListEvent): void {
   systemDark.value = event.matches;
@@ -374,8 +320,9 @@ onBeforeUnmount(() => {
   darkMedia?.removeEventListener("change", syncSystemTheme);
   rowObserver?.disconnect();
   rowObserver = null;
-  disposeTrayBridge?.();
-  disposeTrayBridge = null;
+  // 接线解绑：mount 期返回的解绑函数逐个调用（托盘桥、关窗守卫订阅等）。
+  for (const dispose of wiringDisposers) dispose();
+  wiringDisposers.length = 0;
   unsubscribeSettingsOpen();
 });
 
@@ -419,31 +366,21 @@ function handleNewChat(): void {
   <div v-else class="flex size-full min-h-0 flex-col overflow-hidden bg-background" data-testid="shell">
     <Titlebar
       :collapsed="collapsed"
-      :show-sider-toggle="isMobile"
-      :minimal="minimal"
+      :show-sider-toggle="shellSpec.panels.sider"
       @toggle-sider="collapsed = !collapsed"
-      @toggle-minimal="toggleMinimal"
       @navigate="navigate"
       @new-chat="handleNewChat"
       @open-settings="openSettings"
     />
     <div class="relative flex min-h-0 flex-1 overflow-hidden">
-      <!-- 移动端展开的侧栏是抽屉：遮罩点击收起，侧栏悬浮于内容之上而非挤占宽度。
-           极简模式的侧栏同样按抽屉走（窄屏默认收起，靠顶栏左栏开合键拉出），故遮罩共用。 -->
+      <!-- 移动端展开的侧栏是抽屉：遮罩点击收起，侧栏悬浮于内容之上而非挤占宽度。 -->
       <div v-if="isMobile && !collapsed" class="absolute inset-0 z-30 bg-black/30" aria-hidden="true" @click="collapsed = true" />
-      <!-- 极简模式：瘦身侧栏（窄屏作抽屉悬浮；顶栏左栏开合键收起后整个隐去） -->
+      <!-- 侧栏（窄屏作抽屉悬浮；顶栏左栏开合键收起后整个隐去）。
+           两道门缺一不可：`panels.sider` 是前端声明（这个前端有没有侧栏），
+           `collapsed` 是用户当下的开合态。 -->
       <MinimalSider
-        v-if="minimal && !collapsed"
+        v-if="shellSpec.panels.sider && !collapsed"
         :overlay="isMobile"
-        @new-chat="handleNewChat"
-        @navigate="navigate"
-        @open-settings="openSettings"
-      />
-      <Sider
-        v-else-if="!minimal && (!isMobile || !collapsed)"
-        :collapsed="collapsed"
-        :overlay="isMobile"
-        @toggle-sider="collapsed = !collapsed"
         @new-chat="handleNewChat"
         @navigate="navigate"
         @open-settings="openSettings"
@@ -451,18 +388,17 @@ function handleNewChat(): void {
       <!-- [内容区 + 预览 + 工作区] 组成一列：上行为被观测的 mainRow（宽度是两个面板 clamp 的依据）。
            顺序 = 会话 | 预览 | 工作区：预览紧挨会话（看产物的心智最近），工作区（文件树）在最右。
            工作区栏默认折叠（回旧单右栏布局），展开与否由 workspace store 的持久化开关决定。
-           下行为底部活动面板通栏（ActivityBand 内部自管高度/折叠）。
-           极简模式：预览面板保留（顶栏有右栏开合键；进入极简时先收起，退出还原），
-           工作区栏 / 活动带整体不渲染。 -->
+           下行为底部终端面板通栏。 -->
       <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
         <div ref="mainRow" class="flex min-w-0 flex-1 overflow-hidden">
           <main class="min-w-0 flex-1 overflow-hidden bg-panel">
             <router-view />
           </main>
           <PreviewSider v-if="preview.available" />
-          <WorkspacePanel v-if="!minimal && workspace.available" />
+          <WorkspacePanel v-if="workspace.available" />
         </div>
-        <ActivityBand v-if="!minimal && activity.available" />
+        <!-- 终端面板：底部通栏，落在内容区之下。 -->
+        <TerminalPanel v-if="terminal.available" />
       </div>
     </div>
     <WorkspaceOverlayRegions />

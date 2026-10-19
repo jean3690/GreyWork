@@ -179,12 +179,12 @@ describe("标题栏侧栏开合键", () => {
     vi.unstubAllGlobals();
   });
 
-  it("桌面端不渲染 —— 侧栏顶部的品牌键已经在做同一件事，不重复摆两颗", async () => {
+  it("showSiderToggle 为假（前端声明自己没有侧栏）时不渲染 —— 不留一个点了没反应的按钮", async () => {
     const wrapper = await mountTitlebar();
     expect(wrapper.find('[data-testid="titlebar-sider-toggle"]').exists()).toBe(false);
   });
 
-  it("移动端渲染，点击 emit toggleSider，标签随折叠态在展开/折叠之间切换", async () => {
+  it("为真时渲染（桌面端也渲染：极简侧栏没有品牌开合键，这是唯一入口），点击 emit toggleSider，标签随折叠态切换", async () => {
     const wrapper = await mountTitlebar({ collapsed: true, showSiderToggle: true });
     const button = wrapper.get('[data-testid="titlebar-sider-toggle"]');
     expect(button.attributes("aria-label")).toBe("展开侧栏");
@@ -213,7 +213,7 @@ describe("标题栏窗口控制键隔离线", () => {
     vi.unstubAllGlobals();
   });
 
-  it("非 mac：隔离线排在最小化之前（挡住左侧的活动面板开关）", async () => {
+  it("非 mac：隔离线排在最小化之前（挡住左侧的面板开关簇）", async () => {
     const wrapper = await mountTitlebar();
     const divider = wrapper.get('[data-testid="win-controls-divider"]');
 
@@ -311,7 +311,7 @@ describe("标题栏工作区栏开关", () => {
   });
 });
 
-describe("标题栏活动面板开关", () => {
+describe("标题栏终端面板开关", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     window.localStorage.clear();
@@ -327,30 +327,30 @@ describe("标题栏活动面板开关", () => {
 
   it("视口可用时渲染开关，点击展开/收起并落盘", async () => {
     const wrapper = await mountTitlebar();
-    const { useActivityStore } = await import("@/stores/activity");
-    const activity = useActivityStore();
+    const { useTerminalStore } = await import("@/stores/terminal");
+    const terminal = useTerminalStore();
 
-    const button = wrapper.get('[data-testid="titlebar-activity-toggle"]');
-    expect(button.attributes("aria-label")).toBe("展开活动面板");
-    expect(activity.open).toBe(false);
+    const button = wrapper.get('[data-testid="titlebar-terminal-toggle"]');
+    expect(button.attributes("aria-label")).toBe("展开终端面板");
+    expect(terminal.open).toBe(false);
 
     await button.trigger("click");
-    expect(activity.open).toBe(true);
-    expect(wrapper.get('[data-testid="titlebar-activity-toggle"]').attributes("aria-label")).toBe("收起活动面板");
-    expect(window.localStorage.getItem("greywork.activity.band")).toBe('{"open":true,"active":null}');
+    expect(terminal.open).toBe(true);
+    expect(wrapper.get('[data-testid="titlebar-terminal-toggle"]').attributes("aria-label")).toBe("收起终端面板");
+    expect(window.localStorage.getItem("greywork.terminal")).toBe('{"open":true}');
 
-    await wrapper.get('[data-testid="titlebar-activity-toggle"]').trigger("click");
-    expect(activity.open).toBe(false);
-    expect(window.localStorage.getItem("greywork.activity.band")).toBe('{"open":false,"active":null}');
+    await wrapper.get('[data-testid="titlebar-terminal-toggle"]').trigger("click");
+    expect(terminal.open).toBe(false);
+    expect(window.localStorage.getItem("greywork.terminal")).toBe('{"open":false}');
   });
 
-  it("窄屏（活动面板不渲染）时开关一并消失", async () => {
+  it("宿主不可用（窄屏 / 浏览器预览态）时开关一并消失", async () => {
     const wrapper = await mountTitlebar();
-    const { useActivityStore } = await import("@/stores/activity");
-    useActivityStore().setAvailable(false);
+    const { useTerminalStore } = await import("@/stores/terminal");
+    useTerminalStore().setAvailable(false);
     await wrapper.vm.$nextTick();
 
-    expect(wrapper.find('[data-testid="titlebar-activity-toggle"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="titlebar-terminal-toggle"]').exists()).toBe(false);
   });
 });
 
@@ -403,10 +403,12 @@ describe("标题栏搜索", () => {
   });
 });
 
-// 极简模式顶栏：只保留拖拽区 + 窗口控制键 + 工作区胶囊 + 退出键，隐藏完整外壳的入口簇。
-describe("标题栏极简模式", () => {
+// 只有一个外壳：左入口簇（左栏开合 / 搜索 / GitHub / 更新）+ 面板簇（预览 / 工作区 / 终端）。
+// 逐键行为各有自己的 describe，这里只锁「整簇一起在场」这个形状。
+describe("标题栏入口簇", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
+    window.localStorage.clear();
     // 桌面态 = Electron 壳：hasWindowControls 读 bridge，hostWindow 已在模块级 mock。
     (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = "server";
     (window as unknown as Record<string, unknown>).__GREYWORK_SHELL__ = { window: { label: "main" } };
@@ -414,42 +416,25 @@ describe("标题栏极简模式", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    window.localStorage.clear();
   });
 
-  it("非极简：渲染完整入口簇 + 进入极简的按钮，点击 emit toggleMinimal", async () => {
-    const wrapper = await mountTitlebar();
+  it("左入口簇与面板簇都在；「进入 / 退出极简」这类开关已经不存在", async () => {
+    const wrapper = await mountTitlebar({ showSiderToggle: true });
 
+    expect(wrapper.find('[data-testid="titlebar-sider-toggle"]').exists()).toBe(true);
     expect(wrapper.find('[data-testid="titlebar-search"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="titlebar-github"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="titlebar-update"]').exists()).toBe(true);
     expect(wrapper.find('[data-testid="titlebar-panels"]').exists()).toBe(true);
-    expect(wrapper.find('[data-testid="titlebar-minimal-exit"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="titlebar-preview-toggle"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="titlebar-workspace-toggle"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="titlebar-terminal-toggle"]').exists()).toBe(true);
 
-    await wrapper.get('[data-testid="titlebar-minimal-enter"]').trigger("click");
-    expect(wrapper.emitted("toggleMinimal")).toHaveLength(1);
-  });
-
-  it("极简：隐藏搜索 / GitHub / 更新 / 面板簇，只留左栏开合 + 右栏开合 + 退出键与窗口控制键", async () => {
-    const wrapper = await mountTitlebar({ minimal: true });
-    const preview = usePreviewStore();
-
-    expect(wrapper.find('[data-testid="titlebar-search"]').exists()).toBe(false);
-    expect(wrapper.find('[data-testid="titlebar-github"]').exists()).toBe(false);
-    expect(wrapper.find('[data-testid="titlebar-update"]').exists()).toBe(false);
-    expect(wrapper.find('[data-testid="titlebar-panels"]').exists()).toBe(false);
-    expect(wrapper.find('[data-testid="titlebar-minimal-enter"]').exists()).toBe(false);
     // 拖拽区与窗口控制键不能丢（无边框窗口靠它们）
     expect(wrapper.get("header").attributes("data-tauri-drag-region")).toBeDefined();
     expect(wrapper.find('[data-testid="win-controls"]').exists()).toBe(true);
-
-    // 左栏开合：emit toggleSider（状态归 Shell）
-    await wrapper.get('[data-testid="titlebar-minimal-sider-toggle"]').trigger("click");
-    expect(wrapper.emitted("toggleSider")).toHaveLength(1);
-
-    // 右栏开合：直接拨预览 store
-    const before = preview.collapsed;
-    await wrapper.get('[data-testid="titlebar-minimal-preview-toggle"]').trigger("click");
-    expect(preview.collapsed).toBe(!before);
-
-    await wrapper.get('[data-testid="titlebar-minimal-exit"]').trigger("click");
-    expect(wrapper.emitted("toggleMinimal")).toHaveLength(1);
+    expect(wrapper.find('[data-testid="titlebar-minimal-enter"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="titlebar-minimal-exit"]').exists()).toBe(false);
   });
 });

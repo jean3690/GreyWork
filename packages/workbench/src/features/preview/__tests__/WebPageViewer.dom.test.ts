@@ -25,7 +25,7 @@ function stubHostHtml(html: string, finalUrl = "https://example.com/"): void {
 const ARTICLE_HTML = "<html><head><title>标题</title></head><body><article><p>正文段落</p></article></body></html>";
 
 beforeEach(() => {
-  (window as unknown as { __TAURI_INTERNALS__?: unknown }).__GREYWORK_RUNTIME__ = "server";
+  (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = "server";
   clearWebArticleCache();
   invokeMock.mockReset();
   setActivePinia(createPinia());

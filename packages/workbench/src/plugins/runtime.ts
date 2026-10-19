@@ -57,6 +57,19 @@ export const capabilityGrants = ref<Readonly<Record<string, readonly string[]>>>
 
 let booted = false;
 /**
+ * boot 完成门闩：`bootPlugins()` 落地（授权存档重放 + 内置激活 + 启停存档激活）后 resolve。
+ * 市场清单与外壳 mount 是**并发**的（见 main.ts），后到的注册要等这个门闩再按启停存档
+ * 补激活 —— 否则授权重放还没开始，能力门禁会把该激活的插件误拒。
+ */
+let bootGate = createDeferred();
+function createDeferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
+/**
  * 本会话是否加载了 v1 全局授权：为真时后续每次 register 都可能派生新的按插件授权，
  * 需要重新持久化 v2（市场包在 boot 之后才注册）。
  */
@@ -86,6 +99,14 @@ function persistGrants(): void {
 export async function bootPlugins(): Promise<void> {
   if (booted) return;
   booted = true;
+  try {
+    await runBoot();
+  } finally {
+    bootGate.resolve();
+  }
+}
+
+async function runBoot(): Promise<void> {
   const loader = useCapabilityLoader();
   const storedGrants = grantsStorage.read();
   if (storedGrants) {
@@ -156,6 +177,29 @@ export function clearPluginCapabilityGrants(pluginId: string): void {
   persistGrants();
 }
 
+/**
+ * 市场清单晚于 boot 落地时的补激活（与 boot **并发**的注册路径走这里）：
+ * boot 之前已注册的插件由 `runBoot` 的 wanted 集处理；晚到的按同一份启停存档补激活
+ *（存档不含该 id = 用户从未启用 → 保持休眠，幂等：已激活直接跳过）。
+ * 激活失败（如缺授权）只记日志、不写回存档 —— 与 runBoot 的逐个容错语义一致，
+ * 用户在插件中心仍可手动启用。
+ */
+export async function activateRegisteredPluginFromArchive(id: string): Promise<void> {
+  await bootGate.promise;
+  const stored = storage.read();
+  if (!stored?.includes(id)) return;
+  const loader = useCapabilityLoader();
+  if (loader.activeIds().includes(id)) return;
+  try {
+    await loader.activate(id);
+  } catch (error) {
+    console.error(`[plugins] 晚到的插件 ${id} 按启停存档激活失败`, error);
+    return;
+  }
+  sync();
+  storage.write([...pluginActive.value]);
+}
+
 export async function setPluginEnabled(id: string, enabled: boolean): Promise<void> {
   const loader = useCapabilityLoader();
   if (enabled) {
@@ -218,6 +262,7 @@ export async function restoreBuiltinPlugins(): Promise<void> {
 /** 测试钩子：清掉 booted 与清单状态（不动 loader 本身），换 loader 后配合 boot 重放。 */
 export function resetPluginRuntime(): void {
   booted = false;
+  bootGate = createDeferred();
   legacyMigrationActive = false;
   legacyKeyCleanupPending = false;
   pluginManifests.value = [];

@@ -27,21 +27,22 @@ vi.mock("@/stores/remote-assistant", () => ({
 // 让加载器同步解析成轻量占位，file-icons 等重依赖根本不进图。
 vi.mock("@/features/workspace/WorkspacePanel.vue", () => ({ default: { template: "<div data-testid='workspace-panel-stub' />" } }));
 vi.mock("@/features/preview/PreviewSider.vue", () => ({ default: { template: "<div data-testid='preview-sider-stub' />" } }));
-vi.mock("@/features/activity/ActivityBand.vue", () => ({ default: { template: "<div data-testid='activity-band-stub' />" } }));
+vi.mock("@/features/terminal/TerminalPanel.vue", () => ({ default: { template: "<div data-testid='terminal-panel-stub' />" } }));
 
 import Shell from "@/features/shell/Shell.vue";
 import { appEvents } from "@/events";
 import { useLayoutStore } from "@/stores/layout";
 import { usePreviewStore } from "@/stores/preview";
 import { useWorkspacePanelStore } from "@/stores/workspacePanel";
+import { useTerminalStore } from "@/stores/terminal";
 import { registerPreviewSaver } from "@/lib/preview-save";
 import { cancelDiscard, pendingDiscard } from "@/lib/preview-edit-guard";
 import { ref } from "vue";
 
 const Titlebar = {
-  props: ["collapsed", "showSiderToggle", "minimal"],
-  emits: ["toggle-sider", "toggle-minimal"],
-  template: `<div data-testid="titlebar" :data-collapsed="collapsed" :data-sider-toggle="showSiderToggle" :data-minimal="minimal" />`,
+  props: ["collapsed", "showSiderToggle"],
+  emits: ["toggle-sider"],
+  template: `<div data-testid="titlebar" :data-collapsed="collapsed" :data-sider-toggle="showSiderToggle" />`,
 };
 const SettingsDialog = {
   props: ["open", "section"],
@@ -55,7 +56,7 @@ const stubs = {
   MinimalSider: { template: `<div data-testid="minimal-sider-stub" />` },
   PreviewSider: { template: `<div data-testid="preview-sider-stub" />` },
   WorkspacePanel: { template: `<div data-testid="workspace-panel-stub" />` },
-  ActivityBand: { template: `<div data-testid="activity-band-stub" />` },
+  TerminalPanel: { template: `<div data-testid="terminal-panel-stub" />` },
   WorkspaceOverlayRegions: true,
   NoticeHost: true,
   PermissionPromptHost: true,
@@ -105,8 +106,8 @@ describe("Shell", () => {
     expect(wrapper.find('[data-testid="shell"]').exists()).toBe(true);
     expect(wrapper.find('[data-testid="router-view-stub"]').exists()).toBe(true);
     expect(wrapper.get('[data-testid="titlebar"]').attributes("data-collapsed")).toBe("false");
-    // 桌面端侧栏常驻，开合键交给侧栏顶部的品牌键；标题栏那颗只在移动端渲染
-    expect(wrapper.get('[data-testid="titlebar"]').attributes("data-sider-toggle")).toBe("false");
+    // 开合键恒在：极简侧栏没有品牌开合键，标题栏这颗是唯一入口（由前端的 panels.sider 决定）
+    expect(wrapper.get('[data-testid="titlebar"]').attributes("data-sider-toggle")).toBe("true");
     expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
     expect(document.documentElement.getAttribute("data-palette")).toBe("greywork");
     expect(h.bootPlugins).toHaveBeenCalledTimes(1);
@@ -158,6 +159,36 @@ describe("Shell", () => {
 
     await press({ key: "\\", ctrlKey: true });
     expect(preview.collapsed).toBe(!before);
+  });
+
+  it("Ctrl+` 拨终端面板开关（宿主可用时）", async () => {
+    (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = "server";
+    try {
+      mountShell();
+      const terminal = useTerminalStore();
+      expect(terminal.available).toBe(true);
+      const before = terminal.open;
+
+      await press({ key: "`", code: "Backquote", ctrlKey: true });
+      expect(terminal.open).toBe(!before);
+    } finally {
+      delete (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__;
+    }
+  });
+
+  it("终端面板随宿主可用性渲染：浏览器预览态不渲染，宿主可用时渲染", async () => {
+    const wrapper = mountShell();
+    await nextTick();
+    expect(wrapper.find('[data-testid="terminal-panel-stub"]').exists()).toBe(false);
+
+    (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = "server";
+    try {
+      window.dispatchEvent(new Event("resize"));
+      await nextTick();
+      expect(wrapper.find('[data-testid="terminal-panel-stub"]').exists()).toBe(true);
+    } finally {
+      delete (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__;
+    }
   });
 
   it("Ctrl+1..4 布局联动：两个面板一起拨到位", async () => {
@@ -347,31 +378,29 @@ describe("Shell 窄屏收拢右栏：先保存再卸载", () => {
 });
 
 /**
- * 极简模式（stores/layout 的 `minimal`）：换壳层，不换面板偏好的持久值。
+ * 只有一套外壳：极简侧栏 + 完整侧栏/活动带都不再渲染。面板偏好仍各自持久化。
  */
-describe("Shell 极简模式", () => {
-  it("开启：极简侧栏在、完整 Sider 与工作区 / 活动带不渲染；预览面板保留；标题栏收到 minimal", async () => {
-    const wrapper = mountShell();
-    // 基线：完整外壳
-    expect(wrapper.find('[data-testid="sider-stub"]').exists()).toBe(true);
-    expect(wrapper.find('[data-testid="minimal-sider-stub"]').exists()).toBe(false);
+describe("Shell 外壳组成", () => {
+  it("只渲染极简侧栏；完整 Sider 与活动带不挂载；预览 / 工作区 / 终端面板都保留", async () => {
+    (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = "server";
+    try {
+      const wrapper = mountShell();
+      await nextTick();
 
-    useLayoutStore().setMinimal(true);
-    await nextTick();
-
-    expect(wrapper.find('[data-testid="minimal-sider-stub"]').exists()).toBe(true);
-    expect(wrapper.find('[data-testid="sider-stub"]').exists()).toBe(false);
-    // 预览面板在极简下仍挂载（顶栏有右栏开合键），只是默认收起
-    expect(wrapper.find('[data-testid="preview-sider-stub"]').exists()).toBe(true);
-    expect(wrapper.find('[data-testid="workspace-panel-stub"]').exists()).toBe(false);
-    expect(wrapper.find('[data-testid="activity-band-stub"]').exists()).toBe(false);
-    expect(wrapper.get('[data-testid="titlebar"]').attributes("data-minimal")).toBe("true");
+      expect(wrapper.find('[data-testid="minimal-sider-stub"]').exists()).toBe(true);
+      expect(wrapper.find('[data-testid="sider-stub"]').exists()).toBe(false);
+      expect(wrapper.find('[data-testid="activity-band-stub"]').exists()).toBe(false);
+      // 三个面板都仍挂载（顶栏各有开合键）
+      expect(wrapper.find('[data-testid="preview-sider-stub"]').exists()).toBe(true);
+      expect(wrapper.find('[data-testid="workspace-panel-stub"]').exists()).toBe(true);
+      expect(wrapper.find('[data-testid="terminal-panel-stub"]').exists()).toBe(true);
+    } finally {
+      delete (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__;
+    }
   });
 
   it("左栏开合：toggleSider 收起后 MinimalSider 整个隐去，再按一次恢复", async () => {
     const wrapper = mountShell();
-    useLayoutStore().setMinimal(true);
-    await nextTick();
     expect(wrapper.find('[data-testid="minimal-sider-stub"]').exists()).toBe(true);
 
     wrapper.getComponent(Titlebar).vm.$emit("toggle-sider");
@@ -383,46 +412,8 @@ describe("Shell 极简模式", () => {
     expect(wrapper.find('[data-testid="minimal-sider-stub"]').exists()).toBe(true);
   });
 
-  it("进入极简收起预览、退出还原为进极简前的折叠态", async () => {
-    mountShell();
-    const preview = usePreviewStore();
-    preview.setCollapsed(false); // 先手动展开，才能验「还原」
-
-    useLayoutStore().setMinimal(true);
-    await nextTick();
-    expect(preview.collapsed).toBe(true);
-
-    useLayoutStore().setMinimal(false);
-    await nextTick();
-    expect(preview.collapsed).toBe(false);
-  });
-
-  it("标题栏的 toggle-minimal 事件把偏好翻转", async () => {
+  it("窄屏：默认收起（抽屉），标题栏左栏开合键拉出 MinimalSider", async () => {
     const wrapper = mountShell();
-    wrapper.getComponent(Titlebar).vm.$emit("toggle-minimal");
-    await nextTick();
-    expect(useLayoutStore().minimal).toBe(true);
-  });
-
-  it("极简下 Ctrl+B 不拨左栏；Ctrl+2 先退出极简再应用该布局档", async () => {
-    const wrapper = mountShell();
-    useLayoutStore().setMinimal(true);
-    await nextTick();
-
-    await press({ key: "b", ctrlKey: true });
-    expect(useLayoutStore().minimal).toBe(true);
-    expect(useLayoutStore().sidebarCollapsed).toBe(false);
-
-    await press({ key: "2", code: "Digit2", ctrlKey: true });
-    expect(useLayoutStore().minimal).toBe(false);
-    expect(useLayoutStore().sidebarCollapsed).toBe(false);
-    expect(usePreviewStore().collapsed).toBe(true);
-    expect(wrapper.find('[data-testid="minimal-sider-stub"]').exists()).toBe(false);
-  });
-
-  it("窄屏极简：默认收起（无侧栏），左栏开合键拉出抽屉", async () => {
-    const wrapper = mountShell();
-    useLayoutStore().setMinimal(true);
 
     Object.defineProperty(window, "innerWidth", { value: 500, configurable: true });
     window.dispatchEvent(new Event("resize"));

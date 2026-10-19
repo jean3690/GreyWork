@@ -11,10 +11,7 @@ import { useSessionStore } from "@/stores/session";
 import { useSettingsStore, type PermTier } from "@/stores/settings";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useNoticeStore } from "@/stores/notice";
-import { useLayoutStore } from "@/stores/layout";
 import type { Attachment, MessageComment, ThreadMessage } from "@/types";
-import AcpSessionConfig from "@/features/conversation/AcpSessionConfig.vue";
-import AgentProviderBar from "@/features/conversation/AgentProviderBar.vue";
 import MinimalComposer from "@/features/guid/MinimalComposer.vue";
 import Icon from "@/features/shared/Icon.vue";
 import Hint from "@/features/shared/Hint.vue";
@@ -34,6 +31,7 @@ import SessionStatusIndicator from "@/features/shared/SessionStatusIndicator.vue
 import SubagentIndicator from "@/features/conversation/SubagentIndicator.vue";
 import AttachmentTray from "@/features/conversation/AttachmentTray.vue";
 import SlashCommandMenu from "@/features/conversation/SlashCommandMenu.vue";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useAttachments } from "@/lib/use-attachments";
 import { useChatReceiver } from "@/lib/use-chat-receiver";
 import { useSessionStatus } from "@/lib/session-status";
@@ -56,7 +54,6 @@ const sessionStore = useSessionStore();
 const settings = useSettingsStore();
 const workspaceStore = useWorkspaceStore();
 const notice = useNoticeStore();
-const layout = useLayoutStore();
 
 const draft = ref("");
 /** 选区评论草稿（预览划词 → 评论）：发送时挂到消息上，发后清空。 */
@@ -189,8 +186,6 @@ const imagesAllowed = computed(() => !agent.routeToAcp || agent.acpImageSupport 
 const attachments = useAttachments(() => sessionId.value || chat.activeThreadId, { imagesAllowed: () => imagesAllowed.value });
 const {
   items: attachmentItems,
-  dragging: attachmentDragging,
-  full: attachmentsFull,
   pick: pickAttachmentFiles,
   onPaste: onComposerPaste,
   onDragOver: onComposerDragOver,
@@ -200,13 +195,18 @@ const {
   take: takeAttachments,
 } = attachments;
 
-/** 斜杠命令菜单：内置动作 + ACP 命令；发送复用既有 send() 语义（附件 / 计划模式 / 后端路由）。 */
-const textareaEl = ref<HTMLTextAreaElement | null>(null);
+/**
+ * 斜杠命令菜单：内置动作 + ACP 命令；发送复用既有 send() 语义（附件 / 计划模式 / 后端路由）。
+ *
+ * textarea 元素归 `MinimalComposer` 所有，宿主经它的模板 ref 读暴露出来的元素。
+ * 右键菜单 / 划词注入 / 回焦都要这颗 DOM，所以这里只做一次转接，别处照旧读 `textareaEl`。
+ */
+const composerRef = ref<{ textareaEl: HTMLTextAreaElement | null } | null>(null);
+const textareaEl = computed<HTMLTextAreaElement | null>(() => composerRef.value?.textareaEl ?? null);
 const {
   open: slashOpen,
   items: slashItems,
   activeIndex: slashActiveIndex,
-  activeOptionId: slashActiveOptionId,
   handleKeydown: handleSlashKeydown,
   select: selectSlashCommand,
   dismiss: dismissSlashMenu,
@@ -282,6 +282,22 @@ function goBack(): void {
   void router.push("/guid");
 }
 
+/* ===== 空会话建议卡 =====
+ * 新对话落地页只有标题 + 一行提示时，用户经常不知道从哪说起。给 4 条贴合本产品能力
+ * （工作区 / 计划 / 审查 / 文档）的建议：点击只是把文本填进输入框（不发送），保留用户
+ * 改写余地。文案走 i18n（chat.composer.suggest.*），图标是外壳形状表里的既有字形。 */
+const SUGGESTIONS = [
+  { key: "explore", icon: "search", label: "chat.composer.suggest.explore", text: "chat.composer.suggest.exploreText" },
+  { key: "plan", icon: "calendar", label: "chat.composer.suggest.plan", text: "chat.composer.suggest.planText" },
+  { key: "review", icon: "rotate-left", label: "chat.composer.suggest.review", text: "chat.composer.suggest.reviewText" },
+  { key: "docs", icon: "file", label: "chat.composer.suggest.docs", text: "chat.composer.suggest.docsText" },
+] as const;
+
+function applySuggestion(suggestion: (typeof SUGGESTIONS)[number]): void {
+  draft.value = t(suggestion.text);
+  void nextTick(() => textareaEl.value?.focus());
+}
+
 /** 有可发送内容（文字 / 附件 / 选区评论）。回合进行中不再禁发 —— 发送会进待发队列。 */
 const hasContent = computed(() => draft.value.trim().length > 0 || attachmentItems.value.length > 0 || comments.value.length > 0);
 /** 发送按钮可用：与斜杠菜单共用「有没有内容」这一条（回合状态不再参与）。 */
@@ -290,8 +306,6 @@ const canSend = computed(() => hasContent.value);
 /** 待发队列：全局队列按语义只属于「正在跑的会话」，别的会话不显示。 */
 const pendingItems = computed(() => (chat.runningSessionId === sessionId.value ? chat.commandQueue : []));
 
-/** 发送按钮文案：回合进行中改叫「加入待发」。 */
-const sendLabel = computed(() => (turnActive.value ? t("chat.queue.enqueue") : t("chat.send")));
 /** 输入框占位：回合进行中提示会入队。 */
 const composerPlaceholder = computed(() =>
   turnActive.value ? t("chat.composer.placeholderQueued") : t("chat.composer.placeholderThread"),
@@ -304,6 +318,8 @@ const PERM_TIER_LABELS: Record<PermTier, string> = {
   full: "完全访问",
 };
 const permissionTierLabel = computed(() => PERM_TIER_LABELS[settings.permissionTier] ?? settings.permissionTier);
+/** 窄屏「会话信息」下拉的触发器文案（同样走 grey 外壳字面量，不走 i18n）。 */
+const PERM_SESSION_INFO_LABEL = "会话信息";
 
 /* ===== 右键菜单 =====
  * 整页只挂一个 root（<section> 没有 ref，可安全当 trigger）：
@@ -375,24 +391,57 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
         <div class="flex shrink-0 items-center gap-1.5">
           <SubagentIndicator />
           <SessionStatusIndicator :status="status" chip />
-          <span class="flex h-5 items-center gap-1 rounded-full border border-line bg-panel-2 px-2 text-[10.5px] text-dim">
-            <Icon name="robot" :size="10" />
-            {{ backendLabel }}
-          </span>
-          <span class="flex h-5 items-center gap-1 rounded-full border border-line bg-panel-2 px-2 text-[10.5px] text-dim">
-            <Icon name="shield" :size="10" />
-            {{ permissionTierLabel }}
-          </span>
-          <Hint v-if="agent.acpMcpServers.length || agent.acpMcpSkipped.length" :text="mcpChipTitle" multiline>
-            <span
-              class="flex h-5 items-center gap-1 rounded-full border border-line px-2 text-[10.5px]"
-              :class="agent.acpMcpServers.length ? 'bg-cyan/10 text-cyan' : 'bg-panel-2 text-dim2'"
-              data-testid="session-mcp-chip"
-            >
-              <Icon name="earth" :size="10" />
-              {{ mcpChipLabel }}
+          <!-- 三个状态胶囊在窄窗口会把标题挤没：≥1024px 直接铺开，更窄则收进「会话信息」下拉。 -->
+          <div class="hidden items-center gap-1.5 lg:flex">
+            <span class="flex h-5 items-center gap-1 rounded-full border border-line bg-panel-2 px-2 text-[10.5px] text-dim">
+              <Icon name="robot" :size="10" />
+              {{ backendLabel }}
             </span>
-          </Hint>
+            <span class="flex h-5 items-center gap-1 rounded-full border border-line bg-panel-2 px-2 text-[10.5px] text-dim">
+              <Icon name="shield" :size="10" />
+              {{ permissionTierLabel }}
+            </span>
+            <Hint v-if="agent.acpMcpServers.length || agent.acpMcpSkipped.length" :text="mcpChipTitle" multiline>
+              <span
+                class="flex h-5 items-center gap-1 rounded-full border border-line px-2 text-[10.5px]"
+                :class="agent.acpMcpServers.length ? 'bg-cyan/10 text-cyan' : 'bg-panel-2 text-dim2'"
+                data-testid="session-mcp-chip"
+              >
+                <Icon name="earth" :size="10" />
+                {{ mcpChipLabel }}
+              </span>
+            </Hint>
+          </div>
+          <!-- 窄屏入口：同一份信息换个落点，不再靠胶囊硬挤。只读信息，故用普通行而非菜单项。 -->
+          <DropdownMenu>
+            <DropdownMenuTrigger as-child>
+              <button
+                type="button"
+                data-testid="session-info"
+                class="flex h-5 cursor-pointer items-center gap-1 rounded-full border border-line bg-panel-2 px-2 text-[10.5px] text-dim transition-colors hover:border-line-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan lg:hidden"
+                :aria-label="PERM_SESSION_INFO_LABEL"
+              >
+                <Icon name="setting" :size="10" />
+                {{ PERM_SESSION_INFO_LABEL }}
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent side="bottom" align="end" class="w-[240px] border-line px-2 py-1.5">
+              <div class="flex items-center justify-between gap-3 py-1">
+                <span class="flex shrink-0 items-center gap-1 text-[11px] text-dim2"><Icon name="robot" :size="10" />运行后端</span>
+                <span class="truncate text-[11.5px] text-foreground">{{ backendLabel }}</span>
+              </div>
+              <div class="flex items-center justify-between gap-3 py-1">
+                <span class="flex shrink-0 items-center gap-1 text-[11px] text-dim2"><Icon name="shield" :size="10" />权限档位</span>
+                <span class="truncate text-[11.5px] text-foreground">{{ permissionTierLabel }}</span>
+              </div>
+              <div v-if="agent.acpMcpServers.length || agent.acpMcpSkipped.length" class="flex items-start justify-between gap-3 py-1">
+                <span class="flex shrink-0 items-center gap-1 pt-0.5 text-[11px] text-dim2"><Icon name="earth" :size="10" />MCP</span>
+                <span class="truncate text-[11.5px]" :class="agent.acpMcpServers.length ? 'text-cyan' : 'text-dim2'" :title="mcpChipTitle">
+                  {{ mcpChipLabel }}
+                </span>
+              </div>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <button
             v-if="turnActive"
             type="button"
@@ -408,7 +457,13 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
       <div ref="scrollEl" class="min-h-0 flex-1 overflow-y-auto" @scroll.passive="onScroll">
         <!-- 短会话：普通整列渲染 -->
         <div v-if="messages.length && !useVirtual" class="mx-auto flex w-full max-w-[860px] flex-col gap-4 px-4 py-6 sm:px-6">
-          <ConversationMessage v-for="message in messages" :key="message.id" :message="message" :thread-id="sessionId" />
+          <ConversationMessage
+            v-for="message in messages"
+            :key="message.id"
+            :message="message"
+            :thread-id="sessionId"
+            @rewind="rewindTarget = $event"
+          />
         </div>
         <!-- 长会话：虚拟窗口渲染（动态测量高度，钉底跟流） -->
         <div
@@ -424,10 +479,10 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
             class="absolute left-0 top-0 w-full pb-4"
             :style="{ transform: `translateY(${row.start + V_PAD_TOP}px)` }"
           >
-            <ConversationMessage :message="messages[row.index]" :thread-id="sessionId" />
+            <ConversationMessage :message="messages[row.index]" :thread-id="sessionId" @rewind="rewindTarget = $event" />
           </div>
         </div>
-        <!-- 空会话引导 -->
+        <!-- 空会话引导：标题 + 建议卡（点击填入草稿，不直接发送）。 -->
         <div
           v-else
           class="mx-auto flex h-full w-full max-w-[860px] flex-col items-center justify-center gap-2 px-4 py-16 text-center sm:px-6"
@@ -437,12 +492,32 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
           </span>
           <p class="text-[13px] font-medium text-foreground">{{ t("chat.composer.emptyTitle") }}</p>
           <p class="text-[12px] text-dim2">{{ t("chat.composer.emptyHint") }}</p>
+          <div class="mt-4 grid w-full max-w-[640px] grid-cols-1 gap-2 text-left sm:grid-cols-2">
+            <button
+              v-for="suggestion in SUGGESTIONS"
+              :key="suggestion.key"
+              type="button"
+              data-testid="composer-suggestion"
+              class="group/s flex cursor-pointer items-start gap-2 rounded-[calc(10px*var(--gw-radius-scale))] border border-line bg-panel px-3 py-2.5 transition-colors hover:border-line-2 hover:bg-panel-2 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+              @click="applySuggestion(suggestion)"
+            >
+              <Icon
+                :name="suggestion.icon"
+                :size="13"
+                class="mt-0.5 shrink-0 text-dim2 transition-colors group-hover/s:text-cyan"
+              />
+              <span class="min-w-0 flex-1">
+                <span class="block text-[12px] font-medium text-foreground">{{ t(suggestion.label) }}</span>
+                <span class="mt-0.5 block truncate text-[11px] text-dim2">{{ t(suggestion.text) }}</span>
+              </span>
+            </button>
+          </div>
         </div>
       </div>
 
-      <div class="shrink-0 border-t border-line-2 bg-panel px-4 py-3 sm:px-6">
+      <!-- 顶部一条极淡的上投影替代分隔线：让输入卡从消息流里"浮"起来，而不是靠硬线切开。 -->
+      <div class="shrink-0 bg-panel px-4 py-3 shadow-[0_-8px_24px_-12px_rgba(0,0,0,0.18)] sm:px-6">
         <div class="mx-auto flex w-full max-w-[860px] flex-col gap-2.5">
-          <AgentProviderBar v-if="!layout.minimal" />
           <!-- 选区评论草稿：挂在本条消息上的批注（展示被引用的原文片段），发送后渲染为注解。 -->
           <div v-if="comments.length" data-testid="comment-draft" class="flex flex-col gap-1.5">
             <div class="flex items-center gap-2 text-[10px] text-dim2">
@@ -503,10 +578,10 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
               </button>
             </div>
           </div>
-          <!-- 极简模式：精简输入卡。管线仍归本页（send / 附件 / 斜杠 / 评论 / 待发队列），
-               经 props + 具名 slot 注入，与引导页共用同一个 MinimalComposer。 -->
+          <!-- 输入卡：管线仍归本页（send / 附件 / 斜杠 / 评论 / 待发队列），经 props + 具名
+               slot 注入，与引导页共用同一个 MinimalComposer。 -->
           <MinimalComposer
-            v-if="layout.minimal"
+            ref="composerRef"
             v-model="draft"
             :busy="turnActive"
             :can-send="canSend"
@@ -535,98 +610,6 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
               />
             </template>
           </MinimalComposer>
-
-          <!-- 完整外壳：原输入卡（附件托盘 + 文本区 + 会话配置行 + 动作行 + 斜杠菜单） -->
-          <div
-            v-else
-            data-attachment-dropzone
-            data-testid="composer-card"
-            class="relative flex w-full flex-col gap-2 rounded-[calc(16px*var(--gw-radius-scale))] border bg-panel-2 p-3 shadow-[0_8px_24px_rgba(0,0,0,0.1)] transition-[border-color,box-shadow] focus-within:border-cyan/50 focus-within:shadow-[0_10px_28px_rgba(0,0,0,0.14)]"
-            :class="attachmentDragging ? 'border-cyan ring-2 ring-cyan/40' : 'border-line-2'"
-            @dragover="onComposerDragOver"
-            @dragleave="onComposerDragLeave"
-            @drop="onComposerDrop"
-          >
-            <AttachmentTray :items="attachmentItems" @remove="removeAttachment" />
-            <!-- outline-none 在这里是真生效的：base.css 的全局焦点环放在 @layer base 里，
-               能被 @layer utilities 的 .outline-none 盖掉。焦点反馈由外层卡片的 focus-within 承担。 -->
-            <textarea
-              ref="textareaEl"
-              v-model="draft"
-              data-ctx="composer"
-              rows="3"
-              role="combobox"
-              aria-autocomplete="list"
-              :aria-expanded="slashOpen"
-              :aria-controls="slashOpen ? 'slash-command-menu' : undefined"
-              :aria-activedescendant="slashActiveOptionId"
-              class="min-h-[76px] w-full resize-none rounded-[calc(10px*var(--gw-radius-scale))] bg-panel px-2.5 py-2 text-[14px] leading-relaxed text-foreground outline-none placeholder:text-dim"
-              :placeholder="composerPlaceholder"
-              :aria-label="t('chat.composer.ariaLabel')"
-              @keydown="onKeydown"
-              @blur="dismissSlashMenu"
-              @paste="onComposerPaste"
-            />
-            <div class="flex min-w-0 flex-wrap items-center gap-1.5 border-t border-line/70 px-2 pt-2" data-testid="composer-config-row">
-              <span v-if="agent.routeToAcp" class="mr-0.5 text-[10px] font-medium tracking-[0.08em] text-dim2">会话配置</span>
-              <AcpSessionConfig />
-            </div>
-            <div class="flex items-center justify-between gap-2" data-testid="composer-action-row">
-              <div class="flex min-w-0 items-center gap-1.5">
-                <Hint :text="imagesAllowed ? t('chat.uploadFile') : t('chat.attachImagesUnsupported')" multiline>
-                  <button
-                    type="button"
-                    data-testid="composer-attach"
-                    class="grid size-6 shrink-0 cursor-pointer place-items-center rounded-[calc(6px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40"
-                    :disabled="turnActive || attachmentsFull"
-                    :aria-label="t('chat.uploadFile')"
-                    @click="pickAttachmentFiles"
-                  >
-                    <Icon name="plus" :size="14" />
-                  </button>
-                </Hint>
-                <span class="shrink-0 text-[11px] text-dim2">
-                  {{ turnActive ? t("chat.composer.processing") : t("chat.composer.ready") }}
-                </span>
-                <Hint v-if="settings.planMode" :text="t('chat.planModeTitle')" multiline>
-                  <button
-                    type="button"
-                    data-testid="composer-plan-chip"
-                    class="flex h-5 shrink-0 cursor-pointer items-center rounded-full border border-line bg-panel px-2 text-[10.5px] text-dim transition-colors hover:text-foreground"
-                    @click="settings.planMode = false"
-                  >
-                    {{ t("chat.planMode") }}
-                  </button>
-                </Hint>
-                <Hint v-if="chat.speedBoost" :text="t('chat.speedTitle')" multiline>
-                  <button
-                    type="button"
-                    data-testid="composer-speed-chip"
-                    class="flex h-5 shrink-0 cursor-pointer items-center rounded-full border border-line bg-panel px-2 text-[10.5px] text-dim transition-colors hover:text-foreground"
-                    @click="chat.speedBoost = false"
-                  >
-                    {{ t("chat.speedBoost") }}
-                  </button>
-                </Hint>
-              </div>
-              <button
-                data-testid="composer-send"
-                class="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-[calc(10px*var(--gw-radius-scale))] border border-accent bg-accent px-3 text-[12px] font-medium text-accent-ink transition-[background-color,border-color,color,opacity] hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:border-line-2 disabled:bg-panel disabled:text-dim2 disabled:opacity-100"
-                :disabled="!canSend"
-                @click="send"
-              >
-                {{ sendLabel }}
-                <Icon name="send-one" :size="13" />
-              </button>
-            </div>
-            <SlashCommandMenu
-              v-if="slashOpen"
-              :items="slashItems"
-              :active-index="slashActiveIndex"
-              @select="selectSlashCommand"
-              @update:active-index="slashActiveIndex = $event"
-            />
-          </div>
         </div>
       </div>
     </section>

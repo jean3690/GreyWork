@@ -5,16 +5,11 @@ import { useRouter } from "vue-router";
 import { useAgentStore } from "@/stores/agent";
 import { useChatStore } from "@/stores/chat";
 import { useSessionStore } from "@/stores/session";
-import { useSettingsStore } from "@/stores/settings";
 import { useWorkspaceStore } from "@/stores/workspace";
-import { useLayoutStore } from "@/stores/layout";
-import AcpSessionConfig from "@/features/conversation/AcpSessionConfig.vue";
-import AgentProviderBar from "@/features/conversation/AgentProviderBar.vue";
 import AttachmentTray from "@/features/conversation/AttachmentTray.vue";
 import SlashCommandMenu from "@/features/conversation/SlashCommandMenu.vue";
 import MinimalComposer from "@/features/guid/MinimalComposer.vue";
 import Icon from "@/features/shared/Icon.vue";
-import Hint from "@/features/shared/Hint.vue";
 import ContextMenuRegion from "@/features/shared/ContextMenuRegion.vue";
 import { buildComposerItems, type ComposerMenuActions, type ContextMenuItem, type ContextTarget } from "@/lib/context-menu";
 import { copySelection, cutSelection, hasTextSelection, pasteInto, selectAllText } from "@/lib/textarea-actions";
@@ -27,7 +22,7 @@ import { materializeAttachments } from "@/state/attachment-library";
 import { quoteSummary } from "@/lib/message-comments";
 import type { Attachment, MessageComment } from "@/types";
 /**
- * GreyWork 风格新对话引导页：hero + 快捷入口 + 输入卡。
+ * GreyWork 风格新对话引导页：hero + 快捷入口 + 输入卡（极简输入卡，与对话页共用同一份）。
  * 提交 → 新建会话 → 走 chat 管线（mock/真实 LLM）→ 跳到对话页。
  */
 const router = useRouter();
@@ -36,8 +31,6 @@ const agent = useAgentStore();
 const chat = useChatStore();
 const sessionStore = useSessionStore();
 const workspaceStore = useWorkspaceStore();
-const settings = useSettingsStore();
-const layout = useLayoutStore();
 
 const draft = ref("");
 /** 选区评论草稿（预览划词 → 评论）：随首条消息挂上，发后清空。 */
@@ -50,8 +43,6 @@ const turnActive = useTurnActive();
 const attachments = useAttachments(() => chat.activeThreadId, { imagesAllowed: () => imagesAllowed.value });
 const {
   items: attachmentItems,
-  dragging: attachmentDragging,
-  full: attachmentsFull,
   pick: pickAttachmentFiles,
   onPaste: onComposerPaste,
   onDragOver: onComposerDragOver,
@@ -61,13 +52,17 @@ const {
   take: takeAttachments,
 } = attachments;
 
-/** 斜杠命令菜单：发送复用 onSubmit（先建会话再派发），开关状态胶囊与对话页一致。 */
-const textareaEl = ref<HTMLTextAreaElement | null>(null);
+/** 斜杠命令菜单：发送复用 onSubmit（先建会话再派发），开关状态胶囊与对话页一致。
+ *
+ * textarea 元素归 `MinimalComposer` 所有，宿主经它的模板 ref 读暴露出来的元素：
+ * 斜杠菜单回焦、右键菜单选区、划词注入桥都直接操作这颗 DOM。
+ */
+const composerRef = ref<{ textareaEl: HTMLTextAreaElement | null } | null>(null);
+const textareaEl = computed<HTMLTextAreaElement | null>(() => composerRef.value?.textareaEl ?? null);
 const {
   open: slashOpen,
   items: slashItems,
   activeIndex: slashActiveIndex,
-  activeOptionId: slashActiveOptionId,
   handleKeydown: handleSlashKeydown,
   select: selectSlashCommand,
   dismiss: dismissSlashMenu,
@@ -151,13 +146,9 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
 <template>
   <ContextMenuRegion :build="buildMenu">
     <section class="flex min-h-full w-full flex-col items-center justify-start px-4 pb-8 pt-16 sm:justify-center sm:py-8">
-      <div
-        class="flex w-full flex-col items-center gap-4"
-        :class="layout.minimal ? 'max-w-[760px]' : 'max-w-[800px] sm:-translate-y-[5vh]'"
-      >
+      <div class="flex w-full flex-col items-center gap-4 max-w-[760px]">
         <div class="flex w-full flex-col gap-2.5">
-          <AgentProviderBar v-if="!layout.minimal" />
-          <!-- 选区评论草稿：挂在本条消息上的批注（展示被引用的原文片段）。两种输入卡共用。 -->
+          <!-- 选区评论草稿：挂在本条消息上的批注（展示被引用的原文片段）。 -->
           <div v-if="comments.length" data-testid="comment-draft" class="flex flex-col gap-1.5">
             <div
               v-for="comment in comments"
@@ -178,11 +169,11 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
               </button>
             </div>
           </div>
-          <!-- 极简模式：精简输入卡。管线仍归本页（run / onSubmit / 附件 / 斜杠 / 评论），
-               经 props + 具名 slot 注入；拖放命中靠 data-attachment-dropzone 落到根元素
-               （Vue 把属性与未声明的监听透传到单根），复用同一套 onComposerDrag* 处理器。 -->
+          <!-- 输入卡：管线仍归本页（run / onSubmit / 附件 / 斜杠 / 评论），经 props + 具名
+               slot 注入。拖放命中靠 data-attachment-dropzone 落到根元素（Vue 把属性与未声明
+               的监听透传到单根），复用同一套 onComposerDrag* 处理器。 -->
           <MinimalComposer
-            v-if="layout.minimal"
+            ref="composerRef"
             v-model="draft"
             :busy="turnActive"
             :can-send="!!draft.trim() || attachmentItems.length > 0"
@@ -210,96 +201,6 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
               />
             </template>
           </MinimalComposer>
-
-          <!-- 完整外壳：原输入卡（附件托盘 + 文本区 + 会话配置行 + 动作行 + 斜杠菜单） -->
-          <div
-            v-else
-            data-attachment-dropzone
-            data-testid="composer-card"
-            class="relative flex w-full flex-col gap-2 rounded-[calc(16px*var(--gw-radius-scale))] border bg-panel-2 p-3 shadow-[0_10px_32px_rgba(0,0,0,0.12)] transition-[border-color,box-shadow] focus-within:border-cyan/50 focus-within:shadow-[0_12px_36px_rgba(0,0,0,0.16)]"
-            :class="attachmentDragging ? 'border-cyan ring-2 ring-cyan/40' : 'border-line-2'"
-            @dragover="onComposerDragOver"
-            @dragleave="onComposerDragLeave"
-            @drop="onComposerDrop"
-          >
-            <AttachmentTray :items="attachmentItems" @remove="removeAttachment" />
-            <textarea
-              ref="textareaEl"
-              v-model="draft"
-              data-ctx="composer"
-              rows="2"
-              role="combobox"
-              aria-autocomplete="list"
-              :aria-expanded="slashOpen"
-              :aria-controls="slashOpen ? 'slash-command-menu' : undefined"
-              :aria-activedescendant="slashActiveOptionId"
-              class="min-h-[60px] w-full resize-none rounded-[calc(10px*var(--gw-radius-scale))] bg-panel px-2.5 py-2 text-[14px] leading-relaxed text-foreground outline-none placeholder:text-dim"
-              :placeholder="t('chat.composer.placeholderNew')"
-              :aria-label="t('chat.composer.ariaLabel')"
-              @keydown="onKeydown"
-              @blur="dismissSlashMenu"
-              @paste="onComposerPaste"
-            />
-            <div class="flex min-w-0 flex-wrap items-center gap-1.5 border-t border-line/70 px-2 pt-2" data-testid="composer-config-row">
-              <span v-if="agent.routeToAcp" class="mr-0.5 text-[10px] font-medium tracking-[0.08em] text-dim2">会话配置</span>
-              <AcpSessionConfig />
-            </div>
-            <div class="flex items-center justify-between gap-2" data-testid="composer-action-row">
-              <div class="flex min-w-0 items-center gap-1.5">
-                <Hint :text="imagesAllowed ? t('chat.uploadFile') : t('chat.attachImagesUnsupported')" multiline>
-                  <button
-                    type="button"
-                    data-testid="composer-attach"
-                    class="grid size-6 shrink-0 cursor-pointer place-items-center rounded-[calc(6px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40"
-                    :disabled="attachmentsFull"
-                    :aria-label="t('chat.uploadFile')"
-                    @click="pickAttachmentFiles"
-                  >
-                    <Icon name="plus" :size="14" />
-                  </button>
-                </Hint>
-                <span class="text-[11px] text-dim2">
-                  {{ t("chat.runEnvironment.label", { mode: t(`chat.runEnvironment.${settings.runMode}`) }) }}
-                </span>
-                <Hint v-if="settings.planMode" :text="t('chat.planModeTitle')" multiline>
-                  <button
-                    type="button"
-                    data-testid="composer-plan-chip"
-                    class="flex h-5 shrink-0 cursor-pointer items-center rounded-full border border-line bg-panel px-2 text-[10.5px] text-dim transition-colors hover:text-foreground"
-                    @click="settings.planMode = false"
-                  >
-                    {{ t("chat.planMode") }}
-                  </button>
-                </Hint>
-                <Hint v-if="chat.speedBoost" :text="t('chat.speedTitle')" multiline>
-                  <button
-                    type="button"
-                    data-testid="composer-speed-chip"
-                    class="flex h-5 shrink-0 cursor-pointer items-center rounded-full border border-line bg-panel px-2 text-[10.5px] text-dim transition-colors hover:text-foreground"
-                    @click="chat.speedBoost = false"
-                  >
-                    {{ t("chat.speedBoost") }}
-                  </button>
-                </Hint>
-              </div>
-              <button
-                data-testid="composer-send"
-                class="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-[calc(10px*var(--gw-radius-scale))] border border-accent bg-accent px-3 text-[12px] font-medium text-accent-ink transition-[background-color,border-color,color,opacity] hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:border-line-2 disabled:bg-panel disabled:text-dim2 disabled:opacity-100"
-                :disabled="!draft.trim() && attachmentItems.length === 0"
-                @click="onSubmit"
-              >
-                {{ t("chat.send") }}
-                <Icon name="send-one" :size="13" />
-              </button>
-            </div>
-            <SlashCommandMenu
-              v-if="slashOpen"
-              :items="slashItems"
-              :active-index="slashActiveIndex"
-              @select="selectSlashCommand"
-              @update:active-index="slashActiveIndex = $event"
-            />
-          </div>
         </div>
       </div>
     </section>

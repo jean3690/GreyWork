@@ -17,6 +17,10 @@ const h = vi.hoisted(() => ({
   show: vi.fn<() => Promise<void>>(),
   runtimeMode: vi.fn<() => "desktop" | "server" | "browser-preview">(() => "desktop"),
   initRuntimeMode: vi.fn<() => Promise<string>>(),
+  setFront: vi.fn<(front: unknown) => void>(),
+  // 前端集合只作为「被声明的那个对象」的身份标记，内容由 workbench 自己的单测锁
+  //（tests/unit/lib/nav-items.test.ts）—— 这里不重复维护一份特性清单。
+  ALL_FEATURES_FRONT: Object.freeze({ id: "desktop" }),
   appPlugin: (app: unknown) => {
     void app;
   },
@@ -37,6 +41,10 @@ vi.mock("@greywork/workbench", () => ({
   loadHostSystem: () => h.loadHostSystem(),
   initDeviceTier: () => h.initDeviceTier(),
   createAppRouter: () => h.appPlugin,
+  // 前端身份：入口在 mount 前声明本端是哪一端，路由表与外壳接线都由它派生
+  //（见 workbench 的 front/types.ts）。缺了它 bootstrap 会在 mount 之前抛。
+  setFront: (front: unknown) => h.setFront(front),
+  ALL_FEATURES_FRONT: h.ALL_FEATURES_FRONT,
   i18n: { install: h.appPlugin },
   workspaceFs: {},
   appEvents: {},
@@ -69,6 +77,10 @@ describe("bootstrap", () => {
     expect(h.loadHostSystem).toHaveBeenCalledTimes(1);
     // 设备分级要在 mount 之前同步落地：首帧就该按真实档位渲染。
     expect(h.initDeviceTier).toHaveBeenCalledTimes(1);
+    // 前端身份同样要在 mount 之前声明：路由表与外壳接线都在 setup / mount 期读它。
+    // 桌面端要的是「全部特性」那一个集合 —— 不吃 currentFront() 的缺省是有意的
+    //（理由见 src/main.ts），这条断言把它钉住。
+    expect(h.setFront).toHaveBeenCalledExactlyOnceWith(h.ALL_FEATURES_FRONT);
     await vi.waitFor(() => expect(h.show).toHaveBeenCalledTimes(1));
     const appEl = document.querySelector("#app");
     expect(appEl?.childElementCount).toBeGreaterThan(0);

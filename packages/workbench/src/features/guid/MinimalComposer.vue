@@ -1,9 +1,7 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { runtimeMode } from "@greywork/host-ipc";
 import { useAgentStore } from "@/stores/agent";
-import { useCommandCapabilitiesStore } from "@/stores/command-capabilities";
 import { useNoticeStore } from "@/stores/notice";
 import { useWorkspaceStore } from "@/stores/workspace";
 import Icon from "@/features/shared/Icon.vue";
@@ -52,8 +50,6 @@ const { t } = useI18n();
 const agent = useAgentStore();
 const workspaceStore = useWorkspaceStore();
 const notices = useNoticeStore();
-const capabilities = useCommandCapabilitiesStore();
-void capabilities.ensureCatalog();
 
 /** 未绑定工作区（普通对话）在下拉里也要是一个可选项：reka 的 radio value 只吃字符串，故用哨兵。 */
 const GENERAL_WORKSPACE = "__general__";
@@ -70,35 +66,83 @@ const activeProvider = computed(() =>
 );
 const agentLabel = computed(() => (agent.routeToAcp ? (activeProvider.value?.name ?? t("minimal.agent")) : "Local"));
 
-/**
- * 服务端 agent 目录只读（与 AgentProviderBar 同一判据）。此时不代用户「顺手启用」——
- * 静默改状态又写不进服务端，不如让选择失败并把「未启用」说清楚。判据单一来源见
- * features/conversation/AgentProviderBar.vue（那里是权威实现）。
- */
-const agentCatalogReadOnly = computed(() => runtimeMode() === "server" && capabilities.available("db_agents_sync") !== true);
+/** 只列已启用的后端（与 AgentProviderBar 同一显隐语义：未启用的要先到设置里启用）。 */
+const enabledProviders = computed(() => agent.agentProviders.filter((provider) => provider.enabled));
+
+/* ===== ACP 会话配置块：默认收起 =====
+ * 配置簇（作用域 / 模型 / 思考强度 / 开关 / 设默认 / 重启）完整铺开时块很高，会把输入卡
+ * 顶得离消息流很远 —— 视觉噪声大且抢焦。默认收成一行摘要（当前模型名），要调才展开。
+ * 收起态仍渲染 AcpSessionConfig（v-show 不卸载）：切换后端 / 重连时配置项变化要能即时反映，
+ * 卸载重挂会丢掉展开态与面板焦点。 */
+const configOpen = ref(false);
+
+/** 收起态摘要：当前模型名（无值时回落到「跟随 CLI」占位），与 AcpModelSelector 同一取值口径。 */
+const configSummary = computed(() => {
+  const model = agent.acpConfigOptions.find((entry) => entry.id === "model" && entry.type === "select");
+  const value = model?.currentValue;
+  if (value === null || value === undefined || value === "") return t("minimal.configUnset");
+  const choice = model?.options?.find((candidate) => String(candidate.value) === String(value));
+  return choice?.name ?? String(value);
+});
+
+function toggleConfig(): void {
+  configOpen.value = !configOpen.value;
+}
 
 function pickWorkspace(value: string): void {
   workspaceStore.setActiveWorkspace(value === GENERAL_WORKSPACE ? null : value);
 }
 
-function pickLocal(): void {
-  void agent.switchToLocalLlm();
-}
-
-/** 切换 ACP 后端：镜像 AgentProviderBar.selectAcp（未启用且目录可写则先启用，再连接）。 */
+/** 切换 ACP 后端：列表只放已启用的，启用动作在设置页完成。 */
 async function pickProvider(id: string): Promise<void> {
   const provider = agent.agentProviders.find((candidate) => candidate.id === id);
-  if (provider && !provider.enabled && !agentCatalogReadOnly.value) await agent.setAgentProviderEnabled(id, true);
   if (id === agent.selectedProviderId && agent.routeToAcp && agent.acpConnected) return;
   const failure = await agent.activateAcpProvider(id);
   if (failure) notices.push({ kind: "error", title: t("minimal.agentSwitchFailed", { name: provider?.name ?? id }), detail: failure });
 }
 
+/**
+ * 宿主（`GuidView` / `ConversationView`）要拿到里面这颗 textarea：右键菜单的选区读写、
+ * 斜杠菜单回焦、划词注入桥都直接操作 DOM，而元素现在归本组件所有。
+ * 暴露 `textareaEl`（元素引用）与 `focus()`，宿主经模板 ref 读取。
+ */
 const textareaEl = ref<HTMLTextAreaElement | null>(null);
 function focus(): void {
   textareaEl.value?.focus();
 }
-defineExpose({ focus });
+defineExpose({ focus, textareaEl });
+
+/* ===== 文本区自适应高度 =====
+ * 长指令（贴日志 / 多行 prompt）在固定 2 行高里只能看见末尾，回看开头得手动拽角。
+ * 这里按 scrollHeight 逐行撑高，到 MAX_HEIGHT 封顶后转为内部滚动 —— 不让输入卡无限长高
+ * 把消息流挤没。`height:auto` 先归零再量，否则只增不减（收行时不会回缩）。
+ *
+ * 受控组件，两个触发面都要覆盖：用户敲键盘（input）与外部改草稿（建议卡填入 / 取回待发）。 */
+const MAX_HEIGHT = 176; // 约 6 行（14px * 1.6 行高 + 内边距），再多就该滚而不是继续撑
+let resizeScheduled = false;
+
+function resizeTextarea(): void {
+  const el = textareaEl.value;
+  if (!el || resizeScheduled) return;
+  // input 事件里同步改 height 会被浏览器合批掉，丢到微任务末尾统一量一次
+  resizeScheduled = true;
+  void nextTick(() => {
+    resizeScheduled = false;
+    const target = textareaEl.value;
+    if (!target) return;
+    target.style.height = "auto";
+    target.style.height = `${Math.min(target.scrollHeight, MAX_HEIGHT)}px`;
+  });
+}
+
+onMounted(resizeTextarea);
+watch(() => props.modelValue, resizeTextarea);
+
+/** 输入转发：先更新 v-model，再按新内容重算高度（顺序别反，量的是新值）。 */
+function onTextareaInput(el: HTMLTextAreaElement): void {
+  emit("update:modelValue", el.value);
+  resizeTextarea();
+}
 </script>
 
 <template>
@@ -171,10 +215,10 @@ defineExpose({ focus });
         rows="2"
         role="combobox"
         aria-autocomplete="list"
-        class="min-h-[64px] w-full resize-none bg-transparent px-3 py-3 text-[14px] leading-relaxed text-foreground outline-none placeholder:text-dim"
+        class="max-h-[176px] min-h-[64px] w-full resize-none overflow-y-auto bg-transparent px-3 py-3 text-[14px] leading-relaxed text-foreground outline-none placeholder:text-dim"
         :placeholder="props.placeholder"
         :aria-label="t('chat.composer.ariaLabel')"
-        @input="emit('update:modelValue', ($event.target as HTMLTextAreaElement).value)"
+        @input="onTextareaInput($event.target as HTMLTextAreaElement)"
         @keydown="emit('keydown', $event as KeyboardEvent)"
         @paste="emit('paste', $event as ClipboardEvent)"
         @blur="emit('blur')"
@@ -194,7 +238,7 @@ defineExpose({ focus });
             </button>
           </Hint>
 
-          <!-- Agent 后端切换器：Local + 各 ACP 后端（与完整外壳的 AgentProviderBar 同一套选择语义） -->
+          <!-- Agent 后端切换器：只列各 ACP 后端（与完整外壳的 AgentProviderBar 同一套选择语义） -->
           <DropdownMenu>
             <DropdownMenuTrigger as-child>
               <button
@@ -212,20 +256,9 @@ defineExpose({ focus });
               <DropdownMenuLabel class="px-2 py-1 text-[10.5px] font-medium tracking-wide text-dim2 uppercase">
                 {{ t("minimal.agentLabel") }}
               </DropdownMenuLabel>
-              <DropdownMenuRadioGroup :model-value="agent.routeToAcp ? (agent.selectedProviderId ?? '__none__') : 'local'">
+              <DropdownMenuRadioGroup :model-value="agent.routeToAcp ? (agent.selectedProviderId ?? '__none__') : ''">
                 <DropdownMenuRadioItem
-                  value="local"
-                  data-testid="minimal-agent-local"
-                  class="cursor-pointer gap-2 rounded-[calc(6px*var(--gw-radius-scale))] py-1.5 text-[12px]"
-                  :class="!agent.routeToAcp ? 'text-foreground' : 'text-dim'"
-                  @select="pickLocal"
-                >
-                  <template #indicator-icon><span></span></template>
-                  <Icon :name="!agent.routeToAcp ? 'check-one' : 'terminal'" :size="12" class="shrink-0 text-dim" />
-                  <span class="truncate">Local</span>
-                </DropdownMenuRadioItem>
-                <DropdownMenuRadioItem
-                  v-for="provider in agent.agentProviders"
+                  v-for="provider in enabledProviders"
                   :key="provider.id"
                   :value="provider.id"
                   :data-testid="`minimal-agent-${provider.id}`"
@@ -236,7 +269,6 @@ defineExpose({ focus });
                   <template #indicator-icon><span></span></template>
                   <AgentProviderIcon :provider="provider" :size="13" />
                   <span class="min-w-0 flex-1 truncate">{{ provider.name }}</span>
-                  <span v-if="!provider.enabled" class="shrink-0 text-[10px] text-dim2">{{ t("minimal.agentDisabled") }}</span>
                 </DropdownMenuRadioItem>
               </DropdownMenuRadioGroup>
             </DropdownMenuContent>
@@ -267,15 +299,32 @@ defineExpose({ focus });
       <slot name="menu" />
     </div>
 
-    <!-- ACP 会话配置：放在发送框**下方**，独立成块，圆角 + 阴影与主卡区分。
-         复用完整外壳的 `AcpSessionConfig`（权限 / 模型 / 思考强度 / 会话模式 / 开关型配置 / 重启），
-         它内部已按 routeToAcp 自守 —— 本地路由时整块不渲染，不留空盒。 -->
+    <!-- ACP 会话配置：放在发送框**下方**，独立成块。默认收起成一行摘要（当前模型），
+         点开才铺开完整配置簇 —— 配置项多时整块很高，常驻铺开会把输入卡顶离消息流。
+         复用 `AcpSessionConfig`（权限 / 模型 / 思考强度 / 会话模式 / 开关型配置 / 重启），
+         它内部已按 routeToAcp 自守 —— 本地路由时整块不渲染，不留空盒。
+         展开态用 v-show 而非 v-if：配置簇保持挂载，切换后端 / 重连时能即时反映，不会丢焦点。 -->
     <div
       v-if="agent.routeToAcp"
       data-testid="minimal-composer-config"
-      class="flex min-w-0 flex-wrap items-center gap-1.5 rounded-[calc(12px*var(--gw-radius-scale))] border border-line-2 bg-panel px-3 py-2 shadow-[0_6px_18px_rgba(0,0,0,0.12)]"
+      class="min-w-0 rounded-[calc(12px*var(--gw-radius-scale))] border border-line-2 bg-panel shadow-[0_6px_18px_rgba(0,0,0,0.12)]"
     >
-      <AcpSessionConfig />
+      <button
+        type="button"
+        data-testid="minimal-composer-config-toggle"
+        class="flex w-full min-w-0 cursor-pointer items-center gap-1.5 px-3 py-1.5 text-left transition-colors hover:bg-panel-2 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan"
+        :aria-expanded="configOpen"
+        :aria-label="configOpen ? t('minimal.configCollapse') : t('minimal.configExpand')"
+        @click="toggleConfig"
+      >
+        <Icon name="setting" :size="11" class="shrink-0 text-dim2" />
+        <span class="shrink-0 text-[11px] text-dim">{{ t("minimal.configLabel") }}</span>
+        <span class="min-w-0 flex-1 truncate text-[11px] text-dim2">{{ configSummary }}</span>
+        <Icon name="down" :size="10" class="shrink-0 text-dim2 transition-transform" :class="configOpen ? 'rotate-180' : ''" />
+      </button>
+      <div v-show="configOpen" class="flex min-w-0 flex-wrap items-center gap-1.5 border-t border-line/70 px-3 py-2">
+        <AcpSessionConfig />
+      </div>
     </div>
   </div>
 </template>
