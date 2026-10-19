@@ -51,6 +51,8 @@ GreyWork 把外部编码智能体（走 **Agent Client Protocol**）与本机 Op
 **平台**
 
 - Electron 桌面外壳（Linux / macOS / Windows）+ headless Rust 服务端 + Vue 3 渲染层。
+- **一个后端、多个前端**：除桌面端 SPA 外，`apps/web` 是浏览器前端，通过 `FrontSpec` 契约声明
+  更窄的特性集（不装托盘、不注册通道监听）；两端消费同一份 `@greywork/workbench` 源码与同一套服务端 API。
 - 中英双语界面（zh-CN / en-US）；界面跑在浏览器里时，宿主能力自动降级为只读提示。
 
 ## 技术栈
@@ -68,7 +70,8 @@ GreyWork 把外部编码智能体（走 **Agent Client Protocol**）与本机 Op
 ```
 greyWork/
 ├── apps/
-│   ├── desktop/              # 渲染层 SPA（Vite + Vue；Electron 壳与服务端静态托管共用）
+│   ├── desktop/              # 桌面端渲染层 SPA（Vite + Vue；Electron 壳与服务端静态托管共用）
+│   ├── web/                  # 浏览器前端（同一份 workbench，更窄的 FrontSpec）
 │   ├── electron/             # Electron 壳：主进程 + preload + sidecar 编排
 │   └── server/               # headless 服务端（axum）：命令面 / WS 事件 / 静态托管
 ├── crates/
@@ -82,6 +85,7 @@ greyWork/
 │   ├── shell/                # 供应商注册表与传输数据面
 │   ├── plugins/              # 插件市场适配器与类型
 │   ├── cowork/               # 协作工作区引擎
+│   ├── vite-config/          # 共享 Vite 配置工厂（base / 资源 / dev 代理）
 │   └── workbench/            # 统一 UI 包（外壳、视图、插件运行时）
 ├── plugin-market/            # 插件注册表源与签名
 └── .agents/skills/           # 已安装的 agent 技能（由 ACP agent 原生读取）
@@ -105,21 +109,23 @@ pnpm install
 pnpm electron:dev   # 起桌面应用（Electron 窗口 + 自动拉起的本地服务端）
 ```
 
-纯浏览器预览（无宿主）用 `pnpm dev` 起 Vite 开发服务器。
+纯浏览器预览（无宿主）用 `pnpm dev` 起桌面端渲染层的 Vite 开发服务器；`pnpm dev:web` 起浏览器
+前端（`apps/web`，端口 1421），两端可同时运行。
 
 ## 常用命令
 
-| 命令                    | 说明                                    |
-| ----------------------- | --------------------------------------- |
-| `pnpm dev`              | 渲染层 Vite 开发服务器（浏览器预览态）  |
-| `pnpm electron:dev`     | 桌面应用（Electron + 本地服务端）       |
-| `pnpm lint`             | 全仓 ESLint                             |
-| `pnpm format`           | Prettier 写入（`format:check` 仅校验）  |
-| `pnpm typecheck`        | 全 workspace TypeScript 检查            |
-| `pnpm test`             | 各 package 跑 Vitest                    |
-| `pnpm build`            | 构建渲染层                              |
-| `pnpm electron:package` | 构建桌面安装包（AppImage / NSIS / dmg） |
-| `pnpm check`            | `typecheck` + `build`                   |
+| 命令                    | 说明                                          |
+| ----------------------- | --------------------------------------------- |
+| `pnpm dev`              | 桌面端渲染层 Vite 开发服务器（预览态）        |
+| `pnpm dev:web`          | 浏览器前端 Vite 开发服务器（`apps/web`）      |
+| `pnpm electron:dev`     | 桌面应用（Electron + 本地服务端）             |
+| `pnpm lint`             | 全仓 ESLint                                   |
+| `pnpm format`           | Prettier 写入（`format:check` 仅校验）        |
+| `pnpm typecheck`        | 全 workspace TypeScript 检查                  |
+| `pnpm test`             | 各 package 跑 Vitest                          |
+| `pnpm build`            | 构建两个前端（`build:desktop` / `build:web`） |
+| `pnpm electron:package` | 构建桌面安装包（AppImage / NSIS / dmg）       |
+| `pnpm check`            | `typecheck` + `build`                         |
 
 Rust 侧（仓库根执行，workspace 单一 manifest）：`cargo fmt`、`cargo clippy --all-targets -- -D warnings`、
 `cargo test` —— 带 `--all-targets` 才会连 `tests/`、`examples/` 一起 lint。

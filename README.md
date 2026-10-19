@@ -57,6 +57,9 @@ messaging channels so you can drive the machine from your phone.
 **Platform**
 
 - Electron desktop shell (Linux / macOS / Windows) driving a headless Rust server sidecar, Vue 3 renderer.
+- **Two frontends, one backend**: besides the desktop SPA, `apps/web` is a browser front that declares a
+  narrower feature set through the `FrontSpec` contract (no tray, no channel listeners). Both consume
+  the same `@greywork/workbench` sources and the same server API.
 - Bilingual UI (zh-CN / en-US); host capabilities degrade gracefully when the UI runs in a browser.
 
 ## Tech Stack
@@ -74,7 +77,8 @@ messaging channels so you can drive the machine from your phone.
 ```
 greyWork/
 ├── apps/
-│   ├── desktop/              # Renderer SPA (Vite + Vue; shared by the Electron shell & server hosting)
+│   ├── desktop/              # Desktop renderer SPA (Vite + Vue; Electron shell & server hosting)
+│   ├── web/                  # Browser front (same workbench, narrower FrontSpec)
 │   ├── electron/             # Electron shell: main process + preload + sidecar orchestration
 │   └── server/               # Headless server (axum): command surface / WS events / static hosting
 ├── crates/
@@ -88,6 +92,7 @@ greyWork/
 │   ├── shell/                # Provider registry & transport data plane
 │   ├── plugins/              # Plugin market adapters & types
 │   ├── cowork/               # Co-operative workspace engine
+│   ├── vite-config/          # Shared Vite config factory (base / assets / dev proxy)
 │   └── workbench/            # Unified UI package (shell, views, plugin runtime)
 ├── plugin-market/            # Plugin registry source + signing
 └── .agents/skills/           # Installed agent skills (read natively by the ACP agent)
@@ -111,21 +116,23 @@ pnpm install
 pnpm electron:dev   # Desktop app (Electron window + auto-started local server)
 ```
 
-For a plain browser preview (no host), `pnpm dev` starts the Vite dev server.
+For a plain browser preview (no host), `pnpm dev` starts the desktop renderer's Vite dev server;
+`pnpm dev:web` starts the browser front (`apps/web`, port 1421) so both can run side by side.
 
 ## Common Commands
 
-| Command                 | Description                                      |
-| ----------------------- | ------------------------------------------------ |
-| `pnpm dev`              | Renderer Vite dev server (browser-preview mode)  |
-| `pnpm electron:dev`     | Desktop app (Electron + local server)            |
-| `pnpm lint`             | ESLint across the repo + the radius guard        |
-| `pnpm format`           | Format with Prettier (`format:check` to verify)  |
-| `pnpm typecheck`        | TypeScript check across all workspace packages   |
-| `pnpm test`             | Vitest across all packages                       |
-| `pnpm build`            | Build the renderer                               |
-| `pnpm electron:package` | Build desktop installers (AppImage / NSIS / dmg) |
-| `pnpm check`            | `typecheck` + `build`                            |
+| Command                 | Description                                       |
+| ----------------------- | ------------------------------------------------- |
+| `pnpm dev`              | Desktop renderer Vite dev server (preview mode)   |
+| `pnpm dev:web`          | Browser front Vite dev server (`apps/web`)        |
+| `pnpm electron:dev`     | Desktop app (Electron + local server)             |
+| `pnpm lint`             | ESLint across the repo + the radius guard         |
+| `pnpm format`           | Format with Prettier (`format:check` to verify)   |
+| `pnpm typecheck`        | TypeScript check across all workspace packages    |
+| `pnpm test`             | Vitest across all packages                        |
+| `pnpm build`            | Build both fronts (`build:desktop` / `build:web`) |
+| `pnpm electron:package` | Build desktop installers (AppImage / NSIS / dmg)  |
+| `pnpm check`            | `typecheck` + `build`                             |
 
 Rust side (from the repo root — single workspace manifest): `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 `cargo test` — `--all-targets` so `tests/` and `examples/` are linted too.

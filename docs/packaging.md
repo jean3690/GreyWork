@@ -56,6 +56,32 @@ pnpm --filter @greywork/electron package:dir    # 只出未压缩目录（快，
 
 Artifacts land in `apps/electron/release/<version>/`（安装包 + `<name>-unpacked/`）。
 
+## Browser front (`apps/web`)
+
+`apps/web` is a second frontend built from the same `@greywork/workbench` sources with a narrower
+`FrontSpec` (see [architecture.md](architecture.md#frontends-appsdesktop--appsweb)). It is a static
+SPA: no Electron, no native shell.
+
+```sh
+pnpm dev:web        # Vite dev server on 1421 (proxies /api to 127.0.0.1:8787)
+pnpm build:web      # → apps/web/dist
+```
+
+Deployment requirements:
+
+- Serve `apps/web/dist` as the site root. The router uses **hash history**, so no rewrite rules are
+  needed for client-side routes.
+- Reverse-proxy `/api/*` (including the `/api/events` WebSocket upgrade) to `greywork-server` on the
+  **same origin**. The server does not send CORS headers and the login cookie is scoped to the front
+  origin, so a cross-origin split would break authentication.
+- `/pdfjs/*` and `/vscode-icons/*` are absolute runtime paths baked into the workbench sources; the
+  web build emits them at the root (`emitsSharedAssets: true`). If you put the SPA under a sub-path,
+  those assets must still be reachable at the root.
+
+Against a headless server the browser front is a full client for conversations, automation and the
+plugin market. Capabilities that need a local host (installing skills, native dialogs, system tray)
+degrade with an explicit message rather than failing silently.
+
 ## Desktop installers (Electron)
 
 The desktop app is an **Electron** app (`apps/electron`). The shell only spawns the headless
@@ -65,7 +91,7 @@ it — no second copy of the domain logic, no separate frontend build.
 The sidecar listens on a **stable loopback port** (persisted in `userData/sidecar-port.json`,
 default `17844`, bumped only on collision). This is load-bearing, not cosmetic: the renderer
 persists the workspace list, sessions, settings and layout in `localStorage`, which browsers key
-by **origin** (scheme + host + *port*). A random per-launch port would mint a fresh, empty origin
+by **origin** (scheme + host + _port_). A random per-launch port would mint a fresh, empty origin
 on every start — the user-visible symptom is "my workspaces/settings disappear every launch".
 
 Build order matters (the root script `pnpm electron:package` chains it all):
@@ -112,10 +138,11 @@ The headless server (`apps/server`, see [architecture.md](architecture.md#headle
 ships the same Vue renderer as a same-origin SPA behind a password login. A multi-stage
 [`Dockerfile`](../Dockerfile) at the repo root builds it:
 
-1. **web** (`node:22`) runs `pnpm build` → `apps/desktop/dist` (renderer only). The build
-   context has no `~/.npmrc`, so it uses the public npm registry; pass
-   `--build-arg NPM_REGISTRY=https://registry.npmmirror.com` (or your own mirror) if you are behind
-   a slow link to npmjs — otherwise pnpm's metadata requests time out mid-install.
+1. **web** (`node:22`) runs `pnpm build:desktop` → `apps/desktop/dist` (only the front this image
+   serves; `apps/web` is a separate deployment). The build context has no `~/.npmrc`, so it uses the
+   public npm registry; pass `--build-arg NPM_REGISTRY=https://registry.npmmirror.com` (or your own
+   mirror) if you are behind a slow link to npmjs — otherwise pnpm's metadata requests time out
+   mid-install.
 2. **server** (`rust:1`) runs `cargo build --release -p greywork-server` — only the server crate and
    `greywork-host`, so no GUI toolkit deps are pulled. `cmake` is installed for `aws-lc-rs`
    (rustls); `rusqlite` compiles bundled SQLite with the base image's C toolchain.

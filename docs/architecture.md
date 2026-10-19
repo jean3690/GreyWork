@@ -1,13 +1,14 @@
 # GreyWork Architecture
 
-GreyWork is a monorepo implementing a desktop-first AI agent application. It uses pnpm workspaces with TypeScript packages in `packages/`, an Electron desktop shell in `apps/electron/`, and a headless Rust server (`apps/server/`) backed by shared domain logic in `crates/greywork-host/`.
+GreyWork is a monorepo implementing a desktop-first AI agent application. It uses pnpm workspaces with TypeScript packages in `packages/`, an Electron desktop shell in `apps/electron/`, two renderer frontends (`apps/desktop` and `apps/web`) built from the same `@greywork/workbench` sources, and a headless Rust server (`apps/server/`) backed by shared domain logic in `crates/greywork-host/`.
 
 ## Monorepo Layout
 
 ```
 greyWork/
 ├── apps/
-│   ├── desktop/              # Renderer SPA (Vite + Vue), shared by the Electron shell and the server
+│   ├── desktop/              # Desktop renderer SPA (Vite + Vue), served by the Electron shell / server
+│   ├── web/                  # Browser front: same workbench, narrower FrontSpec
 │   ├── electron/             # Electron shell: main process + preload + sidecar orchestration
 │   └── server/               # Headless axum server: HTTP command endpoint + WS events + login
 ├── crates/
@@ -21,7 +22,8 @@ greyWork/
 │   ├── shell/                # Provider registry & transport data plane
 │   ├── plugins/              # Plugin market source adapters + types
 │   ├── cowork/               # Co-operative workspace engine
-│   └── workbench/            # Shared UI package: shell, views, plugin runtime
+│   ├── vite-config/          # Shared Vite config factory (base / pdf.js assets / dev proxy)
+│   └── workbench/            # Shared UI package: shell, views, plugin runtime, front contract
 ├── plugin-market/            # Plugin registry source + signing
 └── .agents/skills/           # Installed agent skills (read natively by the ACP agent)
 ```
@@ -101,7 +103,7 @@ acp         ← core
 cowork      ← core
 plugins     ← core
 workbench   ← agents, editor, llm, acp, shell, plugins, coop, core
-apps/*      ← workbench (desktop = renderer; electron = shell; server = Rust host)
+apps/*      ← workbench (desktop / web = frontends; electron = shell; server = Rust host)
 ```
 
 **Key rules (enforced by ESLint):**
@@ -111,22 +113,61 @@ apps/*      ← workbench (desktop = renderer; electron = shell; server = Rust h
 
 ### Package Descriptions
 
-| Package               | Purpose                                                                                                                                                                                                                                                                                         |
-| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@greywork/core`      | Shared TypeScript types (vectors, bounding boxes, version info) and math utilities (clamp, lerp, vector ops). Leaf-level.                                                                                                                                                                       |
-| `@greywork/editor`    | File system, Git, and CodeMirror abstractions. The memory-backed mocks ship for browser/unit contexts; the real Git service talks to the host's `git_*` commands (implemented in `crates/greywork-host/src/infra/git.rs`), which run the git CLI strictly inside the authorized workspace root. |
-| `@greywork/agents`    | AI agent domain: role definitions, state machine, event model, task orchestration pipeline.                                                                                                                                                                                                     |
-| `@greywork/llm`       | LLM provider clients using OpenAI-compatible streaming protocol. Bridges to the host's `llm_*` commands for the Rust `LlmHost` backend.                                                                                                                                                         |
-| `@greywork/acp`       | Agent Client Protocol client — session transport (host commands and WebSocket), permission mapping, event model.                                                                                                                                                                                |
-| `@greywork/shell`     | Provider registry and desktop communication data plane. Contains ACP agent backend presets and model provider enums.                                                                                                                                                                            |
-| `@greywork/plugins`   | Plugin market source adapters (skills.sh registry search/download) and AI command strategy types.                                                                                                                                                                                               |
-| `@greywork/cowork`    | Co-operative workspace engine for collaborative sessions.                                                                                                                                                                                                                                       |
-| `@greywork/workbench` | Complete shared UI package used by both desktop and web. Exports a single `GreyWorkWorkbench` entry point. Includes the plugin runtime (Cordis micro-kernel), router, stores, i18n, theme, and all views.                                                                                       |
+| Package                 | Purpose                                                                                                                                                                                                                                                                                         |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@greywork/core`        | Shared TypeScript types (vectors, bounding boxes, version info) and math utilities (clamp, lerp, vector ops). Leaf-level.                                                                                                                                                                       |
+| `@greywork/editor`      | File system, Git, and CodeMirror abstractions. The memory-backed mocks ship for browser/unit contexts; the real Git service talks to the host's `git_*` commands (implemented in `crates/greywork-host/src/infra/git.rs`), which run the git CLI strictly inside the authorized workspace root. |
+| `@greywork/agents`      | AI agent domain: role definitions, state machine, event model, task orchestration pipeline.                                                                                                                                                                                                     |
+| `@greywork/llm`         | LLM provider clients using OpenAI-compatible streaming protocol. Bridges to the host's `llm_*` commands for the Rust `LlmHost` backend.                                                                                                                                                         |
+| `@greywork/acp`         | Agent Client Protocol client — session transport (host commands and WebSocket), permission mapping, event model.                                                                                                                                                                                |
+| `@greywork/shell`       | Provider registry and desktop communication data plane. Contains ACP agent backend presets and model provider enums.                                                                                                                                                                            |
+| `@greywork/plugins`     | Plugin market source adapters (skills.sh registry search/download) and AI command strategy types.                                                                                                                                                                                               |
+| `@greywork/cowork`      | Co-operative workspace engine for collaborative sessions.                                                                                                                                                                                                                                       |
+| `@greywork/workbench`   | Complete shared UI package used by every frontend. Exports the `FrontSpec` contract, router factory, stores, i18n, theme, plugin runtime (Cordis micro-kernel) and all views.                                                                                                                   |
+| `@greywork/vite-config` | Single Vite config factory for all frontends: rxjs entry alias, pdf.js runtime assets, syntax floor, dev proxy and the shared `public/` directory. Apps only declare `base`, `outDir`, `devPort` and whether they emit root-level shared assets.                                                |
+
+## Frontends (`apps/desktop` / `apps/web`)
+
+One backend, many frontends. Every app is a thin bootstrap around `@greywork/workbench`: it awaits
+`initRuntimeMode()`, calls `setFront(<FrontSpec>)`, then mounts `createAppRouter()`. The spec lives in
+`packages/workbench/src/front/` and declares:
+
+- `features` — which feature directories are installed. Each `features/<id>/spec.ts` contributes its
+  routes, sidebar/search entries and a `setup()` hook. Removing a feature removes **both** its routes
+  and its nav entry, and skips its listeners (e.g. the six chat-channel connections).
+- `shell.panels` — which panels (sider / preview / workspace / activity / terminal) exist at all.
+- `shell.wiring` — host-shell integrations (`queueBridge`, `tray`, `closeGuard`, `hostNotifications`).
+  A frontend without a tray simply does not install the tray bridge.
+
+Two rules keep this from silently bloating the bundle:
+
+1. **Feature sets are static imports, not a lookup table.** `front/all.ts` imports each feature
+   explicitly so Rollup can drop the ones no frontend references; a `Record<FeatureId, Feature>`
+   lookup would retain every view.
+2. **A production entry must declare its own spec** — `apps/desktop/src/main.ts` uses
+   `ALL_FEATURES_FRONT`, `apps/web/src/main.ts` uses `WEB_FRONT`. Relying on the default
+   (`currentFront()`, which equals the full set) is reserved for tests and context-free callers, so
+   narrowing the default can never silently starve a real app.
+
+`apps/web` deliberately omits `channels` (opening a browser tab must not dial every IM channel),
+`team` and `assistants`; it keeps `guid`, `conversation`, `automation` and `plugins`. Its smoke e2e
+asserts the resulting feature ids, so a regression in the contract fails CI rather than surfacing as
+a mysterious missing page.
+
+Build-wise, `@greywork/vite-config` holds everything the fronts share. Each app only chooses `base`,
+`outDir`, `devPort` and `emitsSharedAssets`; `publicDir` defaults to the single
+`packages/workbench/public/` (boot script, logo, ~1.1k file icons) so the assets are not copied into
+the repo N times. Desktop is served at the root by its sidecar, and `apps/web` is a separate
+root-path deployment, so both emit the shared assets; merging them into one deployment would require
+moving desktop to `base: "/desktop/"` and turning its `emitsSharedAssets` off.
 
 ## Build & Package
 
 - All packages use source-direct execution (TypeScript via Vite/vue-tsc), no separate build step for packages.
-- The desktop app packages via electron-builder (`apps/electron/electron-builder.yml`); `pnpm build` produces the renderer SPA that both the Electron shell and the server serve.
+- `pnpm build` builds **both** fronts (`build:desktop` → `apps/desktop/dist`, `build:web` →
+  `apps/web/dist`). Deployments build only what they serve: the Electron packaging script and the
+  Docker image use `build:desktop`, since both serve the desktop SPA.
+- The desktop app packages via electron-builder (`apps/electron/electron-builder.yml`).
 - Domain logic lives in `crates/greywork-host/` (a single Cargo workspace at the repo root, one `Cargo.lock`), shared by both hosts. It is organised into four layers — `core/` (leaf utilities), `infra/` (DB, git, http, workspace FS), `services/` (LLM, ACP, MCP, RAG, office, skills, cron), `channels/` (chat transports) and `app/` (the `commands` face) — with a strict downward dependency direction (L0 ← L1 ← L2 ← L3 ← L4). `lib.rs` re-exports every module back to the crate root, so `greywork_host::<mod>` paths are unchanged. Major domains: `services/llm/` (OpenAI-compatible stream -> events), `services/acp_host/`, `services/mcp*.rs`, `services/host_exec.rs` (automation-queue consumer, **not** process exec — that is `infra/process_guard.rs`), `infra/http.rs` / `services/web_fetch.rs`, `infra/workspace_fs/` (authorized workspace root resolution + file reads) and `infra/git.rs` (git CLI surfaced as `git_*` commands, scoped to the authorized root). The command face has a single source of truth: `commands::COMMANDS` + `commands::dispatch`.
 - `apps/electron/src/main/` keeps the host-specific modules (window / tray / notify / close-guard / browser-view / picker / plugin-window / sidecar / auth).
 - `apps/server/` is the headless host (see below).
