@@ -19,7 +19,7 @@
     "electron:start": "pnpm --filter @greywork/electron start",
     "electron:build": "pnpm --filter @greywork/electron build",
     "electron:typecheck": "pnpm --filter @greywork/electron typecheck",
-    "electron:prep": "cargo build --release -p greywork-server && pnpm run build:web && pnpm run build:desktop && pnpm --filter @greywork/electron build",
+    "electron:prep": "cargo build --release -p greywork-server && pnpm run build:desktop && pnpm --filter @greywork/electron build",
     "electron:package": "pnpm run electron:prep && pnpm --filter @greywork/electron package",
     "electron:package:dir": "pnpm run electron:prep && pnpm --filter @greywork/electron package:dir",
     "version:sync": "node scripts/version-sync.mjs",

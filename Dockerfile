@@ -11,10 +11,11 @@ COPY . .
 # 不传就用 pnpm 的默认（registry.npmjs.org）。容器里读不到宿主 ~/.npmrc，
 # 所以镜像源必须显式给 —— 否则直连 npmjs 慢网下 pnpm 会大批请求超时。
 ARG NPM_REGISTRY
-# 只构建渲染端（vue-tsc --noEmit + vite build → apps/desktop/dist）；不跑 tauri。
+# 只构建本镜像要托管的那一端（vue-tsc --noEmit + vite build → apps/desktop/dist）。
+# apps/web 是另一个部署，不在这个镜像里；用 `pnpm build` 会把两端都构建一遍，白白多花几分钟。
 RUN --mount=type=cache,id=gw-pnpm,target=/pnpm/store \
     if [ -n "$NPM_REGISTRY" ]; then export npm_config_registry="$NPM_REGISTRY"; fi && \
-    pnpm install --frozen-lockfile && pnpm build
+    pnpm install --frozen-lockfile && pnpm build:desktop
 
 ########## 2) 构建 headless 服务端二进制 ##########
 FROM rust:1-bookworm AS server

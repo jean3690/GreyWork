@@ -64,10 +64,30 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-node
 
-      # 跑的就是 desktop 的 build 脚本（vue-tsc + vite），不拆脚本：保证 CI 构建的产物
-      # 与本地、与 Electron 打包时用的是同一条路径。类型检查在 typecheck job 已独立覆盖。
+      # `pnpm build` 串起两个前端（desktop 与 web），保证两个 FrontSpec 的产物都能出来。
+      # 不拆脚本：CI 构建的产物与本地、与 Electron 打包时用的是同一条路径。
+      # 类型检查在 typecheck job 已独立覆盖。
       - name: Build (web + desktop renderer)
         run: pnpm build
+
+  renderer-e2e:
+    name: Renderer smoke (e2e)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-node
+
+      # 两条 e2e 都是「起 vite dev server → headless Chromium」，不需要 Rust / Electron。
+      # 只装 headless shell（约 114MB，比完整 chromium 小一半）；web 与 desktop 共用同一份缓存。
+      - name: Install Chromium (headless shell)
+        run: pnpm --filter @greywork/web exec playwright-core install chromium-headless-shell
+
+      - name: Web front (WEB_FRONT + preview chain)
+        run: pnpm --filter @greywork/web e2e
+
+      - name: Desktop renderer (preview chain)
+        run: pnpm --filter @greywork/desktop e2e
 
   # Electron 的「整包能否出来」是唯一的桌面打包门禁：需要显式编三样东西（sidecar 二进制 /
   # 渲染层 SPA / 壳的 out）—— 由 `electron:prep` 串起来。
