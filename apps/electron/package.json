@@ -1,6 +1,6 @@
 {
   "name": "@greywork/electron",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "private": true,
   "description": "GreyWork Electron desktop shell: spawns the headless greywork-server sidecar and hosts the renderer in a Chromium window.",
   "author": "GreyWork Team",

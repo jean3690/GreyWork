@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // 版本号同步：**真源是仓库根 package.json 的 version**，其余位置由本脚本写入。
 //
-// 为什么需要它：同一个版本号散落在 3 处（根 / apps/desktop / apps/electron 的
+// 为什么需要它：同一个版本号散落在 4 处（根 / apps/desktop / apps/electron / apps/web 的
 // package.json），发版时靠手改，漏一处就会出现「安装包里显示的版本对不上 Release
 // 标签」这种很难第一眼发现的偏差。electron-builder 读的是壳自己包内的 package.json。
 //
@@ -41,6 +41,16 @@ const targets = [
   {
     label: "apps/electron/package.json",
     file: "apps/electron/package.json",
+    read: (raw) => JSON.parse(raw).version,
+    write: (raw, version) => {
+      const parsed = JSON.parse(raw);
+      parsed.version = version;
+      return `${JSON.stringify(parsed, null, 2)}\n`;
+    },
+  },
+  {
+    label: "apps/web/package.json",
+    file: "apps/web/package.json",
     read: (raw) => JSON.parse(raw).version,
     write: (raw, version) => {
       const parsed = JSON.parse(raw);
