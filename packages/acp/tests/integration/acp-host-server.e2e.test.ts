@@ -90,6 +90,39 @@ function requireArtifacts(): void {
   if (missing.length > 0) throw new Error(`缺少构建产物，先跑：\n${missing.join("\n")}`);
 }
 
+/**
+ * SIGTERM 后等服务端真正退出再删临时目录：进程还在写会话文件时 `rmSync` 会 ENOTEMPTY，
+ * 让「6 个用例全绿」仍以退出码 1 收场。
+ */
+async function stopServer(proc: ChildProcess | undefined, timeoutMs = 5000): Promise<void> {
+  if (!proc || proc.exitCode !== null || proc.signalCode !== null) return;
+  proc.kill("SIGTERM");
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(() => {
+      proc.kill("SIGKILL");
+      resolve();
+    }, timeoutMs);
+    proc.once("exit", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
+/** 删临时目录：短命子进程可能还在收尾，ENOTEMPTY 时退避重试几次。 */
+async function removeDir(dir: string): Promise<void> {
+  if (!dir) return;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if (attempt >= 9) throw error;
+      await sleep(100);
+    }
+  }
+}
+
 /* ===== 被替换的全局（afterAll 逐个还原） ===== */
 
 const realFetch = globalThis.fetch;
@@ -236,9 +269,9 @@ describe("跨语言 ACP：渲染端 client → 真服务端 → 真宿主 → �
     (globalThis as unknown as Record<string, unknown>).location = undefined;
     globalThis.fetch = realFetch;
     (globalThis as unknown as Record<string, unknown>).WebSocket = realWebSocket;
-    server?.kill("SIGTERM");
-    if (dataDir) rmSync(dataDir, { recursive: true, force: true });
-    if (homeDir) rmSync(homeDir, { recursive: true, force: true });
+    await stopServer(server);
+    await removeDir(dataDir);
+    await removeDir(homeDir);
   });
 
   it("传输层走宿主 IPC，而不是远程 WebSocket 分支", () => {
