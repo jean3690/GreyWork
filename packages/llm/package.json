@@ -14,8 +14,7 @@
   },
   "dependencies": {
     "@greywork/core": "workspace:*",
-    "@greywork/host-ipc": "workspace:*",
-    "@tauri-apps/api": "^2.12.0"
+    "@greywork/host-ipc": "workspace:*"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^5.0.2",

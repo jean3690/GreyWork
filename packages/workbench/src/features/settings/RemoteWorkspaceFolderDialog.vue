@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { isTauriRuntime } from "@greywork/core";
+import { hasNativeShell } from "@greywork/host-ipc";
 import { useI18n } from "vue-i18n";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import Icon from "@/features/shared/Icon.vue";
@@ -35,7 +35,7 @@ async function prepare(): Promise<void> {
 }
 
 async function changeFolder(): Promise<void> {
-  if (busy.value || !isTauriRuntime()) return;
+  if (busy.value || !hasNativeShell()) return;
   const selected = await pickWorkspaceFolder();
   if (!selected || selected === workspace.value?.folder) return;
   busy.value = true;
@@ -55,7 +55,7 @@ async function changeFolder(): Promise<void> {
 }
 
 async function resetFolder(): Promise<void> {
-  if (busy.value || !isTauriRuntime()) return;
+  if (busy.value || !hasNativeShell()) return;
   busy.value = true;
   try {
     const selected = await defaultRemoteWorkspaceFolder();
@@ -121,12 +121,12 @@ onMounted(() => {
         >
           {{ folder }}
         </p>
-        <p v-if="!isTauriRuntime()" class="text-[10.5px] text-dim2">{{ t("remoteAssist.workspace.desktopOnly") }}</p>
+        <p v-if="!hasNativeShell()" class="text-[10.5px] text-dim2">{{ t("remoteAssist.workspace.desktopOnly") }}</p>
         <div class="flex gap-2">
           <button
             type="button"
             class="h-7 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2.5 text-[11.5px] text-dim transition-colors hover:border-line-2 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-            :disabled="busy || !isTauriRuntime()"
+            :disabled="busy || !hasNativeShell()"
             data-testid="remote-workspace-folder-change"
             @click="changeFolder"
           >
@@ -135,7 +135,7 @@ onMounted(() => {
           <button
             type="button"
             class="h-7 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2.5 text-[11.5px] text-dim transition-colors hover:border-line-2 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-            :disabled="busy || !isTauriRuntime()"
+            :disabled="busy || !hasNativeShell()"
             data-testid="remote-workspace-folder-reset"
             @click="resetFolder"
           >

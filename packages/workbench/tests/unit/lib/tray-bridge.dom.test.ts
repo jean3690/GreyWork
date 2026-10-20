@@ -8,7 +8,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises } from "@vue/test-utils";
 
 const invoke = vi.fn<(cmd: string, args?: unknown) => Promise<void>>();
-vi.mock("@tauri-apps/api/core", () => ({ invoke: (cmd: string, args?: unknown) => invoke(cmd, args) }));
+vi.mock("@greywork/host-ipc", async (importOriginal) => ({
+  ...(await importOriginal()),
+  invoke: (cmd: string, args?: unknown) => invoke(cmd, args),
+}));
 
 const handlers = new Map<string, (event: unknown) => void>();
 const unlisten = vi.fn();
@@ -16,14 +19,38 @@ const listen = vi.fn(async (name: string, handler: (event: unknown) => void) => 
   handlers.set(name, handler);
   return unlisten;
 });
-vi.mock("@tauri-apps/api/event", () => ({ listen: (name: string, handler: (event: unknown) => void) => listen(name, handler) }));
 
 import { syncCloseToTray, syncTrayLabels, useTrayBridge, type TrayLabels } from "@/lib/tray-bridge";
 
+/**
+ * 装一个「桌面态」运行时：server 覆盖 + Electron bridge（tray 分组路由到本文件的
+ * invoke / listen 桩，断言由此落在它们身上）。
+ */
 function setTauri(on: boolean): void {
   const w = window as unknown as Record<string, unknown>;
-  if (on) w.__TAURI_INTERNALS__ = {};
-  else delete w.__TAURI_INTERNALS__;
+  if (on) {
+    w.__GREYWORK_RUNTIME__ = "server";
+    w.__GREYWORK_SHELL__ = {
+      window: {},
+      tray: {
+        available: () => Promise.resolve(true),
+        setCloseToTray: (enabled: boolean) => invoke("set_close_to_tray", { enabled }),
+        setLabels: (labels: unknown) => invoke("set_tray_labels", { labels }),
+        // Electron 的托盘事件走 ipcRenderer.on（同步注册、同步解绑），不是 listen。
+        onNewChat: (handler: () => void) => {
+          handlers.set("tray:new-chat", handler);
+          return unlisten;
+        },
+        onOpenSettings: (handler: () => void) => {
+          handlers.set("tray:open-settings", handler);
+          return unlisten;
+        },
+      },
+    };
+  } else {
+    delete w.__GREYWORK_RUNTIME__;
+    delete w.__GREYWORK_SHELL__;
+  }
 }
 
 beforeEach(() => {
@@ -95,9 +122,6 @@ describe("useTrayBridge", () => {
     const onOpenSettings = vi.fn();
     const dispose = useTrayBridge({ onNewChat, onOpenSettings });
     await flushPromises();
-
-    expect(listen).toHaveBeenCalledWith("tray:new-chat", expect.any(Function));
-    expect(listen).toHaveBeenCalledWith("tray:open-settings", expect.any(Function));
 
     handlers.get("tray:new-chat")?.({});
     handlers.get("tray:open-settings")?.({});

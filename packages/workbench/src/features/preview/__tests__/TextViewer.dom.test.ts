@@ -54,7 +54,7 @@ beforeEach(() => {
 
 /** 桌面态标记：`isTauriRuntime()` 认 window 上的 `__TAURI_INTERNALS__`。 */
 function stubTauriRuntime(): void {
-  (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+  (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = "server";
 }
 
 describe("TextViewer", () => {

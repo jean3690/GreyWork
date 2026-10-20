@@ -6,10 +6,17 @@
 //!   事件信封与 acp_host 同构，前端按 kind 分流。
 //! - 服务端若忽略 `stream:true` 返回整段 JSON，按非流式路径一次性下发。
 //! - Anthropic / Ollama 均提供 openai-compatible 端点，Phase 1 统一走该线格式。
+//!
+//! 三条回合同用传输层，按能力分岔：
+//! - [`chat`]：一次请求一次回答，无工具。
+//! - [`agent`]：请求 → 工具 → 回填 → 再请求，直到模型给出结论（只读工具面）。
+//! - [`embeddings`] / [`transcribe`] / [`models`]：非对话端点。
 
+mod agent;
 mod chat;
 mod dto;
 mod embeddings;
+mod events;
 mod models;
 mod sse;
 mod transcribe;
@@ -18,6 +25,7 @@ mod transport;
 #[cfg(test)]
 mod tests;
 
+pub use agent::{llm_agent_start, llm_agent_stop, AgentStartArgs, LlmAgentHost};
 pub use chat::{chat_complete, llm_chat_start, llm_chat_stop, LlmHost};
 pub use dto::{
     ChatStartArgs, ChatStopArgs, InferenceParams, ListModelsArgs, LlmChatMessage, TranscribeArgs,

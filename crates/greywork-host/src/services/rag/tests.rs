@@ -213,3 +213,144 @@ async fn rag_search_ranks_by_cosine() {
     assert_eq!(hits[0].text, "near");
     assert!((hits[0].score - 1.0).abs() < 1e-6);
 }
+
+/* ===== arena（归一化 + SoA）打分路径 ===== */
+
+/// 造一个内存索引，走 `RagIndex::build`，与生产懒加载路径完全一致。
+fn index_of(vectors: &[(&str, Vec<f32>)]) -> RagIndex {
+    RagIndex::build(
+        vectors
+            .iter()
+            .map(|(text, vec)| RagChunkRow {
+                path: format!("/root/{text}.rs"),
+                chunk_index: 0,
+                text: (*text).into(),
+                vec: vec.clone(),
+            })
+            .collect(),
+    )
+}
+
+#[test]
+fn dot_sums_products_across_full_and_partial_tiles() {
+    assert_eq!(dot(&[], &[]), 0.0);
+    // 长度 1：4 路主体一次都不进，全靠尾循环。
+    assert_eq!(dot(&[2.0], &[3.0]), 6.0);
+    // 长度 5：一个 4 路块 + 1 个尾元素。
+    let ones = [1.0f32; 5];
+    assert_eq!(dot(&[1.0, 2.0, 3.0, 4.0, 5.0], &ones), 15.0);
+    // 长度 8：两个 4 路块、无尾元素。
+    assert_eq!(dot(&[1.0f32; 8], &[2.0f32; 8]), 16.0);
+}
+
+/// arena 路径的分数必须与「直接在原始向量上算余弦」（引入 arena 之前的写法）逐条一致 —— 排序与分数都要对上。
+#[test]
+fn arena_scoring_agrees_with_brute_force_cosine() {
+    let raw = [
+        ("a", vec![3.0, 4.0, 0.0]),
+        ("b", vec![-1.0, 2.0, 2.0]),
+        ("c", vec![0.5, 0.5, 0.5]),
+        ("d", vec![0.0, 0.0, 9.0]),
+    ];
+    let query = [1.0, 2.0, -0.5];
+    let mut want: Vec<(f32, usize)> = raw
+        .iter()
+        .enumerate()
+        .map(|(idx, (_, vec))| (cosine(&query, vec), idx))
+        .collect();
+    want.sort_by(|a, b| b.0.partial_cmp(&a.0).expect("分数不应为 NaN"));
+
+    let index = index_of(&raw);
+    let mut got = score_all(&query, &index);
+    got.sort_by(|a, b| b.0.partial_cmp(&a.0).expect("分数不应为 NaN"));
+
+    assert_eq!(got.len(), want.len());
+    for (g, w) in got.iter().zip(want.iter()) {
+        assert_eq!(g.1, w.1, "排序下标不一致");
+        assert!((g.0 - w.0).abs() < 1e-5, "分数不一致: {} vs {}", g.0, w.0);
+    }
+}
+
+/// 维度一致时确实走 arena：向量被搬进连续存储，原行不留第二份。
+#[test]
+fn uniform_dims_move_vectors_into_arena() {
+    let index = index_of(&[("a", vec![3.0, 4.0]), ("b", vec![0.0, -2.0])]);
+    assert!(index.arena.is_some(), "同维度应建 arena");
+    assert!(
+        index.rows.iter().all(|row| row.vec.is_empty()),
+        "进 arena 的行其 vec 应被抽空"
+    );
+    // 归一化后逐个点积：a = [0.6, 0.8]，b = [0, -1]。
+    let scored = score_all(&[2.0, 0.0], &index);
+    assert_eq!(scored[1].1, 1, "行序应保持");
+    assert!((scored[0].0 - 0.6).abs() < 1e-6, "得 {}", scored[0].0);
+    assert!(scored[1].0.abs() < 1e-6, "得 {}", scored[1].0);
+}
+
+/// query 维度与索引不符（换过 embedding 模型却没整库重建）→ 全 0，与旧 `cosine` 的「长度不符返回 0」同义。
+#[test]
+fn query_dim_mismatch_scores_zero() {
+    let index = index_of(&[("a", vec![1.0, 0.0]), ("b", vec![0.0, 1.0])]);
+    let scored = score_all(&[1.0, 0.0, 0.0], &index);
+    assert!(scored.iter().all(|(score, _)| *score == 0.0), "{scored:?}");
+}
+
+/// 维度不齐时不建 arena，退回逐行余弦，且**原向量必须原样保留**。
+#[test]
+fn ragged_dims_fall_back_to_cosine() {
+    let index = index_of(&[("a", vec![1.0, 0.0]), ("b", vec![1.0, 0.0, 0.0])]);
+    assert!(index.arena.is_none(), "维度不齐不应建 arena");
+    assert_eq!(
+        index.rows[1].vec,
+        vec![1.0, 0.0, 0.0],
+        "退化路径须保留原向量"
+    );
+    let scored = score_all(&[1.0, 0.0], &index);
+    assert!((scored[0].0 - 1.0).abs() < 1e-6, "同维同向应为 1");
+    assert_eq!(scored[1].0, 0.0, "维度不符应为 0");
+}
+
+/// 零向量 query：旧 `cosine` 的 `norm_a == 0` 分支返回 0，arena 路径也必须全 0。
+#[test]
+fn zero_query_scores_zero() {
+    let index = index_of(&[("a", vec![1.0, 0.0]), ("b", vec![0.0, 3.0])]);
+    let scored = score_all(&[0.0, 0.0], &index);
+    assert!(scored.iter().all(|(score, _)| *score == 0.0), "{scored:?}");
+}
+
+/// 失效后必须重载：`rag_replace_file` 改了库，缓存不失效就会搜到旧索引。
+#[test]
+fn invalidate_forces_reload_after_replace() {
+    let db = Db::open_in_memory().expect("db");
+    let rag = RagHost::default();
+    db.rag_replace_file(
+        "/root",
+        "/root/a.rs",
+        1,
+        1,
+        &[RagChunkDto {
+            chunk_index: 0,
+            text: "old".into(),
+            vec: vec![1.0, 0.0],
+        }],
+    )
+    .expect("insert");
+    assert_eq!(rag.load(&db).expect("load").rows.len(), 1);
+
+    db.rag_replace_file(
+        "/root",
+        "/root/a.rs",
+        2,
+        2,
+        &[RagChunkDto {
+            chunk_index: 0,
+            text: "new".into(),
+            vec: vec![1.0, 0.0],
+        }],
+    )
+    .expect("replace");
+    // 未失效：缓存仍持旧的 "old" 行 —— 这也正是 `RagHost::invalidate` 存在的理由。
+    assert_eq!(rag.load(&db).expect("cached").rows[0].text, "old");
+    rag.invalidate();
+    assert_eq!(rag.load(&db).expect("reload").rows[0].text, "new");
+}

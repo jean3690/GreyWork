@@ -24,9 +24,6 @@ pub struct HostFacts {
     pub version: String,
     /// 宿主是否真的建出了系统托盘。headless 恒 `false`。
     pub tray_available: bool,
-    /// 宿主是否钉死了 agent 沙箱（服务端配置了 `GREYWORK_SANDBOX` 时为真，
-    /// 与 `policy::overlay_args` 的覆盖条件同源）。桌面壳没有配置覆盖，恒 `false`。
-    pub pinned_sandbox: bool,
     /// 宿主钉死的权限档位（服务端配置了 `GREYWORK_TIER` 时有值）。桌面恒 `None`。
     pub pinned_tier: Option<String>,
 }
@@ -52,8 +49,6 @@ pub struct SysInfo {
     pub total_memory_bytes: Option<u64>,
     /// 逻辑核数。取不到为 0（渲染端回落 `navigator.hardwareConcurrency`）。
     pub cpu_count: usize,
-    /// 宿主是否钉死了 agent 沙箱。设置页据此把沙盒卡置灰并说明。
-    pub pinned_sandbox: bool,
     /// 宿主钉死的权限档位。设置页据此把档位卡置灰并说明。
     pub pinned_tier: Option<String>,
 }
@@ -129,7 +124,6 @@ pub async fn sys_info(db: &Db, acp: &AcpHost, facts: &HostFacts) -> Result<SysIn
         tray_available: facts.tray_available,
         total_memory_bytes: total_memory_bytes(),
         cpu_count: cpu_count(),
-        pinned_sandbox: facts.pinned_sandbox,
         pinned_tier: facts.pinned_tier.clone(),
     })
 }
@@ -149,7 +143,6 @@ mod tests {
             tray_available: false,
             total_memory_bytes: Some(8 * 1024 * 1024 * 1024),
             cpu_count: 8,
-            pinned_sandbox: true,
             pinned_tier: Some("read-only".into()),
         })
         .expect("serialize");
@@ -163,7 +156,6 @@ mod tests {
         assert!(map.contains_key("trayAvailable"));
         assert!(map.contains_key("totalMemoryBytes"));
         assert!(map.contains_key("cpuCount"));
-        assert!(map.contains_key("pinnedSandbox"));
         assert!(map.contains_key("pinnedTier"));
         assert_eq!(map["version"], "0.1.0");
     }
@@ -175,13 +167,11 @@ mod tests {
         let facts = HostFacts {
             version: "9.9.9-test".into(),
             tray_available: true,
-            pinned_sandbox: true,
             pinned_tier: Some("read-only".into()),
         };
         let info = sys_info(&db, &acp, &facts).await.expect("sys_info");
         assert_eq!(info.version, "9.9.9-test");
         assert!(info.tray_available);
-        assert!(info.pinned_sandbox);
         assert_eq!(info.pinned_tier.as_deref(), Some("read-only"));
     }
 

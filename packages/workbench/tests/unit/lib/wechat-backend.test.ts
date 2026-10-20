@@ -8,8 +8,11 @@ const mocks = vi.hoisted(() => ({
   listen: vi.fn(async (_event: string, _handler: (event: { payload: unknown }) => void) => () => {}),
 }));
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
-vi.mock("@tauri-apps/api/event", () => ({ listen: mocks.listen }));
+vi.mock("@greywork/host-ipc", async (importOriginal) => ({
+  ...(await importOriginal()),
+  invoke: mocks.invoke,
+  listen: mocks.listen,
+}));
 vi.mock("@greywork/core", async (importOriginal) => ({
   ...(await importOriginal<typeof GreyworkCore>()),
   isTauriRuntime: () => true,
@@ -18,6 +21,7 @@ vi.mock("@greywork/core", async (importOriginal) => ({
 import { WECHAT_INBOUND_EVENT, WECHAT_STATE_EVENT, wechatBackend } from "@/lib/wechat-backend";
 
 beforeEach(() => {
+  vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "server" });
   vi.clearAllMocks();
 });
 

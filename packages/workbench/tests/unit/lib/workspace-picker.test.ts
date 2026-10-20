@@ -15,7 +15,10 @@ vi.mock("@greywork/core", async (importOriginal) => {
   const mod = await importOriginal<typeof CoreModule>();
   return { ...mod, isTauriRuntime: h.isTauri };
 });
-vi.mock("@tauri-apps/api/core", () => ({ invoke: h.invoke }));
+vi.mock("@greywork/host-ipc", async (importOriginal) => ({
+  ...(await importOriginal()),
+  invoke: h.invoke,
+}));
 
 import { pickWorkspaceFolder } from "@/lib/workspace-picker";
 
@@ -32,23 +35,33 @@ afterEach(() => {
 });
 
 describe("pickWorkspaceFolder", () => {
-  it("桌面端只问 host 的系统目录对话框", async () => {
-    h.invoke.mockResolvedValue("/host/allowed/path");
+  it("桌面端只问 host 的系统目录对话框（选中路径经授权命令回规范值）", async () => {
+    vi.stubGlobal("window", {
+      __GREYWORK_RUNTIME__: "server",
+      __GREYWORK_SHELL__: { window: {}, picker: { openFiles: vi.fn(), openDirectory: () => Promise.resolve("/host/raw") } },
+      prompt: h.prompt,
+    });
+    // 授权命令走 shell.ts 内部的 invoke（相对导入，包级 mock 管不到）→ stub fetch。
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(["/host/allowed/path"]), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
 
     await expect(pickWorkspaceFolder()).resolves.toBe("/host/allowed/path");
-    expect(h.invoke).toHaveBeenCalledWith("pick_workspace_folder");
+    expect(fetchMock).toHaveBeenCalledWith("/api/command", expect.objectContaining({ method: "POST" }));
     expect(h.prompt).not.toHaveBeenCalled();
   });
 
   it("桌面端对话框取消 → null", async () => {
-    h.invoke.mockResolvedValue(null);
+    vi.stubGlobal("window", {
+      __GREYWORK_RUNTIME__: "server",
+      __GREYWORK_SHELL__: { window: {}, picker: { openFiles: vi.fn(), openDirectory: () => Promise.resolve(null) } },
+      prompt: h.prompt,
+    });
 
     await expect(pickWorkspaceFolder()).resolves.toBeNull();
     expect(h.prompt).not.toHaveBeenCalled();
   });
 
   it("浏览器态回落 prompt，并 trim 掉首尾空白", async () => {
-    h.isTauri.mockReturnValue(false);
     h.prompt.mockReturnValue("  /tmp/preview-path  ");
 
     await expect(pickWorkspaceFolder()).resolves.toBe("/tmp/preview-path");
@@ -56,7 +69,6 @@ describe("pickWorkspaceFolder", () => {
   });
 
   it("浏览器态：空串 / 纯空白 / 取消（null）→ null", async () => {
-    h.isTauri.mockReturnValue(false);
     h.prompt.mockReturnValueOnce("").mockReturnValueOnce("   ").mockReturnValueOnce(null);
 
     await expect(pickWorkspaceFolder()).resolves.toBeNull();

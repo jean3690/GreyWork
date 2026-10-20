@@ -25,6 +25,8 @@ logs/
 .pnpm-store/
 greyWork*.png
 .omo/
+# Qoder 的本地权限/会话配置（与 .omo/ 同性质，不进版本库）
+.qoder/
 coverage/
 
 # 产物渲染自测生成的样本文件（docx/pptx 预览联调输出，非源码）

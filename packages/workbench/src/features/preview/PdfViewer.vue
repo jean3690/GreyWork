@@ -65,11 +65,22 @@ interface PdfDocument {
   getPage: (pageNumber: number) => Promise<PdfPage>;
 }
 
-const props = defineProps<{ tab: PreviewTab }>();
+const props = defineProps<{ tab: PreviewTab; bytes?: Uint8Array | null }>();
 
 const { t } = useI18n();
 
-const { data, loading, error } = usePreviewBinary(toRef(props, "tab"));
+/**
+ * PDF 字节的来源：**优先 `bytes` prop**（LibreOffice 转换产物），否则回落到按路径读取。
+ *
+ * 两种来源共用同一套渲染管线（`load(bytes)` + pdf.js），区别只在「字节从哪来」。
+ * `bytes` 为 `undefined` 表示「用路径」（普通 .pdf 文件）；为 `null` 表示「转换还没回来」
+ * （加载态由外层转换组件负责，本组件保持空白）；为 `Uint8Array` 即直接渲染。
+ * `loading` / `error` 只在路径模式下有意义 —— 走 `bytes` 时转换层自己管状态。
+ */
+const { data: fileData, loading: fileLoading, error: fileError } = usePreviewBinary(toRef(props, "tab"));
+const data = computed<Uint8Array | null>(() => (props.bytes !== undefined ? props.bytes : fileData.value));
+const loading = computed(() => (props.bytes !== undefined ? false : fileLoading.value));
+const error = computed<string | null>(() => (props.bytes !== undefined ? null : fileError.value));
 
 const scroller = ref<HTMLElement | null>(null);
 const pagesHost = ref<HTMLElement | null>(null);

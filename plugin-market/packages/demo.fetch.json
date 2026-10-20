@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "manifest": {
+    "id": "demo.fetch",
+    "name": "网络请求演示",
+    "version": "1.0.0",
+    "description": "net.fetch v2 能力演示：GET 只需 host 白名单；POST 必须同时声明路径模板（`*` 段内、`**` 跨段）；上下行默认 1MB，可按 maxBytes 放宽到 8MB；每插件每分钟最多 30 次。",
+    "kind": "worker",
+    "runtime": {
+      "type": "worker",
+      "entry": "https://raw.githubusercontent.com/OWNER/REPO/COMMIT/demo.fetch.js",
+      "sha256": "REPLACE_WITH_64_LOWERCASE_HEX"
+    },
+    "requires": [
+      {
+        "capability": "net.fetch",
+        "hosts": ["postman-echo.com"],
+        "methods": ["GET", "POST"],
+        "paths": ["/get", "/post"],
+        "maxBytes": 4194304
+      }
+    ],
+    "contributes": {
+      "modes": [
+        {
+          "id": "demo-fetch",
+          "title": "网络请求演示",
+          "icon": "earth",
+          "page": {
+            "eyebrow": "Marketplace plugin · net.fetch",
+            "heading": "声明式网络请求",
+            "body": "GET 只需 host 白名单；POST 必须同时在 paths 里声明路径模板（`*` 匹配段内、`**` 跨段）。请求体会先按 maxBytes 校验，再透传宿主做二次校验。web 预览走受限 webview fetch，桌面/服务端走 Rust 代理。",
+            "fields": [
+              {
+                "key": "message",
+                "label": "回显内容",
+                "kind": "text",
+                "default": "hello greywork",
+                "maxLength": 200
+              },
+              {
+                "key": "status",
+                "label": "最近动作",
+                "kind": "text",
+                "default": "尚未操作",
+                "maxLength": 160
+              }
+            ],
+            "outputs": [
+              {
+                "label": "动作",
+                "valueKey": "status"
+              }
+            ],
+            "actions": [
+              {
+                "id": "get",
+                "label": "GET 回显",
+                "style": "primary",
+                "operation": {
+                  "type": "invoke",
+                  "handler": "get"
+                }
+              },
+              {
+                "id": "post",
+                "label": "POST 回显",
+                "operation": {
+                  "type": "invoke",
+                  "handler": "post"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

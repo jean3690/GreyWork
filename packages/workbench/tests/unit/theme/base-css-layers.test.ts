@@ -53,6 +53,16 @@ describe("base.css 的层叠契约", () => {
     expect(base).toMatch(/button\s*\{[^}]*cursor:\s*pointer/);
   });
 
+  it("桌面主窗圆角只认 data-native-shell，且最大化时归零", () => {
+    // 契约另一端在 apps/desktop/src/window-frame.ts：主窗打标 / 插件悬浮窗不打标。
+    expect(css).toMatch(/:root\[data-native-shell\]\s*\{[^}]*background-color:\s*transparent/);
+    expect(css).toMatch(/:root\[data-native-shell\]\s+body\s*\{[^}]*background:\s*transparent/);
+    expect(css).toMatch(
+      /:root\[data-native-shell\]\s+#app\s*\{[^}]*background:\s*var\(--ink\)[^}]*border-radius:\s*calc\(10px \* var\(--gw-radius-scale\)\)/,
+    );
+    expect(css).toMatch(/:root\[data-native-shell\]\[data-native-maximized\]\s+#app\s*\{[^}]*border-radius:\s*0/);
+  });
+
   it("无层区不得再出现表单控件兜底 —— 无层样式会盖掉 @layer utilities 里的工具类", () => {
     // 无层 `input { border: none; background: transparent }` → 全应用输入框的
     // `.border` / `.border-line` / `.bg-panel-2` 一起失效，渲染成无边框透明块。

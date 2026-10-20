@@ -8,15 +8,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
-import { invoke } from "@tauri-apps/api/core";
 import LegacyOfficeViewer from "@/features/preview/LegacyOfficeViewer.vue";
 import { usePreviewStore } from "@/stores/preview";
 import { useVfsStore } from "@/stores/vfs";
 import type { PreviewTab } from "@/stores/preview";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+vi.mock("@greywork/host-ipc", async (importOriginal) => ({
+  ...(await importOriginal()),
+  invoke: vi.fn(),
+}));
 
-const invokeMock = vi.mocked(invoke);
+const invokeMock = vi.mocked((await import("@greywork/host-ipc")).invoke);
+const bridge = vi.hoisted(() => ({ openPath: vi.fn() }));
 
 /** 出现在字节里、绝不该被渲染出来的哨兵串。 */
 const MARKER = "SHOULD_NEVER_RENDER";
@@ -103,13 +106,25 @@ describe("LegacyOfficeViewer", () => {
 });
 
 describe("LegacyOfficeViewer 降级体验", () => {
-  /** 桌面态标记：`isTauriRuntime()` 认 window 上的 `__TAURI_INTERNALS__`。 */
-  function stubTauriRuntime(): void {
-    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+  /** 桌面态 = Electron 壳：按钮闸门读 hasNativeShell()，点击走 bridge.app.openPath。 */
+  function stubDesktop(): void {
+    (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = "server";
+    (window as unknown as Record<string, unknown>).__GREYWORK_SHELL__ = {
+      window: {},
+      app: {
+        openPath: bridge.openPath,
+        openExternal: vi.fn(),
+        version: () => Promise.resolve("0.2.0"),
+        homeDir: () => Promise.resolve(null),
+        revealPath: vi.fn(),
+        pathForFile: () => null,
+      },
+    };
   }
 
   afterEach(() => {
-    delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+    delete (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__;
+    delete (window as unknown as Record<string, unknown>).__GREYWORK_SHELL__;
     invokeMock.mockReset();
   });
 
@@ -126,8 +141,8 @@ describe("LegacyOfficeViewer 降级体验", () => {
   });
 
   it("桌面态且有磁盘孪生路径：正文里出现「用系统应用打开」按钮，点击调 open_path", async () => {
-    stubTauriRuntime();
-    invokeMock.mockResolvedValue(undefined);
+    stubDesktop();
+    bridge.openPath.mockResolvedValue(undefined);
     const preview = usePreviewStore();
     const id = preview.open("docs/legacy.doc");
     preview.attachDiskPath("docs/legacy.doc", "/home/u/docs/legacy.doc");
@@ -138,7 +153,7 @@ describe("LegacyOfficeViewer 降级体验", () => {
     expect(wrapper.find('[data-testid="legacy-office-open-external"]').exists()).toBe(true);
     await wrapper.get('[data-testid="legacy-office-open-external"]').trigger("click");
     await flushPromises();
-    expect(invokeMock).toHaveBeenCalledWith("open_path", { path: "/home/u/docs/legacy.doc" });
+    expect(bridge.openPath).toHaveBeenCalledWith("/home/u/docs/legacy.doc");
   });
 
   it("浏览器态没有磁盘通道：按钮不出现", async () => {

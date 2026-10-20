@@ -8,10 +8,12 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { invoke } from "@tauri-apps/api/core";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
-const invokeMock = vi.mocked(invoke);
+vi.mock("@greywork/host-ipc", async (importOriginal) => ({
+  ...(await importOriginal()),
+  invoke: vi.fn(),
+}));
+const invokeMock = vi.mocked((await import("@greywork/host-ipc")).invoke);
 
 import { sessionBackend, toWorkspaceDirRefs } from "../../src/lib/session-backend";
 
@@ -66,7 +68,7 @@ describe("sessionBackend 浏览器态（无 Tauri、未配远端）", () => {
 
 describe("sessionBackend 桌面态（Tauri invoke）", () => {
   beforeEach(() => {
-    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
+    vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "server" });
   });
   afterEach(() => {
     vi.unstubAllGlobals();

@@ -1,5 +1,5 @@
 // Phase 2 验证：AcpClient 以 fake transport 跑通 start→session→prompt→stream→stop。
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PermissionTier } from "../../src/permissions";
 import {
   createAcpClient,
@@ -37,8 +37,13 @@ function fakeTransport(): AcpTransport & { events: AcpEventEnvelope[] } {
         sessionId,
         configOptions: [],
         restored: true,
+        resumed: false,
         mcpServers: (mcpServers ?? []).map((server) => server.name),
       };
+    },
+    async closeSession(_handle, sessionId) {
+      events.push({ kind: "session-closed", payload: { sessionId } });
+      return true;
     },
     async probeMcp(config) {
       return {
@@ -60,6 +65,9 @@ function fakeTransport(): AcpTransport & { events: AcpEventEnvelope[] } {
         },
       ];
     },
+    async setSessionMode(_handle, modeId) {
+      events.push({ kind: "mode", payload: { modeId } });
+    },
     async prompt(_handle, text) {
       events.push({ kind: "session-update", payload: { text } });
       for (const listener of listeners) listener(events[events.length - 1]!);
@@ -70,6 +78,9 @@ function fakeTransport(): AcpTransport & { events: AcpEventEnvelope[] } {
     },
     async stop(_handle, turnId) {
       events.push({ kind: "stopped", payload: { handle: _handle, turnId } });
+    },
+    async cancelSession(handle, sessionId) {
+      events.push({ kind: "session-cancelled", payload: { handle, sessionId } });
     },
     async respondPermission(requestId, optionId) {
       events.push({ kind: "permission-resolved", payload: { requestId, optionId } });
@@ -107,9 +118,16 @@ describe("AcpClient over fake transport", () => {
     const options = await client.setSessionConfig(handle, "model", "mock-slow");
     expect(options[0]?.id).toBe("model");
     expect(options[0]?.currentValue).toBe("mock-slow");
+    await client.setSessionMode(handle, "plan");
+    expect(transport.events.at(-1)).toMatchObject({ kind: "mode", payload: { modeId: "plan" } });
     const result = await client.prompt(handle, "hello");
     expect(result.turnId).toBe(7);
     await client.stop(handle, 7);
+    await expect(client.closeSession(handle, opened.sessionId)).resolves.toBe(true);
+    expect(transport.events.at(-1)).toMatchObject({
+      kind: "session-closed",
+      payload: { sessionId: "sess-fake" },
+    });
 
     expect(received.map((event) => event.kind)).toEqual(["session-update", "prompt-done"]);
     unsubscribe();
@@ -123,6 +141,7 @@ describe("WebSocketTransport（web 远程骨架）", () => {
     await expect(transport.startAgent("node x.mjs", tier)).rejects.toBeInstanceOf(RemoteAcpUnsupportedError);
     await expect(transport.openSession(1, "/tmp")).rejects.toBeInstanceOf(RemoteAcpUnsupportedError);
     await expect(transport.setSessionConfig(1, "model", "x")).rejects.toBeInstanceOf(RemoteAcpUnsupportedError);
+    await expect(transport.setSessionMode(1, "plan")).rejects.toBeInstanceOf(RemoteAcpUnsupportedError);
     await expect(transport.stop(1)).rejects.toBeInstanceOf(RemoteAcpUnsupportedError);
     await expect(transport.respondPermission(1, null)).rejects.toBeInstanceOf(RemoteAcpUnsupportedError);
     await expect(transport.list()).resolves.toEqual([]);
@@ -137,6 +156,33 @@ describe("WebSocketTransport（web 远程骨架）", () => {
     if (client.transportId !== "websocket") return;
     expect(client.isAvailable()).toBe(false);
     await expect(client.startAgent("node x.mjs", "full")).rejects.toBeInstanceOf(RemoteAcpUnsupportedError);
+  });
+});
+
+describe("默认传输的决议时机", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("延迟到首次使用才决议：模块期 runtime 未定，之后按当时的运行时选宿主传输", () => {
+    // 调用方（workbench 的 acp-client.ts / stores/cowork.ts）都在**模块顶层**就 createAcpClient()，
+    // 而 runtimeMode() 的探测（同源 /api/health）晚于模块求值。若在此处就把传输定死，Electron /
+    // 自托管服务端会被判成 browser-preview、永久拿到不可用的 WebSocket 传输。
+    vi.stubGlobal("window", {}); // 无覆盖 → 此刻 runtimeMode() 还是 browser-preview
+    const client = createAcpClient();
+
+    // 模拟 initRuntimeMode() 探测完成（服务端 / Electron 同属「有宿主命令」）。
+    (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = "server";
+
+    expect(client.transportId).toBe("tauri-ipc");
+    expect(client.isAvailable()).toBe(true);
+  });
+
+  it("显式注入的传输立即生效（测试 / 远程 endpoint 不受延迟决议影响）", () => {
+    const injected = new WebSocketTransport();
+    const client = createAcpClient(injected);
+    expect(client.transportId).toBe("websocket");
+    expect(client.isAvailable()).toBe(false);
   });
 });
 
@@ -177,12 +223,24 @@ class FakeWebSocket {
       request.method === "initialize"
         ? { protocolVersion: 1, agentCapabilities: { loadSession: false } }
         : request.method === "session/new"
-          ? { sessionId: "remote-session", configOptions: [] }
+          ? {
+              sessionId: "remote-session",
+              configOptions: [],
+              modes: {
+                currentModeId: "build",
+                availableModes: [
+                  { id: "build", name: "Build" },
+                  { id: "plan", name: "Plan", description: "Read-only planning" },
+                ],
+              },
+            }
           : request.method === "session/set_config_option"
             ? { configOptions: [{ id: "model", name: "Model", type: "select", currentValue: "fast" }] }
-            : request.method === "session/prompt"
-              ? { stopReason: "end_turn" }
-              : {};
+            : request.method === "session/set_mode"
+              ? {}
+              : request.method === "session/prompt"
+                ? { stopReason: "end_turn" }
+                : {};
     queueMicrotask(() => {
       this.emit("message", JSON.stringify({ jsonrpc: "2.0", id: request.id, result }));
     });
@@ -256,8 +314,22 @@ describe("WebSocketTransport ACP JSON-RPC", () => {
     expect(await transport.startAgent("ignored", "workspace")).toBe(1);
     const socket = FakeWebSocket.instances[0]!;
     expect(JSON.parse(socket.sent[0]!).method).toBe("initialize");
-    expect((await transport.openSession(1, "/tmp")).sessionId).toBe("remote-session");
+    const opened = await transport.openSession(1, "/tmp");
+    expect(opened.sessionId).toBe("remote-session");
+    // 旧版 modes 必须归一成前端契约形状（description 可选）。
+    expect(opened.modes).toEqual({
+      currentModeId: "build",
+      availableModes: [
+        { id: "build", name: "Build" },
+        { id: "plan", name: "Plan", description: "Read-only planning" },
+      ],
+    });
     expect((await transport.setSessionConfig(1, "model", "fast"))[0]?.currentValue).toBe("fast");
+    await transport.setSessionMode(1, "plan");
+    await flushMicrotasks();
+    const modeFrame = JSON.parse(socket.sent.at(-1)!) as { method: string; params: { sessionId: string; modeId: string } };
+    expect(modeFrame.method).toBe("session/set_mode");
+    expect(modeFrame.params).toMatchObject({ sessionId: "remote-session", modeId: "plan" });
     socket.update("hello");
     socket.permissionRequest(99);
     await flushMicrotasks();
@@ -325,5 +397,19 @@ describe("WebSocketTransport ACP JSON-RPC", () => {
     await configured.stop(1);
     await flushMicrotasks();
     expect(JSON.parse(socket.sent.at(-1)!).method).toBe("session/cancel");
+  });
+
+  it("cancelSession 发 session/cancel 指向给定子会话 id（含协议层子代理，不关连接）", async () => {
+    FakeWebSocket.instances = [];
+    const options: WebSocketTransportOptions = { url: "ws://acp.test", socketFactory: () => new FakeWebSocket() as unknown as WebSocket };
+    const transport = new WebSocketTransport(options);
+    await transport.startAgent("ignored", "workspace");
+    await transport.openSession(1, "/tmp");
+    const socket = FakeWebSocket.instances[0]!;
+    await transport.cancelSession(1, "child-sess-1");
+    await flushMicrotasks();
+    const frame = JSON.parse(socket.sent.at(-1)!) as { method: string; params: { sessionId: string } };
+    expect(frame.method).toBe("session/cancel");
+    expect(frame.params.sessionId).toBe("child-sess-1");
   });
 });

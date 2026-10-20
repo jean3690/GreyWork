@@ -1,13 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type * as GreyworkCore from "@greywork/core";
-
-const mocks = vi.hoisted(() => ({ isTauriRuntime: vi.fn<() => boolean>(() => false) }));
-
-// 门面用包导入读 isTauriRuntime，所以 mock 包导出即可（ESM live binding 在调用时生效）。
-vi.mock("@greywork/core", async (importOriginal) => ({
-  ...(await importOriginal<typeof GreyworkCore>()),
-  isTauriRuntime: mocks.isTauriRuntime,
-}));
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 const OVERRIDE_KEY = "__GREYWORK_RUNTIME__";
 
@@ -22,32 +13,20 @@ function stubWindow(override?: string): void {
   vi.stubGlobal("window", override === undefined ? {} : { [OVERRIDE_KEY]: override });
 }
 
-beforeEach(() => {
-  mocks.isTauriRuntime.mockReturnValue(false);
-});
-
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
 describe("runtimeMode", () => {
-  it("渲染端有 Tauri 注入时判定为 desktop", async () => {
-    mocks.isTauriRuntime.mockReturnValue(true);
-    stubWindow();
-    const { runtimeMode } = await freshRuntime();
-    expect(runtimeMode()).toBe("desktop");
-  });
-
-  it("判定是实时的：mock 翻转后立刻改变", async () => {
+  it("判定是实时的：覆盖键翻转后立刻改变", async () => {
     stubWindow();
     const { runtimeMode } = await freshRuntime();
     expect(runtimeMode()).toBe("browser-preview");
-    mocks.isTauriRuntime.mockReturnValue(true);
-    expect(runtimeMode()).toBe("desktop");
+    (window as unknown as Record<string, unknown>)[OVERRIDE_KEY] = "server";
+    expect(runtimeMode()).toBe("server");
   });
 
-  it("显式覆盖优先于桌面端判定", async () => {
-    mocks.isTauriRuntime.mockReturnValue(true);
+  it("显式覆盖优先于探测结果", async () => {
     stubWindow("server");
     const { runtimeMode } = await freshRuntime();
     expect(runtimeMode()).toBe("server");
@@ -70,7 +49,7 @@ describe("hasHostCommands", () => {
     stubWindow();
     const { hasHostCommands } = await freshRuntime();
     expect(hasHostCommands()).toBe(false);
-    mocks.isTauriRuntime.mockReturnValue(true);
+    (window as unknown as Record<string, unknown>)[OVERRIDE_KEY] = "server";
     expect(hasHostCommands()).toBe(true);
   });
 });
@@ -108,16 +87,6 @@ describe("initRuntimeMode", () => {
     await expect(initRuntimeMode()).resolves.toBe("browser-preview");
   });
 
-  it("桌面端初始化零 I/O", async () => {
-    mocks.isTauriRuntime.mockReturnValue(true);
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-    stubWindow();
-    const { initRuntimeMode } = await freshRuntime();
-    await expect(initRuntimeMode()).resolves.toBe("desktop");
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
   it("显式覆盖时不探测", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
@@ -151,8 +120,7 @@ describe("hostVersion", () => {
     expect(hostVersion()).toBeNull();
   });
 
-  it("未探测（桌面态）恒为 null", async () => {
-    mocks.isTauriRuntime.mockReturnValue(true);
+  it("未探测时为 null", async () => {
     stubWindow();
     const { initRuntimeMode, hostVersion } = await freshRuntime();
     await initRuntimeMode();

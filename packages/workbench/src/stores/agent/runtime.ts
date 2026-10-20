@@ -14,13 +14,16 @@ import { normalizeAcpCommands } from "../../lib/slash-commands";
 import { formatDuration, parseToolActivityPayload } from "../../lib/tool-activity";
 import { conversationFolder } from "../../lib/conversation-folder";
 import { isolateForRun, resolveWorkspaceDir } from "../../lib/workspace-dir";
-import { parseScheduleFences } from "../../lib/schedule-fence";
+import { parseAutomationFences } from "../../lib/automation-fence";
+import { ACP_LEGACY_MODE_OPTION_ID, withLegacyModeOption, withLegacyModeValue } from "../../lib/acp-legacy-modes";
 import { appEvents } from "../../events";
 import { notify } from "../notice";
 import { createPermissionGate } from "./permission";
+import { createSubagentSlice } from "./subagent";
 import { CONNECT_ABORTED, t, looksLikeMissingBinary } from "./shared";
-import type { AgentStoreState } from "./state";
+import type { AgentStoreState, SubagentMessage, SubagentTranscript } from "./state";
 import type { TurnApi } from "./turn";
+import type { PermissionTrace } from "../../types";
 
 export interface RuntimeDeps {
   state: AgentStoreState;
@@ -38,6 +41,14 @@ export interface RuntimeApi {
   respondPermission(optionId: string | null): Promise<void>;
   probeMcpServer(config: McpServerConfig): Promise<{ report?: McpProbeReport; error?: string }>;
   dismissPendingPermission(): void;
+  /** 取消一个协议层子代理的当前工作；返回是否已发出（需其宣告了 capabilities.cancel）。 */
+  cancelSubagent(sessionId: string): Promise<boolean>;
+  /** 某 transcript 的会话间消息（session_message 累积）。 */
+  subagentMessagesOf(sessionId: string): SubagentMessage[];
+  /** 某子代理自身的转录（正文 + 工具）。 */
+  subagentTranscriptOf(sessionId: string): SubagentTranscript | undefined;
+  /** 某子代理的树深度（根的子代理 = 1）。 */
+  subagentDepthOf(sessionId: string): number;
 }
 
 export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi {
@@ -45,6 +56,18 @@ export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi 
 
   /** 权限门（待决卡 / 120s 超时 / 留痕 / 免问直答 / 用户裁决）在 ./permission.ts。 */
   const gate = createPermissionGate(state);
+
+  /**
+   * 协议层子代理（agent 内部子会话）在 ./subagent.ts。
+   * `routeToMain` 指回本切片的主会话续写，避免子代理切片反向依赖 runtime。
+   */
+  const subagents = createSubagentSlice({
+    state,
+    getHandle: () => state.acpHandle.value,
+    cancelSession: (handle, sessionId) => acp.cancelSession(handle, sessionId),
+    routeToMain: (payload) =>
+      handleMainSessionUpdate(payload as { sessionId?: string; update?: { sessionUpdate?: string; content?: { text?: string } } }),
+  });
 
   /** 事件监听只挂一次。 */
   let listening = false;
@@ -90,6 +113,47 @@ export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi 
     clearReplayGuard();
   }
 
+  /**
+   * 主会话的 session-update 续写：回放抑制 + 工具时间线 + 正文 chunk。
+   * 抽成函数是为了让子代理切片的缓冲溢出回落（routeToMain）复用同一套主会话续写逻辑，
+   * 而不必让子代理切片反向依赖 runtime。
+   */
+  function handleMainSessionUpdate(payload: {
+    sessionId?: string;
+    update?: { sessionUpdate?: string; content?: { text?: string } };
+  }): void {
+    // 恢复会话的回放抑制：窗口期内只丢「内容类」update（工具 / 正文），避免历史重复渲染。
+    // 匹配规则：事件带 sessionId 时须等于恢复出的会话；缺失则按 handle 级窗口（本会话）。
+    const suppressed = replayGuard !== null && (payload.sessionId === undefined || payload.sessionId === replayGuard.sessionId);
+    if (suppressed) {
+      // 被抑制的内容类 update 仍在推进「静默」计时：只要有内容到达就把窗口往后挪，
+      // 直到连续 300ms 无内容为止（见 settleReplay）。
+      if (replayGuard) replayGuard.lastContentAt = Date.now();
+      return;
+    }
+    // 解析 agent_message 中携带的工具调用部分（read/edit/bash/search …），
+    // 并入支架消息的 tools 时间线 —— 前端「工具聚合时间线」数据源。
+    const toolActivities = parseToolActivityPayload(payload);
+    if (toolActivities.length > 0 && locals.acpStream && locals.acpThreadId) {
+      state.chat.appendTools(toolActivities, locals.acpStream.id, locals.acpThreadId);
+    }
+    if (payload.update?.sessionUpdate === "agent_message_chunk") {
+      const text = payload.update.content?.text ?? "";
+      if (!text) return;
+      if (locals.acpStream && locals.acpThreadId) {
+        state.chat.appendMessageContent(locals.acpStream.id, text, locals.acpThreadId);
+      }
+    }
+  }
+
+  /** 回填当前模式：同步原始 modes 快照 + 合成 config option（agent 主动切档 / 宿主确认）。 */
+  function applyCurrentMode(modeId: string): void {
+    if (state.acpModes.value) {
+      state.acpModes.value = { ...state.acpModes.value, currentModeId: modeId };
+    }
+    state.acpConfigOptions.value = withLegacyModeValue(state.acpConfigOptions.value, modeId);
+  }
+
   async function ensureListener(): Promise<void> {
     if (listening) return;
     listening = true;
@@ -102,28 +166,18 @@ export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi 
         // 子任务会话事件（sessionId 命中编排域注册的会话）由桥直接写子任务支架并消费；
         // 宿主发出的是 camelCase sessionId（ACP schema 的 serde 约定）。
         if (typeof payload.sessionId === "string" && locals.runBridge?.routeSessionUpdate?.(event.payload) === true) return;
-        // 恢复会话的回放抑制：窗口期内只丢「内容类」update（工具 / 正文），避免历史重复渲染。
-        // 匹配规则：事件带 sessionId 时须等于恢复出的 session；缺失则按 handle 级窗口（本会话）。
-        const suppressed = replayGuard !== null && (payload.sessionId === undefined || payload.sessionId === replayGuard.sessionId);
-        if (!suppressed) {
-          // 解析 agent_message 中携带的工具调用部分（read/edit/bash/search …），
-          // 并入支架消息的 tools 时间线 —— 前端「工具聚合时间线」数据源。
-          const toolActivities = parseToolActivityPayload(event.payload);
-          if (toolActivities.length > 0 && locals.acpStream && locals.acpThreadId) {
-            state.chat.appendTools(toolActivities, locals.acpStream.id, locals.acpThreadId);
-          }
-          if (payload.update?.sessionUpdate === "agent_message_chunk") {
-            const text = payload.update.content?.text ?? "";
-            if (!text) return;
-            if (locals.acpStream && locals.acpThreadId) {
-              state.chat.appendMessageContent(locals.acpStream.id, text, locals.acpThreadId);
-            }
-          }
-        } else {
-          // 被抑制的内容类 update 仍在推进「静默」计时：只要有内容到达就把窗口往后挪，
-          // 直到连续 300ms 无内容为止（见 settleReplay）。
-          if (replayGuard) replayGuard.lastContentAt = Date.now();
+        // 协议层子代理：已宣告的归属其自身流量；未宣告的疑似子代理流量先缓冲（等 subagent_update）。
+        // 顺序在 runs 之后、主会话之前——先把「不是主会话的」分流掉，主会话分支只管主会话。
+        if (subagents.handleSessionUpdate(event.payload)) return;
+        if (
+          typeof payload.sessionId === "string" &&
+          state.acpSessionId.value !== null &&
+          payload.sessionId !== state.acpSessionId.value &&
+          subagents.bufferIfSubagentTraffic(event.payload)
+        ) {
+          return;
         }
+        handleMainSessionUpdate(payload);
       } else if (event.kind === "thought") {
         // 思考流（AgentThoughtChunk）：聚合到 store 快照，并续写支架消息的 thinking
         // 字段（ThinkingBlock 数据源），不打断正文流。
@@ -145,35 +199,36 @@ export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi 
         const payload = event.payload as { availableCommands?: unknown };
         state.acpCommands.value = normalizeAcpCommands(payload.availableCommands);
       } else if (event.kind === "permission-auto") {
-        // 宿主按档位自动决策（daily 只读 / auto 直通）：追加一行通知，不打断流
-        const payload = event.payload as AcpPermissionRequestPayload;
-        if (locals.acpStream && locals.acpThreadId) {
-          state.chat.appendMessageContent(
-            locals.acpStream.id,
-            t("errors.autoApproved", { title: payload.title ?? payload.kind, choice: payload.chosen ?? "" }),
-            locals.acpThreadId,
-          );
-        }
+        // 宿主按档位自动放行（只读档放行只读工具 / 工作区档放行界内写）：留痕卡，不打断流。
+        gate.recordHostDecision(event.payload as AcpPermissionRequestPayload, "auto");
       } else if (event.kind === "permission-blocked") {
-        // 宿主权限拦截（只读档 / 工作区越界）：通知流记录，不打断流
-        const payload = event.payload as { title?: string | null; kind?: string; reason?: string; locations?: string[] };
-        if (locals.acpStream && locals.acpThreadId) {
-          const detail =
-            payload.reason === "read-only"
-              ? t("errors.readOnlyBlocked", { title: payload.title ?? payload.kind ?? "write" })
-              : t("errors.blockedOutsideWorkspace", {
-                  title: payload.title ?? payload.kind ?? "write",
-                  paths: (payload.locations ?? []).join("、"),
-                });
-          state.chat.appendMessageContent(locals.acpStream.id, detail, locals.acpThreadId);
-        }
+        // 宿主拦截（只读档拦写/执行、工作区越界、Full 档无 Allow 选项可放行）：留痕卡 + 记原因。
+        const payload = event.payload as AcpPermissionRequestPayload & { reason?: PermissionTrace["reason"] };
+        gate.recordHostDecision(payload, "blocked", payload.reason);
       } else if (event.kind === "config-options") {
         // 后端确认后的全量配置快照（set_config_option 响应 / ConfigOptionUpdate 通知）：
         // 回填选择器控件——对齐 GreyWork useAcpConfigOptions 的 snapshot 观测。
         const payload = event.payload as { configOptions?: AcpSessionConfigOption[] };
         if (Array.isArray(payload.configOptions) && payload.configOptions.length > 0) {
-          state.acpConfigOptions.value = payload.configOptions;
+          // agent 只回它自己的 config options；旧版 modes 的合成选项不在这份快照里，
+          // 合并回去，否则切一次模型/配置就会把模式胶囊弄丢。
+          state.acpConfigOptions.value = withLegacyModeOption(payload.configOptions, state.acpModes.value);
         }
+      } else if (event.kind === "mode") {
+        // 旧版会话模式：宿主在 session/set_mode 成功后广播，agent 也可能自行发
+        // current_mode_update。只认当前会话，避免恢复回放 / 旧会话的迟到事件串台。
+        // load 的重放窗口内 mode 也可能来自历史，丢弃；窗口外再按实时事件处理。
+        if (replayGuard !== null) return;
+        const payload = event.payload as { sessionId?: string; currentModeId?: string };
+        if (
+          typeof payload.sessionId !== "string" ||
+          payload.sessionId !== state.acpSessionId.value ||
+          typeof payload.currentModeId !== "string" ||
+          !payload.currentModeId
+        ) {
+          return;
+        }
+        applyCurrentMode(payload.currentModeId);
       } else if (event.kind === "permission-request") {
         // 用户此前选过「始终允许」的类别：直接答掉，不再第二次打扰。
         const payload = event.payload as AcpPermissionRequestPayload;
@@ -243,12 +298,12 @@ export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi 
             state.chat.flushPendingContent();
           }
         }
-        // ```schedule 围栏解析（AI 提议定时任务）：只在成功回合、支架还在、且未挂过
+        // ```schedule 围栏解析（AI 提议自动化任务）：只在成功回合、支架还在、且未挂过
         // 草稿时做一次；只取第一条（多围栏多半是幻觉，少即是多）。挂上后由
-        // ScheduleConfirmCard 走用户确认，不会静默创建。
+        // AutomationConfirmCard 走用户确认，不会静默创建。
         const scaffold = locals.acpStream;
         if (!errorText && scaffold && !scaffold.scheduleDraft && scaffold.content.trim()) {
-          const fence = parseScheduleFences(scaffold.content)[0];
+          const fence = parseAutomationFences(scaffold.content)[0];
           if (fence) {
             scaffold.scheduleDraft = fence;
             state.session.markDirty();
@@ -299,9 +354,11 @@ export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi 
         state.acpSessionId.value = null;
         locals.acpSessionThreadId = null;
         state.acpConfigOptions.value = [];
+        state.acpModes.value = null;
         state.acpImageSupport.value = null;
         state.acpBusy.value = false;
         state.chat.runningSessionId = null;
+        subagents.reset(); // 会话回收：子代理树一并作废（关闭父会话即结束其后代工作）
         gate.dismiss();
         state.activeTurnId.value = null;
         state.turnStartedAtMs.value = null;
@@ -313,16 +370,22 @@ export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi 
   /** 采纳 session/new 的结果（两条建会话路径共用，避免字段回填漂移）。 */
   function adoptOpenedSession(opened: AcpSessionOpened, threadId: string | null): void {
     state.acpSessionId.value = opened.sessionId;
+    // 新会话 / 恢复会话都会换掉会话身份：旧的子代理树随旧会话作废
+    // （RFD：重连后子代理的 live 状态与授权一律先失效，等新的 subagent_update 重建）。
+    subagents.reset();
     locals.acpSessionThreadId = threadId;
     // 新会话没有上下文：schedule 围栏说明需要随下个回合重新注入一次
     locals.scheduleHintInjectedFor = null;
     // 同理：调用方宿主能力提示（远程文件发送）也要重注。
     locals.hostHintInjectedFor = null;
-    state.acpConfigOptions.value = opened.configOptions;
+    // 旧版 modes 合成为一条 select 型 config option，复用既有的选择器 / 工作区记忆链路；
+    // agent 已用 config option 暴露模式时 withLegacyModeOption 不会重复添加。
+    state.acpModes.value = opened.modes ?? null;
+    state.acpConfigOptions.value = withLegacyModeOption(opened.configOptions, state.acpModes.value);
     state.acpMcpServers.value = opened.mcpServers ?? [];
     state.acpMcpSkipped.value = opened.skippedMcpServers ?? [];
     state.acpImageSupport.value = opened.imagePrompts === true;
-    state.acpStatus.value = opened.configOptions.length > 0 ? "session_active" : "connected";
+    state.acpStatus.value = state.acpConfigOptions.value.length > 0 ? "session_active" : "connected";
     state.acpConnected.value = true;
   }
 
@@ -345,6 +408,7 @@ export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi 
     state.acpSessionId.value = null;
     locals.acpSessionThreadId = null;
     state.acpConfigOptions.value = [];
+    state.acpModes.value = null;
     state.acpImageSupport.value = null;
     state.acpStreamId.value = null;
     state.acpStatus.value = "disconnected";
@@ -381,29 +445,45 @@ export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi 
     if (!reusedProcess) state.acpStatus.value = "connecting";
     try {
       // 已有进程就只在它上面另开会话，不再 spawn 第二个 CLI。
-      state.acpHandle.value ??= await acp.startAgent(
-        provider.command,
-        state.settings.effectivePermissionTier,
-        state.settings.sandboxMode,
-        workspace,
-        provider.env,
-      );
+      state.acpHandle.value ??= await acp.startAgent(provider.command, state.settings.effectivePermissionTier, provider.env);
       if (abortConnecting) return await abortInFlightStart();
 
-      // 惰性恢复：当前对话若落盘了 ACP 绑定、且 provider/cwd 仍一致，先尝试 session/load
+      // 惰性恢复：当前对话若落盘了 ACP 绑定、且 provider/cwd 仍一致，先尝试恢复
       // 接回旧上下文；失败（agent 不支持 / 会话失效）静默回落新建。任何路径都不发错误通知，
       // 保证「发送必达」。
       const binding = threadId !== null ? (state.session.getSession(threadId)?.acp ?? null) : null;
       const canRestore = binding !== null && binding.providerId === provider.id && binding.cwd === workspace;
+
+      // 换对话前释放上一条 ACP 会话：agent 进程复用，但旧会话会一直占着 MCP 连接 /
+      // 索引缓存。agent 未声明 session/close 时宿主返回 false（不是错误），静默跳过。
+      // 目标就是当前会话时不能关——那会把要恢复的上下文一起丢掉。
+      const previousSessionId = state.acpSessionId.value;
+      if (state.acpHandle.value !== null && previousSessionId !== null && previousSessionId !== binding?.sessionId) {
+        try {
+          await acp.closeSession(state.acpHandle.value, previousSessionId);
+        } catch (error) {
+          // 资源回收是尽力而为：失败只记日志，换会话/发消息照常继续。
+          console.warn("[acp] session/close 失败，继续使用新会话：", error);
+        }
+        state.acpSessionId.value = null;
+        locals.acpSessionThreadId = null;
+        state.acpConfigOptions.value = [];
+        state.acpModes.value = null;
+      }
+      if (abortConnecting) return await abortInFlightStart();
+
       let restoredSessionId: string | null = null;
       if (canRestore) {
         try {
           const opened = await acp.loadSession(state.acpHandle.value, workspace, binding.sessionId, state.settings.enabledMcpServers);
           adoptOpenedSession(opened, threadId);
           restoredSessionId = opened.sessionId;
-          await settleReplay(opened.sessionId);
-        } catch {
-          // 回落：清掉恢复标记，下面还是走 session/new（保持孤立分支可读）。
+          // resume 不重放历史，无需回放抑制窗口；开窗口反而可能吞掉恢复后的首条实时输出。
+          if (!opened.resumed) await settleReplay(opened.sessionId);
+        } catch (error) {
+          // 回落：清掉恢复标记，下面还是走 session/new。刻意不弹错误通知（保证「发送必达」），
+          // 但留一条日志 —— 否则「恢复失败」这件事完全无迹可寻。
+          console.warn("[acp] 会话恢复失败，回落新建会话：", error);
           restoredSessionId = null;
         }
       }
@@ -434,6 +514,7 @@ export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi 
         state.acpConnected.value = false;
         state.acpHandle.value = null;
         state.acpConfigOptions.value = [];
+        state.acpModes.value = null;
       }
       const detail = String(error);
       const missing = looksLikeMissingBinary(detail);
@@ -449,15 +530,28 @@ export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi 
     }
   }
 
-  /** 设置会话配置选项（模型 / 推理力度等）；返回错误文案（null = 成功）。 */
+  /** 设置会话配置选项（模型 / 推理力度 / 旧版模式等）；返回错误文案（null = 成功）。 */
   async function setAcpConfig(configId: string, value: string | boolean): Promise<string | null> {
     if (state.acpHandle.value === null || !state.acpSessionId.value) return t("errors.sessionNotStarted");
     try {
-      // setSessionConfig 返回全量最新快照（含后端确认后的 currentValue）——覆盖本地
-      // 控件状态，保证「选择 → 后端确认 → 回填」闭环（对齐 useAcpConfigOptions）。
-      const updated = await acp.setSessionConfig(state.acpHandle.value, configId, value);
-      if (updated.length > 0) state.acpConfigOptions.value = updated;
-      // 记忆到当前工作区：模型 / 思考强度这类选择是「这个项目怎么干活」的一部分，
+      if (configId === ACP_LEGACY_MODE_OPTION_ID) {
+        // 旧版 modes 走 session/set_mode，而不是 set_config_option；宿主确认后回填合成选项。
+        if (typeof value !== "string" || !value) {
+          return t("errors.configFailed", { detail: "session mode requires a non-empty string" });
+        }
+        await acp.setSessionMode(state.acpHandle.value, value);
+        applyCurrentMode(value);
+      } else {
+        // setSessionConfig 返回全量最新快照（含后端确认后的 currentValue）——覆盖本地
+        // 控件状态，保证「选择 → 后端确认 → 回填」闭环（对齐 useAcpConfigOptions）。
+        const updated = await acp.setSessionConfig(state.acpHandle.value, configId, value);
+        // 后端只回它自己的 config options；旧版模式的合成项不在其中，合并回来，
+        // 否则切一次模型 / 思考强度就会把模式胶囊弄丢。
+        if (updated.length > 0) {
+          state.acpConfigOptions.value = withLegacyModeOption(updated, state.acpModes.value);
+        }
+      }
+      // 记忆到当前工作区：模型 / 思考强度 / 模式这类选择是「这个项目怎么干活」的一部分，
       // 切回来应当还是它。回放期间不记（见 replayingConfig），否则回放会把自己再写一遍。
       if (!locals.replayingConfig && typeof value === "string" && state.workspace.activeWorkspaceId) {
         state.workspace.setAgentConfig(state.workspace.activeWorkspaceId, { configValues: { [configId]: value } });
@@ -550,6 +644,7 @@ export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi 
     state.acpSessionId.value = null;
     locals.acpSessionThreadId = null;
     state.acpConfigOptions.value = [];
+    state.acpModes.value = null;
     gate.dismiss();
     state.acpStreamId.value = null;
     state.chat.runningSessionId = null;
@@ -592,5 +687,9 @@ export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi 
     respondPermission: gate.respond,
     probeMcpServer,
     dismissPendingPermission: gate.dismiss,
+    cancelSubagent: subagents.cancel,
+    subagentMessagesOf: subagents.messagesOf,
+    subagentTranscriptOf: subagents.transcriptOf,
+    subagentDepthOf: subagents.depthOf,
   };
 }

@@ -1,4 +1,6 @@
-import { createAcpClient, type AcpSessionConfigOption } from "@greywork/acp";
+import { createAcpClient, type AcpSessionConfigOption, type McpServerConfig } from "@greywork/acp";
+import { createTauriGitService, type GitCommit } from "@greywork/editor";
+import { hasHostCommands } from "@greywork/host-ipc";
 import type { AgentProviderConfig } from "@greywork/shell";
 import {
   createCoworkEngine,
@@ -12,7 +14,7 @@ import {
   type CoworkTaskStatus,
   type WakeState,
 } from "@greywork/cowork";
-import { createIdFactory } from "@greywork/core";
+import { createIdFactory, joinPath } from "@greywork/core";
 import { defineStore } from "pinia";
 import { computed, ref, shallowRef } from "vue";
 import { appEvents } from "../events";
@@ -20,9 +22,12 @@ import { i18n } from "../i18n";
 import { activeConversationFolder } from "../lib/conversation-folder";
 import { parseToolActivityPayload } from "../lib/tool-activity";
 import { resolveWorkspaceDir, isolateForRun } from "../lib/workspace-dir";
-import type { ThreadMessage } from "../types";
+import { materializeAttachments } from "../state/attachment-library";
+import { scanSkills, type InstalledSkill } from "./skills";
+import type { Attachment, ThreadMessage } from "../types";
 import { notify } from "./notice";
 import { useAgentStore } from "./agent";
+import { toAcpUnits } from "./agent/shared";
 import { useRunsStore } from "./runs";
 import { useChatStore } from "./chat";
 import { useSessionStore } from "./session";
@@ -63,6 +68,32 @@ export interface CoworkMemberInit {
    * 后端未暴露的键静默跳过，旧数据无此字段 = 完全跟随后端默认。
    */
   configValues?: Record<string, string>;
+}
+
+/** 起跑时的 run 级工具面选择（成员共享：协作里各人的工具面应当一致）。 */
+export interface CoworkRunOptions {
+  /** 本轮全员启用的 MCP 服务器；省略 = 跟设置页里已启用的那批。 */
+  mcpServers?: readonly McpServerConfig[];
+  /**
+   * 本轮带进成员工作区的技能 id 列表。
+   * 省略 = 全量带入源工作区已安装的技能；空数组 = 一个都不带。
+   * 只在 `worktree` 隔离档位下生效（其它档位工作区就是源目录，技能目录原样可见）。
+   */
+  skills?: readonly string[] | null;
+}
+
+/** 一批随 run 生效的技能（供起跑表单渲染勾选）。 */
+export type { InstalledSkill };
+
+/** 本轮实际声明给 agent 的 MCP 面（各成员取并集）与跳过的服务器。 */
+export interface CoworkRunTooling {
+  declared: string[];
+  skipped: Array<{ name: string; reason: string }>;
+}
+
+/** 一条提交的展示投影：`fromRun` 标记它在本次协作开始之后产生（队友的产出）。 */
+export interface CoworkCommitView extends GitCommit {
+  fromRun: boolean;
 }
 
 export interface CoworkSlotView {
@@ -124,6 +155,43 @@ export const useCoworkStore = defineStore("cowork", () => {
   const lastError = ref<string | null>(null);
   const runtimes = new Map<string, SlotRuntime>();
   let listening = false;
+  /**
+   * 供起跑表单勾选的技能：扫**协作源工作区**的 `.agents/skills`。
+   * 单独保存目录与清单，不复用设置页的 skills store —— 后者的根按
+   * `resolveWorkspaceRoot()` 解析，与协作源（当前对话文件夹）不一定是同一个。
+   */
+  const skillSourceDir = ref<string | null>(null);
+  const availableSkills = ref<InstalledSkill[]>([]);
+  const skillsLoading = ref(false);
+  /** 本轮实际声明给 agent 的 MCP 面（各成员并集）与跳过项。 */
+  const runTooling = ref<CoworkRunTooling | null>(null);
+
+  /* ===== Git 集成：成员共享的工作区里，队友产出的提交 =====
+   * 协作成员跑在同一份隔离工作区（同一分支 greywork/<slug>-<hash>），所以“队友的 commit”
+   * 就是这份工作区里的提交。起跑时记一次基线，之后新增的行标 `fromRun`。
+   */
+  const runWorkspace = ref<string | null>(null);
+  const runBranch = ref<string | null>(null);
+  const commits = ref<GitCommit[]>([]);
+  const commitsLoading = ref(false);
+  const commitsError = ref<string | null>(null);
+  const commitsAvailable = ref(false);
+  const commitDiffCache = ref<Record<string, string>>({});
+  const commitDiffLoading = ref(false);
+  const commitDiffError = ref<string | null>(null);
+  let gitService: ReturnType<typeof createTauriGitService> | null = null;
+  /** 起跑时的提交集合：不在其中的提交视为本轮队友产出。 */
+  let baselineCommits = new Set<string>();
+  /**
+   * 用户随消息带给某成员位的附件，在该成员位下一次派发时消费（按成员位累积）。
+   *
+   * 用成员位而非信件 id 作键：引擎一次 dispatch 会把收件箱里的信全部 drain 成同一个
+   * prompt（见 engine.dispatchSlot），所以同一成员位的多条待发消息本就合并成一轮 ——
+   * 附件跟着合并，语义与引擎一致。
+   */
+  const slotAttachments = new Map<string, Attachment[]>();
+  /** 各成员位 ACP 会话是否声明图片能力（startRun 时记录），派发时按目标成员门控图片。 */
+  const slotImageSupport = new Map<string, boolean>();
 
   const touch = (): void => {
     revision.value += 1;
@@ -216,6 +284,27 @@ export const useCoworkStore = defineStore("cowork", () => {
       .reverse();
   });
 
+  /**
+   * 群聊式时间线：把邮件按时间正序映射成可复用的消息流（用户 + 各成员位混排成一条流）。
+   *
+   * 与 `activity` 的区别：activity 是给邮件列表看的「最近往来」倒序视图；transcript 正序、
+   * 且带上 authorId/authorName，让 ConversationMessage 画出作者头像与身份色。纯展示投影，
+   * 不落库；点作者行打开其会话由面板按 authorId 回查 threadId。
+   */
+  const transcript = computed<ThreadMessage[]>(() => {
+    void revision.value;
+    const current = engine.value;
+    if (!current) return [];
+    return current.run.mail.map((mail) => ({
+      id: mail.id,
+      role: mail.from === "user" ? "user" : "assistant",
+      content: mail.body,
+      ts: mail.createdAt,
+      authorId: mail.from,
+      authorName: nameOf(mail.from),
+    }));
+  });
+
   const stats = computed(() => {
     void revision.value;
     const current = engine.value;
@@ -231,6 +320,87 @@ export const useCoworkStore = defineStore("cowork", () => {
 
   const active = computed<boolean>(() => status.value === "running" || status.value === "paused");
 
+  /** 提交列表投影：标出本轮开始之后产生的提交（队友的产出）。 */
+  const commitViews = computed<CoworkCommitView[]>(() =>
+    commits.value.map((commit) => ({ ...commit, fromRun: !baselineCommits.has(commit.hash) })),
+  );
+
+  /**
+   * 扫协作源工作区的已安装技能（供起跑表单勾选）。源与 startRun 用同一条解析：
+   * 当前对话文件夹优先，否则设置项 / 宿主私有根。
+   */
+  async function loadAvailableSkills(): Promise<void> {
+    skillsLoading.value = true;
+    try {
+      const dir = activeConversationFolder() ?? (await resolveWorkspaceDir());
+      skillSourceDir.value = dir;
+      availableSkills.value = hasHostCommands() ? await scanSkills(joinPath(dir, ".agents", "skills")) : [];
+    } catch {
+      availableSkills.value = [];
+    } finally {
+      skillsLoading.value = false;
+    }
+  }
+
+  /** 拉取协作工作区的提交历史（供「提交」页展示队友产出）。 */
+  async function refreshCommits(): Promise<void> {
+    if (!gitService || commitsLoading.value) return;
+    commitsLoading.value = true;
+    commitsError.value = null;
+    try {
+      commits.value = await gitService.log({ limit: 40, skip: 0 });
+      commitsAvailable.value = true;
+    } catch (error) {
+      commits.value = [];
+      commitsAvailable.value = false;
+      commitsError.value = String(error);
+    } finally {
+      commitsLoading.value = false;
+    }
+  }
+
+  /** 展开某次提交的 diff（缓存一次）。 */
+  async function loadCommitDiff(hash: string): Promise<void> {
+    if (commitDiffCache.value[hash] !== undefined || !gitService) return;
+    commitDiffLoading.value = true;
+    commitDiffError.value = null;
+    try {
+      const text = await gitService.show(hash);
+      commitDiffCache.value = { ...commitDiffCache.value, [hash]: text };
+    } catch (error) {
+      commitDiffError.value = String(error);
+    } finally {
+      commitDiffLoading.value = false;
+    }
+  }
+
+  /** 起跑后接上协作工作区的 git 服务，记基线提交（之后的提交算队友产出）。 */
+  async function attachGit(workspace: string): Promise<void> {
+    runWorkspace.value = workspace;
+    if (!hasHostCommands()) return;
+    commitsAvailable.value = false;
+    runBranch.value = null;
+    commits.value = [];
+    commitDiffCache.value = {};
+    baselineCommits = new Set();
+    gitService = createTauriGitService(workspace);
+    try {
+      runBranch.value = await gitService.currentBranch();
+    } catch {
+      // 不是 git 仓库：提交面板整段隐藏，协作照跑。
+      gitService = null;
+      return;
+    }
+    await refreshCommits();
+    baselineCommits = new Set(commits.value.map((commit) => commit.hash));
+  }
+
+  /** 回合收尾后刷新提交：队友这一轮若提交了，会以 `fromRun` 出现在提交页。 */
+  function refreshCommitsAfterTurn(): void {
+    if (!gitService) return;
+    void refreshCommits();
+  }
+
   function onEngineEvent(event: CoworkEvent): void {
     touch();
     if (event.kind !== "run-status") return;
@@ -245,22 +415,29 @@ export const useCoworkStore = defineStore("cowork", () => {
   }
 
   /** 把本回合投递的信件落成一条 system 消息，让成员位的会话自身可审计。 */
-  function describeInbox(input: CoworkDispatchInput): string {
+  function describeInbox(input: CoworkDispatchInput, attachments: readonly Attachment[] = []): string {
     const head = input.kind === "role" ? `${t("cowork.system.roleInjected")}\n\n` : "";
     const lines = input.mail.map((mail) => {
       const body = mail.body.length > MAX_MAIL_ECHO ? `${mail.body.slice(0, MAX_MAIL_ECHO)}…` : mail.body;
       return `**${nameOf(mail.from)} → ${t(`cowork.mailKind.${mail.kind}`)}**\n${body}`;
     });
-    return `${head}${lines.join("\n\n")}`;
+    const text = `${head}${lines.join("\n\n")}`;
+    if (attachments.length === 0) return text;
+    // 附件名落在审计消息里：成员会话回看时能知道这一回合带了哪些文件（正文在 prompt units 里）。
+    const names = attachments.map((item) => `- ${item.name}`).join("\n");
+    return `${text}\n\n**${t("cowork.inboxAttachments")}**\n${names}`;
   }
 
   function dispatchTurn(input: CoworkDispatchInput): Promise<void> {
     const runtime = runtimes.get(input.slot.id);
     if (!runtime) return Promise.reject(new Error(t("cowork.errors.runtimeMissing", { slot: input.slot.name })));
+    // 附件在派发时消费（同步取走，避免与后续 await 竞态）。
+    const attached = slotAttachments.get(input.slot.id);
+    if (attached?.length) slotAttachments.delete(input.slot.id);
     sessionStore.appendMessage(runtime.threadId, {
       id: uid(),
       role: "system",
-      content: describeInbox(input),
+      content: describeInbox(input, attached ?? []),
       ts: Date.now(),
     });
     const scaffold: ThreadMessage = {
@@ -273,9 +450,11 @@ export const useCoworkStore = defineStore("cowork", () => {
     sessionStore.appendMessage(runtime.threadId, scaffold);
     runtime.messageId = scaffold.id;
     touch();
-    return acp.prompt(runtime.handle, input.prompt).then(({ turnId }) => {
+    return (async () => {
+      const units = attached?.length ? await toAcpUnits(attached, slotImageSupport.get(input.slot.id) ?? true) : [];
+      const { turnId } = await acp.prompt(runtime.handle, input.prompt, units);
       runtime.turnId = turnId;
-    });
+    })();
   }
 
   /** 回合收尾：先解析协作指令（可能唤醒别人），再结束回合（决定是否汇总给 leader）。 */
@@ -308,6 +487,8 @@ export const useCoworkStore = defineStore("cowork", () => {
     if (outcome.ok) current.applyOutput(slotId, output);
     current.turnEnded(slotId, { ok: outcome.ok, error: outcome.error, summary: outcome.ok ? summarize(output) : undefined });
     touch();
+    // 队友这一轮可能提交了代码：刷新提交页，让别人在协作期间就看到。
+    refreshCommitsAfterTurn();
   }
 
   function handleAcpEvent(event: { kind: string; payload: unknown }): void {
@@ -416,7 +597,7 @@ export const useCoworkStore = defineStore("cowork", () => {
     let handle: number | null = null;
     try {
       const workspace = await isolateForRun(activeConversationFolder() ?? (await resolveWorkspaceDir()));
-      handle = await acp.startAgent(provider.command, settings.effectivePermissionTier, settings.sandboxMode, workspace);
+      handle = await acp.startAgent(provider.command, settings.effectivePermissionTier);
       const opened = await acp.openSession(handle, workspace);
       providerOptions.value = { ...providerOptions.value, [providerId]: opened.configOptions ?? [] };
     } catch {
@@ -435,9 +616,15 @@ export const useCoworkStore = defineStore("cowork", () => {
 
   /**
    * 起一次协作运行：每个成员位一个独立会话 + 独立 ACP 进程/会话。
-   * 返回错误文案（null = 成功），与既有 store 的错误约定一致。
+   * `goalAttachments` 是起跑时随目标带给 leader 的初始资料（落进 leader 的附件库，
+   * 作为它首回合的 prompt units 一起递进去）。返回错误文案（null = 成功），与既有约定一致。
    */
-  async function startRun(goalText: string, members: readonly CoworkMemberInit[]): Promise<string | null> {
+  async function startRun(
+    goalText: string,
+    members: readonly CoworkMemberInit[],
+    goalAttachments: readonly Attachment[] = [],
+    options: CoworkRunOptions = {},
+  ): Promise<string | null> {
     if (active.value) return t("cowork.errors.alreadyRunning");
     const trimmed = goalText.trim();
     if (!trimmed) return t("cowork.errors.emptyGoal");
@@ -447,12 +634,22 @@ export const useCoworkStore = defineStore("cowork", () => {
     // 逐个成员先验后端：拉进程起一半才发现某位成员后端不存在，前面那几个 agent 进程就成了孤儿。
     if (members.some((member) => !providerOf(member))) return t("errors.acpNotSelected");
 
+    // run 级工具面：MCP 省略则跟设置页已启用；技能省略则全量带入。
+    const mcpServers: readonly McpServerConfig[] = options.mcpServers ?? settings.enabledMcpServers;
+    const skills = options.skills === undefined ? undefined : options.skills;
+
     starting.value = true;
     lastError.value = null;
     const previousActive = sessionStore.activeSessionId;
     const created: Array<{ init: CoworkSlotInit; runtime: SlotRuntime }> = [];
+    // 本轮实际声明出去的 MCP 面（各成员并集）与跳过项，供面板展示。
+    const declaredNames = new Set<string>();
+    const skippedMap = new Map<string, string>();
+    // 新一轮清空上一轮的附件/能力账本，避免跨 run 串味。
+    slotAttachments.clear();
+    slotImageSupport.clear();
     try {
-      const workspace = await isolateForRun(activeConversationFolder() ?? (await resolveWorkspaceDir()));
+      const workspace = await isolateForRun(activeConversationFolder() ?? (await resolveWorkspaceDir()), { skills });
       await ensureListener();
       let index = 0;
       for (const member of members) {
@@ -461,9 +658,11 @@ export const useCoworkStore = defineStore("cowork", () => {
         const provider = providerOf(member);
         if (!provider) return t("errors.acpNotSelected");
         const session = sessionStore.createSession(workspaceStore.activeWorkspaceId, `${member.name} · ${trimmed}`);
-        const handle = await acp.startAgent(provider.command, settings.effectivePermissionTier, settings.sandboxMode, workspace);
-        // 每个成员位都拿到同一批启用的 MCP 服务器：协作里各人的工具面应当一致。
-        const opened = await acp.openSession(handle, workspace, settings.enabledMcpServers);
+        const handle = await acp.startAgent(provider.command, settings.effectivePermissionTier);
+        // 每个成员位都拿到同一批本轮启用的 MCP 服务器：协作里各人的工具面应当一致。
+        const opened = await acp.openSession(handle, workspace, mcpServers);
+        for (const name of opened.mcpServers ?? []) declaredNames.add(name);
+        for (const skipped of opened.skippedMcpServers ?? []) skippedMap.set(skipped.name, skipped.reason);
         // 应用成员级会话配置（模型 / 思考强度等）：只对该后端暴露的 select 型项下发。
         // 单条失败不中断起跑——该成员位仍以后端默认跑，不值得让整次协作失败。
         if (member.configValues) {
@@ -493,11 +692,17 @@ export const useCoworkStore = defineStore("cowork", () => {
           },
           runtime: { handle, sessionId: opened.sessionId, threadId: session.id, messageId: null, turnId: null },
         });
+        // 记下该成员位后端是否收图片（派发时按目标成员门控，见 dispatchTurn）。
+        slotImageSupport.set(`slot-${index}`, opened.imagePrompts === true);
       }
+      // 接上协作工作区的 git：提交页据此展示队友产出的提交（非 git 工作区整段隐藏）。
+      await attachGit(workspace);
     } catch (error) {
       await teardown(created.map((item) => item.runtime));
       starting.value = false;
       sessionStore.setActive(previousActive);
+      slotAttachments.clear();
+      slotImageSupport.clear();
       const detail = t("errors.startFailed", { detail: String(error) });
       lastError.value = detail;
       return detail;
@@ -513,6 +718,10 @@ export const useCoworkStore = defineStore("cowork", () => {
     });
     engine.value = instance;
     starting.value = false;
+    runTooling.value = {
+      declared: [...declaredNames],
+      skipped: [...skippedMap].map(([name, reason]) => ({ name, reason })),
+    };
 
     // leader 的会话留在前台：用户对着它说话，它负责往下派活。
     const leaderThread = created.find((item) => item.init.role === "leader")?.init.threadId ?? previousActive;
@@ -520,13 +729,34 @@ export const useCoworkStore = defineStore("cowork", () => {
       sessionStore.setActive(leaderThread);
       chat.activeThreadId = leaderThread;
     }
+    // 起跑目标随带的初始资料：落进 leader 的附件库，作为它首回合的附件一起递进去。
+    // 必须在 start() 之前 stash —— start() 会同步唤醒 leader 并派发首回合（读走这份附件）。
+    const leader = created.find((item) => item.init.role === "leader");
+    if (leader && goalAttachments.length > 0) {
+      slotAttachments.set(leader.init.id, await materializeAttachments(leader.init.threadId, goalAttachments));
+    }
     instance.start();
     touch();
     return null;
   }
 
-  function sendUser(text: string, to?: string): void {
-    engine.value?.sendUser(text, to);
+  /**
+   * 用户发言（可带附件）。附件落进目标成员的附件库，在该成员位下一次派发时随 prompt 递进去；
+   * `to` 省略时发给 leader。空文本但带附件时以附件名兜底正文（引擎会丢弃空 body 的信）。
+   */
+  async function sendUser(text: string, to?: string, attachments: readonly Attachment[] = []): Promise<void> {
+    const current = engine.value;
+    if (!current) return;
+    const body = text.trim();
+    if (attachments.length > 0) {
+      const target = to ? current.run.slots.find((slot) => slot.id === to) : current.run.slots.find((slot) => slot.role === "leader");
+      if (target) {
+        const materialized = await materializeAttachments(target.threadId, attachments);
+        slotAttachments.set(target.id, [...(slotAttachments.get(target.id) ?? []), ...materialized]);
+      }
+    }
+    // 空正文时用附件名兜底：引擎对空 body 直接 return，附件会滞留没人消费。
+    current.sendUser(body || attachments.map((item) => item.name).join("、"), to);
     touch();
   }
 
@@ -551,6 +781,8 @@ export const useCoworkStore = defineStore("cowork", () => {
     engine.value?.cancel();
     await teardown([...runtimes.values()]);
     runtimes.clear();
+    // 已取消：不会再有派发来消费这些附件，留着只会挂到「下一次 run 的同名 slot」上。
+    slotAttachments.clear();
     touch();
   }
 
@@ -561,6 +793,7 @@ export const useCoworkStore = defineStore("cowork", () => {
     slots,
     tasks,
     activity,
+    transcript,
     stats,
     spend,
     active,
@@ -571,6 +804,23 @@ export const useCoworkStore = defineStore("cowork", () => {
     probingProviders,
     optionsOf,
     probeProviderOptions,
+    // run 级工具面（技能 / MCP）与 git 集成（队友提交）。
+    availableSkills,
+    skillsLoading,
+    skillSourceDir,
+    loadAvailableSkills,
+    runTooling,
+    runWorkspace,
+    runBranch,
+    commitViews,
+    commitsLoading,
+    commitsError,
+    commitsAvailable,
+    commitDiffCache,
+    commitDiffLoading,
+    commitDiffError,
+    refreshCommits,
+    loadCommitDiff,
     startRun,
     sendUser,
     pauseRun,

@@ -12,7 +12,10 @@ import { useChatStore } from "@/stores/chat";
 import { useSessionStore } from "@/stores/session";
 import type { ToolActivity } from "@/types";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+vi.mock("@greywork/host-ipc", async (importOriginal) => ({
+  ...(await importOriginal()),
+  invoke: vi.fn(),
+}));
 
 function seedAssistant() {
   const chat = useChatStore();

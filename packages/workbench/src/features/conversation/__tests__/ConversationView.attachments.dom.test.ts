@@ -91,7 +91,7 @@ describe("ConversationView · 输入卡附件", () => {
     const { wrapper } = await mountConversation();
 
     expect(wrapper.find('[data-testid="composer-attachments"]').exists()).toBe(false);
-    await wrapper.get('[data-testid="composer-attach"]').trigger("click");
+    await wrapper.get('[data-testid="minimal-composer-attach"]').trigger("click");
     await vi.waitFor(() => {
       expect(wrapper.findAll('[data-testid="attachment-chip"]')).toHaveLength(1);
     });
@@ -121,10 +121,10 @@ describe("ConversationView · 输入卡附件", () => {
     const chat = useChatStore();
     const submit = vi.spyOn(chat, "submitText");
 
-    await wrapper.get('[data-testid="composer-attach"]').trigger("click");
+    await wrapper.get('[data-testid="minimal-composer-attach"]').trigger("click");
     await vi.waitFor(() => expect(wrapper.findAll('[data-testid="attachment-chip"]')).toHaveLength(1));
     await wrapper.get('textarea[aria-label="发送消息"]').setValue("看看这张图");
-    await wrapper.get('[data-testid="composer-send"]').trigger("click");
+    await wrapper.get('[data-testid="minimal-composer-send"]').trigger("click");
 
     await vi.waitFor(() => {
       expect(submit).toHaveBeenCalled();
@@ -150,10 +150,10 @@ describe("ConversationView · 输入卡附件", () => {
     const agent = useAgentStore();
     await agent.activateAcpProvider("opencode");
 
-    await wrapper.get('[data-testid="composer-attach"]').trigger("click");
+    await wrapper.get('[data-testid="minimal-composer-attach"]').trigger("click");
     await vi.waitFor(() => expect(wrapper.findAll('[data-testid="attachment-chip"]')).toHaveLength(1));
     await wrapper.get('textarea[aria-label="发送消息"]').setValue("交给 agent");
-    await wrapper.get('[data-testid="composer-send"]').trigger("click");
+    await wrapper.get('[data-testid="minimal-composer-send"]').trigger("click");
 
     // prompt(handle, text, units)：正文之外的图片单元由 agent store 读字节后组装
     // （首回合 prompt 前置了 schedule 围栏说明，text 断言用包含而非相等）
@@ -178,11 +178,11 @@ describe("ConversationView · 输入卡附件", () => {
     settings.planMode = true;
     await agent.activateAcpProvider("opencode");
 
-    await wrapper.get('[data-testid="composer-attach"]').trigger("click");
+    await wrapper.get('[data-testid="minimal-composer-attach"]').trigger("click");
     await vi.waitFor(() => expect(wrapper.findAll('[data-testid="attachment-chip"]')).toHaveLength(1));
     // 正文留空也能发送（发送按钮不该被空草稿禁掉）
-    expect(wrapper.get('[data-testid="composer-send"]').attributes("disabled")).toBeUndefined();
-    await wrapper.get('[data-testid="composer-send"]').trigger("click");
+    expect(wrapper.get('[data-testid="minimal-composer-send"]').attributes("disabled")).toBeUndefined();
+    await wrapper.get('[data-testid="minimal-composer-send"]').trigger("click");
 
     // 计划模式：先挂卡不派发
     await vi.waitFor(() => expect(wrapper.find('[data-testid="plan-card"]').exists()).toBe(true));
@@ -196,5 +196,14 @@ describe("ConversationView · 输入卡附件", () => {
     expect(units).toEqual([{ type: "image", data: "QUJD", mimeType: "image/png" }]);
     agent.stopAcp();
     useChatStore().clearSim();
+  });
+});
+
+// 只有一个外壳：对话页输入区就是精简输入卡（与引导页共用 MinimalComposer），管线不变。
+describe("ConversationView · 输入卡", () => {
+  it("渲染精简输入卡；没有「完整输入卡」这种东西了", async () => {
+    const { wrapper } = await mountConversation();
+    expect(wrapper.find('[data-testid="minimal-composer"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="composer-card"]').exists()).toBe(false);
   });
 });

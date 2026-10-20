@@ -1,9 +1,6 @@
-/** ACP 传输抽象：desktop 走 Tauri IPC（Rust 主机），web 走远程 WebSocket。 */
+/** ACP 传输抽象：宿主托管（Electron 壳 / 自托管服务端）走宿主命令，web 走远程 WebSocket。 */
 
-import { isTauriRuntime } from "@greywork/core";
 import type { PermissionTier } from "./permissions";
-
-export { isTauriRuntime };
 
 export interface AcpEventEnvelope {
   kind: string;
@@ -16,8 +13,19 @@ export interface AcpSessionInfo {
   hasSession: boolean;
 }
 
+/** 旧版会话模式（`session/new` / `load` / `resume` 回包的 `modes`）。 */
+export interface AcpSessionMode {
+  id: string;
+  name: string;
+  description?: string;
+}
+
+export interface AcpSessionModeState {
+  currentModeId: string;
+  availableModes: AcpSessionMode[];
+}
+
 /** 沙盒策略：auto = 可用时启用文件系统隔离；off 必须由用户显式选择。 */
-export type AcpSandboxMode = "auto" | "off" | "fs" | "full";
 
 export interface AcpPromptResult {
   stopReason?: string;
@@ -102,12 +110,22 @@ export interface McpProbeReport {
 export interface AcpSessionOpened {
   sessionId: string;
   configOptions: AcpSessionConfigOption[];
+  /**
+   * 旧版会话模式状态。部分 agent（如早期 Gemini / Claude 适配器）不走 config option，
+   * 只在 session/new 回包里给 `modes`，切换走 `session/set_mode`。
+   */
+  modes?: AcpSessionModeState | null;
   /** 实际声明给 agent 的服务器名。 */
   mcpServers?: string[];
   /** 因能力不匹配 / 配置不全被跳过的服务器。 */
   skippedMcpServers?: McpSkippedServer[];
-  /** 该会话由 `session/load` 恢复而来（区别于新建）。前端据此跳过「新会话」类提示。 */
+  /** 该会话由 `session/load` / `session/resume` 恢复而来（区别于新建）。前端据此跳过「新会话」类提示。 */
   restored?: boolean;
+  /**
+   * 恢复走的是 `session/resume`（true）还是 `session/load`（false）。
+   * resume 不重放历史，前端不要再开回放抑制窗口——否则可能把恢复后的首条实时输出吞掉。
+   */
+  resumed?: boolean;
   /** agent 是否接受图片 prompt（initialize 声明的 promptCapabilities.image；未声明 = false）。 */
   imagePrompts?: boolean;
 }
@@ -148,18 +166,11 @@ export interface AcpTransport {
   readonly id: "tauri-ipc" | "websocket";
   /** Web transports are available only after an endpoint is configured. */
   readonly available?: boolean;
-  /** sandbox 非 off 时宿主以 OS 沙盒包裹 agent；workspace 为沙盒可写锚定目录（桌面端必需）。 */
   /**
    * 启动 agent 进程。`env` 是该后端的启动环境变量（设置里配的 API key 之类）：
    * 桌面宿主净化后注入子进程；远程传输没有本地进程可注入，参数被忽略。
    */
-  startAgent(
-    agentCmd: string,
-    tier: PermissionTier,
-    sandbox?: AcpSandboxMode,
-    workspace?: string | null,
-    env?: Record<string, string>,
-  ): Promise<number>;
+  startAgent(agentCmd: string, tier: PermissionTier, env?: Record<string, string>): Promise<number>;
   /**
    * 改写在途会话的权限档位（临时降级/回升）。桌面宿主按 handle 存档位并在每条
    * 权限请求上重新读取，因此改档立即生效、不必重启 agent 进程。
@@ -172,12 +183,26 @@ export interface AcpTransport {
    * agent 不支持时宿主返回错误，调用方应静默回落 openSession。
    */
   loadSession(handle: number, cwd: string, sessionId: string, mcpServers?: readonly McpServerConfig[]): Promise<AcpSessionOpened>;
+  /**
+   * 关闭当前 ACP 会话（`session/close`），保留 agent 进程供下一条会话复用。
+   * `sessionId` 是调用方认为的当前会话；宿主会校验，避免把刚建好的新会话误关。
+   * agent 未声明 close 能力时返回 false（可选的资源回收，不视为失败）。
+   */
+  closeSession(handle: number, sessionId: string): Promise<boolean>;
   /** 设置会话配置选项（select 传字符串值，boolean 传布尔值）；返回全量最新配置选项。 */
   setSessionConfig(handle: number, configId: string, value: string | boolean): Promise<AcpSessionConfigOption[]>;
+  /** 切换旧版会话模式（`session/set_mode`）；agent 未声明 `modes` 时会报错。 */
+  setSessionMode(handle: number, modeId: string): Promise<void>;
   /** 发送一轮 prompt，立即返回 turnId；回合结果经 `prompt-done` 事件送达。`units` = 随行的附件内容块。 */
   prompt(handle: number, text: string, units?: readonly AcpPromptUnit[]): Promise<{ turnId: number }>;
   /** 停止：传 turnId 仅取消该回合（agent 进程保留）；缺省停止整个会话。 */
   stop(handle: number, turnId?: number): Promise<void>;
+  /**
+   * 取消某会话的当前工作：发 ACP `session/cancel` 通知（不回收进程、不关会话）。
+   * 用于协议层子代理（subagent_update 宣告的子会话）：目标 sessionId 可能不是本 handle
+   * 的主会话，因此按 sessionId 精确取消，而不是按 handle。
+   */
+  cancelSession(handle: number, sessionId: string): Promise<void>;
   respondPermission(requestId: number, optionId: string | null): Promise<void>;
   list(): Promise<AcpSessionInfo[]>;
   onEvent(listener: (event: AcpEventEnvelope) => void): Promise<() => void>;

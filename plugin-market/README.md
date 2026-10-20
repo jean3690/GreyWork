@@ -12,7 +12,7 @@ plugin-market/
 ```
 
 The desktop host trusts this registry through a hard-coded ed25519 public key
-(`OFFICIAL_REGISTRY_PUBLIC_KEY` in `apps/desktop/src-tauri/src/plugin_market.rs`). A valid signature
+(`OFFICIAL_REGISTRY_PUBLIC_KEY` in `crates/greywork-host/src/services/plugin_market/mod.rs`). A valid signature
 means a compromised GitHub account still cannot poison the catalog: tampering with `registry.json`
 invalidates the signature. Third-party registries may be unsigned ("use at your own risk"), but a
 registry served from the official URL **must** be signed — the URL is compared in normalized form
@@ -44,7 +44,7 @@ the check.
    `shipped_market_packages_pass_validation`):
 
    ```bash
-   cd apps/desktop/src-tauri && cargo test plugin_market
+   cargo test -p greywork-host plugin_market
    ```
 
    A stale `sha256`, a broken schema, or a registry/package version mismatch fails here instead of

@@ -11,10 +11,11 @@
  * transform。好处是 `<img>` 的 `src` / `alt` / 布局盒都不动 —— 测试与划词都还认它。
  * 代价是放大后位图会糊（没有重采样）；对预览来说可以接受。
  */
-import { computed, onMounted, onUnmounted, ref, toRef, watch } from "vue";
+import { computed, onUnmounted, ref, toRef, watch } from "vue";
 import { extname } from "@greywork/core";
 import Icon from "@/features/shared/Icon.vue";
 import { usePreviewBinary } from "@/lib/preview-content";
+import { isHorizontalWheel, wheelDeltaX, wheelZoomFactor } from "@/lib/zoom";
 import PreviewExternalButton from "@/features/preview/PreviewExternalButton.vue";
 import { i18n } from "@/i18n";
 import type { PreviewTab } from "@/stores/preview";
@@ -34,7 +35,7 @@ const MIME: Record<string, string> = {
 /** 缩放上下限：放到 8 倍以上只是糊，缩到 0.1 倍以下点不到按钮。 */
 const MIN_SCALE = 0.1;
 const MAX_SCALE = 8;
-/** 按钮/滚轮每一档的倍率。 */
+/** 按钮每一档的倍率（滚轮走指数曲线，见 `lib/zoom.ts`）。 */
 const ZOOM_STEP = 1.25;
 
 const props = defineProps<{ tab: PreviewTab }>();
@@ -68,14 +69,20 @@ const transformStyle = computed(() => ({
  * 未旋转时就是 1（`object-contain` 本身就是适应）；旋转 90°/270° 时视觉宽高互换，
  * 竖图横放会溢出容器，所以按互换后的尺寸再收一次。
  * 拿不到布局（happy-dom 无布局，offsetWidth 恒 0）时退回 1，不做无谓的猜测。
+ *
+ * 注意不能在这里 `clamp`：`minScale` 依赖本值，互相引用会递归。适应倍率本身
+ * 就是合法下限，`clamp` 用 `min(MIN_SCALE, fittedScale)` 兜住。
  */
 const fittedScale = computed(() => fitScaleAfterRotation(rotation.value));
 
 /** 是否处于「非适应」状态：决定抓手光标与「适应」按钮的选中态。 */
 const zoomed = computed(() => offset.value.x !== 0 || offset.value.y !== 0 || Math.abs(scale.value - fittedScale.value) > 0.001);
 
+/** 下限跟着「适应」走：超大图（全景 / 扫描件）的适应倍率可能低于 0.1，不能把它挡在外面。 */
+const minScale = computed(() => Math.min(MIN_SCALE, fittedScale.value));
+
 function clamp(value: number): number {
-  return Math.min(MAX_SCALE, Math.max(MIN_SCALE, value));
+  return Math.min(MAX_SCALE, Math.max(minScale.value, value));
 }
 
 function fitScaleAfterRotation(degrees: number): number {
@@ -86,7 +93,7 @@ function fitScaleAfterRotation(degrees: number): number {
   const visualWidth = swapped ? box.offsetHeight : box.offsetWidth;
   const visualHeight = swapped ? box.offsetWidth : box.offsetHeight;
   if (!visualWidth || !visualHeight || !host.clientWidth || !host.clientHeight) return 1;
-  return clamp(Math.min(1, host.clientWidth / visualWidth, host.clientHeight / visualHeight));
+  return Math.min(1, host.clientWidth / visualWidth, host.clientHeight / visualHeight);
 }
 
 function resetView(): void {
@@ -123,14 +130,19 @@ function rotate(direction: 1 | -1): void {
   scale.value = fitScaleAfterRotation(rotation.value);
 }
 
-/** 滚轮缩放：以指针为不动点。`passive: false` 才能 preventDefault 拦掉容器滚动。 */
+/** 滚轮缩放：以指针为不动点。指数曲线与触控板捏合的增益见 `lib/zoom.ts`。 */
 function onWheel(event: WheelEvent): void {
   const host = stage.value;
   const box = image.value;
   if (!host || !box) return;
   event.preventDefault();
+  // 触控板横扫 → 平移，和 CAD / 地图一致；竖向仍是缩放。
+  if (isHorizontalWheel(event)) {
+    offset.value = { x: offset.value.x - wheelDeltaX(event), y: offset.value.y };
+    return;
+  }
   const previous = scale.value;
-  const next = clamp(previous * (event.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP));
+  const next = clamp(previous * wheelZoomFactor(event));
   if (next === previous) return;
   const rect = host.getBoundingClientRect();
   // 指针相对容器中心的位置；transform-origin 是元素中心，所以不动点按中心算。
@@ -144,10 +156,18 @@ function onWheel(event: WheelEvent): void {
   scale.value = next;
 }
 
+/** 双击在「适应窗口」与 1:1 之间切换：比先点按钮再点 1:1 少一步。 */
+function onDoubleClick(): void {
+  const atFit = Math.abs(scale.value - fittedScale.value) <= 0.001 && offset.value.x === 0 && offset.value.y === 0;
+  if (atFit) actualSize();
+  else fit();
+}
+
 let dragStart: { x: number; y: number; offsetX: number; offsetY: number } | null = null;
 
 function onPointerDown(event: PointerEvent): void {
-  if (!image.value) return;
+  if (!image.value || (event.button !== 0 && event.button !== 1)) return;
+  event.preventDefault();
   dragging.value = true;
   dragStart = { x: event.clientX, y: event.clientY, offsetX: offset.value.x, offsetY: offset.value.y };
   (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
@@ -190,11 +210,7 @@ watch(
   { immediate: true },
 );
 
-onMounted(() => stage.value?.addEventListener("wheel", onWheel, { passive: false }));
-onUnmounted(() => {
-  stage.value?.removeEventListener("wheel", onWheel);
-  release();
-});
+onUnmounted(() => release());
 
 const toolButtonClass =
   "grid size-6 shrink-0 cursor-pointer place-items-center rounded-[calc(6px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan";
@@ -271,8 +287,10 @@ const toolButtonClass =
       v-else-if="objectUrl"
       ref="stage"
       data-testid="image-stage"
-      class="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-background p-3"
+      class="relative flex min-h-0 flex-1 touch-none items-center justify-center overflow-hidden bg-background p-3"
       :class="zoomed ? (dragging ? 'cursor-grabbing' : 'cursor-grab') : ''"
+      @wheel="onWheel"
+      @dblclick="onDoubleClick"
       @pointerdown="onPointerDown"
       @pointermove="onPointerMove"
       @pointerup="onPointerUp"

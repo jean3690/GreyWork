@@ -34,6 +34,10 @@ struct AuthorizedPathLedger {
 /// 普通 IPC 调用只能消费既有授权，不能自行扩大可读写范围。
 pub struct WorkspaceFsAccess {
     ledger_path: PathBuf,
+    /// 宿主启动时绑定的默认工作区根。与 `paths.roots` 分开存：后者是 `BTreeSet`，
+    /// 字典序最小的那条未必是用户当初绑定的那个（后来授权一个排序更靠前的目录就会顶掉它），
+    /// 而「相对路径解析到哪里」「工具省略 path 时看哪里」都必须锚在**同一个**根上。
+    default_root: PathBuf,
     paths: RwLock<AuthorizedPathSet>,
 }
 
@@ -41,7 +45,7 @@ impl WorkspaceFsAccess {
     pub fn new(default_root: &Path, ledger_path: PathBuf) -> Result<Self, String> {
         let default_root = canonical_existing(default_root)?;
         let mut paths = AuthorizedPathSet::default();
-        paths.roots.insert(default_root);
+        paths.roots.insert(default_root.clone());
         // BOM 容错：账本被编辑器存成「UTF-8 with BOM」时 from_slice 会解析失败，
         // 表现是「授权记录被静默清空」（见 text::read_bytes_without_bom）。
         if let Ok(raw) = crate::text::read_bytes_without_bom(&ledger_path) {
@@ -64,8 +68,17 @@ impl WorkspaceFsAccess {
         }
         Ok(Self {
             ledger_path,
+            default_root,
             paths: RwLock::new(paths),
         })
+    }
+
+    /// 启动时绑定的默认工作区根。
+    ///
+    /// 工具面省略路径参数时锚在这里（见 `services::llm::agent::tools`），而不是
+    /// `authorized_roots()` 的某一条 —— 后者只说明「可以看哪些目录」，不说明「默认是哪个」。
+    pub fn default_root(&self) -> &Path {
+        &self.default_root
     }
 
     pub fn authorize_selected_path(&self, path: &Path) -> Result<PathBuf, String> {
@@ -276,7 +289,9 @@ impl crate::core::ports::WorkspaceAuthorizer for WorkspaceFsAccess {
     }
 }
 
+mod authorize;
 mod dto;
+mod media;
 mod read;
 mod resolve;
 mod transfer;
@@ -287,7 +302,9 @@ use resolve::*;
 #[cfg(test)]
 mod tests;
 
+pub use authorize::*;
 pub use dto::*;
+pub use media::*;
 pub use read::*;
 pub use transfer::*;
 pub use write::*;

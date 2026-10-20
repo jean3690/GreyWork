@@ -1,5 +1,5 @@
 /* shadcn/ui 主题变量 · 直接引用 tokens.css 语义 token（单一来源，随 v6 机加工工作台自动跟随）。
- * Tailwind 工具类的 @theme inline 映射位于 app 级 tailwind.css（tailwind 入口唯一处）。 */
+ * Tailwind 工具类的 @theme inline 映射位于 packages/workbench/src/tailwind.css（tailwind 入口唯一处）。 */
 :root {
   --background: var(--ink);
   --foreground: var(--text);
@@ -25,6 +25,6 @@
   --ring: var(--accent);
   /* 圆角由「外观 → 圆角」的总旋钮驱动（定义在 theme/base.css，与本文件的加载顺序无关：
    * 自定义属性在计算值阶段解析）。这里只写基准值，派生的 sm/md/xl 见
-   * apps/desktop/src/tailwind.css 的 @theme 块。 */
+   * packages/workbench/src/tailwind.css 的 @theme 块。 */
   --radius: calc(0.625rem * var(--gw-radius-scale));
 }

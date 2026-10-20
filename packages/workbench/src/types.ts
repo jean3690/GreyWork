@@ -197,7 +197,7 @@ export interface ChannelMediaCapability {
 }
 
 /**
- * 待确认的定时任务提案（AI 回复中的 ```schedule 围栏解析产物）。
+ * 待确认的自动化任务提案（AI 回复中的 ```schedule 围栏解析产物）。
  * 随会话整条持久化：回合结束/重启后仍可确认；`createdId` 非空 = 已收口
  * （卡片转只读，回放渲染也不会重复建任务）。
  */
@@ -218,7 +218,7 @@ export interface ScheduleDraft {
  *
  * 活跃态卡片挂在输入框上方（那是「等你点」的位置，对 120s 超时窗口最友好）；
  * 一旦裁决就转成本结构随消息落盘，在消息流里留一条只读记录 —— 与 AskQuestionCard /
- * ScheduleConfirmCard 的 settled 态同一约定：事后回看能知道「当时批了什么」。
+ * AutomationConfirmCard 的 settled 态同一约定：事后回看能知道「当时批了什么」。
  */
 export interface PermissionTrace {
   toolCallId: string;
@@ -231,9 +231,31 @@ export interface PermissionTrace {
   command: string | null;
   /** 用户看到的选项名（或拒绝文案）；null = 拒绝 / 取消。 */
   choice: string | null;
-  /** 谁做的决定：用户点选 / 宿主按档位自动 / 超时兜底取消。 */
-  source: "user" | "auto" | "timeout";
+  /**
+   * 谁做的决定：用户点选 / 宿主按档位自动放行 / 宿主拦截 / 超时兜底取消。
+   * `blocked` = 宿主在请求到达用户前就拒绝（只读档、工作区越界、agent 未给可放行的 Allow 选项）。
+   */
+  source: "user" | "auto" | "timeout" | "blocked";
+  /** 仅 `blocked` 用：拦截原因，决定徽标文案。 */
+  reason?: "read-only" | "outside-workspace" | "no-allow-option";
   decidedAt: number;
+}
+
+/**
+ * 一条选区评论（Delta 式「对某段原文的批注」）。
+ *
+ * `quote` 是被评论的原文片段，`note` 是用户写的批注；两者都会拼进发给模型的提示词，
+ * 而渲染时注解展示二者，气泡正文仍是用户自己的草稿。
+ */
+export interface MessageComment {
+  id: string;
+  /** 被评论的原文片段（预览里选中的那段）。 */
+  quote: string;
+  /** 用户写的批注。 */
+  note: string;
+  /** 来源名（预览文件名）；表格等无来源时省略。 */
+  source?: string;
+  createdAt: number;
 }
 
 export interface ThreadMessage {
@@ -248,13 +270,15 @@ export interface ThreadMessage {
   attachments?: Attachment[];
   /** 计划门待派发附件（确认后随 planDraft 一起交给 ACP；取消则丢弃）。 */
   planAttachments?: Attachment[];
+  /** 计划门待派发选区评论（确认后拼进提示词；取消则丢弃）。 */
+  planComments?: MessageComment[];
   /** 完成后产出的交付物 id（artifactStore.artifacts） */
   artifacts?: string[];
   /** 本条消息内的工具调用时间线（会话消息中嵌入；沿用 ACP 同款生命周期）。 */
   tools?: ToolActivity[];
   /** 待用户作答的提问（AskUserQuestion）；作答后 answers 非空，卡片转只读。 */
   ask?: AskRequest;
-  /** 待确认的定时任务提案（```schedule 围栏）；确认后 createdId 非空，取消则移除。 */
+  /** 待确认的自动化任务提案（```schedule 围栏）；确认后 createdId 非空，取消则移除。 */
   scheduleDraft?: ScheduleDraft;
   /**
    * 本条消息内发生的权限裁决留痕，按发生顺序排列。
@@ -266,6 +290,19 @@ export interface ThreadMessage {
   /** ACP 后端派发消息的来源提供方名（内部 LLM 管线无此字段） */
   acp?: string;
   /**
+   * 作者键（`user` / `system` / 协作成员位 id）。仅在群聊式时间线这类「一条流混排多作者」
+   * 的视图里设置：渲染层据此画作者头像与身份色（见 lib/author-identity）。1:1 会话不设。
+   */
+  authorId?: string;
+  /** 作者展示名（缺省时渲染层回落到 authorId）。 */
+  authorName?: string;
+  /**
+   * 选区评论：把「预览里选中的一段 + 用户写的批注」挂到这条消息上，渲染为注解。
+   * 与附件的区别：附件是给模型看的内容，评论是**针对某段原文的批注**，渲染在气泡上，
+   * 让「当时对哪一段说了什么」回看可见。评论同样会拼进发给模型的提示词（见 lib/message-comments）。
+   */
+  comments?: MessageComment[];
+  /**
    * 有序段落：一个回合里 agent 可能思考 → 答话 → 调工具 → 再思考，
    * 渲染必须按到达顺序分段，否则后来的思考会被并进同一坨、或掉到正文里。
    * text 段只记 content 的偏移区间，避免正文存两份。
@@ -273,6 +310,13 @@ export interface ThreadMessage {
   segments?: MessageSegment[];
   /** 会话内提示条（M7）：非空时消息渲染 TipBanner（tips 分支） */
   tip?: MessageTip;
+  /**
+   * 回合起点的工作区快照 ref（`refs/greywork/snap/<id>`，仅 worktree 运行档位下由宿主记）。
+   *
+   * 记在**用户消息**上：它代表「这条消息开跑之前」的文件状态。回退到该用户消息之前 =
+   * 用这个 ref 硬恢复工作区 + 截断消息流（见 stores/agent 的 rewindTo）。
+   */
+  snapshotRef?: string;
 }
 
 /**
@@ -305,6 +349,8 @@ export interface QueuedCommand {
   id: string;
   input: string;
   attachments: Attachment[];
+  /** 随本条一起补发的选区评论（回合进行中挂上的评论不能丢）。 */
+  comments?: MessageComment[];
   ts: number;
 }
 

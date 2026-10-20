@@ -37,11 +37,14 @@ vi.mock("@greywork/acp", () => ({
   desktopHomeDir: () => h.homeDir(),
 }));
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
-const invokeMock = vi.mocked((await import("@tauri-apps/api/core")).invoke);
-vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn().mockResolvedValue(() => {}) }));
+vi.mock("@greywork/host-ipc", async (importOriginal) => ({
+  ...(await importOriginal()),
+  invoke: vi.fn(),
+}));
+const invokeMock = vi.mocked((await import("@greywork/host-ipc")).invoke);
 
 import { useAgentStore } from "@/stores/agent";
+import { useCommandCapabilitiesStore } from "@/stores/command-capabilities";
 
 const storageHolder = globalThis as { localStorage?: Storage };
 
@@ -85,14 +88,36 @@ const dbProviders = [
   { id: "codex", name: "Codex", kind: "acp", command: "npx -y @agentclientprotocol/codex-acp", enabled: true },
 ];
 
+/** 假服务端：/api/commands 回能力表，/api/command 一律成功返回 null。 */
+function installServerFetch(catalogAvailable: boolean) {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    void init;
+    const url = String(input);
+    if (url.endsWith("/api/commands")) {
+      return new Response(
+        JSON.stringify([{ name: "db_agents_sync", auth: "required", desktopOnly: false, binary: false, available: catalogAvailable }]),
+        { status: 200 },
+      );
+    }
+    if (url.endsWith("/api/command")) return new Response(JSON.stringify(null), { status: 200 });
+    return new Response(JSON.stringify({ error: "unexpected" }), { status: 404 });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
 describe("agent 后端目录（桌面态：SQLite 真源）", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     installLocalStorage();
-    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
+    vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "server" });
+    // Electron 形态 = 可信宿主：能力表里 db_agents_sync 放行，同步才走 HTTP。
+    installServerFetch(true);
     invokeMock.mockReset();
     setActivePinia(createPinia());
     h.isAvailable.mockImplementation(() => true);
     h.listener = null;
+    // 同步决策在 hydrate 时一次性做出 → 能力表必须先落定。
+    await useCommandCapabilitiesStore().ensureCatalog();
   });
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -242,69 +267,46 @@ describe("agent 后端目录（服务端态：只读门）", () => {
     vi.clearAllMocks();
   });
 
-  /** 假服务端：/api/commands 回能力表，/api/command 一律成功返回 null。 */
-  function installServerFetch(catalogAvailable: boolean) {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      void init;
-      const url = String(input);
-      if (url.endsWith("/api/commands")) {
-        return new Response(
-          JSON.stringify([{ name: "db_agents_sync", auth: "required", desktopOnly: false, binary: false, available: catalogAvailable }]),
-          { status: 200 },
-        );
-      }
-      if (url.endsWith("/api/command")) return new Response(JSON.stringify(null), { status: 200 });
-      return new Response(JSON.stringify({ error: "unexpected" }), { status: 404 });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    return fetchMock;
-  }
-
-  function syncCalls(fetchMock: ReturnType<typeof vi.fn>): unknown[] {
-    return fetchMock.mock.calls.filter(([url, init]) => {
-      const body = init?.body ? JSON.parse(String(init.body)) : null;
-      return String(url).endsWith("/api/command") && body?.command === "db_agents_sync";
-    });
-  }
-
   it("db_agents_sync 被禁：启动不再尝试写 agent 目录，localStorage 覆盖层照常写", async () => {
-    const fetchMock = installServerFetch(false);
+    installServerFetch(false);
+    await useCommandCapabilitiesStore().ensureCatalog();
     const agentStore = useAgentStore();
     await agentStore.providersHydrated;
     await settleSync();
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(syncCalls(fetchMock)).toHaveLength(0);
+    expect(dbSyncCalls()).toHaveLength(0);
     const cached = JSON.parse(localStorage.getItem("greywork.agent-providers") ?? "{}");
     expect(cached.providers.length).toBe(agentStore.agentProviders.length);
   });
 
   it("能力表回 available=true：写路径自动放行（服务端放开即恢复同步）", async () => {
-    const fetchMock = installServerFetch(true);
+    installServerFetch(true);
+    await useCommandCapabilitiesStore().ensureCatalog();
     const agentStore = useAgentStore();
     await agentStore.providersHydrated;
     await settleSync();
 
-    await vi.waitFor(() => expect(syncCalls(fetchMock).length).toBeGreaterThan(0));
-    const lastSync = syncCalls(fetchMock).at(-1) as [string, { body: string }];
-    const payload = JSON.parse(lastSync[1].body) as { args: { providers: unknown[] } };
-    expect(payload.args.providers.length).toBe(agentStore.agentProviders.length);
+    await vi.waitFor(() => expect(dbSyncCalls().length).toBeGreaterThan(0));
+    const payload = dbSyncCalls().at(-1)![1] as { providers: unknown[] };
+    expect(payload.providers.length).toBe(agentStore.agentProviders.length);
   });
 
   it("能力表拉不到（unknown）：同样跳过同步（fail-closed），只留 localStorage", async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      void init;
-      const url = String(input);
-      if (url.endsWith("/api/command")) return new Response(JSON.stringify(null), { status: 200 });
-      return new Response(JSON.stringify({ error: "未认证" }), { status: 401 });
-    });
-    vi.stubGlobal("fetch", fetchMock);
+    // 不装能力表桩：/api/commands 走不到 → 目录 unknown → fail-closed。
     const agentStore = useAgentStore();
-    await agentStore.providersHydrated;
+    await useCommandCapabilitiesStore().ensureCatalog();
+    const agentStore2 = agentStore;
+    await agentStore2.providersHydrated;
     await settleSync();
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(syncCalls(fetchMock)).toHaveLength(0);
+    expect(dbSyncCalls()).toHaveLength(0);
     expect(localStorage.getItem("greywork.agent-providers")).not.toBeNull();
   });
 });
+
+/** 从 invoke 记录里滤出 db_agents_sync 调用。 */
+function dbSyncCalls(): Array<[string, Record<string, unknown>]> {
+  return invokeMock.mock.calls.filter(([cmd]) => cmd === "db_agents_sync") as Array<[string, Record<string, unknown>]>;
+}

@@ -1,16 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type * as GreyworkCore from "@greywork/core";
 
 const mocks = vi.hoisted(() => ({
-  isTauriRuntime: vi.fn<() => boolean>(() => false),
   tauriListen: vi.fn(),
 }));
-
-vi.mock("@greywork/core", async (importOriginal) => ({
-  ...(await importOriginal<typeof GreyworkCore>()),
-  isTauriRuntime: mocks.isTauriRuntime,
-}));
-vi.mock("@tauri-apps/api/event", () => ({ listen: mocks.tauriListen }));
 
 const OVERRIDE_KEY = "__GREYWORK_RUNTIME__";
 
@@ -69,31 +61,12 @@ async function serverBarrel() {
 
 beforeEach(() => {
   FakeSocket.instances = [];
-  mocks.isTauriRuntime.mockReturnValue(false);
   mocks.tauriListen.mockReset();
 });
 
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
-});
-
-describe("listen —— desktop", () => {
-  it("直通 Tauri listen，参数逐字一致，解绑转发", async () => {
-    mocks.isTauriRuntime.mockReturnValue(true);
-    const unlisten = vi.fn();
-    mocks.tauriListen.mockResolvedValue(unlisten);
-    stubWindow();
-    const { listen } = await freshBarrel();
-
-    const handler = vi.fn();
-    const stop = await listen("acp://event", handler);
-
-    expect(mocks.tauriListen).toHaveBeenCalledWith("acp://event", handler);
-    stop();
-    expect(unlisten).toHaveBeenCalledTimes(1);
-    expect(FakeSocket.instances).toHaveLength(0);
-  });
 });
 
 describe("listen —— browser-preview", () => {

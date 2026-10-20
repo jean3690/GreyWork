@@ -1,10 +1,11 @@
-import { hasHostCommands, invoke } from "@greywork/host-ipc";
+import { hasHostCommands, hostPlugins, invoke } from "@greywork/host-ipc";
 import { computed, ref } from "vue";
 import { adaptInstalledPlugin } from "./declarative";
 import { createWorkerCodePluginRuntime, type CodePluginRuntime, type CodePluginRuntimeFactory } from "./code-runtime";
 import { clearDeclarativePluginState } from "./declarative-state";
 import type { InstalledPluginPackage, MarketPluginManifest, PluginInstallReport, PluginRegistryEntry } from "./market-types";
 import {
+  activateRegisteredPluginFromArchive,
   clearPluginCapabilityGrants,
   isPluginEnabled,
   pluginManifests,
@@ -13,7 +14,12 @@ import {
   unregisterPlugin,
 } from "./runtime";
 import { useCapabilityLoader } from "./current";
-import { setNetFetchTransportForHost } from "./capabilities";
+import {
+  setNetFetchTransportForHost,
+  setPluginFsTransportForHost,
+  setPluginNotifyTransportForHost,
+  setPluginWorkspaceTransportForHost,
+} from "./capabilities";
 import { closePluginWindow } from "./plugin-window";
 
 /**
@@ -31,13 +37,47 @@ export function initPluginHostTransport(): void {
         url: request.url,
         method: request.method,
         headers: Object.entries(request.headers ?? {}),
+        body: request.body,
         allowedHosts: request.allowedHosts,
+        methods: request.methods,
+        paths: request.paths,
+        maxBytes: request.maxBytes,
       },
     });
     const headers: Record<string, string> = {};
     for (const [key, value] of response.headers ?? []) headers[key] = value;
     return { status: response.status, ok: response.ok, headers, body: response.body };
   });
+  setPluginFsTransportForHost(async (request) => {
+    const response = await invoke<{
+      bytes: number;
+      totalBytes: number;
+      data?: string;
+      entries?: { name: string; dir: boolean; bytes: number }[];
+      removed?: boolean;
+      exists?: boolean;
+    }>("plugin_fs", { request });
+    return response;
+  });
+  // workspace.read：宿主侧复用 WorkspaceFsAccess（授权根 + 256 KiB 文本预览）。
+  setPluginWorkspaceTransportForHost(async (request) => {
+    return invoke<{
+      roots?: { path: string; name: string }[];
+      path?: string;
+      name?: string;
+      data?: string;
+      bytes?: number;
+      truncated?: boolean;
+      exists?: boolean;
+    }>("plugin_workspace", { request });
+  });
+  // notify 是**桌面专属**能力（Tauri / Electron）：只在有原生桌面壳时注册传输层。
+  // 纯服务端（自托管 web）不注册，插件调用会按「无宿主」失败并记审计 —— 这正是
+  // capabilities.ts 对 notify 的既有约定，也避免去 invoke `plugin_notify` 撞 403。
+  const plugins = hostPlugins();
+  if (plugins) {
+    setPluginNotifyTransportForHost((request) => plugins.notify(request));
+  }
 }
 
 /** 用户可覆盖为自己的 GitHub raw index；空串表示尚未配置线上目录。 */
@@ -116,6 +156,8 @@ function registerInstalled(packages: readonly InstalledPluginPackage[]): void {
     try {
       registerPlugin(adaptInstalledPlugin(pluginPackage, runtime));
       registeredInstalledIds.add(id);
+      // 清单与 boot 并发：boot 之后才注册的插件按启停存档补激活（boot 之前注册的由 wanted 集覆盖）。
+      void activateRegisteredPluginFromArchive(id);
     } catch (error) {
       runtime?.dispose();
       codeRuntimes.delete(id);

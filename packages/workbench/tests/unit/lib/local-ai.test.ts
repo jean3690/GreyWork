@@ -30,6 +30,9 @@ function fakeLlm(overrides: Partial<LlmClient> = {}): LlmClient {
     isAvailable: () => true,
     chat: () => Promise.resolve(1),
     stop: () => Promise.resolve(),
+    // agent 回合在本地 AI 用例里不涉及，补上只为满足 LlmClient 契约。
+    agentRun: () => Promise.resolve(1),
+    stopAgent: () => Promise.resolve(),
     onEvent: () => Promise.resolve(() => undefined),
     listModels: () => Promise.resolve([]),
     embed: () => Promise.resolve({ embeddings: [[1]], dim: 1, model: "m" }),

@@ -15,17 +15,18 @@ use crate::dingtalk::DingTalkHost;
 use crate::discord::DiscordHost;
 use crate::feishu::FeishuHost;
 use crate::host::HostContext;
-use crate::llm::LlmHost;
+use crate::llm::{LlmAgentHost, LlmHost};
 use crate::qq::QqHost;
 use crate::rag::RagHost;
 use crate::telegram::TelegramHost;
+use crate::terminal::TerminalHost;
 use crate::wechat::WechatHost;
 use crate::wecom::WecomHost;
 use crate::workspace_fs::WorkspaceFsAccess;
 use crate::{
     acp_host, bundled_skills, channel_media, db, dingtalk, discord, feishu, git, llm, mcp,
-    mcp_registry, office, plugin_market, qq, rag, sheet, skills_market, store_fs, sys, telegram,
-    update, web_fetch, wechat, wecom, workspace_fs, worktree,
+    mcp_registry, office, plugin_market, qq, rag, sheet, shell, skills_market, store_fs, sys,
+    telegram, update, web_fetch, wechat, wecom, workspace_fs, worktree,
 };
 
 /// 命令的鉴权要求。
@@ -68,7 +69,11 @@ pub struct Services {
     pub workspace: Arc<WorkspaceFsAccess>,
     pub acp: Arc<AcpHost>,
     pub llm: Arc<LlmHost>,
+    /// 本机 agent 回合的状态（请求 id + 可中止句柄）；与 `llm` 独立，见 `llm::agent`。
+    pub agent: Arc<LlmAgentHost>,
     pub rag: Arc<RagHost>,
+    /// 交互式终端会话宿主（真 PTY；`terminal_*` 命令）。
+    pub terminal: Arc<TerminalHost>,
 }
 
 /// 聊天通道宿主集合（7 条通道）。
@@ -100,7 +105,18 @@ pub struct CommandContext {
     /// 桌面端不构造 `CommandContext`（该值由桌面包装自行从 `db.enabled_agent_programs()`
     /// 取）；服务端填配置里**冻结**的列表，不读 DB —— DB 可被客户端经 `db_agents_sync`
     /// 改写，是 RCE 面（见 `acp_host::acp_start` 的 `extra_programs` 说明）。
+    ///
+    /// 可信本机宿主（`include_db_agent_programs` 为真）下这份**不够用** —— 用户当刻在 UI 里
+    /// 增删的后端必须立刻生效，所以那时改用 [`CommandContext::extra_agent_programs`]。
     pub agent_programs: Arc<Vec<String>>,
+    /// 是否**再并上** `services.db.enabled_agent_programs()`（可信本机宿主）。
+    ///
+    /// 与 `agent_programs` 是「并集」而非「替代」：配置里显式给的放行面在任何模式下都算数。
+    ///
+    /// 置真意味着「客户端与服务端同机且受信」—— 只有那种部署才能接受「客户端经
+    /// `db_agents_sync` 写什么、宿主就放行什么」。默认 `false`：DB 是客户端可写的，直接拿它
+    /// 当 spawn 白名单等于把 RCE 面交给客户端。
+    pub include_db_agent_programs: bool,
     /// 本宿主 CSP 允许内嵌的 origin（云端 Office 的文档地址）。
     ///
     /// 与 `agent_programs` 同样是**宿主侧事实**：桌面端写死在 `tauri.conf.json`（由桌面包装
@@ -112,6 +128,25 @@ pub struct CommandContext {
     /// 与 `agent_programs` / `frame_origins` 同一注入风格。桌面端不构造
     /// `CommandContext`（其 `#[tauri::command]` 包装自行填 [`sys::HostFacts`]）。
     pub host_facts: sys::HostFacts,
+    /// LibreOffice headless 的解析结果（显式配置优先，否则 PATH 探测 / macOS 应用包）。
+    ///
+    /// 与 `frame_origins` / `host_facts` 同一注入风格：共享层无从得知宿主装没装 soffice，
+    /// 只能由宿主在构造时探测一次注入。`office_convert_*` 两个命令消费它。
+    pub soffice: office::SofficeTool,
+}
+
+impl CommandContext {
+    /// 内置白名单之外**额外放行**的 agent 程序名（`acp_start` 的 `extra_programs`）。
+    ///
+    /// 现查而非缓存：可信宿主下用户在 UI 里增删后端后，下一次 `acp_start` 必须立刻按新目录
+    /// 判定 —— 冻结一份会让「刚加的后端」到下次重启前一直起不来。
+    pub fn extra_agent_programs(&self) -> Vec<String> {
+        let mut programs = (*self.agent_programs).clone();
+        if self.include_db_agent_programs {
+            programs.extend(self.services.db.enabled_agent_programs());
+        }
+        programs
+    }
 }
 
 /// 零参命令的占位入参：`null` / `{}` / 缺失都接受。
@@ -261,8 +296,10 @@ use super::llm::llm_commands;
 use super::markets::markets_commands;
 use super::office::office_commands;
 use super::rag::rag_commands;
+use super::shell::shell_commands;
 use super::sys::sys_commands;
+use super::terminal::terminal_commands;
 
 // 领域链入口：顺序**只此一处**决定 `COMMANDS`/`dispatch` 的行序。
 // 各领域文件只负责把自己那批命令行追加进来。
-sys_commands! { [acp_commands llm_commands rag_commands office_commands markets_commands channels_commands fs_commands git_commands db_commands app_commands command_table] }
+sys_commands! { [acp_commands llm_commands rag_commands office_commands markets_commands channels_commands shell_commands terminal_commands fs_commands git_commands db_commands app_commands command_table] }

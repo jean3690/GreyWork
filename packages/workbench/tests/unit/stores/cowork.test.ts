@@ -23,7 +23,7 @@ vi.mock("@greywork/acp", () => ({
       setSessionConfig: (handle: number, configId: string, value: string | boolean) => h.setSessionConfig(handle, configId, value),
       setPermissionTier: vi.fn(),
       probeMcp: vi.fn(),
-      prompt: (handle: number, text: string) => h.prompt(handle, text),
+      prompt: (handle: number, text: string, units?: unknown) => h.prompt(handle, text, units),
       stop: (handle: number, turnId?: number) => h.stop(handle, turnId),
       respondPermission: vi.fn(),
       onEvent: (listener: (event: AcpEventEnvelope) => void) => {
@@ -40,6 +40,7 @@ import { useAgentStore } from "@/stores/agent";
 import { useSettingsStore } from "@/stores/settings";
 import { useCoworkStore } from "@/stores/cowork";
 import { useSessionStore } from "@/stores/session";
+import type { Attachment } from "@/types";
 
 const storageHolder = globalThis as { localStorage?: Storage };
 
@@ -360,6 +361,38 @@ describe("宿主事件分流", () => {
   });
 });
 
+describe("群聊式时间线投影（transcript）", () => {
+  it("把邮件按时间正序投影成带作者的消息流", async () => {
+    const cowork = await startPair();
+    // start() 时引擎给 leader 投了一条「目标：…」的用户信 → 时间线首行即用户
+    expect(cowork.transcript).toHaveLength(1);
+    expect(cowork.transcript[0]).toMatchObject({ role: "user", authorId: "user", authorName: "用户" });
+
+    emit({
+      kind: "session-update",
+      payload: {
+        sessionId: "s-1",
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { text: fence([{ op: "task", subject: "实现登录", owner: "Builder" }]) },
+        },
+      },
+    });
+    useChatStore().flushPendingContent();
+    emit({ kind: "prompt-done", payload: { handle: 1, turnId: 1 } });
+    await Promise.resolve();
+
+    // leader 建任务即投递 assignment 邮件 → 时间线多一条来自 leader 的消息
+    const assignment = cowork.transcript.find((row) => row.content.includes("已派给你"));
+    expect(assignment).toBeTruthy();
+    expect(assignment?.authorId).toBe(cowork.slots[0]!.id);
+    expect(assignment?.authorName).toBe("Leader");
+    expect(assignment?.role).toBe("assistant");
+    // 正序：用户的目标信仍在最前
+    expect(cowork.transcript[0]!.authorId).toBe("user");
+  });
+});
+
 describe("stopRun", () => {
   it("取消运行并回收全部 ACP 进程", async () => {
     const cowork = await startPair();
@@ -410,5 +443,74 @@ describe("成员各自指定 ACP 后端", () => {
     expect(failure).toBeTruthy();
     expect(h.startAgent).not.toHaveBeenCalled();
     expect(cowork.status).toBeNull();
+  });
+});
+
+describe("附件", () => {
+  /** 通用文件附件：toAcpUnits 只递路径引用（不读盘），测试里最省事。 */
+  function fileAttachment(name: string): Attachment {
+    return { id: `att-${name}`, kind: "file", name, mime: "text/plain", size: 3, path: `/tmp/${name}` };
+  }
+
+  /** 有附件时 dispatchTurn 里的 toAcpUnits 是异步的，多让一轮微任务。 */
+  const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it("sendUser 带的附件随目标成员的下一次派发进 prompt units", async () => {
+    const cowork = await startPair();
+    // 先结束 leader 首回合，让它能被下一条消息重新唤醒。
+    emit({ kind: "prompt-done", payload: { handle: 1, turnId: 1 } });
+    await Promise.resolve();
+    const before = h.prompt.mock.calls.length;
+
+    await cowork.sendUser("看看这个文件", undefined, [fileAttachment("spec.md")]);
+    await tick();
+
+    expect(h.prompt.mock.calls.length).toBe(before + 1);
+    const [handle, , units] = h.prompt.mock.calls.at(-1) as [number, string, Array<{ type: string; text: string }>];
+    expect(handle).toBe(1);
+    expect(units).toEqual([{ type: "text", text: expect.stringContaining("spec.md") }]);
+  });
+
+  it("起跑目标带的附件进 leader 首回合的 prompt units", async () => {
+    let handleSeq = 0;
+    h.startAgent.mockImplementation(() => Promise.resolve(++handleSeq));
+    h.openSession.mockImplementation((handle: number) => Promise.resolve({ sessionId: `s-${handle}`, configOptions: [] }));
+    h.prompt.mockResolvedValue({ turnId: 1 });
+    const cowork = useCoworkStore();
+
+    const failure = await cowork.startRun(
+      "按这份规范实现",
+      [
+        { name: "Leader", role: "leader" },
+        { name: "Builder", role: "teammate" },
+      ],
+      [fileAttachment("spec.md")],
+    );
+    expect(failure).toBeNull();
+    await tick();
+
+    const [handle, , units] = h.prompt.mock.calls[0] as [number, string, Array<{ type: string; text: string }>];
+    expect(handle).toBe(1);
+    expect(units).toEqual([{ type: "text", text: expect.stringContaining("spec.md") }]);
+  });
+
+  it("目标成员后端未声明图片能力时，图片在派发时被拦下（不混进 units）", async () => {
+    const cowork = await startPair();
+    emit({ kind: "prompt-done", payload: { handle: 1, turnId: 1 } });
+    await Promise.resolve();
+
+    const image: Attachment = {
+      id: "img",
+      kind: "image",
+      name: "a.png",
+      mime: "image/png",
+      size: 1,
+      dataUrl: "data:image/png;base64,QUJD",
+    };
+    await cowork.sendUser("图", undefined, [image]);
+    await tick();
+
+    const [, , units] = h.prompt.mock.calls.at(-1) as [number, string, unknown[]];
+    expect(units).toEqual([]);
   });
 });

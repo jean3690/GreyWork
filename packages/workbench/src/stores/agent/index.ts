@@ -47,6 +47,7 @@ export const useAgentStore = defineStore("agent", () => {
     acpConnecting: state.acpConnecting,
     pendingPermission: state.pendingPermission,
     acpConfigOptions: state.acpConfigOptions,
+    acpModes: state.acpModes,
     permissionDeadline: state.permissionDeadline,
     acpMcpServers: state.acpMcpServers,
     acpMcpSkipped: state.acpMcpSkipped,
@@ -59,6 +60,14 @@ export const useAgentStore = defineStore("agent", () => {
     acpUsage: state.acpUsage,
     acpThoughtText: state.acpThoughtText,
     acpCommands: state.acpCommands,
+    protocolSubagents: state.protocolSubagents,
+    /** 协议层子代理：取消其当前工作（需其宣告了 capabilities.cancel）。 */
+    cancelSubagent: runtime.cancelSubagent,
+    /** 协议层子代理：会话间消息 / 自身转录读取面。 */
+    subagentMessagesOf: runtime.subagentMessagesOf,
+    subagentTranscriptOf: runtime.subagentTranscriptOf,
+    /** 协议层子代理：树深度（供 UI 缩进嵌套）。 */
+    subagentDepthOf: runtime.subagentDepthOf,
     /** 后端目录启动接管完成信号（null = 浏览器态无后端）。 */
     providersHydrated: state.providersHydrated,
     agentDetection: state.agentDetection,
@@ -88,6 +97,10 @@ export const useAgentStore = defineStore("agent", () => {
     dispatchToAcp: turn.dispatchToAcp,
     beginAcpPlan: turn.beginAcpPlan,
     confirmAcpPlan: turn.confirmAcpPlan,
+    /** 回退到某条用户消息之前（工作区 + 消息流一起回退；agent 上下文重置）。 */
+    rewindTo: turn.rewindTo,
+    /** 重发前置：回退到该消息之前（快照可选），随后由调用方经 dispatch-intent 重派发。 */
+    prepareResend: turn.prepareResend,
     stopAcp: runtime.stopAcp,
     respondPermission: runtime.respondPermission,
     probeMcpServer: runtime.probeMcpServer,

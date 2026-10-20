@@ -27,13 +27,14 @@ vi.mock("@/stores/remote-assistant", () => ({
 // 让加载器同步解析成轻量占位，file-icons 等重依赖根本不进图。
 vi.mock("@/features/workspace/WorkspacePanel.vue", () => ({ default: { template: "<div data-testid='workspace-panel-stub' />" } }));
 vi.mock("@/features/preview/PreviewSider.vue", () => ({ default: { template: "<div data-testid='preview-sider-stub' />" } }));
-vi.mock("@/features/activity/ActivityBand.vue", () => ({ default: { template: "<div data-testid='activity-band-stub' />" } }));
+vi.mock("@/features/terminal/TerminalPanel.vue", () => ({ default: { template: "<div data-testid='terminal-panel-stub' />" } }));
 
 import Shell from "@/features/shell/Shell.vue";
 import { appEvents } from "@/events";
 import { useLayoutStore } from "@/stores/layout";
 import { usePreviewStore } from "@/stores/preview";
 import { useWorkspacePanelStore } from "@/stores/workspacePanel";
+import { useTerminalStore } from "@/stores/terminal";
 import { registerPreviewSaver } from "@/lib/preview-save";
 import { cancelDiscard, pendingDiscard } from "@/lib/preview-edit-guard";
 import { ref } from "vue";
@@ -47,13 +48,15 @@ const SettingsDialog = {
   props: ["open", "section"],
   template: `<div data-testid="settings-dialog" :data-open="open" :data-section="section" />`,
 };
+// 四个外壳面板用显式 testid stub：极简模式要断言「哪个在场 / 哪个不在场」。
 const stubs = {
   Titlebar,
   SettingsDialog,
-  Sider: true,
-  PreviewSider: true,
-  WorkspacePanel: true,
-  ActivityBand: true,
+  Sider: { template: `<div data-testid="sider-stub" />` },
+  MinimalSider: { template: `<div data-testid="minimal-sider-stub" />` },
+  PreviewSider: { template: `<div data-testid="preview-sider-stub" />` },
+  WorkspacePanel: { template: `<div data-testid="workspace-panel-stub" />` },
+  TerminalPanel: { template: `<div data-testid="terminal-panel-stub" />` },
   WorkspaceOverlayRegions: true,
   NoticeHost: true,
   PermissionPromptHost: true,
@@ -103,8 +106,8 @@ describe("Shell", () => {
     expect(wrapper.find('[data-testid="shell"]').exists()).toBe(true);
     expect(wrapper.find('[data-testid="router-view-stub"]').exists()).toBe(true);
     expect(wrapper.get('[data-testid="titlebar"]').attributes("data-collapsed")).toBe("false");
-    // 桌面端侧栏常驻，开合键交给侧栏顶部的品牌键；标题栏那颗只在移动端渲染
-    expect(wrapper.get('[data-testid="titlebar"]').attributes("data-sider-toggle")).toBe("false");
+    // 开合键恒在：极简侧栏没有品牌开合键，标题栏这颗是唯一入口（由前端的 panels.sider 决定）
+    expect(wrapper.get('[data-testid="titlebar"]').attributes("data-sider-toggle")).toBe("true");
     expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
     expect(document.documentElement.getAttribute("data-palette")).toBe("greywork");
     expect(h.bootPlugins).toHaveBeenCalledTimes(1);
@@ -156,6 +159,36 @@ describe("Shell", () => {
 
     await press({ key: "\\", ctrlKey: true });
     expect(preview.collapsed).toBe(!before);
+  });
+
+  it("Ctrl+` 拨终端面板开关（宿主可用时）", async () => {
+    (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = "server";
+    try {
+      mountShell();
+      const terminal = useTerminalStore();
+      expect(terminal.available).toBe(true);
+      const before = terminal.open;
+
+      await press({ key: "`", code: "Backquote", ctrlKey: true });
+      expect(terminal.open).toBe(!before);
+    } finally {
+      delete (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__;
+    }
+  });
+
+  it("终端面板随宿主可用性渲染：浏览器预览态不渲染，宿主可用时渲染", async () => {
+    const wrapper = mountShell();
+    await nextTick();
+    expect(wrapper.find('[data-testid="terminal-panel-stub"]').exists()).toBe(false);
+
+    (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = "server";
+    try {
+      window.dispatchEvent(new Event("resize"));
+      await nextTick();
+      expect(wrapper.find('[data-testid="terminal-panel-stub"]').exists()).toBe(true);
+    } finally {
+      delete (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__;
+    }
   });
 
   it("Ctrl+1..4 布局联动：两个面板一起拨到位", async () => {
@@ -341,5 +374,59 @@ describe("Shell 窄屏收拢右栏：先保存再卸载", () => {
     await settle();
 
     expect(preview.available).toBe(false);
+  });
+});
+
+/**
+ * 只有一套外壳：极简侧栏 + 完整侧栏/活动带都不再渲染。面板偏好仍各自持久化。
+ */
+describe("Shell 外壳组成", () => {
+  it("只渲染极简侧栏；完整 Sider 与活动带不挂载；预览 / 工作区 / 终端面板都保留", async () => {
+    (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = "server";
+    try {
+      const wrapper = mountShell();
+      await nextTick();
+
+      expect(wrapper.find('[data-testid="minimal-sider-stub"]').exists()).toBe(true);
+      expect(wrapper.find('[data-testid="sider-stub"]').exists()).toBe(false);
+      expect(wrapper.find('[data-testid="activity-band-stub"]').exists()).toBe(false);
+      // 三个面板都仍挂载（顶栏各有开合键）
+      expect(wrapper.find('[data-testid="preview-sider-stub"]').exists()).toBe(true);
+      expect(wrapper.find('[data-testid="workspace-panel-stub"]').exists()).toBe(true);
+      expect(wrapper.find('[data-testid="terminal-panel-stub"]').exists()).toBe(true);
+    } finally {
+      delete (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__;
+    }
+  });
+
+  it("左栏开合：toggleSider 收起后 MinimalSider 整个隐去，再按一次恢复", async () => {
+    const wrapper = mountShell();
+    expect(wrapper.find('[data-testid="minimal-sider-stub"]').exists()).toBe(true);
+
+    wrapper.getComponent(Titlebar).vm.$emit("toggle-sider");
+    await nextTick();
+    expect(wrapper.find('[data-testid="minimal-sider-stub"]').exists()).toBe(false);
+
+    wrapper.getComponent(Titlebar).vm.$emit("toggle-sider");
+    await nextTick();
+    expect(wrapper.find('[data-testid="minimal-sider-stub"]').exists()).toBe(true);
+  });
+
+  it("窄屏：默认收起（抽屉），标题栏左栏开合键拉出 MinimalSider", async () => {
+    const wrapper = mountShell();
+
+    Object.defineProperty(window, "innerWidth", { value: 500, configurable: true });
+    window.dispatchEvent(new Event("resize"));
+    await nextTick();
+    expect(wrapper.find('[data-testid="minimal-sider-stub"]').exists()).toBe(false);
+
+    wrapper.getComponent(Titlebar).vm.$emit("toggle-sider");
+    await nextTick();
+    expect(wrapper.find('[data-testid="minimal-sider-stub"]').exists()).toBe(true);
+
+    // 还原视口，免得住后用例带上窄屏态
+    Object.defineProperty(window, "innerWidth", { value: 1024, configurable: true });
+    window.dispatchEvent(new Event("resize"));
+    await nextTick();
   });
 });

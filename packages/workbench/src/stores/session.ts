@@ -327,6 +327,23 @@ export const useSessionStore = defineStore("session", () => {
     return getSession(id)?.messages ?? session.messages;
   }
 
+  /**
+   * 取或建一条**不激活**的会话，供自动化任务的专属会话使用。
+   *
+   * 与 ensure 的关键差异：不写 `activeSessionId` —— 任务到点执行时不能把用户正在聊的
+   * 会话顶掉（`ensure` 的「未命中即激活」语义是给 UI 切历史线程用的）。
+   * 已存在则原样返回（工作区 / 消息保留），仅新建时落盘。
+   */
+  function ensureUnactivated(id: string, title: string, workspaceId: string | null = null): SessionRecord {
+    const existing = getSession(id);
+    if (existing) return existing;
+    const now = Date.now();
+    const session: SessionRecord = { id, title, workspaceId, createdAt: now, updatedAt: now, messages: [] };
+    sessions.value.unshift(session);
+    persist();
+    return session;
+  }
+
   function renameSession(id: string, title: string): void {
     const session = getSession(id);
     const trimmed = title.trim();
@@ -379,6 +396,20 @@ export const useSessionStore = defineStore("session", () => {
     persist();
   }
 
+  /**
+   * 回退：只保留前 `keepCount` 条消息，丢弃其余（「会话 + 文件一起回退」的会话侧）。
+   * 消息只有数组位置这一个顺序键，按索引截断即可；keepCount 越界按夹紧处理。
+   */
+  function truncateMessages(id: string, keepCount: number): void {
+    const record = getSession(id);
+    if (!record) return;
+    const keep = Math.max(0, keepCount);
+    if (record.messages.length <= keep) return;
+    record.messages.splice(keep);
+    touch(id);
+    persist();
+  }
+
   /** 工作区删除后把其会话迁移到「普通对话」（不连带删除用户对话历史）。 */
   function reassignWorkspace(fromWorkspaceId: string, toWorkspaceId: string | null): void {
     let changed = false;
@@ -405,12 +436,15 @@ export const useSessionStore = defineStore("session", () => {
     setAcpBinding,
     createSession,
     ensure,
+    /** 建/取一条不激活的会话（自动化任务专属会话用）。 */
+    ensureUnactivated,
     renameSession,
     autoTitle,
     deleteSession,
     touch,
     setActive,
     appendMessage,
+    truncateMessages,
     reassignWorkspace,
     sessionsOf,
     /** 深层就地修改后打脏，500ms 防抖合并落盘（替代曾经的 deep watch）。 */

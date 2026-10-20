@@ -17,7 +17,7 @@ import path from "node:path";
 
 /** 拦截范围：源码目录下的 .vue/.ts。coverage/dist 等产物目录不扫。 */
 const ROOTS = ["packages", "apps"];
-const SKIP_DIRS = new Set(["node_modules", "dist", "coverage", "target", "src-tauri"]);
+const SKIP_DIRS = new Set(["node_modules", "dist", "coverage", "target"]);
 const OFFENDER = /rounded(-[a-z]+)?-\[(?:\d+)px\]/g;
 
 const offenders = [];

@@ -4,12 +4,12 @@
  * 断言预览面板渲染出内容。
  *
  * 覆盖的链：bootstrap → 壳层挂载 → preview store → 事件桥 → VFS 读取 → Markdown 渲染。
- * Tauri 专属路径（getCurrentWebview 等）在浏览器态静默降级，是引擎盖保证的既定分支。
+ * 原生壳专属能力（窗口/托盘/通知等）在浏览器态静默降级，是引擎盖保证的既定分支。
  *
  * 依赖 playwright-core（desktop 已有）+ 本机 Playwright 浏览器缓存
- * （~/.cache/ms-playwright）；无缓存时先 `npx playwright-core install chromium`。
+ * （~/.cache/ms-playwright）；无缓存时先 `npx playwright-core install chromium-headless-shell`。
  */
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 
@@ -35,15 +35,40 @@ async function waitServer(url, timeoutMs) {
   throw new Error(`vite dev server 未在 ${timeoutMs}ms 内就绪: ${url}`);
 }
 
-// shell: true —— Windows 上 `pnpm` 装的是 .cmd 垫片，Node 不带 shell 起不来。
+// shell: true 仅 Windows 需要（`pnpm` 装的是 .cmd 垫片）；POSIX 上 detached 让
+// pnpm + vite 落在独立进程组里，收尾时可以整组杀掉，避免 vite 子进程握着管道不退出。
+const useShell = process.platform === "win32";
 const server = spawn("pnpm", ["exec", "vite", "--port", String(PORT), "--strictPort"], {
   cwd: desktopRoot,
   stdio: ["ignore", "pipe", "pipe"],
-  shell: true,
+  shell: useShell,
+  detached: !useShell,
 });
 let serverLog = "";
 server.stdout.on("data", (d) => (serverLog += d.toString()));
 server.stderr.on("data", (d) => (serverLog += d.toString()));
+
+/** 停掉 dev server：Windows 用 taskkill /T 清进程树；POSIX 杀整个进程组。 */
+async function stopServer() {
+  if (!server.pid || server.exitCode !== null) return;
+  if (process.platform === "win32") {
+    spawnSync("taskkill", ["/pid", String(server.pid), "/T", "/F"], { stdio: "ignore" });
+    return;
+  }
+  try {
+    process.kill(-server.pid, "SIGTERM");
+  } catch {
+    server.kill("SIGTERM");
+  }
+  await Promise.race([new Promise((resolve) => server.once("exit", resolve)), sleep(3000)]);
+  if (server.exitCode === null) {
+    try {
+      process.kill(-server.pid, "SIGKILL");
+    } catch {
+      // 已经退出
+    }
+  }
+}
 
 let browser;
 try {
@@ -57,6 +82,10 @@ try {
   await page.goto(BASE, { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => Boolean(window.__gw), null, { timeout: 30_000 });
 
+  // 先等预览面板挂载（事件总线在 PreviewSider 的 setup 里订阅）再 emit：
+  // 事件总线不重放，早一步发就是「面板还没开始听」。
+  await page.locator('[data-testid="preview-section-preview"]').waitFor({ timeout: 20_000 });
+
   // 工作区种子已有默认文件；写一个 e2e 专属文件，走 preview:request 联动预览面板。
   await page.evaluate(async () => {
     const gw = window.__gw;
@@ -65,9 +94,8 @@ try {
   });
 
   await page.getByText("体检通过").waitFor({ timeout: 20_000 });
-  await page.locator('[data-testid="preview-section-preview"]').waitFor({ timeout: 10_000 });
 
-  const shellMounted = await page.evaluate(() => document.querySelector("#app")?.childElementCount ?? 0 > 0);
+  const shellMounted = await page.evaluate(() => (document.querySelector("#app")?.childElementCount ?? 0) > 0);
   if (!shellMounted) throw new Error("Shell 未能挂载到 #app");
 
   console.log("SMOKE_OK: renderer 启动 → __gw 注入 → preview:request → Markdown 渲染 全链路通");
@@ -82,5 +110,7 @@ try {
   process.exitCode = 1;
 } finally {
   if (browser) await browser.close().catch(() => undefined);
-  server.kill("SIGTERM");
+  await stopServer();
+  // 显式退出：playwright / dev server 的残留句柄不应把 e2e 进程拖到 CI 超时。
+  process.exit(process.exitCode ?? 0);
 }

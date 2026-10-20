@@ -8,14 +8,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
-import { invoke } from "@tauri-apps/api/core";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+vi.mock("@greywork/host-ipc", async (importOriginal) => ({
+  ...(await importOriginal()),
+  invoke: vi.fn(),
+}));
 
 import LocalAiSettingsPane from "@/features/settings/LocalAiSettingsPane.vue";
 import { useSettingsStore } from "@/stores/settings";
 
-const invokeMock = vi.mocked(invoke);
+const invokeMock = vi.mocked((await import("@greywork/host-ipc")).invoke);
 const mounted: VueWrapper[] = [];
 
 /** 宿主命令桩：`rag_status` 回状态，其余（store_default_root）回一个工作区路径。 */
@@ -26,7 +28,7 @@ function stubHost(): void {
   });
 }
 
-function overrideRuntime(mode: "desktop" | "server" | "browser-preview"): void {
+function overrideRuntime(mode: "server" | "browser-preview"): void {
   (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = mode;
 }
 
@@ -79,7 +81,7 @@ describe("LocalAiSettingsPane 配置链路", () => {
   });
 
   it("桌面态：读索引状态、显示工作区根，构建按钮可点", async () => {
-    overrideRuntime("desktop");
+    overrideRuntime("server");
     stubHost();
     const wrapper = await mountPane();
 

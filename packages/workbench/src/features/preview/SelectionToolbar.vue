@@ -22,7 +22,7 @@ import { placeToolbar, type AnchorRect, type ToolbarPlacement } from "@/lib/sele
 import type { SelectionAction } from "@/lib/selection-injection";
 
 const props = defineProps<{ anchor: AnchorRect; available: boolean }>();
-const emit = defineEmits<{ select: [action: SelectionAction] }>();
+const emit = defineEmits<{ select: [action: SelectionAction]; comment: [note: string] }>();
 
 const { t } = useI18n();
 
@@ -33,6 +33,28 @@ const placed = ref(false);
 
 /** 顺序即展示顺序：先问、再解释、最后改写。 */
 const ACTIONS: readonly SelectionAction[] = ["ask", "explain", "rewrite"];
+
+/** 评论输入态：点「评论」展开一行输入框，提交即把「选中一段 + 批注」交给预览层。 */
+const commenting = ref(false);
+const note = ref("");
+const noteEl = ref<HTMLInputElement | null>(null);
+
+function startComment(): void {
+  commenting.value = true;
+  void nextTick(() => noteEl.value?.focus());
+}
+
+function cancelComment(): void {
+  commenting.value = false;
+  note.value = "";
+}
+
+function submitComment(): void {
+  const text = note.value.trim();
+  if (!text) return;
+  emit("comment", text);
+  cancelComment();
+}
 
 async function reposition(): Promise<void> {
   await nextTick();
@@ -53,6 +75,11 @@ watch(
 );
 watch(
   () => props.available,
+  () => void reposition(),
+);
+// 评论输入行是浮层的一部分：展开/收起会改变高度，需重新定位。
+watch(
+  () => commenting.value,
   () => void reposition(),
 );
 
@@ -88,6 +115,46 @@ const actionClass = (available: boolean): string =>
           @click="emit('select', action)"
         >
           {{ t(`preview.selection.${action}`) }}
+        </button>
+        <span class="mx-0.5 h-4 w-px bg-line" aria-hidden="true" />
+        <button
+          type="button"
+          data-testid="selection-action-comment"
+          :disabled="!available"
+          :class="actionClass(available)"
+          @mousedown.prevent
+          @click="startComment"
+        >
+          {{ t("preview.selection.comment") }}
+        </button>
+      </div>
+
+      <!-- 评论输入行：批注即用户要说的话，提交后追加进输入框草稿并挂为消息注解。 -->
+      <div
+        v-if="commenting"
+        data-testid="selection-comment-row"
+        class="mt-1 flex items-center gap-1 rounded-[calc(10px*var(--gw-radius-scale))] border border-line bg-popover p-1 shadow-lg"
+      >
+        <input
+          ref="noteEl"
+          v-model="note"
+          data-testid="selection-comment-input"
+          class="w-[220px] rounded-[calc(6px*var(--gw-radius-scale))] bg-panel-2 px-2 py-1 text-[11.5px] text-foreground outline-none placeholder:text-dim2 focus:ring-1 focus:ring-cyan/50"
+          :placeholder="t('preview.selection.commentPlaceholder')"
+          :aria-label="t('preview.selection.commentPlaceholder')"
+          @mousedown.stop
+          @keydown.enter.prevent="submitComment"
+          @keydown.esc.prevent.stop="cancelComment"
+        />
+        <button
+          type="button"
+          data-testid="selection-comment-submit"
+          class="rounded-[calc(6px*var(--gw-radius-scale))] bg-accent px-2 py-1 text-[11.5px] font-medium text-accent-ink transition-opacity disabled:opacity-50"
+          :disabled="!note.trim()"
+          @mousedown.prevent
+          @click="submitComment"
+        >
+          {{ t("preview.selection.commentSubmit") }}
         </button>
       </div>
 

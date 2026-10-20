@@ -8,7 +8,10 @@ import { useChatStore } from "@/stores/chat";
 import { useAgentStore } from "@/stores/agent";
 import { useTurnActive } from "@/lib/turn-activity";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+vi.mock("@greywork/host-ipc", async (importOriginal) => ({
+  ...(await importOriginal()),
+  invoke: vi.fn(),
+}));
 vi.mock("@greywork/acp", () => ({
   createAcpClient: () => ({ isAvailable: () => true, onEvent: () => Promise.resolve(() => undefined) }) as never,
   desktopHomeDir: () => Promise.resolve("/home/test"),

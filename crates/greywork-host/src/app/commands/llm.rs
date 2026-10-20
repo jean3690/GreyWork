@@ -13,6 +13,15 @@ macro_rules! llm_commands {
     { "llm_chat_stop", auth: Auth::Required, desktop: false, binary: false,
         args: llm::ChatStopArgs,
         run: |ctx, a| async move { llm::llm_chat_stop(&ctx.services.llm, a.request_id).await.map(Json) } }
+    // 本机 agent 回合：与 llm_chat_* 同一批事件（llm://event），多两个 kind
+    // （llm-tool-call / llm-tool-result）。句柄表与 llm_chat_* 独立 —— agent 回合的
+    // 生命周期（十几轮 / 几十分钟）与单轮聊天差一个量级，共用会让 stop 拿错句柄。
+    { "llm_agent_start", auth: Auth::Required, desktop: false, binary: false,
+        args: llm::AgentStartArgs,
+        run: |ctx, a| async move { llm::llm_agent_start(Arc::clone(&ctx.host), &ctx.services.agent, Arc::clone(&ctx.services.workspace), a).await.map(Json) } }
+    { "llm_agent_stop", auth: Auth::Required, desktop: false, binary: false,
+        args: llm::ChatStopArgs,
+        run: |ctx, a| async move { llm::llm_agent_stop(&ctx.services.agent, a.request_id).await.map(Json) } }
     // 模型清单（连通性自检）/ 向量 / 语音转写：本地 OpenAI 兼容服务提供。
     { "llm_list_models", auth: Auth::Required, desktop: false, binary: false,
         args: llm::ListModelsArgs,

@@ -11,7 +11,7 @@
  * 知道的事。
  */
 import { computed } from "vue";
-import { isTauriRuntime } from "@greywork/core";
+import { hasNativeShell } from "@greywork/host-ipc";
 import { openWithSystemApp, resolveTabDiskPath } from "@/lib/open-external";
 import { notify } from "@/stores/notice";
 import { i18n } from "@/i18n";
@@ -23,7 +23,7 @@ const props = defineProps<{ tab: PreviewTab }>();
 const t = i18n.global.t;
 
 /** 浏览器态恒为 null：没有磁盘通道，按钮点了也不会有反应。 */
-const path = computed(() => (isTauriRuntime() ? resolveTabDiskPath(props.tab) : null));
+const path = computed(() => (hasNativeShell() ? resolveTabDiskPath(props.tab) : null));
 
 async function open(): Promise<void> {
   const target = path.value;

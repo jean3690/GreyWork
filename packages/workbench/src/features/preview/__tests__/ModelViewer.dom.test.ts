@@ -36,7 +36,9 @@ vi.mock("@/state/workspaceFiles", () => ({
 }));
 vi.mock("@greywork/host-ipc", () => ({
   hasHostCommands: h.hasHostCommands,
+  hasNativeShell: () => h.hasHostCommands(),
   mediaStreamUrl: h.mediaStreamUrl,
+  declareFront: () => undefined,
 }));
 
 vi.mock("three", () => {

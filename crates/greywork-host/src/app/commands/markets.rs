@@ -48,6 +48,18 @@ macro_rules! markets_commands {
     { "plugin_net_fetch", auth: Auth::Required, desktop: false, binary: false,
         args: plugin_market::PluginFetchRequest,
         run: |_ctx, a| async move { plugin_market::plugin_net_fetch(a).await.map(Json) } }
+    { "plugin_fs", auth: Auth::Required, desktop: false, binary: false,
+        args: plugin_market::PluginFsRequest,
+        run: |ctx, a| async move { plugin_market::plugin_fs(ctx.host.as_ref(), a).map(Json) } }
+    // 只读工作区（workspace.read）：路径经 WorkspaceFsAccess 的授权根解析，不新建白名单。
+    { "plugin_workspace", auth: Auth::Required, desktop: false, binary: false,
+        args: plugin_market::PluginWorkspaceRequest,
+        run: |ctx, a| async move { plugin_market::plugin_workspace(ctx.services.workspace.as_ref(), a).map(Json) } }
+    // 系统通知是桌面专属（headless 无系统通知）：投递在桌面壳 `notify::send`，
+    // 宿主侧只做校验 + 归属合成。dispatch 在解析入参前即拒绝。
+    { "plugin_notify", auth: Auth::Required, desktop: true, binary: false,
+        args: plugin_market::PluginNotifyRequest,
+        run: |_ctx, _a| async move { Err::<Json<plugin_market::PluginNotifyResponse>, String>("仅桌面端可用".into()) } }
     { "plugin_market_preview", auth: Auth::Required, desktop: false, binary: false,
         args: plugin_market::PreviewArgs,
         run: |_ctx, a| async move { plugin_market::plugin_market_preview(a.registry_url, a.plugin_id).await.map(Json) } }

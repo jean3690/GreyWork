@@ -7,8 +7,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
-const invokeMock = vi.mocked((await import("@tauri-apps/api/core")).invoke);
+vi.mock("@greywork/host-ipc", async (importOriginal) => ({
+  ...(await importOriginal()),
+  invoke: vi.fn(),
+}));
+const invokeMock = vi.mocked((await import("@greywork/host-ipc")).invoke);
 
 import { i18n } from "@/i18n";
 import SystemSettingsPane from "@/features/settings/SystemSettingsPane.vue";
@@ -27,7 +30,6 @@ function sysInfo(overrides: Partial<Record<string, unknown>> = {}) {
     trayAvailable: true,
     totalMemoryBytes: 16 * 1024 ** 3,
     cpuCount: 8,
-    pinnedSandbox: false,
     pinnedTier: null,
     ...overrides,
   };
@@ -37,7 +39,7 @@ beforeEach(() => {
   window.localStorage.clear();
   setActivePinia(createPinia());
   invokeMock.mockReset();
-  (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
+  (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = "server";
   i18n.global.locale.value = "zh-CN";
 });
 
@@ -48,7 +50,15 @@ afterEach(() => {
 });
 
 async function render(info: boolean | "browser" | Record<string, unknown> = true): Promise<VueWrapper> {
-  if (info === "browser") delete (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+  const w = window as unknown as Record<string, unknown>;
+  if (info === "browser") {
+    w.__GREYWORK_RUNTIME__ = "browser-preview";
+    delete w.__GREYWORK_SHELL__;
+  } else {
+    // 桌面态 = Electron 壳：关于卡的「桌面应用」标签读 hasNativeShell()（bridge 判定）。
+    w.__GREYWORK_RUNTIME__ = "server";
+    w.__GREYWORK_SHELL__ = { window: {} };
+  }
   invokeMock.mockImplementation(async (command: string) =>
     command === "sys_info" ? sysInfo(typeof info === "object" ? info : { trayAvailable: info === true }) : null,
   );
@@ -92,7 +102,7 @@ describe("SystemSettingsPane · 托盘区块", () => {
   });
 });
 
-describe("SystemSettingsPane · 关于卡与钉住的沙盒", () => {
+describe("SystemSettingsPane · 关于卡", () => {
   it("桌面态有宿主：关于卡显示版本与运行形态，不再谎报「无宿主诊断面」", async () => {
     const wrapper = await render(true);
 
@@ -107,22 +117,15 @@ describe("SystemSettingsPane · 关于卡与钉住的沙盒", () => {
     expect(wrapper.text()).toContain("浏览器预览：无宿主诊断面");
   });
 
-  it("服务端钉死沙盒档位：档位按钮禁用并说明，联动建议一并收起", async () => {
-    const wrapper = await render({ pinnedSandbox: true });
-
-    expect(wrapper.get('[data-testid="sandbox-pinned"]').text()).toContain("GREYWORK_SANDBOX");
-    for (const mode of ["auto", "off", "fs", "full"]) {
-      expect(wrapper.find(`[data-testid="sandbox-mode-${mode}"]`).attributes("disabled")).toBeDefined();
-    }
-    expect(wrapper.find('[data-testid="sandbox-recommend"]').exists()).toBe(false);
-  });
-
-  it("未钉住时沙盒档位照常可选", async () => {
-    const wrapper = await render({ pinnedSandbox: false });
+  it("沙盒档位已停用：不再渲染任何沙盒选择 UI", async () => {
+    // 2026-10-13 用户决策：agent 自带权限模型，宿主不再套 OS 沙箱。
+    const wrapper = await render({});
 
     expect(wrapper.find('[data-testid="sandbox-pinned"]').exists()).toBe(false);
     for (const mode of ["auto", "off", "fs", "full"]) {
-      expect(wrapper.find(`[data-testid="sandbox-mode-${mode}"]`).attributes("disabled")).toBeUndefined();
+      expect(wrapper.find(`[data-testid="sandbox-mode-${mode}"]`).exists()).toBe(false);
     }
+    expect(wrapper.find('[data-testid="sandbox-recommend"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="sandbox-unavailable"]').exists()).toBe(false);
   });
 });

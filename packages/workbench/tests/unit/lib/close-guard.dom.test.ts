@@ -1,39 +1,39 @@
 /**
- * 关窗守卫：点 X 一律 `preventDefault()`，收口动作交回宿主 `close_main_window`。
- *
- * 为什么这条要钉死：Tauri 只要发现 JS 注册了 `tauri://close-requested` 监听，就把
- * 「真的关掉」整个甩给 JS 包装层；而包装层在没 `preventDefault` 时的默认动作是
- * `plugin:window|destroy` —— 那是一条渲染端没被 ACL 授权的命令，于是「关闭即退出」下
- * 点 X 完全没反应（只剩托盘能退）。见 lib/close-guard.ts 顶部与
- * apps/desktop/src-tauri/src/tray.rs 的 `close_main_window`。
+ * 关窗守卫的决策逻辑（lib/close-guard.ts）：对 `@greywork/host-ipc` 的 `closeGuardHost()`
+ * 门面接线，不感知 Tauri / Electron。这里只钉**消费者可见的决策**：
+ * - 无宿主窗口（server / 浏览器态）：不订阅。
+ * - 点 X 且无脏页：直接请宿主收口（requestClose）。
+ * - 点 X 且有脏页：走离开守卫，保存成功后清脏 + 同步未保存=false + 请宿主收口。
+ * - 宿主发来退出请求：走同一套离开守卫，然后 confirmExit。
+ * 拦截/ preventDefault 的实现细节属于门面与各宿主，不在这层断言。
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { defineComponent } from "vue";
+import type * as HostIpc from "@greywork/host-ipc";
 
-// 变参转发：`invoke("close_main_window")` 只有一个实参，多补一个 undefined 会让
-// toHaveBeenCalledWith 因数组长度不等而失配（与 lib/host-ipc 的 invoke 同一取舍）。
-const invoke = vi.fn<(...args: unknown[]) => Promise<void>>();
-vi.mock("@tauri-apps/api/core", () => ({ invoke: (...args: unknown[]) => invoke(...args) }));
-
-const handlers = new Map<string, (event: unknown) => void>();
 const unlisten = vi.fn();
-vi.mock("@tauri-apps/api/event", () => ({
-  listen: async (name: string, handler: (event: unknown) => void) => {
-    handlers.set(name, handler);
-    return unlisten;
-  },
-}));
+let closeHandler: (() => void) | null = null;
+let exitHandler: (() => void) | null = null;
 
-type CloseHandler = (event: { preventDefault: () => void }) => void;
-let closeHandler: CloseHandler | null = null;
-vi.mock("@tauri-apps/api/window", () => ({
-  getCurrentWindow: () => ({
-    onCloseRequested: async (handler: CloseHandler) => {
-      closeHandler = handler;
-      return unlisten;
-    },
+const host = {
+  syncUnsavedChanges: vi.fn(() => Promise.resolve()),
+  requestClose: vi.fn(() => Promise.resolve()),
+  confirmExit: vi.fn(() => Promise.resolve()),
+  onCloseRequested: vi.fn((handler: () => void) => {
+    closeHandler = handler;
+    return Promise.resolve(unlisten);
   }),
+  onExitRequested: vi.fn((handler: () => void) => {
+    exitHandler = handler;
+    return Promise.resolve(unlisten);
+  }),
+};
+
+let hostAvailable = true;
+vi.mock("@greywork/host-ipc", async (importOriginal) => ({
+  ...(await importOriginal<typeof HostIpc>()),
+  closeGuardHost: () => (hostAvailable ? host : null),
 }));
 
 const hasDirty = vi.fn(() => false);
@@ -47,12 +47,6 @@ vi.mock("@/lib/preview-edit-guard", () => ({
 
 import { useCloseGuard } from "@/lib/close-guard";
 
-function setTauri(on: boolean): void {
-  const w = window as unknown as Record<string, unknown>;
-  if (on) w.__TAURI_INTERNALS__ = {};
-  else delete w.__TAURI_INTERNALS__;
-}
-
 /** 在一个真实组件实例里挂守卫（它内部用 onUnmounted 退订）。 */
 function mountGuard() {
   const Host = defineComponent({
@@ -64,61 +58,56 @@ function mountGuard() {
   return mount(Host);
 }
 
-/** 模拟点 X：Tauri 把 CloseRequested 交给 JS 时的入参形状。 */
-async function clickClose(): Promise<{ preventDefault: ReturnType<typeof vi.fn> }> {
-  const event = { preventDefault: vi.fn() };
-  closeHandler?.(event);
-  await flushPromises();
-  return event;
-}
-
 beforeEach(() => {
-  handlers.clear();
   closeHandler = null;
-  invoke.mockReset().mockResolvedValue(undefined);
+  exitHandler = null;
+  hostAvailable = true;
   unlisten.mockClear();
+  host.syncUnsavedChanges.mockClear();
+  host.requestClose.mockClear();
+  host.confirmExit.mockClear();
+  host.onCloseRequested.mockClear();
+  host.onExitRequested.mockClear();
   hasDirty.mockReset().mockReturnValue(false);
   requestLeave.mockClear();
   clearDirtyPreviewTabs.mockClear();
-  setTauri(false);
 });
 
 describe("useCloseGuard · 点窗口 X", () => {
-  it("浏览器态：不订阅任何东西", () => {
+  it("无宿主窗口：不订阅任何东西", () => {
+    hostAvailable = false;
     mountGuard();
     expect(closeHandler).toBeNull();
-    expect(handlers.size).toBe(0);
+    expect(host.onCloseRequested).not.toHaveBeenCalled();
   });
 
-  it("没有未保存改动：拦下包装层，请宿主按偏好隐藏或真关", async () => {
-    setTauri(true);
+  it("没有未保存改动：请宿主按偏好隐藏或真关", async () => {
     mountGuard();
     await flushPromises();
 
-    const event = await clickClose();
-    expect(event.preventDefault).toHaveBeenCalledOnce();
-    // 不再调 appWindow.close()：那条路会回到包装层的 destroy()，而它没有授权。
-    expect(invoke).toHaveBeenCalledWith("close_main_window");
+    closeHandler?.();
+    await flushPromises();
+
+    expect(host.requestClose).toHaveBeenCalledOnce();
     expect(requestLeave).not.toHaveBeenCalled();
   });
 
   it("有未保存改动：先走离开守卫，保存成功后仍请宿主收口", async () => {
-    setTauri(true);
     hasDirty.mockReturnValue(true);
     mountGuard();
     await flushPromises();
 
-    const event = await clickClose();
-    expect(event.preventDefault).toHaveBeenCalledOnce();
+    closeHandler?.();
+    await flushPromises();
+
     expect(requestLeave).toHaveBeenCalledOnce();
     // requestLeave 的 mock 直接执行 run()，等于「自动保存全部成功」。
     expect(clearDirtyPreviewTabs).toHaveBeenCalledOnce();
-    expect(invoke).toHaveBeenCalledWith("set_unsaved_changes", { unsaved: false });
-    expect(invoke).toHaveBeenCalledWith("close_main_window");
+    expect(host.syncUnsavedChanges).toHaveBeenCalledWith(false);
+    expect(host.requestClose).toHaveBeenCalledOnce();
   });
 
   it("卸载后退订两条监听", async () => {
-    setTauri(true);
     const wrapper = mountGuard();
     await flushPromises();
     wrapper.unmount();
@@ -127,13 +116,12 @@ describe("useCloseGuard · 点窗口 X", () => {
 });
 
 describe("useCloseGuard · 宿主发来的退出请求", () => {
-  it("走同一套离开守卫，然后 confirm_exit", async () => {
-    setTauri(true);
+  it("走同一套离开守卫，然后 confirmExit", async () => {
     mountGuard();
     await flushPromises();
 
-    handlers.get("close-guard:exit-requested")?.({});
+    exitHandler?.();
     expect(requestLeave).toHaveBeenCalledOnce();
-    expect(invoke).toHaveBeenCalledWith("confirm_exit");
+    expect(host.confirmExit).toHaveBeenCalledOnce();
   });
 });

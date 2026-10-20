@@ -16,7 +16,7 @@ import { buildLlmHistory, localReasoningOverride, resolveLocalEffort } from "../
 import { selectLlmProvider } from "../../lib/llm-provider";
 import { retrieveContext, transcribeAttachment, type LocalAiDeps } from "../../lib/local-ai";
 import { isAskSettled } from "../../lib/ask-question";
-import { mergeToolActivities } from "../../lib/tool-activity";
+import { llmToolEventToActivity, mergeToolActivities } from "../../lib/tool-activity";
 import { t, tid, uid, clearSim } from "./shared";
 import type { PermissionTrace, ThreadMessage, ToolActivity } from "../../types";
 import type { ChatStoreState } from "./state";
@@ -30,7 +30,11 @@ export interface StreamDeps {
 }
 
 export interface StreamApi {
-  dispatchAssistant(message: ThreadMessage, intentText?: string): Promise<void>;
+  /**
+   * @param threadId 指定历史与 runningSessionId 归属的线程（自动化任务的专属会话）；
+   *   缺省 = 当前激活线程。正文仍写在 message 上，故增量流与激活态解耦。
+   */
+  dispatchAssistant(message: ThreadMessage, intentText?: string, threadId?: string): Promise<void>;
   abortGeneration(): void;
   appendMessageContent(messageId: string, content: string, threadId?: string): void;
   setMessageContent(messageId: string, content: string, threadId?: string): void;
@@ -48,6 +52,13 @@ export function createStreamSlice({ state, getSession, getDemo }: StreamDeps): S
   /** 本轮会话流的调用令牌：过滤 `llm://event` 广播里属于别的流（如远程助手回复）的事件。 */
   let activeTurnToken: string | null = null;
   let llmRequestId: number | null = null;
+  /**
+   * 本轮走的是 agent 回合（`llm_agent_start`）还是单轮问答（`llm_chat_start`）。
+   *
+   * 两者的句柄空间在宿主侧是**两张独立的表**，所以中止必须走对应的 stop ——
+   * 拿 chat 的句柄去停 agent 会报 unknown request（反之亦然）。
+   */
+  let activeTurnIsAgent = false;
   /** 当前正被流式续写的消息（null = 无活跃流）。 */
   let streamingInto: ThreadMessage | null = null;
   let llmListening = false;
@@ -111,6 +122,7 @@ export function createStreamSlice({ state, getSession, getDemo }: StreamDeps): S
     streamingInto = null;
     llmRequestId = null;
     activeTurnToken = null;
+    activeTurnIsAgent = false;
     streamingMessageId.value = null;
   }
 
@@ -132,6 +144,12 @@ export function createStreamSlice({ state, getSession, getDemo }: StreamDeps): S
         if (streamingInto && event.payload.delta) {
           appendMessageThinking(streamingInto.id, event.payload.delta);
         }
+      } else if (event.kind === "llm-tool-call" || event.kind === "llm-tool-result") {
+        // 本机 agent 回合的工具事件：规范化后进与 ACP 完全相同的时间线，
+        // 两边的渲染/交互不需要各写一套（映射规则见 lib/tool-activity 的纯函数）。
+        if (!streamingInto) return;
+        const activity = llmToolEventToActivity(event.kind === "llm-tool-call" ? "call" : "result", event.payload);
+        if (activity) appendTools([activity], streamingInto.id);
       } else if (event.kind === "llm-done") {
         finishStream();
       } else if (event.kind === "llm-error") {
@@ -142,11 +160,13 @@ export function createStreamSlice({ state, getSession, getDemo }: StreamDeps): S
   }
 
   /** 统一助手分发：配置了可用供应商 → 真实流式；否则 mock 兜底（明示演示管线）。 */
-  async function dispatchAssistant(message: ThreadMessage, intentText = ""): Promise<void> {
+  async function dispatchAssistant(message: ThreadMessage, intentText = "", threadId?: string): Promise<void> {
+    // 目标线程：自动化任务的专属会话传入 threadId，否则回落当前激活线程。
+    const targetThread = threadId ?? session.activeThreadId.value;
     const provider = selectLlmProvider(settingsStore.modelProviders, settingsStore.selectedModelProviderId);
     if (!provider || !llm.isAvailable()) {
       llmActive.value = false;
-      getDemo().runAssistant(message, intentText);
+      getDemo().runAssistant(message, intentText, targetThread);
       return;
     }
     const localAi: LocalAiDeps = {
@@ -161,7 +181,7 @@ export function createStreamSlice({ state, getSession, getDemo }: StreamDeps): S
     message.steps = [];
     sessionStore.markDirty();
     busy.value = true;
-    runningSessionId.value = session.activeThreadId.value;
+    runningSessionId.value = targetThread;
     streamingInto = message;
     streamingMessageId.value = message.id;
     await ensureLlmListener();
@@ -169,12 +189,16 @@ export function createStreamSlice({ state, getSession, getDemo }: StreamDeps): S
       // 工作区检索（未启用/无命中返回 undefined）；语音附件转写（未启用返回 null → 路径引用）。
       const contextBlock = await retrieveContext(localAi, intentText);
       const history = await buildLlmHistory(
-        session.ensure(session.activeThreadId.value).filter((item) => item.id !== message.id),
+        session.ensure(targetThread).filter((item) => item.id !== message.id),
         20,
         { contextBlock, transcribe: (attachment) => transcribeAttachment(localAi, attachment) },
       );
       activeTurnToken = tid();
-      llmRequestId = await llm.chat({
+      // agent 模式逐供应商开启：tool calling 是端点能力，不是全局开关（见
+      // ModelProviderConfig.agentMode）。走 agent 回合时宿主会多发两个工具事件 kind，
+      // 已在 ensureLlmListener 里接上。
+      activeTurnIsAgent = provider.agentMode === true;
+      const request = {
         baseUrl: provider.baseUrl ?? "",
         model: provider.model,
         apiKeyEnv: provider.apiKeyEnv,
@@ -184,7 +208,8 @@ export function createStreamSlice({ state, getSession, getDemo }: StreamDeps): S
         temperature: provider.temperature,
         maxTokens: provider.maxTokens,
         clientToken: activeTurnToken,
-      });
+      };
+      llmRequestId = activeTurnIsAgent ? await llm.agentRun({ ...request, maxRounds: provider.agentMaxRounds }) : await llm.chat(request);
     } catch (error) {
       message.content = `[LLM 调用失败] ${error instanceof Error ? error.message : String(error)}`;
       sessionStore.markDirty();
@@ -195,7 +220,9 @@ export function createStreamSlice({ state, getSession, getDemo }: StreamDeps): S
   /** 中止生成：真实流式走宿主 stop；mock 时间线清定时器。 */
   function abortGeneration(): void {
     if (llmRequestId !== null) {
-      void llm.stop(llmRequestId);
+      // 句柄表按回合类型分开，stop 必须走对的那一个（见 activeTurnIsAgent 的注释）。
+      if (activeTurnIsAgent) void llm.stopAgent(llmRequestId);
+      else void llm.stop(llmRequestId);
       return;
     }
     clearSim();

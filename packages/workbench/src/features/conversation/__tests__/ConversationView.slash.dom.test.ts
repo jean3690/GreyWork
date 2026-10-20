@@ -94,7 +94,7 @@ describe("ConversationView · 斜杠命令", () => {
     expect(wrapper.find('[data-testid="slash-menu"]').exists()).toBe(false);
   });
 
-  it("方向键切换高亮，Enter 触发内置开关并显示状态胶囊", async () => {
+  it("方向键切换高亮，Enter 触发内置开关", async () => {
     const { wrapper } = await mountConversation();
     const chat = useChatStore();
     await composer(wrapper).setValue("/");
@@ -104,10 +104,6 @@ describe("ConversationView · 斜杠命令", () => {
 
     expect(chat.speedBoost).toBe(true);
     expect(composerValue(wrapper)).toBe("");
-    expect(wrapper.find('[data-testid="composer-speed-chip"]').exists()).toBe(true);
-
-    await wrapper.get('[data-testid="composer-speed-chip"]').trigger("click");
-    expect(chat.speedBoost).toBe(false);
   });
 
   it("无匹配命令时 Enter 不消费，/zzz 按普通消息发送", async () => {
@@ -118,7 +114,7 @@ describe("ConversationView · 斜杠命令", () => {
     await composer(wrapper).setValue("/zzz");
     await composer(wrapper).trigger("keydown", { key: "Enter" });
 
-    expect(submit).toHaveBeenCalledWith("/zzz", []);
+    expect(submit).toHaveBeenCalledWith("/zzz", [], []);
     chat.clearSim();
   });
 
@@ -148,7 +144,7 @@ describe("ConversationView · 斜杠命令", () => {
 
     await composer(wrapper).setValue("/compact");
     await composer(wrapper).trigger("keydown", { key: "Enter" });
-    expect(dispatch).toHaveBeenCalledWith("/compact", []);
+    expect(dispatch).toHaveBeenCalledWith("/compact", [], []);
     expect(composerValue(wrapper)).toBe("");
 
     await composer(wrapper).setValue("/deploy");
@@ -168,15 +164,12 @@ describe("ConversationView · 斜杠命令", () => {
     expect(wrapper.findAll('[data-testid="slash-option"]')).toHaveLength(0);
   });
 
-  it("计划模式胶囊随 /plan 选中出现，可点击关闭", async () => {
+  it("计划模式随 /plan 选中开启", async () => {
     const { wrapper } = await mountConversation();
     const settings = useSettingsStore();
     await composer(wrapper).setValue("/plan");
     await composer(wrapper).trigger("keydown", { key: "Enter" });
 
     expect(settings.planMode).toBe(true);
-    expect(wrapper.find('[data-testid="composer-plan-chip"]').exists()).toBe(true);
-    await wrapper.get('[data-testid="composer-plan-chip"]').trigger("click");
-    expect(settings.planMode).toBe(false);
   });
 });

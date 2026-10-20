@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "manifest": {
+    "id": "demo.schedule",
+    "name": "后台定时巡检",
+    "version": "1.0.0",
+    "description": "schedule 能力演示：声明后台定时（{ \"capability\": \"schedule\", \"schedule\": { \"kind\": \"interval\", \"min\": 5 } }），挂载面存活期间每 5 分钟唤醒 worker 的 registerSchedule 处理器把巡检次数 +1；不在内存时跳过、下次激活补结算一次。与 notify/fs 不同，调度器在工作台内，web 预览下也能跑（只要插件被授权并挂载）。",
+    "kind": "worker",
+    "runtime": {
+      "type": "worker",
+      "entry": "https://raw.githubusercontent.com/OWNER/REPO/COMMIT/demo.schedule.js",
+      "sha256": "REPLACE_WITH_64_LOWERCASE_HEX",
+      "render": { "handler": "draw", "fps": 8, "width": 180, "height": 140 }
+    },
+    "requires": [
+      {
+        "capability": "schedule",
+        "schedule": { "kind": "interval", "min": 5 }
+      }
+    ],
+    "contributes": {
+      "modes": [
+        {
+          "id": "demo-schedule",
+          "title": "后台定时",
+          "icon": "clock",
+          "page": {
+            "eyebrow": "Marketplace plugin · schedule",
+            "heading": "后台定时巡检",
+            "body": "manifest 用 `{ \"capability\": \"schedule\", \"schedule\": { \"kind\": \"interval\", \"min\": 5 } }` 声明后台定时（5–1440 分钟，安装期校验）。宿主在工作台上挂钟：画布区域存活期间每 5 分钟唤醒一次 worker 的 `registerSchedule` 处理器，返回的状态补丁与动作按钮同路径合并进区域状态；窗口不在内存（如切走 / 停用）时跳过，下次激活补结算一次。画布上的圆点随巡检次数变大，可点「立即巡检」手动 +1 对照。",
+            "fields": [],
+            "outputs": [],
+            "actions": []
+          }
+        }
+      ],
+      "uiRegions": [
+        {
+          "region": "activityPanel",
+          "id": "patrol.tick",
+          "title": "后台巡检",
+          "order": 20,
+          "width": 180,
+          "height": 140,
+          "actions": [{ "id": "patrol", "label": "立即巡检" }]
+        }
+      ]
+    }
+  }
+}

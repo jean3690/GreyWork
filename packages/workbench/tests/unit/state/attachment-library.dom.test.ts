@@ -9,8 +9,11 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
-const invokeMock = vi.mocked((await import("@tauri-apps/api/core")).invoke);
+vi.mock("@greywork/host-ipc", async (importOriginal) => ({
+  ...(await importOriginal()),
+  invoke: vi.fn(),
+}));
+const invokeMock = vi.mocked((await import("@greywork/host-ipc")).invoke);
 
 import { attachmentsFromPaths, materializeAttachments, readAttachmentBase64, readAttachmentBytes } from "@/state/attachment-library";
 import type { Attachment } from "@/types";
@@ -24,7 +27,7 @@ function attachment(overrides: Partial<Attachment> = {}): Attachment {
 }
 
 function enableTauri(): void {
-  (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
+  (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = "server";
 }
 
 beforeEach(() => {
@@ -32,7 +35,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  delete (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+  delete (window as unknown as { __GREYWORK_RUNTIME__?: unknown }).__GREYWORK_RUNTIME__;
 });
 
 describe("按路径读取附件", () => {
@@ -76,6 +79,7 @@ describe("按路径读取附件", () => {
   });
 
   it("浏览器态（没有 Tauri 宿主）也走内联副本", async () => {
+    (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = "browser-preview";
     invokeMock.mockResolvedValue(new Uint8Array(ABC).buffer);
 
     const withDataUrl = attachment({ path: "/tmp/a.png", dataUrl: `data:image/png;base64,${ABC_BASE64}` });
@@ -140,6 +144,7 @@ describe("materializeAttachments", () => {
   });
 
   it("没有文件系统（浏览器态）时也剥掉 bytes", async () => {
+    (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = "browser-preview";
     const draft = attachment({ kind: "file", name: "paper.pdf", bytes: new Uint8Array(ABC) });
 
     const [stored] = await materializeAttachments("s1", [draft]);

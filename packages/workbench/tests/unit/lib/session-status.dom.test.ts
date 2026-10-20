@@ -10,7 +10,10 @@ import { useAgentStore } from "@/stores/agent";
 import { useSessionStatus } from "@/lib/session-status";
 import type { ThreadMessage } from "@/types";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+vi.mock("@greywork/host-ipc", async (importOriginal) => ({
+  ...(await importOriginal()),
+  invoke: vi.fn(),
+}));
 vi.mock("@greywork/acp", () => ({
   createAcpClient: () => ({ isAvailable: () => true, onEvent: () => Promise.resolve(() => undefined) }) as never,
   desktopHomeDir: () => Promise.resolve("/home/test"),

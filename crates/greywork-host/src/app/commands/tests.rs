@@ -9,11 +9,12 @@ use crate::dingtalk::DingTalkHost;
 use crate::discord::DiscordHost;
 use crate::feishu::FeishuHost;
 use crate::host::{HostContext, HostPaths};
-use crate::llm::LlmHost;
+use crate::llm::{LlmAgentHost, LlmHost};
 use crate::qq::QqHost;
 use crate::rag::RagHost;
 use crate::sys;
 use crate::telegram::TelegramHost;
+use crate::terminal::TerminalHost;
 use crate::wechat::WechatHost;
 use crate::wecom::WecomHost;
 use crate::workspace_fs::WorkspaceFsAccess;
@@ -42,7 +43,7 @@ fn test_ctx(tmp: &Path) -> CommandContext {
         paths: HostPaths::new(tmp.join("home"), data_dir),
     });
     CommandContext {
-        host,
+        host: Arc::clone(&host),
         services: Arc::new(Services {
             db: Arc::new(Db::open_in_memory().expect("db")),
             workspace: Arc::new(
@@ -50,7 +51,9 @@ fn test_ctx(tmp: &Path) -> CommandContext {
             ),
             acp: Arc::new(AcpHost::default()),
             llm: Arc::new(LlmHost::default()),
+            agent: Arc::new(LlmAgentHost::default()),
             rag: Arc::new(RagHost::default()),
+            terminal: Arc::new(TerminalHost::new(Arc::clone(&host))),
         }),
         channels: Arc::new(Channels {
             wechat: Arc::new(WechatHost::default()),
@@ -63,14 +66,17 @@ fn test_ctx(tmp: &Path) -> CommandContext {
         }),
         // 空列表 = 只放行内置白名单（headless 语义）。
         agent_programs: Arc::new(Vec::new()),
+        // 不可信默认：DB 是客户端可写的，拿它当 spawn 白名单等于把 RCE 面交出去。
+        include_db_agent_programs: false,
         // 非空样例：既覆盖「宿主白名单被如实回给渲染端」，也让下面的冒烟断言有东西可断。
         frame_origins: Arc::new(vec!["https://docs.example.com".to_string()]),
         host_facts: sys::HostFacts {
             version: "9.9.9-test".to_string(),
             tray_available: false,
-            pinned_sandbox: true,
             pinned_tier: Some("read-only".to_string()),
         },
+        // 测试环境不依赖宿主 PATH：显式给 None = 不可用（`office_convert_info` 冒烟据此断言）。
+        soffice: crate::office::SofficeTool::for_test(None),
     }
 }
 
@@ -97,11 +103,12 @@ const DESKTOP_ONLY: &[&str] = &[
     "set_tray_labels",
     "close_main_window",
     "open_external",
+    "plugin_notify",
 ];
 
 #[test]
 fn commands_table_shape() {
-    assert_eq!(COMMANDS.len(), 161, "命令总数应为 161");
+    assert_eq!(COMMANDS.len(), 186, "命令总数应为 186");
 
     // 命令名唯一。
     let mut names: Vec<&str> = COMMANDS.iter().map(|c| c.name).collect();
@@ -124,7 +131,7 @@ fn commands_table_shape() {
     expected.sort_unstable();
     assert_eq!(desktop_only, expected, "桌面专属集合必须与计划一致");
 
-    // binary 命令恰 3 条。
+    // binary 命令恰 4 条。
     let mut binary: Vec<&str> = COMMANDS
         .iter()
         .filter(|c| c.binary)
@@ -133,7 +140,12 @@ fn commands_table_shape() {
     binary.sort_unstable();
     assert_eq!(
         binary,
-        vec!["channel_take_media", "fs_read_binary", "fs_read_media"]
+        vec![
+            "channel_take_media",
+            "fs_read_binary",
+            "fs_read_media",
+            "office_convert_to_pdf"
+        ]
     );
 
     // 桌面专属与 binary 不相交。
@@ -157,6 +169,12 @@ async fn dispatch_smoke_db_settings_load() {
         .expect_err("reveal_path 应被拒绝");
     assert!(error.contains("仅桌面端可用"), "实际错误：{error}");
 
+    // 系统通知同样是桌面专属：headless 服务端拒绝。
+    let error = dispatch("plugin_notify", Value::Null, &ctx)
+        .await
+        .expect_err("plugin_notify 应被拒绝");
+    assert!(error.contains("仅桌面端可用"), "实际错误：{error}");
+
     // sys_info 走得通：宿主侧事实从 ctx 注入，如实回传（服务端不再谎报）。
     let out = dispatch("sys_info", Value::Null, &ctx)
         .await
@@ -166,7 +184,6 @@ async fn dispatch_smoke_db_settings_load() {
     };
     assert_eq!(value["version"], "9.9.9-test");
     assert_eq!(value["trayAvailable"], serde_json::json!(false));
-    assert_eq!(value["pinnedSandbox"], serde_json::json!(true));
     assert_eq!(value["pinnedTier"], serde_json::json!("read-only"));
 
     // 未知命令。
@@ -194,6 +211,89 @@ async fn dispatch_smoke_db_settings_load() {
     assert_eq!(
         value["embeddableFrameOrigins"],
         serde_json::json!(["https://docs.example.com"])
+    );
+
+    // office 本地转换：零参可用性查询经 dispatch 走得通；测试 ctx 注入的是「无 soffice」。
+    let out = dispatch("office_convert_info", Value::Null, &ctx)
+        .await
+        .expect("dispatch office_convert_info");
+    let CommandOutput::Json(value) = out else {
+        panic!("office_convert_info 应返回 JSON");
+    };
+    assert_eq!(value["available"], serde_json::json!(false));
+    assert!(value["path"].is_null());
+
+    // office 扫码授权：三条不发网络请求的命令经 dispatch 走得通
+    // （`office_oauth_submit` 要真换 token，端到端在 services/office/auth.rs 里）。
+    let out = dispatch(
+        "office_oauth_begin",
+        serde_json::json!({ "client": { "clientId": "cid", "redirectUri": "https://localhost/cb" } }),
+        &ctx,
+    )
+    .await
+    .expect("dispatch office_oauth_begin");
+    let CommandOutput::Json(value) = out else {
+        panic!("office_oauth_begin 应返回 JSON");
+    };
+    assert!(value["authorizeUrl"]
+        .as_str()
+        .is_some_and(|url| url.starts_with("https://docs.qq.com/oauth/v2/authorize")));
+    assert_eq!(
+        value["state"].as_str().map(|state| state.len()),
+        Some(32),
+        "state 应是 32 位十六进制"
+    );
+
+    let out = dispatch(
+        "office_oauth_status",
+        serde_json::json!({ "clientId": "cid" }),
+        &ctx,
+    )
+    .await
+    .expect("dispatch office_oauth_status");
+    let CommandOutput::Json(value) = out else {
+        panic!("office_oauth_status 应返回 JSON");
+    };
+    assert_eq!(value["authorized"], serde_json::json!(false));
+
+    dispatch(
+        "office_oauth_logout",
+        serde_json::json!({ "clientId": "cid" }),
+        &ctx,
+    )
+    .await
+    .expect("dispatch office_oauth_logout");
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn extra_agent_programs_unions_config_and_db_only_under_trusted_host() {
+    let tmp = std::env::temp_dir().join(format!("gw-cmd-agent-programs-{}", std::process::id()));
+    let mut ctx = test_ctx(&tmp);
+    ctx.agent_programs = Arc::new(vec!["cfg-agent".to_string()]);
+    ctx.services
+        .db
+        .sync_agent_providers(&[crate::db::AgentProviderDto {
+            id: "custom-1".to_string(),
+            name: "My Agent".to_string(),
+            kind: "acp".to_string(),
+            command: "/opt/bin/my-agent --acp".to_string(),
+            enabled: true,
+            env: None,
+        }])
+        .expect("sync providers");
+
+    // 不可信（默认）：只见配置里那份冻结列表 —— DB 是客户端可写的，不能拿它当 spawn 白名单。
+    assert_eq!(ctx.extra_agent_programs(), vec!["cfg-agent".to_string()]);
+
+    // 可信本机宿主：并上 DB 里启用的后端（首 token 的 basename），用户刚加的后端立刻可起。
+    ctx.include_db_agent_programs = true;
+    let mut programs = ctx.extra_agent_programs();
+    programs.sort();
+    assert_eq!(
+        programs,
+        vec!["cfg-agent".to_string(), "my-agent".to_string()]
     );
 
     let _ = std::fs::remove_dir_all(&tmp);

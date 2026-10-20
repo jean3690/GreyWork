@@ -242,6 +242,23 @@ describe("buildMessageItems", () => {
     expect(buildMessageItems(null, t, { copyBody: vi.fn() })).toEqual([]);
     expect(buildMessageItems("", t, { copyBody: vi.fn() })).toEqual([]);
   });
+
+  it("给了 rewind：正文之后多一条「回退到这里」（分隔线隔开，破坏性色）", () => {
+    const rewind = vi.fn();
+    const entries = buildMessageItems("hello", t, { copyBody: vi.fn(), rewind });
+    expect(labels(entries)).toEqual(["contextMenu.message.copyBody", "contextMenu.message.rewind"]);
+    expect(entries[1]).toEqual({ kind: "separator" });
+    const entry = findItem(entries, "contextMenu.message.rewind");
+    expect(entry.destructive).toBe(true);
+    expect(entry.icon).toBe("history");
+    entry.onSelect();
+    expect(rewind).toHaveBeenCalledOnce();
+  });
+
+  it("无正文但有 rewind（纯附件回合起点）：仍给回退，不抑制菜单", () => {
+    const entries = buildMessageItems(null, t, { copyBody: vi.fn(), rewind: vi.fn() });
+    expect(labels(entries)).toEqual(["contextMenu.message.rewind"]);
+  });
 });
 
 describe("buildComposerItems", () => {
@@ -267,15 +284,15 @@ describe("buildTitlebarItems", () => {
       toggleSidebar: vi.fn(),
       togglePreview: vi.fn(),
       toggleWorkspace: vi.fn(),
-      toggleActivity: vi.fn(),
+      toggleTerminal: vi.fn(),
       newChat,
       openSettings: vi.fn(),
       previewAvailable: false,
       workspaceAvailable: true,
-      activityAvailable: false,
+      terminalAvailable: false,
     });
     expect(findItem(entries, "contextMenu.titlebar.togglePreview").disabled).toBe(true);
-    expect(findItem(entries, "contextMenu.titlebar.toggleActivity").disabled).toBe(true);
+    expect(findItem(entries, "contextMenu.titlebar.toggleTerminal").disabled).toBe(true);
     expect(findItem(entries, "contextMenu.titlebar.toggleWorkspace").disabled).toBe(false);
     findItem(entries, "contextMenu.titlebar.newChat").onSelect();
     expect(newChat).toHaveBeenCalledOnce();

@@ -10,8 +10,7 @@
  * - 插入用 setRangeText + 派发 input：v-model 监听的是 input 事件，只改 DOM 不派发
  *   会让视图与草稿脱节。
  */
-import { isTauriRuntime } from "@greywork/core";
-import { readText } from "@tauri-apps/plugin-clipboard-manager";
+import { hostClipboard } from "@greywork/host-ipc";
 import { copyText } from "./clipboard";
 import { i18n } from "../i18n";
 import { notify } from "../stores/notice";
@@ -62,18 +61,11 @@ export async function cutSelection(el: HTMLTextAreaElement | null): Promise<void
   replaceRange(el, "", start, end);
 }
 
-/** 读系统剪贴板文本：桌面走插件（可靠），浏览器态走 Web API（插件必然失败）。 */
-async function readClipboardText(): Promise<string> {
-  if (isTauriRuntime()) return await readText();
-  // eslint-disable-next-line no-restricted-properties -- 浏览器态没有 IPC 宿主，按运行时分叉
-  return await navigator.clipboard.readText();
-}
-
 export async function pasteInto(el: HTMLTextAreaElement | null): Promise<void> {
   if (!el) return;
   let text: string;
   try {
-    text = await readClipboardText();
+    text = await hostClipboard().readText();
   } catch (error: unknown) {
     // 系统剪贴板里是图片、或宿主没给读文本权限：不静默失败，提示改用键盘。
     console.error("[composer] 读取剪贴板文本失败", error);

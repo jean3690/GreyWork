@@ -90,6 +90,37 @@ export interface OfficeRecipe {
   viewUrlPointer: string;
 }
 
+/**
+ * 扫码授权（OAuth 2.0 授权码流）的客户端配置。
+ *
+ * **只在配方里写了 `{{OAUTH_ACCESS_TOKEN}}` 时才需要**：那时凭证不是环境变量，而是
+ * 「用户扫码授权后换回的 access_token」，由宿主按 `clientId` 分键落在
+ * `<app_data>/office/credentials.json`（0600）。不写占位符则整块配置不参与任何事。
+ *
+ * 与其它凭证字段同一条边界：这里只存**变量名**（`clientSecretEnv`），明文密钥只在宿主侧
+ * 从环境变量解析；`clientSecret` 永不进设置快照、日志或 IPC 载荷。
+ */
+export interface OfficeOAuthConfig {
+  /** 开放平台应用的 client_id。 */
+  clientId: string;
+  /** `client_secret` 所在的**环境变量名**（宿主侧解析）。 */
+  clientSecretEnv?: string;
+  /**
+   * 回调地址。**必须与开放平台登记的值逐字一致**，否则授权页会直接拒绝。
+   *
+   * 本项目用「粘贴回调 URL」回填，不需要真有一个能访问的服务：登记一个不会被访问的地址
+   * （如 `https://localhost/oauth/callback`）即可，授权后浏览器停在该地址，把地址栏整条
+   * URL 复制回来。
+   */
+  redirectUri: string;
+  /** 申请的 scope；缺省由宿主落到 `all`。 */
+  scope?: string;
+  /** 授权端点；缺省由宿主落到厂商官方端点。 */
+  authorizeUrl?: string;
+  /** 换 token 端点；缺省由宿主落到厂商官方端点。 */
+  tokenUrl?: string;
+}
+
 export interface OfficeProviderConfig extends ServiceProviderBase {
   family: "office";
   kind: OfficeProviderKind;
@@ -101,6 +132,12 @@ export interface OfficeProviderConfig extends ServiceProviderBase {
    * 比留空更糟（症状是运行时 404/解析失败，而不是配置页上一句提示）。填一次后随服务配置落盘。
    */
   recipe?: OfficeRecipe;
+  /**
+   * 扫码授权配置。填了之后，配方里写 `{{OAUTH_ACCESS_TOKEN}}` 即可用扫码换来的令牌取件
+   * （见 [`OfficeOAuthConfig`]）。预设一律留空 —— `redirectUri` 必须是用户自己在开放平台
+   * 登记的那个值，猜不得。
+   */
+  oauth?: OfficeOAuthConfig;
   /** 厂商开放平台文档地址（预设提供，供填写配方时对照）。 */
   docsUrl?: string;
 }
@@ -126,7 +163,7 @@ export interface StorageProviderConfig extends ServiceProviderBase {
 }
 
 /**
- * 定时任务族：把「到期后怎么执行」做成可插拔后端。
+ * 自动化任务族：把「到期后怎么执行」做成可插拔后端。
  * 长期落点：`crates/greywork-host/src/host_exec.rs` 与 `automation_due` 队列。
  * 本期只实现了「宿主成为主执行者」，见 `GREYWORK_AUTOMATION_HOST_PRIMARY`。
  */

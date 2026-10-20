@@ -1,30 +1,69 @@
 <script setup lang="ts">
 /**
- * 团队页 · Cowork 协作面板：起跑表单（成员位 / 目标）与进行中的协作集群
- * （成员位胶囊 / 暂停恢复 / 对团队说话 / 任务板 / 协作往来）。
+ * 团队页 · Cowork 协作面板。
+ *
+ * - 起跑表单：目标（可带附件）+ 成员位（各自后端 / 会话配置 / 职能）+ 本轮能力（MCP / 技能勾选）；
+ * - 进行中：以群聊式时间线为主，右侧挂任务板与「提交」（看队友产出的 commit），底部「对团队说话」。
+ *
+ * 布局走「对话优先」：成员产出默认以一条多作者时间线呈现；邮件列表保留为次视图。
  */
-import { computed, ref } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import Icon from "@/features/shared/Icon.vue";
 import Hint from "@/features/shared/Hint.vue";
+import ConversationMessage from "@/features/conversation/ConversationMessage.vue";
+import AttachmentTray from "@/features/conversation/AttachmentTray.vue";
+import CoworkCommits from "@/features/team/CoworkCommits.vue";
+import CoworkTooling from "@/features/team/CoworkTooling.vue";
 import { configOptionLabel } from "@/lib/acp-config-options";
+import { useAttachments } from "@/lib/use-attachments";
 import { useAgentStore } from "@/stores/agent";
 import { useChatStore } from "@/stores/chat";
 import { useCoworkStore, type CoworkMemberInit } from "@/stores/cowork";
 import { useSessionStore } from "@/stores/session";
+import { useSettingsStore, type McpServerEntry } from "@/stores/settings";
 
 const { t } = useI18n();
 const cowork = useCoworkStore();
 const sessionStore = useSessionStore();
 const agentStore = useAgentStore();
 const chat = useChatStore();
+const settings = useSettingsStore();
 const router = useRouter();
+
+/**
+ * 两处附件草稿：起跑目标（初始资料给 leader）与「对团队说话」（发给 leader 或某成员）。
+ * 图片能力不在这里预判：各成员后端能力在派发时按目标成员门控（见 stores/cowork）。
+ */
+const {
+  items: goalItems,
+  dragging: goalDragging,
+  pick: pickGoal,
+  onPaste: onGoalPaste,
+  onDragOver: onGoalDragOver,
+  onDragLeave: onGoalDragLeave,
+  onDrop: onGoalDrop,
+  remove: removeGoal,
+  clear: clearGoal,
+} = useAttachments(() => "cowork-goal");
+const {
+  items: messageItems,
+  dragging: messageDragging,
+  pick: pickMessage,
+  onPaste: onMessagePaste,
+  onDragOver: onMessageDragOver,
+  onDragLeave: onMessageDragLeave,
+  onDrop: onMessageDrop,
+  remove: removeMessage,
+  take: takeMessage,
+} = useAttachments(() => "cowork-send");
+
+/* ===== 成员位 ===== */
 
 /** 可选的 ACP 后端：成员位各自挑一个，不选则跟随全局。 */
 const acpProviders = computed(() => agentStore.agentProviders);
 
-/** 成员位实际会用到的后端 id：显式指定优先，跟随全局。 */
 function memberProviderIdOf(member: CoworkMemberInit): string | undefined {
   return member.providerId ?? agentStore.selectedProviderId;
 }
@@ -35,7 +74,6 @@ function memberConfigOptions(member: CoworkMemberInit) {
   return providerId ? cowork.optionsOf(providerId).filter((option) => option.type === "select") : [];
 }
 
-/** 展开成员配置编辑区的行（一次只开一行）。 */
 const configTarget = ref<number | null>(null);
 
 function toggleMemberConfig(index: number): void {
@@ -44,8 +82,7 @@ function toggleMemberConfig(index: number): void {
     return;
   }
   configTarget.value = index;
-  const member = memberDrafts.value[index];
-  const providerId = memberProviderIdOf(member);
+  const providerId = memberProviderIdOf(memberDrafts.value[index]);
   if (providerId) void cowork.probeProviderOptions(providerId);
 }
 
@@ -62,12 +99,105 @@ const memberDrafts = ref<CoworkMemberInit[]>([
   { name: "Reviewer", role: "teammate", specialty: "reviewer" },
 ]);
 const startError = ref<string | null>(null);
+
+/* ===== 本轮能力（MCP / 技能勾选） ===== */
+
+const mcpEntries = computed<McpServerEntry[]>(() => settings.mcpServers);
+/** 默认勾选设置页里已启用的那批；技能默认全选。 */
+const selectedMcpIds = ref<string[]>([]);
+const selectedSkillIds = ref<string[]>([]);
+/** 技能清单加载完才算「勾选可用」—— 加载前起跑按全量带入，避免误判成空选。 */
+const skillsLoaded = ref(false);
+/** 技能勾选只在 worktree 隔离档位生效。 */
+const worktreeOnly = computed(() => settings.runMode !== "worktree");
+
+async function loadCapabilities(): Promise<void> {
+  selectedMcpIds.value = settings.mcpServers.filter((server) => server.enabled).map((server) => server.id);
+  await cowork.loadAvailableSkills();
+  selectedSkillIds.value = cowork.availableSkills.map((skill) => skill.id);
+  skillsLoaded.value = true;
+}
+
+onMounted(() => void loadCapabilities());
+
+/** 勾选的 MCP 服务器 → 声明给 agent 的配置（剥掉仅本地用的 id/enabled）。 */
+function selectedMcpConfigs() {
+  return settings.mcpServers
+    .filter((server) => selectedMcpIds.value.includes(server.id))
+    .map(({ id: _id, enabled: _enabled, ...config }) => config);
+}
+
+async function startCowork(): Promise<void> {
+  startError.value = null;
+  const failure = await cowork.startRun(
+    goalDraft.value,
+    memberDrafts.value.filter((member) => member.name.trim().length > 0),
+    goalItems.value.slice(),
+    {
+      mcpServers: selectedMcpConfigs(),
+      skills: skillsLoaded.value ? selectedSkillIds.value : undefined,
+    },
+  );
+  if (failure) {
+    startError.value = failure;
+    return;
+  }
+  goalDraft.value = "";
+  clearGoal();
+}
+
+function addMember(): void {
+  memberDrafts.value.push({ name: "", role: "teammate", specialty: undefined });
+}
+
+function removeMember(index: number): void {
+  memberDrafts.value.splice(index, 1);
+}
+
+/* ===== 进行中 ===== */
+
 const messageDraft = ref("");
 /** 空串 = 发给 leader。 */
 const messageTarget = ref("");
 
-/*** 活动流只展示最近 30 条（拖长会堆到整个列表）。 */
+function sendToTeam(): void {
+  const text = messageDraft.value.trim();
+  const items = messageItems.value;
+  if (!text && items.length === 0) return;
+  const attachments = takeMessage();
+  messageDraft.value = "";
+  void cowork.sendUser(text, messageTarget.value || undefined, attachments);
+}
+
+function resumeCowork(): void {
+  startError.value = cowork.resumeRun() ? null : t("cowork.errors.resumeStillOver");
+}
+
+/** 打开某成员位的会话：协作产出全在各自会话里，流式过程照常可看。 */
+function openSlot(threadId: string): void {
+  sessionStore.setActive(threadId);
+  chat.activeThreadId = threadId;
+  void router.push(`/conversation/${threadId}`);
+}
+
+/** 点时间线里的作者行：打开该成员位的完整会话（用户自己的消息没有可打开的会话）。 */
+function openAuthor(authorId: string): void {
+  const slot = cowork.slots.find((candidate) => candidate.id === authorId);
+  if (slot) openSlot(slot.threadId);
+}
+
+/** 协作往来视图：群聊式时间线（默认、对话优先）或邮件列表（控制台视角）。 */
+const activityView = ref<"mail" | "timeline">("timeline");
 const visibleActivity = computed(() => cowork.activity.slice(0, 30));
+
+/** 新消息进来自动滚到底：对话优先的布局里，视线应始终落在最新一条。 */
+const scrollEl = ref<HTMLElement | null>(null);
+const feedLength = computed(() => (activityView.value === "timeline" ? cowork.transcript.length : cowork.activity.length));
+watch(feedLength, async () => {
+  await nextTick();
+  const el = scrollEl.value;
+  if (el) el.scrollTop = el.scrollHeight;
+});
 
 const wakeDot: Record<string, string> = {
   idle: "bg-line-2",
@@ -82,199 +212,214 @@ const taskDot: Record<string, string> = {
   failed: "bg-destructive",
 };
 
+const runBadge: Record<string, string> = {
+  running: "bg-amber/10 text-amber",
+  paused: "bg-cyan/10 text-cyan",
+  done: "bg-mint/10 text-mint",
+  failed: "bg-destructive/10 text-destructive",
+  cancelled: "bg-panel-2 text-dim",
+};
+
+const turnProgress = computed<number>(() => {
+  const spend = cowork.spend;
+  if (!spend || spend.budget.maxTurns <= 0) return 0;
+  return Math.min(100, Math.round((spend.turns / spend.budget.maxTurns) * 100));
+});
+
 function timeOf(ts: number): string {
   if (!ts) return "";
   return new Date(ts).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
-}
-
-async function startCowork(): Promise<void> {
-  startError.value = null;
-  const failure = await cowork.startRun(
-    goalDraft.value,
-    memberDrafts.value.filter((member) => member.name.trim().length > 0),
-  );
-  if (failure) {
-    startError.value = failure;
-    return;
-  }
-  goalDraft.value = "";
-}
-
-function addMember(): void {
-  memberDrafts.value.push({ name: "", role: "teammate", specialty: undefined });
-}
-
-function removeMember(index: number): void {
-  memberDrafts.value.splice(index, 1);
-}
-
-function sendToTeam(): void {
-  const text = messageDraft.value.trim();
-  if (!text) return;
-  cowork.sendUser(text, messageTarget.value || undefined);
-  messageDraft.value = "";
-}
-
-function resumeCowork(): void {
-  startError.value = cowork.resumeRun() ? null : t("cowork.errors.resumeStillOver");
-}
-
-/** 打开某成员位的会话：协作产出全在各自会话里，流式过程照常可看。 */
-function openSlot(threadId: string): void {
-  sessionStore.setActive(threadId);
-  chat.activeThreadId = threadId;
-  void router.push(`/conversation/${threadId}`);
 }
 </script>
 
 <template>
   <div>
-    <!-- 起一次协作 -->
-    <div v-if="!cowork.active" class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-3.5">
-      <textarea
-        v-model="goalDraft"
-        rows="2"
-        class="w-full resize-none rounded-[calc(10px*var(--gw-radius-scale))] border border-line bg-panel-2 px-3 py-2 text-[13px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
-        :placeholder="t('cowork.goalPlaceholder')"
-      />
-      <div class="mt-3 text-[11px] font-medium text-dim">{{ t("cowork.members") }}</div>
-      <div class="mt-1.5 flex flex-col gap-1.5">
-        <div v-for="(member, index) in memberDrafts" :key="index" class="flex flex-wrap items-center gap-1.5">
-          <input
-            v-model="member.name"
-            class="min-w-[120px] flex-1 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2.5 py-1.5 text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
-            :placeholder="t('cowork.memberNamePlaceholder')"
-          />
-          <select
-            v-model="member.role"
-            class="rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-1.5 text-[12px] text-foreground outline-none focus:border-accent"
-            data-testid="member-role"
-          >
-            <option value="leader">{{ t("cowork.role.leader") }}</option>
-            <option value="teammate">{{ t("cowork.role.teammate") }}</option>
-          </select>
-          <select
-            v-if="member.role === 'teammate'"
-            v-model="member.specialty"
-            class="rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-1.5 text-[12px] text-foreground outline-none focus:border-accent"
-            data-testid="member-specialty"
-            :aria-label="t('cowork.specialty.label')"
-          >
-            <option :value="undefined">{{ t("cowork.specialty.none") }}</option>
-            <option value="planner">{{ t("cowork.specialty.planner") }}</option>
-            <option value="researcher">{{ t("cowork.specialty.researcher") }}</option>
-            <option value="builder">{{ t("cowork.specialty.builder") }}</option>
-            <option value="reviewer">{{ t("cowork.specialty.reviewer") }}</option>
-          </select>
-          <!-- 后端按成员选：整个队伍跑同一个 agent 只是退化情况 -->
-          <!-- title 与 aria-label 文案相同：可读名已由 aria-label 提供，重复的悬停提示没有增量，直接不留 -->
-          <select
-            v-model="member.providerId"
-            class="max-w-[150px] rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-1.5 text-[12px] text-foreground outline-none focus:border-accent"
-            data-testid="member-provider"
-            :aria-label="t('cowork.provider.label')"
-          >
-            <option :value="undefined">{{ t("cowork.provider.followGlobal") }}</option>
-            <option v-for="provider in acpProviders" :key="provider.id" :value="provider.id">{{ provider.name }}</option>
-          </select>
-          <!-- 成员级会话配置（模型 / 思考强度…）：展开后按该后端上报项逐个选择 -->
-          <button
-            type="button"
-            data-testid="member-config-toggle"
-            class="rounded-[calc(8px*var(--gw-radius-scale))] border px-2 py-1.5 text-[11.5px] transition-colors"
-            :class="configTarget === index ? 'border-accent/50 text-foreground' : 'border-line text-dim hover:text-foreground'"
-            :aria-expanded="configTarget === index"
-            @click="toggleMemberConfig(index)"
-          >
-            {{ t("cowork.memberConfig.label") }}
-          </button>
-          <!-- 纯图标按钮：aria-label 只服务读屏，看得见的人需要一条悬停提示。
-               （上面那个后端 <select> 不留提示，是因为它自己有可见的选中值。） -->
-          <Hint :text="t('cowork.removeMember')">
+    <!-- ============ 起跑表单 ============ -->
+    <div v-if="!cowork.active" class="flex flex-col gap-3">
+      <!-- 目标 -->
+      <div
+        data-attachment-dropzone
+        class="rounded-[calc(16px*var(--gw-radius-scale))] border bg-panel p-3.5 transition-[border-color,box-shadow] focus-within:border-accent/50"
+        :class="goalDragging ? 'border-cyan ring-2 ring-cyan/40' : 'border-line'"
+        @dragover="onGoalDragOver"
+        @dragleave="onGoalDragLeave"
+        @drop="onGoalDrop"
+      >
+        <textarea
+          v-model="goalDraft"
+          rows="3"
+          class="w-full resize-none rounded-[calc(10px*var(--gw-radius-scale))] border border-line bg-panel-2 px-3 py-2.5 text-[13px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
+          :placeholder="t('cowork.goalPlaceholder')"
+          @paste="onGoalPaste"
+        />
+        <AttachmentTray :items="goalItems" @remove="removeGoal" />
+        <div class="mt-2 flex items-center gap-2">
+          <Hint :text="t('chat.uploadFile')">
             <button
               type="button"
-              class="grid size-7 place-items-center rounded-[calc(8px*var(--gw-radius-scale))] border border-line text-dim transition-colors hover:text-foreground"
-              :disabled="memberDrafts.length <= 1"
-              :aria-label="t('cowork.removeMember')"
-              @click="removeMember(index)"
+              data-testid="cowork-goal-attach"
+              class="grid size-6 shrink-0 cursor-pointer place-items-center rounded-[calc(6px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground"
+              :aria-label="t('chat.uploadFile')"
+              @click="pickGoal"
             >
-              <Icon name="close" :size="12" />
+              <Icon name="plus" :size="14" />
             </button>
           </Hint>
-          <div v-if="configTarget === index" data-testid="member-config-area" class="flex w-full flex-wrap items-center gap-1.5 ps-1">
-            <span v-if="cowork.probingProviders[memberProviderIdOf(member) ?? '']" class="text-[11px] text-dim2">
-              {{ t("cowork.memberConfig.probing") }}
-            </span>
-            <p v-else-if="memberConfigOptions(member).length === 0" class="text-[11px] text-dim2">
-              {{ t("cowork.memberConfig.probeFailed") }}
-            </p>
-            <label v-for="option in memberConfigOptions(member)" :key="option.id" class="flex items-center gap-1">
-              <span class="text-[11px] text-dim2">{{ configOptionLabel(option) }}</span>
-              <select
-                class="max-w-[140px] rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-1 text-[11.5px] text-foreground outline-none focus:border-accent"
-                :data-testid="`member-config-${option.id}`"
-                :aria-label="configOptionLabel(option)"
-                :value="member.configValues?.[option.id] ?? ''"
-                @change="setMemberConfig(member, option.id, ($event.target as HTMLSelectElement).value)"
-              >
-                <option value="">{{ t("cowork.memberConfig.followBackend") }}</option>
-                <option v-for="choice in option.options" :key="choice.value" :value="choice.value">{{ choice.name }}</option>
-              </select>
-            </label>
-          </div>
+          <span class="text-[11px] text-dim2">{{ t("cowork.attachHint") }}</span>
         </div>
       </div>
-      <div class="mt-2.5 flex items-center gap-2">
+
+      <!-- 成员 -->
+      <section class="rounded-[calc(16px*var(--gw-radius-scale))] border border-line bg-panel p-3.5">
+        <div class="mb-2 flex items-center gap-2">
+          <Icon name="peoples" :size="13" class="text-dim" />
+          <h3 class="text-[12px] font-semibold text-foreground">{{ t("cowork.members") }}</h3>
+          <span class="rounded-full bg-panel-2 px-1.5 text-[10px] text-dim2">{{ memberDrafts.length }}</span>
+          <button
+            type="button"
+            class="ml-auto flex items-center gap-1 rounded-[calc(8px*var(--gw-radius-scale))] border border-line px-2.5 py-1 text-[11.5px] text-dim transition-colors hover:text-foreground"
+            @click="addMember"
+          >
+            <Icon name="plus" :size="12" />
+            {{ t("cowork.addMember") }}
+          </button>
+        </div>
+        <div class="flex flex-col gap-2">
+          <div
+            v-for="(member, index) in memberDrafts"
+            :key="index"
+            class="rounded-[calc(12px*var(--gw-radius-scale))] border border-line bg-panel-2/60 p-2"
+          >
+            <div class="flex flex-wrap items-center gap-1.5">
+              <input
+                v-model="member.name"
+                class="min-w-[120px] flex-1 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel px-2.5 py-1.5 text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
+                :placeholder="t('cowork.memberNamePlaceholder')"
+              />
+              <select
+                v-model="member.role"
+                class="rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel px-2 py-1.5 text-[12px] text-foreground outline-none focus:border-accent"
+                data-testid="member-role"
+              >
+                <option value="leader">{{ t("cowork.role.leader") }}</option>
+                <option value="teammate">{{ t("cowork.role.teammate") }}</option>
+              </select>
+              <select
+                v-if="member.role === 'teammate'"
+                v-model="member.specialty"
+                class="rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel px-2 py-1.5 text-[12px] text-foreground outline-none focus:border-accent"
+                data-testid="member-specialty"
+                :aria-label="t('cowork.specialty.label')"
+              >
+                <option :value="undefined">{{ t("cowork.specialty.none") }}</option>
+                <option value="planner">{{ t("cowork.specialty.planner") }}</option>
+                <option value="researcher">{{ t("cowork.specialty.researcher") }}</option>
+                <option value="builder">{{ t("cowork.specialty.builder") }}</option>
+                <option value="reviewer">{{ t("cowork.specialty.reviewer") }}</option>
+              </select>
+              <!-- 后端按成员选：整个队伍跑同一个 agent 只是退化情况 -->
+              <select
+                v-model="member.providerId"
+                class="max-w-[150px] rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel px-2 py-1.5 text-[12px] text-foreground outline-none focus:border-accent"
+                data-testid="member-provider"
+                :aria-label="t('cowork.provider.label')"
+              >
+                <option :value="undefined">{{ t("cowork.provider.followGlobal") }}</option>
+                <option v-for="provider in acpProviders" :key="provider.id" :value="provider.id">{{ provider.name }}</option>
+              </select>
+              <!-- 成员级会话配置（模型 / 思考强度…）：展开后按该后端上报项逐个选择 -->
+              <button
+                type="button"
+                data-testid="member-config-toggle"
+                class="rounded-[calc(8px*var(--gw-radius-scale))] border px-2 py-1.5 text-[11.5px] transition-colors"
+                :class="configTarget === index ? 'border-accent/50 text-foreground' : 'border-line text-dim hover:text-foreground'"
+                :aria-expanded="configTarget === index"
+                @click="toggleMemberConfig(index)"
+              >
+                {{ t("cowork.memberConfig.label") }}
+              </button>
+              <Hint :text="t('cowork.removeMember')">
+                <button
+                  type="button"
+                  class="grid size-7 place-items-center rounded-[calc(8px*var(--gw-radius-scale))] border border-line text-dim transition-colors hover:text-foreground disabled:opacity-40"
+                  :disabled="memberDrafts.length <= 1"
+                  :aria-label="t('cowork.removeMember')"
+                  @click="removeMember(index)"
+                >
+                  <Icon name="close" :size="12" />
+                </button>
+              </Hint>
+            </div>
+            <div
+              v-if="configTarget === index"
+              data-testid="member-config-area"
+              class="mt-2 flex flex-wrap items-center gap-2 border-t border-line pt-2"
+            >
+              <span v-if="cowork.probingProviders[memberProviderIdOf(member) ?? '']" class="text-[11px] text-dim2">
+                {{ t("cowork.memberConfig.probing") }}
+              </span>
+              <p v-else-if="memberConfigOptions(member).length === 0" class="text-[11px] text-dim2">
+                {{ t("cowork.memberConfig.probeFailed") }}
+              </p>
+              <label v-for="option in memberConfigOptions(member)" :key="option.id" class="flex items-center gap-1">
+                <span class="text-[11px] text-dim2">{{ configOptionLabel(option) }}</span>
+                <select
+                  class="max-w-[140px] rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel px-2 py-1 text-[11.5px] text-foreground outline-none focus:border-accent"
+                  :data-testid="`member-config-${option.id}`"
+                  :aria-label="configOptionLabel(option)"
+                  :value="member.configValues?.[option.id] ?? ''"
+                  @change="setMemberConfig(member, option.id, ($event.target as HTMLSelectElement).value)"
+                >
+                  <option value="">{{ t("cowork.memberConfig.followBackend") }}</option>
+                  <option v-for="choice in option.options" :key="choice.value" :value="choice.value">{{ choice.name }}</option>
+                </select>
+              </label>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 本轮能力：MCP / 技能 -->
+      <CoworkTooling
+        v-model:selected-mcp="selectedMcpIds"
+        v-model:selected-skills="selectedSkillIds"
+        :mcp-servers="mcpEntries"
+        :skills="cowork.availableSkills"
+        :skills-loading="cowork.skillsLoading"
+        :worktree-only="worktreeOnly"
+      />
+
+      <div class="flex items-center gap-3">
+        <p v-if="startError" class="text-[11px] text-destructive">{{ startError }}</p>
         <button
           type="button"
-          class="flex items-center gap-1 rounded-[calc(8px*var(--gw-radius-scale))] border border-line px-2.5 py-1.5 text-[12px] text-dim transition-colors hover:text-foreground"
-          @click="addMember"
-        >
-          <Icon name="plus" :size="12" />
-          {{ t("cowork.addMember") }}
-        </button>
-        <button
-          type="button"
-          class="ml-auto rounded-[calc(8px*var(--gw-radius-scale))] bg-accent px-3 py-1.5 text-[12px] font-medium text-accent-ink disabled:opacity-50"
+          class="ml-auto flex items-center gap-1.5 rounded-[calc(10px*var(--gw-radius-scale))] bg-accent px-4 py-2 text-[12.5px] font-medium text-accent-ink shadow-[0_6px_20px_rgba(0,0,0,0.18)] transition-opacity disabled:opacity-50"
           :disabled="cowork.starting"
           @click="startCowork"
         >
+          <Icon v-if="!cowork.starting" name="lightning" :size="13" />
           {{ cowork.starting ? t("cowork.starting") : t("cowork.start") }}
         </button>
       </div>
-      <p v-if="startError" class="mt-2 text-[11px] text-destructive">{{ startError }}</p>
     </div>
 
-    <!-- 进行中的协作 -->
-    <div v-else class="flex flex-col gap-2.5">
-      <div class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-3.5">
-        <div class="text-[13px] font-medium text-foreground">{{ cowork.goal }}</div>
-        <div class="mt-2 flex flex-wrap gap-1.5">
-          <Hint v-for="slot in cowork.slots" :key="slot.id" :text="t(`cowork.wake.${slot.wake}`)" multiline>
-            <button
-              type="button"
-              class="flex items-center gap-1.5 rounded-full border border-line bg-panel-2 px-2.5 py-1 text-[11px] text-dim transition-colors hover:text-foreground"
-              @click="openSlot(slot.threadId)"
-            >
-              <span class="size-1.5 rounded-full" :class="wakeDot[slot.wake]" />
-              <span class="text-foreground">{{ slot.name }}</span>
-              <span class="text-dim2">{{ t(`cowork.role.${slot.role}`) }}</span>
-              <span v-if="slot.specialty" class="rounded-full bg-panel px-1.5 text-[10px] text-cyan">{{
-                t(`cowork.specialty.${slot.specialty}`)
-              }}</span>
-              <span v-if="slot.unread > 0" class="rounded-full bg-cyan/15 px-1.5 text-[10px] text-cyan">{{ slot.unread }}</span>
-              <span class="tabular-nums text-dim2">{{ slot.turns }}</span>
-              <span v-if="slot.status === 'failed'" class="text-destructive">!</span>
-            </button>
-          </Hint>
-        </div>
-        <p v-if="cowork.pausedReason" class="mt-2.5 rounded-[calc(8px*var(--gw-radius-scale))] bg-panel-2 px-2.5 py-2 text-[11px] text-dim">
-          {{ t("cowork.pausedHint", { reason: t(`cowork.breach.${cowork.pausedReason}`) }) }}
-        </p>
-        <div class="mt-2.5 flex items-center gap-2 text-[10px] text-dim2">
-          <span>{{ t("cowork.inflight", { count: cowork.stats.inflight }) }}</span>
-          <span>{{ t("cowork.unread", { count: cowork.stats.unread }) }}</span>
-          <div class="ml-auto flex items-center gap-1.5">
+    <!-- ============ 进行中 ============ -->
+    <div v-else class="flex flex-col gap-3">
+      <!-- 头部：目标 / 状态 / 预算 / 控制 -->
+      <section class="rounded-[calc(16px*var(--gw-radius-scale))] border border-line bg-panel p-3.5">
+        <div class="flex items-start gap-2">
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-2">
+              <span class="rounded-full px-2 py-0.5 text-[10px] font-medium" :class="runBadge[cowork.status ?? '']">
+                {{ t(`cowork.runStatus.${cowork.status}`) }}
+              </span>
+              <span v-if="cowork.spend" class="tabular-nums text-[10px] text-dim2">
+                {{ t("cowork.turns", { used: cowork.spend.turns, max: cowork.spend.budget.maxTurns }) }}
+              </span>
+            </div>
+            <div class="mt-1 truncate text-[13px] font-medium text-foreground" :title="cowork.goal">{{ cowork.goal }}</div>
+          </div>
+          <div class="flex shrink-0 items-center gap-1.5">
             <button
               v-if="cowork.status === 'paused'"
               type="button"
@@ -300,67 +445,198 @@ function openSlot(threadId: string): void {
             </button>
           </div>
         </div>
+
+        <!-- 预算进度 -->
+        <div class="mt-2.5 h-1 overflow-hidden rounded-full bg-panel-2">
+          <div class="h-full rounded-full bg-accent/70 transition-[width]" :style="{ width: `${turnProgress}%` }" />
+        </div>
+
+        <!-- 成员胶囊 -->
+        <div class="mt-2.5 flex flex-wrap gap-1.5">
+          <Hint v-for="slot in cowork.slots" :key="slot.id" :text="t(`cowork.wake.${slot.wake}`)" multiline>
+            <button
+              type="button"
+              class="flex items-center gap-1.5 rounded-full border border-line bg-panel-2 px-2.5 py-1 text-[11px] text-dim transition-colors hover:border-accent/40 hover:text-foreground"
+              @click="openSlot(slot.threadId)"
+            >
+              <span class="size-1.5 rounded-full" :class="wakeDot[slot.wake]" />
+              <span class="text-foreground">{{ slot.name }}</span>
+              <span class="text-dim2">{{ t(`cowork.role.${slot.role}`) }}</span>
+              <span v-if="slot.specialty" class="rounded-full bg-panel px-1.5 text-[10px] text-cyan">{{
+                t(`cowork.specialty.${slot.specialty}`)
+              }}</span>
+              <span v-if="slot.unread > 0" class="rounded-full bg-cyan/15 px-1.5 text-[10px] text-cyan">{{ slot.unread }}</span>
+              <span class="tabular-nums text-dim2">{{ slot.turns }}</span>
+              <span v-if="slot.status === 'failed'" class="text-destructive">!</span>
+            </button>
+          </Hint>
+        </div>
+
+        <p v-if="cowork.pausedReason" class="mt-2.5 rounded-[calc(8px*var(--gw-radius-scale))] bg-panel-2 px-2.5 py-2 text-[11px] text-dim">
+          {{ t("cowork.pausedHint", { reason: t(`cowork.breach.${cowork.pausedReason}`) }) }}
+        </p>
+        <div class="mt-2 flex items-center gap-3 text-[10px] text-dim2">
+          <span>{{ t("cowork.inflight", { count: cowork.stats.inflight }) }}</span>
+          <span>{{ t("cowork.unread", { count: cowork.stats.unread }) }}</span>
+          <span v-if="cowork.runTooling && cowork.runTooling.declared.length > 0" class="truncate">
+            {{ t("cowork.tooling.declared", { names: cowork.runTooling.declared.join("、") }) }}
+          </span>
+          <span
+            v-if="cowork.runTooling && cowork.runTooling.skipped.length > 0"
+            class="text-amber"
+            :title="cowork.runTooling.skipped.map((s) => t('cowork.tooling.skipped', { name: s.name, reason: s.reason })).join('；')"
+          >
+            {{ t("cowork.tooling.skippedTitle") }}{{ cowork.runTooling.skipped.map((s) => s.name).join("、") }}
+          </span>
+        </div>
         <p v-if="startError" class="mt-2 text-[11px] text-destructive">{{ startError }}</p>
-      </div>
+      </section>
 
-      <!-- 对团队说话 -->
-      <div class="flex items-center gap-1.5">
-        <select
-          v-model="messageTarget"
-          class="rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-2 text-[12px] text-foreground outline-none focus:border-accent"
-        >
-          <option value="">{{ t("cowork.role.leader") }}</option>
-          <option v-for="slot in cowork.slots" :key="slot.id" :value="slot.id">{{ slot.name }}</option>
-        </select>
-        <input
-          v-model="messageDraft"
-          class="min-w-0 flex-1 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-3 py-2 text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
-          :placeholder="t('cowork.sendPlaceholder')"
-          @keydown.enter.prevent="sendToTeam"
-        />
-        <button
-          type="button"
-          class="rounded-[calc(8px*var(--gw-radius-scale))] bg-accent px-3 py-2 text-[12px] font-medium text-accent-ink"
-          @click="sendToTeam"
-        >
-          {{ t("cowork.send") }}
-        </button>
-      </div>
-
-      <!-- 任务板 -->
-      <div class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-3.5">
-        <div class="mb-2 text-[11px] font-medium text-dim">{{ t("cowork.board") }}</div>
-        <p v-if="cowork.tasks.length === 0" class="text-[11px] text-dim2">{{ t("cowork.emptyTasks") }}</p>
-        <div v-else class="flex flex-col gap-1.5">
-          <div v-for="task in cowork.tasks" :key="task.id" class="rounded-[calc(10px*var(--gw-radius-scale))] bg-panel-2 px-2.5 py-2">
-            <div class="flex items-center gap-2">
-              <span class="size-1.5 shrink-0 rounded-full" :class="taskDot[task.status]" />
-              <span class="min-w-0 flex-1 truncate text-[12px] text-foreground">{{ task.subject }}</span>
-              <span class="shrink-0 text-[10px] text-dim2">{{ t(`cowork.taskStatus.${task.status}`) }}</span>
-              <span v-if="task.ownerName" class="shrink-0 text-[10px] text-dim">{{ task.ownerName }}</span>
+      <!-- 主区：时间线（主） + 任务板 / 提交（侧） -->
+      <div class="grid gap-3 lg:grid-cols-[minmax(0,1fr)_300px]">
+        <!-- 对话优先：时间线 + 说话 -->
+        <div class="flex min-w-0 flex-col gap-3">
+          <section class="flex h-[52vh] min-h-[320px] flex-col rounded-[calc(16px*var(--gw-radius-scale))] border border-line bg-panel">
+            <div class="flex items-center gap-2 border-b border-line px-3.5 py-2">
+              <Icon name="message" :size="13" class="text-dim" />
+              <span class="text-[11px] font-medium text-dim">{{ t("cowork.run.transcriptTitle") }}</span>
+              <div class="ml-auto flex items-center rounded-full border border-line bg-panel-2 p-0.5" data-testid="activity-view-toggle">
+                <button
+                  type="button"
+                  data-testid="activity-view-timeline"
+                  class="rounded-full px-2 py-0.5 text-[10.5px] transition-colors"
+                  :class="activityView === 'timeline' ? 'bg-panel text-foreground' : 'text-dim hover:text-foreground'"
+                  :aria-pressed="activityView === 'timeline'"
+                  @click="activityView = 'timeline'"
+                >
+                  {{ t("cowork.view.timeline") }}
+                </button>
+                <button
+                  type="button"
+                  data-testid="activity-view-mail"
+                  class="rounded-full px-2 py-0.5 text-[10.5px] transition-colors"
+                  :class="activityView === 'mail' ? 'bg-panel text-foreground' : 'text-dim hover:text-foreground'"
+                  :aria-pressed="activityView === 'mail'"
+                  @click="activityView = 'mail'"
+                >
+                  {{ t("cowork.view.mail") }}
+                </button>
+              </div>
             </div>
-            <div v-if="task.blockedBy.length > 0" class="mt-1 text-[10px] text-dim2">⛓ {{ task.blockedBy.join("、") }}</div>
-            <p v-if="task.result" class="mt-1 line-clamp-3 text-[11px] text-dim">{{ task.result }}</p>
+
+            <div ref="scrollEl" class="min-h-0 flex-1 overflow-y-auto px-3.5 py-3">
+              <!-- 群聊式时间线：复用对话消息行（作者头像 + 身份色），点作者打开其会话 -->
+              <template v-if="activityView === 'timeline'">
+                <p v-if="cowork.transcript.length === 0" class="text-[11px] text-dim2">{{ t("cowork.emptyActivity") }}</p>
+                <div v-else data-testid="cowork-transcript" class="flex flex-col gap-3">
+                  <ConversationMessage
+                    v-for="message in cowork.transcript"
+                    :key="message.id"
+                    :message="message"
+                    @author-click="openAuthor"
+                  />
+                </div>
+              </template>
+
+              <!-- 邮件列表 -->
+              <template v-else>
+                <p v-if="cowork.activity.length === 0" class="text-[11px] text-dim2">{{ t("cowork.emptyActivity") }}</p>
+                <div v-else class="flex flex-col gap-1.5">
+                  <div
+                    v-for="item in visibleActivity"
+                    :key="item.id"
+                    class="rounded-[calc(10px*var(--gw-radius-scale))] bg-panel-2 px-2.5 py-2"
+                  >
+                    <div class="flex items-center gap-1.5 text-[10px] text-dim2">
+                      <span class="text-dim">{{ item.fromName }}</span>
+                      <Icon name="right" :size="10" />
+                      <span class="text-dim">{{ item.toName }}</span>
+                      <span class="rounded-full bg-panel px-1.5">{{ t(`cowork.mailKind.${item.kind}`) }}</span>
+                      <span v-if="!item.read" class="text-cyan">●</span>
+                      <span class="ml-auto tabular-nums">{{ timeOf(item.createdAt) }}</span>
+                    </div>
+                    <p class="mt-1 line-clamp-4 whitespace-pre-wrap text-[11px] text-foreground">{{ item.summary || item.body }}</p>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </section>
+
+          <!-- 对团队说话（可带附件：附件随目标成员的下一次派发一起递进去） -->
+          <div
+            data-attachment-dropzone
+            class="flex flex-col gap-1.5 rounded-[calc(14px*var(--gw-radius-scale))] border bg-panel p-2 transition-[border-color,box-shadow]"
+            :class="messageDragging ? 'border-cyan ring-2 ring-cyan/40' : 'border-line'"
+            @dragover="onMessageDragOver"
+            @dragleave="onMessageDragLeave"
+            @drop="onMessageDrop"
+          >
+            <div class="flex items-center gap-1.5">
+              <select
+                v-model="messageTarget"
+                class="rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-2 text-[12px] text-foreground outline-none focus:border-accent"
+              >
+                <option value="">{{ t("cowork.role.leader") }}</option>
+                <option v-for="slot in cowork.slots" :key="slot.id" :value="slot.id">{{ slot.name }}</option>
+              </select>
+              <input
+                v-model="messageDraft"
+                class="min-w-0 flex-1 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-3 py-2 text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
+                :placeholder="t('cowork.sendPlaceholder')"
+                @keydown.enter.prevent="sendToTeam"
+                @paste="onMessagePaste"
+              />
+              <Hint :text="t('chat.uploadFile')">
+                <button
+                  type="button"
+                  data-testid="cowork-send-attach"
+                  class="grid size-7 shrink-0 cursor-pointer place-items-center rounded-[calc(8px*var(--gw-radius-scale))] border border-line text-dim transition-colors hover:text-foreground"
+                  :aria-label="t('chat.uploadFile')"
+                  @click="pickMessage"
+                >
+                  <Icon name="plus" :size="13" />
+                </button>
+              </Hint>
+              <button
+                type="button"
+                class="rounded-[calc(8px*var(--gw-radius-scale))] bg-accent px-3 py-2 text-[12px] font-medium text-accent-ink"
+                @click="sendToTeam"
+              >
+                {{ t("cowork.send") }}
+              </button>
+            </div>
+            <AttachmentTray :items="messageItems" @remove="removeMessage" />
           </div>
         </div>
-      </div>
 
-      <!-- 协作往来 -->
-      <div class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-3.5">
-        <div class="mb-2 text-[11px] font-medium text-dim">{{ t("cowork.activityTitle") }}</div>
-        <p v-if="cowork.activity.length === 0" class="text-[11px] text-dim2">{{ t("cowork.emptyActivity") }}</p>
-        <div v-else class="flex flex-col gap-1.5">
-          <div v-for="item in visibleActivity" :key="item.id" class="rounded-[calc(10px*var(--gw-radius-scale))] bg-panel-2 px-2.5 py-2">
-            <div class="flex items-center gap-1.5 text-[10px] text-dim2">
-              <span class="text-dim">{{ item.fromName }}</span>
-              <Icon name="right" :size="10" />
-              <span class="text-dim">{{ item.toName }}</span>
-              <span class="rounded-full bg-panel px-1.5">{{ t(`cowork.mailKind.${item.kind}`) }}</span>
-              <span v-if="!item.read" class="text-cyan">●</span>
-              <span class="ml-auto tabular-nums">{{ timeOf(item.createdAt) }}</span>
+        <!-- 侧栏：任务板 + 提交 -->
+        <div class="flex min-w-0 flex-col gap-3">
+          <section class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-3.5">
+            <div class="mb-2 flex items-center gap-2">
+              <Icon name="check-one" :size="13" class="text-dim" />
+              <span class="text-[11px] font-medium text-dim">{{ t("cowork.board") }}</span>
+              <span v-if="cowork.tasks.length > 0" class="rounded-full bg-panel-2 px-1.5 text-[10px] text-dim2">{{
+                cowork.tasks.length
+              }}</span>
             </div>
-            <p class="mt-1 line-clamp-4 whitespace-pre-wrap text-[11px] text-foreground">{{ item.summary || item.body }}</p>
-          </div>
+            <p v-if="cowork.tasks.length === 0" class="text-[11px] text-dim2">{{ t("cowork.emptyTasks") }}</p>
+            <div v-else class="flex flex-col gap-1.5">
+              <div v-for="task in cowork.tasks" :key="task.id" class="rounded-[calc(10px*var(--gw-radius-scale))] bg-panel-2 px-2.5 py-2">
+                <div class="flex items-center gap-2">
+                  <span class="size-1.5 shrink-0 rounded-full" :class="taskDot[task.status]" />
+                  <span class="min-w-0 flex-1 truncate text-[12px] text-foreground">{{ task.subject }}</span>
+                  <span class="shrink-0 text-[10px] text-dim2">{{ t(`cowork.taskStatus.${task.status}`) }}</span>
+                </div>
+                <div class="mt-0.5 flex items-center gap-2 ps-3.5">
+                  <span v-if="task.ownerName" class="text-[10px] text-dim">{{ task.ownerName }}</span>
+                  <span v-if="task.blockedBy.length > 0" class="text-[10px] text-dim2">⛓ {{ task.blockedBy.join("、") }}</span>
+                </div>
+                <p v-if="task.result" class="mt-1 line-clamp-3 text-[11px] text-dim">{{ task.result }}</p>
+              </div>
+            </div>
+          </section>
+
+          <CoworkCommits />
         </div>
       </div>
     </div>

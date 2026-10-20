@@ -52,7 +52,13 @@ impl DeltaBatcher {
     }
 }
 
-/// 一条 SSE data 行里的增量：正文与思考链分开取。
+/// 取非空字符串字段：空串视同缺失（端点用它占位，不该产出空事件）。
+fn non_empty_str(value: &serde_json::Value, key: &str) -> Option<String> {
+    let text = value.get(key)?.as_str()?;
+    (!text.is_empty()).then(|| text.to_string())
+}
+
+/// 一条 SSE data 行里的增量：正文、思考链与工具调用分片分开取。
 ///
 /// 思考链有两种线上形状：`delta.reasoning_content`（DeepSeek-R1 / Qwen3）与
 /// `delta.reasoning`（Ollama / vLLM）。两种都收，正文与思考各自独立合批下发。
@@ -60,6 +66,41 @@ impl DeltaBatcher {
 pub(super) struct SseDelta {
     pub(super) content: Option<String>,
     pub(super) reasoning: Option<String>,
+    pub(super) tool_calls: Vec<ToolCallChunk>,
+}
+
+/// 一条 SSE data 行里的 `tool_calls` 分片。
+///
+/// 线上形状是**逐 token 累加**的：首片带 `id` / `type` / `function.name`，后续片通常
+/// 只带 `function.arguments` 的一小段 JSON 文本。所以 `index` 是唯一的归位依据 ——
+/// 取最后一片只会拿到半截 JSON，必须按 index 拼接（见 [`ToolCallAccumulator`]）。
+#[derive(Debug, Default, PartialEq, Eq, Clone)]
+pub(super) struct ToolCallChunk {
+    pub(super) index: usize,
+    pub(super) id: Option<String>,
+    pub(super) name: Option<String>,
+    pub(super) arguments: Option<String>,
+}
+
+/// 解析 `delta.tool_calls` 数组为分片序列；非数组 / 空数组 → 空 vec。
+fn parse_tool_call_chunks(delta: &serde_json::Value) -> Vec<ToolCallChunk> {
+    let Some(items) = delta.get("tool_calls").and_then(|value| value.as_array()) else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(|item| {
+            // 缺 index 的分片无法归位：丢掉它，而不是猜它属于哪个调用。
+            let index = item.get("index")?.as_u64()? as usize;
+            let function = item.get("function");
+            Some(ToolCallChunk {
+                index,
+                id: non_empty_str(item, "id"),
+                name: function.and_then(|value| non_empty_str(value, "name")),
+                arguments: function.and_then(|value| non_empty_str(value, "arguments")),
+            })
+        })
+        .collect()
 }
 
 /// 解析一条 SSE data 行为增量；非流式完整响应由调用方单独处理。
@@ -75,7 +116,88 @@ pub(super) fn parse_sse_delta(data: &str) -> Option<SseDelta> {
     Some(SseDelta {
         content: pick("content"),
         reasoning,
+        tool_calls: parse_tool_call_chunks(delta),
     })
+}
+
+/// 一次模型回合里累积下来的工具调用（`arguments` 已是完整 JSON 文本）。
+///
+/// `id` 缺失时合成：assistant 消息由本侧构造，只要回填 `tool` 消息时用同一个 id，
+/// 协议就自洽 —— 合成 id 让「模型漏发 id」退化成一次可回传给模型自我纠正的普通错误，
+/// 而不是静默丢掉整个调用（丢掉的话模型收不到 tool 结果，会原地重复调用同一个工具）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ToolCall {
+    pub(super) id: String,
+    pub(super) name: String,
+    pub(super) arguments: String,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct PendingToolCall {
+    index: usize,
+    id: Option<String>,
+    name: Option<String>,
+    arguments: String,
+}
+
+/// 按 `index` 归位拼接一个回合里的工具调用分片。
+#[derive(Debug, Default)]
+pub(super) struct ToolCallAccumulator {
+    calls: Vec<PendingToolCall>,
+    /// 合成 id 的序号：同一个回合里两次漏 id 的调用不能撞号。
+    synth_seq: usize,
+}
+
+impl ToolCallAccumulator {
+    pub(super) fn push(&mut self, chunks: &[ToolCallChunk]) {
+        for chunk in chunks {
+            let slot = match self.calls.iter().position(|call| call.index == chunk.index) {
+                Some(found) => found,
+                None => {
+                    self.calls.push(PendingToolCall {
+                        index: chunk.index,
+                        ..Default::default()
+                    });
+                    self.calls.len() - 1
+                }
+            };
+            let call = &mut self.calls[slot];
+            if chunk.id.is_some() {
+                call.id = chunk.id.clone();
+            }
+            if chunk.name.is_some() {
+                call.name = chunk.name.clone();
+            }
+            if let Some(arguments) = &chunk.arguments {
+                call.arguments.push_str(arguments);
+            }
+        }
+    }
+
+    /// 取出本回合累积的全部调用（按 index 升序，即模型给出的并行调用顺序）。
+    ///
+    /// 清空累积器：同一个 accumulator 跨多个回合复用时，上一回合的分片必须丢掉，
+    /// 否则新回合的 `index:0` 会续在旧调用的 arguments 后面。
+    pub(super) fn take(&mut self) -> Vec<ToolCall> {
+        let mut calls = std::mem::take(&mut self.calls);
+        calls.sort_by_key(|call| call.index);
+        calls
+            .into_iter()
+            .map(|call| {
+                let id = call.id.unwrap_or_else(|| {
+                    self.synth_seq += 1;
+                    format!("call_synth_{}_{}", call.index, self.synth_seq)
+                });
+                ToolCall {
+                    id,
+                    // 同样合成：没有名字就无法路由到任何工具，回传一条「未知工具」错误
+                    // 让模型自己纠正，好过让整条 assistant 消息对不上协议。
+                    name: call.name.unwrap_or_default(),
+                    arguments: call.arguments,
+                }
+            })
+            .collect()
+    }
 }
 
 /// 非流式完整响应（服务端忽略 stream 时）提取全文。
@@ -97,11 +219,51 @@ pub(super) fn content_from_completion(body: &serde_json::Value) -> Option<String
     (!joined.is_empty()).then_some(joined)
 }
 
+/// 非流式完整响应提取工具调用（服务端忽略 `stream:true` 时的一次性形状）。
+///
+/// 与流式路径的区别：`arguments` 已是完整字符串，不需要分片拼接；仍统一经
+/// `ToolCallAccumulator` 走一遍，让缺 id / 缺 name 的合成规则在两条路径上完全一致
+/// —— 否则「同一个模型，切不切流」会得到不同的协议行为。
+pub(super) fn tool_calls_from_completion(body: &serde_json::Value) -> Vec<ToolCall> {
+    let Some(items) = body
+        .get("choices")
+        .and_then(|value| value.get(0))
+        .and_then(|choice| choice.get("message"))
+        .and_then(|message| message.get("tool_calls"))
+        .and_then(|value| value.as_array())
+    else {
+        return Vec::new();
+    };
+    let chunks: Vec<ToolCallChunk> = items
+        .iter()
+        .enumerate()
+        .map(|(position, item)| {
+            let function = item.get("function");
+            ToolCallChunk {
+                // 非流式一般不带 index，用数组位置兜底；带了就以线上的为准。
+                index: item
+                    .get("index")
+                    .and_then(|value| value.as_u64())
+                    .map(|value| value as usize)
+                    .unwrap_or(position),
+                id: non_empty_str(item, "id"),
+                name: function.and_then(|value| non_empty_str(value, "name")),
+                arguments: function.and_then(|value| non_empty_str(value, "arguments")),
+            }
+        })
+        .collect();
+    let mut accumulator = ToolCallAccumulator::default();
+    accumulator.push(&chunks);
+    accumulator.take()
+}
+
 /// SSE 消费结果。
 #[derive(Debug, PartialEq)]
 pub(super) enum SseEvent {
     Delta(String),
     Thinking(String),
+    /// 一条（或多条）工具调用分片；交给累积器归位，本身还不是完整调用。
+    ToolCalls(Vec<ToolCallChunk>),
     Done,
     Error(String),
 }
@@ -170,6 +332,10 @@ pub(super) async fn drain_sse_into(
                     if !sink(SseEvent::Thinking(reasoning)) {
                         return;
                     }
+                }
+                // 工具调用排在正文与思考之后：一帧里三者同现时，模型先说话再调工具。
+                if !delta.tool_calls.is_empty() && !sink(SseEvent::ToolCalls(delta.tool_calls)) {
+                    return;
                 }
             }
         }

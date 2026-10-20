@@ -7,15 +7,13 @@
  * `grid-template-columns: 0fr ↔ 1fr` —— fr 过渡把轨道宽度从 0 拉到内容的
  * max-content，所以短名字（Codex）不会留一大截空白，长名字（GitHub Copilot CLI）
  * 也不必靠截断凑数。名字常驻 DOM（只是被收成 0 宽），展开状态由 `data-expanded` 表达。
+ *
+ * 只呈现**已启用**的后端：启停即显隐，未启用的要先到「设置 → Agent」勾选才会出现。
  */
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { useI18n } from "vue-i18n";
-import { type AgentProviderConfig, REASONING_EFFORTS, type ReasoningEffort } from "@greywork/shell";
-import { runtimeMode } from "@greywork/host-ipc";
+import { type AgentProviderConfig } from "@greywork/shell";
 import { useAgentStore } from "@/stores/agent";
-import { useCommandCapabilitiesStore } from "@/stores/command-capabilities";
 import { useSettingsStore } from "@/stores/settings";
-import { localReasoningOverride, resolveLocalEffort } from "@/stores/chat-llm";
 import AgentProviderIcon from "@/features/conversation/AgentProviderIcon.vue";
 import Icon from "@/features/shared/Icon.vue";
 import Hint from "@/features/shared/Hint.vue";
@@ -23,18 +21,9 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 
 const agent = useAgentStore();
 const settings = useSettingsStore();
-const { t } = useI18n();
 
-const capabilities = useCommandCapabilitiesStore();
-void capabilities.ensureCatalog();
-
-/**
- * 服务端 agent 目录只读（与设置页 / 写路径同一判据）。此时不代用户「顺手启用」：
- * 静默改状态又写不进服务端，还不如让选择失败并把「未启用」说清楚。
- */
-const agentCatalogReadOnly = computed(() => runtimeMode() === "server" && capabilities.available("db_agents_sync") !== true);
-
-const acpOptions = computed<AgentProviderConfig[]>(() => agent.agentProviders);
+/** 只列已启用的后端：启停即显隐（未启用的在「设置 → Agent」勾选后才出现）。 */
+const acpOptions = computed<AgentProviderConfig[]>(() => agent.agentProviders.filter((provider) => provider.enabled));
 const selected = computed(() => (agent.routeToAcp ? agent.selectedProviderId : null));
 const connectError = ref<string | null>(null);
 
@@ -51,6 +40,14 @@ const OVERFLOW_SLOT_PX = 38;
 const FALLBACK_RAIL_WIDTH_PX = 304;
 
 /**
+ * 展开项也必须是已启用的在册项：设置里停用后残留的 expandedChoice 不能白占槽位，
+ * 否则容量预算会少显示一项。
+ */
+const expandedVisibleId = computed(() =>
+  expandedChoice.value !== null && acpOptions.value.some((provider) => provider.id === expandedChoice.value) ? expandedChoice.value : null,
+);
+
+/**
  * 主轨道容量使用保守固定槽位计算：收起项 32px + 6px gap；展开项按最坏情况留 162px + gap。
  * 展开宽度本身是按内容撑开的（见文件头），但名字容器的 max-w-[110px] 封了顶，
  * 于是展开项实际宽度 ≤ 30(图标槽) + 110(名字上限) + 10(右内边距) + 2(边框) = 152px，
@@ -58,7 +55,7 @@ const FALLBACK_RAIL_WIDTH_PX = 304;
  */
 const visibleCapacity = computed(() => {
   const width = railWidth.value > 0 ? railWidth.value : FALLBACK_RAIL_WIDTH_PX;
-  const expandedAcp = expandedChoice.value !== null && expandedChoice.value !== "local";
+  const expandedAcp = expandedVisibleId.value !== null;
   const reserved = OVERFLOW_SLOT_PX + EXPANDED_SLOT_PX - (expandedAcp ? 0 : COLLAPSED_SLOT_PX);
   const collapsed = Math.floor(Math.max(0, width - reserved) / COLLAPSED_SLOT_PX);
   return Math.max(1, collapsed + (expandedAcp ? 1 : 0));
@@ -67,9 +64,9 @@ const visibleCapacity = computed(() => {
 /** 当前展开项必须可见；超出首屏容量时替换最后一个普通项，并保持注册表原顺序。 */
 const visibleAcpOptions = computed(() => {
   const capacity = Math.min(visibleCapacity.value, acpOptions.value.length);
-  const expandedId = expandedChoice.value;
+  const expandedId = expandedVisibleId.value;
   const initial = acpOptions.value.slice(0, capacity);
-  if (!expandedId || expandedId === "local" || initial.some((provider) => provider.id === expandedId)) return initial;
+  if (!expandedId || initial.some((provider) => provider.id === expandedId)) return initial;
   const visibleIds = new Set(initial.slice(0, Math.max(0, capacity - 1)).map((provider) => provider.id));
   visibleIds.add(expandedId);
   return acpOptions.value.filter((provider) => visibleIds.has(provider.id));
@@ -85,53 +82,17 @@ function providerHint(provider: AgentProviderConfig): string {
   return installed === null ? provider.name : `${provider.name} · ${agent.providerInstallLabel(provider)}`;
 }
 
-function selectLocal(): void {
-  expandedChoice.value = "local";
-  overflowOpen.value = false;
-  connectError.value = null;
-  void agent.switchToLocalLlm();
-}
-
 async function selectAcp(id: string): Promise<void> {
   expandedChoice.value = id;
   overflowOpen.value = false;
   connectError.value = null;
-  const provider = agent.agentProviders.find((candidate) => candidate.id === id);
-  // 目录只读（服务端）时不代启用：让 activateAcpProvider 返回「未启用」，错误就地可见。
-  if (provider && !provider.enabled && !agentCatalogReadOnly.value) await agent.setAgentProviderEnabled(id, true);
+  // 列表只放已启用的后端，启用动作在设置页完成；这里直接连。
   if (id === agent.selectedProviderId && agent.routeToAcp && agent.acpConnected) return;
   connectError.value = await agent.activateAcpProvider(id);
 }
 
 async function toggleTempReadOnly(on: boolean): Promise<void> {
   connectError.value = await agent.setTempReadOnly(on);
-}
-
-// ---------- Local 路由的模型 / 思考强度选择器 ----------
-
-/** 可选的 Local 供应商：启用且 baseUrl/model 齐全（与 chat-llm 的可用判据一致）。 */
-const localProviders = computed(() =>
-  settings.modelProviders.filter((provider) => provider.enabled && !!provider.baseUrl?.trim() && !!provider.model.trim()),
-);
-
-/** 实际会用的供应商：选中项优先，未选过回落第一个可用（镜像 selectLlmProvider 的兜底）。 */
-const activeLocalProvider = computed(
-  () => localProviders.value.find((provider) => provider.id === settings.selectedModelProviderId) ?? localProviders.value[0] ?? null,
-);
-
-/** 当前生效档：会话覆盖 > 供应商配置 > auto（与 stream.ts 的实际调用同一来源）。 */
-const activeEffort = computed<ReasoningEffort>(() => resolveLocalEffort(localReasoningOverride.value, activeLocalProvider.value));
-
-function setLocalEffort(effort: ReasoningEffort): void {
-  localReasoningOverride.value = effort;
-}
-
-/** 把当前生效档写回供应商配置（成为所有新会话的默认），并清掉会话覆盖。 */
-function setDefaultEffort(): void {
-  const provider = activeLocalProvider.value;
-  if (!provider) return;
-  settings.upsertModelProvider({ ...provider, reasoningEffort: activeEffort.value });
-  localReasoningOverride.value = null;
 }
 
 /** 「…」菜单的 Esc / 点外部收回与键盘漫游都交给 DropdownMenu。 */
@@ -177,39 +138,6 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="flex w-full items-center gap-2">
-      <div class="shrink-0">
-        <!-- 展开时名字已经显示在胶囊上，再弹提示是多余的 —— 传 null 让 Hint 直接透传。 -->
-        <Hint :text="expandedChoice === 'local' ? null : 'Local'">
-          <button
-            type="button"
-            data-testid="local-provider-button"
-            :data-expanded="expandedChoice === 'local'"
-            :class="[
-              'flex h-8 cursor-pointer items-center overflow-hidden rounded-full border text-[11.5px] transition-[border-color,background-color,color,box-shadow] duration-200 ease-out focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan',
-              selected === null
-                ? 'border-cyan/70 bg-cyan/15 text-foreground shadow-[0_0_0_1px_rgba(77,159,255,0.12),0_0_18px_rgba(77,159,255,0.08)]'
-                : 'border-line-2 bg-panel text-dim hover:border-cyan/50 hover:text-foreground',
-            ]"
-            :aria-pressed="selected === null"
-            aria-label="Local"
-            @click="selectLocal"
-          >
-            <span class="grid size-[30px] shrink-0 place-items-center">
-              <Icon name="terminal" :size="14" class="text-dim" />
-            </span>
-            <!-- 收起即 0 宽：轨道 0fr 时整块被按钮的 overflow-hidden 裁掉，胶囊正好回到 32px 圆点。 -->
-            <span
-              class="grid min-w-0 transition-[grid-template-columns,padding,opacity] duration-200 ease-out"
-              :class="expandedChoice === 'local' ? 'grid-cols-[1fr] pr-2.5 opacity-100' : 'grid-cols-[0fr] pr-0 opacity-0'"
-            >
-              <span class="min-w-0 max-w-[110px] truncate text-left">Local</span>
-            </span>
-          </button>
-        </Hint>
-      </div>
-
-      <span class="mx-0.5 h-4 w-px shrink-0 bg-line-2" aria-hidden="true" />
-
       <div ref="railEl" data-testid="acp-provider-rail" class="flex min-w-0 flex-1 items-center gap-1.5">
         <Hint
           v-for="provider in visibleAcpOptions"
@@ -225,16 +153,14 @@ onBeforeUnmount(() => {
               'relative flex h-8 cursor-pointer items-center overflow-hidden rounded-full border text-[11.5px] transition-[border-color,background-color,color,box-shadow] duration-200 ease-out focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan',
               selected === provider.id
                 ? 'border-cyan/70 bg-cyan/15 text-foreground shadow-[0_0_0_1px_rgba(77,159,255,0.12),0_0_18px_rgba(77,159,255,0.08)]'
-                : provider.enabled
-                  ? 'border-line-2 bg-panel text-dim hover:border-cyan/50 hover:text-foreground'
-                  : 'border-dashed border-line-2 bg-panel text-dim hover:border-cyan/40 hover:text-foreground',
+                : 'border-line-2 bg-panel text-dim hover:border-cyan/50 hover:text-foreground',
             ]"
             :aria-pressed="selected === provider.id"
             :aria-label="provider.name"
             @click="selectAcp(provider.id)"
           >
             <span class="grid size-[30px] shrink-0 place-items-center">
-              <AgentProviderIcon :provider="provider" :size="15" :class="provider.enabled ? 'opacity-100' : 'opacity-70'" />
+              <AgentProviderIcon :provider="provider" :size="15" />
             </span>
             <!-- 宽度由名字撑开；max-w-[110px] 封顶是槽位预算 162px 能兜住的前提（见上方常量注释）。 -->
             <span
@@ -257,8 +183,8 @@ onBeforeUnmount(() => {
         </Hint>
       </div>
 
-      <!-- 固定外框配合容量预算，避免「…」出现后挤压轨道并触发来回抖动。 -->
-      <div class="relative size-8 shrink-0">
+      <!-- 固定外框配合容量预算，避免「…」出现后挤压轨道并触发来回抖动。无后端时整块收起。 -->
+      <div v-if="acpOptions.length > 0" class="relative size-8 shrink-0">
         <DropdownMenu v-model:open="overflowOpen">
           <DropdownMenuTrigger as-child>
             <button
@@ -295,62 +221,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- Local 路由展开区：模型选择（即全局默认供应商）+ 会话级思考强度覆盖 -->
-    <div v-if="expandedChoice === 'local'" data-testid="local-selector" class="gw-bar-rise flex flex-wrap items-center gap-1.5 pl-1">
-      <DropdownMenu>
-        <DropdownMenuTrigger as-child>
-          <button
-            type="button"
-            data-testid="local-model-button"
-            class="flex h-6 cursor-pointer items-center gap-1.5 rounded-full border border-line-2 bg-panel px-2 text-[11px] text-dim transition-colors hover:border-cyan/50 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
-            aria-label="选择模型供应商"
-          >
-            <Icon name="terminal" :size="11" />
-            <span class="max-w-[180px] truncate font-mono">{{ activeLocalProvider?.model || "选择模型" }}</span>
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent side="top" align="start" class="w-[240px] border-line-2">
-          <DropdownMenuItem
-            v-for="provider in localProviders"
-            :key="provider.id"
-            data-testid="local-model-item"
-            :data-provider-id="provider.id"
-            class="h-8 cursor-pointer gap-2 rounded-[calc(7px*var(--gw-radius-scale))] px-2 text-[11.5px]"
-            :class="provider.id === settings.selectedModelProviderId ? 'text-foreground' : 'text-dim'"
-            @select="settings.selectModelProvider(provider.id)"
-          >
-            <span class="min-w-0 flex-1 truncate">{{ provider.name }}</span>
-            <span class="max-w-[45%] truncate font-mono text-[10.5px] text-dim2">{{ provider.model }}</span>
-          </DropdownMenuItem>
-          <p v-if="localProviders.length === 0" class="px-2 py-1.5 text-[11px] text-dim2">未配置可用模型，去设置页添加</p>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <button
-        v-for="effort in REASONING_EFFORTS"
-        :key="effort.value"
-        type="button"
-        data-testid="local-effort-chip"
-        :data-effort="effort.value"
-        :class="[
-          'flex h-6 cursor-pointer items-center rounded-full px-2 text-[10.5px] transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan',
-          activeEffort === effort.value ? 'bg-cyan/15 text-cyan' : 'text-dim2 hover:bg-panel hover:text-foreground',
-        ]"
-        :aria-pressed="activeEffort === effort.value"
-        @click="setLocalEffort(effort.value)"
-      >
-        {{ t(effort.label) }}
-      </button>
-      <Hint text="把当前思考强度写回该供应商，成为所有新会话的默认">
-        <button
-          type="button"
-          data-testid="local-effort-default"
-          class="flex h-6 cursor-pointer items-center rounded-full border border-line-2 bg-panel px-2 text-[10.5px] text-dim transition-colors hover:border-cyan/50 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
-          @click="setDefaultEffort"
-        >
-          设为默认
-        </button>
-      </Hint>
-    </div>
+    <p v-if="acpOptions.length === 0" class="pl-1 text-[11px] text-dim2">未启用任何 ACP 后端 · 到「设置 → Agent」勾选启用</p>
 
     <p v-if="settings.tempReadOnly" class="gw-bar-rise flex items-center gap-1.5 pl-1 text-[11px] text-dim">
       已临时降级为只读 · 基线 {{ TIER_LABELS[settings.permissionTier] }}
@@ -377,7 +248,7 @@ onBeforeUnmount(() => {
 <style scoped>
 /* 选择栏的入场动效一律用关键帧（只做进场），不用 <Transition> 的 leave：
  * 退场直接卸载元素，不留过渡尾巴 —— 否则 DOM 会多挂一帧，既拖住下方布局，
- * 也让「点完立刻查 DOM」的测试（如 local-selector 收起）失准。 */
+ * 也让「点完立刻查 DOM」的测试（如错误行收起）失准。 */
 @keyframes gw-bar-rise {
   from {
     opacity: 0;

@@ -5,6 +5,14 @@ export { default as Shell } from "@/features/shell/Shell.vue";
 // Shell 外层，入口负责在 mount 前 await initRuntimeMode()。
 export { default as AuthGate } from "@/features/auth/AuthGate.vue";
 export { createAppRouter } from "./router";
+// 前端契约（「一个后端、多个前端」的组装点）：入口在 mount 前 `setFront(<该端的 FrontSpec>)`，
+// 路由表、侧栏入口与外壳接线都由它派生。没有缺省前端 —— 未声明时 `currentFront()` 抛错，
+// 这样每个前端的产物只包含自己 import 的那份特性集（理由见 front/current.ts）。
+export { setFront, currentFront } from "./front/current";
+// 各端的前端集合**不走这个 barrel**：从 `@greywork/workbench/front/all` /
+// `.../front/web` 直接 import。放进 barrel 会让两个入口都可达两份集合，
+// 多前端就只剩运行期差异、省不下一个字节（实测见 front/current.ts）。
+export type { Feature, FeatureId, FrontId, FrontShellSpec, FrontSpec, ShellPanels, ShellWiringId } from "./front/types";
 export { ICONS, getIconShapes, iconNames } from "./lib/icons";
 export type { IconShape } from "./lib/icons";
 export { capabilitySeam } from "./plugins/loader";

@@ -122,6 +122,78 @@ export function resolveToolStatus(raw: string | undefined): ToolActivityStatus {
   return "pending";
 }
 
+/* ===== 本机 agent 回合的工具事件（llm://event） ===== */
+
+/**
+ * 本机 agent 回合（`llm_agent_start`）的工具事件负载。
+ *
+ * 与 ACP 的差异：宿主自己发的两个 kind，语义更窄 —— 没有 status 字段（成功/失败由
+ * `ok` 布尔表达），输出是已经截断的预览（完整内容只回给模型，不随事件广播）。
+ */
+export interface LlmToolEventPayload {
+  id?: string;
+  name?: string;
+  input?: Record<string, unknown>;
+  ok?: boolean;
+  error?: string | null;
+  summary?: string;
+  path?: string | null;
+  preview?: string;
+}
+
+/**
+ * 一行描述：在工具结果回来之前也要能说清「它在干什么」。
+ *
+ * 用入参里的路径而不是等 `summary` —— `llm-tool-call` 与 `llm-tool-result` 之间可能隔着
+ * 一次真实文件读取，那段时间里时间线不能只有个裸工具名。
+ */
+function llmToolLabel(name: string, input: Record<string, unknown> | undefined): string {
+  const path = typeof input?.path === "string" ? input.path : null;
+  if (name === "read_file") return path ? `读取 ${path}` : "读取文件";
+  if (name === "list_dir") return path ? `列出 ${path}` : "列出工作区根目录";
+  if (name === "git_log") return "读取提交历史";
+  return name;
+}
+
+/**
+ * 把一条本机 agent 工具事件规范化成 ToolActivity，与 ACP 侧共用同一套时间线渲染。
+ *
+ * 返回 `null` 表示这条事件没有工具 id —— 无 id 的活动无法与后续结果配对，
+ * 也过不了 `mergeToolActivities` 的去重锚点，进了时间线只会变成一行永不 settle 的僵尸。
+ */
+export function llmToolEventToActivity(kind: "call" | "result", payload: LlmToolEventPayload, now = Date.now()): ToolActivity | null {
+  const toolCallId = typeof payload.id === "string" ? payload.id : "";
+  if (!toolCallId) return null;
+  const name = typeof payload.name === "string" ? payload.name : "";
+  // 首版工具面全是只读（read_file / list_dir / git_log），故 kind 恒为 read；
+  // 将来加写工具时按名字分流，与 ACP 侧 `resolveToolKind` 同一套判据。
+  const base = {
+    toolCallId,
+    kind: "read" as ToolActivityKind,
+    startedAt: now,
+    name,
+  };
+  if (kind === "call") {
+    return {
+      ...base,
+      status: "in_progress" as ToolActivityStatus,
+      finishedAt: null,
+      description: llmToolLabel(name, payload.input),
+      detail: payload.input ? { args: JSON.stringify(payload.input, null, 2) } : undefined,
+    };
+  }
+  return {
+    ...base,
+    // 失败也是 settled：留 in_progress 会让时间线永远转圈，用户以为还在跑。
+    status: (payload.ok === false ? "failed" : "completed") as ToolActivityStatus,
+    finishedAt: now,
+    description: payload.summary ?? name,
+    path: typeof payload.path === "string" ? payload.path : undefined,
+    error: payload.error ?? undefined,
+    detail: payload.preview ? { text: payload.preview } : undefined,
+  };
+}
+
 /** 把一条 ACP 内容部分规范化成一条 ToolActivity（无 id 时生成占位）。 */
 export function toToolActivity(part: AcpToolPartLike, now = Date.now(), seq = 0): ToolActivity | null {
   const tool = part.tool_call;

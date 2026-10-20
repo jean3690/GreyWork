@@ -60,13 +60,28 @@ macro_rules! git_commands {
     // ---- worktree ----
     { "worktree_provision", auth: Auth::Required, desktop: false, binary: false,
         args: worktree::ProvisionArgs,
-        run: |ctx, a| async move { worktree::worktree_provision(ctx.host.as_ref(), ctx.services.workspace.as_ref(), a.source).map(Json) } }
+        run: |ctx, a| async move {
+            worktree::worktree_provision(
+                ctx.host.as_ref(),
+                ctx.services.workspace.as_ref(),
+                a.source,
+                a.prepare,
+                a.skills,
+            )
+            .map(Json)
+        } }
     { "worktree_release", auth: Auth::Required, desktop: false, binary: false,
         args: worktree::ReleaseArgs,
         run: |ctx, a| async move { worktree::worktree_release(ctx.host.as_ref(), ctx.services.workspace.as_ref(), a.root).map(Json) } }
     { "worktree_list", auth: Auth::Required, desktop: false, binary: false,
         args: UnitArgs,
         run: |ctx, _a| async move { worktree::worktree_list(ctx.host.as_ref()).map(Json) } }
+    { "worktree_snapshot", auth: Auth::Required, desktop: false, binary: false,
+        args: worktree::SnapshotArgs,
+        run: |ctx, a| async move { worktree::worktree_snapshot(ctx.host.as_ref(), ctx.services.workspace.as_ref(), a.root).map(Json) } }
+    { "worktree_restore", auth: Auth::Required, desktop: false, binary: false,
+        args: worktree::RestoreArgs,
+        run: |ctx, a| async move { worktree::worktree_restore(ctx.host.as_ref(), ctx.services.workspace.as_ref(), a.root, a.reference).map(Json) } }
 
         }
     };

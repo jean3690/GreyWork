@@ -1,5 +1,5 @@
-import { invoke } from "@greywork/host-ipc";
-import { basename, isTauriRuntime } from "@greywork/core";
+import { hostPicker, invoke, type HostPicker } from "@greywork/host-ipc";
+import { basename } from "@greywork/core";
 import type { SheetTable } from "../lib/tabular";
 
 /** 可读取的本地文件源：统一 Tauri 磁盘文件与浏览器 File 对象。 */
@@ -37,16 +37,17 @@ export function isTextFile(name: string, size?: number): boolean {
   return TEXT_EXT.test(name) && (size === undefined || size <= MAX_TEXT_BYTES);
 }
 
-/** 打开文件选择器（多选）。Tauri = 宿主对话框；浏览器 = input[type=file]。 */
+/** 打开文件选择器（多选）。有原生选择器 = 宿主对话框；否则 = input[type=file]。 */
 export function pickWorkspaceFiles(multiple: boolean): Promise<WorkspaceFileSource[]> {
-  if (isTauriRuntime()) {
-    return pickTauriFiles(multiple);
+  const picker = hostPicker();
+  if (picker) {
+    return pickHostFiles(picker, multiple);
   }
   return pickBrowserFiles(multiple);
 }
 
-async function pickTauriFiles(multiple: boolean): Promise<WorkspaceFileSource[]> {
-  const paths = await invoke<string[]>("fs_pick_files", { purpose: "workspace", multiple });
+async function pickHostFiles(picker: HostPicker, multiple: boolean): Promise<WorkspaceFileSource[]> {
+  const paths = await picker.pickFiles({ purpose: "workspace", multiple });
   return paths.map((path) => ({
     name: basename(path),
     origin: path,
@@ -85,16 +86,17 @@ function pickBrowserFiles(multiple: boolean): Promise<WorkspaceFileSource[]> {
   });
 }
 
-/** 选择存放文件夹：Tauri = 宿主目录对话框 + fs_list_dir；浏览器 = webkitdirectory。 */
+/** 选择存放文件夹：有原生选择器 = 宿主目录对话框 + fs_list_dir；浏览器 = webkitdirectory。 */
 export function pickWorkspaceDirectory(): Promise<WorkspaceDirSource | null> {
-  if (isTauriRuntime()) {
-    return pickTauriDirectory();
+  const picker = hostPicker();
+  if (picker) {
+    return pickHostDirectory(picker);
   }
   return pickBrowserDirectory();
 }
 
-async function pickTauriDirectory(): Promise<WorkspaceDirSource | null> {
-  const selected = await invoke<string | null>("pick_workspace_folder");
+async function pickHostDirectory(picker: HostPicker): Promise<WorkspaceDirSource | null> {
+  const selected = await picker.pickWorkspaceFolder();
   if (!selected) return null;
   const raw =
     (await invoke<{ name: string; kind: string; size?: number; path: string }[]>("fs_list_dir", {

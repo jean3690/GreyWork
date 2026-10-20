@@ -8,15 +8,18 @@
 import { beforeEach, describe, expect, it, vi, afterEach } from "vitest";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
-import { invoke } from "@tauri-apps/api/core";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+vi.mock("@greywork/host-ipc", async (importOriginal) => ({
+  ...(await importOriginal()),
+  invoke: vi.fn(),
+}));
 
 import PreviewSider from "@/features/preview/PreviewSider.vue";
 import { useNoticeStore } from "@/stores/notice";
 import { usePreviewStore } from "@/stores/preview";
 
-const invokeMock = vi.mocked(invoke);
+const invokeMock = vi.mocked((await import("@greywork/host-ipc")).invoke);
+const bridge = vi.hoisted(() => ({ openPath: vi.fn() }));
 
 const stubs = {
   PreviewSurface: { template: "<div data-testid='surface-stub' />" },
@@ -191,13 +194,25 @@ describe("PreviewSider 空态引导", () => {
 });
 
 describe("PreviewSider「用系统应用打开」", () => {
-  /** 桌面态标记：`isTauriRuntime()` 认 window 上的 `__TAURI_INTERNALS__`。 */
+  /** 桌面态 = Electron 壳：「用系统应用打开」闸门读 hasNativeShell()，点击走 bridge.app.openPath。 */
   function stubTauriRuntime(): void {
-    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+    (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = "server";
+    (window as unknown as Record<string, unknown>).__GREYWORK_SHELL__ = {
+      window: {},
+      app: {
+        openPath: bridge.openPath,
+        openExternal: vi.fn(),
+        version: () => Promise.resolve("0.2.0"),
+        homeDir: () => Promise.resolve(null),
+        revealPath: vi.fn(),
+        pathForFile: () => null,
+      },
+    };
   }
 
   afterEach(() => {
-    delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+    delete (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__;
+    delete (window as unknown as Record<string, unknown>).__GREYWORK_SHELL__;
     invokeMock.mockReset();
   });
 
@@ -210,14 +225,14 @@ describe("PreviewSider「用系统应用打开」", () => {
 
   it("磁盘源 tab：出现按钮，点击以 open_path 调宿主", async () => {
     stubTauriRuntime();
-    invokeMock.mockResolvedValue(undefined);
+    bridge.openPath.mockResolvedValue(undefined);
     const wrapper = mountSider();
     usePreviewStore().open("/data/a.xlsx", "a.xlsx", "disk");
     await wrapper.vm.$nextTick();
 
     await wrapper.get('[data-testid="preview-open-external"]').trigger("click");
     await flushPromises();
-    expect(invokeMock).toHaveBeenCalledWith("open_path", { path: "/data/a.xlsx" });
+    expect(bridge.openPath).toHaveBeenCalledWith("/data/a.xlsx");
   });
 
   it("vfs 产物：落盘路径挂上之前不显示，挂上之后就出现", async () => {
@@ -236,7 +251,7 @@ describe("PreviewSider「用系统应用打开」", () => {
 
   it("宿主打开失败时弹提醒而不是静默", async () => {
     stubTauriRuntime();
-    invokeMock.mockRejectedValue(new Error("路径不存在"));
+    bridge.openPath.mockRejectedValue(new Error("路径不存在"));
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const wrapper = mountSider();
     usePreviewStore().open("/data/a.xlsx", "a.xlsx", "disk");

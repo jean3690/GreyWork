@@ -1,12 +1,29 @@
-/** LLM 直连传输抽象：desktop 走 Tauri IPC（Rust 宿主 reqwest），web 无直连通道。 */
-
-import { isTauriRuntime } from "@greywork/core";
-
-export { isTauriRuntime };
+/** LLM 直连传输抽象：宿主托管（Electron 壳 / 自托管服务端）走宿主命令，web 无直连通道。 */
 
 export interface LlmEventEnvelope {
-  kind: "llm-delta" | "llm-thinking-delta" | "llm-done" | "llm-error";
-  payload: { delta?: string; message?: string; clientToken?: string };
+  kind: "llm-delta" | "llm-thinking-delta" | "llm-done" | "llm-error" | "llm-tool-call" | "llm-tool-result";
+  payload: {
+    delta?: string;
+    message?: string;
+    clientToken?: string;
+    /** `llm-tool-call`：模型请求调用某工具（id 与后续 `llm-tool-result` 配对）。 */
+    id?: string;
+    name?: string;
+    /** `llm-tool-call`：结构化入参（模型给的 arguments 已解析；非法 JSON 时是空对象）。 */
+    input?: Record<string, unknown>;
+    /** `llm-tool-call`：第几轮（从 0 起）。 */
+    round?: number;
+    /** `llm-tool-result`：是否成功（工具存在但执行失败也是 ok=false）。 */
+    ok?: boolean;
+    /** `llm-tool-result`：失败原因。 */
+    error?: string | null;
+    /** `llm-tool-result`：一行摘要（前端时间线的 description）。 */
+    summary?: string;
+    /** `llm-tool-result`：实际访问的路径。 */
+    path?: string | null;
+    /** `llm-tool-result`：输出的截断预览（完整内容不回传事件，事件是全局广播的）。 */
+    preview?: string;
+  };
 }
 
 /**
@@ -47,6 +64,18 @@ export interface LlmChatParams {
   clientToken?: string;
 }
 
+/**
+ * 本机 agent 回合：模型可用只读工具（read_file / list_dir / git_log），
+ * 由宿主在自己的授权面内执行，直到它给出结论。
+ *
+ * 与 `LlmChatParams` 的差异只在工具回合上限上；其余字段同义（`clientToken` 同样
+ * 用于过滤 `llm://event` 广播里属于别的流的事件）。
+ */
+export interface LlmAgentParams extends LlmChatParams {
+  /** 工具回合上限；缺省由宿主取默认值，上限由宿主硬夹。 */
+  maxRounds?: number;
+}
+
 /** 连接参数：模型发现 / 向量 / 语音转写共用（都是打同一个 OpenAI 兼容端点）。 */
 export interface LlmConnection {
   baseUrl: string;
@@ -81,6 +110,15 @@ export interface LlmClient {
   isAvailable(): boolean;
   chat(params: LlmChatParams): Promise<number>;
   stop(requestId: number): Promise<void>;
+  /**
+   * 发起一个 agent 回合（模型可用只读工具）。与 `chat` 发出同一批事件，
+   * 额外多 `llm-tool-call` / `llm-tool-result` 两个 kind。
+   *
+   * 句柄空间与 `chat` **独立**（宿主侧两张表），所以必须配 `stopAgent` 中止，
+   * 拿 `chat` 的句柄去停 agent 会报 unknown request。
+   */
+  agentRun(params: LlmAgentParams): Promise<number>;
+  stopAgent(requestId: number): Promise<void>;
   onEvent(listener: (event: LlmEventEnvelope) => void): Promise<() => void>;
   /** 拉取 `/models` 清单（设置页模型下拉，兼作连通性自检）。 */
   listModels(connection: LlmConnection): Promise<string[]>;

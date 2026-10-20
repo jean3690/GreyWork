@@ -1,10 +1,9 @@
-import { isTauriRuntime } from "@greywork/core";
-import { invoke } from "@greywork/host-ipc";
+import { hostPlugins } from "@greywork/host-ipc";
 
 /**
  * 插件悬浮窗的宿主桥。
  *
- * 窗口由 Rust 宿主托管（插件代码永远拿不到句柄）：桌面态经 Tauri IPC 建/关 OS 级窗口，
+ * 窗口由宿主托管（插件代码永远拿不到句柄）：桌面态（Tauri / Electron）经宿主建/关 OS 级窗口，
  * 浏览器预览与单测下为 no-op（无窗口概念）。开窗入口在 PluginRegionHost，
  * 停用/卸载时的回收由 runtime/market 调 closePluginWindow —— 两者共用这一条通道。
  */
@@ -13,23 +12,33 @@ export interface PluginWindowHost {
   close(pluginId: string): Promise<void>;
 }
 
-/** 测试注入的宿主实现；非空时优先于默认 Tauri 通道。 */
+/** 测试注入的宿主实现；非空时优先于默认宿主通道。 */
 let hostOverride: PluginWindowHost | null = null;
 
 async function resolveHost(): Promise<PluginWindowHost | null> {
   if (hostOverride) return hostOverride;
-  // 守卫必须留在 isTauriRuntime 而非 hasHostCommands：plugin_window_* 是**仅桌面端**命令，
-  // 服务端会以 403 拒绝，服务端模式下这里就该是 no-op。
-  if (!isTauriRuntime()) return null;
+  // plugin_window_* 是**仅桌面端**能力，纯服务端 / 浏览器下就该是 no-op。用 hostPlugins() 判空：
+  // 不能用 hasHostCommands()——它在 Electron 的 server 态为真，会去 invoke 并撞 403。
+  const host = hostPlugins();
+  if (!host) return null;
   return {
-    open: (pluginId) => invoke("plugin_window_open", { pluginId }),
-    close: (pluginId) => invoke("plugin_window_close", { pluginId }),
+    open: (pluginId) => host.openWindow(pluginId),
+    close: (pluginId) => host.closeWindow(pluginId),
   };
 }
 
-/** 测试 seam：注入/清除宿主实现（生产走默认 Tauri 通道）。 */
+/** 测试 seam：注入/清除宿主实现（生产走默认宿主通道）。 */
 export function setPluginWindowHostForTest(next: PluginWindowHost | null): void {
   hostOverride = next;
+}
+
+/**
+ * 当前运行时是否存在可用的悬浮窗宿主（桌面壳或测试注入）。
+ * UI 面据此决定「弹出桌面」入口是否出现 —— 纯服务端/浏览器下 openPluginWindow 是静默 no-op，
+ * 按钮留着只会让用户点了没反应；入口本就不该出现（对标 notify 无壳不注册传输的约定）。
+ */
+export function hasPluginWindowHost(): boolean {
+  return hostOverride !== null || hostPlugins() !== null;
 }
 
 export async function openPluginWindow(pluginId: string): Promise<void> {

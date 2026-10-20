@@ -26,7 +26,9 @@ mod markets;
 mod office;
 mod rag;
 mod registry;
+mod shell;
 mod sys;
+mod terminal;
 
 #[cfg(test)]
 mod tests;

@@ -119,11 +119,11 @@ export type PreviewMediaSource = { kind: "stream"; url: string } | { kind: "byte
 export type PreviewMediaPreference = "stream" | "bytes";
 
 /**
- * 媒体通道。优先流式：桌面壳注册了 `gwmedia://`，媒体元素按 Range 自己拉片段，
- * 不读字节、不受 128MB 硬顶约束、拖动进度条可用。
+ * 媒体通道。优先流式：桌面壳的 `gwmedia://` 与服务端的 `/api/media` 都是支持 Range 的
+ * 同源地址，媒体元素按需拉片段，不读字节、不受 128MB 硬顶约束、拖动进度条可用。
  *
- * 没有自定义协议的宿主（服务端 / 浏览器预览）回落到整份读入 + blob URL —— 这条路对
- * 视频很慢（IPC 全量传输 + 主线程同步拷贝），是已知待办：服务端还缺一条 Range 路由。
+ * 没有流式通道的宿主（浏览器预览）回落到整份读入 + blob URL —— 这条路对视频很慢
+ * （全量传输 + 主线程同步拷贝），但预览态没有宿主，无从谈起。
  */
 export async function resolvePreviewMedia(
   tab: PreviewTab,

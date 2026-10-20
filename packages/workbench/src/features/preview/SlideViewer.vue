@@ -14,6 +14,7 @@
  */
 import { computed, onUnmounted, ref, toRef, watch } from "vue";
 import { usePreviewBinary } from "@/lib/preview-content";
+import OfficeViewSwitch from "@/features/preview/OfficeViewSwitch.vue";
 import { paragraphFontPt, parsePptx, type ParsedDeck, type PptxParagraph, type PptxRun, type PptxTextRef } from "@/lib/pptx-parse";
 import { patchPptxText } from "@/lib/pptx-serialize";
 import { registerPreviewSaver, unregisterPreviewSaver, writePreviewBytes } from "@/lib/preview-save";
@@ -282,6 +283,7 @@ registerPreviewSaver(props.tab.id, { dirty, save });
   <div class="flex size-full min-h-0 flex-col overflow-hidden">
     <div class="flex shrink-0 items-center gap-2 border-b border-line px-3 py-1 text-[11px] text-dim2">
       <span>{{ summary }}</span>
+      <OfficeViewSwitch :tab="tab" />
     </div>
 
     <p v-if="loading" class="px-4 py-3 text-[12px] text-dim2">{{ t("preview.common.loading") }}</p>

@@ -13,7 +13,7 @@ const localStorageStub = {
 vi.stubGlobal("localStorage", localStorageStub);
 vi.stubGlobal("window", { localStorage: localStorageStub });
 
-import { recommendedSandboxMode, useSettingsStore } from "@/stores/settings";
+import { useSettingsStore } from "@/stores/settings";
 
 beforeEach(() => {
   storage.clear();
@@ -163,27 +163,16 @@ describe("权限档位与沙盒联动", () => {
     expect(reloaded.effectivePermissionTier).toBe("full");
   });
 
-  it("沙盒档位往返持久化，旧快照缺失与非法值都迁移到 auto", () => {
+  it("沙盒已停用：快照里的旧 sandboxMode 被忽略，persist 也不再写出该字段", () => {
+    // 2026-10-13 用户决策：agent 自带权限模型，宿主不再套 OS 沙箱。
+    // bwrap 的 auto 档默认断网，对云端模型 agent 直接不可用，所以整层撤掉。
+    storage.set("greywork.settings", JSON.stringify({ sandboxMode: "full", permissionTier: "workspace" }));
     const settings = useSettingsStore();
-    expect(settings.sandboxMode).toBe("auto");
-    settings.sandboxMode = "fs";
+    expect("sandboxMode" in settings).toBe(false);
+
     settings.persist();
-    setActivePinia(createPinia());
-    expect(useSettingsStore().sandboxMode).toBe("fs");
-
-    storage.set("greywork.settings", JSON.stringify({ sandboxMode: "yolo" }));
-    setActivePinia(createPinia());
-    expect(useSettingsStore().sandboxMode).toBe("auto");
-
-    storage.set("greywork.settings", JSON.stringify({ permissionTier: "workspace" }));
-    setActivePinia(createPinia());
-    expect(useSettingsStore().sandboxMode).toBe("auto");
-  });
-
-  it("recommendedSandboxMode 默认选择自动隔离，网络放行不被权限档位隐式开启", () => {
-    expect(recommendedSandboxMode("read-only")).toBe("auto");
-    expect(recommendedSandboxMode("workspace")).toBe("auto");
-    expect(recommendedSandboxMode("full")).toBe("auto");
+    const persisted = JSON.parse(storage.get("greywork.settings") ?? "{}");
+    expect("sandboxMode" in persisted).toBe(false);
   });
 });
 
@@ -462,6 +451,42 @@ describe("第三方服务配置 serviceProviders", () => {
       recipe: { method: "POST", url: "https://docs.example.com/upload", body: "multipart", viewUrlPointer: "" },
     });
     expect(settings.officeProviders.find((provider) => provider.id === "custom")?.recipe).toBeUndefined();
+  });
+
+  it("OAuth 配置：字段齐全时保留，缺 clientId 或 redirectUri 时整块丢弃", () => {
+    const settings = useSettingsStore();
+    settings.upsertServiceProvider({
+      id: "tencent-docs",
+      name: "腾讯文档",
+      family: "office",
+      kind: "tencent-docs",
+      enabled: true,
+      oauth: {
+        clientId: "cid-123",
+        clientSecretEnv: "TENCENT_DOCS_SECRET",
+        redirectUri: "https://localhost/callback",
+        scope: "all",
+        authorizeUrl: "https://docs.qq.com/oauth/v2/authorize",
+        tokenUrl: "https://docs.qq.com/oauth/v2/token",
+      },
+    });
+    const stored = settings.officeProviders.find((provider) => provider.id === "tencent-docs");
+    expect(stored?.oauth).toMatchObject({
+      clientId: "cid-123",
+      clientSecretEnv: "TENCENT_DOCS_SECRET",
+      redirectUri: "https://localhost/callback",
+    });
+
+    // 缺 redirectUri → 整块丢弃（留半块配置只会在点「扫码授权」时才炸）。
+    settings.upsertServiceProvider({
+      id: "custom",
+      name: "自建",
+      family: "office",
+      kind: "custom",
+      enabled: true,
+      oauth: { clientId: "cid", redirectUri: "" },
+    });
+    expect(settings.officeProviders.find((provider) => provider.id === "custom")?.oauth).toBeUndefined();
   });
 
   it("kind 不属于该族清单 → 拒收（拼错的值会让预览永远走不到云端）", () => {

@@ -9,6 +9,7 @@ use common::{
     command_req, get, harness, harness_with, json_body, login, post_json, send, with_bearer,
     with_cookie, PASSWORD,
 };
+use greywork_host::commands::COMMANDS;
 use greywork_host::db::AgentProviderDto;
 
 #[tokio::test]
@@ -183,15 +184,23 @@ async fn list_commands_exposes_metadata() {
     assert_eq!(status, StatusCode::OK);
     let value = json_body(&body);
     let commands = value.as_array().unwrap();
-    assert_eq!(commands.len(), 161, "命令总数应与共享表一致");
-    let binary: Vec<&str> = commands
+    // 从共享表派生而不是写死数字：命令数随 greywork-host 涨落，写死会在下次加命令时
+    // 变成一条「明明没问题却红」的假警报。
+    assert_eq!(commands.len(), COMMANDS.len(), "命令总数应与共享表一致");
+    let mut binary: Vec<&str> = commands
         .iter()
         .filter(|meta| meta["binary"] == true)
         .map(|meta| meta["name"].as_str().unwrap())
         .collect();
+    binary.sort_unstable();
     assert_eq!(
         binary,
-        vec!["channel_take_media", "fs_read_binary", "fs_read_media"]
+        vec![
+            "channel_take_media",
+            "fs_read_binary",
+            "fs_read_media",
+            "office_convert_to_pdf"
+        ]
     );
 
     // available 如实回传「本宿主可不可调」：桌面专属与黑名单都是 false，
@@ -221,6 +230,223 @@ async fn list_commands_exposes_metadata() {
     );
     assert_eq!(available_of("reveal_path"), json!(false), "桌面专属不可用");
     assert_eq!(available_of("fs_list_dir"), json!(true), "普通命令可用");
+}
+
+#[tokio::test]
+async fn db_agents_sync_is_allowed_on_trusted_host() {
+    // 可信本机宿主 = 桌面壳形态：用户在**自己这台机器**上改 agent 后端目录必须能落盘。
+    let h = harness_with("trusted-agents-sync", |config, _| {
+        config.trusted_host = true
+    });
+    let token = login(&h.router, PASSWORD).await;
+    let (status, _, body) = send(
+        &h.router,
+        with_bearer(
+            command_req("db_agents_sync", json!({ "providers": [] })),
+            &token,
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "可信宿主下不该 403: {}",
+        String::from_utf8_lossy(&body)
+    );
+}
+
+#[tokio::test]
+async fn command_catalogue_marks_db_agents_sync_available_on_trusted_host() {
+    // 灰显判定读的正是这里 —— 报 false 会让 UI 把整个 agent 目录锁成只读。
+    let h = harness_with("trusted-catalogue", |config, _| config.trusted_host = true);
+    let token = login(&h.router, PASSWORD).await;
+    let (status, _, body) = send(&h.router, with_bearer(get("/api/commands"), &token)).await;
+    assert_eq!(status, StatusCode::OK);
+    let commands = json_body(&body);
+    let meta = commands
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|meta| meta["name"] == "db_agents_sync")
+        .expect("命令表里应有 db_agents_sync");
+    assert_eq!(meta["available"], json!(true), "可信宿主下应可用");
+    assert_eq!(meta["desktopOnly"], json!(false));
+    // 桌面专属与信任无关：缺的是宿主能力，不是授权。
+    let reveal = commands
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|meta| meta["name"] == "reveal_path")
+        .unwrap();
+    assert_eq!(reveal["available"], json!(false));
+}
+
+#[tokio::test]
+async fn fs_authorize_drop_paths_is_gated_by_trusted_host() {
+    // 不可信：这条命令等于「任何客户端都能授权任意路径」，与授权面「只由宿主壳在收到用户
+    // 动作时扩大」的前提直接冲突，必须 403。
+    let untrusted = harness("drop-auth-untrusted");
+    let token = login(&untrusted.router, PASSWORD).await;
+    let outside = untrusted.tmp.join("outside.txt");
+    std::fs::write(&outside, "nope").unwrap();
+    let (status, _, _) = send(
+        &untrusted.router,
+        with_bearer(
+            command_req(
+                "fs_authorize_drop_paths",
+                json!({ "paths": [outside.to_string_lossy()] }),
+            ),
+            &token,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "不可信宿主下应拒绝");
+
+    // 可信本机宿主（Electron 壳的形态）：拖放的路径落在授权根之外，授权前读不到、授权后读得到。
+    let trusted = harness_with("drop-auth-trusted", |config, _| config.trusted_host = true);
+    let token = login(&trusted.router, PASSWORD).await;
+    let dropped = trusted.tmp.join("dropped.txt");
+    std::fs::write(&dropped, "dropped body").unwrap();
+    let path = dropped.to_string_lossy().to_string();
+
+    let (status, _, body) = send(
+        &trusted.router,
+        with_bearer(
+            command_req("fs_read_text_file", json!({ "path": path })),
+            &token,
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "授权根之外的散文件不该读得到: {}",
+        String::from_utf8_lossy(&body)
+    );
+
+    let (status, _, body) = send(
+        &trusted.router,
+        with_bearer(
+            command_req("fs_authorize_drop_paths", json!({ "paths": [path] })),
+            &token,
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "授权应成功: {}",
+        String::from_utf8_lossy(&body)
+    );
+
+    let (status, _, body) = send(
+        &trusted.router,
+        with_bearer(
+            command_req("fs_read_text_file", json!({ "path": path })),
+            &token,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json_body(&body), json!("dropped body"));
+}
+
+/// 与 `encodeURIComponent` 等价的查询值编码（保留字也编进去，对查询值是安全的超集）。
+fn query_encode(raw: &str) -> String {
+    let mut out = String::new();
+    for byte in raw.as_bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(*byte as char)
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
+#[tokio::test]
+async fn media_route_streams_ranges_within_authorized_roots() {
+    // 预览的 <video> 直接把这条地址当 src：必须支持 Range（否则拖进度条废掉），
+    // 且只放行授权账本内的路径（与 fs_read_media 同一授权面）。
+    let h = harness("media-range");
+    let token = login(&h.router, PASSWORD).await;
+
+    let clip = h.root().join("clip.mp4");
+    std::fs::write(&clip, b"0123456789").unwrap();
+    let path = clip.to_string_lossy().to_string();
+    let url = format!("/api/media?path={}", query_encode(&path));
+
+    // 不带 Range：整份 200，且声明支持 Range（媒体元素据此才敢拖进度条）。
+    let (status, headers, body) = send(&h.router, with_bearer(get(&url), &token)).await;
+    assert_eq!(status, StatusCode::OK, "整份读取应成功");
+    assert_eq!(body, b"0123456789");
+    assert_eq!(headers.get(header::CONTENT_TYPE).unwrap(), "video/mp4");
+    assert_eq!(headers.get(header::ACCEPT_RANGES).unwrap(), "bytes");
+
+    // 带 Range：206 + Content-Range，只回请求窗口。
+    let mut request = get(&url);
+    request.headers_mut().insert(
+        header::RANGE,
+        axum::http::HeaderValue::from_static("bytes=2-5"),
+    );
+    let (status, headers, body) = send(&h.router, with_bearer(request, &token)).await;
+    assert_eq!(status, StatusCode::PARTIAL_CONTENT);
+    assert_eq!(body, b"2345");
+    assert_eq!(headers.get(header::CONTENT_RANGE).unwrap(), "bytes 2-5/10");
+
+    // 越界：416（媒体元素靠它知道要重新对齐）。
+    let mut request = get(&url);
+    request.headers_mut().insert(
+        header::RANGE,
+        axum::http::HeaderValue::from_static("bytes=100-200"),
+    );
+    let (status, _, _) = send(&h.router, with_bearer(request, &token)).await;
+    assert_eq!(status, StatusCode::RANGE_NOT_SATISFIABLE);
+
+    // 授权根之外：拒绝（与 fs_* 同一口径）。
+    let outside = h.tmp.join("outside.mp4");
+    std::fs::write(&outside, b"secret").unwrap();
+    let (status, _, body) = send(
+        &h.router,
+        with_bearer(
+            get(&format!(
+                "/api/media?path={}",
+                query_encode(outside.to_string_lossy().as_ref())
+            )),
+            &token,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(
+        String::from_utf8_lossy(&body).contains("未获用户授权"),
+        "实际错误：{}",
+        String::from_utf8_lossy(&body)
+    );
+
+    // 未认证：401（cookie 会由 <video src> 自动带上，但没会话就不该读）。
+    let (status, _, _) = send(&h.router, get(&url)).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn trusted_host_leaves_acp_tier_unpinned() {
+    // 与 `config::apply_trusted_host` 同源：可信宿主下 `sys_info` 必须报「没钉」，
+    // 否则设置页的档位选择器仍然是灰的（钳制在 `policy::overlay_args` 里是同一条判据）。
+    let h = harness_with("trusted-unpinned", |config, _| {
+        config.trusted_host = true;
+        config.tier = None;
+    });
+    let token = login(&h.router, PASSWORD).await;
+    let (status, _, body) = send(
+        &h.router,
+        with_bearer(command_req("sys_info", Value::Null), &token),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let info = json_body(&body);
+    assert!(info["pinnedTier"].is_null(), "不钉时档位应为 null");
 }
 
 #[tokio::test]
@@ -304,9 +530,7 @@ async fn fs_read_binary_returns_octet_stream() {
 
 #[tokio::test]
 async fn frozen_allowlist_ignores_db_enabled_programs() {
-    let h = harness_with("frozen", |config, _| {
-        config.sandbox = Some("off".to_string());
-    });
+    let h = harness("frozen");
     // 模拟「DB 被写入了启用的自配后端」：直写 DB，绕过被禁的 db_agents_sync。
     h.state
         .ctx
@@ -346,7 +570,6 @@ async fn frozen_allowlist_ignores_db_enabled_programs() {
 #[tokio::test]
 async fn configured_allowlist_permits_program() {
     let h = harness_with("allowlisted", |config, _| {
-        config.sandbox = Some("off".to_string());
         config.agent_programs = vec!["gw-allowlisted-test-agent".to_string()];
     });
     let token = login(&h.router, PASSWORD).await;
@@ -528,12 +751,11 @@ async fn office_host_info_reports_configured_frame_origins() {
 
 /// `sys_info` 在服务端可调，且回传的钉住事实与配置同源。
 ///
-/// 渲染端据此把沙盒/档位卡置灰并说明 —— 所以这里断的是「配置钉了什么就报什么」，
+/// 渲染端据此把档位卡置灰并说明 —— 所以这里断的是「配置钉了什么就报什么」，
 /// 不是桌面常量。托盘在 headless 恒不可用。
 #[tokio::test]
 async fn sys_info_reports_config_pinned_facts() {
     let h = harness_with("sys-info-pinned", |config, _tmp| {
-        config.sandbox = Some("fs".to_string());
         config.tier = Some("read-only".to_string());
     });
     let token = login(&h.router, PASSWORD).await;
@@ -544,7 +766,6 @@ async fn sys_info_reports_config_pinned_facts() {
     .await;
     assert_eq!(status, StatusCode::OK);
     let info = json_body(&body);
-    assert_eq!(info["pinnedSandbox"], json!(true), "配置钉了沙箱要如实报");
     assert_eq!(info["pinnedTier"], json!("read-only"));
     assert_eq!(info["trayAvailable"], json!(false), "headless 没有托盘");
 }

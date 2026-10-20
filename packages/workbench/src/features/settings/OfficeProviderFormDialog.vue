@@ -10,7 +10,13 @@
  * 是最难查的一类问题。
  */
 import { ref, watch } from "vue";
-import { OFFICE_PROVIDER_KINDS, type OfficeProviderConfig, type OfficeProviderKind, type OfficeRecipe } from "@greywork/shell";
+import {
+  OFFICE_PROVIDER_KINDS,
+  type OfficeOAuthConfig,
+  type OfficeProviderConfig,
+  type OfficeProviderKind,
+  type OfficeRecipe,
+} from "@greywork/shell";
 import CloseIcon from "@/features/shared/Icon.vue";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 
@@ -24,6 +30,8 @@ export interface OfficeProviderDraftPayload {
   docsUrl: string;
   /** 留空 = 该服务商不做云端上传。 */
   recipe?: OfficeRecipe;
+  /** 留空 = 该服务商不走扫码授权（预览仍可走本地 viewer）。 */
+  oauth?: OfficeOAuthConfig;
 }
 
 const props = defineProps<{
@@ -53,6 +61,13 @@ const draft = ref({
   contentType: "",
   credentialHeader: "",
   viewUrlPointer: "",
+  // OAuth：六项各自独立，填全（clientId + redirectUri）才成立。
+  oauthClientId: "",
+  oauthClientSecretEnv: "",
+  oauthRedirectUri: "",
+  oauthScope: "",
+  oauthAuthorizeUrl: "",
+  oauthTokenUrl: "",
 });
 const localError = ref<string | null>(null);
 
@@ -73,6 +88,12 @@ function reset(): void {
     contentType: entry?.recipe?.contentType ?? "",
     credentialHeader: entry?.recipe?.credentialHeader ?? "",
     viewUrlPointer: entry?.recipe?.viewUrlPointer ?? "",
+    oauthClientId: entry?.oauth?.clientId ?? "",
+    oauthClientSecretEnv: entry?.oauth?.clientSecretEnv ?? "",
+    oauthRedirectUri: entry?.oauth?.redirectUri ?? "",
+    oauthScope: entry?.oauth?.scope ?? "",
+    oauthAuthorizeUrl: entry?.oauth?.authorizeUrl ?? "",
+    oauthTokenUrl: entry?.oauth?.tokenUrl ?? "",
   };
   localError.value = null;
 }
@@ -119,6 +140,31 @@ function save(): void {
     if (credentialHeader) recipe.credentialHeader = credentialHeader;
   }
 
+  // OAuth 配置：与配方同一哲学 —— 填全或留空。六项里填了任一项，就要求 clientId 与回调地址
+  // 齐全：缺 clientId 换不了 token，缺回调地址授权页会直接拒绝，半填只会在点「扫码授权」时才炸。
+  const oauthClientId = draft.value.oauthClientId.trim();
+  const oauthRedirectUri = draft.value.oauthRedirectUri.trim();
+  const oauthSecretEnv = draft.value.oauthClientSecretEnv.trim();
+  const oauthScope = draft.value.oauthScope.trim();
+  const oauthAuthorizeUrl = draft.value.oauthAuthorizeUrl.trim();
+  const oauthTokenUrl = draft.value.oauthTokenUrl.trim();
+  let oauth: OfficeOAuthConfig | undefined;
+  if (oauthClientId || oauthRedirectUri || oauthSecretEnv || oauthScope || oauthAuthorizeUrl || oauthTokenUrl) {
+    if (!oauthClientId) {
+      localError.value = "授权配置缺 clientId（开放平台应用的 client_id）";
+      return;
+    }
+    if (!oauthRedirectUri) {
+      localError.value = "授权配置缺回调地址（须与开放平台登记值逐字一致）";
+      return;
+    }
+    oauth = { clientId: oauthClientId, redirectUri: oauthRedirectUri };
+    if (oauthSecretEnv) oauth.clientSecretEnv = oauthSecretEnv;
+    if (oauthScope) oauth.scope = oauthScope;
+    if (oauthAuthorizeUrl) oauth.authorizeUrl = oauthAuthorizeUrl;
+    if (oauthTokenUrl) oauth.tokenUrl = oauthTokenUrl;
+  }
+
   // 内嵌域名会被拿去比对宿主 CSP 白名单，写错的表现是「预览被判成不可内嵌」，
   // 所以这里先按 origin 形态粗筛一道（精确校验在宿主侧，那里还会归一化）。
   const frameOrigin = draft.value.frameOrigin.trim();
@@ -135,7 +181,10 @@ function save(): void {
     credentialEnv: draft.value.credentialEnv.trim(),
     frameOrigin,
     docsUrl: draft.value.docsUrl.trim(),
-    ...(recipe ? { recipe } : {}),
+    // 对象字段也**一律带上**（可为 undefined）：父级是 `{ ...current, ...payload }` 覆盖写，
+    // 不带键就清不掉已有配置 —— 用户把配方/授权字段全删了却「还在」，正是最难查的一类问题。
+    recipe,
+    oauth,
   });
 }
 
@@ -225,6 +274,68 @@ const monoClass = `${inputClass} font-mono text-[12px]`;
             placeholder="https://open.example.com/docs/"
           />
         </label>
+
+        <div class="rounded-[calc(10px*var(--gw-radius-scale))] border border-line bg-panel-2 p-3">
+          <div class="mb-2 text-[12px] font-medium text-foreground">扫码授权（OAuth）</div>
+          <p class="mb-2.5 text-[10.5px] leading-relaxed text-dim2">
+            留空 = 该服务商不走扫码授权。填了就要 clientId 与回调地址齐全 —— 半填的配置会被整条丢弃。密钥只填环境变量名，值由宿主读。
+          </p>
+          <div class="flex flex-col gap-2">
+            <label class="flex flex-col gap-1">
+              <span class="text-[11px] text-dim2">client_id</span>
+              <input
+                v-model="draft.oauthClientId"
+                data-testid="office-provider-oauth-client-id"
+                :class="monoClass"
+                placeholder="开放平台应用的 client_id"
+              />
+            </label>
+            <div class="flex gap-2">
+              <label class="flex min-w-0 flex-1 flex-col gap-1">
+                <span class="text-[11px] text-dim2">回调地址（redirect_uri）</span>
+                <input
+                  v-model="draft.oauthRedirectUri"
+                  data-testid="office-provider-oauth-redirect-uri"
+                  :class="monoClass"
+                  placeholder="https://localhost/oauth/callback"
+                />
+              </label>
+              <label class="flex min-w-0 flex-1 flex-col gap-1">
+                <span class="text-[11px] text-dim2">密钥环境变量</span>
+                <input
+                  v-model="draft.oauthClientSecretEnv"
+                  data-testid="office-provider-oauth-secret-env"
+                  :class="monoClass"
+                  placeholder="DOCS_CLIENT_SECRET"
+                />
+              </label>
+            </div>
+            <div class="flex gap-2">
+              <label class="flex min-w-0 flex-1 flex-col gap-1">
+                <span class="text-[11px] text-dim2">授权端点（留空走官方）</span>
+                <input
+                  v-model="draft.oauthAuthorizeUrl"
+                  data-testid="office-provider-oauth-authorize-url"
+                  :class="monoClass"
+                  placeholder="https://docs.qq.com/oauth/v2/authorize"
+                />
+              </label>
+              <label class="flex min-w-0 flex-1 flex-col gap-1">
+                <span class="text-[11px] text-dim2">换 token 端点（留空走官方）</span>
+                <input
+                  v-model="draft.oauthTokenUrl"
+                  data-testid="office-provider-oauth-token-url"
+                  :class="monoClass"
+                  placeholder="https://docs.qq.com/oauth/v2/token"
+                />
+              </label>
+            </div>
+            <label class="flex flex-col gap-1">
+              <span class="text-[11px] text-dim2">scope（留空 = all）</span>
+              <input v-model="draft.oauthScope" data-testid="office-provider-oauth-scope" :class="monoClass" placeholder="all" />
+            </label>
+          </div>
+        </div>
 
         <div class="rounded-[calc(10px*var(--gw-radius-scale))] border border-line bg-panel-2 p-3">
           <div class="mb-2 text-[12px] font-medium text-foreground">上传取件配方</div>

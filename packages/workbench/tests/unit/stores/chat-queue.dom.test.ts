@@ -1,5 +1,5 @@
 // M5 发送队列：入队 / 移除 / 清空 / 手动补发 / auto 回合结束自动补发。
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import { nextTick } from "vue";
 import { useChatStore } from "@/stores/chat";
@@ -80,6 +80,38 @@ describe("chat 发送队列（M5）", () => {
     chat.busy = false;
     await nextTick();
     expect(chat.commandQueue.length).toBe(1);
+    chat.busy = false;
+  });
+
+  it("注入派发器后：补发走注入的派发器，不再走本地 LLM 管线", async () => {
+    const chat = useChatStore();
+    const dispatch = vi.fn();
+    chat.setQueueDispatch(dispatch);
+    // 会话 store 会从 localStorage 恢复，消息数可能非 0：比对增量而不是「有没有 user 消息」。
+    const before = chat.threads[chat.activeThreadId]?.length ?? 0;
+    chat.enqueueCommand("交给 ACP");
+    chat.busy = true;
+    chat.busy = false;
+    await nextTick();
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(dispatch).toHaveBeenCalledWith("交给 ACP", [], []);
+    // 没走 submitText：本地会话不因这次补发新增任何消息（这正是 ACP 被串到本地 LLM 的症状）
+    expect(chat.threads[chat.activeThreadId]?.length ?? 0).toBe(before);
+    chat.setQueueDispatch(null);
+    chat.busy = false;
+  });
+
+  it("随队列入队的选区评论补发时一并透传（不丢指代）", async () => {
+    const chat = useChatStore();
+    const dispatch = vi.fn();
+    chat.setQueueDispatch(dispatch);
+    const comments = [{ id: "c1", quote: "原句", note: "改这里", createdAt: 1 }];
+    chat.enqueueCommand("补一句", [], comments);
+    chat.busy = true;
+    chat.busy = false;
+    await nextTick();
+    expect(dispatch).toHaveBeenCalledWith("补一句", [], comments);
+    chat.setQueueDispatch(null);
     chat.busy = false;
   });
 });

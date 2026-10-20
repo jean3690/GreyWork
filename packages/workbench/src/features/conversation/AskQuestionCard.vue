@@ -90,33 +90,36 @@ function submit(): void {
     v-if="questions.length"
     data-testid="ask-card"
     :data-settled="settled"
-    class="flex flex-col gap-2.5 rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel-2 p-3"
+    :class="
+      settled
+        ? 'flex flex-col gap-0.5'
+        : 'flex flex-col gap-2.5 rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel-2 p-3'
+    "
   >
-    <div class="flex items-center justify-between gap-2">
+    <!-- 活跃态头部：等用户动手的卡，面板与标题都给足 -->
+    <div v-if="!settled" class="flex items-center justify-between gap-2">
       <span class="flex min-w-0 items-center gap-1.5 text-[12px] font-medium text-foreground">
         <Icon name="message" :size="13" class="shrink-0 text-cyan" />
         {{ t("chatView.ask.title") }}
       </span>
-      <span
-        v-if="settled"
-        data-testid="ask-answered-badge"
-        class="flex h-5 shrink-0 items-center gap-1 rounded-full bg-mint/10 px-2 text-[10.5px] text-mint"
-      >
-        <Icon name="check-one" :size="10" />
-        {{ t("chatView.ask.answered") }}
-      </span>
     </div>
 
-    <!-- 只读态：列出当时的作答 -->
-    <ul v-if="settled" class="m-0 flex list-none flex-col gap-1.5" data-testid="ask-card-answered">
-      <li v-for="answer in answers" :key="answer.question" class="flex items-start gap-1.5 text-[12px] leading-relaxed">
-        <Icon name="check" :size="11" class="mt-[3px] shrink-0 text-mint" />
-        <span class="min-w-0 text-dim [overflow-wrap:anywhere]">{{ formatAnswerLine(answer) }}</span>
-      </li>
-    </ul>
+    <!-- 只读态：与权限留痕同款的细条组。作答记录回看即可，不再撑面板占消息流 -->
+    <div v-else class="flex flex-col gap-0.5">
+      <div class="flex items-center gap-1.5 text-[11.5px] text-dim2">
+        <Icon name="check-one" :size="11" class="flex-none text-mint" />
+        <span data-testid="ask-answered-badge">{{ t("chatView.ask.answered") }}</span>
+      </div>
+      <ul class="m-0 flex list-none flex-col gap-0.5" data-testid="ask-card-answered">
+        <li v-for="answer in answers" :key="answer.question" class="flex items-start gap-1.5 text-[11.5px] leading-relaxed">
+          <Icon name="check" :size="10" class="mt-[3px] shrink-0 text-mint" />
+          <span class="min-w-0 text-dim [overflow-wrap:anywhere]">{{ formatAnswerLine(answer) }}</span>
+        </li>
+      </ul>
+    </div>
 
     <!-- 作答态 -->
-    <div v-else class="flex flex-col gap-3">
+    <div v-if="!settled" class="flex flex-col gap-3">
       <div v-for="(question, index) in questions" :key="index" class="flex flex-col gap-1.5" :data-testid="`ask-question-${index}`">
         <div class="flex items-baseline gap-1.5">
           <span v-if="question.header" class="shrink-0 rounded-full bg-panel px-1.5 text-[10px] text-dim2">{{ question.header }}</span>

@@ -5,7 +5,7 @@
  * `permission-request` 交给它弹卡，用户点选 / 超时后它回传宿主并留痕；runtime 只
  * 保留会话生命周期与事件路由。
  */
-import type { AcpPermissionRequestPayload } from "@greywork/acp";
+import type { AcpPermissionOptionInfo, AcpPermissionRequestPayload } from "@greywork/acp";
 // 走 ./permissions 子路径而不是包根：那是无依赖的纯分类层。包根会连带拉起 client.ts
 // （@tauri-apps/api / ACP SDK），而权限分类在测试里必须能独立于传输层加载。
 import { classifyAcpPermission, safeAllowOnceId } from "@greywork/acp/permissions";
@@ -19,11 +19,29 @@ import type { PermissionTrace } from "../../types";
 /** 权限确认截止窗口（ms）：与宿主 PERMISSION_CONFIRM_TIMEOUT 同一 120s。 */
 const PERMISSION_TIMEOUT_MS = 120_000;
 
+/**
+ * 宿主决策载荷的最小子集：`permission-request` / `permission-auto` / `permission-blocked`
+ * 三种事件都满足（blocked 不带 options，auto 带 chosen）。
+ */
+export interface HostDecisionPayload {
+  toolCallId: string;
+  title?: string | null;
+  kind: string;
+  locations?: string[];
+  rawInput?: unknown;
+  /** 宿主已选定的 optionId（仅 permission-auto）。 */
+  chosen?: string | null;
+  /** 选项清单（permission-request / permission-auto；blocked 没有）。 */
+  options?: AcpPermissionOptionInfo[];
+}
+
 export interface PermissionGateApi {
   /** 用户此前对该类别选过「始终允许」时返回免问直答的 optionId；undefined = 未记住，照常弹卡。 */
   rememberedOptionId(payload: AcpPermissionRequestPayload): string | undefined;
   /** 免问直答：留痕 + 回传宿主（不弹卡）。 */
   autoRespond(payload: AcpPermissionRequestPayload, optionId: string): Promise<void>;
+  /** 宿主在请求到达用户前替它做的决定（按档位自动放行 / 拦截）：只留痕，不弹卡、不回传。 */
+  recordHostDecision(payload: HostDecisionPayload, source: "auto" | "blocked", reason?: PermissionTrace["reason"]): void;
   /** 弹卡：置待决请求并起 120s 镜像超时。 */
   arm(payload: AcpPermissionRequestPayload): void;
   /** 统一清场（respondPermission / 断开 / 切后端 / 重启）。 */
@@ -78,9 +96,10 @@ export function createPermissionGate(state: AgentStoreState): PermissionGateApi 
 
   /** 权限载荷 + 裁决结果 → 留痕记录（消息流里那条只读卡）。 */
   function permissionTrace(
-    payload: AcpPermissionRequestPayload,
+    payload: HostDecisionPayload,
     choice: string | null,
     source: PermissionTrace["source"],
+    reason?: PermissionTrace["reason"],
   ): PermissionTrace {
     return {
       toolCallId: payload.toolCallId,
@@ -90,6 +109,7 @@ export function createPermissionGate(state: AgentStoreState): PermissionGateApi 
       command: permissionCommand(payload.rawInput),
       choice,
       source,
+      reason,
       decidedAt: Date.now(),
     };
   }
@@ -98,6 +118,18 @@ export function createPermissionGate(state: AgentStoreState): PermissionGateApi 
   function writePermissionTrace(trace: PermissionTrace): void {
     if (!state.locals.acpStream || !state.locals.acpThreadId) return;
     state.chat.setPermissionTrace(trace, state.locals.acpStream.id, state.locals.acpThreadId);
+  }
+
+  /**
+   * 宿主在请求到达用户前就替它做了决定：按档位自动放行（`auto`）/ 拦截（`blocked`）。
+   *
+   * 只留痕、不回传、不弹卡 —— 宿主已经决定了。与 `autoRespond` 不同（那条是用户此前选了
+   * 「始终允许」，前端代答并回传宿主）。统一成留痕卡，回看时能解释「这次为什么没问我」；
+   * `chosen` 是 optionId，这里换成用户看得懂的选项名。
+   */
+  function recordHostDecision(payload: HostDecisionPayload, source: "auto" | "blocked", reason?: PermissionTrace["reason"]): void {
+    const choice = payload.chosen ? (payload.options?.find((option) => option.optionId === payload.chosen)?.name ?? payload.chosen) : null;
+    writePermissionTrace(permissionTrace(payload, choice, source, reason));
   }
 
   /**
@@ -161,6 +193,7 @@ export function createPermissionGate(state: AgentStoreState): PermissionGateApi 
   return {
     rememberedOptionId,
     autoRespond,
+    recordHostDecision,
     arm: (payload) => {
       pendingPermission.value = payload;
       armTimer();

@@ -3,7 +3,7 @@
  * MCP 调用还要看得见「是哪台外部服务器」——折叠态也不能藏起来。
  */
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { mount } from "@vue/test-utils";
 import ToolTimeline from "@/features/conversation/ToolTimeline.vue";
 import { i18n } from "@/i18n";
@@ -149,6 +149,66 @@ describe("ToolTimeline", () => {
     expect(wrapper.find('[data-testid="tool-change-stat"]').exists()).toBe(false);
   });
 
+  it("运行中：头部进度旁显示实时总跨度，秒表推进读数跟着走", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(T + 1000);
+    const wrapper = render([act({ toolCallId: "a", kind: "read", path: "a.ts", status: "in_progress", finishedAt: null, startedAt: T })]);
+    // 进度数字与实时跨度并存：一个答「还剩几个」，一个答「已经跑了多久」
+    expect(wrapper.get('[data-testid="tool-progress"]').text()).toBe("0/1");
+    expect(wrapper.get('[data-testid="tool-span"]').text()).toBe("1.0s");
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(wrapper.get('[data-testid="tool-span"]').text()).toBe("2.0s");
+  });
+
+  it("飞行中的行也显示实时耗时（不再是只有结算后才有时读数）", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(T + 2000);
+    const wrapper = render([
+      act({ toolCallId: "b", kind: "execute", command: "pnpm test", status: "in_progress", finishedAt: null, startedAt: T + 500 }),
+    ]);
+    // 运行中自动展开，行内直接可见
+    expect(wrapper.get('[data-testid="tool-row-duration"]').text()).toBe("1.5s");
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(wrapper.get('[data-testid="tool-row-duration"]').text()).toBe("2.5s");
+  });
+
+  it("结算后折叠头瘦身：一条安静的工具日志行（无标题、无完成徽标）", () => {
+    const wrapper = render([act({ toolCallId: "a", kind: "read", path: "a.ts" })]);
+    const text = wrapper.get('[data-testid="tool-timeline"]').text();
+    expect(text).toContain("Read 1");
+    expect(text).not.toContain("完成");
+    expect(text).not.toContain("工具");
+  });
+
+  it("失败仍保留状态徽标（失败必须被看见，不能跟着一起瘦掉）", () => {
+    const wrapper = render([act({ toolCallId: "f1", kind: "read", path: "a.ts", status: "failed", error: "boom" })]);
+    expect(wrapper.get('[data-testid="tool-timeline"]').text()).toContain("失败");
+  });
+
+  it("调用落定时播报一句（完成/失败 + 对象）；历史批量挂载不补播", async () => {
+    const running = act({ toolCallId: "b", kind: "execute", command: "pnpm test", status: "in_progress", finishedAt: null });
+    const wrapper = render([act({ toolCallId: "a", kind: "read", path: "a.ts", startedAt: T, finishedAt: T + 100 }), running]);
+    // 挂载即有已完成项：不补播（否则切会话会被历史结算连环喊）
+    expect(wrapper.get('[role="status"]').text()).toBe("");
+
+    await wrapper.setProps({
+      activities: [
+        act({ toolCallId: "a", kind: "read", path: "a.ts", startedAt: T, finishedAt: T + 100 }),
+        { ...running, status: "completed", finishedAt: T + 300 },
+      ],
+    });
+    expect(wrapper.get('[role="status"]').text()).toBe("工具调用完成：pnpm test");
+
+    await wrapper.setProps({
+      activities: [
+        act({ toolCallId: "a", kind: "read", path: "a.ts", startedAt: T, finishedAt: T + 100 }),
+        { ...running, status: "completed", finishedAt: T + 300 },
+        act({ toolCallId: "c", kind: "execute", command: "pnpm build", status: "failed", finishedAt: T + 900, error: "boom" }),
+      ],
+    });
+    expect(wrapper.get('[role="status"]').text()).toBe("工具调用失败：pnpm build");
+  });
+
   it("结算后显示任务级总耗时（不显示进度数字）", () => {
     const wrapper = render([
       act({ toolCallId: "a", kind: "read", path: "a.ts", startedAt: T, finishedAt: T + 900 }),
@@ -157,4 +217,15 @@ describe("ToolTimeline", () => {
     expect(wrapper.find('[data-testid="tool-progress"]').exists()).toBe(false);
     expect(wrapper.get('[data-testid="tool-span"]').text()).toBe("1.5s");
   });
+
+  it("全结算后秒表停走：跨度读数冻结（不再每秒重渲染）", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(T + 1000);
+    const wrapper = render([act({ toolCallId: "a", kind: "read", path: "a.ts", startedAt: T, finishedAt: T + 800 })]);
+    expect(wrapper.get('[data-testid="tool-span"]').text()).toBe("800ms");
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(wrapper.get('[data-testid="tool-span"]').text()).toBe("800ms");
+  });
 });
+
+afterEach(() => vi.useRealTimers());

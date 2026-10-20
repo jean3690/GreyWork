@@ -61,7 +61,7 @@ function store() {
 }
 
 beforeEach(() => {
-  h.tauri = false;
+  vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "browser-preview" });
   h.ensureDir.mockReset();
   h.resolveWorkspaceDir.mockReset();
   h.resolveWorkspaceDir.mockResolvedValue("/home/test/.greyWork");
@@ -88,7 +88,7 @@ describe("ensureRemoteWorkspaceFolder", () => {
   });
 
   it("桌面端首次绑定默认 remote 文件夹", async () => {
-    h.tauri = true;
+    vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "server" });
     const target = store();
     await expect(ensureRemoteWorkspaceFolder(target)).resolves.toBe("/home/test/.greyWork/remote");
     expect(h.ensureDir).toHaveBeenCalledWith("/home/test/.greyWork/remote");
@@ -96,7 +96,7 @@ describe("ensureRemoteWorkspaceFolder", () => {
   });
 
   it("已有绑定时不重复创建", async () => {
-    h.tauri = true;
+    vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "server" });
     const target = store();
     const record = ensureRemoteWorkspace(target);
     record.folder = "/custom/remote";

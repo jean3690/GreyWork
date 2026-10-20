@@ -4,7 +4,7 @@
 //! `greywork_host::commands`），本 crate 只补三样宿主能力：
 //! - **传输**：HTTP 命令端点 + WebSocket 事件总线（[`ServerHost`] 把事件推上广播通道）；
 //! - **内置登录**：密码 → 会话 cookie / Bearer；
-//! - **安全策略**：冻结 agent 白名单、拒绝 `db_agents_sync`、夹紧 sandbox/tier、
+//! - **安全策略**：冻结 agent 白名单、拒绝 `db_agents_sync`、夹紧 tier、
 //!   预置授权根（见 [`policy`] 与 [`config`]）。
 //!
 //! 与桌面壳对称：桌面用 Tauri IPC + `TauriHost`，服务端用 HTTP/WS + [`ServerHost`]，
@@ -107,6 +107,26 @@ pub async fn run() -> Result<(), String> {
     // 补一次登录 shell PATH 解析（容器里通常失败即回退继承的 PATH，无副作用）。
     greywork_host::process_guard::init_login_path();
 
+    // 可信宿主是「本机」语义，与「网络暴露」互斥。配错组合必须喊出来 —— 它等于把
+    // 「改 agent 后端目录 / 自选沙箱档位」的能力交给网络上的任何客户端。
+    if config.trusted_host {
+        if bind_is_loopback(&config.bind) {
+            greywork_host::log::info(
+                "server",
+                "可信宿主：解除档位钳制、放行 db_agents_sync、acp_start 改读 DB 后端目录",
+            );
+        } else {
+            greywork_host::log::warn(
+                "server",
+                format!(
+                    "GREYWORK_TRUSTED_HOST 已开启但监听 {} 为非环回地址：这会把「可改 agent 后端目录 / \
+                     自选沙箱与权限档位」的能力交给网络上的任何客户端。请关闭该开关，或把监听改回环回。",
+                    config.bind
+                ),
+            );
+        }
+    }
+
     // 授权面：默认根 + 配置预置根。headless 没有原生选择器，运行期不能新增根。
     let default_root = greywork_host::store_fs::default_root(&home)?;
     let access = greywork_host::workspace_fs::WorkspaceFsAccess::new(
@@ -140,7 +160,7 @@ pub async fn run() -> Result<(), String> {
     // 调度器：宿主执行自动化。
     //
     // `GREYWORK_AUTOMATION_HOST_PRIMARY=1` 时阈值归零 —— 宿主是**主执行者**，到点即跑，
-    // 不需要任何浏览器/桌面端在场；这才是「定时任务放到服务器上，不用一直开着电脑」的语义。
+    // 不需要任何浏览器/桌面端在场；这才是「自动化任务放到服务器上，不用一直开着电脑」的语义。
     // 不配时与桌面端同语义：宿主只是替补，等渲染端 2 分钟不来才接手（用户开着浏览器用 Web UI
     // 的形态下，让服务端抢跑会让任务在用户眼前"消失"到另一个执行者）。
     // 两种阈值都走 `automation_due_finish` 的行级原子认领，双执行防护一致。
@@ -152,7 +172,7 @@ pub async fn run() -> Result<(), String> {
     if config.automation_host_primary {
         greywork_host::log::info(
             "scheduler",
-            "定时任务：宿主为主执行者（到点即执行，无需渲染端在场）",
+            "自动化任务：宿主为主执行者（到点即执行，无需渲染端在场）",
         );
     }
     let ticker_host = Arc::clone(&host);
@@ -168,7 +188,11 @@ pub async fn run() -> Result<(), String> {
             workspace: Arc::new(access),
             acp: Arc::new(greywork_host::acp_host::AcpHost::default()),
             llm: Arc::new(greywork_host::llm::LlmHost::default()),
+            agent: Arc::new(greywork_host::llm::LlmAgentHost::default()),
             rag: Arc::new(greywork_host::rag::RagHost::default()),
+            terminal: Arc::new(greywork_host::terminal::TerminalHost::new(Arc::clone(
+                &host,
+            ))),
         }),
         channels: Arc::new(Channels {
             wechat: Arc::new(greywork_host::wechat::WechatHost::default()),
@@ -180,18 +204,26 @@ pub async fn run() -> Result<(), String> {
             wecom: Arc::new(greywork_host::wecom::WecomHost::default()),
         }),
         // 冻结白名单：来自配置，不读 DB（DB 可被客户端改写，是 RCE 面）。
+        // 可信本机宿主下再并上 DB 里启用的后端目录（`include_db_agent_programs`）。
         agent_programs: Arc::new(config.agent_programs.clone()),
+        include_db_agent_programs: config.trusted_host,
         // 本服务端 CSP 的 frame-src 白名单：与 middleware 拼策略用的是同一份配置，
         // 这样 `office_host_info` 回给渲染端的白名单就是**真的**（而非桌面常量）。
         frame_origins: Arc::new(config.frame_origins.clone()),
-        // 宿主侧事实：版本是服务端自己的 crate 版本；沙箱/档位的钉住判定与
+        // 宿主侧事实：版本是服务端自己的 crate 版本；档位的钉住判定与
         // `policy::overlay_args` 的覆盖条件同源（配置有值才算钉住）。
+        //
+        // `tray_available` 恒 false 是**如实**的：托盘属于壳，headless server 没有它。
+        // 但 Electron 壳也走 server 态，所以渲染端有原生壳时会改问壳（见 workbench 的
+        // `lib/system-backend.ts`）—— 这里不要试图去猜壳的托盘状态。
         host_facts: greywork_host::sys::HostFacts {
             version: env!("CARGO_PKG_VERSION").to_string(),
             tray_available: false,
-            pinned_sandbox: config.sandbox.is_some(),
             pinned_tier: config.tier.clone(),
         },
+        // LibreOffice headless：显式配置优先，否则探测 PATH（Docker 镜像内 apt 装的
+        // `/usr/bin/soffice` 即在 PATH 上）。探测不到时 Office 预览回落原生解析器。
+        soffice: greywork_host::office::SofficeTool::discover(config.soffice_path.as_deref()),
     });
 
     let state = AppState {
@@ -230,7 +262,44 @@ fn generated_password_banner(plaintext: &str) -> String {
     )
 }
 
-/// 优雅退出：Ctrl-C 或（unix）SIGTERM —— 容器 stop 发的是 SIGTERM，必须处理。
+/// 是否按「stdin 关闭即退出」运行（`GREYWORK_EXIT_ON_STDIN_EOF=1`，只有 Electron sidecar 会设）。
+fn exit_on_stdin_eof(value: Option<&str>) -> bool {
+    matches!(value, Some("1"))
+}
+
+/// 等 stdin 读到 EOF：`GREYWORK_EXIT_ON_STDIN_EOF=1` 时 stdin 是父进程（Electron 壳）持有的
+/// 管道，父进程一消失写端就关，这里随即返回。
+///
+/// 刻意用一根**普通线程**而不是 `tokio::io::stdin()`：后者内部走 blocking 池，读到一半被丢下
+/// 会让运行时退出时还等它，反而卡住收尾；普通线程在进程退出时直接随进程结束，不拖后腿。
+async fn stdin_closed() {
+    let (done, closed) = tokio::sync::oneshot::channel::<()>();
+    std::thread::spawn(move || {
+        use std::io::Read;
+        let mut stdin = std::io::stdin().lock();
+        let mut scratch = [0u8; 256];
+        loop {
+            // 管道里不会有内容：读到 0（EOF）或出错，都说明父进程没了。
+            match stdin.read(&mut scratch) {
+                Ok(0) | Err(_) => break,
+                Ok(_) => {}
+            }
+        }
+        let _ = done.send(());
+    });
+    let _ = closed.await;
+}
+
+/// 优雅退出：Ctrl-C、（unix）SIGTERM，或（sidecar 模式）父进程消失。
+///
+/// 「父进程消失」这一路是给 Electron sidecar 的：主进程被**强杀**时（WSLg 崩溃 → X 连接中断
+/// → Chromium `FATAL: Failed to shutdown` / SIGTRAP，或直接 SIGKILL）`before-quit` 不跑、
+/// SIGTERM 也不发，sidecar 就会变成孤儿，一直占着端口和数据目录 —— 下次启动只能顺延端口，
+/// origin 一变渲染层读到的就是另一份 localStorage，用户表现为「工作区/设置又没了」。故
+/// sidecar 以 `GREYWORK_EXIT_ON_STDIN_EOF=1` 拉起，父死子死（管道那端见 apps/electron 的
+/// `SIDECAR_STDIO`）。
+///
+/// 默认**不**启用：当守护进程 / 容器跑时 stdin 往往本就是已关闭的，无条件监听会一启动就退。
 async fn shutdown_signal() {
     let ctrl_c = async {
         let _ = tokio::signal::ctrl_c().await;
@@ -247,9 +316,18 @@ async fn shutdown_signal() {
     #[cfg(not(unix))]
     let terminate = std::future::pending::<()>();
 
+    let parent_gone = async {
+        if !exit_on_stdin_eof(std::env::var("GREYWORK_EXIT_ON_STDIN_EOF").ok().as_deref()) {
+            std::future::pending::<()>().await;
+        }
+        stdin_closed().await;
+        greywork_host::log::warn("server", "父进程已退出（stdin 关闭），sidecar 随之一并退出");
+    };
+
     tokio::select! {
         _ = ctrl_c => {}
         _ = terminate => {}
+        _ = parent_gone => {}
     }
     greywork_host::log::info("server", "收到退出信号，正在关闭");
 }
@@ -271,7 +349,17 @@ fn bind_is_loopback(bind: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::bind_is_loopback;
+    use super::{bind_is_loopback, exit_on_stdin_eof};
+
+    /// 「父死子死」必须显式开启：守护进程 / 容器跑时 stdin 常常本就是关的。
+    #[test]
+    fn stdin_eof_exit_is_opt_in() {
+        assert!(exit_on_stdin_eof(Some("1")));
+        assert!(!exit_on_stdin_eof(Some("0")));
+        assert!(!exit_on_stdin_eof(Some("true")));
+        assert!(!exit_on_stdin_eof(Some("")));
+        assert!(!exit_on_stdin_eof(None));
+    }
 
     #[test]
     fn loopback_binds_are_recognized() {

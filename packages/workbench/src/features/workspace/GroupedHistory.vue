@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import { basename, joinPath } from "@greywork/core";
 import { useSessionStore } from "@/stores/session";
 import { useWorkspaceStore } from "@/stores/workspace";
-import { groupSessions, type HistoryGroup } from "@/lib/grouped";
+import { groupSessions, type HistoryGroup, type SessionSort } from "@/lib/grouped";
 import { pickWorkspaceFolder } from "@/lib/workspace-picker";
 import { bindWorkspaceFolder } from "@/lib/workspace-bind";
 import Icon from "@/features/shared/Icon.vue";
@@ -24,6 +24,15 @@ import WorkspaceRowMenu from "@/features/workspace/WorkspaceRowMenu.vue";
  */
 const props = defineProps<{
   activeSessionId: string | null;
+  /**
+   * 不在此列表出现的会话 id（当前协作 run 的成员位会话由侧栏「协作运行」区嵌套展示）。
+   * 由 Sider 从 cowork store 算出后传入 —— 本组件不认识 cowork，保持只读会话 + 分组的纯投影。
+   */
+  excludeSessionIds?: ReadonlySet<string>;
+  /** 组内会话排序（转发给 groupSessions）；缺省 recent，完整 Sider 不传即保持现状。 */
+  sort?: SessionSort;
+  /** 只显示当前工作区那一行（极简侧栏的「筛选」）；缺省 false。 */
+  onlyActiveWorkspace?: boolean;
 }>();
 
 const emit = defineEmits<{ navigate: [path: string] }>();
@@ -33,8 +42,8 @@ const workspaceStore = useWorkspaceStore();
 const query = ref("");
 
 /** 行序取工作区声明顺序（刻意不按最近使用排）：切换工作区时行不会在脚下跳位。 */
-const groups = computed<HistoryGroup[]>(() =>
-  groupSessions({
+const groups = computed<HistoryGroup[]>(() => {
+  const all = groupSessions({
     workspaces: workspaceStore.workspaces,
     sessions: sessionStore.sessions.map((session) => ({
       id: session.id,
@@ -43,8 +52,12 @@ const groups = computed<HistoryGroup[]>(() =>
       workspaceId: session.workspaceId,
     })),
     keyword: query.value,
-  }),
-);
+    excludeIds: props.excludeSessionIds,
+    sort: props.sort,
+  });
+  // 「只看当前工作区」：保留当前那一行（兜底行认可 activeWorkspaceId === null，见 isActiveRow）。
+  return props.onlyActiveWorkspace ? all.filter(isActiveRow) : all;
+});
 
 /** 搜索态：折叠让位于命中（强制展开，收起按钮同步禁用）。 */
 const filtering = computed(() => query.value.trim().length > 0);

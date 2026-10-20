@@ -167,6 +167,15 @@ describe("PermissionCard · 只读留痕", () => {
     expect(wrapper.findAll("button")).toHaveLength(0);
   });
 
+  it("留痕是单行细条：类别、动作对象、裁决徽标同线呈现（不再撑成面板卡）", () => {
+    const wrapper = mountTrace(trace);
+
+    const row = wrapper.get('[data-testid="permission-trace"]');
+    expect(row.text()).toContain("修改文件");
+    expect(row.text()).toContain("/home/test/notes.md");
+    expect(row.get('[data-testid="permission-trace-badge"]').text()).toContain("允许一次");
+  });
+
   it("拒绝的留痕标「已拒绝」而不是空白 choice", () => {
     const wrapper = mountTrace({ ...trace, choice: null, source: "timeout" });
 
@@ -177,5 +186,16 @@ describe("PermissionCard · 只读留痕", () => {
     const wrapper = mountTrace({ ...trace, source: "auto" });
 
     expect(wrapper.get('[data-testid="permission-trace-badge"]').text()).toContain("始终允许");
+  });
+
+  it("宿主拦截的留痕按原因标徽标（只读档 / 越界 / 无允许项）", () => {
+    const outside = mountTrace({ ...trace, choice: null, source: "blocked", reason: "outside-workspace" });
+    expect(outside.get('[data-testid="permission-trace-badge"]').text()).toContain("工作区之外");
+
+    const readOnly = mountTrace({ ...trace, choice: null, source: "blocked", reason: "read-only" });
+    expect(readOnly.get('[data-testid="permission-trace-badge"]').text()).toContain("只读档");
+
+    const noOption = mountTrace({ ...trace, choice: null, source: "blocked", reason: "no-allow-option" });
+    expect(noOption.get('[data-testid="permission-trace-badge"]').text()).toContain("没有可放行的选项");
   });
 });

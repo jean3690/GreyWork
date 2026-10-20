@@ -17,7 +17,7 @@
  */
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { hostWindow } from "@greywork/host-ipc";
 import { browserBackend, normalizeBrowserUrl, openInSystemBrowser, type BrowserRect, type BrowserStateEvent } from "@/lib/browser-backend";
 import { isOverlayPresent, rectEquals, rectOf } from "@/lib/browser-bounds";
 import { usePreviewStore } from "@/stores/preview";
@@ -135,9 +135,11 @@ function openExternal(): void {
 /** OS 窗口焦点，不是 DOM blur —— 点进子 webview 会 blur 宿主文档，用 DOM 焦点会把
  * webview 藏在用户正要交互的那一刻。 */
 async function watchWindowFocus(): Promise<() => void> {
+  const host = hostWindow();
+  if (!host) return () => {};
   try {
-    return await getCurrentWindow().onFocusChanged((event) => {
-      windowFocused.value = event.payload;
+    return await host.onFocusChanged((focused) => {
+      windowFocused.value = focused;
       queueSync();
     });
   } catch {

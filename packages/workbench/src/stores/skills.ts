@@ -76,6 +76,40 @@ export function parseSkillFrontmatter(text: string): { name?: string; descriptio
   return out;
 }
 
+/** 读某技能目录 SKILL.md 的 frontmatter（读不到回落空对象）。 */
+async function readSkillMeta(skillDir: string): Promise<{ name?: string; description?: string }> {
+  try {
+    const text = await readTextFile(joinPath(skillDir, "SKILL.md"));
+    return parseSkillFrontmatter(text.slice(0, 32 * 1024));
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * 扫描任意 `<skillsDir>` 下的一层目录，读各 SKILL.md frontmatter 得到已安装技能清单。
+ *
+ * 抽成独立函数（而非 store 私有）：团队页要按**协作运行的工作区**列技能，
+ * 与设置页用的 `resolveWorkspaceRoot()` 不一定是同一个目录，不能让两边共用一份缓存。
+ * 目录不存在时返回空清单而不是报错。
+ */
+export async function scanSkills(dir: string): Promise<InstalledSkill[]> {
+  const entries = await listDir(dir);
+  const skills: InstalledSkill[] = [];
+  for (const entry of entries) {
+    if (entry.kind !== "directory" || !entry.origin) continue;
+    const meta = await readSkillMeta(entry.origin);
+    skills.push({
+      id: entry.name,
+      name: meta.name ?? entry.name,
+      description: meta.description,
+      dir: entry.origin,
+    });
+  }
+  skills.sort((a, b) => a.id.localeCompare(b.id));
+  return skills;
+}
+
 function isRecord(value: { ref?: unknown; skillId?: unknown; hash?: unknown; installedAt?: unknown }): boolean {
   return (
     typeof value?.ref === "string" &&
@@ -189,20 +223,7 @@ export const useSkillsStore = defineStore("skills", () => {
     }
     installedLoading.value = true;
     try {
-      const entries = await listDir(ws.dir);
-      const skills: InstalledSkill[] = [];
-      for (const entry of entries) {
-        if (entry.kind !== "directory" || !entry.origin) continue;
-        const meta = await readSkillMeta(entry.origin);
-        skills.push({
-          id: entry.name,
-          name: meta.name ?? entry.name,
-          description: meta.description,
-          dir: entry.origin,
-        });
-      }
-      skills.sort((a, b) => a.id.localeCompare(b.id));
-      installed.value = skills;
+      installed.value = await scanSkills(ws.dir);
     } catch (error) {
       // .agents/skills 尚不存在时 listDir 报错，视为空清单而不是故障
       installed.value = [];
@@ -211,15 +232,6 @@ export const useSkillsStore = defineStore("skills", () => {
       }
     } finally {
       installedLoading.value = false;
-    }
-  }
-
-  async function readSkillMeta(skillDir: string): Promise<{ name?: string; description?: string }> {
-    try {
-      const text = await readTextFile(joinPath(skillDir, "SKILL.md"));
-      return parseSkillFrontmatter(text.slice(0, 32 * 1024));
-    } catch {
-      return {};
     }
   }
 

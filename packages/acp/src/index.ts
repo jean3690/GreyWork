@@ -1,4 +1,4 @@
-export { createAcpClient, isTauriRuntime, desktopHomeDir } from "./client";
+export { createAcpClient, desktopHomeDir } from "./client";
 export { WebSocketTransport, RemoteAcpUnsupportedError } from "./client";
 export type { WebSocketTransportOptions } from "./client";
 export {
@@ -10,7 +10,7 @@ export {
   toPermissionPanelOptions,
 } from "./permissions";
 export type { AcpOptionKind, PermissionIntent, PermissionOperationKind, PermissionPanelOption, PermissionTier } from "./permissions";
-export { TauriIpcTransport } from "./tauri-transport";
+export { HostCommandTransport } from "./host-transport";
 export type {
   AcpAvailableCommand,
   AcpClient,
@@ -20,9 +20,10 @@ export type {
   AcpPermissionRequestPayload,
   AcpPromptResult,
   AcpPromptUnit,
-  AcpSandboxMode,
   AcpSessionConfigOption,
   AcpSessionInfo,
+  AcpSessionMode,
+  AcpSessionModeState,
   AcpSessionOpened,
   AcpTransport,
   McpProbeReport,

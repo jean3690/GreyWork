@@ -11,6 +11,7 @@ import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import Icon from "@/features/shared/Icon.vue";
 import ToolCallDetail from "@/features/conversation/ToolCallDetail.vue";
+import { useNow } from "@/lib/use-now";
 import {
   activityRowLabel,
   activityRowVerb,
@@ -91,6 +92,11 @@ const displayRows = computed(() =>
 const lifecycle = computed(() => aggregateLifecycle(props.activities));
 const summary = computed(() => aggregateSummary(props.activities, lifecycle.value));
 
+/** 运行中每秒推进：头部总跨度与飞行中行的「已耗时」都要实时走。
+ *  全结算后停表（timelineSpan / durationOf 回落静态值，读数不再变）。
+ *  必须定义在 lifecycle 之后 —— watch 的 immediate 求值会同步读它。 */
+const now = useNow(() => lifecycle.value === "running");
+
 /** 执行进度：已结算 / 全部（飞行中的实时计数，支持「3/7」式进度感知）。 */
 const progress = computed(() => {
   const total = props.activities.length;
@@ -107,8 +113,9 @@ const progressPct = computed(() => {
 /** 本条消息里的改动总量（+N/-N）；没有任何 diff 细节时为 null。 */
 const changeStat = computed(() => aggregateDiffStat(props.activities));
 
-/** 任务级总耗时：最早开始 → 最晚结束（不依赖单条调用的重叠时长）。 */
-const span = computed(() => timelineSpan(props.activities));
+/** 任务级总耗时：最早开始 → 最晚结束（不依赖单条调用的重叠时长）。
+ *  运行中按 now 实时折算（停跑的调用不会让读数回退）；全结算后为静态值。 */
+const span = computed(() => timelineSpan(props.activities, now.value));
 
 /** 本条消息里出现过的 MCP 服务器（去重保序）——折叠态也必须能看见。 */
 const mcpServers = computed(() => {
@@ -138,6 +145,30 @@ watch(
   },
   { immediate: true },
 );
+
+/** 最近一次落定的调用（finishedAt 最大者）。一批同时结算只认最新一条，播报不连环。 */
+const lastSettled = computed(() => {
+  let best: ToolActivity | null = null;
+  let bestAt = -1;
+  for (const activity of props.activities) {
+    const doneAt = activity.finishedAt;
+    if (doneAt == null || doneAt <= bestAt) continue;
+    best = activity;
+    bestAt = doneAt;
+  }
+  return best;
+});
+
+/** 结算播报（读屏专用）：飞行中的调用落定那一刻报一句「完成/失败：对象」。
+ *  watch 无 immediate —— 挂载即有的一批历史调用不补播：切会话、滚长列表都会
+ *  重挂时间线，补播会把历史结算连环喊一遍。live region 元素常驻，内容才换得进去。 */
+const settleAnnouncement = ref("");
+watch(lastSettled, (activity) => {
+  if (!activity) return;
+  const label = activityRowLabel(activity);
+  settleAnnouncement.value =
+    activity.status === "completed" ? t("chatView.a11y.toolDone", { label }) : t("chatView.a11y.toolFailed", { label });
+});
 </script>
 
 <template>
@@ -155,7 +186,10 @@ watch(
       @click="open = !open"
     >
       <Icon name="hammer" :size="13" class="flex-none text-dim2" />
-      <span class="flex-none font-medium">{{ t("chatView.tools.title") }}</span>
+      <!-- 标题与状态徽标只在非 done 态出现：结算后这条就是一条安静的工具日志行
+           （锤子 + 摘要 + 统计 + 跨度）， done 的绿徽标每消息一枚纯属 chrome；
+           失败 / 运行 / 等待仍保留徽标 —— 那才是需要被看见的状态。 -->
+      <span v-if="lifecycle !== 'done'" class="flex-none font-medium">{{ t("chatView.tools.title") }}</span>
       <span class="truncate text-dim2">{{ summary }}</span>
       <span v-if="changeStat" class="flex flex-none items-center gap-1 font-mono text-[10px] tabular-nums" data-testid="tool-change-stat">
         <span v-if="changeStat.added" class="text-mint">+{{ changeStat.added }}</span>
@@ -176,14 +210,21 @@ watch(
       >
         {{ progress.settled }}/{{ progress.total }}
       </span>
-      <span v-else-if="span != null" class="flex-none font-mono text-[10px] tabular-nums text-dim2" data-testid="tool-span">
+      <span v-if="span != null" class="flex-none font-mono text-[10px] tabular-nums text-dim2" data-testid="tool-span">
         {{ formatDuration(span) }}
       </span>
-      <span class="ml-auto flex h-4 flex-none items-center rounded-full px-1.5 text-[10px]" :class="STATUS_BADGE[lifecycle]">
+      <span
+        v-if="lifecycle !== 'done'"
+        class="ml-auto flex h-4 flex-none items-center rounded-full px-1.5 text-[10px]"
+        :class="STATUS_BADGE[lifecycle]"
+      >
         {{ statusText }}
       </span>
-      <Icon :name="open ? 'up' : 'down'" :size="12" class="flex-none text-dim2" />
+      <!-- ml-auto：done 态徽标缺席时把折叠指示钉在行尾，不跟着摘要左侧挤成一团 -->
+      <Icon :name="open ? 'up' : 'down'" :size="12" class="ml-auto flex-none text-dim2" />
     </button>
+    <!-- 结算播报（读屏专用）：常驻空区，调用落定时才写入内容 -->
+    <span class="sr-only" role="status">{{ settleAnnouncement }}</span>
     <!-- 运行进度条：2px，按已结算比例填充；结算后整条消失（不占视觉）。 -->
     <div v-if="lifecycle === 'running' && progress" class="h-0.5 w-full bg-amber/20" data-testid="tool-progressbar">
       <div class="h-full bg-amber transition-[width] duration-300" :style="{ width: `${progressPct}%` }" />
@@ -232,11 +273,12 @@ watch(
             class="ml-auto flex-none text-dim2"
           />
           <span
-            v-if="row.activity.finishedAt != null"
+            v-if="durationOf(row.activity, now) != null"
             class="flex-none font-mono text-[10px] text-dim2"
             :class="row.activity.detail ? '' : 'ml-auto'"
+            data-testid="tool-row-duration"
           >
-            {{ formatDuration(durationOf(row.activity)) }}
+            {{ formatDuration(durationOf(row.activity, now)) }}
           </span>
         </component>
         <p v-if="row.activity.error" class="m-0 pl-[18px] font-mono text-[10.5px] text-destructive [overflow-wrap:anywhere]">

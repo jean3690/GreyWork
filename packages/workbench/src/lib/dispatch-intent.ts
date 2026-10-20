@@ -12,13 +12,15 @@ import { useAgentStore } from "../stores/agent";
 import { useChatStore } from "../stores/chat";
 import { useRunsStore } from "../stores/runs";
 import { useSettingsStore } from "../stores/settings";
-import type { Attachment } from "../types";
+import type { Attachment, MessageComment } from "../types";
 
 export interface DispatchIntentOptions {
   /** 计划模式先挂计划卡，确认后才真正派发（只有对话页有这道门）。 */
   planGate?: boolean;
   /** 允许编排判定：纯文本命中编排意图则交给 planner 拆解，不进本会话消息流。 */
   allowOrchestrate?: boolean;
+  /** 选区评论：挂到本次消息上并随引用拼进提示词。 */
+  comments?: readonly MessageComment[];
 }
 
 export async function dispatchIntent(
@@ -30,14 +32,16 @@ export async function dispatchIntent(
   const chat = useChatStore();
   const settings = useSettingsStore();
 
+  const comments = options.comments ?? [];
+
   if (agent.routeToAcp) {
-    if (options.planGate && settings.planMode) agent.beginAcpPlan(text, attachments);
-    else await agent.dispatchToAcp(text, attachments);
+    if (options.planGate && settings.planMode) agent.beginAcpPlan(text, attachments, comments);
+    else await agent.dispatchToAcp(text, attachments, comments);
     return;
   }
 
-  // 编排只吃纯文本：planner 拆解出的子任务各建独立会话，附件无法随行。
-  if (options.allowOrchestrate && attachments.length === 0 && useRunsStore().maybeOrchestrate(text)) return;
+  // 编排只吃纯文本：planner 拆解出的子任务各建独立会话，附件与评论的指代都无法随行。
+  if (options.allowOrchestrate && attachments.length === 0 && comments.length === 0 && useRunsStore().maybeOrchestrate(text)) return;
 
-  chat.submitText(text, [...attachments]);
+  chat.submitText(text, [...attachments], comments);
 }

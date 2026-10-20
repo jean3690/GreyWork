@@ -39,7 +39,11 @@ pub struct CommandMetaView {
 }
 
 /// 列出全部命令元数据（含桌面专属与被禁命令，供前端灰显并说明）。
-pub async fn list_commands(_session: AuthSession) -> Json<Vec<CommandMetaView>> {
+pub async fn list_commands(
+    State(state): State<AppState>,
+    _session: AuthSession,
+) -> Json<Vec<CommandMetaView>> {
+    let trusted = state.config.trusted_host;
     Json(
         COMMANDS
             .iter()
@@ -51,7 +55,7 @@ pub async fn list_commands(_session: AuthSession) -> Json<Vec<CommandMetaView>> 
                 },
                 desktop_only: meta.desktop_only,
                 binary: meta.binary,
-                available: policy::is_available(meta),
+                available: policy::is_available(meta, trusted),
             })
             .collect(),
     )
@@ -76,7 +80,7 @@ pub async fn run_command(
             meta.name
         )));
     }
-    if policy::is_denied(meta.name) {
+    if policy::is_denied(meta.name, state.config.trusted_host) {
         return Err(ApiError::Forbidden(format!(
             "命令 {} 在服务端不可用",
             meta.name

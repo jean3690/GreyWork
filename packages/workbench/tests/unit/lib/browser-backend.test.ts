@@ -1,22 +1,23 @@
-// 内嵌浏览器的宿主通道（lib/browser-backend）。两个易错点钉死：
-// - URL 归一化里「本地服务补 http://」是一等用例 —— dev server 补 https 会 TLS 握手失败；
-// - 命令名与参数名必须和宿主 browser.rs 的 browser_* 一一对应，漂移了只有运行时才炸。
+// 内嵌浏览器的宿主通道（lib/browser-backend）。
+// 命令名 / 参数名 ↔ 宿主的映射现在收口在 @greywork/host-ipc 的 hostBrowser()（见其单测），
+// 这里只钉本模块自有的真逻辑：URL 归一化的「本地服务补 http://」一等用例，和系统浏览器回落。
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const hostIpc = vi.hoisted(() => ({
-  hasHostCommands: vi.fn<() => boolean>(() => true),
-  invoke: vi.fn<(command: string, ...args: unknown[]) => Promise<unknown>>(async () => null),
-  listen: vi.fn<(event: string, handler: (event: unknown) => void) => Promise<() => void>>(async () => () => {}),
+  // browserBackend 顶层解析一次 hostBrowser()；本文件不测委派，给 null 即可。
+  hostBrowser: vi.fn<() => unknown>(() => null),
+  openExternal: vi.fn<(url: string) => Promise<void>>(async () => undefined),
+  hostApp: vi.fn<() => unknown>(() => null),
 }));
 
 vi.mock("@greywork/host-ipc", () => hostIpc);
 
-import { browserBackend, normalizeBrowserUrl, openInSystemBrowser } from "@/lib/browser-backend";
+import { normalizeBrowserUrl, openInSystemBrowser } from "@/lib/browser-backend";
 
 beforeEach(() => {
-  hostIpc.hasHostCommands.mockReset().mockReturnValue(true);
-  hostIpc.invoke.mockReset().mockResolvedValue(null);
-  hostIpc.listen.mockReset().mockResolvedValue(() => {});
+  hostIpc.hostBrowser.mockReturnValue(null);
+  hostIpc.hostApp.mockReset().mockReturnValue(null);
+  hostIpc.openExternal.mockReset().mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -49,90 +50,19 @@ describe("normalizeBrowserUrl", () => {
   });
 });
 
-describe("browserBackend", () => {
-  it("supported 跟随 hasHostCommands", () => {
-    hostIpc.hasHostCommands.mockReturnValue(true);
-    expect(browserBackend.supported()).toBe(true);
-    hostIpc.hasHostCommands.mockReturnValue(false);
-    expect(browserBackend.supported()).toBe(false);
-  });
-
-  it("open 把矩形拆成 x/y/width/height 喂给 browser_open", async () => {
-    await browserBackend.open("https://example.com", { x: 10.5, y: 0, width: 480, height: 300 });
-    expect(hostIpc.invoke).toHaveBeenCalledWith("browser_open", {
-      url: "https://example.com",
-      x: 10.5,
-      y: 0,
-      width: 480,
-      height: 300,
-    });
-  });
-
-  it("setBounds / setVisible / navigate 走各自命令且参数名对齐宿主", async () => {
-    await browserBackend.setBounds({ x: 0, y: 0, width: 100, height: 100 });
-    expect(hostIpc.invoke).toHaveBeenCalledWith("browser_set_bounds", { x: 0, y: 0, width: 100, height: 100 });
-
-    await browserBackend.setVisible(false);
-    expect(hostIpc.invoke).toHaveBeenCalledWith("browser_set_visible", { visible: false });
-
-    await browserBackend.navigate("https://example.com/b");
-    expect(hostIpc.invoke).toHaveBeenCalledWith("browser_navigate", { url: "https://example.com/b" });
-  });
-
-  it("back / forward / reload / stop / close 是无参命令", async () => {
-    await browserBackend.back();
-    await browserBackend.forward();
-    await browserBackend.reload();
-    await browserBackend.stop();
-    await browserBackend.close();
-    expect(hostIpc.invoke.mock.calls.map(([command]) => command)).toEqual([
-      "browser_back",
-      "browser_forward",
-      "browser_reload",
-      "browser_stop",
-      "browser_close",
-    ]);
-  });
-
-  describe("onState", () => {
-    it("非桌面态返回 no-op，不订阅事件", async () => {
-      hostIpc.hasHostCommands.mockReturnValue(false);
-      const unbind = await browserBackend.onState(() => {});
-      expect(hostIpc.listen).not.toHaveBeenCalled();
-      expect(() => unbind()).not.toThrow();
-    });
-
-    it("订阅 browser:state 并转发 payload，解绑透传 unlisten", async () => {
-      const unlisten = vi.fn();
-      hostIpc.listen.mockResolvedValue(unlisten);
-      const seen: unknown[] = [];
-      const unbind = await browserBackend.onState((state) => seen.push(state));
-
-      const handler = hostIpc.listen.mock.calls[0]?.[1] as (event: { payload: unknown }) => void;
-      const payload = { url: "https://example.com", title: "E", loading: false, canGoBack: false, canGoForward: true };
-      handler({ event: "browser:state", payload, id: 1 } as { payload: unknown });
-
-      expect(hostIpc.listen).toHaveBeenCalledWith("browser:state", expect.any(Function));
-      expect(seen).toEqual([payload]);
-
-      unbind();
-      expect(unlisten).toHaveBeenCalled();
-    });
-  });
-});
-
 describe("openInSystemBrowser", () => {
-  it("桌面态走 open_external", async () => {
+  it("有原生宿主时走 hostApp().openExternal", async () => {
+    hostIpc.hostApp.mockReturnValue({ openExternal: hostIpc.openExternal });
     await openInSystemBrowser("https://example.com");
-    expect(hostIpc.invoke).toHaveBeenCalledWith("open_external", { url: "https://example.com" });
+    expect(hostIpc.openExternal).toHaveBeenCalledWith("https://example.com");
   });
 
-  it("非桌面态回落 window.open", async () => {
-    hostIpc.hasHostCommands.mockReturnValue(false);
+  it("无原生宿主回落 window.open", async () => {
+    hostIpc.hostApp.mockReturnValue(null);
     const open = vi.fn(() => null);
     vi.stubGlobal("window", { open });
     await openInSystemBrowser("https://example.com");
-    expect(hostIpc.invoke).not.toHaveBeenCalled();
+    expect(hostIpc.openExternal).not.toHaveBeenCalled();
     expect(open).toHaveBeenCalledWith("https://example.com", "_blank", "noopener");
   });
 });

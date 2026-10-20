@@ -1,4 +1,4 @@
-export { createLlmClient, LlmUnavailableError, isTauriRuntime } from "./client";
+export { createLlmClient, LlmUnavailableError } from "./client";
 export type {
   LlmChatMessage,
   LlmChatParams,

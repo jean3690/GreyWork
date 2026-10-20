@@ -4,6 +4,7 @@ import PluginRenderCanvas from "@/features/plugins/PluginRenderCanvas.vue";
 import { createWorkerCodePluginRuntime, type CodePluginRuntime } from "@/plugins/code-runtime";
 import { installedMarketPlugins } from "@/plugins/market";
 import { validateRenderCommands, type RenderCommand } from "@/plugins/render-commands";
+import { hostWindow } from "@greywork/host-ipc";
 
 /**
  * 插件悬浮窗视图（隐藏路由 #/plugin-window）：宿主透明置顶窗的内容。
@@ -25,8 +26,7 @@ async function startDrag(event: MouseEvent): Promise<void> {
   if (event.button !== 0) return;
   dragging.value = true;
   try {
-    const { getCurrentWindow } = await import("@tauri-apps/api/window");
-    await getCurrentWindow().startDragging();
+    await hostWindow()?.startDragging();
   } catch {
     // 非 Tauri 预览环境：忽略。
   } finally {
@@ -36,8 +36,7 @@ async function startDrag(event: MouseEvent): Promise<void> {
 
 async function closeWindow(): Promise<void> {
   try {
-    const { getCurrentWindow } = await import("@tauri-apps/api/window");
-    await getCurrentWindow().close();
+    await hostWindow()?.close();
   } catch {
     // ignore
   }
@@ -65,8 +64,7 @@ async function pullFrame(): Promise<void> {
 onMounted(async () => {
   try {
     // 窗口 label 反查插件。
-    const { getCurrentWindow } = await import("@tauri-apps/api/window");
-    const label = getCurrentWindow().label;
+    const label = hostWindow()?.label ?? "";
     const pluginId = label.startsWith(PLUGIN_WINDOW_LABEL_PREFIX) ? label.slice(PLUGIN_WINDOW_LABEL_PREFIX.length) : "";
     const pkg = installedMarketPlugins.value.find((item) => item.manifest.id === pluginId);
     const render = pkg?.manifest.runtime?.render;

@@ -3,7 +3,9 @@ import DeclarativePluginView from "./DeclarativePluginView.vue";
 import PluginRegionHost from "@/features/plugins/PluginRegionHost.vue";
 import type { DeclarativeValue, InstalledPluginPackage } from "./market-types";
 import type { PluginManifest, UiRegionContribution } from "./types";
-import type { CodePluginRuntime } from "./code-runtime";
+import type { CodePluginRuntime, PluginPointerEvent } from "./code-runtime";
+import { effectiveRegionSchedule } from "./scheduler";
+import { isPluginCapabilityGranted } from "./runtime";
 
 /** 安装包 → 工作台清单；页面/区域均由宿主渲染，worker 仅处理 invoke/render 动作。 */
 export function adaptInstalledPlugin(pluginPackage: InstalledPluginPackage, runtime?: CodePluginRuntime): PluginManifest {
@@ -28,8 +30,14 @@ export function adaptInstalledPlugin(pluginPackage: InstalledPluginPackage, runt
               contribution: region,
               render,
               windowDecl: source.window,
+              // schedule 能力已声明 + 已授权才挂钟（授权门禁由 effectiveRegionSchedule 收敛）。
+              schedule: effectiveRegionSchedule(source, (capability) => isPluginCapabilityGranted(source.id, capability)),
               invoke: (handler: string, state: Readonly<Record<string, DeclarativeValue>>) => runtime.invoke(handler, state),
               invokeRaw: (handler: string, state: Readonly<Record<string, DeclarativeValue>>) => runtime.invokeRaw(handler, state),
+              // 指针回传通道：仅 render.pointer 声明的包接线（事件归一化/校验在渲染循环宿主）。
+              dispatchPointer: render.pointer
+                ? (event: PluginPointerEvent, state: Readonly<Record<string, DeclarativeValue>>) => runtime.dispatchPointer(event, state)
+                : undefined,
             }),
         }),
       });
@@ -61,6 +69,11 @@ export function adaptInstalledPlugin(pluginPackage: InstalledPluginPackage, runt
               renderChannel: runtime
                 ? (handler: string, state: Readonly<Record<string, DeclarativeValue>>) => runtime.invokeRaw(handler, state)
                 : undefined,
+              // 指针回传通道：仅 render.pointer 声明的包接线。
+              dispatchPointer:
+                runtime && render?.pointer
+                  ? (event: PluginPointerEvent, state: Readonly<Record<string, DeclarativeValue>>) => runtime.dispatchPointer(event, state)
+                  : undefined,
             }),
         }),
       })),

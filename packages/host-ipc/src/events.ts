@@ -1,8 +1,8 @@
 /**
- * 宿主事件门面：desktop 走 Tauri 事件总线，server 走服务端单条 WebSocket。
+ * 宿主事件门面：server 走服务端单条 WebSocket。
  *
  * 服务端只有一个 `/api/events` 端点，所以这里维护**一条**共享连接 + 「事件名 → 处理器集合」的
- * 多路分发。投递形状刻意与 Tauri 的 `listen` 一致（处理器收到 `{ payload }`），消费端零改动。
+ * 多路分发。投递形状刻意与 Tauri 时代的 `listen` 一致（处理器收到 `{ payload }`），消费端零改动。
  *
  * 事件是有损的（服务端不重放）：断线重连后需要重新拉取的 store 订阅 `HOST_HELLO_EVENT` 即可 ——
  * 服务端每次（重）连都会先发这一帧，门面不额外合成重连事件。
@@ -11,11 +11,9 @@
  * 唯一触发源是 `invoke` 收到的 HTTP 401；WS 只管退避重连，重新登录后自然连上。
  */
 
-import { listen as tauriListen } from "@tauri-apps/api/event";
-
 import { HostUnavailableError, runtimeMode } from "./runtime";
 
-/** 与 `@tauri-apps/api/event` 的 `UnlistenFn` 同名同型。 */
+/** 解绑函数（与 Tauri 时代的 `UnlistenFn` 同名同型，消费端零改动）。 */
 export type UnlistenFn = () => void;
 
 /** 与 Tauri `Event<T>` 的形状对齐：消费端一律读 `event.payload`。 */
@@ -25,6 +23,21 @@ export interface HostEvent<T> {
 
 /** 服务端每次（重）连都会先发的帧，也是「可以重新 hydrate 了」的信号。 */
 export const HOST_HELLO_EVENT = "host://hello";
+
+/**
+ * 宿主「面向用户的通知」事件。
+ *
+ * 只有**没有系统通知面**的宿主会推它：服务端（Electron 的 sidecar / 自托管 Web）走这条；
+ * Tauri 的 `HostContext::notify` 直接在 Rust 里发系统通知，事件从不进渲染端。
+ * 事件是有损的，断线期间的丢就丢了 —— 通知不该在重连后补一堆旧事。
+ */
+export const HOST_NOTIFY_EVENT = "host://notify";
+
+/** `HOST_NOTIFY_EVENT` 的载荷（与 `apps/server/src/host.rs` 的 `notify` 逐字对齐）。 */
+export interface HostNotifyPayload {
+  title: string;
+  body: string;
+}
 
 const EVENTS_PATH = "/api/events";
 const INITIAL_RETRY_MS = 500;
@@ -39,13 +52,8 @@ let retryMs = INITIAL_RETRY_MS;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
 export async function listen<T = unknown>(event: string, handler: (event: HostEvent<T>) => void): Promise<UnlistenFn> {
-  const mode = runtimeMode();
-  if (mode === "desktop") {
-    const unlisten = await tauriListen<T>(event, handler);
-    return () => unlisten();
-  }
-  if (mode === "browser-preview") {
-    // 抛错而非静默 no-op：与 invoke 一致，也与「缺宿主时 Tauri listen 自己会抛」的既有行为一致。
+  if (runtimeMode() === "browser-preview") {
+    // 抛错而非静默 no-op：与 invoke 一致，缺宿主时把问题摆到明面上。
     throw new HostUnavailableError(`事件 ${event}`);
   }
   return subscribe(event, handler as Handler);

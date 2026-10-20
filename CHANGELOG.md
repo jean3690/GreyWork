@@ -6,6 +6,69 @@
 发版流程：新增条目补进对应版本标题下 → 打 `v*` 标签 → `.github/workflows/release.yml` 会自动从本文件
 抽取该版本条目作为 Release 说明。**不要手改 Release 正文**，改这里。
 
+## [Unreleased]
+
+### 新增
+
+- **桌面主窗圆角**：macOS / Windows 11 沿用系统原生圆角（`roundedCorners`）；Linux 上因 Electron 30
+  尚不支持该选项，主窗改为透明无边框窗口，由渲染端按「外观 → 圆角」旋钮裁圆角
+  （`apps/desktop/src/window-frame.ts` + `theme/base.css`），最大化时自动归零以免四角漏出桌面。
+  只作用于主窗，插件悬浮窗与 Web 端保持不变；Linux/X11 补了 `enable-transparent-visuals` 开关。
+
+- **Office 文档「高保真(PDF)」预览（LibreOffice 本地转换）**：docx / pptx / 老格式（.doc / .ppt 等）
+  现在可在原生 viewer 与 LibreOffice 转换出的 PDF 之间切换（viewer 工具栏的「原生 / 高保真(PDF)」）。
+  - 高保真路径经宿主 `office_convert_to_pdf` 命令调起 `soffice --convert-to pdf`，字节直接交给既有
+    `PdfViewer`，补上原生解析器缺失的页眉页脚 / 分栏 / 分页符 / 脚注等版式；转换失败一律回落原生 viewer 并提示。
+  - 默认走高保真**当且仅当**宿主探测到可用的 soffice（`office_convert_info`）；桌面端探测系统安装的
+    soffice，服务端 Docker 镜像已内置 `libreoffice-writer` + `libreoffice-impress` + `fonts-noto-cjk`。
+  - `GREYWORK_SOFFICE_PATH` 可锁定到特定 soffice 可执行文件；指向不可用会记为「配置了但不可用」而非静默回落。
+  - 表格族（xlsx / xls）**不**走转换：转 PDF 只会丢掉 Univer 的可交互表格与分析视图。
+
+- **团队协作（Cowork）控制台重做 + 本轮能力勾选 + 队友提交**：起跑表单拆成「目标 / 成员 / 本轮能力」
+  三张卡，运行中改成对话优先布局（群聊式时间线为主、邮件列表为次，右侧挂任务板），并新增提交卡。
+  - **run 级能力**：起跑时可勾选本轮带给每个成员的 MCP 服务器与技能（默认跟设置里已启用 / 全量技能）；
+    `startRun` 新增第 4 参 `CoworkRunOptions`，MCP 选择覆盖本轮的工具面，技能选择透传到
+    `worktree_provision`（`skills` 入参）—— 修复了先前 `worktree` 隔离下成员会话拿不到
+    **未提交** `.agents/skills` 的缺口（宿主把源工作区的技能符号链接进快照，见
+    `crates/greywork-host/src/infra/worktree/skills.rs`）。运行头部展示本轮已声明 / 被后端跳过的服务器。
+  - **队友提交**：协作成员跑在同一份隔离工作区、同一条 `greywork/<slug>-<hash>` 分支上，提交卡据此
+    展示提交历史（作者、主题、「本轮」标记、分支名），起跑记基线、每回合刷新增量，点开按需拉 diff；
+    非 git 工作区整段隐藏，协作照跑。
+
+- **协议层子代理（ACP subagent sessions）**：支持 agent 内部委派的子代理经 `subagent_update`
+  宣告的独立子会话（RFD: Subagent Sessions）。
+  - **归属与状态**：会话头部新增子代理胶囊（`SubagentIndicator.vue`），展开可见每个子代理的标题、
+    当前工作状态（running / idle / requires_action / unknown）、工具数与最新输出；无子代理时零渲染。
+  - **收工通知**：子代理从运行态转入 idle 时按 `stopReason` 给出一次非侵入式通知（完成 / 取消 /
+    出错），同一子代理重新开工后再收工可再次通知，幂等的 idle 快照不重复打扰。
+  - **事件路由**：子代理自身的消息 / 思考 / 工具流量按 sessionId 归属其独立转录，不泄漏进主会话支架；
+    宣告前的早到流量先缓冲、宣告到达后回放（缓冲溢出则整块回落主会话，不吞事件）；`session_message`
+    / `session_message_chunk` 记为会话间消息。会话回收（stop / 换会话 / 重连）时子代理树整体失效。
+  - **单独取消**：宣告了 `capabilities.cancel` 的子代理可从胶囊里单独取消——新增宿主命令
+    `acp_cancel_session`（发 ACP `session/cancel` 指向子会话 id，不回收进程），桌面 / 远程传输均已接线。
+  - 与应用层「编排子任务」（TeamView 看板，UI 主动拆解并行跑的独立会话）是两回事，两者可并存、按
+    sessionId 分流。
+
+- **ACP 会话生命周期补全**：恢复会话时按 agent 声明的能力择优——优先 `session/resume`
+  （不重放历史，切回旧对话更快，也不会用回放抑制窗口吞掉恢复后的首条实时输出），不可用或失败
+  再回落 `session/load`；两者都不支持仍静默回落 `session/new`，保证「发送必达」。切换对话时
+  通过新增的宿主命令 `acp_close_session`（`session/close`）释放旧会话，agent 进程继续复用；
+  未声明 `close` 的后端返回 `false`，按可选的资源回收静默跳过。`packages/acp` 传输层新增
+  `closeSession`，桌面宿主与 WebSocket 远程传输均已接线。
+
+- **ACP 旧版会话模式（session modes）**：agent 在 `session/new` / `session/load` /
+  `session/resume` 回包中声明 `modes` 时，前端把它合成为一条「会话模式」选择器，复用既有
+  config option 链路（工作区记忆 / 全局默认一并生效）；切换经新增宿主命令 `acp_set_mode`
+  发 `session/set_mode`，agent 主动发出的 `current_mode_update` 也会回填选择器。
+  已用 config option（`category: "mode"`）暴露模式的 agent 不会重复渲染；没有 `model`
+  配置时模型胶囊保持只读占位，不再回落到任意 select 抢占模式 / 思考强度配置。
+
+### 修复
+
+- **ACP「停止生成」只发底层 `$/cancel_request`**：部分 agent 没实现这条 JSON-RPC 取消，用户点
+  停止后回合仍会跑完。现在先发协议规定的 `session/cancel` 通知，再以 `$/cancel_request` 兜底；
+  进程与会话保留，后续仍可继续 prompt。
+
 ## [0.7.0] - 2026-10-08
 
 ### 新增

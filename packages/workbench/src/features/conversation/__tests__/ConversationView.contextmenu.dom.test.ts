@@ -17,6 +17,7 @@ const h = vi.hoisted(() => ({
   respondPermission: vi.fn(),
   isAvailable: vi.fn(() => true),
   homeDir: vi.fn<() => Promise<string | null>>(() => Promise.resolve("/home/test")),
+  restore: vi.fn<(root: string, reference: string) => Promise<void>>(),
 }));
 
 vi.mock("@/state/attachment-library", () => ({
@@ -49,8 +50,28 @@ vi.mock("@greywork/acp", () => ({
 const copyText = vi.fn<(text: string) => Promise<void>>();
 vi.mock("@/lib/clipboard", () => ({ copyText: (text: string) => copyText(text) }));
 
+// 回退走 worktree 后端：这里只关心 UI 是否把 restore 正确接上，落盘细节由 stores/rewind.test.ts 覆盖。
+vi.mock("@/lib/worktree-backend", () => ({
+  worktreeBackend: {
+    active: () => true,
+    list: () => Promise.resolve([]),
+    release: () => Promise.resolve(),
+    snapshot: () => Promise.resolve("refs/greywork/snap/1"),
+    restore: (root: string, reference: string) => h.restore(root, reference),
+  },
+}));
+
+import type * as HostIpc from "@greywork/host-ipc";
+
 const readText = vi.fn<() => Promise<string>>();
-vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({ readText: () => readText() }));
+vi.mock("@greywork/host-ipc", async (importOriginal) => ({
+  ...(await importOriginal<typeof HostIpc>()),
+  hostClipboard: () => ({
+    writeText: vi.fn(() => Promise.resolve()),
+    readText: () => readText(),
+    readImagePng: vi.fn(() => Promise.resolve(null)),
+  }),
+}));
 
 import ConversationView from "@/features/conversation/ConversationView.vue";
 import { createAppRouter } from "@/router";
@@ -91,6 +112,7 @@ beforeEach(() => {
   localStorage.clear();
   copyText.mockReset().mockResolvedValue(undefined);
   readText.mockReset().mockResolvedValue("");
+  h.restore.mockReset().mockResolvedValue(undefined);
   delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
   document.body.innerHTML = "";
 });
@@ -152,5 +174,81 @@ describe("消息右键菜单", () => {
     await wrapper.get("section").trigger("contextmenu");
     await flushPromises();
     expect(menuCount()).toBe(0);
+  });
+});
+
+describe("消息回退", () => {
+  /** 会话起手：带快照的 u1 + 助手 a1 + 带快照的 u2（u2 的回合起点即回退目标）。 */
+  function seed(sessionStore: ReturnType<typeof useSessionStore>, sessionId: string): void {
+    sessionStore.appendMessage(sessionId, { id: "u1", role: "user", content: "第一轮", ts: 1, snapshotRef: "refs/greywork/snap/1" });
+    sessionStore.appendMessage(sessionId, { id: "a1", role: "assistant", content: "答复", ts: 2 });
+    sessionStore.appendMessage(sessionId, { id: "u2", role: "user", content: "第二轮", ts: 3, snapshotRef: "refs/greywork/snap/2" });
+  }
+
+  function confirmDialog(): HTMLElement | null {
+    return document.body.querySelector<HTMLElement>('[data-slot="alert-dialog-content"]');
+  }
+
+  function dialogButtons(): HTMLButtonElement[] {
+    return [...(confirmDialog()?.querySelectorAll<HTMLButtonElement>("button") ?? [])];
+  }
+
+  it("带快照的用户消息多一条「回退到这里」；助手消息 / 无快照消息没有", async () => {
+    const { session, sessionStore, wrapper } = await mountConversation();
+    seed(sessionStore, session.id);
+    sessionStore.appendMessage(session.id, { id: "u9", role: "user", content: "没有快照", ts: 4 });
+    await flushPromises();
+
+    await wrapper.get('[data-message-id="u2"]').trigger("contextmenu");
+    await flushPromises();
+    expect(menuLabels()).toEqual([t("contextMenu.message.copyBody"), t("contextMenu.message.rewind")]);
+
+    await wrapper.get('[data-message-id="a1"]').trigger("contextmenu");
+    await flushPromises();
+    expect(menuLabels()).toEqual([t("contextMenu.message.copyBody")]);
+
+    await wrapper.get('[data-message-id="u9"]').trigger("contextmenu");
+    await flushPromises();
+    expect(menuLabels()).toEqual([t("contextMenu.message.copyBody")]);
+  });
+
+  it("点「回退到这里」弹确认；确认后按 cwd+ref 硬恢复并截断消息流", async () => {
+    const { session, sessionStore, wrapper } = await mountConversation();
+    seed(sessionStore, session.id);
+    sessionStore.setAcpBinding(session.id, { sessionId: "s1", providerId: "p1", cwd: "/wt", savedAt: 1 });
+    await flushPromises();
+
+    await wrapper.get('[data-message-id="u2"]').trigger("contextmenu");
+    await flushPromises();
+    await menuItems()[1].trigger("click"); // [复制正文, 回退到这里]
+    await flushPromises();
+
+    expect(confirmDialog()?.textContent).toContain(t("chat.rewindConfirmTitle"));
+
+    dialogButtons()[1].click(); // [取消, 回退]
+    await flushPromises();
+
+    expect(h.restore).toHaveBeenCalledWith("/wt", "refs/greywork/snap/2");
+    expect(sessionStore.getSession(session.id)?.messages.map((m) => m.id)).toEqual(["u1", "a1"]);
+    // 回退后绑定被清（下个回合开新会话）。
+    expect(sessionStore.getSession(session.id)?.acp).toBeUndefined();
+  });
+
+  it("取消：不调 restore，消息流不变", async () => {
+    const { session, sessionStore, wrapper } = await mountConversation();
+    seed(sessionStore, session.id);
+    sessionStore.setAcpBinding(session.id, { sessionId: "s1", providerId: "p1", cwd: "/wt", savedAt: 1 });
+    await flushPromises();
+
+    await wrapper.get('[data-message-id="u2"]').trigger("contextmenu");
+    await flushPromises();
+    await menuItems()[1].trigger("click");
+    await flushPromises();
+
+    dialogButtons()[0].click(); // 取消
+    await flushPromises();
+
+    expect(h.restore).not.toHaveBeenCalled();
+    expect(sessionStore.getSession(session.id)?.messages).toHaveLength(3);
   });
 });

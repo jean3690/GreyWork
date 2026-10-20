@@ -9,14 +9,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DOMWrapper, flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
-import { invoke } from "@tauri-apps/api/core";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+vi.mock("@greywork/host-ipc", async (importOriginal) => ({
+  ...(await importOriginal()),
+  invoke: vi.fn(),
+}));
 
 import ServicesSettingsPane from "@/features/settings/ServicesSettingsPane.vue";
 import { useSettingsStore } from "@/stores/settings";
 
-const invokeMock = vi.mocked(invoke);
+const invokeMock = vi.mocked((await import("@greywork/host-ipc")).invoke);
 
 const mounted: VueWrapper[] = [];
 
@@ -33,7 +35,7 @@ function mountPane(): VueWrapper {
   return wrapper;
 }
 
-function overrideRuntime(mode: "desktop" | "server" | "browser-preview"): void {
+function overrideRuntime(mode: "server" | "browser-preview"): void {
   (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = mode;
 }
 
@@ -100,6 +102,57 @@ describe("ServicesSettingsPane 配置链路", () => {
     expect(settings.officeProviders.find((provider) => provider.id === "wps365")?.recipe).toBeUndefined();
   });
 
+  it("编辑服务商填好 OAuth 配置：落库并出现授权徽标与「授权」按钮", async () => {
+    const wrapper = mountPane();
+    const settings = useSettingsStore();
+
+    await wrapper.get('[data-testid="office-provider-edit-tencent-docs"]').trigger("click");
+    await flushPromises();
+    await dialog().find('[data-testid="office-provider-oauth-client-id"]').setValue("cid-1");
+    await dialog().find('[data-testid="office-provider-oauth-redirect-uri"]').setValue("https://localhost/callback");
+    await dialog().find('[data-testid="office-provider-save"]').trigger("click");
+    await flushPromises();
+
+    const stored = settings.officeProviders.find((provider) => provider.id === "tencent-docs");
+    expect(stored?.oauth).toMatchObject({ clientId: "cid-1", redirectUri: "https://localhost/callback" });
+    expect(wrapper.find('[data-testid="office-provider-auth-tencent-docs"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="office-provider-authorize-tencent-docs"]').exists()).toBe(true);
+  });
+
+  it("OAuth 半填就地报错、不落库（与配方同一哲学：填全或留空）", async () => {
+    const wrapper = mountPane();
+    const settings = useSettingsStore();
+
+    await wrapper.get('[data-testid="office-provider-edit-tencent-docs"]').trigger("click");
+    await flushPromises();
+    await dialog().find('[data-testid="office-provider-oauth-client-id"]').setValue("cid-1");
+    await dialog().find('[data-testid="office-provider-save"]').trigger("click");
+    await flushPromises();
+
+    expect(dialog().text()).toContain("回调地址");
+    expect(settings.officeProviders.find((provider) => provider.id === "tencent-docs")?.oauth).toBeUndefined();
+  });
+
+  it("点「授权」打开扫码授权弹窗", async () => {
+    const settings = useSettingsStore();
+    settings.upsertServiceProvider({
+      id: "tencent-docs",
+      name: "腾讯文档",
+      family: "office",
+      kind: "tencent-docs",
+      enabled: true,
+      oauth: { clientId: "cid-1", redirectUri: "https://localhost/callback" },
+    });
+    const wrapper = mountPane();
+    await flushPromises();
+
+    await wrapper.get('[data-testid="office-provider-authorize-tencent-docs"]').trigger("click");
+    await flushPromises();
+
+    expect(document.body.textContent).toContain("扫码授权");
+    expect(document.body.querySelector('[data-testid="office-oauth-open"]')).not.toBeNull();
+  });
+
   it("新增服务商：落库并自动选中", async () => {
     const wrapper = mountPane();
     const settings = useSettingsStore();
@@ -148,7 +201,7 @@ describe("ServicesSettingsPane 配置链路", () => {
 
 describe("ServicesSettingsPane 宿主事实", () => {
   it("桌面态：显示宿主可内嵌白名单与未设置的凭证变量名", async () => {
-    overrideRuntime("desktop");
+    overrideRuntime("server");
     invokeMock.mockResolvedValue({
       embeddableFrameOrigins: ["https://docs.example.com"],
       envPresent: [],
@@ -164,7 +217,7 @@ describe("ServicesSettingsPane 宿主事实", () => {
   it("白名单为空时如实说明「宿主未允许任何外部域名」，而不是显示成空白", async () => {
     // 桌面态与服务端态在这一页走的是同一条路径（都 `hasHostCommands()` 为真、都走
     // `office_host_info`）；差异在宿主侧怎么算白名单，由 Rust 侧用例覆盖。
-    overrideRuntime("desktop");
+    overrideRuntime("server");
     invokeMock.mockResolvedValue({ embeddableFrameOrigins: [], envPresent: [], envMissing: [] });
     const wrapper = mountPane();
     await flushPromises();

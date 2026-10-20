@@ -5,24 +5,13 @@ import { defineConfigWithVueTs, vueTsConfigs } from "@vue/eslint-config-typescri
 import prettierConfig from "eslint-config-prettier";
 
 /**
- * Tauri 传输层只能经 @greywork/host-ipc 门面访问。
- *
- * 与 Rust 侧「crates/greywork-host 不得依赖 tauri」的 CI 守卫同构：桌面 Tauri IPC 与服务端
- * HTTP/WS 的差异被收敛在那一个包里，上层代码不感知运行时。绕过门面直接 import 的代码在
- * 服务端模式下编得过、跑不通（缺 __TAURI_INTERNALS__），是最难排查的一类问题。
- *
- * 注意：no-restricted-imports 管不到动态 import()，写新代码时别用动态 import 绕它。
+ * Tauri 壳已移除：`@tauri-apps/*` 在本仓是彻底不存在的依赖，直接 import 只会解析失败。
+ * 规则保留为「防回归」——宿主能力一律走 @greywork/host-ipc 门面。
  */
-const TAURI_TRANSPORT_PATHS = [
-  {
-    name: "@tauri-apps/api/core",
-    message: "Tauri IPC 只允许经 @greywork/host-ipc 的 invoke 门面（全仓唯一的 Tauri 传输层出口）。",
-  },
-  {
-    name: "@tauri-apps/api/event",
-    message: "Tauri 事件只允许经 @greywork/host-ipc 的 listen 门面（全仓唯一的 Tauri 传输层出口）。",
-  },
-];
+const TAURI_TRANSPORT = {
+  group: ["@tauri-apps/**"],
+  message: "Tauri 壳已移除：宿主能力一律经 @greywork/host-ipc 门面。",
+};
 
 /** packages 不得反向依赖 apps/*。 */
 const NO_APPS_DEPENDENCY = {
@@ -48,16 +37,28 @@ export default defineConfigWithVueTs(
       "**/.ui-shots/**",
       "**/logs/**",
       "pnpm-lock.yaml",
-      "**/src-tauri/tests/*.mjs",
       "apps/desktop/e2e/**",
+      // 各前端的 e2e 同理：无类型、不进 tsconfig 的 project service（apps/web 与桌面端走同一条约定）。
+      "apps/web/e2e/**",
       // 原样直出的静态资源（logo / vscode-icons / 首帧引导脚本）：不经打包器、也不属于
       // 任何 tsconfig 的 project service，交给 eslint 解析只会报 parsing error。
-      "apps/desktop/public/**",
+      // 位置在 workbench 包下：这批资源由**所有前端共享**（各 app 的 publicDir 都指过去，
+      // 见 packages/vite-config 的默认值），不再属于某一个前端。
+      "packages/workbench/public/**",
+      // ACP 集成测试的 mock agent：夹具 .mjs，不属于任何 tsconfig project service
+      //（与 allowDefaultProject 不能加通配条目的约束一致，见 2026-09 的 eslint 调优）。
+      "apps/server/tests/mock-acp-agent.mjs",
       "**/vitest.config.ts",
       "eslint.config.js",
       // 插件市场源仓库（发布产物 JSON + worker JS），运行时经 registry URL 拉取，
       // 不参与本仓 tsconfig project service
       "plugin-market/**",
+      // 待删的 Electron 迁移 PoC（游离于 workspace 之外的独立项目，无 tsconfig）。
+      // 新壳落在 apps/electron（apps/* 已纳入 workspace 与 lint）。
+      "electron/**",
+      // Electron 壳的构建产物（tsc 输出到 out/）与打包产物：不是源码，不在任何 tsconfig 里。
+      "apps/electron/out/**",
+      "apps/electron/release/**",
       // vendored 的 agent skills（markdown 文档 + 自带配置），不是本仓代码，
       // 也不在 tsconfig 的 project service 里 —— 交给 eslint 解析只会报 parsing error
       ".agents/**",
@@ -152,8 +153,7 @@ export default defineConfigWithVueTs(
       "no-restricted-imports": [
         "error",
         {
-          paths: TAURI_TRANSPORT_PATHS,
-          patterns: [NO_APPS_DEPENDENCY],
+          patterns: [TAURI_TRANSPORT, NO_APPS_DEPENDENCY],
         },
       ],
     },
@@ -176,7 +176,7 @@ export default defineConfigWithVueTs(
       "no-restricted-imports": [
         "error",
         {
-          paths: TAURI_TRANSPORT_PATHS,
+          patterns: [TAURI_TRANSPORT],
         },
       ],
     },

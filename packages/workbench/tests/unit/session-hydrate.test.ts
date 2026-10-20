@@ -9,10 +9,12 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
-import { invoke } from "@tauri-apps/api/core";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
-const invokeMock = vi.mocked(invoke);
+vi.mock("@greywork/host-ipc", async (importOriginal) => ({
+  ...(await importOriginal()),
+  invoke: vi.fn(),
+}));
+const invokeMock = vi.mocked((await import("@greywork/host-ipc")).invoke);
 
 import { useSessionStore } from "../../src/stores/session";
 
@@ -49,7 +51,7 @@ const dbSnapshot = {
 describe("session store 桌面接管（~/.greyWork 文件真源）", () => {
   beforeEach(() => {
     installLocalStorage();
-    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
+    vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "server" });
     invokeMock.mockReset();
     setActivePinia(createPinia());
   });

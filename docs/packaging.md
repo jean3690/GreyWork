@@ -1,173 +1,20 @@
 # GreyWork Packaging & Distribution
 
-How the desktop app is bundled for each platform, and what is still missing before
+How the desktop app is packaged (Electron), and what is still missing before
 signed installers can ship.
-
-## Bundle targets per platform
-
-`bundle.targets` is overridden per platform through Tauri's platform config files,
-which are merged on top of `tauri.conf.json` before validation:
-
-| Platform | Config file                         | `bundle.targets` |
-| -------- | ----------------------------------- | ---------------- |
-| Linux    | `src-tauri/tauri.linux.conf.json`   | `["deb"]`        |
-| Windows  | `src-tauri/tauri.windows.conf.json` | `["nsis"]`       |
-| macOS    | `src-tauri/tauri.macos.conf.json`   | `["app", "dmg"]` |
-
-The merge is [RFC 7386](https://datatracker.ietf.org/doc/html/rfc7386) JSON Merge
-Patch (`json_patch::merge`): objects merge recursively, arrays are replaced. A
-platform file therefore only needs the keys it overrides — `bundle.active` and
-`bundle.icon` still come from the base config. `tauri.conf.json` keeps
-`"targets": "all"` as the fallback for any platform without an override file.
-
-`tauri build --bundles <list>` replaces the config value entirely, which is why
-`ci.yml` and `release.yml` can still pass an explicit `--bundles` per matrix row.
-
-### Why not a single `"targets": ["deb", "nsis", "app", "dmg"]` list
-
-`tauri-bundler` skips targets that were compiled out for the host platform
-(`_ => log::warn!("ignoring {}", ...)`) — **except `nsis`**, which is deliberately
-not `cfg`-gated so NSIS installers can be cross-built on Linux/macOS via
-`cargo-xwin`. Listing `nsis` in the base config would therefore make a plain
-`pnpm tauri build` on Linux _attempt_ to produce a Windows installer. Per-platform
-files are the only way to express "deb on Linux, nsis on Windows" safely.
-
-The extra targets we drop were also the slowest:
-
-- Linux `appimage` needs `linuxdeploy` downloaded at build time (unstable in CI),
-  and `rpm` pulls in another toolchain. `deb` is what we ship.
-- Windows `msi` needs WiX; NSIS is smaller and is what we ship.
-
-## Bundle metadata
-
-`category`, `shortDescription`, `longDescription`, `publisher`, `homepage`, `copyright`
-and `license` live in the base `tauri.conf.json` because they are platform-neutral
-descriptions of the app. Where each one actually ends up is worth writing down, because
-the schema's one-line descriptions are easy to over-read. The deb column was verified by
-building the package and reading the generated `control` and `.desktop`; the rest is
-marked accordingly.
-
-| Key                | deb (verified)                                                   |
-| ------------------ | ---------------------------------------------------------------- |
-| `category`         | `.desktop` `Categories=Development;` (was empty)                 |
-| `shortDescription` | `Description:` first line, and `.desktop` `Comment=`             |
-| `longDescription`  | the indented extended description                                |
-| `homepage`         | `Homepage:`                                                      |
-| `publisher`        | _nothing_ — deb `Maintainer` comes from `Cargo.toml`'s `authors` |
-| `copyright`        | _nothing_                                                        |
-| `license`          | _nothing_                                                        |
-
-Two of these matter beyond the deb: `tauri-bundler` contains the NSIS metadata strings
-`Manufacturer` and `LegalCopyright`, so `publisher` and `copyright` are what the Windows
-installer reports to the OS. Neither `LSApplicationCategoryType` nor
-`NSHumanReadableCopyright` appears in the bundler at all, so `category` and `copyright`
-do **not** reach the macOS `Info.plist`.
-
-`category` also does **not** produce the deb `Section:` field, despite the two looking
-like the same concept in the schema. `Section` is a separate key that only exists on
-`bundle.linux.deb` — see below.
-
-## Debian package metadata
-
-Three deb-only keys are set in `src-tauri/tauri.linux.conf.json`, because none of them
-has an equivalent on the other platforms:
-
-- `linux.deb.section: "devel"` — the `Section:` field, which `bundle.category` does not
-  fill in. Without it `apt` has no section to file the package under.
-- `linux.deb.depends: ["libc6"]` — **appends** to the dependencies `tauri-bundler`
-  computes (`libwebkit2gtk-4.1-0`, `libgtk-3-0`), it does not replace them; the result is
-  `libc6, libwebkit2gtk-4.1-0, libgtk-3-0`. Debian Policy 8.6 requires the libc
-  dependency, and `lintian` flags its absence as an error.
-- `linux.deb.files` — ships `LICENSE` to `/usr/share/doc/grey-work/copyright`. Debian
-  Policy 12.5 requires a verbatim copyright file per package; without one `lintian`
-  reports `no-copyright-file`. `bundle.licenseFile` is **not** the knob for this: it is
-  read only by the NSIS/Windows bundler, and setting it changes nothing in the deb.
-  The destination hardcodes the package name (`grey-work`, derived from `productName`),
-  so it needs updating if the product is ever renamed.
-
-`lintian` on the resulting `.deb` is clean apart from four tags, all left as-is
-deliberately:
-
-| Tag                           | Why it is still open                                                         |
-| ----------------------------- | ---------------------------------------------------------------------------- |
-| `malformed-contact`           | `Maintainer` needs an RFC 822 `Name <email>`; we have no project address yet |
-| `no-changelog`                | Debian expects a `changelog.gz` in Debian's own format, not `CHANGELOG.md`   |
-| `unstripped-binary-or-object` | `strip` is not set on the release profile — see below                        |
-| `no-manual-page`              | there is no man page                                                         |
-
-The binary ships unstripped because the release profile does not set `strip`. Adding
-`strip = true` to `[profile.release]` in `src-tauri/Cargo.toml` would clear that tag and
-shrink the download, but it also removes the symbol table from all three platforms'
-binaries, which is what makes a panic backtrace readable. That trade-off is a support
-decision rather than a packaging one, so it is left open here.
-
-## Windows installer
-
-`bundle.windows.webviewInstallMode` is written out explicitly as
-`downloadBootstrapper` (silent) instead of being left implicit. The value matches
-Tauri's default — the point is that the decision is visible and has a single place to
-change it.
-
-The modes differ only in how much of WebView2 is shipped inside the installer. Read
-off `tauri-bundler`'s NSIS implementation (`FixedRuntime` is a separate mechanism — it
-ships a runtime as an app resource instead of installing one):
-
-| Mode                                 | Installer size | Internet at install time?                                          |
-| ------------------------------------ | -------------- | ------------------------------------------------------------------ |
-| `downloadBootstrapper` (what we use) | baseline       | yes — fetches and runs the bootstrapper                            |
-| `embedBootstrapper`                  | +1.8 MB        | yes — only the bootstrapper is local, it still fetches the runtime |
-| `offlineInstaller`                   | +127 MB        | no — the full runtime is embedded                                  |
-| `skip`                               | baseline       | no — and no install attempt at all                                 |
-
-`downloadBootstrapper` was kept because WebView2 is already present on Windows 11 and
-on any Windows 10 machine with Edge, so the download only happens on the rare machine
-that is missing it. `embedBootstrapper` buys almost nothing: it costs a build-time
-download from a Microsoft endpoint while still needing the network at install time.
-`offlineInstaller` would multiply the installer size by roughly 7–10× to serve that
-same rare case. Switch to `offlineInstaller` if air-gapped installs become a
-requirement.
-
-### Installer languages
-
-`bundle.windows.nsis.languages` is set to `["SimpChinese", "English"]`. Tauri's default
-is `["English"]` alone, which hands a Chinese-first project an English-only installer.
-NSIS picks the language from the OS locale and falls back to the **first** entry in the
-list, so zh-CN Windows gets Chinese and every other locale gets English.
-`displayLanguageSelector` stays at its default (`false`) — the language follows the
-system, and no extra page is added to the installer.
-
-The entries are NSIS's contributed language file names (`SimpChinese.nlf` / `.nsh`,
-the file defining `${LANG_SIMPCHINESE}`), not BCP 47 tags. Adding a language here only
-takes effect on a Windows build, so it is verified by the NSIS row of the CI bundle
-matrix rather than locally.
-
-## macOS
-
-- `bundle.macOS.minimumSystemVersion` is pinned to `10.13` explicitly. That matches
-  Tauri's own default and sits above `objc2`'s floor of 10.12, so the value is
-  correct today — it is written down so a future Tauri default bump cannot silently
-  move our support floor. A universal bundle declares the _lower_ floor: the x86_64
-  slice runs on 10.13, the arm64 slice only exists on 11.0+ machines anyway.
-- Releases are built as `universal-apple-darwin` (`release.yml`). `macos-latest` is
-  an arm64 host, so without `--target universal-apple-darwin` the `.dmg` would be
-  arm64-only and Intel Macs could not install it. This needs both
-  `aarch64-apple-darwin` and `x86_64-apple-darwin` installed, which the `targets`
-  input of the `setup-rust` composite handles. Cost: two full Rust compiles, so the
-  macOS release job is the slowest of the three.
 
 ## In-app update check (no signed auto-update)
 
-The app does **not** bundle an in-place updater: no `tauri-plugin-updater`, no
-`bundle.createUpdaterArtifacts`, no minisign signing, no `latest.json`. A signed updater
-chain needs a private key held as a repo secret and a `latest.json` manifest merged
-race-free across parallel release jobs; we opted to keep the release pipeline key-free.
+The app does **not** bundle an in-place updater: no signed updater chain, no `latest.json`.
+A signed updater needs a private key held as a repo secret and a manifest merged race-free
+across parallel release jobs; we opted to keep the release pipeline key-free.
 
-What the titlebar "Check for updates" does instead (`lib/update-backend.ts` + the Rust
-`check_update` command in `src-tauri/src/update.rs`):
+What the titlebar "Check for updates" does instead (`lib/update-backend.ts` + the shared
+`check_update` command in `crates/greywork-host/src/services/update.rs`):
 
-- Calls the GitHub Releases API (`/releases/latest`) from the **host** — the renderer CSP
-  only allows `self` + `ipc`, and the API rejects requests without a `User-Agent`. It
-  compares `tag_name` with the running version and shows the release notes.
+- Calls the GitHub Releases API (`/releases/latest`) from the **host** (the headless server
+  the shell spawned), which compares `tag_name` with the running version and shows the
+  release notes.
 - "Go to download" opens the release page in the system browser via `open_external`
   (http/https only). Every platform takes this same manual path.
 
@@ -177,20 +24,15 @@ No repo secrets are required to build or release.
 
 Deliberately left out: both require certificates we do not have, and wiring the
 steps up without the secrets only turns a working workflow into a failing one.
-What each side needs:
+What each side needs (electron-builder reads these from env vars on the runner):
 
 **macOS** — an Apple Developer Program membership and a _Developer ID Application_
 certificate.
 
-1. Export the cert as `.p12`, base64 it into a secret, and import it on the runner
-   (or set `APPLE_CERTIFICATE` / `APPLE_CERTIFICATE_PASSWORD`, which `tauri-action`
-   understands natively).
-2. Set `bundle.macOS.signingIdentity` in `tauri.macos.conf.json`.
-3. For notarization set `APPLE_ID`, `APPLE_PASSWORD` (an app-specific password) and
-   `APPLE_TEAM_ID`, or the App Store Connect API key triple
-   (`APPLE_API_ISSUER`, `APPLE_API_KEY`, `APPLE_API_KEY_PATH`).
-4. `hardenedRuntime` is already on by default; add an entitlements file only if a
-   capability is denied.
+1. Export the cert as `.p12`, base64 it into the `CSC_LINK` secret (with
+   `CSC_KEY_PASSWORD` if passphrase-protected); electron-builder imports it on the runner.
+2. For notarization set `APPLE_ID`, `APPLE_PASSWORD` (an app-specific password) and
+   `APPLE_TEAM_ID` — electron-builder notarizes the notarized app automatically.
 
 Until then, Gatekeeper quarantines the downloaded `.dmg`. Users can right-click →
 Open, or run `xattr -dr com.apple.quarantine /Applications/GreyWork.app`.
@@ -198,22 +40,92 @@ Open, or run `xattr -dr com.apple.quarantine /Applications/GreyWork.app`.
 **Windows** — an OV or EV code-signing certificate (EV avoids the SmartScreen
 reputation warm-up).
 
-1. `bundle.windows.certificateThumbprint` + `digestAlgorithm` (`sha256`) +
-   `timestampUrl`, with the cert imported into the runner's certificate store; or
-   `bundle.windows.signCommand` for a custom signer.
+1. Set `CSC_LINK` (a `.pfx` in a secret) + `CSC_KEY_PASSWORD`; electron-builder runs
+   signtool with a `sha256` digest and a default timestamp server.
 2. EV certificates on hardware tokens need a cloud signing service instead of a
-   `.pfx` in a secret.
+   `.pfx` in a secret (electron-builder supports `sign`/`signOptions` hooks).
 
 Until then, SmartScreen warns on the unsigned NSIS installer.
 
 ## Building locally
 
 ```sh
-pnpm tauri build                    # uses the platform config above
-pnpm --filter @greywork/desktop tauri build --bundles deb   # explicit override
+pnpm electron:package        # sidecar（release）+ 渲染层 + 壳 + electron-builder
+pnpm --filter @greywork/electron package:dir    # 只出未压缩目录（快，用于本地验证）
 ```
 
-Artifacts land in `src-tauri/target/release/bundle/<type>/`.
+Artifacts land in `apps/electron/release/<version>/`（安装包 + `<name>-unpacked/`）。
+
+## Browser front (`apps/web`)
+
+`apps/web` is a second frontend built from the same `@greywork/workbench` sources with a narrower
+`FrontSpec` (see [architecture.md](architecture.md#frontends-appsdesktop--appsweb)). It is a static
+SPA: no Electron, no native shell.
+
+```sh
+pnpm dev:web        # Vite dev server on 1421 (proxies /api to 127.0.0.1:8787)
+pnpm build:web      # → apps/web/dist
+```
+
+Deployment requirements:
+
+- Serve `apps/web/dist` as the site root. The router uses **hash history**, so no rewrite rules are
+  needed for client-side routes.
+- Reverse-proxy `/api/*` (including the `/api/events` WebSocket upgrade) to `greywork-server` on the
+  **same origin**. The server does not send CORS headers and the login cookie is scoped to the front
+  origin, so a cross-origin split would break authentication.
+- `/pdfjs/*` and `/vscode-icons/*` are absolute runtime paths baked into the workbench sources; the
+  web build emits them at the root (`emitsSharedAssets: true`). If you put the SPA under a sub-path,
+  those assets must still be reachable at the root.
+
+Against a headless server the browser front is a full client for conversations, automation and the
+plugin market. Capabilities that need a local host (installing skills, native dialogs, system tray)
+degrade with an explicit message rather than failing silently.
+
+## Desktop installers (Electron)
+
+The desktop app is an **Electron** app (`apps/electron`). The shell only spawns the headless
+`greywork-server` as a sidecar and loads the **same renderer build** (`apps/desktop/dist`) from
+it — no second copy of the domain logic, no separate frontend build.
+
+The sidecar listens on a **stable loopback port** (persisted in `userData/sidecar-port.json`,
+default `17844`, bumped only on collision). This is load-bearing, not cosmetic: the renderer
+persists the workspace list, sessions, settings and layout in `localStorage`, which browsers key
+by **origin** (scheme + host + _port_). A random per-launch port would mint a fresh, empty origin
+on every start — the user-visible symptom is "my workspaces/settings disappear every launch".
+
+Build order matters (the root script `pnpm electron:package` chains it all):
+
+```sh
+cargo build --release -p greywork-server     # sidecar binary      → target/release/
+pnpm --filter @greywork/desktop build        # renderer SPA        → apps/desktop/dist/
+pnpm --filter @greywork/electron build       # main + preload      → apps/electron/out/
+pnpm --filter @greywork/electron package     # electron-builder    → apps/electron/release/<version>/
+```
+
+`apps/electron/electron-builder.yml` decides what lands where:
+
+| Location               | Contents                                       | Why                                         |
+| ---------------------- | ---------------------------------------------- | ------------------------------------------- |
+| asar (`files: out/**`) | main process + preload only                    | the real SPA is served by the sidecar       |
+| `resources/static/`    | the renderer SPA (`apps/desktop/dist`)         | becomes the sidecar's `GREYWORK_STATIC_DIR` |
+| `resources/server/`    | the `greywork-server` binary for that platform | spawned as a sidecar on launch              |
+| `resources/icons/`     | tray icon + installer icons                    | runtime + per-platform installer icons      |
+
+Targets: Linux `AppImage`, Windows `nsis`, macOS `dmg`. CI builds with `--dir` (unpacked) only:
+the per-platform installers pull extra tooling at build time, which is flaky on CI runners —
+actual installers are produced in `release.yml` and attached to the draft Release.
+
+`pnpm version:sync` keeps the version in the root `package.json`, `apps/desktop` and
+`apps/electron` in step — electron-builder reads the shell's own `package.json`, so drift shows
+up as an installer whose version does not match the release tag.
+
+Runtime logs: the shell mirrors main-process `console.*` output to `<userData>/logs/main.log`
+(rotated to `main.log.1` at 5 MiB), including sidecar spawn/exit, auto-login failures and renderer
+crashes. Packaged builds have no terminal, so this file is the first thing to ask for in a bug
+report. `userData` is Electron's per-app data directory (`~/.config/<app>` on Linux,
+`%APPDATA%\<app>` on Windows, `~/Library/Application Support/<app>` on macOS); in development the
+app name comes from the package name, in packaged builds from `productName` (`GreyWork`).
 
 ## Windows development prerequisites
 
@@ -233,18 +145,22 @@ The headless server (`apps/server`, see [architecture.md](architecture.md#headle
 ships the same Vue renderer as a same-origin SPA behind a password login. A multi-stage
 [`Dockerfile`](../Dockerfile) at the repo root builds it:
 
-1. **web** (`node:22`) runs `pnpm build` → `apps/desktop/dist` (renderer only, no Tauri). The build
-   context has no `~/.npmrc`, so it uses the public npm registry; pass
-   `--build-arg NPM_REGISTRY=https://registry.npmmirror.com` (or your own mirror) if you are behind
-   a slow link to npmjs — otherwise pnpm's metadata requests time out mid-install.
+1. **web** (`node:22`) runs `pnpm build:desktop` → `apps/desktop/dist` (only the front this image
+   serves; `apps/web` is a separate deployment). The build context has no `~/.npmrc`, so it uses the
+   public npm registry; pass `--build-arg NPM_REGISTRY=https://registry.npmmirror.com` (or your own
+   mirror) if you are behind a slow link to npmjs — otherwise pnpm's metadata requests time out
+   mid-install.
 2. **server** (`rust:1`) runs `cargo build --release -p greywork-server` — only the server crate and
-   `greywork-host`, so no WebKit/Tauri system deps are pulled. `cmake` is installed for `aws-lc-rs`
+   `greywork-host`, so no GUI toolkit deps are pulled. `cmake` is installed for `aws-lc-rs`
    (rustls); `rusqlite` compiles bundled SQLite with the base image's C toolchain.
 3. **runtime** (`debian:bookworm-slim`) carries just the binary, the built SPA at `/app/web`,
    `ca-certificates` and `git`. It runs as a non-root user and serves `0.0.0.0:8787`.
+   **LibreOffice** (`libreoffice-writer` + `libreoffice-impress`, plus `fonts-noto-cjk` for CJK
+   glyphs) is also installed here so the "high-fidelity (PDF)" office preview works out of the box;
+   `soffice` is on `PATH`, so no `GREYWORK_SOFFICE_PATH` is needed in the default image.
 
 ```sh
-# 0) 可选：cp .env.example .env —— 三种密码来源 / 授权面 / 安全开关 / 定时任务与
+# 0) 可选：cp .env.example .env —— 三种密码来源 / 授权面 / 安全开关 / 自动化任务与
 #    模型凭证都在里面逐条注明了用途
 cp .env.example .env
 
@@ -260,15 +176,16 @@ docker compose up -d --build
 
 Key environment variables (full list: `greywork-server help`):
 
-| Variable                           | Purpose                                                                          |
-| ---------------------------------- | -------------------------------------------------------------------------------- |
-| `GREYWORK_PASSWORD_HASH`           | argon2 PHC login password (best source). Else `auth.json` / `GREYWORK_PASSWORD`. |
-| `GREYWORK_WORKSPACE_ROOTS`         | Colon-separated container paths the agent may touch (`fs_*` / `git_*`).          |
-| `GREYWORK_SECURE_COOKIE`           | `1` behind a TLS reverse proxy (adds `Secure` to the session cookie).            |
-| `GREYWORK_AGENT_PROGRAMS`          | Extra allowed agent programs (frozen allow-list; DB is never trusted).           |
-| `GREYWORK_STATIC_DIR`              | SPA dir; the image sets `/app/web`. Missing `index.html` → hard startup failure. |
-| `GREYWORK_FRAME_ORIGINS`           | Comma-separated origins allowed in the CSP `frame-src` (cloud Office viewers).   |
-| `GREYWORK_AUTOMATION_HOST_PRIMARY` | `1` = the server **is** the automation executor (see below).                     |
+| Variable                           | Purpose                                                                                         |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `GREYWORK_PASSWORD_HASH`           | argon2 PHC login password (best source). Else `auth.json` / `GREYWORK_PASSWORD`.                |
+| `GREYWORK_WORKSPACE_ROOTS`         | Colon-separated container paths the agent may touch (`fs_*` / `git_*`).                         |
+| `GREYWORK_SECURE_COOKIE`           | `1` behind a TLS reverse proxy (adds `Secure` to the session cookie).                           |
+| `GREYWORK_AGENT_PROGRAMS`          | Extra allowed agent programs (frozen allow-list; DB is never trusted).                          |
+| `GREYWORK_STATIC_DIR`              | SPA dir; the image sets `/app/web`. Missing `index.html` → hard startup failure.                |
+| `GREYWORK_FRAME_ORIGINS`           | Comma-separated origins allowed in the CSP `frame-src` (cloud Office viewers).                  |
+| `GREYWORK_AUTOMATION_HOST_PRIMARY` | `1` = the server **is** the automation executor (see below).                                    |
+| `GREYWORK_TRUSTED_HOST`            | `1` = client is on this machine (Electron sidecar). Lifts three fail-closed clamps — see below. |
 
 Design/security notes:
 
@@ -277,8 +194,35 @@ Design/security notes:
   logs a startup warning — the password and session token would otherwise cross the wire in clear.
 - **Health probe is self-contained.** `HEALTHCHECK` runs `greywork-server healthcheck` (a raw TCP GET
   to `/api/health`); the image ships no `curl`/`wget`, keeping the runtime tool surface minimal.
-- **Security headers.** The server sends a strict `Content-Security-Policy` (mirroring the desktop
-  Tauri CSP, plus `media-src blob:` for inbound video/voice thumbnails), `X-Frame-Options: DENY`,
+- **`GREYWORK_TRUSTED_HOST` is the one control that widens the client's reach — treat it as a
+  deployment-mode switch, not a convenience flag.** Defaults are fail-closed because the client is
+  assumed to be _remote_; a trusted host means the client runs on the same machine and is
+  authoritative. Setting it lifts three fail-closed clamps at once:
+  1. **ACP `tier` stops being pinned** (`GREYWORK_TIER`, default `read-only`). Normally the server
+     overwrites that field on `acp_start` and `acp_set_permission_tier`, so a remote session can
+     neither escalate its tier nor run repo scripts through `worktree_provision`. Unpinned, the tier
+     the user picked in the UI is what actually runs, and `sys_info` reports `pinnedTier: null` —
+     which is what re-enables the pickers in Settings.
+  2. **`db_agents_sync` is allowed.** It is the source of truth for the agent-backend directory and
+     can write an arbitrary `command`; when denied (the default) the UI greys out the whole agent
+     directory as read-only.
+  3. **`acp_start` reads the DB-enabled backends** instead of only the frozen `GREYWORK_AGENT_PROGRAMS`
+     list, so a backend the user just added works without a restart.
+  4. **`fs_authorize_drop_paths` / `fs_authorize_picked_paths` are allowed.** The renderer gets an
+     absolute path from an OS drop (`webUtils.getPathForFile`) or from the shell's own native dialog
+     but the host has no idea the user did anything, so it must declare the path explicitly —
+     otherwise the following `fs_read_*` is refused with "path not authorized". Drops authorize
+     files only (a dropped folder must not hand over a whole tree); picked paths authorize files
+     **and** directories, since picking a folder is how a workspace root gets bound.
+
+  The Electron desktop shell runs this server as its own private backend on loopback and therefore
+  sets `GREYWORK_TRUSTED_HOST=1`. **Never set it on a network-exposed deployment** — a non-loopback
+  bind with this flag on logs a loud startup warning, because it hands any client on the network the
+  ability to pick its own permission tier and rewrite the agent-backend directory.
+
+- **Security headers.** The server sends a strict `Content-Security-Policy` (also governing the
+  desktop shell, which loads the same served SPA; `media-src 'self' blob:` — `blob:` is for inbound video/voice thumbnails and
+  browser-preview mode; workspace video/audio streams through the same-origin `/api/media` route), `X-Frame-Options: DENY`,
   `Referrer-Policy: no-referrer`, `Permissions-Policy` (camera / microphone / geolocation / … all
   denied; `clipboard-*` is deliberately left alone because the UI's copy buttons use
   `navigator.clipboard`) and `X-Content-Type-Options: nosniff` on every response. `HSTS` is sent
@@ -287,19 +231,15 @@ Design/security notes:
   `GREYWORK_FRAME_ORIGINS` **only** appends a `frame-src` directive — it cannot relax the rest of the
   policy, and entries that are not a bare `scheme://host[:port]` are dropped with a startup warning
   (anything containing `;`, quotes, wildcards or whitespace could otherwise rewrite the policy).
-  This is what makes a _custom_ cloud-Office vendor usable on the web build; the desktop shell's CSP
-  is baked into `tauri.conf.json`, so it can only embed the three preset vendors.
+  This is what makes a _custom_ cloud-Office vendor usable — the Electron shell loads the same
+  served SPA, so it inherits this server-side policy instead of carrying its own.
   The policy is verified against the **real** hosted bundle by `pnpm --filter @greywork/desktop
 e2e:served`, which logs in and opens markdown / HTML / PDF / xlsx previews while asserting zero
   `securitypolicyviolation` events — dev-server CSP is a different beast, so only the served build
   counts.
-- **Hardened by default, sandbox opt-in.** `docker-compose.yml` sets `no-new-privileges` (so neither
-  the server nor any agent child can gain privileges via setuid) and runs as uid 10001. The agent
-  sandbox's `fs` / `full` tiers need `bwrap`, which cannot work in a default container: the probe
-  fails and the sandbox degrades to `off`. If you need those tiers, layer
-  `docker-compose.sandbox.yml` (`seccomp=unconfined` + `SYS_ADMIN` + `NET_ADMIN`) — it is a separate
-  file precisely because it materially widens the container-escape surface. The measured matrix and
-  the trade-off are documented at the top of that file.
+- **Hardened by default.** `docker-compose.yml` sets `no-new-privileges` (so neither the server nor
+  any agent child can gain privileges via setuid) and runs as uid 10001. Agents run unsandboxed —
+  they keep their own permission models (see the sandbox note in architecture.md).
 - **Unattended automations.** Scheduled tasks live in the **server's** database — a task created in
   the desktop app is not visible here (and vice-versa). To have a task run without any browser or
   desktop machine being open, create it in the server's web UI and set

@@ -30,7 +30,7 @@ services:
       # 只在服务端态生效——桌面壳的 CSP 写死在打包配置里，仅支持三个预设厂商。
       # 非 http(s)://host[:port] 形态的项会被丢弃并在日志里点名（防它改写整条 CSP）。
       GREYWORK_FRAME_ORIGINS: "${GREYWORK_FRAME_ORIGINS:-}"
-      # 定时任务：置 1 则**本容器**是执行者，到点即跑，不需要一直开着浏览器或自己的电脑。
+      # 自动化任务：置 1 则**本容器**是执行者，到点即跑，不需要一直开着浏览器或自己的电脑。
       # 注意任务建在服务端库内（桌面端建的任务不在这份库里），见 docs/packaging.md。
       GREYWORK_AUTOMATION_HOST_PRIMARY: "${GREYWORK_AUTOMATION_HOST_PRIMARY:-0}"
       # 无人值守执行时模型凭据从**本进程**环境变量读取（对应设置里的 apiKeyEnv），
@@ -43,7 +43,7 @@ services:
       # 需要 agent 读写的项目目录：挂进来，并把容器内路径加进 GREYWORK_WORKSPACE_ROOTS。
       # - /path/on/host/project:/work/project:rw
     # 默认不提权：禁止进程通过 setuid/setgid 提权（对 agent 子进程同样生效）。
-    # 需要 agent 沙盒的 fs / full 档时叠加 docker-compose.sandbox.yml（它会替换本列表）。
+    # 沙盒已移除（agent 自带权限模型），seccomp 叠加文件随之删除。
     security_opt:
       - no-new-privileges:true
     restart: unless-stopped

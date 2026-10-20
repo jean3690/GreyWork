@@ -1,15 +1,25 @@
 // MCP 官方注册表：条目 → 登记草稿的传输归一 + 宿主搜索转发参数。
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as GreyWorkCore from "@greywork/core";
-import { invoke } from "@tauri-apps/api/core";
 import { registryEntryToDraft, searchMcpRegistry, type McpRegistryEntry } from "@/lib/mcp-registry";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+vi.mock("@greywork/host-ipc", async (importOriginal) => ({
+  ...(await importOriginal()),
+  invoke: vi.fn(),
+}));
 vi.mock("@greywork/core", async (importOriginal) => {
   const actual = await importOriginal<typeof GreyWorkCore>();
   return { ...actual, isTauriRuntime: () => true };
 });
-const invokeMock = vi.mocked(invoke);
+const invokeMock = vi.mocked((await import("@greywork/host-ipc")).invoke);
+
+beforeEach(() => {
+  vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "server" });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 function entry(partial: Partial<McpRegistryEntry>): McpRegistryEntry {
   return {

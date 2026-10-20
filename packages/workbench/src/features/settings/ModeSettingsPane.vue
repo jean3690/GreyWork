@@ -5,12 +5,11 @@ import { useI18n } from "vue-i18n";
 import { useAgentStore } from "@/stores/agent";
 import { systemBackend, type SysInfo } from "@/lib/system-backend";
 import { PERMISSION_TIERS, RUN_MODES, useSettingsStore, type PermTier } from "@/stores/settings";
-import { PERM_TIER_DESCS, PERM_TIER_LABELS, SANDBOX_LABELS, usePermissionSandbox } from "@/lib/permission-sandbox";
+import { PERM_TIER_DESCS, PERM_TIER_LABELS } from "@/lib/permission-sandbox";
 import WorktreeSnapshotsCard from "@/features/settings/WorktreeSnapshotsCard.vue";
 
 const settings = useSettingsStore();
 const agent = useAgentStore();
-const { suggestedSandbox } = usePermissionSandbox();
 // 运行模式的 hint 是 i18n key（RUN_MODES 存 key、渲染处转译，同 AppearanceSettingsPane 的 FONT_SIZES）；
 // 本 pane 其余权限 / 沙盒文案仍走 permission-sandbox 的字面量，不在此次转 i18n 的范围内。
 const { t } = useI18n();
@@ -98,9 +97,7 @@ function applyPermissionTier(tier: (typeof PERMISSION_TIERS)[number]["value"]): 
         }}：这里的改动不会生效，实际档位以服务端为准。
       </p>
       <p v-if="settings.permissionTier === 'full'" class="mt-2 text-[11px] text-amber-400">
-        完全访问不设工作区边界：agent 可读写任意路径。建议配合沙盒「{{
-          SANDBOX_LABELS[suggestedSandbox]
-        }}」，或用下面的临时只读跑高风险回合。
+        完全访问不设工作区边界：agent 可读写任意路径。可用下面的临时只读跑高风险回合。
       </p>
       <label
         class="mt-3 flex items-center justify-between gap-3 border-t border-line-2 pt-3"

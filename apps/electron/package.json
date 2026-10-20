@@ -1,0 +1,26 @@
+{
+  "name": "@greywork/electron",
+  "version": "0.7.0",
+  "private": true,
+  "description": "GreyWork Electron desktop shell: spawns the headless greywork-server sidecar and hosts the renderer in a Chromium window.",
+  "author": "GreyWork Team",
+  "license": "MIT",
+  "homepage": "https://github.com/jean3690/GreyWork",
+  "main": "out/main/index.js",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "build": "node -e \"require('node:fs').rmSync('out',{recursive:true,force:true})\" && tsc -p tsconfig.build.json",
+    "dev": "pnpm run build && electron .",
+    "start": "electron .",
+    "package": "electron-builder --config electron-builder.yml",
+    "package:dir": "electron-builder --config electron-builder.yml --dir"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "electron": "30.0.1",
+    "electron-builder": "^24.13.3",
+    "typescript": "~5.6.2",
+    "vitest": "^5.0.2"
+  }
+}

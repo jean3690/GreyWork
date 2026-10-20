@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 1,
+  "manifest": {
+    "id": "demo.workspace",
+    "name": "工作区只读预览",
+    "version": "1.0.0",
+    "description": "workspace.read 能力演示：列出用户已授权的工作区根，只读预览根内文本文件（单次最多 256 KiB，超出截断；二进制/目录拒绝）；仅桌面/服务端宿主可用。",
+    "kind": "worker",
+    "runtime": {
+      "type": "worker",
+      "entry": "https://raw.githubusercontent.com/OWNER/REPO/COMMIT/demo.workspace.js",
+      "sha256": "REPLACE_WITH_64_LOWERCASE_HEX"
+    },
+    "requires": ["workspace.read"],
+    "contributes": {
+      "modes": [
+        {
+          "id": "demo-workspace",
+          "title": "工作区预览",
+          "icon": "folder",
+          "page": {
+            "eyebrow": "Marketplace plugin · workspace.read",
+            "heading": "工作区只读预览",
+            "body": "workspace.read 走的是用户已授权的工作区（与文件树同一张白名单，不会新建第二张）：roots 列出授权根，read 只读根内文本文件。路径必须落在授权根内，否则与「文件不存在」返回同一句错误；单次最多 256 KiB，超出部分截断；二进制与目录直接拒绝。插件拿不到任何写入口。",
+            "fields": [
+              {
+                "key": "path",
+                "label": "文件路径",
+                "kind": "text",
+                "default": "README.md",
+                "maxLength": 512
+              },
+              {
+                "key": "preview",
+                "label": "内容预览",
+                "kind": "text",
+                "default": "",
+                "maxLength": 4096
+              },
+              {
+                "key": "status",
+                "label": "最近动作",
+                "kind": "text",
+                "default": "尚未操作",
+                "maxLength": 120
+              }
+            ],
+            "outputs": [
+              {
+                "label": "路径",
+                "valueKey": "path"
+              },
+              {
+                "label": "动作",
+                "valueKey": "status"
+              },
+              {
+                "label": "预览",
+                "valueKey": "preview"
+              }
+            ],
+            "actions": [
+              {
+                "id": "roots",
+                "label": "列出授权根",
+                "style": "secondary",
+                "operation": {
+                  "type": "invoke",
+                  "handler": "roots"
+                }
+              },
+              {
+                "id": "read",
+                "label": "读取文件",
+                "style": "primary",
+                "operation": {
+                  "type": "invoke",
+                  "handler": "read"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

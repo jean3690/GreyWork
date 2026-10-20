@@ -220,6 +220,51 @@ describe("SelectionLayer", () => {
     unregister();
   });
 
+  it("有接收方：点评论展开输入框，提交后发射 chat:comment 并收起浮层", async () => {
+    const unregister = registerChatReceiver();
+    const { root, unit } = setupDom();
+    const commented: { quote: string; note: string; source?: string }[] = [];
+    appEvents.on("chat:comment", (payload) => commented.push(payload));
+
+    await mountLayer(root);
+    stubSelection(unit, "选中的文字");
+    await selectAndSettle();
+
+    const commentBtn = toolbar()!.querySelector<HTMLButtonElement>('[data-testid="selection-action-comment"]')!;
+    expect(commentBtn.disabled).toBe(false);
+    commentBtn.click();
+    await nextTick();
+
+    const input = toolbar()!.querySelector<HTMLInputElement>('[data-testid="selection-comment-input"]')!;
+    expect(input).not.toBeNull();
+    input.value = "这里要改";
+    input.dispatchEvent(new Event("input"));
+    await nextTick();
+
+    toolbar()!.querySelector<HTMLButtonElement>('[data-testid="selection-comment-submit"]')!.click();
+    await flushPromises();
+    await nextTick();
+
+    expect(commented).toHaveLength(1);
+    expect(commented[0]).toMatchObject({ quote: "选中的文字", note: "这里要改", source: "a.md" });
+    expect(toolbar()).toBeNull();
+
+    unregister();
+  });
+
+  it("没有接收方：评论按钮禁用，点评论不展开输入框", async () => {
+    const { root, unit } = setupDom();
+    await mountLayer(root);
+    stubSelection(unit, "选中的文字");
+    await selectAndSettle();
+
+    const commentBtn = toolbar()!.querySelector<HTMLButtonElement>('[data-testid="selection-action-comment"]')!;
+    expect(commentBtn.disabled).toBe(true);
+    commentBtn.click();
+    await nextTick();
+    expect(toolbar()!.querySelector('[data-testid="selection-comment-input"]')).toBeNull();
+  });
+
   it("按下按钮时选区被引擎折叠：浮层不能被拆掉，click 仍要生效", async () => {
     const unregister = registerChatReceiver();
     const { root, unit } = setupDom();

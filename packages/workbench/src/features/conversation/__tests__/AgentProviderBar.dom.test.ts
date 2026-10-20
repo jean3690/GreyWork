@@ -3,12 +3,11 @@
 // 连接失败就地展示错误文案并可点击重试；已连接重复点击不再重复建会话。
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DOMWrapper, enableAutoUnmount, flushPromises, mount, type VueWrapper } from "@vue/test-utils";
-import { defineComponent } from "vue";
+import { defineComponent, nextTick } from "vue";
 import { createPinia, setActivePinia } from "pinia";
 import AcpSessionConfig from "@/features/conversation/AcpSessionConfig.vue";
 import { i18n } from "@/i18n";
 import AgentProviderBar from "@/features/conversation/AgentProviderBar.vue";
-import { localReasoningOverride } from "@/stores/chat-llm";
 import { useAgentStore } from "@/stores/agent";
 import { useSettingsStore } from "@/stores/settings";
 
@@ -45,7 +44,10 @@ vi.mock("@greywork/acp", () => ({
   desktopHomeDir: () => h.homeDir(),
 }));
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: (...args: unknown[]) => (h.invoke as (...a: unknown[]) => Promise<unknown>)(...args) }));
+vi.mock("@greywork/host-ipc", async (importOriginal) => ({
+  ...(await importOriginal()),
+  invoke: (...args: unknown[]) => (h.invoke as (...a: unknown[]) => Promise<unknown>)(...args),
+}));
 
 function options(withEffort: boolean) {
   const configOptions = [
@@ -145,77 +147,33 @@ function openCodeButton(wrapper: VueWrapper) {
   return providerButton(wrapper, "opencode");
 }
 
+/**
+ * 预设里默认只开 opencode；而 `DEFAULT_AGENT_PROVIDERS` 是模块级对象，启停会**原地改写**它，
+ * 同文件后面的用例会读到残留状态。这里显式把整份目录重置成给定集合，保证用例互不影响。
+ * 服务端态还要先等目录接管完成，免得随后的预设重建把改动覆盖掉。
+ */
+async function setEnabledProviders(...ids: string[]): Promise<void> {
+  const store = useAgentStore();
+  await store.providersHydrated;
+  for (const provider of store.agentProviders) {
+    await store.setAgentProviderEnabled(provider.id, ids.includes(provider.id));
+  }
+  await nextTick();
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   h.isAvailable.mockImplementation(() => true);
   h.homeDir.mockImplementation(() => Promise.resolve("/home/test"));
   h.listener = null;
-  // 模块级会话覆盖是全局单例：用例间必须复位，否则上一用例的覆盖会漏进下一用例
-  localReasoningOverride.value = null;
   // settings 会持久化 selectedModelProviderId 等：不清理会跨用例水合出前置状态
   localStorage.clear();
-});
-
-describe("AgentProviderBar · Local 模型 / 思考强度选择器", () => {
-  it("点 Local 展开选择区：模型下拉与思考强度胶囊出现；ACP 展开时不出现", async () => {
-    const { wrapper } = mountBar();
-    expect(wrapper.find('[data-testid="local-selector"]').exists()).toBe(false);
-
-    await wrapper.get('[data-testid="local-provider-button"]').trigger("click");
-    await flushPromises();
-    const selector = wrapper.find('[data-testid="local-selector"]');
-    expect(selector.exists()).toBe(true);
-    // 默认供应商的模型名出现在触发按钮上
-    expect(selector.text()).toContain(useSettingsStore().modelProviders[0].model);
-
-    // 切到 ACP 后 Local 选择区收起
-    h.startAgent.mockResolvedValue(7);
-    h.openSession.mockResolvedValue(options(true));
-    await openCodeButton(wrapper).trigger("click");
-    await vi.waitFor(() => expect(useAgentStore().acpConnected).toBe(true));
-    expect(wrapper.find('[data-testid="local-selector"]').exists()).toBe(false);
-  });
-
-  it("模型下拉选择即切换全局默认供应商", async () => {
-    const { wrapper } = mountBar();
-    const settings = useSettingsStore();
-    const second = settings.modelProviders[1] ?? settings.modelProviders[0];
-    await wrapper.get('[data-testid="local-provider-button"]').trigger("click");
-    await flushPromises();
-
-    await wrapper.get('[data-testid="local-model-button"]').trigger("click");
-    await flushPromises();
-    const items = [...document.body.querySelectorAll('[data-testid="local-model-item"]')].map((element) => new DOMWrapper(element));
-    expect(items.length).toBeGreaterThan(0);
-    await items.at(-1)!.trigger("click");
-    await flushPromises();
-    expect(settings.selectedModelProviderId).toBe(second.id);
-  });
-
-  it("思考强度胶囊写会话覆盖并影响生效档；设为默认写回供应商并清覆盖", async () => {
-    const { wrapper } = mountBar();
-    const settings = useSettingsStore();
-    // 镜像组件的实际选择：选中项（若可用）优先，否则第一个可用
-    const available = settings.modelProviders.filter(
-      (candidate) => candidate.enabled && !!candidate.baseUrl?.trim() && !!candidate.model.trim(),
-    );
-    const target = available.find((candidate) => candidate.id === settings.selectedModelProviderId) ?? available[0];
-    await wrapper.get('[data-testid="local-provider-button"]').trigger("click");
-    await flushPromises();
-
-    const high = wrapper.get('[data-testid="local-effort-chip"][data-effort="high"]');
-    await high.trigger("click");
-    expect(localReasoningOverride.value).toBe("high");
-
-    await wrapper.get('[data-testid="local-effort-default"]').trigger("click");
-    expect(localReasoningOverride.value).toBeNull();
-    expect(settings.modelProviders.find((candidate) => candidate.id === target.id)?.reasoningEffort).toBe("high");
-  });
 });
 
 describe("AgentProviderBar · ACP 会话配置选择器", () => {
   it("首屏只显示图标；点击后仅当前 ACP 展开名称", async () => {
     const { wrapper } = mountBar();
+    await setEnabledProviders("opencode", "codex");
     expect(wrapper.text()).toContain("ACP 选择");
     // 名字常驻 DOM（收起态是靠 grid 0fr 把宽度收成 0），所以「有没有展开」看 data-expanded，
     // 不能再用 text() 判断 —— 那已经恒为真。
@@ -281,6 +239,29 @@ describe("AgentProviderBar · ACP 会话配置选择器", () => {
     });
   });
 
+  it("只有旧版 modes：模式只出一个选择器，模型位保持只读占位", async () => {
+    h.startAgent.mockResolvedValue(7);
+    h.openSession.mockResolvedValue({
+      sessionId: "session-legacy-modes",
+      configOptions: [],
+      modes: {
+        currentModeId: "build",
+        availableModes: [
+          { id: "build", name: "Build" },
+          { id: "plan", name: "Plan" },
+        ],
+      },
+    });
+    const { wrapper } = mountBar();
+
+    await openCodeButton(wrapper).trigger("click");
+    await vi.waitFor(() => expect(wrapper.text()).toContain("会话模式 · Build"));
+    // 没有 model option 时模型胶囊不应抢走会话模式（否则和额外配置胶囊重复）。
+    expect(wrapper.text()).toContain("使用 CLI 模型");
+    expect(wrapper.findAll("button").filter((button) => button.text().toLowerCase().includes("build"))).toHaveLength(1);
+    expect(wrapper.text()).not.toContain("模型不支持");
+  });
+
   it("连接失败：胶囊旁出现错误行（含宿主原因），不出现模型选择", async () => {
     h.startAgent.mockResolvedValue(7);
     h.openSession.mockRejectedValue(new Error("agent handshake timeout"));
@@ -322,6 +303,8 @@ describe("AgentProviderBar · ACP 会话配置选择器", () => {
     h.openSession.mockResolvedValue(options(true));
     const { wrapper } = mountBar();
     const agentStore = useAgentStore();
+    // 铺满主轨道并留出溢出项：4 个已启用 → 容量 3，最后一个进「…」。
+    await setEnabledProviders("opencode", "codex", "claude-code", "gemini");
 
     const overflowToggle = wrapper.get('[data-testid="acp-overflow-toggle"]');
     expect(overflowToggle.attributes("aria-label")).toBe("更多 ACP");
@@ -339,26 +322,40 @@ describe("AgentProviderBar · ACP 会话配置选择器", () => {
     expect(providerButton(wrapper, targetId).text()).toContain(targetName);
   });
 
-  it("未启用 ACP 可一步选择并启用", async () => {
+  it("未启用 ACP 不出现在选择条；启用后才出现并可连接", async () => {
     h.startAgent.mockResolvedValue(7);
     h.openSession.mockResolvedValue(options(true));
     const { wrapper } = mountBar();
     const agentStore = useAgentStore();
 
+    // 重置成「只开 opencode」：codex 既不在主轨道，也不在溢出菜单。
+    await setEnabledProviders("opencode");
+    expect(wrapper.find('[data-testid="acp-provider-button"][data-provider-id="codex"]').exists()).toBe(false);
+    const overflowToggle = wrapper.find('[data-testid="acp-overflow-toggle"]');
+    if (overflowToggle.exists()) {
+      await overflowToggle.trigger("click");
+      await flushPromises();
+    }
+    expect(overflowItems().some((item) => item.attributes("data-provider-id") === "codex")).toBe(false);
+
+    // 在设置里启用后才出现在主轨道，点击即连接。
+    await agentStore.setAgentProviderEnabled("codex", true);
+    await nextTick();
+    expect(agentStore.agentProviders.find((provider) => provider.id === "codex")?.enabled).toBe(true);
+
     await providerButton(wrapper, "codex").trigger("click");
     await vi.waitFor(() => expect(agentStore.acpConnected).toBe(true));
-    expect(agentStore.agentProviders.find((provider) => provider.id === "codex")?.enabled).toBe(true);
     expect(h.startAgent).toHaveBeenCalledWith("npx -y @agentclientprotocol/codex-acp", expect.any(String));
   });
 });
 
 describe("AgentProviderBar · 安装状态探测与胶囊标注", () => {
-  /** 模拟桌面运行时（__TAURI_INTERNALS__ 注入 → isTauriRuntime()=true → agentsBackend.detect 走 invoke）。 */
+  /** 模拟服务端运行时（__GREYWORK_RUNTIME__="server" → agentsBackend.detect 走 invoke）。 */
   beforeEach(() => {
-    (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
+    (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = "server";
   });
   afterEach(() => {
-    delete (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+    delete (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__;
   });
 
   it("挂载即触发本机 CLI 安装探测（桌面态），不需要先去设置页", async () => {
@@ -380,6 +377,8 @@ describe("AgentProviderBar · 安装状态探测与胶囊标注", () => {
     h.startAgent.mockResolvedValue(7);
     h.openSession.mockResolvedValue(options(true));
     const { wrapper } = mountBar();
+    // codex 留在主轨道、gemini 挤进溢出菜单，两种状态都要能标注。
+    await setEnabledProviders("opencode", "codex", "claude-code", "gemini");
 
     // 轨道图标：安装状态进提示（不再是 title 属性）。
     await openCodeButton(wrapper).trigger("focus");
@@ -399,10 +398,10 @@ describe("AgentProviderBar · 安装状态探测与胶囊标注", () => {
 });
 
 /**
- * 服务端只读态：agent 目录只读时不代用户「顺手启用」——静默改状态又写不进服务端，
- * 不如让选择失败并把「尚未启用」就地说清楚。判据与设置页同一份命令能力表。
+ * 停用即隐藏：设置里取消勾选的后端会从选择条消失（服务端只读态一样 ——
+ * 选择条不再有「点一下顺手启用」这条路径，启用统一收口到设置页）。
  */
-describe("AgentProviderBar · 服务端只读态", () => {
+describe("AgentProviderBar · 停用的后端从选择条消失", () => {
   /** 假服务端：/api/commands 回 available:false，/api/command 一律成功返回 null。 */
   function installServerFetch(): void {
     vi.stubGlobal(
@@ -426,20 +425,21 @@ describe("AgentProviderBar · 服务端只读态", () => {
     delete (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__;
   });
 
-  it("点未启用的后端不代启用：错误就地可见，enabled 保持 false", async () => {
+  it("停用 opencode 后它不再出现在选择条，并提示去设置启用", async () => {
     // 直接设属性而不是 stubGlobal("window", …)：整个换掉 window 会丢掉
     // trigger() 依赖的 Event/MouseEvent 构造器。
     (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = "server";
     installServerFetch();
     const { wrapper } = mountBar();
     const store = useAgentStore();
-    await vi.waitFor(() => expect(store.agentProviders.length).toBeGreaterThan(0));
 
+    // 先把目录重置成「只开 opencode」，再停用它：确保验的是「停用即隐藏」而非残留状态。
+    await setEnabledProviders("opencode");
     await store.setAgentProviderEnabled("opencode", false);
-    await openCodeButton(wrapper).trigger("click");
-    await flushPromises();
+    await nextTick();
 
-    expect(store.agentProviders.find((p) => p.id === "opencode")?.enabled).toBe(false);
-    expect(wrapper.text()).toContain("尚未启用");
+    expect(store.agentProviders.find((provider) => provider.id === "opencode")?.enabled).toBe(false);
+    expect(wrapper.find('[data-testid="acp-provider-button"][data-provider-id="opencode"]').exists()).toBe(false);
+    expect(wrapper.text()).toContain("未启用任何 ACP 后端");
   });
 });

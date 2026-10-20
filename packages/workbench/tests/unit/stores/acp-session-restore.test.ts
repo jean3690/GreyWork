@@ -1,5 +1,6 @@
-// ACP 会话惰性恢复契约：绑定存在且 provider/cwd 一致 → session/load 接回旧上下文；
-// 任何不匹配/失败都静默回落 session/new，保证「发送必达」；恢复窗口内重放内容被抑制。
+// ACP 会话惰性恢复契约：绑定存在且 provider/cwd 一致 → 宿主优先 session/resume、
+// 其次 session/load 接回旧上下文；任何不匹配/失败都静默回落 session/new，保证「发送必达」；
+// load 的重放窗口内内容被抑制，resume 不重放所以不开窗口。换对话时释放旧会话。
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import type { AcpEventEnvelope } from "@greywork/acp";
@@ -8,7 +9,9 @@ const h = vi.hoisted(() => ({
   startAgent: vi.fn(),
   openSession: vi.fn(),
   loadSession: vi.fn(),
+  closeSession: vi.fn(),
   setSessionConfig: vi.fn(),
+  setSessionMode: vi.fn(),
   setPermissionTier: vi.fn(),
   prompt: vi.fn(),
   probeMcp: vi.fn(),
@@ -27,8 +30,10 @@ vi.mock("@greywork/acp", () => ({
       openSession: (handle: number, cwd: string, mcpServers?: unknown) => h.openSession(handle, cwd, mcpServers),
       loadSession: (handle: number, cwd: string, sessionId: string, mcpServers?: unknown) =>
         h.loadSession(handle, cwd, sessionId, mcpServers),
+      closeSession: (handle: number, sessionId: string) => h.closeSession(handle, sessionId),
       probeMcp: (config: unknown) => h.probeMcp(config),
       setSessionConfig: (handle: number, configId: string, value: string | boolean) => h.setSessionConfig(handle, configId, value),
+      setSessionMode: (handle: number, modeId: string) => h.setSessionMode(handle, modeId),
       setPermissionTier: (handle: number, tier: string) => h.setPermissionTier(handle, tier),
       prompt: (handle: number, text: string) => h.prompt(handle, text),
       stop: (handle: number, turnId?: number) => h.stop(handle, turnId),
@@ -87,6 +92,8 @@ beforeEach(() => {
   h.startAgent.mockResolvedValue(7);
   h.openSession.mockResolvedValue({ sessionId: "new-session", configOptions: [] });
   h.loadSession.mockResolvedValue({ sessionId: "acp-old-1", configOptions: [], restored: true });
+  h.closeSession.mockResolvedValue(true);
+  h.setSessionMode.mockResolvedValue(undefined);
   h.prompt.mockResolvedValue({ turnId: 1 });
 });
 
@@ -187,6 +194,41 @@ describe("ACP 会话惰性恢复", () => {
     expect(list[1]?.content ?? "").not.toContain("启动失败");
   });
 
+  it("切换到另一条对话：先 closeSession 旧会话，再建新会话", async () => {
+    const sessionStore = useSessionStore();
+    const agentStore = useAgentStore();
+    const first = sessionStore.createSession(null, "对话 A");
+    const second = sessionStore.createSession(null, "对话 B");
+    h.openSession.mockResolvedValueOnce({ sessionId: "session-a", configOptions: [] });
+
+    await agentStore.dispatchToAcp("第一轮", [], [], first.id);
+    emit({ kind: "prompt-done", payload: { turnId: 1, response: {} } });
+
+    h.openSession.mockResolvedValueOnce({ sessionId: "session-b", configOptions: [] });
+    await agentStore.dispatchToAcp("第二轮", [], [], second.id);
+
+    expect(h.closeSession).toHaveBeenCalledWith(7, "session-a");
+    expect(h.openSession).toHaveBeenCalledTimes(2);
+    expect(h.prompt).toHaveBeenLastCalledWith(7, expect.stringContaining("第二轮"));
+  });
+
+  it("session/close 失败只记日志，不阻断新会话", async () => {
+    const sessionStore = useSessionStore();
+    const agentStore = useAgentStore();
+    const first = sessionStore.createSession(null, "对话 A");
+    const second = sessionStore.createSession(null, "对话 B");
+    h.openSession.mockResolvedValueOnce({ sessionId: "session-a", configOptions: [] });
+    await agentStore.dispatchToAcp("第一轮", [], [], first.id);
+    emit({ kind: "prompt-done", payload: { turnId: 1, response: {} } });
+
+    h.closeSession.mockRejectedValueOnce(new Error("agent does not support session/close"));
+    h.openSession.mockResolvedValueOnce({ sessionId: "session-b", configOptions: [] });
+    await agentStore.dispatchToAcp("第二轮", [], [], second.id);
+
+    expect(h.openSession).toHaveBeenCalledTimes(2);
+    expect(h.prompt).toHaveBeenLastCalledWith(7, expect.stringContaining("第二轮"));
+  });
+
   it("load 成功后绑定落盘：重建 store 后同一会话再派发仍走 loadSession", async () => {
     bindCurrentSession();
     const agentStore = useAgentStore();
@@ -207,6 +249,31 @@ describe("ACP 会话惰性恢复", () => {
 });
 
 describe("恢复会话的重放抑制", () => {
+  it("resumed=true 不开回放窗口：恢复后的首条实时输出立即渲染", async () => {
+    h.loadSession.mockResolvedValue({
+      sessionId: "acp-old-1",
+      configOptions: [],
+      restored: true,
+      resumed: true,
+    });
+    bindCurrentSession();
+    const agentStore = useAgentStore();
+    const chat = useChatStore();
+
+    const pending = agentStore.dispatchToAcp("继续");
+    await vi.waitFor(() => expect(h.prompt).toHaveBeenCalledTimes(1));
+
+    emit({
+      kind: "session-update",
+      payload: { update: { sessionUpdate: "agent_message_chunk", content: { text: "恢复后的实时输出" } } },
+    });
+    chat.flushPendingContent();
+    await pending;
+
+    const list = chat.threads[chat.activeThreadId] ?? [];
+    expect(list[1]?.content ?? "").toContain("恢复后的实时输出");
+  });
+
   it("load 后静默窗口内的 agent_message_chunk 被丢弃，不重复渲染历史", async () => {
     vi.useFakeTimers();
     try {
@@ -265,5 +332,139 @@ describe("恢复会话的重放抑制", () => {
     expect(agentStore.pendingPermission?.requestId).toBe(9);
     await pending;
     expect(agentStore.pendingPermission?.requestId).toBe(9);
+  });
+});
+
+describe("旧版 ACP 会话模式", () => {
+  const modes = {
+    currentModeId: "build",
+    availableModes: [
+      { id: "build", name: "Build" },
+      { id: "plan", name: "Plan", description: "只读规划" },
+    ],
+  };
+
+  it("只回 modes 时合成模式 config option，切换走 setSessionMode", async () => {
+    h.openSession.mockResolvedValue({ sessionId: "session-modes", configOptions: [], modes });
+    const agentStore = useAgentStore();
+
+    await agentStore.connectAcp();
+
+    const option = agentStore.acpConfigOptions.find((entry) => entry.id === "legacy_session_mode");
+    expect(option).toMatchObject({
+      id: "legacy_session_mode",
+      category: "mode",
+      type: "select",
+      currentValue: "build",
+      options: [
+        { value: "build", name: "Build" },
+        { value: "plan", name: "Plan", description: "只读规划" },
+      ],
+    });
+    expect(agentStore.acpStatus).toBe("session_active");
+
+    await agentStore.setAcpConfig("legacy_session_mode", "plan");
+
+    expect(h.setSessionMode).toHaveBeenCalledWith(7, "plan");
+    expect(h.setSessionConfig).not.toHaveBeenCalled();
+    expect(agentStore.acpConfigOptions.find((entry) => entry.id === "legacy_session_mode")?.currentValue).toBe("plan");
+    expect(agentStore.acpModes?.currentModeId).toBe("plan");
+  });
+
+  it("已有真实 mode config option 时不重复合成；mode 事件只更新原始 modes 快照", async () => {
+    h.openSession.mockResolvedValue({
+      sessionId: "session-real-mode",
+      configOptions: [
+        {
+          id: "mode",
+          name: "Session Mode",
+          category: "mode",
+          type: "select",
+          currentValue: "build",
+          options: [
+            { value: "build", name: "Build" },
+            { value: "plan", name: "Plan" },
+          ],
+        },
+      ],
+      modes,
+    });
+    const agentStore = useAgentStore();
+
+    await agentStore.connectAcp();
+
+    expect(agentStore.acpConfigOptions.filter((entry) => entry.category === "mode")).toHaveLength(1);
+    expect(agentStore.acpConfigOptions.some((entry) => entry.id === "legacy_session_mode")).toBe(false);
+
+    emit({ kind: "mode", payload: { sessionId: "session-real-mode", currentModeId: "plan" } });
+
+    expect(agentStore.acpModes?.currentModeId).toBe("plan");
+    // 真实 mode 选择器的值由 agent 的 config-options 更新负责，旧版 mode 事件不越权改写它。
+    expect(agentStore.acpConfigOptions.find((entry) => entry.id === "mode")?.currentValue).toBe("build");
+    expect(agentStore.acpConfigOptions.some((entry) => entry.id === "legacy_session_mode")).toBe(false);
+  });
+
+  it("切换普通 config option 后仍保留合成的模式选项", async () => {
+    h.openSession.mockResolvedValue({ sessionId: "session-modes-2", configOptions: [], modes });
+    h.setSessionConfig.mockResolvedValue([
+      {
+        id: "model",
+        name: "Model",
+        category: "model",
+        type: "select",
+        currentValue: "mock/slow",
+        options: [
+          { value: "mock/fast", name: "Fast" },
+          { value: "mock/slow", name: "Slow" },
+        ],
+      },
+    ]);
+    const agentStore = useAgentStore();
+
+    await agentStore.connectAcp();
+    await agentStore.setAcpConfig("model", "mock/slow");
+
+    expect(h.setSessionConfig).toHaveBeenCalledWith(7, "model", "mock/slow");
+    expect(agentStore.acpConfigOptions.find((entry) => entry.id === "model")?.currentValue).toBe("mock/slow");
+    expect(agentStore.acpConfigOptions.find((entry) => entry.id === "legacy_session_mode")?.currentValue).toBe("build");
+  });
+
+  it("非当前会话的 mode 事件被忽略，避免恢复回放串台", async () => {
+    h.openSession.mockResolvedValue({ sessionId: "session-current", configOptions: [], modes });
+    const agentStore = useAgentStore();
+
+    await agentStore.connectAcp();
+    emit({ kind: "mode", payload: { sessionId: "session-other", currentModeId: "plan" } });
+
+    expect(agentStore.acpModes?.currentModeId).toBe("build");
+    expect(agentStore.acpConfigOptions.find((entry) => entry.id === "legacy_session_mode")?.currentValue).toBe("build");
+  });
+
+  it("load 重放窗口内的 mode 事件不覆盖 load 回包的当前模式", async () => {
+    vi.useFakeTimers();
+    try {
+      h.loadSession.mockResolvedValue({
+        sessionId: "acp-old-1",
+        configOptions: [],
+        restored: true,
+        modes,
+      });
+      bindCurrentSession();
+      const agentStore = useAgentStore();
+
+      const pending = agentStore.dispatchToAcp("继续");
+      for (let i = 0; i < 16; i += 1) await Promise.resolve();
+      expect(h.loadSession).toHaveBeenCalledTimes(1);
+
+      // 历史重放里的旧模式不应把 load 回包声明的当前模式改回去。
+      emit({ kind: "mode", payload: { sessionId: "acp-old-1", currentModeId: "plan" } });
+      await vi.advanceTimersByTimeAsync(350);
+      await pending;
+
+      expect(agentStore.acpModes?.currentModeId).toBe("build");
+      expect(agentStore.acpConfigOptions.find((entry) => entry.id === "legacy_session_mode")?.currentValue).toBe("build");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

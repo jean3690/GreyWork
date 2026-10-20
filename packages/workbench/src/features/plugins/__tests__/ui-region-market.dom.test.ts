@@ -70,6 +70,7 @@ function createFakeRuntime() {
         if (!fn) throw new Error(`no handler ${handler}`);
         return fn(state);
       }),
+      dispatchPointer: vi.fn(async (): Promise<Record<string, DeclarativeValue> | void> => undefined),
       dispose: vi.fn(),
     },
     on(handler: string, fn: (state: Record<string, unknown>) => unknown) {

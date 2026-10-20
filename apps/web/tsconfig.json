@@ -1,0 +1,11 @@
+{
+  // 与 apps/desktop 同款：继承 workbench 的「前端程序」tsconfig，它补上 `@/*` →
+  // `packages/workbench/src/*` 的映射。前端 app 的源码只是薄 bootstrap，真正被本程序检查的
+  // 是 workbench 的源码，而 workbench 内部一律用 `@/…` 互相引用 —— 少了这条映射全是 TS2307。
+  "extends": "../../packages/workbench/tsconfig.front.json",
+  // 最后一行的 glob 单独解释：workbench 的源码被本程序带进来，但它的**补充声明**不在本包
+  // 的 include 里（`types/shpjs.d.ts` 这类无类型依赖的手写声明、`*.css` / `*?worker` 资源
+  // 模块）。TS 的 include 只会叠加、不会与 extends 的合并，所以必须在这里显式纳入。
+  "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.tsx", "src/**/*.vue", "tests/**/*.ts", "../../packages/workbench/src/**/*.d.ts"],
+  "references": [{ "path": "./tsconfig.node.json" }]
+}

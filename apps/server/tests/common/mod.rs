@@ -87,13 +87,17 @@ fn make_state(tmp: &Path, config: ServerConfig) -> AppState {
     }
     let db = Arc::new(greywork_host::db::Db::open_in_memory().unwrap());
     let ctx = Arc::new(CommandContext {
-        host,
+        host: Arc::clone(&host),
         services: Arc::new(Services {
             db,
             workspace: Arc::new(access),
             acp: Arc::new(greywork_host::acp_host::AcpHost::default()),
             llm: Arc::new(greywork_host::llm::LlmHost::default()),
+            agent: Arc::new(greywork_host::llm::LlmAgentHost::default()),
             rag: Arc::new(greywork_host::rag::RagHost::default()),
+            terminal: Arc::new(greywork_host::terminal::TerminalHost::new(Arc::clone(
+                &host,
+            ))),
         }),
         channels: Arc::new(Channels {
             wechat: Arc::new(greywork_host::wechat::WechatHost::default()),
@@ -105,14 +109,16 @@ fn make_state(tmp: &Path, config: ServerConfig) -> AppState {
             wecom: Arc::new(greywork_host::wecom::WecomHost::default()),
         }),
         agent_programs: Arc::new(config.agent_programs.clone()),
+        include_db_agent_programs: config.trusted_host,
         frame_origins: Arc::new(config.frame_origins.clone()),
         // 与 lib.rs 同源：钉住判定看配置有没有值（`policy::overlay_args` 的覆盖条件）。
         host_facts: greywork_host::sys::HostFacts {
             version: "0.0.0-test".to_string(),
             tray_available: false,
-            pinned_sandbox: config.sandbox.is_some(),
             pinned_tier: config.tier.clone(),
         },
+        // 测试不依赖宿主 PATH：显式不可用，`office_convert_info` 结果确定。
+        soffice: greywork_host::office::SofficeTool::for_test(None),
     });
     let sessions = Arc::new(
         SessionStore::new(&hash_password(PASSWORD).unwrap(), Duration::from_secs(3600)).unwrap(),

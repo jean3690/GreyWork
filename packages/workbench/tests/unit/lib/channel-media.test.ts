@@ -7,7 +7,10 @@ const mocks = vi.hoisted(() => ({
   invoke: vi.fn(async (_command: string, _args?: Record<string, unknown>) => ({})),
 }));
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
+vi.mock("@greywork/host-ipc", async (importOriginal) => ({
+  ...(await importOriginal()),
+  invoke: mocks.invoke,
+}));
 vi.mock("@greywork/core", async (importOriginal) => ({
   ...(await importOriginal<typeof GreyworkCore>()),
   isTauriRuntime: () => true,

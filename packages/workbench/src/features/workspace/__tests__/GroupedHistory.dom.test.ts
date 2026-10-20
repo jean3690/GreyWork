@@ -218,6 +218,18 @@ describe("GroupedHistory · 工作区列表", () => {
     ]);
     expect(wrapper.text()).not.toContain("自由会话");
   });
+
+  it("excludeSessionIds 里的会话从列表摘除（协作成员位会话不重复出现）", () => {
+    const wrapper = mount(GroupedHistory, { props: { activeSessionId: null, excludeSessionIds: new Set(["s-a1"]) } });
+    // 工作区行照常在（空组仍是可切换落点），但被排除的会话不再出现
+    expect(wrapper.findAll(ROW).map((row) => row.attributes("data-testid"))).toEqual([
+      "workspace-row-w-alpha",
+      "workspace-row-w-beta",
+      "workspace-row-p-general",
+    ]);
+    expect(wrapper.text()).not.toContain("Alpha 会话");
+    expect(wrapper.text()).toContain("暂无会话");
+  });
 });
 
 describe("GroupedHistory · 会话状态标记", () => {
@@ -317,5 +329,21 @@ describe("GroupedHistorySessions · 大量会话虚拟窗口", () => {
     const { wrapper } = mountSessions(12);
     expect(wrapper.findAll("[data-index]")).toHaveLength(0);
     expect(wrapper.text()).toContain("历史会话 011");
+  });
+});
+
+// 极简侧栏的「筛选」：只看当前工作区那一行（其余行整行隐去）。
+describe("GroupedHistory · 只看当前工作区", () => {
+  it("开启后只保留当前工作区那一行", () => {
+    const wrapper = mount(GroupedHistory, { props: { activeSessionId: null, onlyActiveWorkspace: true } });
+    expect(wrapper.findAll(ROW).map((row) => row.attributes("data-testid"))).toEqual(["workspace-row-w-alpha"]);
+  });
+
+  it("切成未绑定（null）时保留兜底行", async () => {
+    const wrapper = mount(GroupedHistory, { props: { activeSessionId: null, onlyActiveWorkspace: true } });
+    useWorkspaceStore().setActiveWorkspace(null);
+    await nextTick();
+
+    expect(wrapper.findAll(ROW).map((row) => row.attributes("data-testid"))).toEqual(["workspace-row-p-general"]);
   });
 });

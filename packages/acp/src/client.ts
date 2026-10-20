@@ -1,6 +1,5 @@
 // 副作用 import：必须在 `@agentclientprotocol/sdk` 之前求值（见该文件说明）。
 import "./zod-jitless";
-import { homeDir } from "@tauri-apps/api/path";
 import {
   AGENT_METHODS,
   CLIENT_METHODS,
@@ -24,9 +23,10 @@ import type {
   AcpPermissionRequestPayload,
   AcpPromptResult,
   AcpPromptUnit,
-  AcpSandboxMode,
   AcpSessionConfigOption,
   AcpSessionInfo,
+  AcpSessionMode,
+  AcpSessionModeState,
   AcpSessionOpened,
   AcpTransport,
   McpProbeReport,
@@ -36,9 +36,8 @@ import type {
 } from "./transports";
 import type { PermissionTier } from "./permissions";
 import { boundedPermissionRawInput } from "./permissions";
-import { isTauriRuntime } from "./transports";
-import { hasHostCommands } from "@greywork/host-ipc";
-import { TauriIpcTransport } from "./tauri-transport";
+import { hasHostCommands, hostApp } from "@greywork/host-ipc";
+import { HostCommandTransport } from "./host-transport";
 export class RemoteAcpUnsupportedError extends Error {
   constructor(message = "remote ACP WebSocket endpoint is not configured") {
     super(message);
@@ -88,6 +87,21 @@ function toConfigOptions(options: SessionConfigOption[] | null | undefined): Acp
   return (options ?? []).map((option) => option as AcpSessionConfigOption);
 }
 
+/** 归一旧版 `modes`（SDK 的 description 允许 null，前端契约用可选字符串）。 */
+function toSessionModes(
+  modes: { currentModeId: string; availableModes: Array<{ id: string; name: string; description?: string | null }> } | null | undefined,
+): AcpSessionModeState | undefined {
+  if (!modes) return undefined;
+  return {
+    currentModeId: modes.currentModeId,
+    availableModes: modes.availableModes.map((mode) => ({
+      id: mode.id,
+      name: mode.name,
+      ...(mode.description ? { description: mode.description } : {}),
+    })),
+  };
+}
+
 export interface WebSocketTransportOptions {
   url: string;
   protocols?: string | string[];
@@ -134,13 +148,7 @@ export class WebSocketTransport implements AcpTransport {
     this.available = Boolean(options?.url);
   }
 
-  async startAgent(
-    _agentCmd: string,
-    _tier: PermissionTier,
-    _sandbox?: AcpSandboxMode,
-    _workspace?: string | null,
-    _env?: Record<string, string>,
-  ): Promise<number> {
+  async startAgent(_agentCmd: string, _tier: PermissionTier, _env?: Record<string, string>): Promise<number> {
     const ctx = await this.ensureConnected();
     await ctx.request(AGENT_METHODS.initialize, {
       protocolVersion: 1,
@@ -168,6 +176,7 @@ export class WebSocketTransport implements AcpTransport {
     return {
       sessionId: result.sessionId,
       configOptions: toConfigOptions(result.configOptions),
+      modes: toSessionModes(result.modes),
       mcpServers: (mcpServers ?? []).map((server) => server.name),
     };
   }
@@ -175,6 +184,14 @@ export class WebSocketTransport implements AcpTransport {
   /** 远程传输不代管会话恢复（依赖桌面宿主的 session 持久化）：明确报错而非假装成功。 */
   async loadSession(_handle: number, _cwd: string, _sessionId: string, _mcpServers?: readonly McpServerConfig[]): Promise<never> {
     throw new RemoteAcpUnsupportedError("ACP 远程传输不代管会话恢复（恢复依赖桌面宿主的 session 持久化）");
+  }
+
+  /** 关闭远程会话：agent 不支持时请求会失败，调用方按「尽力回收」处理。 */
+  async closeSession(_handle: number, sessionId: string): Promise<boolean> {
+    const ctx = await this.ensureConnected();
+    await ctx.request(AGENT_METHODS.session_close, { sessionId });
+    if (this.sessionId === sessionId) this.sessionId = null;
+    return true;
   }
 
   /** 远程传输没有宿主进程面：探活需要本机发起 HTTP / spawn，明确报错而非假装成功。 */
@@ -190,6 +207,14 @@ export class WebSocketTransport implements AcpTransport {
       ...(typeof value === "boolean" ? { type: "boolean", value } : { value }),
     });
     return toConfigOptions(result.configOptions);
+  }
+
+  async setSessionMode(_handle: number, modeId: string): Promise<void> {
+    const ctx = await this.ensureConnected();
+    await ctx.request(AGENT_METHODS.session_set_mode, {
+      sessionId: this.requireSession(),
+      modeId,
+    });
   }
 
   async prompt(handle: number, text: string, units: readonly AcpPromptUnit[] = []): Promise<{ turnId: number }> {
@@ -229,6 +254,12 @@ export class WebSocketTransport implements AcpTransport {
       }
     }
     this.close();
+  }
+
+  /** 取消指定会话（含协议层子代理子会话）的当前工作：发 session/cancel，不关连接。 */
+  async cancelSession(_handle: number, sessionId: string): Promise<void> {
+    const ctx = await this.ensureConnected();
+    await ctx.notify(AGENT_METHODS.session_cancel, { sessionId });
   }
 
   async respondPermission(requestId: number, optionId: string | null): Promise<void> {
@@ -354,23 +385,22 @@ export class WebSocketTransport implements AcpTransport {
 export interface AcpClient {
   readonly transportId: "tauri-ipc" | "websocket";
   isAvailable(): boolean;
-  /** sandbox 非 off 时宿主以 OS 沙盒包裹 agent；workspace 为沙盒可写锚定目录。 */
-  startAgent(
-    agentCmd: string,
-    tier: PermissionTier,
-    sandbox?: AcpSandboxMode,
-    workspace?: string | null,
-    env?: Record<string, string>,
-  ): Promise<number>;
+  startAgent(agentCmd: string, tier: PermissionTier, env?: Record<string, string>): Promise<number>;
   /** 建会话；`mcpServers` 随 session/new 声明给 agent，由 agent 连接并合并工具面。 */
   openSession(handle: number, cwd: string, mcpServers?: readonly McpServerConfig[]): Promise<AcpSessionOpened>;
-  /** 恢复已存在会话（session/load）；agent 不支持时由调用方回落 openSession。 */
+  /** 恢复已存在会话（宿主优先 session/resume，其次 session/load）；失败时由调用方回落 openSession。 */
   loadSession(handle: number, cwd: string, sessionId: string, mcpServers?: readonly McpServerConfig[]): Promise<AcpSessionOpened>;
+  /** 关闭当前会话（session/close），保留进程；agent 不支持时返回 false。 */
+  closeSession(handle: number, sessionId: string): Promise<boolean>;
   /** 改写在途会话的权限档位（临时降级/回升）；桌面宿主立即生效。 */
   setPermissionTier(handle: number, tier: PermissionTier): Promise<void>;
   setSessionConfig(handle: number, configId: string, value: string | boolean): Promise<AcpSessionConfigOption[]>;
+  /** 切换旧版会话模式（session/set_mode）；agent 未声明 modes 时会报错。 */
+  setSessionMode(handle: number, modeId: string): Promise<void>;
   prompt(handle: number, text: string, units?: readonly AcpPromptUnit[]): Promise<{ turnId: number }>;
   stop(handle: number, turnId?: number): Promise<void>;
+  /** 取消某会话（含协议层子代理子会话）的当前工作：发 ACP `session/cancel`，不回收进程。 */
+  cancelSession(handle: number, sessionId: string): Promise<void>;
   respondPermission(requestId: number, optionId: string | null): Promise<void>;
   list(): Promise<AcpSessionInfo[]>;
   onEvent(listener: (event: AcpEventEnvelope) => void): Promise<() => void>;
@@ -378,37 +408,51 @@ export interface AcpClient {
   probeMcp(config: McpServerConfig, timeoutSecs?: number): Promise<McpProbeReport>;
 }
 
-/** 按运行环境自动选择传输；测试/桌面可显式注入。 */
-export function createAcpClient(transport: AcpTransport = defaultTransport()): AcpClient {
+/**
+ * 按运行环境自动选择传输；测试/桌面可显式注入。
+ *
+ * 传输**延迟到首次使用**才决议，而不是函数调用时立即定死：`runtimeMode()` 的探测
+ * （同源 `/api/health`）是异步的、晚于模块求值，而调用方（`workbench/src/lib/acp-client.ts`、
+ * `stores/cowork.ts`）都在**模块顶层**就 `createAcpClient()`。立即决议的话，Electron /
+ * 自托管服务端会被判成 browser-preview（探测还没跑），拿到一个没有 endpoint、不可用的
+ * WebSocket 传输并永久缓存 —— 症状就是首帧弹「未配置可用 ACP 传输」。
+ * 显式注入（测试 / 远程 endpoint）仍然立即生效。
+ */
+export function createAcpClient(transport?: AcpTransport): AcpClient {
+  let resolved: AcpTransport | null = transport ?? null;
+  const active = (): AcpTransport => (resolved ??= defaultTransport());
   return {
-    transportId: transport.id,
-    isAvailable: () => transport.available ?? transport.id === "tauri-ipc",
-    startAgent: (cmd, tier, sandbox, workspace) => transport.startAgent(cmd, tier, sandbox, workspace),
-    openSession: (handle, cwd, mcpServers) => transport.openSession(handle, cwd, mcpServers),
-    loadSession: (handle, cwd, sessionId, mcpServers) => transport.loadSession(handle, cwd, sessionId, mcpServers),
-    setSessionConfig: (handle, configId, value) => transport.setSessionConfig(handle, configId, value),
-    setPermissionTier: (handle, tier) => transport.setPermissionTier(handle, tier),
-    prompt: (handle, text, units) => transport.prompt(handle, text, units),
-    stop: (handle, turnId) => transport.stop(handle, turnId),
-    respondPermission: (requestId, optionId) => transport.respondPermission(requestId, optionId),
-    list: () => transport.list(),
-    onEvent: (listener) => transport.onEvent(listener),
-    probeMcp: (config, timeoutSecs) => transport.probeMcp(config, timeoutSecs),
+    get transportId() {
+      return active().id;
+    },
+    isAvailable: () => {
+      const current = active();
+      return current.available ?? current.id === "tauri-ipc";
+    },
+    startAgent: (cmd, tier, env) => active().startAgent(cmd, tier, env),
+    openSession: (handle, cwd, mcpServers) => active().openSession(handle, cwd, mcpServers),
+    loadSession: (handle, cwd, sessionId, mcpServers) => active().loadSession(handle, cwd, sessionId, mcpServers),
+    closeSession: (handle, sessionId) => active().closeSession(handle, sessionId),
+    setSessionConfig: (handle, configId, value) => active().setSessionConfig(handle, configId, value),
+    setSessionMode: (handle, modeId) => active().setSessionMode(handle, modeId),
+    setPermissionTier: (handle, tier) => active().setPermissionTier(handle, tier),
+    prompt: (handle, text, units) => active().prompt(handle, text, units),
+    stop: (handle, turnId) => active().stop(handle, turnId),
+    cancelSession: (handle, sessionId) => active().cancelSession(handle, sessionId),
+    respondPermission: (requestId, optionId) => active().respondPermission(requestId, optionId),
+    list: () => active().list(),
+    onEvent: (listener) => active().onEvent(listener),
+    probeMcp: (config, timeoutSecs) => active().probeMcp(config, timeoutSecs),
   };
 }
 
 function defaultTransport(): AcpTransport {
-  return hasHostCommands() ? new TauriIpcTransport() : new WebSocketTransport();
+  return hasHostCommands() ? new HostCommandTransport() : new WebSocketTransport();
 }
 
-export { isTauriRuntime };
-
-/** 桌面端默认工作区目录（用户主目录）；Web 环境返回 null。 */
+/** 桌面端默认工作区目录（用户主目录）；无原生宿主（服务端 / Web）返回 null。 */
 export async function desktopHomeDir(): Promise<string | null> {
-  // 刻意保留 isTauriRuntime 而非 hasHostCommands：homeDir 来自 @tauri-apps/api/path，
-  // 服务端没有对应的「用户主目录」概念，这里必须只在桌面端取值。
-  if (!isTauriRuntime()) return null;
-  return homeDir();
+  return (await hostApp()?.homeDir()) ?? null;
 }
 
 export type {
@@ -419,9 +463,10 @@ export type {
   AcpPermissionRequestPayload,
   AcpPromptResult,
   AcpPromptUnit,
-  AcpSandboxMode,
   AcpSessionConfigOption,
   AcpSessionInfo,
+  AcpSessionMode,
+  AcpSessionModeState,
   AcpSessionOpened,
   AcpTransport,
   McpProbeReport,

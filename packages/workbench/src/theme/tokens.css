@@ -49,12 +49,13 @@
   --grey-violet: #8b5cf6;
   --grey-red: #ef4444;
 
-  /* 状态信号 = GreyWork 语义色（浅色加深半档保证可读） */
-  --amber: #ff7d00;
+  /* 状态信号 = GreyWork 语义色（浅色压暗到正文对比 ≥4.5:1 / WCAG AA；原 #ff7d00·#00b42a·#f53f3f·#8b5cf6
+   * 在白底仅 2.3–4.2:1，StatusChip 的 9px 彩字读不清。深色态在近黑画布上本就达标，不动。） */
+  --amber: #ba5b00;
   --cyan: #165dff;
-  --violet: #8b5cf6;
-  --mint: #00b42a;
-  --orange: #f53f3f;
+  --violet: #8655f6;
+  --mint: #008920;
+  --orange: #ed0c0c;
 
   /* 主强调 = GreyWork primary（浅色 #165dff）；hi 为悬停亮阶 */
   --accent: #165dff;
@@ -315,11 +316,11 @@
   --dim: #3f4a5c;
   --dim2: #5b6779;
   --bubble: #e3edfd;
-  --amber: #ff7d00;
+  --amber: #ba5b00;
   --cyan: #165dff;
-  --violet: #8b5cf6;
-  --mint: #00b42a;
-  --orange: #f53f3f;
+  --violet: #8655f6;
+  --mint: #008920;
+  --orange: #ed0c0c;
   --accent: #165dff;
   --accent-ink: #ffffff;
   --accent-hi: #3d7bff;
@@ -394,11 +395,11 @@
   --dim: #3c4f44;
   --dim2: #57695d;
   --bubble: #e0f3e8;
-  --amber: #ff7d00;
+  --amber: #ba5b00;
   --cyan: #165dff;
-  --violet: #8b5cf6;
-  --mint: #00b42a;
-  --orange: #f53f3f;
+  --violet: #8655f6;
+  --mint: #008920;
+  --orange: #ed0c0c;
   --accent: #0f8a4a;
   --accent-ink: #ffffff;
   --accent-hi: #16a35a;
@@ -478,11 +479,11 @@
   --dim: #3f4a5c;
   --dim2: #566072;
   --bubble: rgba(22, 93, 255, 0.14);
-  --amber: #ff7d00;
+  --amber: #ba5b00;
   --cyan: #165dff;
-  --violet: #8b5cf6;
-  --mint: #00b42a;
-  --orange: #f53f3f;
+  --violet: #8655f6;
+  --mint: #008920;
+  --orange: #ed0c0c;
   --accent: #165dff;
   --accent-ink: #ffffff;
   --accent-hi: #3d7bff;

@@ -6,7 +6,7 @@
  * 每段思考各自折叠，工具批次就地展开细节。没有 segments 的消息（历史档 / 纯文本回复）
  * 退化为一段正文，不需要单独一套渲染路径。
  */
-import { computed, ref } from "vue";
+import { computed, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import MarkdownText from "@/features/shared/MarkdownText.vue";
 import ArtifactCards from "@/features/activity/ArtifactCards.vue";
@@ -15,25 +15,53 @@ import ThinkingBlock from "@/features/conversation/ThinkingBlock.vue";
 import ToolTimeline from "@/features/conversation/ToolTimeline.vue";
 import PlanCard from "@/features/conversation/PlanCard.vue";
 import AskQuestionCard from "@/features/conversation/AskQuestionCard.vue";
-import ScheduleConfirmCard from "@/features/conversation/ScheduleConfirmCard.vue";
+import AutomationConfirmCard from "@/features/conversation/AutomationConfirmCard.vue";
 import PermissionCard from "@/features/conversation/PermissionCard.vue";
 import Icon from "@/features/shared/Icon.vue";
 import Hint from "@/features/shared/Hint.vue";
+import { copyText } from "@/lib/clipboard";
+import { formatDuration } from "@/lib/tool-activity";
 import { appEvents } from "@/events";
 import { useAgentStore } from "@/stores/agent";
 import { useChatStore } from "@/stores/chat";
+import { authorIdentity } from "@/lib/author-identity";
 import { useAttachmentThumbs } from "@/lib/use-attachments";
 import { useTurnActive } from "@/lib/turn-activity";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import type { Attachment, MessageSegment, ThreadMessage, ToolActivity } from "@/types";
 
-const props = withDefaults(defineProps<{ message: ThreadMessage; threadId?: string }>(), { threadId: "" });
+const props = withDefaults(
+  defineProps<{
+    message: ThreadMessage;
+    threadId?: string;
+    /** 是否线程末条：重新生成 / 删除只对末条开放（这两动会截掉其后全部） */ isLast?: boolean;
+  }>(),
+  {
+    threadId: "",
+    isLast: false,
+  },
+);
+/** 点作者头像/名：群聊时间线据此打开该成员的完整会话（1:1 会话不设 authorId，不会触发）。
+ *  回退：只带快照的用户消息出现该键，交回 ConversationView 的确认弹层（快照恢复不归本组件）。 */
+const emit = defineEmits<{
+  authorClick: [authorId: string];
+  rewind: [message: ThreadMessage];
+  /** 编辑后重发：草稿回填由宿主（ConversationView）管，本组件只报「点了哪条」。 */
+  edit: [message: ThreadMessage];
+  /** 重新生成：宿主回退到该回合的 user 消息后按原输入重派发。 */
+  regenerate: [message: ThreadMessage];
+  /** 删除：宿主截断消息流（仅末条可达）。 */
+  delete: [message: ThreadMessage];
+}>();
 
 const { t } = useI18n();
 const agent = useAgentStore();
 const chat = useChatStore();
 
 const message = computed(() => props.message);
+
+/** 作者身份（头像 + 名 + 色）：仅在群聊式时间线设置了 authorId 时渲染。 */
+const author = computed(() => (message.value.authorId ? authorIdentity(message.value.authorId, message.value.authorName) : null));
 
 /** 附件缩略图（磁盘附件 → blob URL，模块级 LRU）；读不到时渲染占位。 */
 const attachmentList = computed<readonly Attachment[]>(() => message.value.attachments ?? []);
@@ -69,6 +97,26 @@ const isStreaming = computed(() => chat.streamingMessageId === message.value.id 
 const turnActive = useTurnActive();
 
 /**
+ * 回合总耗时（assistant 消息）：消息创建（用户发出那一刻）→ 本消息最后一个事件
+ * （思考段收尾 / 工具结算）的墙钟时长。含权限等待、工具执行、思考与生成。
+ *
+ * 只在回合结束后展示：流式期间「已用时」由思考段与工具行各自的实时秒表分工，
+ * 这里再放一个会跳的总表只会重复。无任何段级事件的消息（纯即时回复）返回 null。
+ */
+const turnSpan = computed(() => {
+  if (message.value.role !== "assistant" || isStreaming.value) return null;
+  const start = message.value.ts;
+  let end = start;
+  for (const segment of message.value.segments ?? []) {
+    if (segment.kind === "thinking" && segment.endedAt > end) end = segment.endedAt;
+  }
+  for (const activity of message.value.tools ?? []) {
+    if (activity.finishedAt != null && activity.finishedAt > end) end = activity.finishedAt;
+  }
+  return end > start ? end - start : null;
+});
+
+/**
  * 渲染用段落表。没有 segments 却有正文的消息（内部 LLM 管线、历史档）补一段全量正文，
  * 让模板只有一条渲染路径。
  */
@@ -95,11 +143,59 @@ function activitiesOf(segment: Extract<MessageSegment, { kind: "tools" }>): Tool
 function timeLabel(ts: number): string {
   return new Date(ts).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
 }
+
+/* ===== 消息操作条（复制 / 回退）=====
+ * 此前这两个动作只挂在右键菜单里，可发现性差；现在常驻在时间戳旁（低对比、hover 提亮），
+ * 复制对两条角色都给，回退只给带回合起点快照的用户消息（判定与 ConversationView.canRewind 同源）。 */
+const copied = ref(false);
+let copiedTimer: number | undefined;
+
+async function copyBody(): Promise<void> {
+  if (!message.value.content) return;
+  await copyText(message.value.content);
+  copied.value = true;
+  window.clearTimeout(copiedTimer);
+  copiedTimer = window.setTimeout(() => (copied.value = false), 1500);
+}
+
+/** 可回退：带快照的用户消息，且当前没有回合在跑（跑着的时候回退会撞上工作区写入）。 */
+function canRewind(): boolean {
+  return message.value.role === "user" && Boolean(message.value.snapshotRef) && !turnActive.value;
+}
+
+onUnmounted(() => window.clearTimeout(copiedTimer));
+
+/* ===== 操作条可用性 =====
+ * 编辑：user 消息、回合空闲（prepareResend 有忙闸，这里先不做无谓入口）。
+ * 重新生成 / 删除：assistant 消息、末条、空闲 —— 非末条会截掉其后全部，不给这个入口。 */
+const canEdit = computed(() => message.value.role === "user" && !turnActive.value);
+const canRegenerate = computed(() => message.value.role === "assistant" && props.isLast && !turnActive.value);
+const canDelete = computed(() => canRegenerate.value);
+/** 操作条显隐：有正文可复制，或上面三个动作任一可用（空回复的回合也要能重生成 / 删掉）。 */
+const showActions = computed(() => message.value.content.length > 0 || canEdit.value || canRegenerate.value || canDelete.value);
 </script>
 
 <template>
   <!-- data-ctx/data-message-id：会话页的右键菜单靠它认出「右键的是哪条消息」（见 ConversationView）。 -->
-  <article class="flex flex-col" data-ctx="message" :data-message-id="message.id">
+  <article class="group/msg flex flex-col" data-ctx="message" :data-message-id="message.id">
+    <!-- 作者行（群聊时间线专属）：头像 + 名，点开该作者的完整会话。user 侧右对齐。 -->
+    <button
+      v-if="author"
+      type="button"
+      data-testid="message-author"
+      class="mb-1 flex cursor-pointer items-center gap-1.5 bg-transparent p-0 text-left"
+      :class="message.role === 'user' ? 'ml-auto flex-row-reverse' : ''"
+      :aria-label="t('chat.openAuthor', { name: author.name })"
+      @click="emit('authorClick', author.id)"
+    >
+      <span
+        class="grid size-5 shrink-0 place-items-center rounded-full text-[10px] font-medium text-white"
+        :style="{ backgroundColor: author.color }"
+        aria-hidden="true"
+        >{{ author.initial }}</span
+      >
+      <span class="text-[11px] font-medium text-dim">{{ author.name }}</span>
+    </button>
     <div
       v-if="message.role === 'user'"
       class="msg__bubble ml-auto max-w-[78%] rounded-tl-[calc(16px*var(--gw-radius-scale))] rounded-tr-[calc(16px*var(--gw-radius-scale))] rounded-br-[calc(4px*var(--gw-radius-scale))] rounded-bl-[calc(16px*var(--gw-radius-scale))] bg-bubble px-4 py-3"
@@ -159,12 +255,29 @@ function timeLabel(ts: number): string {
         <p v-if="message.content" class="whitespace-pre-wrap text-[13.5px] leading-[1.7] text-foreground [overflow-wrap:anywhere]">
           {{ message.content }}
         </p>
+        <!-- 选区评论注解：展示这条消息批注了哪一段原文（批注文本本身已是消息正文）。 -->
+        <div v-if="message.comments?.length" data-testid="message-comments" class="flex flex-col gap-1.5">
+          <div
+            v-for="comment in message.comments"
+            :key="comment.id"
+            data-testid="message-comment"
+            class="flex gap-2 rounded-[calc(8px*var(--gw-radius-scale))] bg-panel-2 px-2.5 py-1.5"
+          >
+            <span class="w-0.5 shrink-0 rounded-full bg-cyan/50" aria-hidden="true" />
+            <div class="min-w-0 flex-1">
+              <p class="whitespace-pre-wrap text-[11.5px] leading-relaxed text-dim [overflow-wrap:anywhere]">{{ comment.quote }}</p>
+              <p v-if="comment.source" class="mt-0.5 text-[10px] text-dim2">{{ comment.source }}</p>
+            </div>
+          </div>
+        </div>
       </div>
+      <!-- user 侧时间戳：与 assistant 末行同一格式同一字号，读起来不必切换坐标系 -->
+      <span class="mr-1 mt-0.5 text-right text-[10px] text-dim2">{{ timeLabel(message.ts) }}</span>
     </div>
     <div v-else class="flex max-w-[92%] flex-col gap-2.5">
       <PlanCard v-if="message.planPending" :thread-id="threadId || chat.activeThreadId" :message="message" />
       <AskQuestionCard v-if="message.ask" :thread-id="threadId || chat.activeThreadId" :message="message" />
-      <ScheduleConfirmCard v-if="message.scheduleDraft" :thread-id="threadId || chat.activeThreadId" :message="message" />
+      <AutomationConfirmCard v-if="message.scheduleDraft" :thread-id="threadId || chat.activeThreadId" :message="message" />
       <div
         v-if="awaitingOutput"
         class="flex h-9 items-center gap-2.5 rounded-[calc(12px*var(--gw-radius-scale))] border border-line bg-panel-2 px-3.5 text-[12px] text-dim"
@@ -190,7 +303,77 @@ function timeLabel(ts: number): string {
       <!-- 权限裁决留痕：活跃卡片在输入框上方（那里才是「等你点」的位置），
            裁决后卡片消失，但记录留在消息流里，回看能知道当时批了什么。 -->
       <PermissionCard v-for="trace in message.permissions ?? []" :key="trace.toolCallId" :trace="trace" />
-      <span class="text-[10px] text-dim2">{{ timeLabel(message.ts) }}</span>
+      <div class="flex items-center gap-2 text-[10px] text-dim2">
+        <span>{{ timeLabel(message.ts) }}</span>
+        <span v-if="turnSpan != null" data-testid="message-turn-duration">{{
+          t("chatView.turnDuration", { s: formatDuration(turnSpan) })
+        }}</span>
+      </div>
+    </div>
+    <!-- 消息操作条：复制 / 编辑（user）· 复制 / 重新生成 / 删除 / 回退（assistant 与带快照的 user）。
+         默认隐藏、hover 或键盘聚焦时浮现，不占常驻视觉噪声；按钮仍是真按钮
+         （focus-within 可达），不靠 hover 才能用。 -->
+    <div
+      v-if="showActions"
+      data-testid="message-actions"
+      class="mt-0.5 flex items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover/msg:opacity-100"
+      :class="message.role === 'user' ? 'mr-1 justify-end' : 'ml-0.5'"
+    >
+      <Hint v-if="message.content" :text="copied ? t('chat.messageCopied') : t('contextMenu.message.copyBody')" multiline>
+        <button
+          type="button"
+          data-testid="message-copy"
+          class="grid size-5 shrink-0 cursor-pointer place-items-center rounded-[calc(5px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          :aria-label="t('contextMenu.message.copyBody')"
+          @click="copyBody"
+        >
+          <Icon :name="copied ? 'check' : 'copy'" :size="12" />
+        </button>
+      </Hint>
+      <Hint v-if="canEdit" :text="t('chat.editResend')">
+        <button
+          type="button"
+          data-testid="message-edit"
+          class="grid size-5 shrink-0 cursor-pointer place-items-center rounded-[calc(5px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          :aria-label="t('chat.editResend')"
+          @click="emit('edit', message)"
+        >
+          <Icon name="edit" :size="12" />
+        </button>
+      </Hint>
+      <Hint v-if="canRegenerate" :text="t('chat.regenerate')">
+        <button
+          type="button"
+          data-testid="message-regenerate"
+          class="grid size-5 shrink-0 cursor-pointer place-items-center rounded-[calc(5px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          :aria-label="t('chat.regenerate')"
+          @click="emit('regenerate', message)"
+        >
+          <Icon name="refresh" :size="12" />
+        </button>
+      </Hint>
+      <Hint v-if="canDelete" :text="t('chat.deleteMessage')">
+        <button
+          type="button"
+          data-testid="message-delete"
+          class="grid size-5 shrink-0 cursor-pointer place-items-center rounded-[calc(5px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel-2 hover:text-destructive focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          :aria-label="t('chat.deleteMessage')"
+          @click="emit('delete', message)"
+        >
+          <Icon name="delete" :size="12" />
+        </button>
+      </Hint>
+      <Hint v-if="canRewind()" :text="t('contextMenu.message.rewind')">
+        <button
+          type="button"
+          data-testid="message-rewind"
+          class="grid size-5 shrink-0 cursor-pointer place-items-center rounded-[calc(5px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel-2 hover:text-destructive focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          :aria-label="t('contextMenu.message.rewind')"
+          @click="emit('rewind', message)"
+        >
+          <Icon name="rotate-left" :size="12" />
+        </button>
+      </Hint>
     </div>
   </article>
   <!-- 浏览器态图片附件没有磁盘通道可开预览面板，用组件内灯箱兜底。

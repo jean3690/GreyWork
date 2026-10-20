@@ -1,0 +1,91 @@
+import { invoke, listen, type UnlistenFn } from "@greywork/host-ipc";
+import type {
+  AcpEventEnvelope,
+  AcpPromptUnit,
+  AcpSessionConfigOption,
+  AcpSessionInfo,
+  AcpSessionOpened,
+  AcpTransport,
+  McpProbeReport,
+  McpServerConfig,
+} from "./transports";
+import type { PermissionTier } from "./permissions";
+
+const EVENT_NAME = "acp://event";
+
+/** 宿主传输：经 @greywork/host-ipc 门面调用 Rust ACP 主机（acp_host）。类名是 Tauri 壳时代的沿袭。 */
+export class HostCommandTransport implements AcpTransport {
+  readonly id = "tauri-ipc" as const;
+
+  async startAgent(agentCmd: string, tier: PermissionTier, env?: Record<string, string>): Promise<number> {
+    return invoke<number>("acp_start", { agentCmd, tier, env });
+  }
+
+  async setPermissionTier(handle: number, tier: PermissionTier): Promise<void> {
+    await invoke("acp_set_permission_tier", { handle, tier });
+  }
+
+  async openSession(handle: number, cwd: string, mcpServers?: readonly McpServerConfig[]): Promise<AcpSessionOpened> {
+    return invoke<AcpSessionOpened>("acp_new_session", { handle, cwd, mcpServers });
+  }
+
+  async loadSession(handle: number, cwd: string, sessionId: string, mcpServers?: readonly McpServerConfig[]): Promise<AcpSessionOpened> {
+    return invoke<AcpSessionOpened>("acp_load_session", { handle, cwd, sessionId, mcpServers });
+  }
+
+  async closeSession(handle: number, sessionId: string): Promise<boolean> {
+    return invoke<boolean>("acp_close_session", { handle, sessionId });
+  }
+
+  async probeMcp(config: McpServerConfig, timeoutSecs?: number): Promise<McpProbeReport> {
+    return invoke<McpProbeReport>("mcp_probe", {
+      transport: config.transport,
+      url: config.url,
+      command: config.command,
+      args: config.args,
+      env: config.env,
+      headers: config.headers,
+      timeoutSecs,
+    });
+  }
+
+  async setSessionConfig(handle: number, configId: string, value: string | boolean): Promise<AcpSessionConfigOption[]> {
+    const response = await invoke<{ configOptions?: AcpSessionConfigOption[] }>("acp_set_config", {
+      handle,
+      configId,
+      value,
+    });
+    return response.configOptions ?? [];
+  }
+
+  async setSessionMode(handle: number, modeId: string): Promise<void> {
+    await invoke("acp_set_mode", { handle, modeId });
+  }
+
+  async prompt(handle: number, text: string, units: readonly AcpPromptUnit[] = []): Promise<{ turnId: number }> {
+    return invoke<{ turnId: number }>("acp_send", { handle, text, units });
+  }
+
+  async stop(handle: number, turnId?: number): Promise<void> {
+    await invoke("acp_stop", { handle, turnId });
+  }
+
+  async cancelSession(handle: number, sessionId: string): Promise<void> {
+    await invoke("acp_cancel_session", { handle, sessionId });
+  }
+
+  async respondPermission(requestId: number, optionId: string | null): Promise<void> {
+    await invoke("acp_permission_respond", { requestId, optionId });
+  }
+
+  async list(): Promise<AcpSessionInfo[]> {
+    return invoke<AcpSessionInfo[]>("acp_list");
+  }
+
+  async onEvent(listener: (event: AcpEventEnvelope) => void): Promise<() => void> {
+    const unlisten: UnlistenFn = await listen<AcpEventEnvelope>(EVENT_NAME, (event) => {
+      listener(event.payload);
+    });
+    return () => unlisten();
+  }
+}

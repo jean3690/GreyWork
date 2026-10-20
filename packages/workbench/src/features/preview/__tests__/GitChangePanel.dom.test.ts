@@ -24,7 +24,8 @@ vi.mock("@greywork/core", async (importOriginal) => {
 vi.mock("@/lib/workspace-dir", () => ({ resolveWorkspaceRoot: () => h.resolveRoot() }));
 vi.mock("@/lib/conversation-folder", () => ({ activeConversationFolder: () => null }));
 vi.mock("@/lib/artifact-dir", () => ({ activeWorkspaceFolder: () => null }));
-vi.mock("@tauri-apps/api/core", () => ({
+vi.mock("@greywork/host-ipc", async (importOriginal) => ({
+  ...(await importOriginal()),
   invoke: (command: string, args?: Record<string, unknown>) => h.invoke(command, args),
 }));
 
@@ -53,7 +54,7 @@ beforeEach(() => {
   localStorage.clear();
   setActivePinia(createPinia());
   vi.clearAllMocks();
-  h.isTauri.mockReturnValue(true);
+  (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = "server";
   h.resolveRoot.mockResolvedValue({ dir: "/ws", bound: true });
   h.invoke.mockImplementation((command: string) => {
     if (command === "git_changes") return Promise.resolve(CHANGES);

@@ -7,7 +7,13 @@ import type { ForkScope, Plugin } from "@cordisjs/core";
 import { ref } from "vue";
 import { SeamService } from "./seam-service";
 import type { CapabilitySeam, PluginManifest } from "./types";
-import { CAPABILITY_REGISTRY, capabilityTitle, normalizeGrantSpec, recordCapabilityAudit } from "./capabilities";
+import {
+  CAPABILITY_REGISTRY,
+  capabilityTitle,
+  normalizeGrantSpec,
+  recordCapabilityAudit,
+  type ManifestScheduleDeclaration,
+} from "./capabilities";
 
 export class CapabilityCallError extends Error {
   constructor(message: string) {
@@ -228,7 +234,17 @@ export function createCapabilityLoader(): CapabilityLoader {
   }
 
   /** 插件对某能力的声明式授权（含参数）。找不到返回 null —— 未声明即不可调用。 */
-  function declaredGrant(id: string, capability: string): { capability: string; hosts?: string[] } | null {
+  function declaredGrant(
+    id: string,
+    capability: string,
+  ): {
+    capability: string;
+    hosts?: string[];
+    methods?: string[];
+    paths?: string[];
+    maxBytes?: number;
+    schedule?: ManifestScheduleDeclaration;
+  } | null {
     for (const spec of manifestById.get(id)?.requires ?? []) {
       const grant = normalizeGrantSpec(spec);
       if (grant.capability === capability) return grant;

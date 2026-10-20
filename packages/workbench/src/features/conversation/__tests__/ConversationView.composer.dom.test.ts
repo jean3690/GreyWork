@@ -1,7 +1,7 @@
 /**
- * 对话输入框的外观契约。
+ * 对话输入框的外观契约（精简输入卡 `MinimalComposer`）。
  *
- * 这两条钉的是「模板这一侧」的约定，机制那一侧（为什么 outline-none 能生效）由
+ * 钉的是「模板这一侧」的约定，机制那一侧（为什么 outline-none 能生效）由
  * `tests/unit/theme/base-css-layers.test.ts` 守着 —— 两边是配对的：
  *
  * 1. 文字区带 `outline-none`：base.css 的全局焦点环（`textarea:focus-visible` → 2px `--accent`
@@ -9,8 +9,8 @@
  *    注意这条曾经是**死代码**：base.css 当时是无层的，无层样式压过 @layer utilities，
  *    所以 `outline-none` 盖不住那条全局规则，点一下就会冒出一个直角蓝框。现在
  *    base.css 的焦点环已挪进 `@layer base`，这条才真正生效。
- * 2. 文字区自己带一块可见的圆角底面（不再是 `bg-transparent` 的隐形区域），
- *    这样外层卡片才是「输入框」本体、内层是一块写字的凹槽，圆角才有东西可依附。
+ * 2. 文字区本身透明无框，圆角 / 边框 / 阴影都在外层卡片上 —— 卡片是「输入框」本体，
+ *    内层是 chips 行 / 写字区 / 操作行共用的凹槽。
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { mount } from "@vue/test-utils";
@@ -71,11 +71,14 @@ describe("对话输入框外观", () => {
     expect(wrapper.get('textarea[aria-label="发送消息"]').classes()).toContain("outline-none");
   });
 
-  it("文字区自带圆角与可见底面，不再是透明无边框的隐形区域", async () => {
+  it("文字区透明无框；圆角 / 边框 / 阴影都在外层卡片上", async () => {
     const wrapper = await mountComposer();
-    const classes = wrapper.get('textarea[aria-label="发送消息"]').classes();
+    const textarea = wrapper.get('textarea[aria-label="发送消息"]');
+    const card = wrapper.get('[data-testid="minimal-composer"]').element.firstElementChild as HTMLElement;
 
-    expect(classes.some((name) => name.startsWith("rounded-"))).toBe(true);
-    expect(classes).not.toContain("bg-transparent");
+    expect(textarea.classes()).toContain("bg-transparent");
+    expect(textarea.classes().some((name) => name.startsWith("rounded-"))).toBe(false);
+    expect(card.className).toContain("rounded-");
+    expect(card.className).toContain("border");
   });
 });

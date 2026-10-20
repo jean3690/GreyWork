@@ -3,10 +3,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as GreyWorkCore from "@greywork/core";
 import { createPinia, setActivePinia } from "pinia";
-import { invoke } from "@tauri-apps/api/core";
 import { parseSkillFrontmatter, resolveSkillsRoot, useSkillsStore } from "@/stores/skills";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+vi.mock("@greywork/host-ipc", async (importOriginal) => ({
+  ...(await importOriginal()),
+  invoke: vi.fn(),
+}));
 vi.mock("@greywork/core", async (importOriginal) => {
   const actual = await importOriginal<typeof GreyWorkCore>();
   return { ...actual, isTauriRuntime: () => true };
@@ -15,7 +17,7 @@ vi.mock("@/lib/workspace-dir", () => ({
   resolveWorkspaceRoot: () => Promise.resolve({ dir: "/ws/proj", bound: true }),
 }));
 
-const invokeMock = vi.mocked(invoke);
+const invokeMock = vi.mocked((await import("@greywork/host-ipc")).invoke);
 
 const storageHolder = globalThis as { localStorage?: Storage };
 const storage = new Map<string, string>();
@@ -69,6 +71,8 @@ function host(marketResults: unknown[] = []): void {
 }
 
 beforeEach(() => {
+  // 桌面态 = 宿主托管：hasHostCommands() 为真（node 环境用 stubGlobal 提供最小 window）。
+  vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "server" });
   storage.clear();
   setActivePinia(createPinia());
   vi.clearAllMocks();

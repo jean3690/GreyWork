@@ -240,12 +240,25 @@ export function buildHistoryRowItems(t: Translate, actions: HistoryRowMenuAction
 
 export interface MessageMenuActions {
   copyBody: (text: string) => void;
+  /**
+   * 会话回退（A3）：仅当命中消息带回合起点快照时由调用方传入。缺省则不给「回退到这里」——
+   * 可用性判定（role=user + snapshotRef）留在视图侧，构建器只认「有没有这个动作」。
+   */
+  rewind?: () => void;
 }
 
-/** content 为空（纯占位 / 只带卡片的消息）返回空表 → 该次右键被抑制。 */
+/**
+ * 消息行条目：正文可复制时给「复制正文」；带快照的回合起点消息再多一条「回退到这里」。
+ * 两者都没有（纯占位 / 只带卡片的消息）时返回空表 → 该次右键被抑制。
+ */
 export function buildMessageItems(content: string | null, t: Translate, actions: MessageMenuActions): ContextMenuItem[] {
-  if (!content) return [];
-  return [item(t("contextMenu.message.copyBody"), () => actions.copyBody(content), { icon: "file" })];
+  const entries: ContextMenuItem[] = [];
+  if (content) entries.push(item(t("contextMenu.message.copyBody"), () => actions.copyBody(content), { icon: "file" }));
+  if (actions.rewind) {
+    if (entries.length > 0) entries.push(separator());
+    entries.push(item(t("contextMenu.message.rewind"), actions.rewind, { icon: "history", destructive: true }));
+  }
+  return entries;
 }
 
 /* ===================== 输入框 ===================== */
@@ -275,13 +288,13 @@ export interface TitlebarMenuActions {
   toggleSidebar: () => void;
   togglePreview: () => void;
   toggleWorkspace: () => void;
-  toggleActivity: () => void;
+  toggleTerminal: () => void;
   newChat: () => void;
   openSettings: () => void;
   /** 面板可用性 / 折叠态：不可用的面板项直接禁用（与标题栏按钮的显隐同源）。 */
   previewAvailable: boolean;
   workspaceAvailable: boolean;
-  activityAvailable: boolean;
+  terminalAvailable: boolean;
 }
 
 export function buildTitlebarItems(t: Translate, actions: TitlebarMenuActions): ContextMenuItem[] {
@@ -289,7 +302,7 @@ export function buildTitlebarItems(t: Translate, actions: TitlebarMenuActions): 
     item(t("contextMenu.titlebar.toggleSidebar"), actions.toggleSidebar, { icon: "sidebar" }),
     item(t("contextMenu.titlebar.togglePreview"), actions.togglePreview, { icon: "sidebar", disabled: !actions.previewAvailable }),
     item(t("contextMenu.titlebar.toggleWorkspace"), actions.toggleWorkspace, { icon: "folder", disabled: !actions.workspaceAvailable }),
-    item(t("contextMenu.titlebar.toggleActivity"), actions.toggleActivity, { icon: "up", disabled: !actions.activityAvailable }),
+    item(t("contextMenu.titlebar.toggleTerminal"), actions.toggleTerminal, { icon: "terminal", disabled: !actions.terminalAvailable }),
     separator(),
     item(t("contextMenu.titlebar.newChat"), actions.newChat, { icon: "plus" }),
     item(t("contextMenu.titlebar.openSettings"), actions.openSettings, { icon: "setting" }),

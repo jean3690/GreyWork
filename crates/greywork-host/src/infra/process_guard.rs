@@ -374,6 +374,21 @@ fn login_shell() -> String {
     "/bin/sh".to_string()
 }
 
+/// 跑用户命令（终端命令运行器）时该用哪个 shell 程序。
+///
+/// unix 复用登录 shell 的解析（`$SHELL` → 常见路径兜底），Windows 用 `cmd`。调用方的
+/// 典型形态是 `user_shell() -lc <command>` / `cmd /C <command>`（见 [`super::shell`]）。
+pub fn user_shell() -> String {
+    #[cfg(unix)]
+    {
+        login_shell()
+    }
+    #[cfg(not(unix))]
+    {
+        "cmd".to_string()
+    }
+}
+
 /// 取 shell 的可执行文件名（`/bin/zsh` → `zsh`），决定用哪种 PATH 拼接语法。
 #[cfg(unix)]
 fn shell_basename(shell: &str) -> &str {

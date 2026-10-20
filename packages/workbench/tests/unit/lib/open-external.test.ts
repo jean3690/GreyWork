@@ -5,10 +5,13 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { invoke } from "@tauri-apps/api/core";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
-const invokeMock = vi.mocked(invoke);
+const bridge = vi.hoisted(() => ({ openPath: vi.fn(), openExternal: vi.fn() }));
+
+vi.mock("@greywork/host-ipc", async (importOriginal) => ({
+  ...(await importOriginal()),
+  invoke: vi.fn(),
+}));
 
 import { openWithSystemApp, resolveTabDiskPath } from "../../../src/lib/open-external";
 import type { PreviewTab } from "../../../src/stores/preview";
@@ -19,28 +22,29 @@ function tab(partial: Partial<PreviewTab>): PreviewTab {
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  invokeMock.mockReset();
 });
 
 describe("openWithSystemApp", () => {
-  it("浏览器态回 false，不触 invoke", async () => {
+  it("浏览器态回 false，不触宿主", async () => {
     expect(await openWithSystemApp("/tmp/a.xlsx")).toBe(false);
-    expect(invokeMock).not.toHaveBeenCalled();
   });
 
-  describe("桌面态", () => {
+  describe("桌面态（Electron bridge）", () => {
     beforeEach(() => {
-      vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
+      vi.stubGlobal("window", {
+        __GREYWORK_RUNTIME__: "server",
+        __GREYWORK_SHELL__: { window: {}, app: { openPath: bridge.openPath, openExternal: bridge.openExternal } },
+      });
     });
 
-    it("以 open_path + path 调用宿主并回 true", async () => {
-      invokeMock.mockResolvedValue(undefined);
+    it("以 hostApp().openPath 调用宿主并回 true", async () => {
+      bridge.openPath.mockResolvedValue(undefined);
       expect(await openWithSystemApp("/home/u/.greyWork/artifacts/a.xlsx")).toBe(true);
-      expect(invokeMock).toHaveBeenCalledWith("open_path", { path: "/home/u/.greyWork/artifacts/a.xlsx" });
+      expect(bridge.openPath).toHaveBeenCalledWith("/home/u/.greyWork/artifacts/a.xlsx");
     });
 
     it("宿主拒绝（路径已删 / 无关联程序）时回 false 而不抛", async () => {
-      invokeMock.mockRejectedValue(new Error("路径不存在"));
+      bridge.openPath.mockRejectedValue(new Error("路径不存在"));
       vi.spyOn(console, "error").mockImplementation(() => undefined);
       expect(await openWithSystemApp("/gone/a.xlsx")).toBe(false);
     });

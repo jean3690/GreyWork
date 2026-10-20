@@ -32,7 +32,13 @@ vi.mock("@/state/workspaceFiles", () => ({
   readTextFile: h.readTextFile,
   readMediaFile: vi.fn(),
 }));
-vi.mock("@greywork/host-ipc", () => ({ hasHostCommands: h.hasHostCommands, mediaStreamUrl: () => null }));
+vi.mock("@greywork/host-ipc", () => ({
+  hasHostCommands: h.hasHostCommands,
+  hasNativeShell: () => h.hasHostCommands(),
+  mediaStreamUrl: () => null,
+  // 测试 setup 会 setFront() 声明全量前端；这里只把身份落库，无需断言。
+  declareFront: () => undefined,
+}));
 
 vi.mock("maplibre-gl", () => {
   class MapLibreMap {

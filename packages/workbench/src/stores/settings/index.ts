@@ -30,7 +30,6 @@ import {
   type Radius,
   type RemoteAssistPrefs,
   type RunMode,
-  type SandboxMode,
   type SavedSettings,
   type SkillSourceEntry,
   type ThemeId,
@@ -41,7 +40,6 @@ import {
   MCP_TRANSPORTS,
   RADIUS_VALUES,
   RUN_MODE_VALUES,
-  SANDBOX_MODE_VALUES,
   SKILL_SOURCE_TYPES,
   THEME_VALUES,
   normalizeAcpConfigValues,
@@ -67,8 +65,7 @@ const settingsStorage = createJsonStorage<SavedSettings>(
 /** 全局设置：权限档位 / 计划模式 / token 快照 / 供应商芯片 / MCP 服务器声明。 */
 export const useSettingsStore = defineStore("settings", () => {
   const permissionTier = ref<PermTier>("workspace");
-  /** 默认自动启用可用的宿主沙箱；off 只能由用户显式选择。 */
-  const sandboxMode = ref<SandboxMode>("auto");
+  /**
   /** 多智能体编排并发度（同时跑的回合上限）。默认 2，与既有并行编排一致。 */
   const maxParallel = ref(2);
   /** 关闭到托盘（默认开）：点关闭按钮只隐藏窗口，托盘「退出应用」才真正退出。 */
@@ -197,8 +194,6 @@ export const useSettingsStore = defineStore("settings", () => {
   function applySaved(saved: SavedSettings | null | undefined): void {
     if (!saved) return;
     if (saved.permissionTier && PERM_TIER_VALUES[saved.permissionTier]) permissionTier.value = saved.permissionTier;
-    // 无字段（旧快照）与非法值都迁移到 auto；绝不因损坏配置回落为直启。
-    sandboxMode.value = saved.sandboxMode && SANDBOX_MODE_VALUES[saved.sandboxMode] ? saved.sandboxMode : "auto";
     // 运行模式：旧快照缺字段或非法值一律回落 local —— 绝不因损坏配置悄悄进隔离。
     runMode.value = saved.runMode && RUN_MODE_VALUES[saved.runMode] ? saved.runMode : "local";
     if (typeof saved.workspaceDir === "string") workspaceDir.value = saved.workspaceDir;
@@ -304,7 +299,6 @@ export const useSettingsStore = defineStore("settings", () => {
       selectedModelProviderId: selectedModelProviderId.value,
       modelProviders: modelProviders.value,
       permissionTier: permissionTier.value,
-      sandboxMode: sandboxMode.value,
       runMode: runMode.value,
       workspaceDir: workspaceDir.value,
       mcpServers: mcpServers.value,
@@ -537,7 +531,6 @@ export const useSettingsStore = defineStore("settings", () => {
 
   return {
     permissionTier,
-    sandboxMode,
     maxParallel,
     closeToTray,
     setCloseToTray,

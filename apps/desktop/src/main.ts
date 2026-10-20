@@ -1,10 +1,13 @@
 import { createApp, nextTick } from "vue";
 import { createPinia } from "pinia";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { initRuntimeMode, runtimeMode } from "@greywork/host-ipc";
+import { hostWindow, initRuntimeMode } from "@greywork/host-ipc";
 import App from "./App.vue";
-import { bootInstalledMarketPlugins, createAppRouter, i18n, initDeviceTier, loadHostSystem } from "@greywork/workbench";
-import "./tailwind.css";
+import { installWindowFrame } from "./window-frame";
+import { bootInstalledMarketPlugins, createAppRouter, i18n, initDeviceTier, loadHostSystem, setFront } from "@greywork/workbench";
+// 前端集合走子路径：放进 barrel 会让另一端也把它拖进产物（见 workbench/src/front/current.ts）。
+import { ALL_FEATURES_FRONT } from "@greywork/workbench/front/all";
+// Tailwind 入口是**全仓共享**的那一份（主题令牌只此一处，见 workbench/src/tailwind.css）。
+import "@greywork/workbench/tailwind.css";
 
 /* ===== 启动基线打点 =====
  * 起点 `gw:entry` 在 index.html 的同步脚本里（入口模块解析求值之前），这里补齐后续各点，
@@ -72,11 +75,18 @@ async function bootstrap(): Promise<void> {
   // 运行时判定：必须在 mount 之前落地 —— AuthGate 与各处守卫都同步读 runtimeMode()，
   // 探测结果晚一步写下来，服务端态就会被误判成 browser-preview（登录门不弹、能力全禁）。
   //
-  // 桌面态在这里零 await 短路：渲染端有 __TAURI_INTERNALS__，同步即可判定，既不探测
-  // /api/health 也不查 /api/session，不给首帧前加任何网络往返。
-  if (runtimeMode() !== "desktop") await initRuntimeMode();
+  // 显式覆盖在 initRuntimeMode 里零 I/O 短路（测试 / 调试注入）；正常启动探测同源
+  // /api/health 与 /api/session，给首帧前加一次本地回环请求（sidecar 场景是毫秒级）。
+  await initRuntimeMode();
 
   mark("mountStart");
+  // 前端身份必须在 mount 之前落地：路由表与外壳接线都在 setup / mount 期同步读它。
+  // 桌面端要的是「全部特性」那一个集合。这里**显式**声明：`currentFront()` 没有缺省值，
+  // 未声明就抛错（见 workbench 的 front/current.ts）。声明放在本端入口，也保证了
+  // 「桌面端开满特性」这件事不会被另一端（或测试）的集合悄悄改写。
+  setFront(ALL_FEATURES_FRONT);
+  // 主窗圆角：必须在 mount 之前给 <html> 打标，首帧就按圆角裁，避免窗口显示后才跳一下。
+  installWindowFrame();
   const app = createApp(App).use(i18n).use(createPinia()).use(createAppRouter());
   app.mount("#app");
   mark("mounted");
@@ -96,17 +106,17 @@ async function bootstrap(): Promise<void> {
     });
   }
 
-  // 防白屏闪烁：tauri.conf.json 配 visible:false，窗口等首帧画完再显示。
+  // 防白屏闪烁：窗口以 visible:false / show:false 起手，等首帧画完再显示。
   // 两个 rAF 之间留一个 nextTick，确保 Vue 首帧布局与主题 data-theme 都已落 DOM。
   await nextTick();
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
       try {
-        void getCurrentWindow()
-          .show()
+        void hostWindow()
+          ?.show()
           .catch(() => {});
       } catch {
-        // 非 Tauri 运行（浏览器预览 devUrl）：无窗口概念，忽略。
+        // 非桌面壳运行（浏览器预览 devUrl / 纯服务端）：无窗口概念，忽略。
       }
       mark("shown");
       reportStartup(pluginsMs);

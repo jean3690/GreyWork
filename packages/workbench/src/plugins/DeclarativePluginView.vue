@@ -2,6 +2,7 @@
 import { computed, ref } from "vue";
 import PluginRenderLoop from "@/features/plugins/PluginRenderLoop.vue";
 import { runDeclarativeAction, setDeclarativePluginValue, useDeclarativePluginState } from "./declarative-state";
+import type { PluginPointerEvent } from "./code-runtime";
 import type { DeclarativeAction, DeclarativeField, DeclarativePage, DeclarativeValue } from "./market-types";
 
 const props = defineProps<{
@@ -9,10 +10,15 @@ const props = defineProps<{
   modeId: string;
   page: DeclarativePage;
   invoke?: (handler: string, state: Readonly<Record<string, DeclarativeValue>>) => Promise<Record<string, DeclarativeValue> | void>;
-  /** 声明的渲染循环（worker render handler + fps + 画布尺寸）；仅 worker 包有。 */
-  render?: { handler: string; fps?: number; width?: number; height?: number };
+  /** 声明的渲染循环（worker render handler + fps + 画布尺寸 + 指针回传）；仅 worker 包有。 */
+  render?: { handler: string; fps?: number; width?: number; height?: number; pointer?: boolean };
   /** 渲染通道：worker render handler 返回指令集（非 patch）。 */
   renderChannel?: (handler: string, state: Readonly<Record<string, DeclarativeValue>>) => Promise<unknown>;
+  /** 指针通道：worker registerPointer handler 返回状态补丁。 */
+  dispatchPointer?: (
+    event: PluginPointerEvent,
+    state: Readonly<Record<string, DeclarativeValue>>,
+  ) => Promise<Record<string, DeclarativeValue> | void>;
 }>();
 
 const busyAction = ref<string | null>(null);
@@ -65,6 +71,13 @@ function actionClass(action: DeclarativeAction): string {
   if (action.style === "secondary") return "border-line-2 bg-panel-2 text-foreground hover:border-dim2";
   return "border-accent bg-accent text-accent-ink hover:opacity-90";
 }
+
+/** 指针处理器返回的补丁（isPatch 已保证原始值）按声明并入模式状态并持久化。 */
+function applyPointerPatch(patch: Record<string, DeclarativeValue>): void {
+  for (const [key, value] of Object.entries(patch)) {
+    setDeclarativePluginValue(`${props.pluginId}/${props.modeId}`, state, key, value);
+  }
+}
 </script>
 
 <template>
@@ -85,6 +98,9 @@ function actionClass(action: DeclarativeAction): string {
       :width="props.render.width"
       :height="props.render.height"
       :state="() => ({ ...state })"
+      :pointer="props.render.pointer === true"
+      :pointerChannel="props.dispatchPointer"
+      :onPointerPatch="applyPointerPatch"
       data-testid="declarative-plugin-render"
     />
 

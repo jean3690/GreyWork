@@ -1,26 +1,29 @@
 # GreyWork Architecture
 
-GreyWork is a monorepo implementing a desktop-first AI agent application. It uses pnpm workspaces with TypeScript packages in `packages/` and a Tauri desktop shell in `apps/desktop/`, backed by Rust for the native host.
+GreyWork is a monorepo implementing a desktop-first AI agent application. It uses pnpm workspaces with TypeScript packages in `packages/`, an Electron desktop shell in `apps/electron/`, two renderer frontends (`apps/desktop` and `apps/web`) built from the same `@greywork/workbench` sources, and a headless Rust server (`apps/server/`) backed by shared domain logic in `crates/greywork-host/`.
 
 ## Monorepo Layout
 
 ```
 greyWork/
 ├── apps/
-│   ├── desktop/              # Tauri shell: Vite + Vue renderer + thin Rust wrappers
+│   ├── desktop/              # Desktop renderer SPA (Vite + Vue), served by the Electron shell / server
+│   ├── web/                  # Browser front: same workbench, narrower FrontSpec
+│   ├── electron/             # Electron shell: main process + preload + sidecar orchestration
 │   └── server/               # Headless axum server: HTTP command endpoint + WS events + login
 ├── crates/
-│   └── greywork-host/        # Shared domain logic (Tauri-free) used by both hosts
+│   └── greywork-host/        # Shared domain logic (host-transport-free) used by every host
 ├── packages/
 │   ├── core/                 # Shared types & math (no deps)
 │   ├── editor/               # File system, Git, CodeMirror abstractions
 │   ├── agents/               # Agent domain logic (roles, events, orchestration)
 │   ├── llm/                  # LLM provider clients (OpenAI-compatible stream → IPC)
-│   ├── acp/                  # Agent Client Protocol client (Tauri IPC + WebSocket)
+│   ├── acp/                  # Agent Client Protocol client (host commands + WebSocket)
 │   ├── shell/                # Provider registry & transport data plane
 │   ├── plugins/              # Plugin market source adapters + types
 │   ├── cowork/               # Co-operative workspace engine
-│   └── workbench/            # Shared UI package: shell, views, plugin runtime
+│   ├── vite-config/          # Shared Vite config factory (base / pdf.js assets / dev proxy)
+│   └── workbench/            # Shared UI package: shell, views, plugin runtime, front contract
 ├── plugin-market/            # Plugin registry source + signing
 └── .agents/skills/           # Installed agent skills (read natively by the ACP agent)
 ```
@@ -42,6 +45,68 @@ what a skill directory may contain (path sanitising, file-count and per-file siz
 bundled skill is `ffmpeg-media`, a driver for the `ffmpeg` CLI: the host ships the instructions, the
 agent runs the tool, and the artefacts land in the workspace where the preview viewers pick them up.
 
+**Skills in isolated runs.** A `worktree` run provisions an isolated snapshot, which — for a git
+source — only contains **committed** files, so uncommitted `.agents/skills` would not reach the
+agent. `worktree_provision` therefore carries the source's `.agents/skills` into the snapshot
+(`infra/worktree/skills.rs`): each entry is symlinked (a directory the agent reads, not code the
+host runs), guarded like `.agents/linked` — the entry must be a safe relative path and, in a git
+source, git-ignored (so the link does not pollute the agent's change view). The renderer passes an
+optional `skills` filter so a cowork run can bring only the teammates-selected subset (`None` =
+all, `[]` = none); the filter only bites in `worktree` mode, since every other mode uses the source
+directory as the workspace and the skills are visible as-is.
+
+## MCP servers
+
+MCP servers are declared per session: the renderer passes the enabled set (or a run-level subset)
+to `acp_new_session` / `acp_load_session`, and the host filters it by the agent's declared
+`mcpCapabilities` (`services/acp_host/session.rs`) before forwarding it in `session/new.mcp_servers`.
+The agent connects to them and merges their tools — the host never proxies tool calls. Skipped
+servers (e.g. an `http` server on an agent that only supports `stdio`) come back as
+`skippedMcpServers` so the UI can say why.
+
+## ACP session lifecycle
+
+`acp_load_session` restores a persisted binding by capability: `session/resume` first when the
+agent advertises `sessionCapabilities.resume` (no history replay, so the renderer skips its replay
+guard), then `session/load` for agents that only support replay. If both fail the renderer falls
+back to `session/new`, so a send is never blocked by a stale binding. When switching conversations
+the renderer releases the previous session through `acp_close_session` (`session/close`) while
+keeping the agent process alive; agents without the `close` capability return `false` and the
+renderer proceeds. Turn cancellation sends ACP `session/cancel` before the JSON-RPC
+`$/cancel_request` fallback, since the former is the protocol-defined prompt-cancel path.
+
+Legacy session **modes** (`session/new` / `load` / `resume` returning `modes`) are adapted in the
+renderer into a synthetic `legacy_session_mode` config option (`lib/acp-legacy-modes.ts`), so the
+existing selector, workspace memory and global-default plumbing all work unchanged. Switching calls
+the new host command `acp_set_mode` (`session/set_mode`), and `current_mode_update` notifications flow
+back as `mode` events. Agents that already expose a real `mode` config option are left alone to avoid
+a duplicate selector.
+
+## Subagents (protocol-level)
+
+An ACP agent may delegate to _subagents_ it creates internally and expose them as child sessions
+(RFD: Subagent Sessions). This is distinct from GreyWork's own **orchestration tasks** (the
+`runs` store's planner/subtask board, which starts a separate agent process per subtask): a
+protocol subagent shares the parent's ACP connection and is announced with a `subagent_update`
+session update.
+
+Routing lives in `packages/workbench/src/stores/agent/subagent.ts`, driven by the single
+`acp://event` listener: the listener asks the runs bridge first (app orchestration), then this
+slice, then falls through to the main session stream. The slice keeps the parent→child tree,
+current work state (`running` / `idle` / `requires_action` / `unknown`), inter-session messages
+(`session_message*`) and a per-subagent transcript, surfaces an indicator chip in the conversation
+header, and notifies once when a child settles (`stopReason` end_turn / cancelled / error). Child
+traffic for a not-yet-announced session is buffered briefly and replayed on announcement, with a
+bounded fallback (size cap + 2s timer) that hands orphaned traffic back to the main stream so it is
+never silently dropped.
+
+Cancelling one child reuses ACP `session/cancel` targeted at the child's session id — a new host
+command `acp_cancel_session` (it does not reap the process). Note the pinned Rust SDK
+(`agent-client-protocol-schema` 1.9.1) does not yet model the draft subagent variants, so the
+host currently drops `subagent_update` (non-fatally — the connection and turn survive, and
+child-session chunks still arrive); the renderer path is forward-compatible and activates once the
+SDK carries the variants.
+
 ## Dependency Direction
 
 The project enforces strict dependency direction: **leaf packages depend on nothing or only on `@greywork/core`**; higher-level packages depend on lower-level ones.
@@ -56,7 +121,7 @@ acp         ← core
 cowork      ← core
 plugins     ← core
 workbench   ← agents, editor, llm, acp, shell, plugins, coop, core
-desktop     ← workbench (+ Tauri Rust host)
+apps/*      ← workbench (desktop / web = frontends; electron = shell; server = Rust host)
 ```
 
 **Key rules (enforced by ESLint):**
@@ -66,24 +131,69 @@ desktop     ← workbench (+ Tauri Rust host)
 
 ### Package Descriptions
 
-| Package               | Purpose                                                                                                                                                                                                                                                                                                                                      |
-| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@greywork/core`      | Shared TypeScript types (vectors, bounding boxes, version info) and math utilities (clamp, lerp, vector ops). Leaf-level.                                                                                                                                                                                                                    |
-| `@greywork/editor`    | File system, Git, and CodeMirror abstractions. The memory-backed mocks ship for browser/unit contexts; the real Git host lives in `src/tauri.ts` (`createTauriGitService`) and talks to the Rust host's `git_*` IPC commands (see `apps/desktop/src-tauri/src/git.rs`), which run the git CLI strictly inside the authorized workspace root. |
-| `@greywork/agents`    | AI agent domain: role definitions, state machine, event model, task orchestration pipeline.                                                                                                                                                                                                                                                  |
-| `@greywork/llm`       | LLM provider clients using OpenAI-compatible streaming protocol. Bridges to Tauri IPC for the Rust `LlmHost` backend.                                                                                                                                                                                                                        |
-| `@greywork/acp`       | Agent Client Protocol client — session transport (Tauri IPC and WebSocket), permission mapping, event model.                                                                                                                                                                                                                                 |
-| `@greywork/shell`     | Provider registry and desktop communication data plane. Contains ACP agent backend presets and model provider enums.                                                                                                                                                                                                                         |
-| `@greywork/plugins`   | Plugin market source adapters (skills.sh registry search/download) and AI command strategy types.                                                                                                                                                                                                                                            |
-| `@greywork/cowork`    | Co-operative workspace engine for collaborative sessions.                                                                                                                                                                                                                                                                                    |
-| `@greywork/workbench` | Complete shared UI package used by both desktop and web. Exports a single `GreyWorkWorkbench` entry point. Includes the plugin runtime (Cordis micro-kernel), router, stores, i18n, theme, and all views.                                                                                                                                    |
+| Package                 | Purpose                                                                                                                                                                                                                                                                                         |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@greywork/core`        | Shared TypeScript types (vectors, bounding boxes, version info) and math utilities (clamp, lerp, vector ops). Leaf-level.                                                                                                                                                                       |
+| `@greywork/editor`      | File system, Git, and CodeMirror abstractions. The memory-backed mocks ship for browser/unit contexts; the real Git service talks to the host's `git_*` commands (implemented in `crates/greywork-host/src/infra/git.rs`), which run the git CLI strictly inside the authorized workspace root. |
+| `@greywork/agents`      | AI agent domain: role definitions, state machine, event model, task orchestration pipeline.                                                                                                                                                                                                     |
+| `@greywork/llm`         | LLM provider clients using OpenAI-compatible streaming protocol. Bridges to the host's `llm_*` commands for the Rust `LlmHost` backend.                                                                                                                                                         |
+| `@greywork/acp`         | Agent Client Protocol client — session transport (host commands and WebSocket), permission mapping, event model.                                                                                                                                                                                |
+| `@greywork/shell`       | Provider registry and desktop communication data plane. Contains ACP agent backend presets and model provider enums.                                                                                                                                                                            |
+| `@greywork/plugins`     | Plugin market source adapters (skills.sh registry search/download) and AI command strategy types.                                                                                                                                                                                               |
+| `@greywork/cowork`      | Co-operative workspace engine for collaborative sessions.                                                                                                                                                                                                                                       |
+| `@greywork/workbench`   | Complete shared UI package used by every frontend. Exports the `FrontSpec` contract, router factory, stores, i18n, theme, plugin runtime (Cordis micro-kernel) and all views.                                                                                                                   |
+| `@greywork/vite-config` | Single Vite config factory for all frontends: rxjs entry alias, pdf.js runtime assets, syntax floor, dev proxy and the shared `public/` directory. Apps only declare `base`, `outDir`, `devPort` and whether they emit root-level shared assets.                                                |
+
+## Frontends (`apps/desktop` / `apps/web`)
+
+One backend, many frontends. Every app is a thin bootstrap around `@greywork/workbench`: it awaits
+`initRuntimeMode()`, calls `setFront(<FrontSpec>)`, then mounts `createAppRouter()`. The spec lives in
+`packages/workbench/src/front/` and declares:
+
+- `features` — which feature directories are installed. Each `features/<id>/spec.ts` contributes its
+  routes, sidebar/search entries and a `setup()` hook. Removing a feature removes **both** its routes
+  and its nav entry, and skips its listeners (e.g. the six chat-channel connections).
+- `shell.panels` — which panels (sider / preview / workspace / activity / terminal) exist at all.
+- `shell.wiring` — host-shell integrations (`queueBridge`, `tray`, `closeGuard`, `hostNotifications`).
+  A frontend without a tray simply does not install the tray bridge.
+
+Two rules keep this from silently bloating the bundle:
+
+1. **Feature sets are static imports, not a lookup table.** `front/all.ts` imports each feature
+   explicitly so Rollup can drop the ones no frontend references; a `Record<FeatureId, Feature>`
+   lookup would retain every view.
+2. **A production entry must declare its own spec, and there is no default** — `apps/desktop/src/main.ts`
+   imports `ALL_FEATURES_FRONT`, `apps/web/src/main.ts` imports `WEB_FRONT`, both from their own
+   `@greywork/workbench/front/*` subpath (never the barrel). `currentFront()` throws until `setFront()`
+   has run, so a missing declaration fails loudly instead of silently loading the full set. Component
+   tests get the full set from `tests/vitest.dom.setup.ts`.
+
+   Removing the default is what makes the split pay for itself: while `currentFront()` referenced the
+   full set, every frontend emitted every feature's route chunks (web and desktop had the same chunk
+   count and differed by <0.02% in bytes). With the default gone, `apps/web` no longer contains
+   `TeamView` / `AssistantsView` / channel views at all.
+
+`apps/web` deliberately omits `channels` (opening a browser tab must not dial every IM channel),
+`team` and `assistants`; it keeps `guid`, `conversation`, `automation` and `plugins`. Its smoke e2e
+asserts the resulting feature ids, so a regression in the contract fails CI rather than surfacing as
+a mysterious missing page.
+
+Build-wise, `@greywork/vite-config` holds everything the fronts share. Each app only chooses `base`,
+`outDir`, `devPort` and `emitsSharedAssets`; `publicDir` defaults to the single
+`packages/workbench/public/` (boot script, logo, ~1.1k file icons) so the assets are not copied into
+the repo N times. Desktop is served at the root by its sidecar, and `apps/web` is a separate
+root-path deployment, so both emit the shared assets; merging them into one deployment would require
+moving desktop to `base: "/desktop/"` and turning its `emitsSharedAssets` off.
 
 ## Build & Package
 
 - All packages use source-direct execution (TypeScript via Vite/vue-tsc), no separate build step for packages.
-- The desktop app builds via Tauri: `pnpm build` runs `vue-tsc --noEmit && vite build` as `beforeBuildCommand`, then Tauri compiles the Rust binary.
-- Domain logic lives in `crates/greywork-host/` (a single Cargo workspace at the repo root, one `Cargo.lock`), shared by both hosts. It is organised into four layers — `core/` (leaf utilities), `infra/` (DB, git, http, sandbox, workspace FS), `services/` (LLM, ACP, MCP, RAG, office, skills, cron), `channels/` (chat transports) and `app/` (the `commands` face) — with a strict downward dependency direction (L0 ← L1 ← L2 ← L3 ← L4). `lib.rs` re-exports every module back to the crate root, so `greywork_host::<mod>` paths are unchanged. Major domains: `services/llm/` (OpenAI-compatible stream -> events), `services/acp_host.rs`, `services/mcp*.rs`, `services/host_exec.rs` (automation-queue consumer, **not** process exec — that is `infra/sandbox.rs` + `infra/process_guard.rs`), `infra/http.rs` / `services/web_fetch.rs`, `infra/workspace_fs/` (authorized workspace root resolution + file reads) and `infra/git.rs` (git CLI surfaced as `git_*` commands, scoped to the authorized root). The command face has a single source of truth: `commands::COMMANDS` + `commands::dispatch`.
-- `apps/desktop/src-tauri/src/` keeps only `#[tauri::command]` wrappers and truly host-specific modules (`sys` / `tray` / `notify` / `close_guard` / `plugin_window` / `TauriHost`).
+- `pnpm build` builds **both** fronts (`build:desktop` → `apps/desktop/dist`, `build:web` →
+  `apps/web/dist`). Deployments build only what they serve: the Electron packaging script and the
+  Docker image use `build:desktop`, since both serve the desktop SPA.
+- The desktop app packages via electron-builder (`apps/electron/electron-builder.yml`).
+- Domain logic lives in `crates/greywork-host/` (a single Cargo workspace at the repo root, one `Cargo.lock`), shared by both hosts. It is organised into four layers — `core/` (leaf utilities), `infra/` (DB, git, http, workspace FS), `services/` (LLM, ACP, MCP, RAG, office, skills, cron), `channels/` (chat transports) and `app/` (the `commands` face) — with a strict downward dependency direction (L0 ← L1 ← L2 ← L3 ← L4). `lib.rs` re-exports every module back to the crate root, so `greywork_host::<mod>` paths are unchanged. Major domains: `services/llm/` (OpenAI-compatible stream -> events), `services/acp_host/`, `services/mcp*.rs`, `services/host_exec.rs` (automation-queue consumer, **not** process exec — that is `infra/process_guard.rs`), `infra/http.rs` / `services/web_fetch.rs`, `infra/workspace_fs/` (authorized workspace root resolution + file reads) and `infra/git.rs` (git CLI surfaced as `git_*` commands, scoped to the authorized root). The command face has a single source of truth: `commands::COMMANDS` + `commands::dispatch`.
+- `apps/electron/src/main/` keeps the host-specific modules (window / tray / notify / close-guard / navigation / menu / logger / browser-view / picker / plugin-window / sidecar / auth).
 - `apps/server/` is the headless host (see below).
 - Patches are applied to dependencies via `patches/` directory (e.g., `@univerjs/engine-render`, `exceljs`).
 
@@ -91,10 +201,10 @@ desktop     ← workbench (+ Tauri Rust host)
 
 - Each package with testable logic has a `tests/` directory using Vitest.
 - `pnpm -r test` runs all tests across packages with coverage enabled where configured.
-- Rust tests run via `cargo test --locked` from the **repo root** (single workspace: desktop shell + `greywork-host` + server).
+- Rust tests run via `cargo test --locked` from the **repo root** (single workspace: `greywork-host` + server).
 - Coverage thresholds are configured per-package in `vitest.config.ts`.
 - **Cross-language ACP gate**: `pnpm --filter @greywork/acp test:integration` drives the real
-  renderer-side ACP client (`@greywork/acp` → `TauriIpcTransport` → `POST /api/command` +
+  renderer-side ACP client (`@greywork/acp` → the host-command transport → `POST /api/command` +
   `WS /api/events`) against a real `greywork-server` and a fake agent, asserting a full
   `initialize → session/new → prompt → agent_message_chunk → prompt-done` round trip. The two ACP
   SDKs (TS `@agentclientprotocol/sdk` vs Rust `agent-client-protocol`) are independent release
@@ -108,25 +218,26 @@ desktop     ← workbench (+ Tauri Rust host)
 
 A single-user, self-hosted web host for GreyWork. It reuses **all** of `greywork-host`'s domain
 logic and adds only the host shell: HTTP transport, WebSocket event delivery, built-in login, and
-the server-side security policy. It never depends on `tauri`.
+the server-side security policy. It carries no GUI-toolkit dependency.
 
 ### Reuse boundary
 
 The command face has one source of truth: `greywork_host::commands::COMMANDS` (metadata) and
-`commands::dispatch(name, args, ctx)`. The desktop shell registers the same commands with Tauri's
-`generate_handler!` (a drift test asserts the two name sets are identical); the server routes
-`POST /api/command` into `dispatch`. Commands marked `desktop_only` (native pickers, tray, system
-browser) are rejected server-side.
+`commands::dispatch(name, args, ctx)`; the server routes `POST /api/command` into `dispatch`.
+Commands marked `desktop_only` are rejected server-side and are implemented by the Electron main
+process instead — the mirror list in `apps/electron/src/shared/desktop-only.ts` is asserted against
+`/api/commands` so the two sides cannot drift (the Electron shell's own unit tests pin its shape).
 
 ### Configuration
 
 Loaded as `defaults → <data_dir>/server.json → GREYWORK_* env vars` (env wins). Fields: `bind`,
 `data_dir`, `home_dir`, `session_ttl_secs`, `password_hash` / `password`, `agent_programs`,
-`workspace_roots`, `sandbox`, `tier`, `secure_cookie`, `allowed_origins`,
+`workspace_roots`, `tier`, `secure_cookie`, `allowed_origins`,
 `frame_origins` (`GREYWORK_FRAME_ORIGINS`, see [Security headers](#security-headers)),
 `automation_host_primary` (`GREYWORK_AUTOMATION_HOST_PRIMARY`, see
-[Scheduled tasks](#scheduled-tasks)), `static_dir` (`GREYWORK_STATIC_DIR`, see
-[Static hosting](#static-hosting-spa)).
+[Automations](#automations)), `static_dir` (`GREYWORK_STATIC_DIR`, see
+[Static hosting](#static-hosting-spa)), `soffice_path` (`GREYWORK_SOFFICE_PATH`, see
+[Office preview](#office-preview-native-vs-high-fidelity-libreoffice)).
 
 Password bootstrap, in priority order:
 
@@ -149,15 +260,16 @@ cooldown → `429`). CSRF rests on `SameSite=Strict` plus an optional `allowed_o
 
 ### HTTP / WebSocket contract
 
-| Method | Path            | Auth | Notes                                                    |
-| ------ | --------------- | ---- | -------------------------------------------------------- |
-| GET    | `/api/health`   | no   | `{status, version}`                                      |
-| POST   | `/api/login`    | no   | `{password}` → `{token}` + `Set-Cookie`                  |
-| POST   | `/api/logout`   | yes  | clears cookie + server session                           |
-| GET    | `/api/session`  | yes  | `{authenticated, expiresAt}`                             |
-| GET    | `/api/commands` | yes  | command metadata (`auth` / `desktopOnly` / `binary`)     |
-| POST   | `/api/command`  | yes  | `{command, args}` → the command's return value, verbatim |
-| GET    | `/api/events`   | yes  | WebSocket; frames are `{event, payload}`                 |
+| Method | Path            | Auth | Notes                                                              |
+| ------ | --------------- | ---- | ------------------------------------------------------------------ |
+| GET    | `/api/health`   | no   | `{status, version}`                                                |
+| POST   | `/api/login`    | no   | `{password}` → `{token}` + `Set-Cookie`                            |
+| POST   | `/api/logout`   | yes  | clears cookie + server session                                     |
+| GET    | `/api/session`  | yes  | `{authenticated, expiresAt}`                                       |
+| GET    | `/api/commands` | yes  | command metadata (`auth` / `desktopOnly` / `binary` / `available`) |
+| POST   | `/api/command`  | yes  | `{command, args}` → the command's return value, verbatim           |
+| GET    | `/api/media`    | yes  | `?path=` → media bytes with HTTP `Range` support                   |
+| GET    | `/api/events`   | yes  | WebSocket; frames are `{event, payload}`                           |
 
 Successful `/api/command` responses carry the command's return value directly (JSON, or raw bytes
 for the two `binary` commands with `Content-Type: application/octet-stream`). Failures are a
@@ -204,7 +316,7 @@ The CSP is computed once at router-assembly time from the config, not per respon
 
 | Header                      | Value                                                               | Why                                                                                                                                             |
 | --------------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Content-Security-Policy`   | mirrors the desktop `tauri.conf.json` CSP, minus Tauri-only sources | the desktop policy is the strongest evidence of what the app actually needs; a drift test keeps the two in sync                                 |
+| `Content-Security-Policy`   | a strict same-origin policy (see the directives in `middleware.rs`) | the desktop shell loads the same served SPA and inherits this policy — there is deliberately no second, shell-specific CSP                      |
 | `X-Frame-Options`           | `DENY`                                                              | clickjacking guard for older browsers (`frame-ancestors 'none'` covers modern ones)                                                             |
 | `Referrer-Policy`           | `no-referrer`                                                       | never leak the self-hosted URL/paths to outbound links                                                                                          |
 | `Permissions-Policy`        | `camera=(), microphone=(), …` (omits `clipboard-*`)                 | the UI uses `navigator.clipboard` for its copy buttons, so `clipboard-*` is deliberately left unset; everything else is unused and denied       |
@@ -212,16 +324,16 @@ The CSP is computed once at router-assembly time from the config, not per respon
 | `Strict-Transport-Security` | `max-age=31536000; includeSubDomains`                               | **only when `secure_cookie` is set** — that flag is the "behind a TLS proxy" signal; over plain HTTP HSTS is meaningless and can lock users out |
 
 `GREYWORK_FRAME_ORIGINS` appends a `frame-src` allow-list for cloud Office viewers. Origins are
-normalized by the shared `greywork_host::csp::normalize_frame_origin` (the server CSP, the desktop
-CSP drift test, and the host-fact query all need the same form); anything that could rewrite the
-policy (whitespace, quotes, semicolons) is dropped and named in the startup log.
+normalized by the shared `greywork_host::csp::normalize_frame_origin` (both the server policy and
+the host-fact query need the same form); anything that could rewrite the policy (whitespace,
+quotes, semicolons) is dropped and named in the startup log.
 
 The server does **not** add request timeouts or concurrency limits: `acp_start`, LLM streaming,
 large `web_fetch`, and 32 MB binary reads legitimately run for minutes, and long-lived WebSockets
 must stay open. The only abuse-prone entry point is `/api/login`, which `LoginThrottle` already
 covers (5 failures → `429`).
 
-### Scheduled tasks
+### Automations
 
 Due automations are consumed by the renderer's 30 s poll loop when a browser is present. The host
 process also consumes them, and `GREYWORK_AUTOMATION_HOST_PRIMARY=1` decides **which role** it
@@ -245,10 +357,7 @@ subcommand so the image needs no `curl`/`wget`.
 `docker-compose.yml` publishes `8787`, mounts a named `/data` volume, sets
 `no-new-privileges`, and runs as uid 10001. The server itself does no TLS, so production belongs
 behind a TLS reverse proxy (Caddy / nginx / Traefik) with `GREYWORK_SECURE_COOKIE=1`; binding
-non-loopback without it logs a cleartext-credential warning at startup. A separate
-`docker-compose.sandbox.yml` override adds `seccomp=unconfined` + `SYS_ADMIN`/`NET_ADMIN` for
-operators who need the agent sandbox's `fs`/`full` tiers — in a default container the `bwrap` probe
-always fails and the sandbox degrades to `off`. See [`docs/packaging.md`](./packaging.md) for the
+non-loopback without it logs a cleartext-credential warning at startup. See [`docs/packaging.md`](./packaging.md) for the
 deployment guide, volume layout, password strategies, and the full capability trade-off matrix.
 
 ### Security model
@@ -260,10 +369,9 @@ processes, so the controls below limit what the _web UI_ can be tricked into doi
   config (`agent_programs`), never from `db.enabled_agent_programs()` — that table is client-writable
   and would otherwise let a request widen the spawn surface. `db_agents_sync` is rejected outright
   (`403`).
-- **Sandbox / tier clamping.** The server overwrites the caller-supplied `sandbox` and `tier`
-  arguments on `acp_start` (and pins `tier` on `acp_set_permission_tier`) with the configured
-  values, so a remote caller cannot request `sandbox="off"` or `tier="full"`. The default tier is
-  `read-only` (fail-closed).
+- **Tier clamping.** The server overwrites the caller-supplied `tier` argument on `acp_start`
+  (and pins it on `acp_set_permission_tier`) with the configured value, so a remote caller cannot
+  request `tier="full"`. The default tier is `read-only` (fail-closed).
 - **Pre-seeded authorized roots.** A headless host has no native folder picker, so authorized
   workspace roots come only from config (`workspace_roots`); `WorkspaceFsAccess` still enforces
   them for every `fs_*` / `git_*` call. No new path resolution is introduced by the server.
@@ -283,28 +391,28 @@ single home.
 1. **Lint / Typecheck / Test / Build (renderer)** — four parallel jobs. They mirror the pre-push
    hook; running them concurrently keeps the wall clock at the slowest job instead of the sum. Each
    job installs the pnpm store from cache (~20-40s).
-2. **Tauri Bundle (deb / NSIS / dmg)** — three-platform matrix that installs the Tauri system deps,
-   compiles Rust, and packages the app; the renderer is built inside `tauri build` via
-   `beforeBuildCommand`.
+2. **Electron Bundle** — three-platform matrix that builds the sidecar binary, the renderer SPA and
+   the shell (`pnpm electron:prep`), then packages an unpacked app with electron-builder. Actual
+   installers are produced by `release.yml` (see below).
 3. **Cargo Test (workspace)** — from the repo root: `cargo fmt --check`,
    `cargo clippy --locked --all-targets -- -D warnings`, `cargo test --locked`, plus a guard that
-   `crates/greywork-host/Cargo.toml` declares no `tauri` dependency. The pre-push hook runs the same
-   three commands when a push touches Rust files.
+   `crates/greywork-host/Cargo.toml` declares no `tauri` / `electron` dependency. The pre-push hook
+   runs the same three commands when a push touches Rust files.
 4. **ACP E2E (renderer TS × Rust host)** — builds `greywork-server` and runs the cross-language ACP
    gate described under Testing. It needs no browser and no renderer bundle (it only talks to
-   `/api`), and it reuses `shared-key: tauri` so it does not add a cache entry — it pays for the
-   Tauri system deps it does not strictly need rather than risk evicting the `master` cache.
+   `/api`), and it reuses `shared-key: rust` so it does not add a cache entry.
 
-Rust dependency caches come from `Swatinem/rust-cache` and are keyed with `shared-key: tauri`, so the
-CI bundle matrix and the release workflow restore the same dependency artifacts (the key still
+Rust dependency caches come from `Swatinem/rust-cache` and are keyed with `shared-key: rust`, so the
+CI packaging job and the release workflow restore the same dependency artifacts (the key still
 includes OS/arch and the rustc hash). Caches are only written on `master` and on tags: GitHub's cache
-budget is 10 GB per repository, and per-PR copies of the ~600 MB desktop cache evict the `master`
+budget is 10 GB per repository, and per-PR copies of the ~600 MB dependency cache evict the `master`
 entries, turning the next build into a full dependency recompile. The first run after a change to
 `Cargo.lock`, `RUSTFLAGS`, or a job's cache key is a cold build by design.
 
-`release.yml` runs on `v*` tags, extracts the release notes from `CHANGELOG.md`, and builds/uploads
-deb / NSIS / dmg to a draft Release via `tauri-action`. Branch protection ensures all checks pass
-before merge — if required check names change, update them in the branch protection settings.
+`release.yml` runs on `v*` tags: a first job extracts the release notes from `CHANGELOG.md` and
+creates a draft Release, then a three-platform matrix builds the Electron installers (AppImage /
+NSIS / dmg) and uploads them to it. Branch protection ensures all checks pass before merge — if
+required check names change, update them in the branch protection settings.
 
 `docker.yml` is deliberately a separate workflow with its own `paths` filter (Dockerfile, compose
 files, server/host/renderer sources, lockfiles) so it neither runs on unrelated PRs nor perturbs
@@ -313,6 +421,78 @@ starts it with a known password, polls `/api/health`, and asserts that `/` reall
 (`<div id="app">`) and that the CSP header is present — a plain health check would pass on an image
 whose UI 404s. It does **not** use BuildKit's `type=gha` cache: the repository's 10 GB cache budget is
 already saturated by the Rust dependency caches.
+
+## Native model agent loop (`services::llm::agent`)
+
+Three conversation paths share one OpenAI-compatible transport (`services::llm::transport`) and
+differ only in what they declare to the model:
+
+| Path             | Entry             | Tools                                | Where the loop lives                  |
+| ---------------- | ----------------- | ------------------------------------ | ------------------------------------- |
+| Single-turn chat | `llm_chat_start`  | none                                 | one request                           |
+| **Native agent** | `llm_agent_start` | `read_file` / `list_dir` / `git_log` | host (`services::llm::agent::runner`) |
+| ACP agent        | `acp_send`        | whatever the external agent declares | external process                      |
+
+### Why the loop runs in the host
+
+The tool surface is read-only, so every call is auto-approved under all three permission tiers —
+no interactive confirmation branch exists. That is what lets the loop live in the host: the
+renderer, the remote-assistant pipeline (`stores/remote-assistant/pipeline.ts`) and the automation
+queue's host fallback (`services/host_exec.rs`) all reuse one implementation, and aborting is
+`JoinHandle::abort()` exactly as in `llm_chat_stop`.
+
+### Trust boundary
+
+Tools execute **inside GreyWork, inside its own authorization surface** — `read_file` /
+`list_dir` call the same `workspace_fs` functions as the `fs_read_text_file` / `fs_list_dir`
+commands, and `git_log` calls the same `git_log`. There is deliberately **no second allow-list**:
+a path outside the authorized roots fails in `resolve_existing`, which canonicalizes _before_
+checking, so `../` escapes and symlinks are rejected too.
+
+This is a different trust relationship than "mounting these capabilities as MCP tools for an
+external agent": there the external agent's own sandbox is the boundary; here the host's
+authorization ledger is.
+
+### Protocol details worth knowing
+
+- **Streaming `tool_calls` are fragmented.** `function.arguments` arrives token by token, tagged
+  by `index`. `ToolCallAccumulator` reassembles per index; reading only the last chunk yields
+  truncated JSON. `take()` clears the accumulator so a reused accumulator cannot append a new
+  round's `index:0` onto the previous call's arguments.
+- **Missing `id` / `name` is synthesized, not dropped.** The assistant message is constructed
+  host-side, so a synthesized id keeps the `assistant.tool_calls` ↔ `tool.tool_call_id` pairing
+  self-consistent. Dropping the call instead would leave the model without a tool result and
+  looping on the same request.
+- **Truncation is visible to the model.** Tool output is capped (`MAX_TOOL_OUTPUT_CHARS`), and the
+  cap states how much was dropped. Silently truncating makes the model reason confidently over
+  partial content.
+- **Authorization failures are worded identically to "does not exist".** Telling the model
+  "unauthorized" maps the boundary for it.
+- **Running out of rounds still produces an answer.** After `max_rounds`, one final request is
+  sent with `tool_choice: "none"` — tools stay declared (so the model still knows what it could
+  have used) but calls are forbidden. Stripping `tools` instead makes the model assume they do
+  not exist and hallucinate having read a file.
+
+### Event contract
+
+The same `llm://event` broadcast as chat, with two extra kinds. `clientToken` filtering and the
+event envelope are identical, which is why the store's tool timeline needed no new plumbing — it
+reuses the ACP `ToolActivity` path via `lib/tool-activity.ts`.
+
+| kind              | payload                                           | meaning                                |
+| ----------------- | ------------------------------------------------- | -------------------------------------- |
+| `llm-tool-call`   | `id`, `name`, `input`, `round`                    | model requested a tool                 |
+| `llm-tool-result` | `id`, `ok`, `error`, `summary`, `path`, `preview` | tool finished (`preview` is truncated) |
+
+`llm_agent_start` / `llm_agent_stop` keep a **separate handle table** from `llm_chat_*`: an agent
+turn runs for many rounds and minutes, so a shared table would let one stop the other.
+
+### Enabling it
+
+Per model provider (`ModelProviderConfig.agentMode`), not globally — tool calling is an
+endpoint/model capability, and some gateways reject a request carrying `tools` with `400` while
+another provider works fine at the same moment. `agentMaxRounds` caps tool rounds (host clamps to
+a hard ceiling).
 
 ## File preview (viewer dispatch)
 
@@ -342,6 +522,29 @@ renderer can ask for a per-kind budget but can never raise the host's hard cap. 
 when exceeded, never truncation — a half file surfaces as "corrupt format", which is far harder to
 diagnose than a size message.
 
+### Office preview: native vs. high-fidelity (LibreOffice)
+
+Office documents have **two** rendering paths, chosen per tab by a viewer-level switch
+(`OfficeViewSwitch`, shown only for covered kinds):
+
+- **Native** (`docx` → `DocViewer`, `pptx` → `SlideViewer`, `legacy-office` → `LegacyOfficeViewer`):
+  in-house OOXML parsers. They re-flow to panel width and support in-place text editing, but have
+  known fidelity gaps (headers/footers, columns, page breaks, footnotes, fields, floating objects).
+- **High-fidelity (PDF)**: the host runs LibreOffice headless (`soffice --convert-to pdf`, service in
+  `crates/greywork-host/src/services/office/convert.rs`) and the renderer feeds the bytes to the
+  existing `PdfViewer`. This closes the fidelity gaps but is read-only.
+
+**Priority** in `PreviewSurface.vue`: a configured cloud Office provider wins (user opted into a
+third-party service); otherwise a covered kind defaults to high-fidelity **iff** the host reports
+LibreOffice available (`office_convert_info`), else native. Any conversion failure falls back to the
+native viewer **with** a notice — never a silent dead end.
+
+The converter is the B driver layer (on-demand external tool), **not** an embedded engine: it is
+invoked only when a user opens an office file with LibreOffice present, returns PDF bytes via the
+`office_convert_to_pdf` binary command, and cleans up its scratch profile per run. Spreadsheet kinds
+(`xlsx`/`xls`) are deliberately excluded — converting them to PDF throws away Univer's interactive
+table and analysis views for a static print layout.
+
 ### Media playback: stream, don't buffer
 
 Reading a video into memory and handing `<video>` a `blob:` URL does **not** work for real files:
@@ -349,18 +552,14 @@ the IPC transfer plus the synchronous `new Blob` copy freeze the renderer, and W
 whole blob before it starts playing (seeking is effectively broken). The symptom is a spinner with
 no error anywhere.
 
-So the desktop shell registers a custom URI scheme, `gwmedia://`
-(`apps/desktop/src-tauri/src/media_protocol.rs`), which serves the file with **HTTP Range** support
-in 1 MB chunks. `packages/host-ipc/src/media.ts` builds the address via
-`convertFileSrc(path, "gwmedia")` and returns `null` on hosts that lack the scheme, so
-`lib/preview-content.ts` (`resolvePreviewMedia`) can fall back to bytes. The scheme's authorization
-is `WorkspaceFsAccess::resolve_existing` — the _same_ check `fs_read_media` uses, so there is no
-second allow-list to keep in sync (which is why Tauri's built-in asset protocol is not used here).
-
-Both URL shapes `convertFileSrc` can produce (`gwmedia://localhost/…` on Linux/macOS,
-`http://gwmedia.localhost/…` on Windows/Android) must be listed in the desktop `media-src`; a drift
-test enforces it. The server has no custom scheme, so server-mode video still takes the slow
-buffered path — a Range route there is the remaining follow-up.
+So both hosts stream: the server exposes `GET /api/media?path=…` with **HTTP Range** support
+(`apps/server/src/routes/media.rs`), serving 1 MB chunks. The slice logic
+(`workspace_fs::fs_media_slice`, which also owns the MIME table) authorizes through
+`WorkspaceFsAccess::resolve_existing` — the _same_ check `fs_read_media` uses, so there is no second
+allow-list to keep in sync. `packages/host-ipc/src/media.ts` returns that same-origin address in
+server mode (which is what the Electron shell runs), so `lib/preview-content.ts`
+(`resolvePreviewMedia`) gets a stream everywhere a host exists and only browser-preview mode falls
+back to bytes. The server CSP already allows `media-src 'self'`.
 
 ### 3D and GIS: container before content
 
@@ -371,9 +570,8 @@ branch is still `null` when the renderer is constructed — and once the branch 
 re-triggers the load. Both viewers therefore render their container as soon as there is no read
 error, and show the loading state as an overlay.
 
-`ModelViewer` uses the media channel with the `bytes` preference
-(`usePreviewMedia(tab, "bytes")`): `GLTFLoader` needs the whole buffer, so the `gwmedia://` Range
-address is of no use here. A `.gltf` that references sibling `.bin` / texture files can never
+`ModelViewer` uses the media channel with the `bytes` preference (`usePreviewMedia(tab, "bytes")`):
+`GLTFLoader` needs the whole buffer, so the streaming address is of no use here. A `.gltf` that references sibling `.bin` / texture files can never
 resolve (the preview only receives the one path), so that failure is turned into an explicit
 "export a self-contained .glb" message instead of an empty scene. Teardown (on content change and
 on unmount) traverses the object graph disposing geometries, materials and textures — one tab
@@ -386,9 +584,23 @@ untouched. Features are split into point / line / polygon layers by `geometry-ty
 mixing all three is normal), and the view is fitted to the data's bounding box, computed in
 `lib/geojson.ts` as a pure function so it can be unit-tested without MapLibre.
 
+### CAD: DXF in, DWG out
+
+`DxfViewer.vue` previews ASCII DXF with a plain 2D canvas (no WebGL). `lib/dxf.ts` normalizes
+LINE / LWPOLYLINE / POLYLINE (including bulge arcs) / CIRCLE / ARC / ELLIPSE / SPLINE (fit or
+control points) / TEXT / MTEXT / POINT / SOLID / 3DFACE / INSERT / DIMENSION into polylines, texts
+and dots; block references are expanded with translation / rotation / scale (depth-capped), and the
+total point count is capped at 200k so a site plan cannot freeze the renderer. The viewer owns the
+viewport: wheel zoom anchored at the cursor, drag pan, zoom buttons and fit-to-extent. Re-exporting
+the file resets the viewport because the drawing extents usually change.
+
+DWG / DWF are proprietary binary containers with no pure-JS decoder. They map to `legacy-cad`, which
+states that explicitly and offers "open with system app" (or save a DXF copy). Do **not** route them
+to `raw`: binary decoded as UTF-8 is mojibake with no error.
+
 ## Design Principles
 
-- **Thin Rust, Fat TypeScript**: UI and orchestration logic live in TS; Rust provides IPC bridges, sandboxing, and system access.
+- **Thin Rust, Fat TypeScript**: UI and orchestration logic live in TS; Rust provides the command surface, process hosting, and system access. Agents keep their own permission models — the host no longer sandboxes them at the OS level.
 - **Shared Workbench**: Desktop and web share a single UI package to maximize code reuse.
 - **Plugin System**: Uses Cordis micro-kernel for plugin lifecycle; skills are vendored in `.agents/skills/`.
-- **No Runtime Web Clipboard**: Uses `@tauri-apps/plugin-clipboard-manager` due to WKWebView/WebKitGTK limitations (see ESLint rule in `eslint.config.js`).
+- **Clipboard goes through the host**: the facade exposes `hostClipboard()` (Electron main-process `clipboard` / browser Web API), because some renderers silently resolved the Web Clipboard API without writing (see ESLint rule in `eslint.config.js`).

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createWorkerCodePluginRuntime } from "@/plugins/code-runtime";
+import { createWorkerCodePluginRuntime, type PluginPointerEvent } from "@/plugins/code-runtime";
 import type { InstalledPluginPackage } from "@/plugins/market-types";
 
 interface WorkerHarness {
@@ -108,6 +108,30 @@ describe("createWorkerCodePluginRuntime", () => {
     harness.worker?.respond({ type: "result", requestId: request.requestId, patch: { count: 2 } });
     await expect(promise).resolves.toEqual({ count: 2 });
     expect(calls.map((call) => call.capability)).toEqual(["net.fetch", "fs.read"]);
+  });
+
+  it("dispatchPointer posts a pointer message and resolves the validated patch", async () => {
+    const runtime = createWorkerCodePluginRuntime(pluginPackage, hostCallNoop);
+    const event: PluginPointerEvent = { type: "down", x: 12, y: 34, nx: 0.25, ny: 0.5, buttons: 1, pointerId: 7 };
+    const promise = runtime.dispatchPointer(event, { count: 1 });
+    const request = harness.worker?.posted[0] as { type: string; requestId: number; event: PluginPointerEvent };
+    expect(request.type).toBe("pointer");
+    expect(request.event).toEqual(event);
+    harness.worker?.respond({ type: "result", requestId: request.requestId, patch: { count: 2, lastEvent: "down" } });
+
+    await expect(promise).resolves.toEqual({ count: 2, lastEvent: "down" });
+  });
+
+  it("dispatchPointer rejects non-primitive patches and disposed runtimes", async () => {
+    const runtime = createWorkerCodePluginRuntime(pluginPackage, hostCallNoop);
+    const event: PluginPointerEvent = { type: "move", x: 0, y: 0, nx: 0, ny: 0, buttons: 0, pointerId: 0 };
+    const promise = runtime.dispatchPointer(event, {});
+    const request = harness.worker?.posted[0] as { requestId: number };
+    harness.worker?.respond({ type: "result", requestId: request.requestId, patch: { nested: { value: 1 } } });
+    await expect(promise).rejects.toThrow("invalid state patch");
+
+    runtime.dispose();
+    await expect(runtime.dispatchPointer(event, {})).rejects.toThrow("disposed");
   });
 });
 

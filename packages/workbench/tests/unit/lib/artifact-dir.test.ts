@@ -22,7 +22,10 @@ vi.mock("@greywork/core", async (importOriginal) => {
   const mod = await importOriginal<typeof CoreModule>();
   return { ...mod, isTauriRuntime: h.isTauri };
 });
-vi.mock("@tauri-apps/api/core", () => ({ invoke: h.invoke }));
+vi.mock("@greywork/host-ipc", async (importOriginal) => ({
+  ...(await importOriginal()),
+  invoke: h.invoke,
+}));
 vi.mock("@/stores/workspace", () => ({
   useWorkspaceStore: () => ({ activeWorkspaceId: h.activeWorkspaceId(), workspaceById: h.workspaceById }),
 }));
@@ -48,6 +51,7 @@ function bindWorkspace(folder: string | undefined): void {
 }
 
 beforeEach(() => {
+  vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "server" });
   h.isTauri.mockReset().mockReturnValue(true);
   h.invoke.mockReset().mockResolvedValue("/home/jean/.greyWork");
   h.activeWorkspaceId.mockReset().mockReturnValue(null);
@@ -63,7 +67,7 @@ afterEach(() => {
 
 describe("resolveArtifactsDir", () => {
   it("浏览器态直接 null，且不碰任何 host 通道", async () => {
-    h.isTauri.mockReturnValue(false);
+    vi.stubGlobal("window", {});
     bindWorkspace("/srv/projects/acme");
 
     await expect(resolveArtifactsDir()).resolves.toBeNull();
@@ -137,7 +141,7 @@ describe("saveArtifactToDisk", () => {
   });
 
   it("浏览器态返回 null，不建目录不写盘", async () => {
-    h.isTauri.mockReturnValue(false);
+    vi.stubGlobal("window", {});
     bindWorkspace(WORKSPACE_WORKSPACE_FOLDER);
 
     await expect(saveArtifactToDisk("a.md", "x")).resolves.toBeNull();

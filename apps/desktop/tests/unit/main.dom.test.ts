@@ -15,9 +15,12 @@ const h = vi.hoisted(() => ({
   loadHostSystem: vi.fn<() => Promise<void>>(),
   initDeviceTier: vi.fn<() => void>(),
   show: vi.fn<() => Promise<void>>(),
-  getWindow: vi.fn(),
   runtimeMode: vi.fn<() => "desktop" | "server" | "browser-preview">(() => "desktop"),
   initRuntimeMode: vi.fn<() => Promise<string>>(),
+  setFront: vi.fn<(front: unknown) => void>(),
+  // 前端集合只作为「被声明的那个对象」的身份标记，内容由 workbench 自己的单测锁
+  //（tests/unit/lib/nav-items.test.ts）—— 这里不重复维护一份特性清单。
+  ALL_FEATURES_FRONT: Object.freeze({ id: "desktop" }),
   appPlugin: (app: unknown) => {
     void app;
   },
@@ -26,6 +29,19 @@ const h = vi.hoisted(() => ({
 vi.mock("@greywork/host-ipc", () => ({
   runtimeMode: h.runtimeMode,
   initRuntimeMode: h.initRuntimeMode,
+  hostApp: () => null,
+  // 窗口显示走 host-ipc 的 hostWindow 门面（内部按运行时选 Tauri / Electron 后端）。
+  // 圆角接线只认主窗 label；这里按主窗给全最小窗口面，避免 bootstrap 走到未打桩的方法。
+  MAIN_WINDOW_LABEL: "main",
+  hostWindow: () => ({
+    label: "main",
+    platform: "linux",
+    show: h.show,
+    isMaximized: () => Promise.resolve(false),
+    onResized: () => Promise.resolve(() => undefined),
+  }),
+  // App.vue 的拖放接线：无原生拖放面 → 走 HTML5（这里只保证 bootstrap 不报错）。
+  hostDragDrop: () => null,
 }));
 
 vi.mock("@greywork/workbench", () => ({
@@ -33,6 +49,9 @@ vi.mock("@greywork/workbench", () => ({
   loadHostSystem: () => h.loadHostSystem(),
   initDeviceTier: () => h.initDeviceTier(),
   createAppRouter: () => h.appPlugin,
+  // 前端身份：入口在 mount 前声明本端是哪一端，路由表与外壳接线都由它派生
+  //（见 workbench 的 front/types.ts）。缺了它 bootstrap 会在 mount 之前抛。
+  setFront: (front: unknown) => h.setFront(front),
   i18n: { install: h.appPlugin },
   workspaceFs: {},
   appEvents: {},
@@ -41,12 +60,8 @@ vi.mock("@greywork/workbench", () => ({
   isPhysicalPointInDropzone: () => Promise.resolve(false),
   usePreviewStore: () => ({ open: () => undefined }),
 }));
-vi.mock("@tauri-apps/api/window", () => ({
-  getCurrentWindow: () => h.getWindow(),
-}));
-vi.mock("@tauri-apps/api/webview", () => ({
-  getCurrentWebview: () => ({ onDragDropEvent: () => Promise.resolve(() => undefined) }),
-}));
+
+vi.mock("@greywork/workbench/front/all", () => ({ ALL_FEATURES_FRONT: h.ALL_FEATURES_FRONT }));
 
 describe("bootstrap", () => {
   beforeEach(() => {
@@ -59,7 +74,6 @@ describe("bootstrap", () => {
     h.boot.mockResolvedValue(undefined);
     h.loadHostSystem.mockResolvedValue(undefined);
     h.show.mockResolvedValue(undefined);
-    h.getWindow.mockReturnValue({ show: h.show });
     // 默认按桌面态：既有的「不挡挂载」用例都建立在 mount 同步发生之上。
     h.runtimeMode.mockReset().mockReturnValue("desktop");
     h.initRuntimeMode.mockReset().mockResolvedValue("desktop");
@@ -72,6 +86,10 @@ describe("bootstrap", () => {
     expect(h.loadHostSystem).toHaveBeenCalledTimes(1);
     // 设备分级要在 mount 之前同步落地：首帧就该按真实档位渲染。
     expect(h.initDeviceTier).toHaveBeenCalledTimes(1);
+    // 前端身份同样要在 mount 之前声明：路由表与外壳接线都在 setup / mount 期读它。
+    // 桌面端要的是「全部特性」那一个集合 —— 不吃 currentFront() 的缺省是有意的
+    //（理由见 src/main.ts），这条断言把它钉住。
+    expect(h.setFront).toHaveBeenCalledExactlyOnceWith(h.ALL_FEATURES_FRONT);
     await vi.waitFor(() => expect(h.show).toHaveBeenCalledTimes(1));
     const appEl = document.querySelector("#app");
     expect(appEl?.childElementCount).toBeGreaterThan(0);
@@ -154,16 +172,6 @@ describe("运行时判定接线", () => {
     h.boot.mockResolvedValue(undefined);
     h.loadHostSystem.mockResolvedValue(undefined);
     h.show.mockResolvedValue(undefined);
-    h.getWindow.mockReturnValue({ show: h.show });
-  });
-
-  it("桌面态零探测：不调 initRuntimeMode，同步挂载", async () => {
-    h.runtimeMode.mockReturnValue("desktop");
-
-    await import("../../src/main");
-
-    expect(h.initRuntimeMode).not.toHaveBeenCalled();
-    expect(document.querySelector("#app")?.childElementCount).toBeGreaterThan(0);
   });
 
   it("非桌面态：先探测运行时再挂载，探测未回来之前不挂载", async () => {

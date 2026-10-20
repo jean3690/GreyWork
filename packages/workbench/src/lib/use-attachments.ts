@@ -4,15 +4,12 @@
  * 会话页与引导页共用同一份实现 —— 两边的差异在 send 语义（停止/计划/编排/建会话），
  * 而附件部分完全同构，抽成 composable 比抽整个 ChatComposer 改动面小得多。
  *
- * 拖放仲裁：桌面宿主（tauri.conf 开了 dragDropEnabled）的 OS 拖放由 App.vue 的全局
- * 监听统一接收并默认开预览面板，输入卡靠 `data-attachment-dropzone` 标记 + 命中判定
+ * 拖放仲裁：有原生拖放面的桌面宿主（Tauri 的 dragDropEnabled 会截获 OS 拖放）由 App.vue 的
+ * 全局监听统一接收并默认开预览面板，输入卡靠 `data-attachment-dropzone` 标记 + 命中判定
  * 把落在自己身上的拖放接管过来，避免「既贴了附件又开了预览」。
  */
 import { computed, onMounted, onUnmounted, ref, watch, type ComputedRef, type Ref } from "vue";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { isTauriRuntime } from "@greywork/core";
-import { hasHostCommands } from "@greywork/host-ipc";
+import { hasHostCommands, hasNativeShell, hostDragDrop, hostWindow } from "@greywork/host-ipc";
 import {
   attachmentObjectUrl,
   attachmentsFromClipboard,
@@ -38,9 +35,14 @@ let scalePromise: Promise<number> | null = null;
 
 /** 窗口缩放因子（物理像素 → 逻辑像素）；失败回落到 devicePixelRatio。 */
 function windowScale(): Promise<number> {
-  scalePromise ??= getCurrentWindow()
-    .scaleFactor()
-    .catch(() => window.devicePixelRatio || 1);
+  scalePromise ??= (async () => {
+    try {
+      const factor = await hostWindow()?.scaleFactor();
+      return factor ?? (window.devicePixelRatio || 1);
+    } catch {
+      return window.devicePixelRatio || 1;
+    }
+  })();
   return scalePromise;
 }
 
@@ -169,7 +171,7 @@ export function useAttachments(sessionId: () => string, options: AttachmentsOpti
       void addFiles(files);
       return;
     }
-    if (!isTauriRuntime()) return;
+    if (!hasNativeShell()) return;
     void (async () => {
       const added = await attachmentsFromClipboard(items.value);
       if (added.length) append(added);
@@ -211,14 +213,15 @@ export function useAttachments(sessionId: () => string, options: AttachmentsOpti
   // 切换会话：草稿只属于当前输入框，跟着会话走会串号。
   watch(sessionId, clear);
 
-  // 桌面态：OS 拖放由宿主截获，HTML5 drop 收不到，必须自己听 webview 事件。
+  // 桌面态：OS 拖放由宿主截获，HTML5 drop 收不到，必须自己听宿主的原生拖放事件；
+  // Electron / 浏览器没有这层，走 HTML5 拖放。
   let unlisten: (() => void) | undefined;
   onMounted(() => {
-    if (!isTauriRuntime()) return;
+    const drop = hostDragDrop();
+    if (!drop) return;
     void (async () => {
       try {
-        unlisten = await getCurrentWebview().onDragDropEvent((event) => {
-          const payload = event.payload;
+        unlisten = await drop.onDragDrop((payload) => {
           if (payload.type === "leave") {
             dragging.value = false;
             return;
@@ -234,7 +237,7 @@ export function useAttachments(sessionId: () => string, options: AttachmentsOpti
           })();
         });
       } catch {
-        // 浏览器 dev / 无 Tauri 通道：走 HTML5 拖放，静默降级。
+        // 无原生拖放通道：走 HTML5 拖放，静默降级。
       }
     })();
   });

@@ -33,24 +33,54 @@ pub(super) fn openai_reasoning_effort(effort: &str) -> Option<&'static str> {
     }
 }
 
+/// 本次请求的工具声明模式（openai `tools` / `tool_choice`）。
+#[derive(Debug, Clone, Copy)]
+pub(super) enum ToolMode<'a> {
+    /// 不声明任何工具。纯聊天回合用它。
+    None,
+    /// 声明工具，允许模型自主调用。
+    Auto(&'a [serde_json::Value]),
+    /// 声明工具但禁止调用（`tool_choice: "none"`）：工具回合触顶后的收尾请求。
+    ///
+    /// 模型仍看得见工具清单（知道自己有哪些手段），只是不能再调。直接把 tools 摘掉
+    /// 会让模型以为工具不存在，转而去正文里编造「我已经读过那个文件」—— 比多花一次
+    /// 请求让它规规矩矩收尾坏得多。
+    Disable(&'a [serde_json::Value]),
+}
+
+/// 把渲染端提交的消息转成 openai wire 形状。
+///
+/// `content` 有意原样透传（`serde_json::Value`）：纯文本消息是 string，带图片的消息是
+/// vision 的 content parts 数组，形状由协议决定、本层不解释。
+pub(super) fn messages_wire(messages: Vec<LlmChatMessage>) -> Vec<serde_json::Value> {
+    messages
+        .into_iter()
+        .map(|message| {
+            serde_json::json!({
+                "role": message.role,
+                "content": message.content,
+            })
+        })
+        .collect()
+}
+
 /// 构造流式请求体。推理档位映射为 openai `reasoning_effort`，
-/// 仅对显式档位（low/medium/high/max）添加，避免不支持的模型拒绝整个请求。
+/// 仅对显式档位（low/medium/high/max）添加，避免不支持的模型拒绝整个请求）。
+///
+/// `messages` 是**已成型**的 wire 消息数组：纯聊天路径由 [`messages_wire`] 生成，
+/// agent 路径还要自己拼 `assistant.tool_calls` 与 `tool` 两种消息（`LlmChatMessage`
+/// 只有 role + content，表达不了）。传输层因此完全不认识 dto，只认线上形状。
 pub(super) fn chat_request_body(
     model: &str,
-    messages: Vec<LlmChatMessage>,
+    messages: Vec<serde_json::Value>,
     reasoning_effort: &str,
     params: &InferenceParams,
+    tools: ToolMode<'_>,
 ) -> serde_json::Value {
     let mut body = serde_json::json!({
         "model": model,
         "stream": true,
-        "messages": messages
-            .into_iter()
-            .map(|message| serde_json::json!({
-                "role": message.role,
-                "content": message.content,
-            }))
-            .collect::<Vec<_>>(),
+        "messages": messages,
     });
     if let Some(effort) = openai_reasoning_effort(reasoning_effort) {
         body["reasoning_effort"] = serde_json::json!(effort);
@@ -60,6 +90,21 @@ pub(super) fn chat_request_body(
     }
     if let Some(max_tokens) = params.max_tokens {
         body["max_tokens"] = serde_json::json!(max_tokens);
+    }
+    // tools 为空列表时同样不写字段：部分端点对「有 tools 但模型不支持」直接 400，
+    // 纯聊天回合不该为 agent 能力付这个代价。
+    match tools {
+        ToolMode::None => {}
+        ToolMode::Auto(schemas) if !schemas.is_empty() => {
+            body["tools"] = serde_json::json!(schemas);
+            body["tool_choice"] = serde_json::json!("auto");
+        }
+        ToolMode::Disable(schemas) if !schemas.is_empty() => {
+            body["tools"] = serde_json::json!(schemas);
+            body["tool_choice"] = serde_json::json!("none");
+        }
+        // 空 schema 列表的 Auto / Disable：无可声明，退化成不声明。
+        ToolMode::Auto(_) | ToolMode::Disable(_) => {}
     }
     body
 }
@@ -132,27 +177,37 @@ pub(super) fn apply_auth(
     Ok(request)
 }
 
-/// 构造并发送 chat/completions 请求（command 与宿主自主执行共用）。
+/// 一次 chat/completions 请求里除消息以外的全部参数。
+///
+/// 成结构体而不是八个位置参数：agent 回合要跨十几轮复用同一组参数、每轮只换
+/// `messages`，拆开后这个「只有消息在变」的事实直接写在类型里。
+pub(super) struct ChatRequest<'a> {
+    pub(super) base_url: &'a str,
+    pub(super) model: &'a str,
+    pub(super) api_key_env: &'a str,
+    pub(super) reasoning_effort: &'a str,
+    pub(super) headers: &'a HashMap<String, String>,
+    pub(super) params: &'a InferenceParams,
+    pub(super) tools: ToolMode<'a>,
+}
+
+/// 构造并发送 chat/completions 请求（单轮聊天、agent 回合、宿主自主执行共用）。
 pub(super) async fn send_chat_request(
-    base_url: &str,
-    model: &str,
-    api_key_env: &str,
-    messages: Vec<LlmChatMessage>,
-    reasoning_effort: &str,
-    headers: &HashMap<String, String>,
-    params: &InferenceParams,
+    spec: ChatRequest<'_>,
+    messages: Vec<serde_json::Value>,
 ) -> Result<reqwest::Response, String> {
-    let api_key = resolve_api_key(api_key_env)?;
+    let api_key = resolve_api_key(spec.api_key_env)?;
     let client = crate::http::shared_client(10)?;
     let request = client
-        .post(completions_url(base_url))
+        .post(completions_url(spec.base_url))
         .json(&chat_request_body(
-            model.trim(),
+            spec.model.trim(),
             messages,
-            reasoning_effort,
-            params,
+            spec.reasoning_effort,
+            spec.params,
+            spec.tools,
         ));
-    let request = apply_auth(request, &api_key, headers)?;
+    let request = apply_auth(request, &api_key, spec.headers)?;
     let response = request
         .send()
         .await

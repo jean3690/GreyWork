@@ -79,19 +79,19 @@ pub(super) fn parse_embeddings(body: &serde_json::Value) -> Result<Vec<Vec<f32>>
     if let Some(data) = body.get("data").and_then(|value| value.as_array()) {
         let out: Vec<Vec<f32>> = data
             .iter()
-            .filter_map(|item| item.get("embedding").and_then(&to_vec))
+            .filter_map(|item| item.get("embedding").and_then(to_vec))
             .collect();
         if !out.is_empty() {
             return Ok(out);
         }
     }
     if let Some(embeddings) = body.get("embeddings").and_then(|value| value.as_array()) {
-        let out: Vec<Vec<f32>> = embeddings.iter().filter_map(&to_vec).collect();
+        let out: Vec<Vec<f32>> = embeddings.iter().filter_map(to_vec).collect();
         if !out.is_empty() {
             return Ok(out);
         }
     }
-    if let Some(single) = body.get("embedding").and_then(&to_vec) {
+    if let Some(single) = body.get("embedding").and_then(to_vec) {
         return Ok(vec![single]);
     }
     Err("embedding 响应里没有向量（确认模型是 embedding 模型）".to_string())

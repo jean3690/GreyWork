@@ -47,6 +47,17 @@ export interface WorktreeProvision {
 }
 
 /**
+ * `isolateForRun` 的可选参数。
+ *
+ * `skills`：run 级技能勾选。`undefined` = 全量带入源工作区已安装的技能；
+ * 数组 = 只带这些 id（空数组 = 一个都不带）。只在真正隔离出快照时生效 ——
+ * `local`/`cloud` 档位直接把源目录当工作区，技能目录原样可见，无法过滤。
+ */
+export interface IsolateOptions {
+  skills?: readonly string[] | null;
+}
+
+/**
  * 按 runMode 给本轮 ACP 会话套上运行环境隔离，返回真正该用的工作区目录。
  *
  * 只做「判定 + 派生」，**不解析 base** —— base 由调用点按自己的会话归属给出：
@@ -56,8 +67,16 @@ export interface WorktreeProvision {
  *
  * 非桌面端、或档位不是 worktree，一律原样返回 base。
  */
-export async function isolateForRun(base: string): Promise<string> {
-  if (useSettingsStore().runMode !== "worktree" || !hasHostCommands()) return base;
-  const provisioned = await invoke<WorktreeProvision>("worktree_provision", { source: base });
+export async function isolateForRun(base: string, options: IsolateOptions = {}): Promise<string> {
+  const settings = useSettingsStore();
+  if (settings.runMode !== "worktree" || !hasHostCommands()) return base;
+  const provisioned = await invoke<WorktreeProvision>("worktree_provision", {
+    source: base,
+    // `.agents/prepare` 会执行仓库里的脚本：只读档不跑。服务端会按配置档位再夹一次
+    // （见 apps/server 的 overlay_args），这里是第一道、也是桌面端的唯一一道。
+    prepare: settings.permissionTier !== "read-only",
+    // 技能勾选透传给宿主（`None` 语义 = 全量）：宿主侧只带入选中的技能目录。
+    skills: options.skills == null ? null : [...options.skills],
+  });
   return provisioned.root;
 }

@@ -23,22 +23,8 @@ export const PERM_LABELS: Record<PermTier, string> = {
   full: "settings.permissions.full.label",
 };
 
-/** 沙盒策略。auto 在 Linux bwrap 可用时启用 fs，否则宿主显式记录未隔离告警。 */
-export type SandboxMode = "auto" | "off" | "fs" | "full";
-export const SANDBOX_MODES: { value: SandboxMode; label: string; desc: string }[] = [
-  { value: "auto", label: "settings.sandbox.auto.label", desc: "settings.sandbox.auto.desc" },
-  { value: "off", label: "settings.sandbox.off.label", desc: "settings.sandbox.off.desc" },
-  { value: "fs", label: "settings.sandbox.fs.label", desc: "settings.sandbox.fs.desc" },
-  { value: "full", label: "settings.sandbox.full.label", desc: "settings.sandbox.full.desc" },
-];
-
 /** 编排并发度合法区间（含端点）。 */
 export const MAX_PARALLEL_RANGE = { min: 1, max: 8 } as const;
-
-/** 权限档位 → 建议沙盒策略。默认一律 auto；放行网络必须由用户显式选择 full。 */
-export function recommendedSandboxMode(_tier: PermTier): SandboxMode {
-  return "auto";
-}
 
 export type RunMode = "local" | "worktree" | "cloud";
 export type ThemeId = "greywork" | "night-blue" | "night-green" | "github" | "fox" | "liquid-glass";
@@ -240,7 +226,6 @@ export interface SavedSettings {
   selectedModelProviderId?: string | null;
   modelProviders?: ModelProviderConfig[];
   permissionTier?: PermTier;
-  sandboxMode?: SandboxMode;
   workspaceDir?: string;
   /** 运行模式；未接入的档位（cloud）也照存，由 UI 负责标注它不生效。 */
   runMode?: RunMode;
