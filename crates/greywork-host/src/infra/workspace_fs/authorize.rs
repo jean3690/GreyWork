@@ -88,7 +88,13 @@ mod tests {
         let picked = fs_authorize_picked_paths(&access, vec![dir.to_string_lossy().into()])
             .expect("选择器授权");
         assert_eq!(picked.len(), 1);
-        assert!(access.is_authorized_root(&dir), "选择目录应成为授权根");
+        // 授权账本存的是规范路径；macOS 的 /var → /private/var、Windows 的 \\?\ 前缀
+        // 都会让「入参原样」与「落账形态」不同，所以比较前先 canonicalize。
+        let canonical_dir = dir.canonicalize().expect("规范化目录");
+        assert!(
+            access.is_authorized_root(&canonical_dir),
+            "选择目录应成为授权根"
+        );
         assert!(access
             .resolve_existing(&dir.join("inner.txt").to_string_lossy())
             .is_ok());

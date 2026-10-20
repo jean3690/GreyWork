@@ -271,8 +271,11 @@ fn rejects_unauthorized_cwd() {
     let (access, _project) = access("unauthorized");
     let terminal = TerminalHost::new(host);
 
+    // 用系统临时目录做「授权面之外」的绝对路径：`/` 在 Windows 上不是绝对路径，
+    // 会在授权检查之前就被路径合法性挡掉，测不到这里想覆盖的分支。
+    let outside = std::env::temp_dir();
     let error = terminal
-        .open(&access, open_args(Some(Path::new("/"))))
-        .expect_err("根目录不在授权面内");
+        .open(&access, open_args(Some(&outside)))
+        .expect_err("授权面之外的目录应被拒绝");
     assert!(error.contains("授权"), "实际: {error}");
 }

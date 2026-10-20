@@ -53,6 +53,10 @@ fn init_repo(root: &Path) {
     for (key, value) in [
         ("user.name", "GreyWork Test"),
         ("user.email", "test@greywork.local"),
+        // Windows runner 默认 core.autocrlf=true：工作区写 "two\n" 会被 git 在
+        // checkout/restore 时换成 CRLF，快照往返断言就与内容无关地挂掉。
+        ("core.autocrlf", "false"),
+        ("core.eol", "lf"),
     ] {
         Command::new("git")
             .current_dir(root)
