@@ -44,10 +44,24 @@ pub struct SendArgs {
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CloseSessionArgs {
+    pub handle: u64,
+    pub session_id: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SetConfigArgs {
     pub handle: u64,
     pub config_id: String,
     pub value: serde_json::Value,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetModeArgs {
+    pub handle: u64,
+    pub mode_id: String,
 }
 
 #[derive(serde::Deserialize)]

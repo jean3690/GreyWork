@@ -31,7 +31,15 @@ vi.mock("@greywork/host-ipc", () => ({
   initRuntimeMode: h.initRuntimeMode,
   hostApp: () => null,
   // 窗口显示走 host-ipc 的 hostWindow 门面（内部按运行时选 Tauri / Electron 后端）。
-  hostWindow: () => ({ show: h.show }),
+  // 圆角接线只认主窗 label；这里按主窗给全最小窗口面，避免 bootstrap 走到未打桩的方法。
+  MAIN_WINDOW_LABEL: "main",
+  hostWindow: () => ({
+    label: "main",
+    platform: "linux",
+    show: h.show,
+    isMaximized: () => Promise.resolve(false),
+    onResized: () => Promise.resolve(() => undefined),
+  }),
   // App.vue 的拖放接线：无原生拖放面 → 走 HTML5（这里只保证 bootstrap 不报错）。
   hostDragDrop: () => null,
 }));

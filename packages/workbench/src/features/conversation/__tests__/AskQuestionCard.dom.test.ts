@@ -152,6 +152,23 @@ describe("AskQuestionCard", () => {
     chat.clearSim();
   });
 
+  it("已收口态是细条组：不再撑面板（无边框/底色/内距），答案逐行细条呈现", () => {
+    const { pinia, threadId } = seedSession();
+    const message = askMessage({
+      questions: [{ question: "继续吗？", options: [{ label: "继续" }, { label: "停止" }] }],
+      answers: [{ question: "继续吗？", labels: ["停止"] }],
+      answeredAt: Date.now(),
+    });
+    const wrapper = render(pinia, threadId, message);
+
+    const root = wrapper.get('[data-testid="ask-card"]');
+    expect(root.classes()).not.toContain("border");
+    expect(root.classes()).not.toContain("bg-panel-2");
+    expect(root.classes()).not.toContain("p-3");
+    expect(wrapper.get('[data-testid="ask-answered-badge"]').text()).toContain("已作答");
+    expect(wrapper.get('[data-testid="ask-card-answered"]').text()).toContain("继续吗？：停止");
+  });
+
   it("已作答的消息直接渲染只读态，不再给选项", () => {
     const { pinia, threadId } = seedSession();
     const message = askMessage({

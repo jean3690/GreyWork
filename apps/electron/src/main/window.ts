@@ -2,6 +2,15 @@
  * 主窗口：无边框 `BrowserWindow`（对齐 Tauri 的 `decorations: false`），载入 `options.origin`
  * 下的 SPA —— 生产是 sidecar 同源托管，dev 热更态是 Vite dev server（见 `MainWindowOptions.origin`）。
  *
+ * 圆角：macOS / Windows 11 由系统裁（`roundedCorners`，无边框窗默认开启，还带原生阴影）；
+ * Linux 上 Electron 30 还不支持这个选项，只能把窗口做成**透明**的，再由渲染端裁
+ * （`apps/desktop/src/window-frame.ts` 给 `<html>` 打 `data-native-shell`，
+ * `theme/base.css` 据此把底色改透明并给壳层加 `border-radius`）。
+ *
+ * 为什么不在三端都用透明窗：Windows 的透明无边框窗会失去边缘拖拽缩放（系统级限制），
+ * 主窗不该为一个装饰效果牺牲这个。Linux 的合成器没这个问题，才只在那边走 CSS 路线。
+ * Linux 最大化时渲染端会把圆角归零（见 `data-native-maximized`），否则四角会漏出桌面。
+ *
  * 拖拽：Electron 没有 Tauri 的 `startDragging()`，改用 CSS `-webkit-app-region`。渲染端的
  * Titlebar 沿用 Tauri 的 `data-tauri-drag-region` 标记，这里在页面加载后注入一段样式把它翻译
  * 成 app-region；交互元素标 no-drag，免得按钮区域把点击吃掉。
@@ -58,7 +67,12 @@ export async function createMainWindow(options: MainWindowOptions): Promise<Brow
     minWidth: 960,
     minHeight: 640,
     frame: false,
-    backgroundColor: "#000000",
+    // Linux：透明底 + 渲染端裁圆角（见文件头）。`#AARRGGBB`，alpha 为 0。
+    // macOS / Windows：保持不透明，留给 `roundedCorners` 的原生圆角与窗口阴影。
+    transparent: process.platform === "linux",
+    backgroundColor: process.platform === "linux" ? "#00000000" : "#000000",
+    // macOS / Windows 11 的系统级圆角；Linux 上该选项在 Electron 30 里无效果。
+    roundedCorners: true,
     show: false,
     webPreferences: {
       preload: preloadPath(),

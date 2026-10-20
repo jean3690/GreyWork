@@ -21,7 +21,7 @@
 //! - [`artifacts`]：回合产物扫描；
 //! - [`env`]：启动命令白名单、环境变量净化、握手超时窗口；
 //! - [`start`]：`acp_start`（spawn + initialize 握手）；
-//! - [`session`]：会话生命周期（new / load / set_config / set_permission_tier / list）；
+//! - [`session`]：会话生命周期（new / resume / load / close / set_config / set_mode / set_permission_tier / list）；
 //! - [`prompt`]：prompt 组装、发送与停止（`acp_send` / `acp_stop`）；
 //! - [`probe`]：agent 入口程序探测；
 //! - [`commands`]：命令入参。
@@ -42,14 +42,16 @@ mod state;
 mod tests;
 
 pub use commands::{
-    CancelSessionArgs, DetectProgramsArgs, LoadSessionArgs, NewSessionArgs, PermissionRespondArgs,
-    SendArgs, SetConfigArgs, SetPermissionTierArgs, StartArgs, StopArgs,
+    CancelSessionArgs, CloseSessionArgs, DetectProgramsArgs, LoadSessionArgs, NewSessionArgs,
+    PermissionRespondArgs, SendArgs, SetConfigArgs, SetModeArgs, SetPermissionTierArgs, StartArgs,
+    StopArgs,
 };
 pub use permission::acp_permission_respond;
 pub use probe::{acp_detect_programs, AgentProgramProbe};
 pub use prompt::{acp_cancel_session, acp_send, acp_stop, PromptUnit};
 pub use session::{
-    acp_list, acp_load_session, acp_new_session, acp_set_config, acp_set_permission_tier,
+    acp_close_session, acp_list, acp_load_session, acp_new_session, acp_set_config, acp_set_mode,
+    acp_set_permission_tier,
 };
 pub use start::acp_start;
 pub use state::AcpHost;

@@ -2,6 +2,7 @@ import { createApp, nextTick } from "vue";
 import { createPinia } from "pinia";
 import { hostWindow, initRuntimeMode } from "@greywork/host-ipc";
 import App from "./App.vue";
+import { installWindowFrame } from "./window-frame";
 import { bootInstalledMarketPlugins, createAppRouter, i18n, initDeviceTier, loadHostSystem, setFront } from "@greywork/workbench";
 // 前端集合走子路径：放进 barrel 会让另一端也把它拖进产物（见 workbench/src/front/current.ts）。
 import { ALL_FEATURES_FRONT } from "@greywork/workbench/front/all";
@@ -84,6 +85,8 @@ async function bootstrap(): Promise<void> {
   // 未声明就抛错（见 workbench 的 front/current.ts）。声明放在本端入口，也保证了
   // 「桌面端开满特性」这件事不会被另一端（或测试）的集合悄悄改写。
   setFront(ALL_FEATURES_FRONT);
+  // 主窗圆角：必须在 mount 之前给 <html> 打标，首帧就按圆角裁，避免窗口显示后才跳一下。
+  installWindowFrame();
   const app = createApp(App).use(i18n).use(createPinia()).use(createAppRouter());
   app.mount("#app");
   mark("mounted");

@@ -20,6 +20,7 @@ import PermissionCard from "@/features/conversation/PermissionCard.vue";
 import Icon from "@/features/shared/Icon.vue";
 import Hint from "@/features/shared/Hint.vue";
 import { copyText } from "@/lib/clipboard";
+import { formatDuration } from "@/lib/tool-activity";
 import { appEvents } from "@/events";
 import { useAgentStore } from "@/stores/agent";
 import { useChatStore } from "@/stores/chat";
@@ -29,10 +30,29 @@ import { useTurnActive } from "@/lib/turn-activity";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import type { Attachment, MessageSegment, ThreadMessage, ToolActivity } from "@/types";
 
-const props = withDefaults(defineProps<{ message: ThreadMessage; threadId?: string }>(), { threadId: "" });
+const props = withDefaults(
+  defineProps<{
+    message: ThreadMessage;
+    threadId?: string;
+    /** 是否线程末条：重新生成 / 删除只对末条开放（这两动会截掉其后全部） */ isLast?: boolean;
+  }>(),
+  {
+    threadId: "",
+    isLast: false,
+  },
+);
 /** 点作者头像/名：群聊时间线据此打开该成员的完整会话（1:1 会话不设 authorId，不会触发）。
  *  回退：只带快照的用户消息出现该键，交回 ConversationView 的确认弹层（快照恢复不归本组件）。 */
-const emit = defineEmits<{ authorClick: [authorId: string]; rewind: [message: ThreadMessage] }>();
+const emit = defineEmits<{
+  authorClick: [authorId: string];
+  rewind: [message: ThreadMessage];
+  /** 编辑后重发：草稿回填由宿主（ConversationView）管，本组件只报「点了哪条」。 */
+  edit: [message: ThreadMessage];
+  /** 重新生成：宿主回退到该回合的 user 消息后按原输入重派发。 */
+  regenerate: [message: ThreadMessage];
+  /** 删除：宿主截断消息流（仅末条可达）。 */
+  delete: [message: ThreadMessage];
+}>();
 
 const { t } = useI18n();
 const agent = useAgentStore();
@@ -75,6 +95,26 @@ const isStreaming = computed(() => chat.streamingMessageId === message.value.id 
 
 /** 回合活跃：LLM 流 / ACP 回合 / ACP 建会话（判定收在 lib/turn-activity）。 */
 const turnActive = useTurnActive();
+
+/**
+ * 回合总耗时（assistant 消息）：消息创建（用户发出那一刻）→ 本消息最后一个事件
+ * （思考段收尾 / 工具结算）的墙钟时长。含权限等待、工具执行、思考与生成。
+ *
+ * 只在回合结束后展示：流式期间「已用时」由思考段与工具行各自的实时秒表分工，
+ * 这里再放一个会跳的总表只会重复。无任何段级事件的消息（纯即时回复）返回 null。
+ */
+const turnSpan = computed(() => {
+  if (message.value.role !== "assistant" || isStreaming.value) return null;
+  const start = message.value.ts;
+  let end = start;
+  for (const segment of message.value.segments ?? []) {
+    if (segment.kind === "thinking" && segment.endedAt > end) end = segment.endedAt;
+  }
+  for (const activity of message.value.tools ?? []) {
+    if (activity.finishedAt != null && activity.finishedAt > end) end = activity.finishedAt;
+  }
+  return end > start ? end - start : null;
+});
 
 /**
  * 渲染用段落表。没有 segments 却有正文的消息（内部 LLM 管线、历史档）补一段全量正文，
@@ -124,6 +164,15 @@ function canRewind(): boolean {
 }
 
 onUnmounted(() => window.clearTimeout(copiedTimer));
+
+/* ===== 操作条可用性 =====
+ * 编辑：user 消息、回合空闲（prepareResend 有忙闸，这里先不做无谓入口）。
+ * 重新生成 / 删除：assistant 消息、末条、空闲 —— 非末条会截掉其后全部，不给这个入口。 */
+const canEdit = computed(() => message.value.role === "user" && !turnActive.value);
+const canRegenerate = computed(() => message.value.role === "assistant" && props.isLast && !turnActive.value);
+const canDelete = computed(() => canRegenerate.value);
+/** 操作条显隐：有正文可复制，或上面三个动作任一可用（空回复的回合也要能重生成 / 删掉）。 */
+const showActions = computed(() => message.value.content.length > 0 || canEdit.value || canRegenerate.value || canDelete.value);
 </script>
 
 <template>
@@ -222,6 +271,8 @@ onUnmounted(() => window.clearTimeout(copiedTimer));
           </div>
         </div>
       </div>
+      <!-- user 侧时间戳：与 assistant 末行同一格式同一字号，读起来不必切换坐标系 -->
+      <span class="mr-1 mt-0.5 text-right text-[10px] text-dim2">{{ timeLabel(message.ts) }}</span>
     </div>
     <div v-else class="flex max-w-[92%] flex-col gap-2.5">
       <PlanCard v-if="message.planPending" :thread-id="threadId || chat.activeThreadId" :message="message" />
@@ -252,17 +303,23 @@ onUnmounted(() => window.clearTimeout(copiedTimer));
       <!-- 权限裁决留痕：活跃卡片在输入框上方（那里才是「等你点」的位置），
            裁决后卡片消失，但记录留在消息流里，回看能知道当时批了什么。 -->
       <PermissionCard v-for="trace in message.permissions ?? []" :key="trace.toolCallId" :trace="trace" />
-      <span class="text-[10px] text-dim2">{{ timeLabel(message.ts) }}</span>
+      <div class="flex items-center gap-2 text-[10px] text-dim2">
+        <span>{{ timeLabel(message.ts) }}</span>
+        <span v-if="turnSpan != null" data-testid="message-turn-duration">{{
+          t("chatView.turnDuration", { s: formatDuration(turnSpan) })
+        }}</span>
+      </div>
     </div>
-    <!-- 消息操作条：复制 / 回退（带快照的用户消息）。默认隐藏、hover 或键盘聚焦时浮现，
-         不占常驻视觉噪声；按钮仍是真按钮（focus-within 可达），不靠 hover 才能用。 -->
+    <!-- 消息操作条：复制 / 编辑（user）· 复制 / 重新生成 / 删除 / 回退（assistant 与带快照的 user）。
+         默认隐藏、hover 或键盘聚焦时浮现，不占常驻视觉噪声；按钮仍是真按钮
+         （focus-within 可达），不靠 hover 才能用。 -->
     <div
-      v-if="message.content"
+      v-if="showActions"
       data-testid="message-actions"
       class="mt-0.5 flex items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover/msg:opacity-100"
       :class="message.role === 'user' ? 'mr-1 justify-end' : 'ml-0.5'"
     >
-      <Hint :text="copied ? t('chat.messageCopied') : t('contextMenu.message.copyBody')" multiline>
+      <Hint v-if="message.content" :text="copied ? t('chat.messageCopied') : t('contextMenu.message.copyBody')" multiline>
         <button
           type="button"
           data-testid="message-copy"
@@ -271,6 +328,39 @@ onUnmounted(() => window.clearTimeout(copiedTimer));
           @click="copyBody"
         >
           <Icon :name="copied ? 'check' : 'copy'" :size="12" />
+        </button>
+      </Hint>
+      <Hint v-if="canEdit" :text="t('chat.editResend')">
+        <button
+          type="button"
+          data-testid="message-edit"
+          class="grid size-5 shrink-0 cursor-pointer place-items-center rounded-[calc(5px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          :aria-label="t('chat.editResend')"
+          @click="emit('edit', message)"
+        >
+          <Icon name="edit" :size="12" />
+        </button>
+      </Hint>
+      <Hint v-if="canRegenerate" :text="t('chat.regenerate')">
+        <button
+          type="button"
+          data-testid="message-regenerate"
+          class="grid size-5 shrink-0 cursor-pointer place-items-center rounded-[calc(5px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          :aria-label="t('chat.regenerate')"
+          @click="emit('regenerate', message)"
+        >
+          <Icon name="refresh" :size="12" />
+        </button>
+      </Hint>
+      <Hint v-if="canDelete" :text="t('chat.deleteMessage')">
+        <button
+          type="button"
+          data-testid="message-delete"
+          class="grid size-5 shrink-0 cursor-pointer place-items-center rounded-[calc(5px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel-2 hover:text-destructive focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          :aria-label="t('chat.deleteMessage')"
+          @click="emit('delete', message)"
+        >
+          <Icon name="delete" :size="12" />
         </button>
       </Hint>
       <Hint v-if="canRewind()" :text="t('contextMenu.message.rewind')">

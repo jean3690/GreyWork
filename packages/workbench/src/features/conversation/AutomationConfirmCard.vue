@@ -81,24 +81,47 @@ function goScheduled(): void {
   <div
     v-if="draft"
     data-testid="schedule-card"
-    class="flex flex-col gap-2.5 rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel-2 p-3"
+    :class="
+      settled
+        ? 'flex flex-col gap-0.5'
+        : 'flex flex-col gap-2.5 rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel-2 p-3'
+    "
   >
-    <div class="flex items-center justify-between gap-2">
+    <!-- 活跃态头部：等用户确认的卡，面板与标题都给足 -->
+    <div v-if="!settled" class="flex items-center justify-between gap-2">
       <span class="flex min-w-0 items-center gap-1.5 text-[12px] font-medium text-foreground">
         <Icon name="clock" :size="13" class="shrink-0 text-cyan" />
         {{ t("chatView.scheduleCard.title") }}
       </span>
-      <span
-        v-if="settled"
-        data-testid="schedule-created-badge"
-        class="flex h-5 shrink-0 items-center gap-1 rounded-full bg-mint/10 px-2 text-[10.5px] text-mint"
-      >
-        <Icon name="check-one" :size="10" />
-        {{ t("chatView.scheduleCard.created") }}
-      </span>
     </div>
 
-    <div class="flex flex-col gap-1.5">
+    <!-- 只读态：与权限留痕同款的细条。任务已落 automation store，消息流里只留
+         「建了什么 / 何时触发」一行 + 一行截断的指令（全文在自动化任务页）。 -->
+    <div v-else class="flex flex-col gap-0.5">
+      <div class="flex items-center gap-1.5 py-0.5 text-[11.5px] leading-[1.6] text-dim2">
+        <Icon name="check-one" :size="11" class="flex-none text-mint" />
+        <span class="min-w-0 truncate text-dim">{{ draft.name }}</span>
+        <span v-if="triggerText" class="shrink-0 rounded-full bg-cyan/10 px-1.5 text-[10px] text-cyan">{{ triggerText }}</span>
+        <span
+          data-testid="schedule-created-badge"
+          class="ml-auto flex h-4 shrink-0 items-center gap-1 rounded-full bg-mint/10 px-1.5 text-[10px] text-mint"
+        >
+          <Icon name="check-one" :size="9" />
+          {{ t("chatView.scheduleCard.created") }}
+        </span>
+        <button
+          type="button"
+          data-testid="schedule-go-scheduled"
+          class="shrink-0 cursor-pointer text-[10.5px] text-dim2 underline-offset-2 transition-colors hover:text-foreground hover:underline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          @click="goScheduled"
+        >
+          {{ t("chatView.scheduleCard.goScheduled") }}
+        </button>
+      </div>
+      <p class="m-0 truncate text-[11px] text-dim2" :title="draft.intent">{{ draft.intent }}</p>
+    </div>
+
+    <div v-if="!settled" class="flex flex-col gap-1.5">
       <div class="flex items-center gap-2">
         <span class="shrink-0 text-[11px] text-dim2">{{ draft.name }}</span>
         <span v-if="triggerText" class="shrink-0 rounded-full bg-panel px-2 text-[10.5px] text-cyan">{{ triggerText }}</span>
@@ -106,21 +129,8 @@ function goScheduled(): void {
       <p class="m-0 text-[12px] leading-relaxed text-dim [overflow-wrap:anywhere]">{{ draft.intent }}</p>
     </div>
 
-    <!-- 已创建：给一个显式的「去自动化任务页」入口（精确调整在那里做） -->
-    <div v-if="settled" class="flex justify-end">
-      <button
-        type="button"
-        data-testid="schedule-go-scheduled"
-        class="flex h-7 cursor-pointer items-center gap-1.5 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel px-2.5 text-[11.5px] text-dim transition-colors hover:border-line-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
-        @click="goScheduled"
-      >
-        {{ t("chatView.scheduleCard.goScheduled") }}
-        <Icon name="right" :size="11" />
-      </button>
-    </div>
-
     <!-- 待确认 -->
-    <div v-else class="flex items-center justify-end gap-2">
+    <div v-if="!settled" class="flex items-center justify-end gap-2">
       <span class="mr-auto text-[10.5px] text-dim2">{{ t("chatView.scheduleCard.hint") }}</span>
       <button
         type="button"

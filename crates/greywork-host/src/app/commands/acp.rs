@@ -21,12 +21,18 @@ macro_rules! acp_commands {
     { "acp_load_session", auth: Auth::Required, desktop: false, binary: false,
         args: acp_host::LoadSessionArgs,
         run: |ctx, a| async move { acp_host::acp_load_session(Arc::clone(&ctx.host), &ctx.services.acp, a.handle, a.cwd, a.session_id, a.mcp_servers).await.map(Json) } }
+    { "acp_close_session", auth: Auth::Required, desktop: false, binary: false,
+        args: acp_host::CloseSessionArgs,
+        run: |ctx, a| async move { acp_host::acp_close_session(Arc::clone(&ctx.host), &ctx.services.acp, a.handle, a.session_id).await.map(Json) } }
     { "acp_send", auth: Auth::Required, desktop: false, binary: false,
         args: acp_host::SendArgs,
         run: |ctx, a| async move { acp_host::acp_send(Arc::clone(&ctx.host), &ctx.services.acp, a.handle, a.text, a.units).await.map(Json) } }
     { "acp_set_config", auth: Auth::Required, desktop: false, binary: false,
         args: acp_host::SetConfigArgs,
         run: |ctx, a| async move { acp_host::acp_set_config(&ctx.services.acp, a.handle, a.config_id, a.value).await.map(Json) } }
+    { "acp_set_mode", auth: Auth::Required, desktop: false, binary: false,
+        args: acp_host::SetModeArgs,
+        run: |ctx, a| async move { acp_host::acp_set_mode(Arc::clone(&ctx.host), &ctx.services.acp, a.handle, a.mode_id).await.map(Json) } }
     { "acp_stop", auth: Auth::Required, desktop: false, binary: false,
         args: acp_host::StopArgs,
         run: |ctx, a| async move { acp_host::acp_stop(Arc::clone(&ctx.host), &ctx.services.acp, a.handle, a.turn_id).await.map(Json) } }

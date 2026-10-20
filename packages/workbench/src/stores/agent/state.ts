@@ -7,7 +7,13 @@
  * 有一处把状态集中起来，切片只交换函数不交换状态。
  */
 import type { Agent } from "@greywork/agents";
-import type { AcpAvailableCommand, AcpPermissionRequestPayload, AcpSessionConfigOption, McpSkippedServer } from "@greywork/acp";
+import type {
+  AcpAvailableCommand,
+  AcpPermissionRequestPayload,
+  AcpSessionConfigOption,
+  AcpSessionModeState,
+  McpSkippedServer,
+} from "@greywork/acp";
 import { createAgentProviderRegistry, type AgentProviderConfig } from "@greywork/shell";
 import { ref, type Ref } from "vue";
 import type { AgentProgramProbe } from "../../lib/agents-backend";
@@ -116,6 +122,8 @@ export interface AgentStoreState {
   permissionDeadline: Ref<number | null>;
   acpStreamId: Ref<string | null>;
   acpConfigOptions: Ref<AcpSessionConfigOption[]>;
+  /** 旧版会话模式状态；界面通过合成的 config option 消费，这里保留原始快照供切换/事件回填。 */
+  acpModes: Ref<AcpSessionModeState | null>;
   acpMcpServers: Ref<string[]>;
   acpMcpSkipped: Ref<McpSkippedServer[]>;
   acpImageSupport: Ref<boolean | null>;
@@ -175,6 +183,7 @@ export function createAgentStoreState(): AgentStoreState {
     permissionDeadline: ref<number | null>(null),
     acpStreamId: ref<string | null>(null),
     acpConfigOptions: ref<AcpSessionConfigOption[]>([]),
+    acpModes: ref<AcpSessionModeState | null>(null),
     acpMcpServers: ref<string[]>([]),
     acpMcpSkipped: ref<McpSkippedServer[]>([]),
     acpImageSupport: ref<boolean | null>(null),

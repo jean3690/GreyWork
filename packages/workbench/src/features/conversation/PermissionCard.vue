@@ -142,34 +142,21 @@ const traceDetail = computed(() => {
 </script>
 
 <template>
-  <!-- 只读态：会话流里的裁决记录 -->
-  <div
-    v-if="settled"
-    data-testid="permission-trace"
-    class="flex items-start gap-2.5 rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel-2 p-3"
-  >
-    <span class="grid size-8 shrink-0 place-items-center rounded-[calc(9px*var(--gw-radius-scale))] bg-panel text-dim">
-      <Icon :name="kindIcon" :size="15" />
+  <!-- 只读态：会话流里的裁决留痕。单行细条而不是面板卡 —— 一个回合可能连问多条
+       权限（每条 bash 一次），面板式卡片会把整条消息撑成一面「权限墙」，把真正的
+       回复挤到看不见的地方。细条保留四要素：类别图标 / 类别 / 动作对象 / 裁决徽标。 -->
+  <div v-if="settled" data-testid="permission-trace" class="flex items-center gap-1.5 py-0.5 text-[11.5px] leading-[1.6] text-dim2">
+    <Icon :name="kindIcon" :size="11" class="flex-none" />
+    <span class="flex-none">{{ kindLabel }}</span>
+    <span v-if="traceDetail" class="min-w-0 truncate font-mono text-dim" :title="traceDetail">{{ traceDetail }}</span>
+    <span
+      data-testid="permission-trace-badge"
+      class="ml-auto flex h-4 shrink-0 items-center gap-1 rounded-full px-1.5 text-[10px]"
+      :class="traceAllowed ? 'bg-mint/10 text-mint' : 'bg-amber/15 text-amber'"
+    >
+      <Icon :name="traceIcon" :size="9" />
+      {{ traceLabel }}
     </span>
-    <div class="min-w-0 flex-1">
-      <div class="flex items-center justify-between gap-2">
-        <span class="flex min-w-0 items-center gap-1.5 text-[12px] font-medium text-foreground">
-          {{ kindLabel }}
-          <span v-if="title" class="min-w-0 truncate text-[11.5px] font-normal text-dim">{{ title }}</span>
-        </span>
-        <span
-          data-testid="permission-trace-badge"
-          class="flex h-5 shrink-0 items-center gap-1 rounded-full px-2 text-[10.5px]"
-          :class="traceAllowed ? 'bg-mint/10 text-mint' : 'bg-amber/15 text-amber'"
-        >
-          <Icon :name="traceIcon" :size="10" />
-          {{ traceLabel }}
-        </span>
-      </div>
-      <p v-if="traceDetail" class="mt-1 break-words text-[11.5px] leading-relaxed text-dim2 [overflow-wrap:anywhere]">
-        {{ traceDetail }}
-      </p>
-    </div>
   </div>
 
   <!-- 活跃态：待确认的权限请求 -->

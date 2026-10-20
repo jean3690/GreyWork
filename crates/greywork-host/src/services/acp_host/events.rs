@@ -58,6 +58,17 @@ pub(super) fn classify_notification(host: &dyn HostContext, notification: Sessio
                 }),
             );
         }
+        SessionUpdate::CurrentModeUpdate(update) => {
+            // 旧版会话模式：agent 可自行切档（如 plan/build），前端据此回填合成选择器。
+            emit(
+                host,
+                "mode",
+                serde_json::json!({
+                    "sessionId": session_id,
+                    "currentModeId": update.current_mode_id,
+                }),
+            );
+        }
         _ => {
             let payload = serde_json::to_value(&notification).unwrap_or(serde_json::Value::Null);
             emit(host, "session-update", payload);

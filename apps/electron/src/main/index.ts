@@ -31,6 +31,11 @@ let sidecarPassword = "";
 let rendererOrigin = "";
 let quitting = false;
 
+// Linux/X11 下透明窗口需要 ARGB visual 才会真的透出桌面（主窗圆角靠它，见 window.ts）。
+// 不加 `--disable-gpu`：那只是旧版 NVIDIA 驱动下 alpha 失效的兜底，代价是整窗软件渲染，
+// 对预览 / 终端这些吃 GPU 的面板得不偿失。
+if (process.platform === "linux") app.commandLine.appendSwitch("enable-transparent-visuals");
+
 /** 托盘 / 关窗守卫共用的宿主面：窗口是懒取（托盘可能先于窗口建成）。 */
 const trayHost: TrayHost = {
   window: () => mainWindow,

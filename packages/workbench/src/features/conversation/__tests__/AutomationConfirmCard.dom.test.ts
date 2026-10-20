@@ -60,6 +60,24 @@ describe("AutomationConfirmCard", () => {
     expect(automation.list.every((task) => task.name !== "n")).toBe(true);
   });
 
+  it("已收口态是细条：名称/触发/徽标/去调整入口同行一行，指令截到第二行", async () => {
+    const { wrapper } = mountCard(messageOf({ name: "站会提醒", intent: "发起站会并汇总待办", cron: "0 9 * * *", createdId: "at-x" }));
+
+    const root = wrapper.get('[data-testid="schedule-card"]');
+    expect(root.classes()).not.toContain("border");
+    expect(root.classes()).not.toContain("bg-panel-2");
+    expect(root.classes()).not.toContain("p-3");
+
+    const line = root.get('[data-testid="schedule-created-badge"]').element.parentElement;
+    expect(line?.textContent).toContain("站会提醒");
+    expect(line?.textContent).toContain("每天 09:00");
+    expect(line?.textContent).toContain("已创建");
+    expect(line?.querySelector('[data-testid="schedule-go-scheduled"]')).not.toBeNull();
+    // 指令留一行截断（全文在自动化任务页），不再整段展开
+    expect(root.text()).toContain("发起站会并汇总待办");
+    expect(root.findAll("button")).toHaveLength(1);
+  });
+
   it("取消：提案从消息上移除", async () => {
     const { wrapper, message } = mountCard(messageOf({ name: "n", intent: "i", cron: "0 9 * * *" }));
     const automation = useAutomationStore();

@@ -43,6 +43,8 @@ export interface TurnApi {
    * 及其后全部），并清掉 ACP 绑定。返回错误文案（null = 成功）。
    */
   rewindTo(threadId: string, messageId: string): Promise<string | null>;
+  /** 重发前置：回退到该 user 消息之前的状态（快照可选），随后由调用方重派发。 */
+  prepareResend(threadId: string, messageId: string): Promise<string | null>;
 }
 
 export function createTurnSlice({ state, getRuntime }: TurnDeps): TurnApi {
@@ -255,26 +257,51 @@ export function createTurnSlice({ state, getRuntime }: TurnDeps): TurnApi {
    * 在服务端、ACP 没有回退接口，所以必须清绑定 + 会话归属，让下个回合开**新会话** —— 代价是
    * agent 会忘掉被丢弃的那几轮（A3 的核心限制，调用方需向用户明示）。
    */
-  async function rewindTo(threadId: string, messageId: string): Promise<string | null> {
+  /**
+   * 「回到某条 user 消息之前」的共享原语：硬恢复工作区（有快照时）→ 截断消息流
+   * （丢弃该 user 消息及其后全部）→ 清 ACP 绑定（agent 上下文不可回退，下个回合开新会话）。
+   *
+   * requireSnapshot 分流两种语义：
+   * - true（rewindTo，用户显式回退）：没有快照 = 不可回退，报错不动数据 —— 回退的承诺
+   *   就是「文件也回去」，做不到就别做；
+   * - false（prepareResend，编辑重发 / 重新生成的前置）：快照是锦上添花，非 worktree
+   *   档位 / 非 git 隔离本来就没有，此时只截消息流，调用方随后会重派发。
+   */
+  async function revertToUserMessage(threadId: string, messageId: string, requireSnapshot: boolean): Promise<string | null> {
     if (state.acpBusy.value || state.acpConnecting.value) return t("chat.rewindBusy");
     const record = state.session.getSession(threadId);
     if (!record) return t("chat.rewindUnavailable");
     const index = record.messages.findIndex((candidate) => candidate.id === messageId);
     const target = index >= 0 ? record.messages[index] : undefined;
-    if (!target || target.role !== "user" || !target.snapshotRef) return t("chat.rewindUnavailable");
+    if (!target || target.role !== "user") return t("chat.rewindUnavailable");
     const cwd = record.acp?.cwd;
-    if (!cwd) return t("chat.rewindUnavailable");
-    try {
-      await worktreeBackend.restore(cwd, target.snapshotRef);
-    } catch (error) {
-      return t("chat.rewindFailed", { detail: error instanceof Error ? error.message : String(error) });
+    if (requireSnapshot && (!target.snapshotRef || !cwd)) return t("chat.rewindUnavailable");
+    if (target.snapshotRef && cwd) {
+      try {
+        await worktreeBackend.restore(cwd, target.snapshotRef);
+      } catch (error) {
+        return t("chat.rewindFailed", { detail: error instanceof Error ? error.message : String(error) });
+      }
     }
-    // 文件已回到该消息之前：截断消息流（丢弃该 user 消息及其后全部，便于改后重发）。
+    // 文件已回到该消息之前（或无从恢复）：截断消息流（丢弃该 user 消息及其后全部，便于改后重发）。
     state.session.truncateMessages(threadId, index);
     // 清绑定 + 会话归属：让下个回合开新会话（agent 上下文不可回退）。
     state.session.setAcpBinding(threadId, null);
     if (locals.acpSessionThreadId === threadId) locals.acpSessionThreadId = null;
     return null;
+  }
+
+  async function rewindTo(threadId: string, messageId: string): Promise<string | null> {
+    return revertToUserMessage(threadId, messageId, true);
+  }
+
+  /**
+   * 重发前置：把会话改到「这条 user 消息之前」的状态，随后的派发由调用方经
+   * lib/dispatch-intent 走正常发送链（计划门 / 后端路由都不在这里重写）。
+   * 与 rewindTo 的差别只有一点：不要求快照 —— 见 revertToUserMessage 的注释。
+   */
+  async function prepareResend(threadId: string, messageId: string): Promise<string | null> {
+    return revertToUserMessage(threadId, messageId, false);
   }
 
   return {
@@ -285,5 +312,6 @@ export function createTurnSlice({ state, getRuntime }: TurnDeps): TurnApi {
     confirmAcpPlan,
     attachRunBridge,
     rewindTo,
+    prepareResend,
   };
 }

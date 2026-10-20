@@ -716,6 +716,17 @@ export const zhCN = {
     rewindConfirmBody:
       "工作区文件会硬恢复到这条消息开跑前的状态（之后新建的文件会被删除）。这条消息及其之后的全部对话都会被丢弃。agent 会重置上下文——它将忘记这段对话，无法回忆之前做过什么。",
     rewindConfirmAction: "回退",
+    /* 消息操作（行动作条）：编辑后重发 / 重新生成 / 删除。三者都经 prepareResend 回退后重走发送链。 */
+    regenerate: "重新生成回复",
+    editResend: "编辑后重发",
+    deleteMessage: "删除这条回复",
+    editingBanner: "正在编辑一条消息 · 发送后该条及其后的全部内容会重跑",
+    editingCarry: "原消息的附件与批注会一并重发",
+    editingCancel: "取消编辑",
+    editingPlaceholder: "编辑后发送…",
+    deleteConfirmTitle: "删除这条回复？",
+    deleteConfirmBody: "这条回复会从消息流中移除，不可恢复。工作区文件不受影响。",
+    deleteConfirmAction: "删除",
     stop: "停止生成",
     send: "发送",
     uploadFile: "上传文件 / 图片",
@@ -1060,6 +1071,13 @@ export const zhCN = {
     thought: "已思考",
     waiting: "正在思考…",
     seconds: "{s}s",
+    turnDuration: "回合 {s}",
+    a11y: {
+      turnStart: "正在生成回复",
+      turnEnd: "回复已生成",
+      toolDone: "工具调用完成：{label}",
+      toolFailed: "工具调用失败：{label}",
+    },
     toolStatus: {
       done: "完成",
       running: "运行中",

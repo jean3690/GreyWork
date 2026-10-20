@@ -321,6 +321,7 @@ export function createProvidersSlice({ state, getRuntime }: ProvidersDeps): Prov
       state.acpSessionId.value = null;
       state.locals.acpSessionThreadId = null;
       state.acpConfigOptions.value = [];
+      state.acpModes.value = null;
       runtime().dismissPendingPermission();
       state.acpStreamId.value = null;
       state.chat.runningSessionId = null;
@@ -403,6 +404,7 @@ export function createProvidersSlice({ state, getRuntime }: ProvidersDeps): Prov
       state.acpSessionId.value = null;
       state.locals.acpSessionThreadId = null;
       state.acpConfigOptions.value = [];
+      state.acpModes.value = null;
       state.acpImageSupport.value = null;
       runtime().dismissPendingPermission();
       state.acpStreamId.value = null;

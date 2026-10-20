@@ -239,6 +239,29 @@ describe("AgentProviderBar · ACP 会话配置选择器", () => {
     });
   });
 
+  it("只有旧版 modes：模式只出一个选择器，模型位保持只读占位", async () => {
+    h.startAgent.mockResolvedValue(7);
+    h.openSession.mockResolvedValue({
+      sessionId: "session-legacy-modes",
+      configOptions: [],
+      modes: {
+        currentModeId: "build",
+        availableModes: [
+          { id: "build", name: "Build" },
+          { id: "plan", name: "Plan" },
+        ],
+      },
+    });
+    const { wrapper } = mountBar();
+
+    await openCodeButton(wrapper).trigger("click");
+    await vi.waitFor(() => expect(wrapper.text()).toContain("会话模式 · Build"));
+    // 没有 model option 时模型胶囊不应抢走会话模式（否则和额外配置胶囊重复）。
+    expect(wrapper.text()).toContain("使用 CLI 模型");
+    expect(wrapper.findAll("button").filter((button) => button.text().toLowerCase().includes("build"))).toHaveLength(1);
+    expect(wrapper.text()).not.toContain("模型不支持");
+  });
+
   it("连接失败：胶囊旁出现错误行（含宿主原因），不出现模型选择", async () => {
     h.startAgent.mockResolvedValue(7);
     h.openSession.mockRejectedValue(new Error("agent handshake timeout"));

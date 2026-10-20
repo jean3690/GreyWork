@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Mock ACP agent（stdio JSON-RPC 桩）：initialize / session/new / session/prompt
-// / session/set_config_option。initialize 声明支持 http+sse 两种 MCP 传输；
-// session/new 返回一个 model 选择器，并把收到的 mcpServers 原样放进 `_meta`
+// / session/set_config_option / session/set_mode。initialize 声明支持 http+sse 两种 MCP 传输；
+// session/new 返回一个 model 选择器与旧版 modes，并把收到的 mcpServers 原样放进 `_meta`
 // 供集成测试断言；prompt 收到后流式发一条 agent_message_chunk，再以 end_turn 结束回合。
 //
 // prompt 文本命中触发词时改走权限链路（agent → 客户端的 session/request_permission）：
@@ -37,6 +37,15 @@ const configOptions = [
   },
 ];
 
+/** 旧版会话模式（部分 agent 仍只用 session/set_mode，不走 config options）。 */
+const sessionModes = {
+  currentModeId: "build",
+  availableModes: [
+    { id: "build", name: "Build", description: "Implement and edit files" },
+    { id: "plan", name: "Plan", description: "Read-only planning" },
+  ],
+};
+
 const rl = createInterface({ input: process.stdin });
 rl.on("line", async (line) => {
   const trimmed = line.trim();
@@ -62,14 +71,39 @@ rl.on("line", async (line) => {
   if (method === "initialize") {
     reply(id, {
       protocolVersion: 1,
-      agentCapabilities: { mcpCapabilities: { http: true, sse: true } },
+      agentCapabilities: {
+        loadSession: true,
+        mcpCapabilities: { http: true, sse: true },
+        // 声明会话生命周期能力：宿主恢复时优先 resume，换会话时可发 close。
+        sessionCapabilities: { resume: {}, close: {} },
+      },
     });
   } else if (method === "session/new") {
     reply(id, {
       sessionId: "sess-mock-001",
       configOptions,
+      modes: sessionModes,
       _meta: { receivedMcpServers: params?.mcpServers ?? [] },
     });
+  } else if (method === "session/resume" || method === "session/load") {
+    // 两种恢复都回同一份配置；resume 不重放历史，load 在本桩里同样不重放
+    // （真实 agent 会重放，前端回放抑制由 workbench 测试覆盖）。
+    reply(id, { configOptions, modes: sessionModes });
+  } else if (method === "session/close") {
+    reply(id, {});
+  } else if (method === "session/set_mode") {
+    const { sessionId, modeId } = params ?? {};
+    if (!sessionModes.availableModes.some((mode) => mode.id === modeId)) {
+      send({ jsonrpc: "2.0", id, error: { code: -32602, message: `unknown mode ${modeId}` } });
+    } else {
+      sessionModes.currentModeId = modeId;
+      // 真实 agent 会广播 current_mode_update；宿主应转成 `mode` 事件。
+      notify("session/update", {
+        sessionId: sessionId ?? "sess-mock-001",
+        update: { sessionUpdate: "current_mode_update", currentModeId: modeId },
+      });
+      reply(id, {});
+    }
   } else if (method === "session/set_config_option") {
     const { configId, value } = params ?? {};
     const option = configOptions.find((entry) => entry.id === configId);
@@ -109,7 +143,9 @@ rl.on("line", async (line) => {
       clearTimeout(timer);
       reply(id, { stopReason: "cancelled" });
     });
-  } else if (method === "$/cancel_request") {
+  } else if (method === "$/cancel_request" || method === "session/cancel") {
+    // ACP 正路是 session/cancel（通知，无 id）；$/cancel_request 是 JSON-RPC 兜底。
+    // 两者都触发同一批取消回调，重复到达时第二次自然为空操作。
     const handlers = cancelHandlers.splice(0);
     for (const handler of handlers) handler();
   } else if (id !== undefined) {

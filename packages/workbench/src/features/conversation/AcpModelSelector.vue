@@ -47,7 +47,10 @@ const option = computed(() => {
     return null;
   }
   const id = props.optionId;
-  return list.find((entry) => (id ? entry.id === id : entry.type === "select")) ?? list.find((entry) => entry.type === "select") ?? null;
+  // 指定了 id 就只认该 id：回落到任意 select 会让「模型」胶囊抢占会话模式 / 思考强度，
+  // 与 AcpSessionConfig 的额外配置胶囊重复渲染。未指定 id 时才取第一个 select。
+  if (id) return list.find((entry) => entry.id === id && entry.type === "select") ?? null;
+  return list.find((entry) => entry.type === "select") ?? null;
 });
 
 const label = computed(() => {

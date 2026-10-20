@@ -33,6 +33,10 @@ export class HostCommandTransport implements AcpTransport {
     return invoke<AcpSessionOpened>("acp_load_session", { handle, cwd, sessionId, mcpServers });
   }
 
+  async closeSession(handle: number, sessionId: string): Promise<boolean> {
+    return invoke<boolean>("acp_close_session", { handle, sessionId });
+  }
+
   async probeMcp(config: McpServerConfig, timeoutSecs?: number): Promise<McpProbeReport> {
     return invoke<McpProbeReport>("mcp_probe", {
       transport: config.transport,
@@ -52,6 +56,10 @@ export class HostCommandTransport implements AcpTransport {
       value,
     });
     return response.configOptions ?? [];
+  }
+
+  async setSessionMode(handle: number, modeId: string): Promise<void> {
+    await invoke("acp_set_mode", { handle, modeId });
   }
 
   async prompt(handle: number, text: string, units: readonly AcpPromptUnit[] = []): Promise<{ turnId: number }> {

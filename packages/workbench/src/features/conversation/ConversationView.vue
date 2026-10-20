@@ -63,6 +63,10 @@ const scrollEl = ref<HTMLElement | null>(null);
 const pinnedToBottom = ref(true);
 /** 会话回退目标：非 null 时挂确认弹层（见 performRewind）。 */
 const rewindTarget = ref<ThreadMessage | null>(null);
+/** 正在编辑的用户消息（编辑后重发）：非 null 时输入卡进编辑态，发送走重发链。 */
+const editing = ref<ThreadMessage | null>(null);
+/** 待确认删除的回复（删除只对末条 assistant 开放，见 ConversationMessage 的可用性判定）。 */
+const deleteTarget = ref<ThreadMessage | null>(null);
 
 const sessionId = computed(() => {
   const raw = route.params.conversationId;
@@ -237,6 +241,11 @@ async function dispatchWithAttachments(text: string, items: readonly Attachment[
 
 async function send(): Promise<void> {
   if (!canSend.value) return;
+  // 编辑态：这一发不是新消息，是「改后重发」——走重发链（回退 + 重派发）。
+  if (editing.value) {
+    await submitEdit();
+    return;
+  }
   const text = draft.value.trim();
   const items = attachmentItems.value.length ? takeAttachments() : [];
   const pending = comments.value;
@@ -282,6 +291,15 @@ function goBack(): void {
   void router.push("/guid");
 }
 
+/** 回合级无障碍播报（读屏专用）：流式起止各一句。
+ *  粒度刻意粗 —— 每 40ms 的文本增量不进 live region，那是把读屏淹掉；
+ *  watch 无 immediate：进页面 / 切会话不补播，只有本视图内真实发生的起止才喊。 */
+const turnAnnouncement = ref("");
+watch(turnActive, (active, was) => {
+  if (active) turnAnnouncement.value = t("chatView.a11y.turnStart");
+  else if (was) turnAnnouncement.value = t("chatView.a11y.turnEnd");
+});
+
 /* ===== 空会话建议卡 =====
  * 新对话落地页只有标题 + 一行提示时，用户经常不知道从哪说起。给 4 条贴合本产品能力
  * （工作区 / 计划 / 审查 / 文档）的建议：点击只是把文本填进输入框（不发送），保留用户
@@ -300,16 +318,21 @@ function applySuggestion(suggestion: (typeof SUGGESTIONS)[number]): void {
 
 /** 有可发送内容（文字 / 附件 / 选区评论）。回合进行中不再禁发 —— 发送会进待发队列。 */
 const hasContent = computed(() => draft.value.trim().length > 0 || attachmentItems.value.length > 0 || comments.value.length > 0);
-/** 发送按钮可用：与斜杠菜单共用「有没有内容」这一条（回合状态不再参与）。 */
-const canSend = computed(() => hasContent.value);
+/** 发送按钮可用：与斜杠菜单共用「有没有内容」这一条（回合状态不再参与）。
+ *  编辑态追加一条：正文被清空但原消息带附件 / 批注时也算可发（纯附件消息允许空正文，
+ *  与 send 的既有语义一致）。editCarry 声明在后，computed 惰性求值，运行时才读。 */
+const canSend = computed(
+  () => hasContent.value || (editCarry.value !== null && (editCarry.value.attachments.length > 0 || editCarry.value.comments.length > 0)),
+);
 
 /** 待发队列：全局队列按语义只属于「正在跑的会话」，别的会话不显示。 */
 const pendingItems = computed(() => (chat.runningSessionId === sessionId.value ? chat.commandQueue : []));
 
-/** 输入框占位：回合进行中提示会入队。 */
-const composerPlaceholder = computed(() =>
-  turnActive.value ? t("chat.composer.placeholderQueued") : t("chat.composer.placeholderThread"),
-);
+/** 输入框占位：编辑态优先（它是更具体的状态），其次回合进行中提示会入队。 */
+const composerPlaceholder = computed(() => {
+  if (editing.value) return t("chat.editingPlaceholder");
+  return turnActive.value ? t("chat.composer.placeholderQueued") : t("chat.composer.placeholderThread");
+});
 
 /** 权限档位胶囊文案（grey 外壳字面量，不走 i18n）。 */
 const PERM_TIER_LABELS: Record<PermTier, string> = {
@@ -356,6 +379,72 @@ async function performRewind(): Promise<void> {
   rewindTarget.value = null;
   const error = await agent.rewindTo(sessionId.value || chat.activeThreadId, target.id);
   if (error) notice.error(error);
+}
+
+/* ===== 编辑后重发 / 重新生成 / 删除 =====
+ * 三者共用 agent.prepareResend 这一个原语（工作区硬恢复 + 截流 + 清 ACP 绑定），
+ * 差别只在「截完之后干什么」：重发按新文本派发、重生成按原输入派发、删除不派发。
+ * 派发一律走 lib/dispatch-intent（计划门 / 后端路由不在这里重写）。 */
+
+/** 编辑态携带的原消息载荷：附件与批注随车带走 —— 用户编辑的是文字，不是重选附件。 */
+const editCarry = computed(() => {
+  const target = editing.value;
+  if (!target) return null;
+  return { attachments: target.attachments ?? [], comments: target.comments ?? [] };
+});
+
+function startEdit(message: ThreadMessage): void {
+  editing.value = message;
+  draft.value = message.content;
+  void nextTick(() => textareaEl.value?.focus());
+}
+
+function cancelEdit(): void {
+  editing.value = null;
+}
+
+async function submitEdit(): Promise<void> {
+  const target = editing.value;
+  if (!target) return;
+  const text = draft.value.trim();
+  const carry = editCarry.value;
+  // 空文本 + 无载荷 = 没啥可发（与 send 的 canSend 判定同源：纯附件消息允许空正文）。
+  if (!text && (carry === null || (carry.attachments.length === 0 && carry.comments.length === 0))) return;
+  editing.value = null;
+  draft.value = "";
+  const error = await agent.prepareResend(sessionId.value || chat.activeThreadId, target.id);
+  if (error) {
+    notice.error(error);
+    return;
+  }
+  await dispatchWithAttachments(text, carry?.attachments ?? [], carry?.comments ?? []);
+  scrollToBottom();
+}
+
+/** 重新生成：回合起点 = 紧邻这条回复之前的 user 消息；回退后按它的原始输入重派发。 */
+async function regenerate(message: ThreadMessage): Promise<void> {
+  const list = messages.value;
+  const index = list.findIndex((candidate) => candidate.id === message.id);
+  const origin = index > 0 ? list[index - 1] : undefined;
+  if (!origin || origin.role !== "user") return;
+  const error = await agent.prepareResend(sessionId.value || chat.activeThreadId, origin.id);
+  if (error) {
+    notice.error(error);
+    return;
+  }
+  await dispatchWithAttachments(origin.content, origin.attachments ?? [], origin.comments ?? []);
+  scrollToBottom();
+}
+
+/** 删除回复：仅末条可达（组件侧已闸），这里按索引截断即只掉这一条。 */
+function performDelete(): void {
+  const target = deleteTarget.value;
+  if (!target) return;
+  deleteTarget.value = null;
+  const threadId = sessionId.value || chat.activeThreadId;
+  const index = messages.value.findIndex((candidate) => candidate.id === target.id);
+  if (index < 0) return;
+  sessionStore.truncateMessages(threadId, index);
 }
 
 function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
@@ -454,15 +543,20 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
         </div>
       </div>
 
-      <div ref="scrollEl" class="min-h-0 flex-1 overflow-y-auto" @scroll.passive="onScroll">
+      <!-- aria-busy：流式期间告诉辅助技术「这片区域在持续更新」，别急着朗读中间态 -->
+      <div ref="scrollEl" class="min-h-0 flex-1 overflow-y-auto" :aria-busy="turnActive" @scroll.passive="onScroll">
         <!-- 短会话：普通整列渲染 -->
         <div v-if="messages.length && !useVirtual" class="mx-auto flex w-full max-w-[860px] flex-col gap-4 px-4 py-6 sm:px-6">
           <ConversationMessage
-            v-for="message in messages"
+            v-for="(message, index) in messages"
             :key="message.id"
             :message="message"
             :thread-id="sessionId"
+            :is-last="index === messages.length - 1"
             @rewind="rewindTarget = $event"
+            @edit="startEdit"
+            @regenerate="regenerate"
+            @delete="deleteTarget = $event"
           />
         </div>
         <!-- 长会话：虚拟窗口渲染（动态测量高度，钉底跟流） -->
@@ -479,7 +573,15 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
             class="absolute left-0 top-0 w-full pb-4"
             :style="{ transform: `translateY(${row.start + V_PAD_TOP}px)` }"
           >
-            <ConversationMessage :message="messages[row.index]" :thread-id="sessionId" @rewind="rewindTarget = $event" />
+            <ConversationMessage
+              :message="messages[row.index]"
+              :thread-id="sessionId"
+              :is-last="row.index === messages.length - 1"
+              @rewind="rewindTarget = $event"
+              @edit="startEdit"
+              @regenerate="regenerate"
+              @delete="deleteTarget = $event"
+            />
           </div>
         </div>
         <!-- 空会话引导：标题 + 建议卡（点击填入草稿，不直接发送）。 -->
@@ -501,11 +603,7 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
               class="group/s flex cursor-pointer items-start gap-2 rounded-[calc(10px*var(--gw-radius-scale))] border border-line bg-panel px-3 py-2.5 transition-colors hover:border-line-2 hover:bg-panel-2 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
               @click="applySuggestion(suggestion)"
             >
-              <Icon
-                :name="suggestion.icon"
-                :size="13"
-                class="mt-0.5 shrink-0 text-dim2 transition-colors group-hover/s:text-cyan"
-              />
+              <Icon :name="suggestion.icon" :size="13" class="mt-0.5 shrink-0 text-dim2 transition-colors group-hover/s:text-cyan" />
               <span class="min-w-0 flex-1">
                 <span class="block text-[12px] font-medium text-foreground">{{ t(suggestion.label) }}</span>
                 <span class="mt-0.5 block truncate text-[11px] text-dim2">{{ t(suggestion.text) }}</span>
@@ -514,6 +612,9 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
           </div>
         </div>
       </div>
+
+      <!-- 回合级播报（读屏专用，常驻空区）：内容只在起止时更换 -->
+      <p class="sr-only" role="status">{{ turnAnnouncement }}</p>
 
       <!-- 顶部一条极淡的上投影替代分隔线：让输入卡从消息流里"浮"起来，而不是靠硬线切开。 -->
       <div class="shrink-0 bg-panel px-4 py-3 shadow-[0_-8px_24px_-12px_rgba(0,0,0,0.18)] sm:px-6">
@@ -578,6 +679,29 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
               </button>
             </div>
           </div>
+          <!-- 编辑态横幅：说清「这一发不是新消息」以及会连带重跑的范围。
+               原消息的附件 / 批注随车带走（见 editCarry），所以只提示文字被编辑。 -->
+          <div
+            v-if="editing"
+            data-testid="edit-banner"
+            class="flex items-center gap-2 rounded-[calc(10px*var(--gw-radius-scale))] border border-dashed border-line-2 bg-panel px-3 py-2"
+          >
+            <Icon name="edit" :size="12" class="shrink-0 text-dim2" />
+            <span class="min-w-0 flex-1 text-[11.5px] text-dim">{{ t("chat.editingBanner") }}</span>
+            <span
+              v-if="editCarry && (editCarry.attachments.length || editCarry.comments.length)"
+              class="shrink-0 text-[10.5px] text-dim2"
+              >{{ t("chat.editingCarry") }}</span
+            >
+            <button
+              type="button"
+              data-testid="edit-cancel"
+              class="shrink-0 cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] px-1.5 py-0.5 text-[11px] text-dim2 transition-colors hover:text-foreground"
+              @click="cancelEdit"
+            >
+              {{ t("chat.editingCancel") }}
+            </button>
+          </div>
           <!-- 输入卡：管线仍归本页（send / 附件 / 斜杠 / 评论 / 待发队列），经 props + 具名
                slot 注入，与引导页共用同一个 MinimalComposer。 -->
           <MinimalComposer
@@ -613,6 +737,16 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
         </div>
       </div>
     </section>
+
+    <!-- 删除确认：只掉消息流，不动工作区文件（与回退的差别就在这里，文案要说清）。 -->
+    <ConfirmDialog
+      v-if="deleteTarget"
+      :title="t('chat.deleteConfirmTitle')"
+      :message="t('chat.deleteConfirmBody')"
+      :confirm-label="t('chat.deleteConfirmAction')"
+      @confirm="performDelete"
+      @cancel="deleteTarget = null"
+    />
 
     <!-- 回退确认：工作区会硬恢复、消息流会截断，且 agent 上下文不可回退（必须明示）。 -->
     <ConfirmDialog

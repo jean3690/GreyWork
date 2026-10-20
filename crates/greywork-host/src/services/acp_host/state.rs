@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicU64;
 
 use agent_client_protocol::schema::v1::{
-    McpCapabilities, PermissionOptionId, RequestId, SessionId,
+    McpCapabilities, PermissionOptionId, RequestId, SessionId, SessionModeState,
 };
 use agent_client_protocol::{Agent as AgentRole, ConnectionTo};
 use serde::Serialize;
@@ -50,6 +50,16 @@ pub(super) struct AcpSession {
     /// 本 handle 的 agent 是否支持 `session/load`（initialize 回包）。
     /// 不支持时前端回落 session/new，宿主也不发无谓请求。
     pub(super) load_session: bool,
+    /// 本 handle 的 agent 是否支持 `session/resume`（`sessionCapabilities.resume`）。
+    /// 恢复会话时优先走 resume：它不重放历史，前端不必再开回放抑制窗口，
+    /// 比 load 更快也更干净；只有 resume 不可用 / 失败时才回落 load。
+    pub(super) resume_session: bool,
+    /// 本 handle 的 agent 是否支持 `session/close`（`sessionCapabilities.close`）。
+    /// 切换对话时宿主据此释放旧会话；不支持则静默跳过，进程仍可复用。
+    pub(super) close_session: bool,
+    /// 当前会话的旧版模式状态（`session/new` / `load` / `resume` 回包里的 `modes`）。
+    /// 声明了可用模式才允许 `session/set_mode`；None = 该 agent 不暴露旧版模式。
+    pub(super) modes: Option<SessionModeState>,
     /// 本 handle 的 agent 是否接受图片 prompt（initialize 回包 `promptCapabilities.image`）。
     /// 前端据此置灰图片入口；宿主侧再兜一层过滤，避免把图片发给只认文本的 agent。
     pub(super) image_prompts: bool,

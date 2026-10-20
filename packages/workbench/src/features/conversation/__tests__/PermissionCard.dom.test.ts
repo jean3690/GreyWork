@@ -167,6 +167,15 @@ describe("PermissionCard · 只读留痕", () => {
     expect(wrapper.findAll("button")).toHaveLength(0);
   });
 
+  it("留痕是单行细条：类别、动作对象、裁决徽标同线呈现（不再撑成面板卡）", () => {
+    const wrapper = mountTrace(trace);
+
+    const row = wrapper.get('[data-testid="permission-trace"]');
+    expect(row.text()).toContain("修改文件");
+    expect(row.text()).toContain("/home/test/notes.md");
+    expect(row.get('[data-testid="permission-trace-badge"]').text()).toContain("允许一次");
+  });
+
   it("拒绝的留痕标「已拒绝」而不是空白 choice", () => {
     const wrapper = mountTrace({ ...trace, choice: null, source: "timeout" });
 

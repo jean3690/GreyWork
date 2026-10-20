@@ -47,6 +47,7 @@ export const useAgentStore = defineStore("agent", () => {
     acpConnecting: state.acpConnecting,
     pendingPermission: state.pendingPermission,
     acpConfigOptions: state.acpConfigOptions,
+    acpModes: state.acpModes,
     permissionDeadline: state.permissionDeadline,
     acpMcpServers: state.acpMcpServers,
     acpMcpSkipped: state.acpMcpSkipped,
@@ -98,6 +99,8 @@ export const useAgentStore = defineStore("agent", () => {
     confirmAcpPlan: turn.confirmAcpPlan,
     /** 回退到某条用户消息之前（工作区 + 消息流一起回退；agent 上下文重置）。 */
     rewindTo: turn.rewindTo,
+    /** 重发前置：回退到该消息之前（快照可选），随后由调用方经 dispatch-intent 重派发。 */
+    prepareResend: turn.prepareResend,
     stopAcp: runtime.stopAcp,
     respondPermission: runtime.respondPermission,
     probeMcpServer: runtime.probeMcpServer,

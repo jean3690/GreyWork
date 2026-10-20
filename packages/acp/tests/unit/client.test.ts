@@ -37,8 +37,13 @@ function fakeTransport(): AcpTransport & { events: AcpEventEnvelope[] } {
         sessionId,
         configOptions: [],
         restored: true,
+        resumed: false,
         mcpServers: (mcpServers ?? []).map((server) => server.name),
       };
+    },
+    async closeSession(_handle, sessionId) {
+      events.push({ kind: "session-closed", payload: { sessionId } });
+      return true;
     },
     async probeMcp(config) {
       return {
@@ -59,6 +64,9 @@ function fakeTransport(): AcpTransport & { events: AcpEventEnvelope[] } {
           options: [{ value: String(value), name: String(value) }],
         },
       ];
+    },
+    async setSessionMode(_handle, modeId) {
+      events.push({ kind: "mode", payload: { modeId } });
     },
     async prompt(_handle, text) {
       events.push({ kind: "session-update", payload: { text } });
@@ -110,9 +118,16 @@ describe("AcpClient over fake transport", () => {
     const options = await client.setSessionConfig(handle, "model", "mock-slow");
     expect(options[0]?.id).toBe("model");
     expect(options[0]?.currentValue).toBe("mock-slow");
+    await client.setSessionMode(handle, "plan");
+    expect(transport.events.at(-1)).toMatchObject({ kind: "mode", payload: { modeId: "plan" } });
     const result = await client.prompt(handle, "hello");
     expect(result.turnId).toBe(7);
     await client.stop(handle, 7);
+    await expect(client.closeSession(handle, opened.sessionId)).resolves.toBe(true);
+    expect(transport.events.at(-1)).toMatchObject({
+      kind: "session-closed",
+      payload: { sessionId: "sess-fake" },
+    });
 
     expect(received.map((event) => event.kind)).toEqual(["session-update", "prompt-done"]);
     unsubscribe();
@@ -126,6 +141,7 @@ describe("WebSocketTransport（web 远程骨架）", () => {
     await expect(transport.startAgent("node x.mjs", tier)).rejects.toBeInstanceOf(RemoteAcpUnsupportedError);
     await expect(transport.openSession(1, "/tmp")).rejects.toBeInstanceOf(RemoteAcpUnsupportedError);
     await expect(transport.setSessionConfig(1, "model", "x")).rejects.toBeInstanceOf(RemoteAcpUnsupportedError);
+    await expect(transport.setSessionMode(1, "plan")).rejects.toBeInstanceOf(RemoteAcpUnsupportedError);
     await expect(transport.stop(1)).rejects.toBeInstanceOf(RemoteAcpUnsupportedError);
     await expect(transport.respondPermission(1, null)).rejects.toBeInstanceOf(RemoteAcpUnsupportedError);
     await expect(transport.list()).resolves.toEqual([]);
@@ -207,12 +223,24 @@ class FakeWebSocket {
       request.method === "initialize"
         ? { protocolVersion: 1, agentCapabilities: { loadSession: false } }
         : request.method === "session/new"
-          ? { sessionId: "remote-session", configOptions: [] }
+          ? {
+              sessionId: "remote-session",
+              configOptions: [],
+              modes: {
+                currentModeId: "build",
+                availableModes: [
+                  { id: "build", name: "Build" },
+                  { id: "plan", name: "Plan", description: "Read-only planning" },
+                ],
+              },
+            }
           : request.method === "session/set_config_option"
             ? { configOptions: [{ id: "model", name: "Model", type: "select", currentValue: "fast" }] }
-            : request.method === "session/prompt"
-              ? { stopReason: "end_turn" }
-              : {};
+            : request.method === "session/set_mode"
+              ? {}
+              : request.method === "session/prompt"
+                ? { stopReason: "end_turn" }
+                : {};
     queueMicrotask(() => {
       this.emit("message", JSON.stringify({ jsonrpc: "2.0", id: request.id, result }));
     });
@@ -286,8 +314,22 @@ describe("WebSocketTransport ACP JSON-RPC", () => {
     expect(await transport.startAgent("ignored", "workspace")).toBe(1);
     const socket = FakeWebSocket.instances[0]!;
     expect(JSON.parse(socket.sent[0]!).method).toBe("initialize");
-    expect((await transport.openSession(1, "/tmp")).sessionId).toBe("remote-session");
+    const opened = await transport.openSession(1, "/tmp");
+    expect(opened.sessionId).toBe("remote-session");
+    // 旧版 modes 必须归一成前端契约形状（description 可选）。
+    expect(opened.modes).toEqual({
+      currentModeId: "build",
+      availableModes: [
+        { id: "build", name: "Build" },
+        { id: "plan", name: "Plan", description: "Read-only planning" },
+      ],
+    });
     expect((await transport.setSessionConfig(1, "model", "fast"))[0]?.currentValue).toBe("fast");
+    await transport.setSessionMode(1, "plan");
+    await flushMicrotasks();
+    const modeFrame = JSON.parse(socket.sent.at(-1)!) as { method: string; params: { sessionId: string; modeId: string } };
+    expect(modeFrame.method).toBe("session/set_mode");
+    expect(modeFrame.params).toMatchObject({ sessionId: "remote-session", modeId: "plan" });
     socket.update("hello");
     socket.permissionRequest(99);
     await flushMicrotasks();

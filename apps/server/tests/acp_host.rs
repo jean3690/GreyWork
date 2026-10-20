@@ -168,6 +168,159 @@ async fn acp_host_drives_a_full_turn_through_dispatch() {
     assert_eq!(stopped["payload"]["handle"].as_u64(), Some(handle));
 }
 
+/// 会话生命周期补全：声明了 resume 的 agent 恢复时优先走 `session/resume`（不重放历史），
+/// 声明了 close 的 agent 可在换会话时释放旧会话，而进程与 handle 保持存活。
+#[tokio::test]
+async fn acp_host_resumes_and_closes_sessions() {
+    let h = harness("acp-host-lifecycle");
+    let ctx = h.state.ctx.as_ref();
+    let mut rx = h.state.bus.subscribe();
+    let root = h.root().to_string_lossy().to_string();
+
+    let handle = dispatch_json(
+        ctx,
+        "acp_start",
+        json!({
+            "agentCmd": mock_agent_cmd(),
+            "tier": "read-only",
+            "workspace": root,
+        }),
+    )
+    .await;
+    let handle = handle.as_u64().expect("acp_start 应返回数字 handle");
+
+    let opened = dispatch_json(
+        ctx,
+        "acp_new_session",
+        json!({ "handle": handle, "cwd": root }),
+    )
+    .await;
+    assert_eq!(opened["sessionId"].as_str(), Some("sess-mock-001"));
+
+    let mut seen = Vec::new();
+    let restored = dispatch_json(
+        ctx,
+        "acp_load_session",
+        json!({ "handle": handle, "cwd": root, "sessionId": "sess-mock-001" }),
+    )
+    .await;
+    assert_eq!(restored["sessionId"].as_str(), Some("sess-mock-001"));
+    assert_eq!(restored["restored"], true);
+    assert_eq!(
+        restored["resumed"], true,
+        "假 agent 声明了 sessionCapabilities.resume，宿主应优先走 resume: {restored}"
+    );
+    let loaded = drain_until(&mut rx, "session-load", &mut seen).await;
+    assert_eq!(loaded["payload"]["resumed"], true);
+
+    // 前端状态滞后时不能误关刚建好的会话：sessionId 对不上就拒绝。
+    let stale = dispatch_json(
+        ctx,
+        "acp_close_session",
+        json!({ "handle": handle, "sessionId": "sess-stale" }),
+    )
+    .await;
+    assert_eq!(stale, false, "sessionId 不匹配时不应关闭当前会话");
+
+    let closed = dispatch_json(
+        ctx,
+        "acp_close_session",
+        json!({ "handle": handle, "sessionId": "sess-mock-001" }),
+    )
+    .await;
+    assert_eq!(closed, true, "声明了 close 的 agent 应真正关闭会话");
+    let listed = dispatch_json(ctx, "acp_list", json!({})).await;
+    assert!(
+        listed.as_array().is_some_and(|sessions| sessions
+            .iter()
+            .any(|session| session["handle"] == handle && session["hasSession"] == false)),
+        "关闭后 handle 应在册但不再挂会话: {listed}"
+    );
+
+    // 收尾：停会话并确认进程回收。
+    dispatch_json(ctx, "acp_stop", json!({ "handle": handle, "turnId": null })).await;
+    let stopped = drain_until(&mut rx, "stopped", &mut seen).await;
+    assert_eq!(stopped["payload"]["handle"].as_u64(), Some(handle));
+}
+
+/// 旧版会话模式：session/new 回包的 `modes` 必须原样带到前端；`acp_set_mode`
+/// 向 agent 发 `session/set_mode`，并把 agent 的 `current_mode_update` 转成 `mode` 事件。
+#[tokio::test]
+async fn acp_host_exposes_and_sets_legacy_session_modes() {
+    let h = harness("acp-host-modes");
+    let ctx = h.state.ctx.as_ref();
+    let mut rx = h.state.bus.subscribe();
+    let root = h.root().to_string_lossy().to_string();
+
+    let handle = dispatch_json(
+        ctx,
+        "acp_start",
+        json!({
+            "agentCmd": mock_agent_cmd(),
+            "tier": "read-only",
+            "workspace": root,
+        }),
+    )
+    .await;
+    let handle = handle.as_u64().expect("acp_start 应返回数字 handle");
+
+    let opened = dispatch_json(
+        ctx,
+        "acp_new_session",
+        json!({ "handle": handle, "cwd": root }),
+    )
+    .await;
+    assert_eq!(
+        opened["modes"]["currentModeId"].as_str(),
+        Some("build"),
+        "session/new 的旧版 modes 应原样返回: {opened}"
+    );
+    assert!(
+        opened["modes"]["availableModes"]
+            .as_array()
+            .is_some_and(|modes| modes.iter().any(|mode| mode["id"] == "plan")),
+        "可用模式清单应包含 plan: {opened}"
+    );
+
+    let changed = dispatch_json(
+        ctx,
+        "acp_set_mode",
+        json!({ "handle": handle, "modeId": "plan" }),
+    )
+    .await;
+    assert_eq!(changed["modeId"].as_str(), Some("plan"));
+
+    let mut seen = Vec::new();
+    let mode = drain_until(&mut rx, "mode", &mut seen).await;
+    assert_eq!(
+        mode["payload"]["sessionId"].as_str(),
+        Some("sess-mock-001"),
+        "mode 事件应指向当前会话: {mode}"
+    );
+    assert_eq!(
+        mode["payload"]["currentModeId"].as_str(),
+        Some("plan"),
+        "agent 的 current_mode_update 应转成 mode 事件: {mode}"
+    );
+
+    // 宿主侧先校验可用模式，未知模式不发请求（避免把 agent 打挂或产生无谓错误）。
+    let error = dispatch(
+        "acp_set_mode",
+        json!({ "handle": handle, "modeId": "does-not-exist" }),
+        ctx,
+    )
+    .await
+    .expect_err("未知模式必须被宿主拒绝");
+    assert!(
+        error.contains("unknown session mode"),
+        "拒绝理由应说明未知模式，实际: {error}"
+    );
+
+    dispatch_json(ctx, "acp_stop", json!({ "handle": handle, "turnId": null })).await;
+    let stopped = drain_until(&mut rx, "stopped", &mut seen).await;
+    assert_eq!(stopped["payload"]["handle"].as_u64(), Some(handle));
+}
+
 #[tokio::test]
 async fn acp_start_rejects_program_outside_the_allowlist() {
     let h = harness("acp-host-allowlist");

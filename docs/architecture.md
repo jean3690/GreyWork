@@ -64,6 +64,24 @@ The agent connects to them and merges their tools — the host never proxies too
 servers (e.g. an `http` server on an agent that only supports `stdio`) come back as
 `skippedMcpServers` so the UI can say why.
 
+## ACP session lifecycle
+
+`acp_load_session` restores a persisted binding by capability: `session/resume` first when the
+agent advertises `sessionCapabilities.resume` (no history replay, so the renderer skips its replay
+guard), then `session/load` for agents that only support replay. If both fail the renderer falls
+back to `session/new`, so a send is never blocked by a stale binding. When switching conversations
+the renderer releases the previous session through `acp_close_session` (`session/close`) while
+keeping the agent process alive; agents without the `close` capability return `false` and the
+renderer proceeds. Turn cancellation sends ACP `session/cancel` before the JSON-RPC
+`$/cancel_request` fallback, since the former is the protocol-defined prompt-cancel path.
+
+Legacy session **modes** (`session/new` / `load` / `resume` returning `modes`) are adapted in the
+renderer into a synthetic `legacy_session_mode` config option (`lib/acp-legacy-modes.ts`), so the
+existing selector, workspace memory and global-default plumbing all work unchanged. Switching calls
+the new host command `acp_set_mode` (`session/set_mode`), and `current_mode_update` notifications flow
+back as `mode` events. Agents that already expose a real `mode` config option are left alone to avoid
+a duplicate selector.
+
 ## Subagents (protocol-level)
 
 An ACP agent may delegate to _subagents_ it creates internally and expose them as child sessions

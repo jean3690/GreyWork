@@ -37,6 +37,8 @@ function windowLabel(): string {
 contextBridge.exposeInMainWorld("__GREYWORK_SHELL__", {
   window: {
     label: windowLabel(),
+    // 渲染端据此决定「窗口圆角由系统裁还是自己裁」（Linux 走后者，见 main/window.ts）。
+    platform: process.platform,
     minimize: () => ipcRenderer.invoke(IPC.window.minimize),
     toggleMaximize: () => ipcRenderer.invoke(IPC.window.toggleMaximize),
     close: () => ipcRenderer.invoke(IPC.window.close),

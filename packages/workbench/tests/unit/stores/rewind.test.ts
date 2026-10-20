@@ -191,3 +191,48 @@ describe("rewindTo", () => {
     expect(record.messages).toHaveLength(2);
   });
 });
+
+describe("prepareResend", () => {
+  /** 跑一轮并收尾（清 busy），返回 user 消息与线程 id。 */
+  async function oneTurn() {
+    const record = useSessionStore().createSession(null, "一轮");
+    const agent = useAgentStore();
+    await agent.dispatchToAcp("第一轮");
+    const user = record.messages.find((message) => message.role === "user")!;
+    emit({ kind: "prompt-done", payload: { turnId: 1, response: {} } });
+    return { record, agent, user };
+  }
+
+  it("无快照也截断（非 worktree 档位的编辑重发 / 重新生成靠它）", async () => {
+    const record = useSessionStore().createSession(null, "无快照重发");
+    record.messages.push(
+      { id: "u1", role: "user", content: "旧输入", ts: Date.now() },
+      { id: "a1", role: "assistant", content: "旧回复", ts: Date.now() },
+    );
+    h.invoke.mockClear();
+    const error = await useAgentStore().prepareResend(record.id, "u1");
+
+    expect(error).toBeNull();
+    expect(h.invoke).not.toHaveBeenCalledWith("worktree_restore", expect.anything());
+    expect(record.messages).toHaveLength(0);
+  });
+
+  it("有快照时同样硬恢复 + 截断 + 清绑定（与 rewindTo 同一原语）", async () => {
+    const { record, agent, user } = await oneTurn();
+    h.invoke.mockClear();
+    const error = await agent.prepareResend(record.id, user.id);
+
+    expect(error).toBeNull();
+    expect(h.invoke).toHaveBeenCalledWith("worktree_restore", { root: WT_ROOT, reference: SNAP_REF });
+    expect(record.messages).toHaveLength(0);
+    expect(record.acp).toBeUndefined();
+  });
+
+  it("非 user 消息不接受（assistant 没有「回合起点」语义）", async () => {
+    const record = useSessionStore().createSession(null, "错目标");
+    record.messages.push({ id: "a1", role: "assistant", content: "x", ts: Date.now() });
+
+    expect(await useAgentStore().prepareResend(record.id, "a1")).toBeTruthy();
+    expect(record.messages).toHaveLength(1);
+  });
+});

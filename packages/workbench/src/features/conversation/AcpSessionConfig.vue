@@ -3,6 +3,7 @@
  * ACP 会话配置选择簇（模型 / 思考强度 / 会话模式等）——单独渲染在输入框下方，不与发送按钮同排。
  * 数据源 agent.acpConfigOptions：agent 在 session/new 暴露什么就渲染什么——select 型出下拉胶囊，
  * boolean 型出开关胶囊（协议里两种都存在，早先只消费 select 会把开关类配置整个漏掉）。
+ * 旧版 `modes` 已由 runtime 合成为一条 select 型 config option，这里无感复用。
  * 状态：
  *  - 连接中 → 状态胶囊；
  *  - 已连接且有配置 → 各配置胶囊（切换走 setAcpConfig，后端确认后回填）；
@@ -42,11 +43,14 @@ const extraOptions = computed(() =>
     })),
 );
 
-/** 已连接但当前模型未暴露思考强度配置（opencode 仅对支持 effort 变体的模型开放）→ 提示桩 */
+/**
+ * 已连接但当前模型未暴露思考强度配置（opencode 仅对支持 effort 变体的模型开放）→ 提示桩。
+ * 必须真的暴露了 model 选择器才提示：只有旧版 modes（或别的布尔配置）的 agent 不该被劝去换模型。
+ */
 const showEffortUnavailable = computed(
   () =>
     agent.acpConnected &&
-    agent.acpConfigOptions.length > 0 &&
+    agent.acpConfigOptions.some((entry) => entry.type === "select" && entry.id === "model") &&
     !agent.acpConfigOptions.some((entry) => entry.type === "select" && isThoughtLevelConfigOption(entry)),
 );
 

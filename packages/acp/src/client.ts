@@ -25,6 +25,8 @@ import type {
   AcpPromptUnit,
   AcpSessionConfigOption,
   AcpSessionInfo,
+  AcpSessionMode,
+  AcpSessionModeState,
   AcpSessionOpened,
   AcpTransport,
   McpProbeReport,
@@ -83,6 +85,21 @@ function optionKindLabel(kind: PermissionOptionKind): AcpPermissionOptionInfo["k
 /** 把 SDK 的 ConfigOption 归一成宿主侧 `AcpSessionConfigOption` 形状（前端消费）。 */
 function toConfigOptions(options: SessionConfigOption[] | null | undefined): AcpSessionConfigOption[] {
   return (options ?? []).map((option) => option as AcpSessionConfigOption);
+}
+
+/** 归一旧版 `modes`（SDK 的 description 允许 null，前端契约用可选字符串）。 */
+function toSessionModes(
+  modes: { currentModeId: string; availableModes: Array<{ id: string; name: string; description?: string | null }> } | null | undefined,
+): AcpSessionModeState | undefined {
+  if (!modes) return undefined;
+  return {
+    currentModeId: modes.currentModeId,
+    availableModes: modes.availableModes.map((mode) => ({
+      id: mode.id,
+      name: mode.name,
+      ...(mode.description ? { description: mode.description } : {}),
+    })),
+  };
 }
 
 export interface WebSocketTransportOptions {
@@ -159,6 +176,7 @@ export class WebSocketTransport implements AcpTransport {
     return {
       sessionId: result.sessionId,
       configOptions: toConfigOptions(result.configOptions),
+      modes: toSessionModes(result.modes),
       mcpServers: (mcpServers ?? []).map((server) => server.name),
     };
   }
@@ -166,6 +184,14 @@ export class WebSocketTransport implements AcpTransport {
   /** 远程传输不代管会话恢复（依赖桌面宿主的 session 持久化）：明确报错而非假装成功。 */
   async loadSession(_handle: number, _cwd: string, _sessionId: string, _mcpServers?: readonly McpServerConfig[]): Promise<never> {
     throw new RemoteAcpUnsupportedError("ACP 远程传输不代管会话恢复（恢复依赖桌面宿主的 session 持久化）");
+  }
+
+  /** 关闭远程会话：agent 不支持时请求会失败，调用方按「尽力回收」处理。 */
+  async closeSession(_handle: number, sessionId: string): Promise<boolean> {
+    const ctx = await this.ensureConnected();
+    await ctx.request(AGENT_METHODS.session_close, { sessionId });
+    if (this.sessionId === sessionId) this.sessionId = null;
+    return true;
   }
 
   /** 远程传输没有宿主进程面：探活需要本机发起 HTTP / spawn，明确报错而非假装成功。 */
@@ -181,6 +207,14 @@ export class WebSocketTransport implements AcpTransport {
       ...(typeof value === "boolean" ? { type: "boolean", value } : { value }),
     });
     return toConfigOptions(result.configOptions);
+  }
+
+  async setSessionMode(_handle: number, modeId: string): Promise<void> {
+    const ctx = await this.ensureConnected();
+    await ctx.request(AGENT_METHODS.session_set_mode, {
+      sessionId: this.requireSession(),
+      modeId,
+    });
   }
 
   async prompt(handle: number, text: string, units: readonly AcpPromptUnit[] = []): Promise<{ turnId: number }> {
@@ -354,11 +388,15 @@ export interface AcpClient {
   startAgent(agentCmd: string, tier: PermissionTier, env?: Record<string, string>): Promise<number>;
   /** 建会话；`mcpServers` 随 session/new 声明给 agent，由 agent 连接并合并工具面。 */
   openSession(handle: number, cwd: string, mcpServers?: readonly McpServerConfig[]): Promise<AcpSessionOpened>;
-  /** 恢复已存在会话（session/load）；agent 不支持时由调用方回落 openSession。 */
+  /** 恢复已存在会话（宿主优先 session/resume，其次 session/load）；失败时由调用方回落 openSession。 */
   loadSession(handle: number, cwd: string, sessionId: string, mcpServers?: readonly McpServerConfig[]): Promise<AcpSessionOpened>;
+  /** 关闭当前会话（session/close），保留进程；agent 不支持时返回 false。 */
+  closeSession(handle: number, sessionId: string): Promise<boolean>;
   /** 改写在途会话的权限档位（临时降级/回升）；桌面宿主立即生效。 */
   setPermissionTier(handle: number, tier: PermissionTier): Promise<void>;
   setSessionConfig(handle: number, configId: string, value: string | boolean): Promise<AcpSessionConfigOption[]>;
+  /** 切换旧版会话模式（session/set_mode）；agent 未声明 modes 时会报错。 */
+  setSessionMode(handle: number, modeId: string): Promise<void>;
   prompt(handle: number, text: string, units?: readonly AcpPromptUnit[]): Promise<{ turnId: number }>;
   stop(handle: number, turnId?: number): Promise<void>;
   /** 取消某会话（含协议层子代理子会话）的当前工作：发 ACP `session/cancel`，不回收进程。 */
@@ -394,7 +432,9 @@ export function createAcpClient(transport?: AcpTransport): AcpClient {
     startAgent: (cmd, tier, env) => active().startAgent(cmd, tier, env),
     openSession: (handle, cwd, mcpServers) => active().openSession(handle, cwd, mcpServers),
     loadSession: (handle, cwd, sessionId, mcpServers) => active().loadSession(handle, cwd, sessionId, mcpServers),
+    closeSession: (handle, sessionId) => active().closeSession(handle, sessionId),
     setSessionConfig: (handle, configId, value) => active().setSessionConfig(handle, configId, value),
+    setSessionMode: (handle, modeId) => active().setSessionMode(handle, modeId),
     setPermissionTier: (handle, tier) => active().setPermissionTier(handle, tier),
     prompt: (handle, text, units) => active().prompt(handle, text, units),
     stop: (handle, turnId) => active().stop(handle, turnId),
@@ -409,7 +449,6 @@ export function createAcpClient(transport?: AcpTransport): AcpClient {
 function defaultTransport(): AcpTransport {
   return hasHostCommands() ? new HostCommandTransport() : new WebSocketTransport();
 }
-
 
 /** 桌面端默认工作区目录（用户主目录）；无原生宿主（服务端 / Web）返回 null。 */
 export async function desktopHomeDir(): Promise<string | null> {
@@ -426,6 +465,8 @@ export type {
   AcpPromptUnit,
   AcpSessionConfigOption,
   AcpSessionInfo,
+  AcpSessionMode,
+  AcpSessionModeState,
   AcpSessionOpened,
   AcpTransport,
   McpProbeReport,

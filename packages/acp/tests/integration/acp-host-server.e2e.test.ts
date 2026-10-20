@@ -261,6 +261,14 @@ describe("跨语言 ACP：渲染端 client → 真服务端 → 真宿主 → �
     expect(opened.sessionId).toBe(MOCK_SESSION_ID);
     // 假 agent 在 session/new 里回了一个 model 选择器 —— 证明 configOptions 这条通路也通。
     expect(opened.configOptions.some((option) => option.id === "model")).toBe(true);
+    // 旧版 modes 也走同一条回包：TS 契约、Rust 序列化、跨语言字段名必须对齐。
+    expect(opened.modes?.currentModeId).toBe("build");
+    expect(opened.modes?.availableModes.some((mode) => mode.id === "plan")).toBe(true);
+
+    const modeFrom = events.length;
+    await acp.setSessionMode(handle, "plan");
+    const modeEvent = await waitForEvent("mode", "session/set_mode 回执", modeFrom);
+    expect(modeEvent.payload).toMatchObject({ sessionId: MOCK_SESSION_ID, currentModeId: "plan" });
 
     const sessionNew = await waitForEvent("session-new", "session/new 回执");
     expect((sessionNew.payload as SessionNewPayload).sessionId).toBe(MOCK_SESSION_ID);

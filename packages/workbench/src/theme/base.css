@@ -63,6 +63,36 @@ body {
   color: var(--text);
 }
 
+/* ===== Linux 桌面主窗的圆角 =====
+ *
+ * macOS / Windows 的圆角由系统裁（BrowserWindow 的 roundedCorners）；Linux 上 Electron 30
+ * 还不支持它，主窗因此是透明的（apps/electron/src/main/window.ts），圆角由这里补：
+ * 入口在 mount 前给 <html> 打 `data-native-shell`（apps/desktop/src/window-frame.ts），
+ * 于是 html / body 的兜底底色让位给桌面，由 `#app` 自己铺底色、裁圆角。
+ *
+ * 三个约束：
+ * - 只认主窗：插件悬浮窗也是 Electron，但它是透明的自由形态，不能整窗裁圆角；
+ * - 最大化时 `data-native-maximized` 把圆角归零，否则四角会漏出桌面；
+ * - 圆角跟随「外观 → 圆角」总旋钮，选「无圆角」时窗口也回到直角。
+ *
+ * 裁在 `#app` 而不是它的子节点：登录门探测 /api/session 期间两边都不渲染内容，
+ * `#app` 自铺底色才不会让窗口在半秒里变成一块透空的桌面。
+ */
+:root[data-native-shell] {
+  background-color: transparent;
+}
+:root[data-native-shell] body {
+  background: transparent;
+}
+:root[data-native-shell] #app {
+  overflow: hidden;
+  background: var(--ink);
+  border-radius: calc(10px * var(--gw-radius-scale));
+}
+:root[data-native-shell][data-native-maximized] #app {
+  border-radius: 0;
+}
+
 /* ===== 表单控件重置 + 全局焦点环：**必须**待在 @layer base 里 =====
  *
  * 本文件其余规则都是无层的，而无层样式**永远压过** @layer 里的样式 —— 与选择器特异度无关
@@ -147,6 +177,24 @@ body {
   color: var(--text);
   font-size: 13.5px;
   line-height: 1.75;
+}
+
+/* 流式正文尾部光标（StreamText 的常驻末子元素）：inline-block 细竖条跟在最后一个
+ * 字符后，随文本自然换行。闪烁由全局 prefers-reduced-motion 与 data-perf="low"
+ * 两条规则归零（静态竖条仍在，「还在生成」的语义不丢）。 */
+@keyframes msg-caret-blink {
+  50% {
+    opacity: 0;
+  }
+}
+.msg__caret {
+  display: inline-block;
+  width: 2px;
+  height: 0.85em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--accent);
+  animation: msg-caret-blink 1.1s ease-in-out infinite;
 }
 
 /* ===== Chat 弹层 / 分段开关 =====

@@ -10,6 +10,11 @@
 
 ### 新增
 
+- **桌面主窗圆角**：macOS / Windows 11 沿用系统原生圆角（`roundedCorners`）；Linux 上因 Electron 30
+  尚不支持该选项，主窗改为透明无边框窗口，由渲染端按「外观 → 圆角」旋钮裁圆角
+  （`apps/desktop/src/window-frame.ts` + `theme/base.css`），最大化时自动归零以免四角漏出桌面。
+  只作用于主窗，插件悬浮窗与 Web 端保持不变；Linux/X11 补了 `enable-transparent-visuals` 开关。
+
 - **Office 文档「高保真(PDF)」预览（LibreOffice 本地转换）**：docx / pptx / 老格式（.doc / .ppt 等）
   现在可在原生 viewer 与 LibreOffice 转换出的 PDF 之间切换（viewer 工具栏的「原生 / 高保真(PDF)」）。
   - 高保真路径经宿主 `office_convert_to_pdf` 命令调起 `soffice --convert-to pdf`，字节直接交给既有
@@ -43,6 +48,26 @@
     `acp_cancel_session`（发 ACP `session/cancel` 指向子会话 id，不回收进程），桌面 / 远程传输均已接线。
   - 与应用层「编排子任务」（TeamView 看板，UI 主动拆解并行跑的独立会话）是两回事，两者可并存、按
     sessionId 分流。
+
+- **ACP 会话生命周期补全**：恢复会话时按 agent 声明的能力择优——优先 `session/resume`
+  （不重放历史，切回旧对话更快，也不会用回放抑制窗口吞掉恢复后的首条实时输出），不可用或失败
+  再回落 `session/load`；两者都不支持仍静默回落 `session/new`，保证「发送必达」。切换对话时
+  通过新增的宿主命令 `acp_close_session`（`session/close`）释放旧会话，agent 进程继续复用；
+  未声明 `close` 的后端返回 `false`，按可选的资源回收静默跳过。`packages/acp` 传输层新增
+  `closeSession`，桌面宿主与 WebSocket 远程传输均已接线。
+
+- **ACP 旧版会话模式（session modes）**：agent 在 `session/new` / `session/load` /
+  `session/resume` 回包中声明 `modes` 时，前端把它合成为一条「会话模式」选择器，复用既有
+  config option 链路（工作区记忆 / 全局默认一并生效）；切换经新增宿主命令 `acp_set_mode`
+  发 `session/set_mode`，agent 主动发出的 `current_mode_update` 也会回填选择器。
+  已用 config option（`category: "mode"`）暴露模式的 agent 不会重复渲染；没有 `model`
+  配置时模型胶囊保持只读占位，不再回落到任意 select 抢占模式 / 思考强度配置。
+
+### 修复
+
+- **ACP「停止生成」只发底层 `$/cancel_request`**：部分 agent 没实现这条 JSON-RPC 取消，用户点
+  停止后回合仍会跑完。现在先发协议规定的 `session/cancel` 通知，再以 `$/cancel_request` 兜底；
+  进程与会话保留，后续仍可继续 prompt。
 
 ## [0.7.0] - 2026-10-08
 

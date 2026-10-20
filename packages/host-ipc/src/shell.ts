@@ -20,6 +20,13 @@ export const MAIN_WINDOW_LABEL = "main";
 export interface HostWindow {
   /** 窗口标识；插件悬浮窗据此反查包（`plugin-window-<id>`）。 */
   readonly label: string;
+  /**
+   * 宿主平台（Electron 的 `process.platform`：`darwin` / `win32` / `linux`）。
+   *
+   * 窗口圆角在三端不是同一套机制：macOS / Windows 交给系统，Linux 上 Electron 30 的
+   * `roundedCorners` 还不生效，要由渲染端把窗口变透明后自己裁（见 window-frame.ts）。
+   */
+  readonly platform: string;
   minimize(): Promise<void>;
   toggleMaximize(): Promise<void>;
   close(): Promise<void>;
@@ -61,6 +68,7 @@ export interface CloseGuardHost {
 interface ElectronShellBridge {
   window: {
     label: string;
+    platform: string;
     minimize(): Promise<void>;
     toggleMaximize(): Promise<void>;
     close(): Promise<void>;
@@ -154,6 +162,7 @@ export function hostWindow(): HostWindow | null {
     const w = electron.window;
     return {
       label: w.label,
+      platform: w.platform,
       minimize: () => w.minimize(),
       toggleMaximize: () => w.toggleMaximize(),
       close: () => w.close(),

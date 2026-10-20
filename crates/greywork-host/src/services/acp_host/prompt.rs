@@ -178,8 +178,9 @@ pub async fn acp_send(
 }
 
 /// 停止会话或取消单回合：
-/// - `turn_id` 为 Some：发 `$/cancel_request` 取消该回合，agent 进程与会话保留。
-///   对应前端「停止生成」语义——后续仍可继续 prompt。
+/// - `turn_id` 为 Some：先发 ACP `session/cancel`（协议正路），再发
+///   `$/cancel_request` 兜底；agent 进程与会话保留。对应前端「停止生成」语义——
+///   后续仍可继续 prompt。
 /// - `turn_id` 为 None：发 `session/cancel` 让 agent 收尾，短暂等待刷出后
 ///   abort 事件循环任务并回收子进程。
 ///
@@ -202,6 +203,15 @@ pub async fn acp_stop(
             .turns
             .remove(&turn_id)
             .ok_or_else(|| format!("unknown or finished turn {turn_id}"))?;
+        // ACP 规定的取消入口是 `session/cancel` 通知：agent 收到后应让在途 prompt 以
+        // `cancelled` 收尾。只发 JSON-RPC 的 `$/cancel_request` 不够——不少 agent 没实现
+        // 这条底层取消（或只把它当传输层断连处理），用户点「停止」后回合仍会跑完。
+        // 两者都发：session/cancel 是协议正路，$/cancel_request 作为兜底保留。
+        if let Some(session_id) = session.session_id.clone() {
+            let _ = session
+                .conn
+                .send_notification(CancelNotification::new(session_id));
+        }
         session
             .conn
             .send_cancel_request(request_id)

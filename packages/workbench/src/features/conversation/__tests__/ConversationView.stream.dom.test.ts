@@ -96,6 +96,9 @@ describe("ConversationView · ACP 回合阶段可见性", () => {
       expect(wrapper.text()).toContain("正在思考…");
       expect(wrapper.find('[data-testid="minimal-composer-busy"]').exists()).toBe(true);
     });
+    // 读屏播报同步跟上：流式起止各一句（live region 常驻，内容此时才写入）
+    expect(wrapper.get('[role="status"]').text()).toBe("正在生成回复");
+    expect(wrapper.get("[aria-busy]").attributes("aria-busy")).toBe("true");
 
     // 阶段二：思考增量到达 → 占位消失、当前思考段自动展开可见推理
     emit({ kind: "thought", payload: { text: "先拆解一下需求，" } });
@@ -125,5 +128,12 @@ describe("ConversationView · ACP 回合阶段可见性", () => {
       expect(wrapper.text()).not.toContain("先拆解一下需求");
     });
     expect(wrapper.text()).toContain("已思考"); // 仍保留「已思考 Ns」折叠条
+
+    // 回合收尾（prompt-done）：忙碌标记撤下，播报换成完成句
+    emit({ kind: "prompt-done", payload: {} });
+    await vi.waitFor(() => {
+      expect(wrapper.get('[role="status"]').text()).toBe("回复已生成");
+    });
+    expect(wrapper.get("[aria-busy]").attributes("aria-busy")).toBe("false");
   });
 });

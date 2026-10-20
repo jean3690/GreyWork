@@ -85,7 +85,6 @@ beforeEach(() => {
 });
 
 describe("hasWindowControls", () => {
-
   it("Electron bridge 存在为真", () => {
     stubElectron({ writeText: vi.fn(), readText: vi.fn(), readImagePng: vi.fn() });
     expect(hasWindowControls()).toBe(true);
@@ -111,7 +110,6 @@ describe("hostClipboard 按运行时选后端", () => {
     expect(bridge.writeText).toHaveBeenCalledWith("hi");
     expect(mocks.pluginWriteText).not.toHaveBeenCalled();
   });
-
 
   it("浏览器态：走 Web API，不碰插件", async () => {
     const writeText = vi.fn(() => Promise.resolve());
@@ -168,11 +166,9 @@ describe("hostBrowser 按运行时选后端", () => {
   });
 
   // 命令名 / 参数名必须和宿主 browser.rs 的 browser_* 一一对应，漂移了只有运行时才炸。
-
 });
 
 describe("hasNativeShell（桌面专属命令的守卫）", () => {
-
   it("Electron bridge 存在为真", () => {
     stubElectron({ writeText: vi.fn(), readText: vi.fn(), readImagePng: vi.fn() });
     expect(hasNativeShell()).toBe(true);
@@ -186,13 +182,16 @@ describe("hasNativeShell（桌面专属命令的守卫）", () => {
 
 describe("hostWindow 按运行时选后端", () => {
   it("Electron：show 为空操作、scaleFactor 取 devicePixelRatio", async () => {
-    vi.stubGlobal("window", { __GREYWORK_SHELL__: { window: { label: "main" } }, devicePixelRatio: 3 });
+    vi.stubGlobal("window", {
+      __GREYWORK_SHELL__: { window: { label: "main", platform: "linux" } },
+      devicePixelRatio: 3,
+    });
     const host = hostWindow();
     expect(host).not.toBeNull();
+    expect(host?.platform).toBe("linux");
     await expect(host?.show()).resolves.toBeUndefined();
     await expect(host?.scaleFactor()).resolves.toBe(3);
   });
-
 });
 
 describe("hostApp 应用面", () => {
@@ -211,7 +210,6 @@ describe("hostApp 应用面", () => {
     expect(revealPath).toHaveBeenCalledWith("/a/b");
     expect(openPath).toHaveBeenCalledWith("/a/b");
   });
-
 });
 
 describe("hostDragDrop", () => {
@@ -221,7 +219,6 @@ describe("hostDragDrop", () => {
     vi.stubGlobal("window", {});
     expect(hostDragDrop()).toBeNull();
   });
-
 });
 
 describe("authorizeDroppedPaths", () => {
@@ -238,7 +235,6 @@ describe("authorizeDroppedPaths", () => {
     await authorizeDroppedPaths([]);
     expect(mocks.invoke).not.toHaveBeenCalled();
   });
-
 
   it("浏览器预览态：静默跳过（此态也拿不到磁盘路径）", async () => {
     vi.stubGlobal("window", {});
@@ -310,7 +306,6 @@ describe("hostPicker 按运行时选后端", () => {
     await expect(hostPicker()?.pickFiles({ purpose: "media", multiple: false })).resolves.toEqual([]);
     expect(mocks.invoke).not.toHaveBeenCalled();
   });
-
 });
 
 describe("hostNotify 系统通知面", () => {
@@ -318,7 +313,6 @@ describe("hostNotify 系统通知面", () => {
     vi.stubGlobal("window", {});
     expect(hostNotify()).toBeNull();
   });
-
 
   it("Electron：委派 bridge.notify.system，文案原样不加前缀", async () => {
     const system = vi.fn(() => Promise.resolve());
@@ -351,7 +345,6 @@ describe("hostPlugins 按运行时选后端", () => {
     expect(openWindow).toHaveBeenCalledWith("p");
     expect(closeWindow).toHaveBeenCalledWith("p");
   });
-
 });
 
 describe("hostWindow 各控制方法", () => {
@@ -389,8 +382,6 @@ describe("hostWindow 各控制方法", () => {
     vi.stubGlobal("window", {});
     expect(hostWindow()).toBeNull();
   });
-
-
 });
 
 describe("closeGuardHost 按运行时选后端", () => {
@@ -420,7 +411,6 @@ describe("closeGuardHost 按运行时选后端", () => {
     expect(w.onCloseRequested).toHaveBeenCalledTimes(1);
     expect(w.onExitRequested).toHaveBeenCalledTimes(1);
   });
-
 });
 
 describe("hostClipboard 读写图片/文本", () => {
@@ -433,7 +423,6 @@ describe("hostClipboard 读写图片/文本", () => {
     await expect(clip.readImagePng()).resolves.toEqual(new Uint8Array([1, 2]));
   });
 
-
   it("浏览器态：readText 走 Web API，readImagePng 无 read 时返回 null", async () => {
     const readText = vi.fn(() => Promise.resolve("web"));
     vi.stubGlobal("window", {});
@@ -442,8 +431,6 @@ describe("hostClipboard 读写图片/文本", () => {
     await expect(clip.readText()).resolves.toBe("web");
     await expect(clip.readImagePng()).resolves.toBeNull();
   });
-
-
 
   it("浏览器态：readImagePng 经 clipboard.read 取图像项", async () => {
     const png = new Uint8Array([9]);
@@ -496,7 +483,6 @@ describe("hostApp 版本 / 主目录 / 外链 / 拖入路径", () => {
     vi.stubGlobal("window", { __GREYWORK_SHELL__: { window: {}, app: { pathForFile: () => "" } } });
     expect(hostApp()?.pathForDroppedFile(new File([], "f"))).toBeNull();
   });
-
 });
 
 describe("hostTray 按运行时选后端", () => {
@@ -528,8 +514,6 @@ describe("hostTray 按运行时选后端", () => {
     expect(offNew).toHaveBeenCalledTimes(1);
     expect(offSettings).toHaveBeenCalledTimes(1);
   });
-
-
 });
 
 describe("hostBrowser onState 订阅", () => {
@@ -567,5 +551,4 @@ describe("hostBrowser onState 订阅", () => {
     await hostBrowser()?.onState(handler);
     expect(onState).toHaveBeenCalledWith(handler);
   });
-
 });

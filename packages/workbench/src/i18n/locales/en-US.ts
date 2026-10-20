@@ -719,6 +719,17 @@ export const enUS: MessageSchema = {
     rewindConfirmBody:
       "Workspace files will be hard-restored to the state before this message ran (files created after the snapshot are deleted). This message and everything after it will be discarded. The agent's context is reset — it will forget this conversation and cannot recall what it did.",
     rewindConfirmAction: "Rewind",
+    /* Message actions (hover bar): edit & resend / regenerate / delete. All three rewind via prepareResend and re-run the send chain. */
+    regenerate: "Regenerate reply",
+    editResend: "Edit & resend",
+    deleteMessage: "Delete this reply",
+    editingBanner: "Editing a message · sending will rerun it and everything after",
+    editingCarry: "The original attachments and comments will be resent too",
+    editingCancel: "Cancel edit",
+    editingPlaceholder: "Edit and send…",
+    deleteConfirmTitle: "Delete this reply?",
+    deleteConfirmBody: "This reply will be removed from the conversation and cannot be recovered. Workspace files are untouched.",
+    deleteConfirmAction: "Delete",
     stop: "Stop generating",
     send: "Send",
     uploadFile: "Upload file / image",
@@ -1080,6 +1091,13 @@ export const enUS: MessageSchema = {
     thought: "Thought",
     waiting: "Thinking…",
     seconds: "{s}s",
+    turnDuration: "turn {s}",
+    a11y: {
+      turnStart: "Generating reply",
+      turnEnd: "Reply ready",
+      toolDone: "Tool call completed: {label}",
+      toolFailed: "Tool call failed: {label}",
+    },
     toolStatus: {
       done: "done",
       running: "running",

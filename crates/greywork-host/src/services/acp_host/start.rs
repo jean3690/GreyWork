@@ -164,9 +164,19 @@ pub async fn acp_start(
             format!("initialize failed: {error}{hint}")
         })?;
     let mcp_capabilities = initialize.agent_capabilities.mcp_capabilities.clone();
-    // 顺手记下是否支持 session/load：恢复会话时据此决定是否走 load 而非 new，
-    // 避免对不支持的 agent 发无谓请求（协议只在声明过的会话上才返回 load_session）。
+    // 顺手记下会话生命周期能力：恢复时优先 resume（不重放历史），其次 load；
+    // 切会话时只有声明了 close 才发 session/close，避免对老 agent 发无谓请求。
     let load_session = initialize.agent_capabilities.load_session;
+    let resume_session = initialize
+        .agent_capabilities
+        .session_capabilities
+        .resume
+        .is_some();
+    let close_session = initialize
+        .agent_capabilities
+        .session_capabilities
+        .close
+        .is_some();
     let image_prompts = initialize.agent_capabilities.prompt_capabilities.image;
 
     state.sessions.lock().await.insert(
@@ -181,6 +191,9 @@ pub async fn acp_start(
             workspace_root: None,
             mcp_capabilities,
             load_session,
+            resume_session,
+            close_session,
+            modes: None,
             image_prompts,
         },
     );

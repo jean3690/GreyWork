@@ -22,6 +22,8 @@ export type {
   AcpPromptUnit,
   AcpSessionConfigOption,
   AcpSessionInfo,
+  AcpSessionMode,
+  AcpSessionModeState,
   AcpSessionOpened,
   AcpTransport,
   McpProbeReport,

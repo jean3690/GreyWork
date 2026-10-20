@@ -5,10 +5,13 @@
  * 一条消息可以有多段：思考被正文或工具调用打断后，下一波思考另起一段、各自折叠，
  * 而不是把整轮推理并成消息头上那一坨。
  * 正在流的那一段默认展开，回合推进后自动收起为「已思考 Ns」细条。
+ * 流式中的秒数同样实时跳动（useNow 秒表）——「想了多久」在思考当时就该看得见，
+ * 而不是等它结束才补一个静态读数。
  */
 import { computed, ref, watch } from "vue";
 import { Brain, ChevronDown } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
+import { useNow } from "@/lib/use-now";
 import type { ThinkingSegment } from "@/types";
 
 const props = defineProps<{
@@ -28,7 +31,17 @@ watch(
   },
 );
 
-const seconds = computed(() => t("chatView.seconds", { s: ((props.segment.endedAt - props.segment.startedAt) / 1000).toFixed(1) }));
+/** 流式中每秒推进；结束后停表（静态读数由 endedAt 算，不再变）。 */
+const now = useNow(() => props.live === true);
+
+const seconds = computed(() =>
+  t("chatView.seconds", {
+    s:
+      props.live === true
+        ? ((now.value - props.segment.startedAt) / 1000).toFixed(1)
+        : ((props.segment.endedAt - props.segment.startedAt) / 1000).toFixed(1),
+  }),
+);
 </script>
 
 <template>
@@ -45,7 +58,7 @@ const seconds = computed(() => t("chatView.seconds", { s: ((props.segment.endedA
     >
       <Brain class="think__icon size-[14px] flex-none text-dim2" />
       <span class="think__label font-medium">{{ live ? t("chatView.thinking") : t("chatView.thought") }}</span>
-      <span v-if="!live" class="think__dur ml-auto font-mono text-[11px] text-dim2">{{ seconds }}</span>
+      <span class="think__dur ml-auto font-mono text-[11px] text-dim2" data-testid="thinking-duration">{{ seconds }}</span>
       <ChevronDown
         class="think__caret ml-auto flex-none text-dim2 transition-transform duration-150 [&.think\_\_caret--open]:rotate-180"
         :class="{ 'think__caret--open': open }"

@@ -1,5 +1,6 @@
 // 消息 hover 操作条：复制（两种角色都有）+ 回退（仅带快照的用户消息），回退事件交回宿主。
 import { describe, expect, it, vi } from "vitest";
+import { nextTick } from "vue";
 import { mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import type { ThreadMessage } from "@/types";
@@ -10,11 +11,12 @@ vi.mock("@/lib/clipboard", () => ({ copyText: (text: string) => h.writeText(text
 
 import ConversationMessage from "@/features/conversation/ConversationMessage.vue";
 import { i18n } from "@/i18n";
+import { useChatStore } from "@/stores/chat";
 
-function mountMessage(message: ThreadMessage) {
+function mountMessage(message: ThreadMessage, props: { isLast?: boolean } = {}) {
   const pinia = createPinia();
   setActivePinia(pinia);
-  return mount(ConversationMessage, { props: { message }, global: { plugins: [pinia, i18n] } });
+  return mount(ConversationMessage, { props: { message, ...props }, global: { plugins: [pinia, i18n] } });
 }
 
 const userMsg: ThreadMessage = { id: "u1", role: "user", content: "改一下这段", ts: 1_700_000_000_000 };
@@ -71,5 +73,50 @@ describe("ConversationMessage · 操作条", () => {
     const emitted = wrapper.emitted("rewind");
     expect(emitted).toHaveLength(1);
     expect(emitted?.[0]).toEqual([userWithSnapshot]);
+  });
+});
+
+describe("ConversationMessage · 消息操作（编辑 / 重新生成 / 删除）", () => {
+  it("user 消息给编辑键（不要求快照），并渲染时间戳", () => {
+    const wrapper = mountMessage(userMsg);
+    expect(wrapper.find('[data-testid="message-edit"]').exists()).toBe(true);
+    // 与 assistant 末行同一格式：HH:MM
+    expect(wrapper.text()).toMatch(/\d{2}:\d{2}/);
+  });
+
+  it("assistant 非末条：没有重新生成 / 删除（这两动会截掉其后全部）", () => {
+    const wrapper = mountMessage(assistantMsg);
+    expect(wrapper.find('[data-testid="message-edit"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="message-regenerate"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="message-delete"]').exists()).toBe(false);
+  });
+
+  it("assistant 末条且空闲：重新生成 / 删除都在，点哪键抛哪条消息", async () => {
+    const wrapper = mountMessage(assistantMsg, { isLast: true });
+    await wrapper.get('[data-testid="message-regenerate"]').trigger("click");
+    await wrapper.get('[data-testid="message-delete"]').trigger("click");
+    expect(wrapper.emitted("regenerate")?.[0]).toEqual([assistantMsg]);
+    expect(wrapper.emitted("delete")?.[0]).toEqual([assistantMsg]);
+  });
+
+  it("回合进行中：编辑 / 重新生成 / 删除全部收起（prepareResend 有忙闸，不做无谓入口）", async () => {
+    const wrapper = mountMessage(assistantMsg, { isLast: true });
+    // 先挂载（建好自己的 pinia）再把会话标成忙碌
+    useChatStore().busy = true;
+    await nextTick();
+    expect(wrapper.find('[data-testid="message-regenerate"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="message-delete"]').exists()).toBe(false);
+  });
+
+  it("空回复的末条 assistant 也留操作条（回合白跑一场，要能重生成 / 删掉）", () => {
+    const wrapper = mountMessage({ id: "e2", role: "assistant", content: "", ts: 1 }, { isLast: true });
+    expect(wrapper.find('[data-testid="message-actions"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="message-regenerate"]').exists()).toBe(true);
+  });
+
+  it("点编辑把消息抛给宿主（草稿回填由 ConversationView 做）", async () => {
+    const wrapper = mountMessage(userMsg);
+    await wrapper.get('[data-testid="message-edit"]').trigger("click");
+    expect(wrapper.emitted("edit")?.[0]).toEqual([userMsg]);
   });
 });
