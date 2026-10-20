@@ -131,6 +131,34 @@ describe("xlsxToUniverWorkbook", () => {
     expect(entry?.v).toBeUndefined();
     expect(parsed.styles?.[entry?.s as string]?.bg).toEqual({ rgb: "#FF0000" });
   });
+
+  it("表格 rel 用绝对路径 Target（openpyxl 风格）也能读入，不再 undefined 崩溃", async () => {
+    const { default: JSZip } = await import("jszip");
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet("数据");
+    sheet.addRow(["产品", "销量"]);
+    sheet.addTable({
+      name: "TestTable",
+      ref: "A1:B2",
+      headerRow: true,
+      columns: [{ name: "产品" }, { name: "销量" }],
+      rows: [["甲", 1]],
+    });
+    const raw = new Uint8Array((await workbook.xlsx.writeBuffer()) as ArrayBuffer);
+
+    // 把 exceljs 写的相对 Target（../tables/table1.xml）改写成绝对路径（/xl/tables/table1.xml），
+    // 复刻 openpyxl 等第三方写入器的形态 —— 修复前这个形态会在 exceljs reconcile 里
+    // 留下 undefined 表格条目，读到 Worksheet set model 时整份文件崩掉。
+    const zip = await JSZip.loadAsync(raw);
+    const relEntry = zip.file("xl/worksheets/_rels/sheet1.xml.rels");
+    expect(relEntry).toBeDefined();
+    const relsXml = (await relEntry!.async("string")).replace("../tables/table1.xml", "/xl/tables/table1.xml");
+    zip.file("xl/worksheets/_rels/sheet1.xml.rels", relsXml);
+    const mutated = await zip.generateAsync({ type: "uint8array" });
+
+    const parsed = await xlsxToUniverWorkbook(mutated);
+    expect(parsed.sheets["sheet-1"]?.name).toBe("数据");
+  });
 });
 
 describe("univerWorkbookToXlsx（回写往返）", () => {

@@ -1,9 +1,9 @@
 /**
  * xlsx 读前清洗：剥离图纸 / 图表 / 媒体部件。
  *
- * 为什么要剥：exceljs 有两个入口 —— node 走 `lib/`(源码,补丁有效),
- * 浏览器 / webview 走 `browser` 字段指向的 `dist/exceljs.min.js`(预打包产物,
- * 改不动)。而 dist 解析 drawing 部件时按 `xdr:` 字面前缀匹配节点名,
+ * 为什么要剥：exceljs 有两个入口 —— node 走 `lib/`(源码),浏览器 / webview 走
+ * `browser` 字段指向的 `dist/exceljs.min.js`(预打包产物,补丁两份都要打)。
+ * 而它解析 drawing 部件时按 `xdr:` 字面前缀匹配节点名,
  * openpyxl 等写入器用默认命名空间(`<wsDr xmlns="...">`),解析不出内容,
  * reconcile 阶段 `drawing.anchors` 就崩在 undefined 上(界面表现为
  * 「无法渲染该表格: undefined is not an object (evaluating 'r4.anchors')」)。

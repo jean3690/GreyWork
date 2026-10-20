@@ -6,7 +6,7 @@ settings:
 
 patchedDependencies:
   '@univerjs/engine-render@0.25.1': ef56c7cf160648542d4ad4ca7d248d9591061cd5557ae4f05aba7043070dba2e
-  exceljs@4.4.0: 1d3a419c1cadeda89269d69b7994bfffd10f10633c0918360587b604f73ed7ef
+  exceljs@4.4.0: dc0ced758d61a9183730dbd3b5b6dec071c432dfc45ba31df2b608512cbb04db
 
 importers:
 
@@ -549,7 +549,7 @@ importers:
         version: 6.1.0
       exceljs:
         specifier: ^4.4.0
-        version: 4.4.0(patch_hash=1d3a419c1cadeda89269d69b7994bfffd10f10633c0918360587b604f73ed7ef)
+        version: 4.4.0(patch_hash=dc0ced758d61a9183730dbd3b5b6dec071c432dfc45ba31df2b608512cbb04db)
       jszip:
         specifier: ^3.10.1
         version: 3.10.2
@@ -8090,7 +8090,7 @@ snapshots:
 
   esutils@2.0.3: {}
 
-  exceljs@4.4.0(patch_hash=1d3a419c1cadeda89269d69b7994bfffd10f10633c0918360587b604f73ed7ef):
+  exceljs@4.4.0(patch_hash=dc0ced758d61a9183730dbd3b5b6dec071c432dfc45ba31df2b608512cbb04db):
     dependencies:
       archiver: 5.0.0
       dayjs: 1.11.23
