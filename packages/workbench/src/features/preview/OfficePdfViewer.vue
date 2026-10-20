@@ -39,7 +39,7 @@ let generation = 0;
  * `vfs` 产物只在其被落盘（`diskPath` 就位）后才走得通：纯内存产物没有宿主可读的路径，
  * 硬传相对路径过去只会撞授权拒绝，不如老实回落原生 viewer。
  */
-const effectivePath = computed(() => (props.tab.source === "disk" ? props.tab.path : props.tab.diskPath ?? null));
+const effectivePath = computed(() => (props.tab.source === "disk" ? props.tab.path : (props.tab.diskPath ?? null)));
 
 async function convert(): Promise<void> {
   const path = effectivePath.value;
@@ -65,11 +65,7 @@ async function convert(): Promise<void> {
   }
 }
 
-watch(
-  [() => effectivePath.value, () => props.tab.revision],
-  () => void convert(),
-  { immediate: true },
-);
+watch([() => effectivePath.value, () => props.tab.revision], () => void convert(), { immediate: true });
 </script>
 
 <template>

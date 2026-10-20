@@ -46,10 +46,7 @@ describe("pickWorkspaceFolder", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(pickWorkspaceFolder()).resolves.toBe("/host/allowed/path");
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/command",
-      expect.objectContaining({ method: "POST" }),
-    );
+    expect(fetchMock).toHaveBeenCalledWith("/api/command", expect.objectContaining({ method: "POST" }));
     expect(h.prompt).not.toHaveBeenCalled();
   });
 

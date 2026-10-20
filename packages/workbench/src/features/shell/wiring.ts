@@ -78,9 +78,17 @@ export const SHELL_WIRINGS: Readonly<Record<ShellWiringId, ShellWiring>> = {
        * 因此不会出现「偏好是关到托盘、宿主却按关闭即退出拦」的错配。
        * 宿主还会再叠一道可用性钳制：托盘没建出来时这个偏好不生效（否则窗口藏起来没入口恢复）。
        */
-      watch(() => settings.closeToTray, (enabled) => void syncCloseToTray(enabled), { immediate: true });
+      watch(
+        () => settings.closeToTray,
+        (enabled) => void syncCloseToTray(enabled),
+        { immediate: true },
+      );
       // immediate 让启动时就落地，覆盖掉宿主构建菜单时用的那套占位文案。
-      watch(() => i18n.global.locale.value, () => void syncTrayLabels(currentTrayLabels()), { immediate: true });
+      watch(
+        () => i18n.global.locale.value,
+        () => void syncTrayLabels(currentTrayLabels()),
+        { immediate: true },
+      );
     },
     // 宿主已先显示并聚焦窗口，订阅只是把菜单点击转成应用内动作。
     mount: (ctx) => useTrayBridge({ onNewChat: ctx.onNewChat, onOpenSettings: ctx.openSettings }),

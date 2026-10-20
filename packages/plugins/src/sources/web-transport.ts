@@ -43,9 +43,7 @@ export class WebSkillsTransport implements SkillsMarketTransport {
   }
 
   uninstall(workspaceRoot: string, skillId: string): Promise<void> {
-    return Promise.reject(
-      new Error(`skills uninstall requires the desktop host: ${workspaceRoot.trim()}/.agents/skills/${skillId}`),
-    );
+    return Promise.reject(new Error(`skills uninstall requires the desktop host: ${workspaceRoot.trim()}/.agents/skills/${skillId}`));
   }
 
   /** 内置技能由宿主二进制提供；Web 预览没有宿主，目录为空。 */
@@ -54,9 +52,7 @@ export class WebSkillsTransport implements SkillsMarketTransport {
   }
 
   installBundled(workspaceRoot: string, skillId: string): Promise<{ dir: string; filesWritten: number }> {
-    return Promise.reject(
-      new Error(`bundled skill install requires the desktop host: ${workspaceRoot.trim()}/.agents/skills/${skillId}`),
-    );
+    return Promise.reject(new Error(`bundled skill install requires the desktop host: ${workspaceRoot.trim()}/.agents/skills/${skillId}`));
   }
 }
 

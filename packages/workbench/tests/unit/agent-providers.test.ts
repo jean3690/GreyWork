@@ -267,7 +267,6 @@ describe("agent 后端目录（服务端态：只读门）", () => {
     vi.clearAllMocks();
   });
 
-
   it("db_agents_sync 被禁：启动不再尝试写 agent 目录，localStorage 覆盖层照常写", async () => {
     installServerFetch(false);
     await useCommandCapabilitiesStore().ensureCatalog();
@@ -309,7 +308,5 @@ describe("agent 后端目录（服务端态：只读门）", () => {
 
 /** 从 invoke 记录里滤出 db_agents_sync 调用。 */
 function dbSyncCalls(): Array<[string, Record<string, unknown>]> {
-  return invokeMock.mock.calls.filter(([cmd]) => cmd === "db_agents_sync") as Array<
-    [string, Record<string, unknown>]
-  >;
+  return invokeMock.mock.calls.filter(([cmd]) => cmd === "db_agents_sync") as Array<[string, Record<string, unknown>]>;
 }

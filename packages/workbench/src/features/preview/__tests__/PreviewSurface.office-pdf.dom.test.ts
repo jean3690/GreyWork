@@ -62,8 +62,7 @@ function mountSurface(tab: PreviewTab = docxTab()): VueWrapper {
   return mount(PreviewSurface, { props: { tab } });
 }
 
-const find = (wrapper: VueWrapper, testId: string): boolean =>
-  wrapper.find(`[data-testid="${testId}"]`).exists();
+const find = (wrapper: VueWrapper, testId: string): boolean => wrapper.find(`[data-testid="${testId}"]`).exists();
 
 const officePdfNotices = (): ReturnType<typeof useNoticeStore>["list"] =>
   useNoticeStore().list.filter((notice) => notice.key === "office-pdf-fallback:pv-1");

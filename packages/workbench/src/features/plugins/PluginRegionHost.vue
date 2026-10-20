@@ -52,7 +52,9 @@ const pluginWindowError = ref("");
  * 且当前运行时真有悬浮窗宿主（桌面壳）。浏览器/纯服务端下 openPluginWindow 是
  * no-op —— 入口直接不出现，而不是点了没反应。
  */
-const canFloat = computed(() => Boolean(props.windowDecl) && isPluginCapabilityGranted(props.pluginId, "window.floating") && hasPluginWindowHost());
+const canFloat = computed(
+  () => Boolean(props.windowDecl) && isPluginCapabilityGranted(props.pluginId, "window.floating") && hasPluginWindowHost(),
+);
 
 async function openFloatingWindow(): Promise<void> {
   if (pluginWindowBusy.value) return;
@@ -128,8 +130,8 @@ onUnmounted(() => {
       :height="contribution.height ?? props.render.height ?? 140"
       :fps="props.render.fps ?? 12"
       :pointer="props.render.pointer === true"
-      :pointerChannel="props.dispatchPointer"
-      :onPointerPatch="applyPointerPatch"
+      :pointer-channel="props.dispatchPointer"
+      :on-pointer-patch="applyPointerPatch"
     />
     <div v-if="canFloat" class="flex justify-center">
       <Hint :text="'在桌面弹出透明悬浮窗（' + (props.windowDecl?.width ?? 0) + '×' + (props.windowDecl?.height ?? 0) + '）'" multiline>

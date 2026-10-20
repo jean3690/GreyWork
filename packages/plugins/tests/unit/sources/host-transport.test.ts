@@ -76,7 +76,9 @@ describe("HostSkillsTransport", () => {
   });
 
   it("bundledList/installBundled forward to the bundled host commands", async () => {
-    vi.mocked((await import("@greywork/host-ipc")).invoke).mockResolvedValue([{ id: "ffmpeg-media", name: "ffmpeg 媒体处理", description: "转码", files: ["SKILL.md"] }]);
+    vi.mocked((await import("@greywork/host-ipc")).invoke).mockResolvedValue([
+      { id: "ffmpeg-media", name: "ffmpeg 媒体处理", description: "转码", files: ["SKILL.md"] },
+    ]);
     const list = await transport.bundledList();
     expect(invokeMock).toHaveBeenCalledWith("skills_bundled_list");
     expect(list.map((skill) => skill.id)).toEqual(["ffmpeg-media"]);

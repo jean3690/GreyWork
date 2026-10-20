@@ -111,7 +111,14 @@ describe("LegacyOfficeViewer 降级体验", () => {
     (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = "server";
     (window as unknown as Record<string, unknown>).__GREYWORK_SHELL__ = {
       window: {},
-      app: { openPath: bridge.openPath, openExternal: vi.fn(), version: () => Promise.resolve("0.2.0"), homeDir: () => Promise.resolve(null), revealPath: vi.fn(), pathForFile: () => null },
+      app: {
+        openPath: bridge.openPath,
+        openExternal: vi.fn(),
+        version: () => Promise.resolve("0.2.0"),
+        homeDir: () => Promise.resolve(null),
+        revealPath: vi.fn(),
+        pathForFile: () => null,
+      },
     };
   }
 
