@@ -31,6 +31,27 @@ function delay(ms: number): Promise<void> {
 }
 
 /**
+ * 起 Vite 前先清掉占用目标端口的残留进程（上一轮没干净退出的 vite / 卡死的孙进程）。
+ *
+ * dev 端口是钉死的（见 `dev-server-spec`）：dev 下只有我们自己在用，此刻的占用者必然是残留，
+ * 杀掉即可自愈，不必让用户手动跑 `pnpm electron:dev:fresh`。跨平台：POSIX 用 `lsof` + `xargs kill`，
+ * Windows 用 `netstat` + `taskkill`；任一命令缺失 / 失败都不影响后续（最多回到“端口仍被占”的
+ * 明确报错）。清完稍等端口释放，避免紧接着的 spawn 又撞上。
+ */
+async function freeDevPort(port: number): Promise<void> {
+  const command =
+    process.platform === "win32"
+      ? `for /f "tokens=5" %a in ('netstat -ano ^| findstr ":${port} " ^| findstr LISTENING') do taskkill /PID %a /T /F >nul 2>nul`
+      : `lsof -ti tcp:${port} | xargs -r kill -TERM 2>/dev/null`;
+  await new Promise<void>((resolve) => {
+    const killer = spawn(command, { shell: true, stdio: "ignore" });
+    killer.on("exit", () => resolve());
+    killer.on("error", () => resolve());
+  });
+  await delay(500);
+}
+
+/**
  * 轮询 `origin` 直到 Vite 起来（HTTP 200）或超时。
  *
  * 就绪判定用 `GET /`：Vite 一 listen 就能返回 index.html，不必等首次请求触发依赖预构建。
@@ -60,6 +81,8 @@ async function waitReady(origin: string, child: ChildProcess, timeoutMs = 60_000
 export async function startDevServer(input: { sidecarPort: number }): Promise<DevServer> {
   const port = devServerPort(process.env);
   const origin = devServerOrigin(port);
+  // 先清掉占用端口的残留 vite（上一轮没干净退出的），否则 --strictPort 会直接失败。
+  await freeDevPort(port);
   // 单字符串 + shell:true：Windows 上 pnpm 是 .cmd 垫片，argv 形态直接 spawn 会失败。
   const command = `pnpm ${devServerArgs(port).join(" ")}`;
   const child = spawn(command, {
