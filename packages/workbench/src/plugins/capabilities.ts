@@ -36,6 +36,7 @@ export interface CapabilityCallContext {
     maxBytes?: number;
     schedule?: ManifestScheduleDeclaration;
     models?: string[];
+    ops?: string[];
   };
   /** 审计写入（能力实现内部在关键决策点调用）。 */
   audit(entry: CapabilityAuditEntry): void;
@@ -64,6 +65,7 @@ export type CapabilityGrantSpec =
       maxBytes?: number;
       schedule?: ManifestScheduleDeclaration;
       models?: string[];
+      ops?: string[];
     };
 
 /** 归一化：把 requires 项映成 { capability, params }。 */
@@ -75,6 +77,7 @@ export function normalizeGrantSpec(spec: CapabilityGrantSpec): {
   maxBytes?: number;
   schedule?: ManifestScheduleDeclaration;
   models?: string[];
+  ops?: string[];
 } {
   return typeof spec === "string"
     ? { capability: spec }
@@ -86,6 +89,7 @@ export function normalizeGrantSpec(spec: CapabilityGrantSpec): {
         maxBytes: spec.maxBytes,
         schedule: spec.schedule,
         models: spec.models,
+        ops: spec.ops,
       };
 }
 
@@ -1393,6 +1397,112 @@ const artifactsPublishCapability: CapabilityDefinition = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// clipboard 传输（宿主剪贴板桥：Electron 走主进程，浏览器态走 Web API）
+// ---------------------------------------------------------------------------
+
+/**
+ * 剪贴板传输层：由外壳注入 `hostClipboard()` 门面（见 `@greywork/host-ipc`）。
+ * 读剪贴板在浏览器态可能需要用户手势，失败按普通错误上抛（会记 error 审计）。
+ */
+export interface PluginClipboardTransport {
+  writeText(text: string): Promise<void>;
+  readText(): Promise<string>;
+}
+
+let clipboardTransport: PluginClipboardTransport | null = null;
+
+export function setPluginClipboardTransportForHost(transport: PluginClipboardTransport | null): void {
+  clipboardTransport = transport;
+}
+
+// ---------------------------------------------------------------------------
+// 能力实现：clipboard
+// ---------------------------------------------------------------------------
+
+/** 单次写入 / 读取上限 64 KiB：剪贴板是「一段文本」的通道，不是文件传输。 */
+const CLIPBOARD_MAX_CHARS = 64 * 1024;
+/** 限速：1 分钟 20 次（写剪贴板会覆盖用户手上的内容，刷屏比多读几次更烦）。 */
+const CLIPBOARD_WINDOW_MS = 60_000;
+const CLIPBOARD_MAX_CALLS_PER_WINDOW = 20;
+/** 缺省允许的操作：只写不读 —— 读剪贴板是隐私面，必须在 manifest 里显式声明 `ops`。 */
+const CLIPBOARD_DEFAULT_OPS: readonly string[] = ["write"];
+
+const clipboardWindows = new Map<string, number[]>();
+
+function takeClipboardToken(pluginId: string): boolean {
+  const now = Date.now();
+  const window = (clipboardWindows.get(pluginId) ?? []).filter((ts) => now - ts < CLIPBOARD_WINDOW_MS);
+  if (window.length >= CLIPBOARD_MAX_CALLS_PER_WINDOW) {
+    clipboardWindows.set(pluginId, window);
+    return false;
+  }
+  window.push(now);
+  clipboardWindows.set(pluginId, window);
+  return true;
+}
+
+type ClipboardArgs = { op: "write"; text: string } | { op: "read" };
+
+function isClipboardArgs(value: unknown): value is ClipboardArgs {
+  if (typeof value !== "object" || value === null) return false;
+  const args = value as Record<string, unknown>;
+  if (args.op === "read") return args.text === undefined;
+  if (args.op !== "write") return false;
+  return typeof args.text === "string" && args.text.length <= CLIPBOARD_MAX_CHARS;
+}
+
+const clipboardCapability: CapabilityDefinition = {
+  id: "clipboard",
+  title: "剪贴板",
+  description:
+    '写 / 读系统剪贴板。**写默认允许、读默认拒绝**：字符串形态的 `"clipboard"` 只给 write，要读必须在 manifest 里声明 `{ capability: "clipboard", ops: ["read"] }`（可加 write）。单次 ≤ 64 KiB，每插件 1 分钟最多 20 次；读取内容只记长度进审计，不落日志。',
+  danger: "medium",
+  async invoke(args, ctx) {
+    const audit = (outcome: "ok" | "denied" | "error", detail: string): void => {
+      ctx.audit({
+        plugin: ctx.pluginId,
+        capability: "clipboard",
+        at: new Date().toISOString(),
+        outcome,
+        detail: detail.slice(0, 200),
+      });
+    };
+    if (!isClipboardArgs(args)) {
+      audit("denied", "invalid args (op: read|write, text for write)");
+      throw new Error(`clipboard requires { op: "write", text ≤ ${CLIPBOARD_MAX_CHARS} chars } or { op: "read" }`);
+    }
+    const allowedOps = ctx.grant.ops?.length ? ctx.grant.ops : CLIPBOARD_DEFAULT_OPS;
+    if (!allowedOps.includes(args.op)) {
+      audit("denied", `op not granted: ${args.op} (granted: ${allowedOps.join(", ")})`);
+      throw new Error(`clipboard op not granted: ${args.op} (declare { capability: "clipboard", ops: ["${args.op}"] } in the manifest)`);
+    }
+    if (!clipboardTransport) {
+      audit("denied", "no clipboard transport: the host shell is not available");
+      throw new Error("clipboard requires the host shell");
+    }
+    if (!takeClipboardToken(ctx.pluginId)) {
+      audit("denied", "rate limit exceeded");
+      throw new Error(`clipboard rate limit exceeded (${CLIPBOARD_MAX_CALLS_PER_WINDOW} per ${CLIPBOARD_WINDOW_MS / 60_000} minutes)`);
+    }
+    try {
+      if (args.op === "write") {
+        await clipboardTransport.writeText(args.text);
+        audit("ok", `write · ${args.text.length} chars`);
+        return { written: true };
+      }
+      const text = await clipboardTransport.readText();
+      const truncated = text.length > CLIPBOARD_MAX_CHARS;
+      // 只记长度：剪贴板内容可能含密码 / 私密文本，绝不进审计日志。
+      audit("ok", `read · ${text.length} chars${truncated ? " (truncated)" : ""}`);
+      return { text: truncated ? text.slice(0, CLIPBOARD_MAX_CHARS) : text, truncated };
+    } catch (error) {
+      audit("error", (error instanceof Error ? error.message : String(error)).slice(0, 200));
+      throw error;
+    }
+  },
+};
+
 const scheduleCapability: CapabilityDefinition = {
   id: "schedule",
   title: "后台定时",
@@ -1414,6 +1524,7 @@ export const CAPABILITY_REGISTRY: Readonly<Record<string, CapabilityDefinition>>
   [workspaceReadCapability.id]: workspaceReadCapability,
   [llmChatCapability.id]: llmChatCapability,
   [artifactsPublishCapability.id]: artifactsPublishCapability,
+  [clipboardCapability.id]: clipboardCapability,
   [notifyCapability.id]: notifyCapability,
   [scheduleCapability.id]: scheduleCapability,
   [pluginAdminCapability.id]: pluginAdminCapability,

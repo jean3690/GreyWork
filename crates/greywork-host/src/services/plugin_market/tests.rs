@@ -415,6 +415,7 @@ fn net_fetch_requirement(
     CapabilityRequirement::Parameterized {
         capability: "net.fetch".into(),
         models: vec![],
+        ops: vec![],
         hosts: hosts.iter().map(|host| host.to_string()).collect(),
         methods: methods.iter().map(|method| method.to_string()).collect(),
         paths: paths.iter().map(|path| path.to_string()).collect(),
@@ -447,6 +448,7 @@ fn net_fetch_requirements_require_a_valid_host_allowlist() {
     assert!(validate(CapabilityRequirement::Parameterized {
         capability: "plugin-admin".into(),
         models: vec![],
+        ops: vec![],
         hosts: vec!["api.github.com".into()],
         methods: vec![],
         paths: vec![],
@@ -588,6 +590,7 @@ fn schedule_requirements_require_a_valid_interval_declaration() {
         package.manifest.requires = vec![CapabilityRequirement::Parameterized {
             capability: "schedule".into(),
             models: vec![],
+            ops: vec![],
             hosts: vec![],
             methods: vec![],
             paths: vec![],
@@ -625,6 +628,7 @@ fn schedule_requirements_require_a_valid_interval_declaration() {
     package.manifest.requires = vec![CapabilityRequirement::Parameterized {
         capability: "schedule".into(),
         models: vec![],
+        ops: vec![],
         hosts: vec![],
         methods: vec![],
         paths: vec![],
@@ -639,6 +643,7 @@ fn schedule_requirements_require_a_valid_interval_declaration() {
     package.manifest.requires = vec![CapabilityRequirement::Parameterized {
         capability: "schedule".into(),
         models: vec![],
+        ops: vec![],
         hosts: vec!["api.github.com".into()],
         methods: vec![],
         paths: vec![],
@@ -656,6 +661,7 @@ fn schedule_requirements_require_a_valid_interval_declaration() {
     package.manifest.requires = vec![CapabilityRequirement::Parameterized {
         capability: "net.fetch".into(),
         models: vec![],
+        ops: vec![],
         hosts: vec![],
         methods: vec![],
         paths: vec![],
@@ -673,6 +679,7 @@ fn schedule_requirements_require_a_valid_interval_declaration() {
     package.manifest.requires = vec![CapabilityRequirement::Parameterized {
         capability: "notify".into(),
         models: vec![],
+        ops: vec![],
         hosts: vec![],
         methods: vec!["GET".into()],
         paths: vec![],
@@ -687,6 +694,7 @@ fn schedule_requirements_require_a_valid_interval_declaration() {
     package.manifest.requires = vec![CapabilityRequirement::Parameterized {
         capability: "schedule".into(),
         models: vec![],
+        ops: vec![],
         hosts: vec![],
         methods: vec![],
         paths: vec![],
@@ -710,6 +718,7 @@ fn llm_chat_requirement(models: &[&str]) -> CapabilityRequirement {
         max_bytes: None,
         schedule: None,
         models: models.iter().map(|model| model.to_string()).collect(),
+        ops: vec![],
     }
 }
 
@@ -751,6 +760,7 @@ fn llm_chat_requirements_require_a_model_allowlist() {
         max_bytes: None,
         schedule: None,
         models: vec!["gpt-4o-mini".into()],
+        ops: vec![],
     }];
     let error = validate_package(&package).unwrap_err();
     assert!(
@@ -768,6 +778,7 @@ fn llm_chat_requirements_require_a_model_allowlist() {
         max_bytes: None,
         schedule: None,
         models: vec!["gpt-4o-mini".into()],
+        ops: vec![],
     }];
     let error = validate_package(&package).unwrap_err();
     assert!(error.contains("does not accept models"), "{error}");
@@ -784,6 +795,7 @@ fn llm_chat_requirements_require_a_model_allowlist() {
             min: 60,
         }),
         models: vec!["gpt-4o-mini".into()],
+        ops: vec![],
     }];
     let error = validate_package(&package).unwrap_err();
     assert!(error.contains("schedule does not accept models"), "{error}");
@@ -1007,6 +1019,106 @@ fn demo_fetch_package_parses_and_validates() {
         super::package::validate_requirement(requirement)
             .unwrap_or_else(|error| panic!("demo.fetch requires validates: {error}"));
     }
+}
+
+/// clipboard 参数化声明构造器（只填 ops，其余留空）。
+fn clipboard_requirement(ops: &[&str]) -> CapabilityRequirement {
+    CapabilityRequirement::Parameterized {
+        capability: "clipboard".into(),
+        hosts: vec![],
+        methods: vec![],
+        paths: vec![],
+        max_bytes: None,
+        schedule: None,
+        models: vec![],
+        ops: ops.iter().map(|op| op.to_string()).collect(),
+    }
+}
+
+#[test]
+fn clipboard_requirements_default_to_write_only() {
+    let validate = |requirement| {
+        let mut package = demo_package();
+        package.manifest.requires = vec![requirement];
+        validate_package(&package)
+    };
+
+    // 字符串形态 = 只允许 write（读剪贴板必须显式声明）。
+    assert!(validate(CapabilityRequirement::Plain("clipboard".into())).is_ok());
+
+    // 显式声明 read / read+write：通过。
+    assert!(validate(clipboard_requirement(&["read"])).is_ok());
+    assert!(validate(clipboard_requirement(&["read", "write"])).is_ok());
+    assert!(validate(clipboard_requirement(&["write"])).is_ok());
+
+    // 空 / 重复 / 未知操作：拒绝。
+    let error = validate(clipboard_requirement(&[])).unwrap_err();
+    assert!(error.contains("1-2 entries"), "{error}");
+    let error = validate(clipboard_requirement(&["read", "read"])).unwrap_err();
+    assert!(error.contains("duplicate clipboard op"), "{error}");
+    let error = validate(clipboard_requirement(&["execute"])).unwrap_err();
+    assert!(error.contains("unknown clipboard op"), "{error}");
+
+    // 夹带其它能力的参数：拒绝。
+    let mut package = demo_package();
+    package.manifest.requires = vec![CapabilityRequirement::Parameterized {
+        capability: "clipboard".into(),
+        hosts: vec!["api.github.com".into()],
+        methods: vec![],
+        paths: vec![],
+        max_bytes: None,
+        schedule: None,
+        models: vec![],
+        ops: vec!["write".into()],
+    }];
+    let error = validate_package(&package).unwrap_err();
+    assert!(
+        error.contains("does not accept net.fetch parameters"),
+        "{error}"
+    );
+
+    // ops 也不能挂到 net.fetch 上。
+    let mut package = demo_package();
+    package.manifest.requires = vec![CapabilityRequirement::Parameterized {
+        capability: "net.fetch".into(),
+        hosts: vec!["api.github.com".into()],
+        methods: vec![],
+        paths: vec![],
+        max_bytes: None,
+        schedule: None,
+        models: vec![],
+        ops: vec!["read".into()],
+    }];
+    let error = validate_package(&package).unwrap_err();
+    assert!(error.contains("does not accept ops"), "{error}");
+}
+
+#[test]
+fn demo_clipboard_package_parses_and_validates() {
+    // demo.clipboard.json 是 clipboard 的「就绪未发布」演示包：解析 + 校 ops 声明，
+    // 并把发布占位换成合法 entry / sha256 后过全量 validate。
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../plugin-market/packages/demo.clipboard.json"
+    );
+    let Ok(bytes) = std::fs::read(path) else {
+        // 仓库外构建（单独打包本 crate）跳过。
+        return;
+    };
+    let mut package: PluginPackage =
+        serde_json::from_slice(&bytes).expect("demo.clipboard.json parses");
+    assert_eq!(package.manifest.id, "demo.clipboard");
+    assert!(
+        !package.manifest.requires.is_empty(),
+        "demo.clipboard declares its clipboard requirement"
+    );
+
+    if let Some(runtime) = package.manifest.runtime.as_mut() {
+        runtime.entry =
+            "https://raw.githubusercontent.com/acme/plugins/main/demo.clipboard.js".into();
+        runtime.sha256 = "a".repeat(64);
+    }
+    validate_package(&package).expect("demo.clipboard declaration validates");
 }
 
 #[test]

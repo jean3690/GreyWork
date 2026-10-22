@@ -114,6 +114,7 @@ user, and (3) registered in the host catalog (`packages/workbench/src/plugins/ca
 | `workspace.read`    | high   | `"workspace.read"`                                                                                                                  | Read-only access to user-authorized workspace roots: `roots` lists them, `read` previews text files (≤256 KiB, truncated; binary/dirs refused); desktop/server host only |
 | `llm.chat`          | high   | `{ "capability": "llm.chat", "models": ["gpt-4o-mini"] }`                                                                           | One-shot completion (`prompt`, optional `system`/`model`); credentials stay host-side, the host resolves the configured provider; 8 KiB prompt, 20 calls/10 min          |
 | `artifacts.publish` | medium | `"artifacts.publish"`                                                                                                               | Publish text artifacts (`md`/`html`/`csv`) into the artifact panel; ≤256 KiB, 20 calls/10 min; HTML renders without scripts                                              |
+| `clipboard`         | medium | `"clipboard"` (write) / `{ "capability": "clipboard", "ops": ["read","write"] }`                                                    | Read/write the system clipboard; **read is denied by default** and must be declared via `ops`; ≤64 KiB per call, 20 calls/min, reads audited by length only              |
 | `notify`            | low    | `"notify"`                                                                                                                          | System notification `{ title, body }`; title gets a `[plugin-id] ` attribution prefix, 10 calls/min, desktop host only                                                   |
 | `schedule`          | low    | `{ "capability": "schedule", "schedule": { "kind": "interval", "min": 5 } }`                                                        | Host-driven background wakeups: fires `registerSchedule` while a mount surface is alive, 5-1440 min interval, catch-up once on reactivation                              |
 | `window.floating`   | medium | `"window.floating"`                                                                                                                 | Host-managed transparent always-on-top window rendering the render loop                                                                                                  |
@@ -151,6 +152,10 @@ const file = await greywork.call("workspace.read", { op: "read", path: "README.m
 
 // One-shot model completion (model must be allowlisted in the manifest; credentials stay host-side)
 const { text } = await greywork.call("llm.chat", { prompt: "Summarize: …", system: "Be terse." });
+
+// Clipboard: writing is allowed by the plain grant, reading needs ops: ["read"]
+await greywork.call("clipboard", { op: "write", text: "copied by the plugin" });
+const { text } = await greywork.call("clipboard", { op: "read" });
 
 // Publish a text artifact into the artifact panel (md/html/csv, ≤256 KiB; opens a preview tab)
 await greywork.call("artifacts.publish", { name: "weekly-report", format: "md", data: "# Report…" });
@@ -254,6 +259,31 @@ const { id, path } = await greywork.call("artifacts.publish", {
   markup cannot run code.
 - 20 calls per 10 minutes per plugin; each call is audited and opens a preview tab, which is why the
   rate limit is tighter than the size cap would suggest.
+
+### Clipboard
+
+`clipboard` is the one capability whose default is **asymmetric**: writing is allowed, reading is not.
+
+```jsonc
+// write-only (the plain string form)
+"requires": ["clipboard"]
+
+// explicit read (and write) — required to read what the user copied
+"requires": [{ "capability": "clipboard", "ops": ["read", "write"] }]
+```
+
+```js
+await greywork.call("clipboard", { op: "write", text: "generated snippet" });
+const { text, truncated } = await greywork.call("clipboard", { op: "read" });
+```
+
+- Reading is a privacy surface: it must be declared through `ops`, and the authorization dialog shows
+  it as such. A plugin that only declares the plain string gets `write` and is refused on `read`.
+- 64 KiB per call in both directions; longer reads come back truncated with `truncated: true`.
+- 20 calls per minute per plugin (writes overwrite what the user is holding, so the limit is tight).
+- Audit entries record the **length only** — clipboard contents never reach the audit log.
+- The host bridge picks the reliable path per runtime (Electron main process, Web API in a real
+  browser); in the browser a read may be refused without a user gesture, which surfaces as an error.
 
 ### Scheduled wakeups
 

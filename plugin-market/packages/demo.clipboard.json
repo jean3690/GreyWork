@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "manifest": {
+    "id": "demo.clipboard",
+    "name": "剪贴板工具",
+    "version": "1.0.0",
+    "description": "clipboard 能力演示：把输入框内容写进系统剪贴板，或读回当前剪贴板文本（读需显式声明 ops）。",
+    "kind": "worker",
+    "runtime": {
+      "type": "worker",
+      "entry": "https://raw.githubusercontent.com/OWNER/REPO/COMMIT/demo.clipboard.js",
+      "sha256": "REPLACE_WITH_64_LOWERCASE_HEX"
+    },
+    "requires": [
+      {
+        "capability": "clipboard",
+        "ops": ["read", "write"]
+      }
+    ],
+    "contributes": {
+      "modes": [
+        {
+          "id": "demo-clipboard",
+          "title": "剪贴板工具",
+          "icon": "copy",
+          "page": {
+            "eyebrow": "Marketplace plugin · clipboard",
+            "heading": "剪贴板工具",
+            "body": "clipboard 是唯一「读写默认不对称」的能力：字符串形态只给 write，读必须在 manifest 里声明 ops: [\"read\"]。宿主按运行时选可靠路径（Electron 主进程 / 浏览器 Web API）；单次上限 64 KiB，每插件 1 分钟最多 20 次；审计只记长度，剪贴板内容不会落日志。浏览器态读取可能需要用户手势，被拒时按普通错误上抛。",
+            "fields": [
+              {
+                "key": "text",
+                "label": "要复制的内容",
+                "kind": "text",
+                "default": "Hello from a plugin",
+                "maxLength": 4096
+              },
+              {
+                "key": "pasted",
+                "label": "读回的剪贴板",
+                "kind": "text",
+                "default": "",
+                "maxLength": 4096
+              },
+              {
+                "key": "status",
+                "label": "最近动作",
+                "kind": "text",
+                "default": "尚未操作",
+                "maxLength": 120
+              }
+            ],
+            "outputs": [
+              {
+                "label": "剪贴板",
+                "valueKey": "pasted"
+              },
+              {
+                "label": "动作",
+                "valueKey": "status"
+              }
+            ],
+            "actions": [
+              {
+                "id": "copy",
+                "label": "写入剪贴板",
+                "style": "primary",
+                "operation": {
+                  "type": "invoke",
+                  "handler": "copy"
+                }
+              },
+              {
+                "id": "paste",
+                "label": "读回剪贴板",
+                "style": "secondary",
+                "operation": {
+                  "type": "invoke",
+                  "handler": "paste"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

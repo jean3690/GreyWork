@@ -245,6 +245,7 @@ export function createCapabilityLoader(): CapabilityLoader {
     maxBytes?: number;
     schedule?: ManifestScheduleDeclaration;
     models?: string[];
+    ops?: string[];
   } | null {
     for (const spec of manifestById.get(id)?.requires ?? []) {
       const grant = normalizeGrantSpec(spec);

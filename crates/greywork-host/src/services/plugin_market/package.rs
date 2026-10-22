@@ -46,6 +46,7 @@ pub(super) fn validate_requirement(requirement: &CapabilityRequirement) -> Resul
             max_bytes,
             schedule,
             models,
+            ops,
         } => {
             validate_key(capability, "required capability")?;
             match capability.as_str() {
@@ -57,6 +58,11 @@ pub(super) fn validate_requirement(requirement: &CapabilityRequirement) -> Resul
                         return Err(
                             "net.fetch does not accept models; use the models of llm.chat"
                                 .to_string(),
+                        );
+                    }
+                    if !ops.is_empty() {
+                        return Err(
+                            "net.fetch does not accept ops; use the ops of clipboard".to_string()
                         );
                     }
                     validate_net_fetch_params(hosts, methods, paths, *max_bytes)?;
@@ -74,7 +80,25 @@ pub(super) fn validate_requirement(requirement: &CapabilityRequirement) -> Resul
                             "llm.chat does not accept maxBytes / schedule parameters".to_string()
                         );
                     }
+                    if !ops.is_empty() {
+                        return Err("llm.chat does not accept ops".to_string());
+                    }
                     validate_llm_chat_models(models)
+                }
+                "clipboard" => {
+                    if !hosts.is_empty() || !methods.is_empty() || !paths.is_empty() {
+                        return Err(
+                            "clipboard does not accept net.fetch parameters (hosts/methods/paths)"
+                                .to_string(),
+                        );
+                    }
+                    if max_bytes.is_some() || schedule.is_some() || !models.is_empty() {
+                        return Err(
+                            "clipboard does not accept maxBytes / schedule / models parameters"
+                                .to_string(),
+                        );
+                    }
+                    validate_clipboard_ops(ops)
                 }
                 "schedule" => {
                     if !hosts.is_empty() {
@@ -91,6 +115,9 @@ pub(super) fn validate_requirement(requirement: &CapabilityRequirement) -> Resul
                     }
                     if !models.is_empty() {
                         return Err("schedule does not accept models".to_string());
+                    }
+                    if !ops.is_empty() {
+                        return Err("schedule does not accept ops".to_string());
                     }
                     let Some(declared) = schedule else {
                         return Err("schedule requires schedule parameters: { \"kind\": \"interval\", \"min\": 60 }".to_string());
@@ -216,6 +243,29 @@ fn validate_llm_chat_models(models: &[String]) -> Result<(), String> {
         }
         if !seen.insert(model.as_str()) {
             return Err(format!("duplicate model id in llm.chat allowlist: {model}"));
+        }
+    }
+    Ok(())
+}
+
+/// clipboard 操作子集校验（安装期第一道门；执行期由前端 broker 再校验一次）。
+///
+/// 语义：
+/// - 参数化声明必须给 1-2 条 `read` / `write`，不重复；
+/// - **字符串形态等价于只允许 `write`** —— 读剪贴板是隐私面，必须显式声明。
+fn validate_clipboard_ops(ops: &[String]) -> Result<(), String> {
+    if ops.is_empty() || ops.len() > 2 {
+        return Err("clipboard ops must contain 1-2 entries (read / write)".to_string());
+    }
+    let mut seen = std::collections::HashSet::new();
+    for op in ops {
+        if op != "read" && op != "write" {
+            return Err(format!(
+                "unknown clipboard op: {op} (expected read / write)"
+            ));
+        }
+        if !seen.insert(op.as_str()) {
+            return Err(format!("duplicate clipboard op: {op}"));
         }
     }
     Ok(())

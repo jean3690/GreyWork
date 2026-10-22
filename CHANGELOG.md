@@ -10,10 +10,13 @@
 
 ### 新增
 
+- **插件能力 `clipboard`**：读 / 写系统剪贴板，**读写默认不对称** —— 字符串形态的 `"clipboard"` 只给
+  write，要读必须在 manifest 里声明 `ops: ["read"]`；单次 ≤ 64 KiB、每插件 1 分钟 20 次，审计只记
+  长度（剪贴板内容绝不落日志）。至此 P1 判据「读工作区 README → LLM 总结 → 写入产物面板 → 一键
+  复制」的四个动作全部可用。
 - **插件能力 `artifacts.publish`**：插件能把文本产物（md / html / csv，单份 ≤ 256 KiB）送进产物
   面板 —— 宿主净化文件名后写 `plugins/<id>/`，再镜像到工作区 `artifacts/` 并广播事件（查看器
-  自动开 tab）；HTML 由查看器去脚本渲染。与 `workspace.read`、`llm.chat` 合起来，P1 判据
-  「读工作区 → 模型总结 → 写产物面板 → 一键复制」只差剪贴板那一环。
+  自动开 tab）；HTML 由查看器去脚本渲染。
 - **插件能力 `llm.chat`**：插件终于能做「智能动作」（摘要 / 分类 / 翻译）而拿不到任何密钥 ——
   manifest 用 `{ capability: "llm.chat", models: [...] }` 声明 1-8 条模型白名单（字符串形态在
   安装期直接拒绝），宿主按当前设置解析供应商后走新增的聚合式 `llm_chat_complete` 命令；prompt

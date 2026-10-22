@@ -1,4 +1,4 @@
-import { hasHostCommands, hostPlugins, invoke } from "@greywork/host-ipc";
+import { hasHostCommands, hostClipboard, hostPlugins, invoke } from "@greywork/host-ipc";
 import { computed, ref } from "vue";
 import { adaptInstalledPlugin } from "./declarative";
 import { createWorkerCodePluginRuntime, type CodePluginRuntime, type CodePluginRuntimeFactory } from "./code-runtime";
@@ -17,6 +17,7 @@ import { useCapabilityLoader } from "./current";
 import {
   setNetFetchTransportForHost,
   setPluginArtifactPublisher,
+  setPluginClipboardTransportForHost,
   setPluginFsTransportForHost,
   setPluginLlmChatTransportForHost,
   setPluginNotifyTransportForHost,
@@ -120,6 +121,16 @@ setPluginArtifactPublisher(async (request) => {
     data: request.data,
   });
   return { id };
+});
+
+/**
+ * clipboard 的落点：宿主剪贴板门面按运行时选路（Electron 主进程 / 浏览器 Web API）。
+ * 每次调用现取门面而不是模块求值时捕获 —— Electron 的 bridge 在 preload 注入后才可用，
+ * 且浏览器态的 navigator.clipboard 也只在调用时才有意义。
+ */
+setPluginClipboardTransportForHost({
+  writeText: (text) => hostClipboard().writeText(text),
+  readText: () => hostClipboard().readText(),
 });
 
 /** 用户可覆盖为自己的 GitHub raw index；空串表示尚未配置线上目录。 */

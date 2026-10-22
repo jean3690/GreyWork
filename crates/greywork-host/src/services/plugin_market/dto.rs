@@ -60,7 +60,7 @@ pub struct PluginWindowDecl {
 
 /// manifest `requires` 项：字符串 = 无参数；对象 = 带资源参数
 /// （net.fetch 的 hosts / methods / paths / maxBytes 白名单；schedule 的定时参数；
-/// llm.chat 的 models 模型白名单）。
+/// llm.chat 的 models 模型白名单；clipboard 的 ops 操作子集）。
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum CapabilityRequirement {
@@ -84,6 +84,9 @@ pub enum CapabilityRequirement {
         /// llm.chat 专属：允许调用的模型白名单（其它能力不得携带）。
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         models: Vec<String>,
+        /// clipboard 专属：允许的操作子集（`read` / `write`；缺省等于只允许 write）。
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        ops: Vec<String>,
     },
 }
 
