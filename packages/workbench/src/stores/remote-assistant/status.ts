@@ -51,6 +51,8 @@ export interface StatusApi {
   refreshQqStatus(): Promise<QqStatus>;
   refreshDiscordStatus(): Promise<DiscordStatus>;
   refreshWecomStatus(): Promise<WecomStatus>;
+  /** 拉齐七条通道状态与媒体能力（页面挂载 / 手动刷新用）。 */
+  refreshAll(): Promise<void>;
   refreshTelegramBotLink(): Promise<TelegramBotLink | null>;
   /** 拉取各通道的媒体能力矩阵（宿主直出；取不到时保留默认矩阵）。 */
   refreshMediaCapabilities(): Promise<void>;
@@ -127,6 +129,26 @@ export function createStatusSlice({ state }: { state: RemoteAssistantState }): S
   }
 
   /**
+   * 拉齐七条通道状态与媒体能力。
+   *
+   * 微信是主通道：它的失败仍然向上抛（调用方据此提示「刷新失败」）；其余通道是可选
+   * 能力，单条命令缺失或网络抖动只让那一条保持旧值，不影响整页状态。
+   */
+  async function refreshAll(): Promise<void> {
+    if (!state.available.value) return;
+    await Promise.all([
+      refreshStatus(),
+      refreshDingTalkStatus().catch(() => undefined),
+      refreshFeishuStatus().catch(() => undefined),
+      refreshTelegramStatus().catch(() => undefined),
+      refreshQqStatus().catch(() => undefined),
+      refreshDiscordStatus().catch(() => undefined),
+      refreshWecomStatus().catch(() => undefined),
+    ]);
+    await refreshMediaCapabilities();
+  }
+
+  /**
    * 取机器人扫码链接（宿主 getMe）。
    *
    * 放在 status 切片：它是「当前通道长什么样」的一部分，且渲染端只读、可重复取。
@@ -185,6 +207,7 @@ export function createStatusSlice({ state }: { state: RemoteAssistantState }): S
     refreshQqStatus,
     refreshDiscordStatus,
     refreshWecomStatus,
+    refreshAll,
     recordActivity,
   };
 }

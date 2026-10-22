@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 import { appEvents } from "@/events";
-import { peerKey, useRemoteAssistantStore, type RemoteChannel } from "@/stores/remote-assistant";
+import { peerKey, useRemoteAssistantStore, type RemoteActivityKind, type RemoteChannel } from "@/stores/remote-assistant";
+import { useAgentStore } from "@/stores/agent";
 import { useSettingsStore } from "@/stores/settings";
 import Icon from "@/features/shared/Icon.vue";
 
@@ -17,6 +18,7 @@ const { t, locale } = useI18n();
 const router = useRouter();
 const store = useRemoteAssistantStore();
 const settings = useSettingsStore();
+const agent = useAgentStore();
 
 /** 已接入的通道（页面按这个清单出卡片）。 */
 const CHANNELS: RemoteChannel[] = ["wechat", "dingtalk", "feishu", "telegram", "qq", "discord", "wecom"];
@@ -26,8 +28,25 @@ const replyBackendLabel = computed(() => {
   if (settings.remoteAssist.replyMode !== "acp") return t("remoteAssist.settings.replyLlm");
   const configured = settings.remoteAssist.replyProviderId;
   if (!configured) return t("remoteAssist.settings.replyProviderFollow");
-  return configured;
+  return agent.agentProviders.find((provider) => provider.id === configured)?.name ?? configured;
 });
+
+/** 页面级刷新：七条通道 + 媒体能力一起拉，失败只影响提示，不挡住页面。 */
+const refreshing = ref(false);
+const refreshError = ref<string | null>(null);
+
+async function refreshAll(): Promise<void> {
+  if (refreshing.value) return;
+  refreshing.value = true;
+  refreshError.value = null;
+  try {
+    await store.refreshAll();
+  } catch (error) {
+    refreshError.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    refreshing.value = false;
+  }
+}
 
 /** 通道状态文案（与设置面板同一个映射）。 */
 function channelState(channel: RemoteChannel): string {
@@ -42,16 +61,30 @@ function channelConnected(channel: RemoteChannel): boolean {
   return store.connectedOf(channel);
 }
 
-// 回到本页时拉一次两条通道的状态：状态可能是在别处（设置里扫码 / 断开）变的。
+// 回到本页时拉一次七条通道的状态与媒体能力：状态可能是在别处（设置里扫码 / 断开）变的。
 onMounted(() => {
-  void store.refreshStatus().catch(() => undefined);
-  void store.refreshDingTalkStatus().catch(() => undefined);
-  void store.refreshFeishuStatus().catch(() => undefined);
+  void refreshAll();
 });
 
 function formatTime(at: number): string {
   if (!at) return "";
   return new Date(at).toLocaleTimeString(locale.value, { hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
+function lastMessageLabel(channel: RemoteChannel): string {
+  const at = store.statusOf(channel).lastMessageAt;
+  return at ? t("remoteAssist.channels.lastMessage", { time: formatTime(at) }) : "";
+}
+
+/** 活动流图标底色：异常用红、暂不支持用琥珀，其余保持中性。 */
+function activityTone(kind: RemoteActivityKind): string {
+  if (kind === "error") return "text-destructive";
+  if (kind === "unsupported") return "text-amber";
+  return "text-dim";
+}
+
+function activityTextTone(kind: RemoteActivityKind): string {
+  return kind === "error" ? "text-destructive" : "text-dim2";
 }
 
 function openSettings(): void {
@@ -65,10 +98,26 @@ function openConversation(key: string): void {
 
 <template>
   <section class="mx-auto min-h-0 h-full w-full max-w-[860px] overflow-y-auto px-4 py-6 sm:px-6">
-    <div class="mb-5">
-      <h1 class="font-display text-[20px] font-bold tracking-tight text-foreground">{{ t("remoteAssist.page.title") }}</h1>
-      <p class="mt-1 text-[12px] text-dim2">{{ t("remoteAssist.page.desc") }}</p>
+    <div class="mb-5 flex items-start justify-between gap-3">
+      <div class="min-w-0">
+        <h1 class="font-display text-[20px] font-bold tracking-tight text-foreground">{{ t("remoteAssist.page.title") }}</h1>
+        <p class="mt-1 text-[12px] text-dim2">{{ t("remoteAssist.page.desc") }}</p>
+      </div>
+      <button
+        type="button"
+        class="flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-[calc(7px*var(--gw-radius-scale))] border border-line bg-panel px-2.5 text-[11.5px] text-dim transition-colors hover:border-line-2 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+        :disabled="refreshing"
+        :aria-label="t('remoteAssist.channels.refresh')"
+        data-testid="remote-refresh"
+        @click="void refreshAll()"
+      >
+        <Icon name="refresh" :size="12" :class="refreshing ? 'animate-spin' : ''" />
+        {{ refreshing ? t("remoteAssist.channels.refreshing") : t("remoteAssist.channels.refresh") }}
+      </button>
     </div>
+    <p v-if="refreshError" class="mb-3 text-[11px] text-destructive" data-testid="remote-refresh-error">
+      {{ t("remoteAssist.channels.refreshFailed", { detail: refreshError }) }}
+    </p>
 
     <div class="flex flex-col gap-2.5">
       <!-- 通道现状：每条通道一张卡（状态 + 回复后端 + 设置入口） -->
@@ -98,6 +147,20 @@ function openConversation(key: string): void {
               {{ channelReady(channel) ? store.statusOf(channel).account : t(`remoteAssist.channels.${channel}NotReady`) }}
               <template v-if="!store.available"> · {{ t("remoteAssist.channels.desktopOnly") }}</template>
             </div>
+            <p
+              v-if="store.statusOf(channel).detail"
+              class="mt-1 line-clamp-2 text-[10.5px] leading-relaxed text-dim2"
+              :data-testid="`${channel}-status-detail`"
+            >
+              {{ store.statusOf(channel).detail }}
+            </p>
+            <p
+              v-else-if="store.statusOf(channel).lastMessageAt"
+              class="mt-1 text-[10.5px] text-dim2"
+              :data-testid="`${channel}-last-message`"
+            >
+              {{ lastMessageLabel(channel) }}
+            </p>
           </div>
           <button
             type="button"
@@ -117,7 +180,7 @@ function openConversation(key: string): void {
           {{ t("remoteAssist.conversation.peersEmpty") }}
         </p>
         <ul v-else class="flex flex-col gap-1" data-testid="remote-peers">
-          <li v-for="peer in store.peerList" :key="peer.id">
+          <li v-for="peer in store.peerList" :key="peerKey(peer)">
             <button
               type="button"
               class="flex w-full cursor-pointer items-center gap-2 rounded-[calc(10px*var(--gw-radius-scale))] border border-transparent px-2 py-2 text-left transition-colors hover:border-line hover:bg-panel-2 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
@@ -141,6 +204,40 @@ function openConversation(key: string): void {
                 :aria-label="t('remoteAssist.conversation.peers')"
               />
             </button>
+          </li>
+        </ul>
+      </article>
+
+      <!-- 最近活动：入站 / 出站 / 通道异常都由 store 记录，这里只展示最近一屏。 -->
+      <article class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-4" data-testid="remote-activity">
+        <div class="mb-2 flex items-center justify-between gap-2">
+          <div class="text-[13px] font-medium text-foreground">{{ t("remoteAssist.channels.activity") }}</div>
+          <span v-if="store.activity.length" class="text-[10.5px] text-dim2">{{ store.activity.length }}</span>
+        </div>
+        <p v-if="store.activity.length === 0" class="text-[11.5px] text-dim2" data-testid="remote-activity-empty">
+          {{ t("remoteAssist.channels.activityEmpty") }}
+        </p>
+        <ul v-else class="flex flex-col gap-1" data-testid="remote-activity-list">
+          <li
+            v-for="entry in store.activity"
+            :key="entry.id"
+            class="flex items-center gap-2 rounded-[calc(9px*var(--gw-radius-scale))] px-2 py-1.5"
+            :data-testid="`remote-activity-${entry.id}`"
+          >
+            <span
+              class="grid size-6 shrink-0 place-items-center rounded-[calc(7px*var(--gw-radius-scale))] bg-panel-2"
+              :class="activityTone(entry.kind)"
+            >
+              <Icon :name="entry.direction === 'in' ? 'down' : 'up'" :size="12" />
+            </span>
+            <span class="min-w-0 flex-1">
+              <span class="block truncate text-[11.5px] text-foreground">
+                <span class="text-dim2">{{ t(`remoteAssist.channels.${entry.channel}`) }}</span>
+                · {{ entry.peer }}
+              </span>
+              <span class="block truncate text-[10.5px]" :class="activityTextTone(entry.kind)">{{ entry.text }}</span>
+            </span>
+            <span class="shrink-0 text-[10.5px] text-dim2">{{ formatTime(entry.at) }}</span>
           </li>
         </ul>
       </article>

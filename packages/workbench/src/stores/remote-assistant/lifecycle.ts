@@ -159,30 +159,9 @@ export function createLifecycleSlice({ state, getStatus, getConnect, getPipeline
     }
   }
 
-  /** 拉齐各通道状态与媒体能力（init 与断线重连共用）。 */
+  /** 拉齐各通道状态与媒体能力（init 与断线重连共用；实现在 status 切片里）。 */
   async function refreshAllStatus(): Promise<void> {
-    await getStatus().refreshStatus();
-    // 钉钉等只有桌面端有宿主命令的通道：拉取失败保持初始值，不影响其余通道。
-    await getStatus()
-      .refreshDingTalkStatus()
-      .catch(() => undefined);
-    await getStatus()
-      .refreshFeishuStatus()
-      .catch(() => undefined);
-    await getStatus()
-      .refreshTelegramStatus()
-      .catch(() => undefined);
-    await getStatus()
-      .refreshQqStatus()
-      .catch(() => undefined);
-    await getStatus()
-      .refreshDiscordStatus()
-      .catch(() => undefined);
-    await getStatus()
-      .refreshWecomStatus()
-      .catch(() => undefined);
-    // 媒体能力矩阵：宿主直出，取不到就沿用默认。
-    await getStatus().refreshMediaCapabilities();
+    await getStatus().refreshAll();
   }
 
   /** 断线重连后重拉状态对齐（不重连、不动用户设置）。 */

@@ -144,6 +144,7 @@ export const useRemoteAssistantStore = defineStore("remote-assistant", () => {
     refreshTelegramStatus: status.refreshTelegramStatus,
     refreshQqStatus: status.refreshQqStatus,
     refreshWecomStatus: status.refreshWecomStatus,
+    refreshAll: status.refreshAll,
     saveDiscordCredentials: connect.saveDiscordCredentials,
     connectDiscord: connect.connectDiscord,
     disconnectDiscord: connect.disconnectDiscord,

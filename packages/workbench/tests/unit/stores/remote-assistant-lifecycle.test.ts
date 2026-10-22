@@ -113,7 +113,20 @@ function build(): LifecycleFixture {
     refreshDiscordStatus: vi.fn(() => Promise.resolve({})),
     refreshWecomStatus: vi.fn(() => Promise.resolve({})),
     refreshMediaCapabilities: vi.fn(() => Promise.resolve()),
+    refreshAll: vi.fn(),
   };
+  refresh.refreshAll.mockImplementation(async () => {
+    await Promise.all([
+      refresh.refreshStatus(),
+      refresh.refreshDingTalkStatus(),
+      refresh.refreshFeishuStatus(),
+      refresh.refreshTelegramStatus(),
+      refresh.refreshQqStatus(),
+      refresh.refreshDiscordStatus(),
+      refresh.refreshWecomStatus(),
+    ]);
+    await refresh.refreshMediaCapabilities();
+  });
   const connect: Record<string, Mock<() => Promise<void>>> = {
     connect: vi.fn(() => Promise.resolve()),
     connectDingTalk: vi.fn(() => Promise.resolve()),
@@ -211,6 +224,7 @@ describe("init 门禁", () => {
       expect(cap.onState).toHaveBeenCalledTimes(1);
       expect(cap.onInbound).toHaveBeenCalledTimes(1);
     }
+    expect(h.refresh.refreshAll).toHaveBeenCalledTimes(1);
     expect(h.refresh.refreshStatus).toHaveBeenCalledTimes(1);
     expect(h.refresh.refreshWecomStatus).toHaveBeenCalledTimes(1);
     expect(h.refresh.refreshMediaCapabilities).toHaveBeenCalledTimes(1);

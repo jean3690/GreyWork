@@ -234,6 +234,37 @@ describe("刷新门禁", () => {
     await expect(h.api.refreshTelegramBotLink()).resolves.toBeNull();
   });
 
+  it("refreshAll：七条通道状态与媒体能力一次拉齐", async () => {
+    const h = build();
+    await h.api.refreshAll();
+    expect(backends.wechatStatus).toHaveBeenCalledTimes(1);
+    expect(backends.dingtalkStatus).toHaveBeenCalledTimes(1);
+    expect(backends.feishuStatus).toHaveBeenCalledTimes(1);
+    expect(backends.telegramStatus).toHaveBeenCalledTimes(1);
+    expect(backends.qqStatus).toHaveBeenCalledTimes(1);
+    expect(backends.discordStatus).toHaveBeenCalledTimes(1);
+    expect(backends.wecomStatus).toHaveBeenCalledTimes(1);
+    expect(backends.capabilities).toHaveBeenCalledTimes(1);
+  });
+
+  it("refreshAll：可选通道失败不影响其余通道，微信失败向上抛", async () => {
+    const h = build();
+    backends.qqStatus.mockRejectedValue(new Error("qq down"));
+    await expect(h.api.refreshAll()).resolves.toBeUndefined();
+    expect(backends.wecomStatus).toHaveBeenCalledTimes(1);
+
+    backends.wechatStatus.mockRejectedValue(new Error("wechat down"));
+    await expect(h.api.refreshAll()).rejects.toThrow("wechat down");
+  });
+
+  it("refreshAll：浏览器态不碰宿主", async () => {
+    const h = build();
+    h.available.value = false;
+    await h.api.refreshAll();
+    expect(backends.wechatStatus).not.toHaveBeenCalled();
+    expect(backends.capabilities).not.toHaveBeenCalled();
+  });
+
   it("微信：宿主快照写回 state", async () => {
     const h = build();
     backends.wechatStatus.mockResolvedValue({

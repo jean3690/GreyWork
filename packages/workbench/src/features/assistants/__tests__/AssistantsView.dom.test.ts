@@ -7,6 +7,7 @@ import AssistantsView from "@/features/assistants/AssistantsView.vue";
 import { appEvents } from "@/events";
 import { i18n } from "@/i18n";
 import { createAppRouter } from "@/router";
+import { useRemoteAssistantStore } from "@/stores/remote-assistant";
 
 const mocks = vi.hoisted(() => ({
   backend: {
@@ -74,6 +75,32 @@ vi.mock("@/lib/dingtalk-backend", () => ({
     onInbound: vi.fn(async () => () => {}),
   },
 }));
+
+/** 其余四条通道：页面挂载即刷新全部状态，缺一个 mock 会在 refreshAll 里抛错。 */
+function idleChannelBackend() {
+  return {
+    supported: () => true,
+    status: vi.fn(async () => ({
+      configured: false,
+      state: "stopped" as const,
+      detail: null,
+      lastMessageAt: null,
+      peerCount: 0,
+    })),
+    saveCredentials: vi.fn(),
+    clearCredentials: vi.fn(),
+    connect: vi.fn(),
+    disconnect: vi.fn(),
+    send: vi.fn(),
+    onState: vi.fn(async () => () => {}),
+    onInbound: vi.fn(async () => () => {}),
+  };
+}
+
+vi.mock("@/lib/telegram-backend", () => ({ telegramBackend: idleChannelBackend() }));
+vi.mock("@/lib/qq-backend", () => ({ qqBackend: idleChannelBackend() }));
+vi.mock("@/lib/discord-backend", () => ({ discordBackend: idleChannelBackend() }));
+vi.mock("@/lib/wecom-backend", () => ({ wecomBackend: idleChannelBackend() }));
 
 /** 预置一个联系人档案（页面要列出来并作为会话入口）。 */
 function seedPeer(): void {
@@ -154,9 +181,70 @@ describe("AssistantsView（远程助手）", () => {
     }
   });
 
-  it("没有联系人时给出空态说明", async () => {
+  it("没有联系人时给出空态说明；最近活动同样有空态", async () => {
     const { wrapper } = await mountPage();
     expect(wrapper.get('[data-testid="remote-peers-empty"]').text()).toContain("等对方发一条消息");
+    expect(wrapper.get('[data-testid="remote-activity-empty"]').text()).toContain("还没有消息往来");
+  });
+
+  it("最近活动展示入站 / 出站条目与通道标签", async () => {
+    const { wrapper } = await mountPage();
+    const store = useRemoteAssistantStore();
+    store.activity.push(
+      { id: "wa-in", direction: "in", channel: "wechat", peer: "甲", text: "在吗", kind: "text", at: 1_730_000_000_000 },
+      { id: "wa-out", direction: "out", channel: "telegram", peer: "乙", text: "收到", kind: "text", at: 1_730_000_001_000 },
+    );
+    await wrapper.vm.$nextTick();
+    const panel = wrapper.get('[data-testid="remote-activity"]');
+    expect(panel.text()).toContain("最近活动");
+    const inbound = wrapper.get('[data-testid="remote-activity-wa-in"]');
+    expect(inbound.text()).toContain("微信");
+    expect(inbound.text()).toContain("在吗");
+    const outbound = wrapper.get('[data-testid="remote-activity-wa-out"]');
+    expect(outbound.text()).toContain("Telegram");
+    expect(outbound.text()).toContain("收到");
+  });
+
+  it("刷新失败时保留页面并给出失败原因", async () => {
+    mocks.backend.status.mockRejectedValueOnce(new Error("宿主未响应"));
+    const { wrapper } = await mountPage();
+    await vi.waitFor(() => expect(wrapper.find('[data-testid="remote-refresh-error"]').exists()).toBe(true));
+    expect(wrapper.get('[data-testid="remote-refresh-error"]').text()).toContain("宿主未响应");
+    // 失败不清空已有内容：通道卡仍按初始状态渲染。
+    expect(wrapper.find('[data-testid="channel-wechat"]').exists()).toBe(true);
+  });
+
+  it("同一对端 id 出现在不同通道时按通道区分（列表 key 不撞）", async () => {
+    window.localStorage.setItem(
+      "greywork.remote-assistant.peers",
+      JSON.stringify({
+        peers: [
+          {
+            channel: "wechat",
+            id: "same-id",
+            nick: "微信同名",
+            sessionId: "s-1",
+            contextToken: "ctx-1",
+            lastAt: 1_730_000_000_000,
+            lastText: "微信消息",
+            readAt: 0,
+          },
+          {
+            channel: "telegram",
+            id: "same-id",
+            nick: "Telegram 同名",
+            sessionId: "s-2",
+            contextToken: null,
+            lastAt: 1_730_000_001_000,
+            lastText: "TG 消息",
+            readAt: 0,
+          },
+        ],
+      }),
+    );
+    const { wrapper } = await mountPage();
+    expect(wrapper.get('[data-testid="remote-peer-wechat:same-id"]').text()).toContain("微信消息");
+    expect(wrapper.get('[data-testid="remote-peer-telegram:same-id"]').text()).toContain("TG 消息");
   });
 
   it("联系人列表带通道标签，可点进会话页，未读带小圆点", async () => {
