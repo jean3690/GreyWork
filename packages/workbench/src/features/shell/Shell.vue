@@ -22,7 +22,6 @@ import { SHELL_WIRINGS, type ShellWiringContext } from "@/features/shell/wiring"
 import MinimalSider from "@/features/shell/MinimalSider.vue";
 import Titlebar from "@/features/shell/Titlebar.vue";
 import NoticeHost from "@/features/shell/NoticeHost.vue";
-import PermissionPromptHost from "@/features/conversation/PermissionPromptHost.vue";
 import WorkspaceOverlayRegions from "@/features/shell/WorkspaceOverlayRegions.vue";
 
 /**
@@ -37,7 +36,10 @@ const SettingsDialog = defineAsyncComponent(() => import("@/features/settings/Se
 const PreviewSider = defineAsyncComponent(() => import("@/features/preview/PreviewSider.vue"));
 const WorkspacePanel = defineAsyncComponent(() => import("@/features/workspace/WorkspacePanel.vue"));
 const TerminalPanel = defineAsyncComponent(() => import("@/features/terminal/TerminalPanel.vue"));
-// 手输路径弹层：只有无原生选择器时才会用到，不必进首屏（Dialog 原语不小）。
+// 权限浮层只在有待决请求时才渲染内容；静态 import 会把权限卡片等子树一起拖进入口 chunk。
+// 改成异步：首帧后本地加载，后台任务真的弹权限时已就位。
+const PermissionPromptHost = defineAsyncComponent(() => import("@/features/conversation/PermissionPromptHost.vue"));
+// 手输路径弹层同理：只有无原生选择器时才会用到，不必进首屏（Dialog 原语不小）。
 const PathPromptDialog = defineAsyncComponent(() => import("@/features/workspace/PathPromptDialog.vue"));
 
 /**

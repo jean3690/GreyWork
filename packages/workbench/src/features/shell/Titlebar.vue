@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref } from "vue";
 import { hasWindowControls as hasHostWindowControls, hostWindow, type UnlistenFn } from "@greywork/host-ipc";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { usePreviewStore } from "@/stores/preview";
@@ -9,12 +9,18 @@ import { hostOs } from "@/lib/host-platform";
 import Icon from "@/features/shared/Icon.vue";
 import Hint from "@/features/shared/Hint.vue";
 import ContextMenuRegion from "@/features/shared/ContextMenuRegion.vue";
-import SearchPanel from "@/features/workspace/SearchPanel.vue";
 import { buildTitlebarItems, type ContextMenuItem } from "@/lib/context-menu";
 import { Popover, PopoverTrigger } from "@/components/ui/popover";
 import { useI18n } from "vue-i18n";
 import { updateBackend, REPO_URL } from "@/lib/update-backend";
-import UpdateDialog from "@/features/shell/UpdateDialog.vue";
+
+/**
+ * 两个「点开才用」的面板：搜索索引要扫全部会话正文，检查更新要走 GitHub。
+ * 静态 import 会让它们和标题栏一起进首屏 chunk；改成异步后首次打开多几毫秒本地加载，
+ * 但启动时不再解析这两棵子树。
+ */
+const SearchPanel = defineAsyncComponent(() => import("@/features/workspace/SearchPanel.vue"));
+const UpdateDialog = defineAsyncComponent(() => import("@/features/shell/UpdateDialog.vue"));
 
 /**
  * GreyWork 风格标题栏：侧栏开合 + 主导航 + 当前工作区指示 + 右上角窗口控制键。

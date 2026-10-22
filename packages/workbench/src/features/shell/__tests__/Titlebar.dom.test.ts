@@ -381,8 +381,9 @@ describe("标题栏搜索", () => {
     await button.trigger("click");
     await flushPromises();
     expect(wrapper.get('[data-testid="titlebar-search"]').attributes("aria-expanded")).toBe("true");
-    // 面板经 Popover Portal 到 body（绕开标题栏 z-30 层叠上下文）
-    expect(document.querySelector('[data-testid="search-panel"]')).not.toBeNull();
+    // 面板经 Popover Portal 到 body（绕开标题栏 z-30 层叠上下文）；SearchPanel 是异步组件，
+    // 动态 import 解析完才会挂上 Portal。
+    await vi.waitFor(() => expect(document.querySelector('[data-testid="search-panel"]')).not.toBeNull());
 
     await button.trigger("click");
     await flushPromises();
@@ -395,11 +396,12 @@ describe("标题栏搜索", () => {
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
     await flushPromises();
     expect(wrapper.get('[data-testid="titlebar-search"]').attributes("aria-expanded")).toBe("true");
+    await vi.waitFor(() => expect(document.querySelector('[data-testid="search-panel"]')).not.toBeNull());
 
     // Esc 由 Popover 的 DismissableLayer 处理（此前是面板自挂的 window 监听）
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     await flushPromises();
-    expect(wrapper.get('[data-testid="titlebar-search"]').attributes("aria-expanded")).toBe("false");
+    await vi.waitFor(() => expect(wrapper.get('[data-testid="titlebar-search"]').attributes("aria-expanded")).toBe("false"));
     wrapper.unmount();
   });
 });

@@ -11,9 +11,6 @@
  * runAssistant 又要经 stream 的 mutators（setMessageContent / appendMessageThinking /
  * appendTools）写消息 —— 经 api 持有者惰性解析。
  */
-import { appendXlsxRow, exportToXlsx } from "../../lib/xlsx";
-import { exportToPptx } from "../../lib/pptx";
-import { extractDashboardTitle, specToHtml } from "../../lib/genui";
 import { isDarkMode } from "../../lib/theme";
 import { formatDuration } from "../../lib/tool-activity";
 import { notify } from "../notice";
@@ -41,6 +38,7 @@ export function createDemoSlice({ state, getSession, getStream }: DemoDeps): Dem
 
   /** 给已存在的 Excel 追加一行（无则新建），写回 VFS 并通知查看器重载。返回交付物 id 供消息记账。 */
   async function appendRowToXlsx(intentText: string): Promise<string> {
+    const { appendXlsxRow } = await import("../../lib/xlsx");
     const path = "reports/task-result.xlsx";
     const row = parseRowValues(intentText);
     const existing = await vfsStore.readBinary(path).catch(() => null);
@@ -189,17 +187,20 @@ export function createDemoSlice({ state, getSession, getStream }: DemoDeps): Dem
           }
           // 表格意图：额外产出一个 xlsx 交付物（引擎生成 → VFS 二进制落盘 → Artifacts 卡片）
           if (!isAddRow && (/表|Excel|xlsx|客流|站点/i.test(intentText) || /表/.test(firstLabel))) {
-            void exportToXlsx([
-              {
-                name: "task-result",
-                headers: ["站点", "客流"],
-                rows: [
-                  ["北京站", "1284"],
-                  ["上海站", "2231"],
-                  ["深圳站", "876"],
-                ],
-              },
-            ])
+            void import("../../lib/xlsx")
+              .then(({ exportToXlsx }) =>
+                exportToXlsx([
+                  {
+                    name: "task-result",
+                    headers: ["站点", "客流"],
+                    rows: [
+                      ["北京站", "1284"],
+                      ["上海站", "2231"],
+                      ["深圳站", "876"],
+                    ],
+                  },
+                ]),
+              )
               .then((data) =>
                 artifactStore.deliverArtifact({
                   meta: "Excel · 表格产物",
@@ -215,16 +216,19 @@ export function createDemoSlice({ state, getSession, getStream }: DemoDeps): Dem
           }
           // 报告意图：额外产出一个 pptx 简报（标题 + 执行步骤）
           if (isReport) {
-            void exportToPptx({
-              title: "任务简报",
-              subtitle: `来源会话：${intentText.slice(0, 24)}…`,
-              slides: [
-                {
-                  title: "执行步骤",
-                  bullets: (live.steps ?? []).map((step) => `${step.label}：${step.detail}`),
-                },
-              ],
-            })
+            void import("../../lib/pptx")
+              .then(({ exportToPptx }) =>
+                exportToPptx({
+                  title: "任务简报",
+                  subtitle: `来源会话：${intentText.slice(0, 24)}…`,
+                  slides: [
+                    {
+                      title: "执行步骤",
+                      bullets: (live.steps ?? []).map((step) => `${step.label}：${step.detail}`),
+                    },
+                  ],
+                }),
+              )
               .then((data) =>
                 artifactStore.deliverArtifact({
                   meta: "PPT · 简报产物",
@@ -241,7 +245,8 @@ export function createDemoSlice({ state, getSession, getStream }: DemoDeps): Dem
           // 演示方案 Brief（Summary / Outline / Page Brief 三段）
           if (isSolar) {
             const { deck, brief } = solarDeck();
-            void exportToPptx(deck)
+            void import("../../lib/pptx")
+              .then(({ exportToPptx }) => exportToPptx(deck))
               .then((data) =>
                 artifactStore.deliverArtifact({
                   meta: "PPT · 太阳系演示",
@@ -266,34 +271,36 @@ export function createDemoSlice({ state, getSession, getStream }: DemoDeps): Dem
           // artifact:created，preview-bridge 收到后自动开预览（preview:request 是
           // 给非产物来源的跨面板请求用的，这里不需要再发一份）。
           if (/界面|仪表盘|看板|dashboard|genui/i.test(intentText) || /界面|仪表盘|看板/.test(firstLabel)) {
-            const html = specToHtml(
-              {
-                title: `${extractDashboardTitle(intentText)} · GenUI`,
-                subtitle: `来源会话：${intentText.slice(0, 24)}…`,
-                kpis: [
-                  { label: "总客流", value: "12,384" },
-                  { label: "峰值日", value: "周六" },
-                  { label: "环比", value: "+8.2%" },
-                ],
-                table: {
-                  headers: ["站点", "客流", "占比"],
-                  rows: [
-                    ["北京站", "4,281", "80%"],
-                    ["上海站", "3,650", "62%"],
-                    ["深圳站", "2,134", "40%"],
-                  ],
-                },
-              },
-              /* 静态产物不带脚本，明暗只能在生成时定稿（见 genui.ts 说明） */ { dark: isDarkMode() },
-            );
-            void artifactStore
-              .deliverArtifact({
-                meta: "HTML · 可视化产物",
-                type: "report",
-                source: "assistant-pipeline",
-                format: "html",
-                path: `reports/genui/dashboard-${Date.now()}.html`,
-                data: html,
+            void import("../../lib/genui")
+              .then(({ extractDashboardTitle, specToHtml }) => {
+                const html = specToHtml(
+                  {
+                    title: `${extractDashboardTitle(intentText)} · GenUI`,
+                    subtitle: `来源会话：${intentText.slice(0, 24)}…`,
+                    kpis: [
+                      { label: "总客流", value: "12,384" },
+                      { label: "峰值日", value: "周六" },
+                      { label: "环比", value: "+8.2%" },
+                    ],
+                    table: {
+                      headers: ["站点", "客流", "占比"],
+                      rows: [
+                        ["北京站", "4,281", "80%"],
+                        ["上海站", "3,650", "62%"],
+                        ["深圳站", "2,134", "40%"],
+                      ],
+                    },
+                  },
+                  /* 静态产物不带脚本，明暗只能在生成时定稿（见 genui.ts 说明） */ { dark: isDarkMode() },
+                );
+                return artifactStore.deliverArtifact({
+                  meta: "HTML · 可视化产物",
+                  type: "report",
+                  source: "assistant-pipeline",
+                  format: "html",
+                  path: `reports/genui/dashboard-${Date.now()}.html`,
+                  data: html,
+                });
               })
               .then(record)
               .catch(notifyArtifactFailure);
