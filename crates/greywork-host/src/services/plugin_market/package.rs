@@ -15,6 +15,11 @@ const SCHEDULE_MIN_MIN: u32 = 5;
 /// schedule 间隔上界（分钟）：24 小时。
 const SCHEDULE_MAX_MIN: u32 = 24 * 60;
 
+/// llm.chat 模型白名单条数上界。
+const LLM_CHAT_MAX_MODELS: usize = 8;
+/// llm.chat 单个模型 id 长度上界。
+const LLM_CHAT_MAX_MODEL_LEN: usize = 128;
+
 /// net.fetch 允许声明的 HTTP 方法全集（缺省子集为 GET/HEAD）。
 const NET_FETCH_ALLOWED_METHODS: [&str; 3] = ["GET", "HEAD", "POST"];
 /// net.fetch `paths` 模板条数上界（仅 POST 需要）。
@@ -29,6 +34,7 @@ pub(super) fn validate_requirement(requirement: &CapabilityRequirement) -> Resul
             match capability.as_str() {
                 "net.fetch" => Err("net.fetch requires a host allowlist: use { \"capability\": \"net.fetch\", \"hosts\": [...] }".to_string()),
                 "schedule" => Err("schedule requires an interval: use { \"capability\": \"schedule\", \"schedule\": { \"kind\": \"interval\", \"min\": 60 } }".to_string()),
+                "llm.chat" => Err("llm.chat requires a model allowlist: use { \"capability\": \"llm.chat\", \"models\": [\"gpt-4o-mini\"] }".to_string()),
                 _ => Ok(()),
             }
         }
@@ -39,6 +45,7 @@ pub(super) fn validate_requirement(requirement: &CapabilityRequirement) -> Resul
             paths,
             max_bytes,
             schedule,
+            models,
         } => {
             validate_key(capability, "required capability")?;
             match capability.as_str() {
@@ -46,8 +53,28 @@ pub(super) fn validate_requirement(requirement: &CapabilityRequirement) -> Resul
                     if schedule.is_some() {
                         return Err("net.fetch does not accept schedule parameters".to_string());
                     }
+                    if !models.is_empty() {
+                        return Err(
+                            "net.fetch does not accept models; use the models of llm.chat"
+                                .to_string(),
+                        );
+                    }
                     validate_net_fetch_params(hosts, methods, paths, *max_bytes)?;
                     Ok(())
+                }
+                "llm.chat" => {
+                    if !hosts.is_empty() || !methods.is_empty() || !paths.is_empty() {
+                        return Err(
+                            "llm.chat does not accept net.fetch parameters (hosts/methods/paths)"
+                                .to_string(),
+                        );
+                    }
+                    if max_bytes.is_some() || schedule.is_some() {
+                        return Err(
+                            "llm.chat does not accept maxBytes / schedule parameters".to_string()
+                        );
+                    }
+                    validate_llm_chat_models(models)
                 }
                 "schedule" => {
                     if !hosts.is_empty() {
@@ -61,6 +88,9 @@ pub(super) fn validate_requirement(requirement: &CapabilityRequirement) -> Resul
                             "schedule does not accept net.fetch parameters (methods/paths/maxBytes)"
                                 .to_string(),
                         );
+                    }
+                    if !models.is_empty() {
+                        return Err("schedule does not accept models".to_string());
                     }
                     let Some(declared) = schedule else {
                         return Err("schedule requires schedule parameters: { \"kind\": \"interval\", \"min\": 60 }".to_string());
@@ -154,6 +184,39 @@ fn validate_path_template(template: &str) -> Result<(), String> {
         return Err(format!(
             "net.fetch path template has invalid characters: {template}"
         ));
+    }
+    Ok(())
+}
+
+/// llm.chat 模型白名单校验（安装期第一道门；执行期由前端 broker 再校验一次）。
+///
+/// 语义：
+/// - 必须声明 1-8 个模型 id（空声明等于「不限模型」，不允许）；
+/// - 每个 id 非空、≤128 字符、不含空白 / 控制字符（模型 id 会原样进请求体）；
+/// - 重复项拒绝（去重后的声明与用户授权时看到的一致）。
+fn validate_llm_chat_models(models: &[String]) -> Result<(), String> {
+    if models.is_empty() || models.len() > LLM_CHAT_MAX_MODELS {
+        return Err(format!(
+            "llm.chat models allowlist must contain 1-{LLM_CHAT_MAX_MODELS} entries"
+        ));
+    }
+    let mut seen = std::collections::HashSet::new();
+    for model in models {
+        let trimmed = model.trim();
+        if trimmed.is_empty() {
+            return Err("llm.chat model id must not be empty".to_string());
+        }
+        if model.len() > LLM_CHAT_MAX_MODEL_LEN {
+            return Err(format!(
+                "llm.chat model id exceeds {LLM_CHAT_MAX_MODEL_LEN} characters"
+            ));
+        }
+        if model.chars().any(|c| c.is_whitespace() || c.is_control()) {
+            return Err(format!("llm.chat model id has invalid characters: {model}"));
+        }
+        if !seen.insert(model.as_str()) {
+            return Err(format!("duplicate model id in llm.chat allowlist: {model}"));
+        }
     }
     Ok(())
 }

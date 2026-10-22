@@ -112,6 +112,7 @@ user, and (3) registered in the host catalog (`packages/workbench/src/plugins/ca
 | `storage.kv`      | low    | `"storage.kv"`                                                                                                                      | Plugin-scoped KV: `get`/`set`/`remove`/`list`/`clear`, any JSON value, 256 KiB per plugin / 64 KiB per value                                                             |
 | `fs.scoped`       | medium | `"fs.scoped"`                                                                                                                       | Plugin-private file area: `read`/`write`/`remove`/`list`/`stat`, relative paths only, symlinks refused, 1 MiB per file / 8 MiB per plugin                                |
 | `workspace.read`  | high   | `"workspace.read"`                                                                                                                  | Read-only access to user-authorized workspace roots: `roots` lists them, `read` previews text files (≤256 KiB, truncated; binary/dirs refused); desktop/server host only |
+| `llm.chat`        | high   | `{ "capability": "llm.chat", "models": ["gpt-4o-mini"] }`                                                                           | One-shot completion (`prompt`, optional `system`/`model`); credentials stay host-side, the host resolves the configured provider; 8 KiB prompt, 20 calls/10 min          |
 | `notify`          | low    | `"notify"`                                                                                                                          | System notification `{ title, body }`; title gets a `[plugin-id] ` attribution prefix, 10 calls/min, desktop host only                                                   |
 | `schedule`        | low    | `{ "capability": "schedule", "schedule": { "kind": "interval", "min": 5 } }`                                                        | Host-driven background wakeups: fires `registerSchedule` while a mount surface is alive, 5-1440 min interval, catch-up once on reactivation                              |
 | `window.floating` | medium | `"window.floating"`                                                                                                                 | Host-managed transparent always-on-top window rendering the render loop                                                                                                  |
@@ -146,6 +147,9 @@ const { exists, data } = await greywork.call("fs.scoped", { op: "read", path: "l
 const { roots } = await greywork.call("workspace.read", { op: "roots" });
 const file = await greywork.call("workspace.read", { op: "read", path: "README.md" });
 // → { exists, path, name, data, bytes, truncated }
+
+// One-shot model completion (model must be allowlisted in the manifest; credentials stay host-side)
+const { text } = await greywork.call("llm.chat", { prompt: "Summarize: …", system: "Be terse." });
 
 // System notification (title is prefixed `[plugin-id]` by the host; 10 calls/min; desktop host only)
 await greywork.call("notify", { title: "构建完成", body: "所有测试通过" });
@@ -197,6 +201,32 @@ const res = await greywork.call("net.fetch", {
 - `body` is only allowed on `POST` and must fit within `maxBytes`.
 - The rate limit stays at 30 calls/min per plugin regardless of the declaration, and every call is
   audited. The desktop/server host re-checks host/method/path/bytes independently (defense in depth).
+
+### Model calls
+
+`llm.chat` is the only way for a plugin to reach a model. The plugin sends a prompt, never a key:
+at call time the host resolves the user's configured provider (base URL + API-key environment variable
+name) and runs a single non-streaming completion.
+
+```jsonc
+"requires": [{ "capability": "llm.chat", "models": ["gpt-4o-mini", "qwen2.5:7b"] }]
+```
+
+```js
+const { text, model } = await greywork.call("llm.chat", {
+  prompt: "Summarize this changelog in one sentence.",
+  system: "Answer in one sentence.",
+});
+```
+
+- `models` (required, 1-8 entries): allowlist. Any other model id is refused before the host is
+  called; a manifest that declares `"llm.chat"` as a plain string is rejected at install time.
+- `prompt` (required, ≤8000 chars), `system` (optional, ≤2000 chars), `model` (optional; defaults
+  to the first allowlisted id).
+- Credentials never reach the plugin, and neither the base URL nor the key variable can be overridden
+  from plugin code.
+- 20 calls per 10 minutes per plugin, every call audited (`ok` / `denied` / `error`).
+- No host (web preview) means the call fails with a `denied` audit entry, same as `workspace.read`.
 
 ### Scheduled wakeups
 

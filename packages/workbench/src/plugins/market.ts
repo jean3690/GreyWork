@@ -17,6 +17,7 @@ import { useCapabilityLoader } from "./current";
 import {
   setNetFetchTransportForHost,
   setPluginFsTransportForHost,
+  setPluginLlmChatTransportForHost,
   setPluginNotifyTransportForHost,
   setPluginWorkspaceTransportForHost,
 } from "./capabilities";
@@ -70,6 +71,25 @@ export function initPluginHostTransport(): void {
       truncated?: boolean;
       exists?: boolean;
     }>("plugin_workspace", { request });
+  });
+  // llm.chat：按**当前设置**解析供应商（baseUrl / 密钥变量名），模型已由能力层按 manifest
+  // 白名单校验。设置 store 用动态 import：本模块在入口求值，且 plugins 层不静态依赖 stores。
+  setPluginLlmChatTransportForHost(async (request) => {
+    const [{ useSettingsStore }, { selectLlmProvider }] = await Promise.all([import("@/stores/settings"), import("@/lib/llm-provider")]);
+    const settings = useSettingsStore();
+    const provider = selectLlmProvider(settings.modelProviders, settings.selectedModelProviderId);
+    if (!provider) throw new Error("llm.chat requires a configured model provider");
+    const messages = [...(request.system ? [{ role: "system", content: request.system }] : []), { role: "user", content: request.prompt }];
+    // 宿主自己从环境变量解析密钥：这里只传变量名，明文 key 不经过插件、也不经过本层。
+    const text = await invoke<string>("llm_chat_complete", {
+      baseUrl: provider.baseUrl ?? "",
+      model: request.model,
+      apiKeyEnv: provider.apiKeyEnv ?? "",
+      messages,
+      reasoningEffort: provider.reasoningEffort ?? "auto",
+      headers: provider.headers,
+    });
+    return { text, model: request.model };
   });
   // notify 是**桌面专属**能力（Tauri / Electron）：只在有原生桌面壳时注册传输层。
   // 纯服务端（自托管 web）不注册，插件调用会按「无宿主」失败并记审计 —— 这正是

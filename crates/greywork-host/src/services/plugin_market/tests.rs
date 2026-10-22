@@ -414,6 +414,7 @@ fn net_fetch_requirement(
 ) -> CapabilityRequirement {
     CapabilityRequirement::Parameterized {
         capability: "net.fetch".into(),
+        models: vec![],
         hosts: hosts.iter().map(|host| host.to_string()).collect(),
         methods: methods.iter().map(|method| method.to_string()).collect(),
         paths: paths.iter().map(|path| path.to_string()).collect(),
@@ -445,6 +446,7 @@ fn net_fetch_requirements_require_a_valid_host_allowlist() {
     // 越权：net.fetch 之外的能力不接受参数。
     assert!(validate(CapabilityRequirement::Parameterized {
         capability: "plugin-admin".into(),
+        models: vec![],
         hosts: vec!["api.github.com".into()],
         methods: vec![],
         paths: vec![],
@@ -585,6 +587,7 @@ fn schedule_requirements_require_a_valid_interval_declaration() {
         let mut package = demo_package();
         package.manifest.requires = vec![CapabilityRequirement::Parameterized {
             capability: "schedule".into(),
+            models: vec![],
             hosts: vec![],
             methods: vec![],
             paths: vec![],
@@ -621,6 +624,7 @@ fn schedule_requirements_require_a_valid_interval_declaration() {
     let mut package = demo_package();
     package.manifest.requires = vec![CapabilityRequirement::Parameterized {
         capability: "schedule".into(),
+        models: vec![],
         hosts: vec![],
         methods: vec![],
         paths: vec![],
@@ -634,6 +638,7 @@ fn schedule_requirements_require_a_valid_interval_declaration() {
     let mut package = demo_package();
     package.manifest.requires = vec![CapabilityRequirement::Parameterized {
         capability: "schedule".into(),
+        models: vec![],
         hosts: vec!["api.github.com".into()],
         methods: vec![],
         paths: vec![],
@@ -650,6 +655,7 @@ fn schedule_requirements_require_a_valid_interval_declaration() {
     let mut package = demo_package();
     package.manifest.requires = vec![CapabilityRequirement::Parameterized {
         capability: "net.fetch".into(),
+        models: vec![],
         hosts: vec![],
         methods: vec![],
         paths: vec![],
@@ -666,6 +672,7 @@ fn schedule_requirements_require_a_valid_interval_declaration() {
     let mut package = demo_package();
     package.manifest.requires = vec![CapabilityRequirement::Parameterized {
         capability: "notify".into(),
+        models: vec![],
         hosts: vec![],
         methods: vec!["GET".into()],
         paths: vec![],
@@ -679,6 +686,7 @@ fn schedule_requirements_require_a_valid_interval_declaration() {
     let mut package = demo_package();
     package.manifest.requires = vec![CapabilityRequirement::Parameterized {
         capability: "schedule".into(),
+        models: vec![],
         hosts: vec![],
         methods: vec![],
         paths: vec![],
@@ -690,6 +698,95 @@ fn schedule_requirements_require_a_valid_interval_declaration() {
     }];
     let error = validate_package(&package).unwrap_err();
     assert!(error.contains("net.fetch parameters"), "{error}");
+}
+
+/// llm.chat 参数化声明构造器（只填 models，其余留空）。
+fn llm_chat_requirement(models: &[&str]) -> CapabilityRequirement {
+    CapabilityRequirement::Parameterized {
+        capability: "llm.chat".into(),
+        hosts: vec![],
+        methods: vec![],
+        paths: vec![],
+        max_bytes: None,
+        schedule: None,
+        models: models.iter().map(|model| model.to_string()).collect(),
+    }
+}
+
+#[test]
+fn llm_chat_requirements_require_a_model_allowlist() {
+    let validate = |requirement| {
+        let mut package = demo_package();
+        package.manifest.requires = vec![requirement];
+        validate_package(&package)
+    };
+
+    // 字符串形态（等于「不限模型」）：拒绝。
+    let error = validate(CapabilityRequirement::Plain("llm.chat".into())).unwrap_err();
+    assert!(error.contains("requires a model allowlist"), "{error}");
+
+    // 参数化形态 + 合法白名单：通过。
+    assert!(validate(llm_chat_requirement(&["gpt-4o-mini", "qwen2.5:7b"])).is_ok());
+
+    // 空白名单 / 超过 8 条：拒绝。
+    assert!(validate(llm_chat_requirement(&[])).is_err());
+    let many: Vec<String> = (0..9).map(|index| format!("model-{index}")).collect();
+    let many: Vec<&str> = many.iter().map(String::as_str).collect();
+    let error = validate(llm_chat_requirement(&many)).unwrap_err();
+    assert!(error.contains("1-8 entries"), "{error}");
+
+    // 空白 / 控制字符 / 重复 / 过长：拒绝。
+    assert!(validate(llm_chat_requirement(&["gpt 4o"])).is_err());
+    assert!(validate(llm_chat_requirement(&["gpt-4o", "gpt-4o"])).is_err());
+    let long = "m".repeat(129);
+    assert!(validate(llm_chat_requirement(&[long.as_str()])).is_err());
+
+    // 夹带 net.fetch 参数：拒绝。
+    let mut package = demo_package();
+    package.manifest.requires = vec![CapabilityRequirement::Parameterized {
+        capability: "llm.chat".into(),
+        hosts: vec!["api.openai.com".into()],
+        methods: vec![],
+        paths: vec![],
+        max_bytes: None,
+        schedule: None,
+        models: vec!["gpt-4o-mini".into()],
+    }];
+    let error = validate_package(&package).unwrap_err();
+    assert!(
+        error.contains("does not accept net.fetch parameters"),
+        "{error}"
+    );
+
+    // models 也不能挂到 net.fetch / schedule 上。
+    let mut package = demo_package();
+    package.manifest.requires = vec![CapabilityRequirement::Parameterized {
+        capability: "net.fetch".into(),
+        hosts: vec!["api.github.com".into()],
+        methods: vec![],
+        paths: vec![],
+        max_bytes: None,
+        schedule: None,
+        models: vec!["gpt-4o-mini".into()],
+    }];
+    let error = validate_package(&package).unwrap_err();
+    assert!(error.contains("does not accept models"), "{error}");
+
+    let mut package = demo_package();
+    package.manifest.requires = vec![CapabilityRequirement::Parameterized {
+        capability: "schedule".into(),
+        hosts: vec![],
+        methods: vec![],
+        paths: vec![],
+        max_bytes: None,
+        schedule: Some(ManifestSchedule {
+            kind: ManifestScheduleKind::Interval,
+            min: 60,
+        }),
+        models: vec!["gpt-4o-mini".into()],
+    }];
+    let error = validate_package(&package).unwrap_err();
+    assert!(error.contains("schedule does not accept models"), "{error}");
 }
 
 #[test]
@@ -910,6 +1007,32 @@ fn demo_fetch_package_parses_and_validates() {
         super::package::validate_requirement(requirement)
             .unwrap_or_else(|error| panic!("demo.fetch requires validates: {error}"));
     }
+}
+
+#[test]
+fn demo_llm_package_parses_and_validates() {
+    // demo.llm.json 是 llm.chat 的「就绪未发布」演示包：解析 + 校模型白名单声明，
+    // 并把发布占位换成合法 entry / sha256 后过全量 validate（未发布包不校 registry 身份）。
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../plugin-market/packages/demo.llm.json"
+    );
+    let Ok(bytes) = std::fs::read(path) else {
+        // 仓库外构建（单独打包本 crate）跳过。
+        return;
+    };
+    let mut package: PluginPackage = serde_json::from_slice(&bytes).expect("demo.llm.json parses");
+    assert_eq!(package.manifest.id, "demo.llm");
+    assert!(
+        !package.manifest.requires.is_empty(),
+        "demo.llm declares its llm.chat requirement"
+    );
+
+    if let Some(runtime) = package.manifest.runtime.as_mut() {
+        runtime.entry = "https://raw.githubusercontent.com/acme/plugins/main/demo.llm.js".into();
+        runtime.sha256 = "a".repeat(64);
+    }
+    validate_package(&package).expect("demo.llm declaration validates");
 }
 
 #[test]

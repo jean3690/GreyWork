@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "manifest": {
+    "id": "demo.llm",
+    "name": "模型摘要",
+    "version": "1.0.0",
+    "description": "llm.chat 能力演示：把一段文本交给宿主侧的模型做单轮摘要；凭证永远在宿主侧，模型必须落在 manifest 白名单内。",
+    "kind": "worker",
+    "runtime": {
+      "type": "worker",
+      "entry": "https://raw.githubusercontent.com/OWNER/REPO/COMMIT/demo.llm.js",
+      "sha256": "REPLACE_WITH_64_LOWERCASE_HEX"
+    },
+    "requires": [
+      {
+        "capability": "llm.chat",
+        "models": ["gpt-4o-mini"]
+      }
+    ],
+    "contributes": {
+      "modes": [
+        {
+          "id": "demo-llm",
+          "title": "模型摘要",
+          "icon": "sparkles",
+          "page": {
+            "eyebrow": "Marketplace plugin · llm.chat",
+            "heading": "模型摘要",
+            "body": "llm.chat 是一次单轮补全：插件只传 prompt 与可选 system，宿主按当前设置解析供应商（baseUrl + 密钥环境变量名），密钥永远不进 worker。模型必须落在 manifest 声明的 models 白名单内，超出白名单的 id 在触达宿主前就被拒绝；prompt 上限 8 KiB，每插件 10 分钟最多 20 次。无宿主（web 预览）时调用失败。",
+            "fields": [
+              {
+                "key": "prompt",
+                "label": "要摘要的文本",
+                "kind": "text",
+                "default": "把这段文字压缩成一句话。",
+                "maxLength": 4096
+              },
+              {
+                "key": "answer",
+                "label": "模型回复",
+                "kind": "text",
+                "default": "",
+                "maxLength": 4096
+              },
+              {
+                "key": "status",
+                "label": "最近动作",
+                "kind": "text",
+                "default": "尚未调用",
+                "maxLength": 120
+              }
+            ],
+            "outputs": [
+              {
+                "label": "回复",
+                "valueKey": "answer"
+              },
+              {
+                "label": "动作",
+                "valueKey": "status"
+              }
+            ],
+            "actions": [
+              {
+                "id": "summarize",
+                "label": "调用模型",
+                "style": "primary",
+                "operation": {
+                  "type": "invoke",
+                  "handler": "summarize"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

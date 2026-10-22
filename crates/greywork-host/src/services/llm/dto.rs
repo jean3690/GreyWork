@@ -42,6 +42,24 @@ pub struct ChatStartArgs {
     pub client_token: Option<String>,
 }
 
+/// `llm_chat_complete` 入参：宿主聚合式单轮补全（插件 `llm.chat` 能力用）。
+///
+/// 与 `ChatStartArgs` 的区别：不走事件流、没有 client_token —— 调用方只等一份完整正文。
+/// 凭证仍是「变量名」而非明文：插件永远拿不到 key，宿主自己从环境变量解析。
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatCompleteArgs {
+    pub base_url: String,
+    pub model: String,
+    #[serde(default)]
+    pub api_key_env: String,
+    pub messages: Vec<LlmChatMessage>,
+    #[serde(default)]
+    pub reasoning_effort: String,
+    #[serde(default)]
+    pub headers: Option<HashMap<String, String>>,
+}
+
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatStopArgs {

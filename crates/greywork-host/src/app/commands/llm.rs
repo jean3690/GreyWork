@@ -13,6 +13,11 @@ macro_rules! llm_commands {
     { "llm_chat_stop", auth: Auth::Required, desktop: false, binary: false,
         args: llm::ChatStopArgs,
         run: |ctx, a| async move { llm::llm_chat_stop(&ctx.services.llm, a.request_id).await.map(Json) } }
+    // 聚合式单轮补全：插件 llm.chat 能力的宿主出口（插件不持凭证，baseUrl / 模型由
+    // 渲染端按当前设置解析后传入，模型白名单在 manifest 安装期与前端 broker 双重校验）。
+    { "llm_chat_complete", auth: Auth::Required, desktop: false, binary: false,
+        args: llm::ChatCompleteArgs,
+        run: |_ctx, a| async move { llm::chat_complete(&a.base_url, &a.model, &a.api_key_env, a.messages, &a.reasoning_effort, &a.headers.unwrap_or_default()).await.map(Json) } }
     // 本机 agent 回合：与 llm_chat_* 同一批事件（llm://event），多两个 kind
     // （llm-tool-call / llm-tool-result）。句柄表与 llm_chat_* 独立 —— agent 回合的
     // 生命周期（十几轮 / 几十分钟）与单轮聊天差一个量级，共用会让 stop 拿错句柄。

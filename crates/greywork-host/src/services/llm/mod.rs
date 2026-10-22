@@ -28,8 +28,8 @@ mod tests;
 pub use agent::{llm_agent_start, llm_agent_stop, AgentStartArgs, LlmAgentHost};
 pub use chat::{chat_complete, llm_chat_start, llm_chat_stop, LlmHost};
 pub use dto::{
-    ChatStartArgs, ChatStopArgs, InferenceParams, ListModelsArgs, LlmChatMessage, TranscribeArgs,
-    TranscribeResult,
+    ChatCompleteArgs, ChatStartArgs, ChatStopArgs, InferenceParams, ListModelsArgs, LlmChatMessage,
+    TranscribeArgs, TranscribeResult,
 };
 pub use embeddings::{llm_embed, LlmEmbedder};
 pub use models::llm_list_models;

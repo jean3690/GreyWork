@@ -35,6 +35,7 @@ export interface CapabilityCallContext {
     paths?: string[];
     maxBytes?: number;
     schedule?: ManifestScheduleDeclaration;
+    models?: string[];
   };
   /** 审计写入（能力实现内部在关键决策点调用）。 */
   audit(entry: CapabilityAuditEntry): void;
@@ -62,6 +63,7 @@ export type CapabilityGrantSpec =
       paths?: string[];
       maxBytes?: number;
       schedule?: ManifestScheduleDeclaration;
+      models?: string[];
     };
 
 /** 归一化：把 requires 项映成 { capability, params }。 */
@@ -72,6 +74,7 @@ export function normalizeGrantSpec(spec: CapabilityGrantSpec): {
   paths?: string[];
   maxBytes?: number;
   schedule?: ManifestScheduleDeclaration;
+  models?: string[];
 } {
   return typeof spec === "string"
     ? { capability: spec }
@@ -82,6 +85,7 @@ export function normalizeGrantSpec(spec: CapabilityGrantSpec): {
         paths: spec.paths,
         maxBytes: spec.maxBytes,
         schedule: spec.schedule,
+        models: spec.models,
       };
 }
 
@@ -1118,6 +1122,136 @@ const notifyCapability: CapabilityDefinition = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// llm.chat 传输（凭证永远在宿主侧；插件只传 prompt 与白名单内的模型）
+// ---------------------------------------------------------------------------
+
+/** 一次插件补全请求：模型已通过 manifest 白名单校验，system / prompt 已截断。 */
+export interface PluginLlmChatRequest {
+  pluginId: string;
+  model: string;
+  system?: string;
+  prompt: string;
+}
+
+/** 宿主返回的正文（model 回显实际使用的模型，便于审计与调试）。 */
+export interface PluginLlmChatResponse {
+  text: string;
+  model: string;
+}
+
+/**
+ * llm.chat 传输层：由外壳注入。宿主侧按**当前设置**解析供应商（baseUrl / 密钥变量名），
+ * 再走 `llm_chat_complete` 聚合式单轮补全 —— 插件既拿不到密钥，也改不了 baseUrl。
+ * 无宿主（web 预览）时调用失败并记 denied 审计。
+ */
+export type PluginLlmChatTransport = (request: PluginLlmChatRequest) => Promise<PluginLlmChatResponse>;
+
+let llmChatTransport: PluginLlmChatTransport | null = null;
+
+export function setPluginLlmChatTransportForHost(transport: PluginLlmChatTransport | null): void {
+  llmChatTransport = transport;
+}
+
+// ---------------------------------------------------------------------------
+// 能力实现：llm.chat
+// ---------------------------------------------------------------------------
+
+/** 单次 prompt 上限：插件做的是摘要 / 分类 / 翻译，8 KiB 已远超一轮对话的合理输入。 */
+const LLM_CHAT_PROMPT_MAX_CHARS = 8000;
+const LLM_CHAT_SYSTEM_MAX_CHARS = 2000;
+/** 限速：10 分钟 20 次（与 notify 同款滑动窗口，按插件隔离）。 */
+const LLM_CHAT_WINDOW_MS = 10 * 60_000;
+const LLM_CHAT_MAX_CALLS_PER_WINDOW = 20;
+
+const llmChatWindows = new Map<string, number[]>();
+
+function takeLlmChatToken(pluginId: string): boolean {
+  const now = Date.now();
+  const window = (llmChatWindows.get(pluginId) ?? []).filter((ts) => now - ts < LLM_CHAT_WINDOW_MS);
+  if (window.length >= LLM_CHAT_MAX_CALLS_PER_WINDOW) {
+    llmChatWindows.set(pluginId, window);
+    return false;
+  }
+  window.push(now);
+  llmChatWindows.set(pluginId, window);
+  return true;
+}
+
+interface LlmChatArgs {
+  prompt: string;
+  system?: string;
+  model?: string;
+}
+
+function isLlmChatArgs(value: unknown): value is LlmChatArgs {
+  if (typeof value !== "object" || value === null) return false;
+  const args = value as Record<string, unknown>;
+  if (typeof args.prompt !== "string" || args.prompt.trim() === "") return false;
+  if (args.prompt.length > LLM_CHAT_PROMPT_MAX_CHARS) return false;
+  if (args.system !== undefined && (typeof args.system !== "string" || args.system.length > LLM_CHAT_SYSTEM_MAX_CHARS)) {
+    return false;
+  }
+  if (args.model !== undefined && (typeof args.model !== "string" || args.model.trim() === "")) return false;
+  return true;
+}
+
+const llmChatCapability: CapabilityDefinition = {
+  id: "llm.chat",
+  title: "调用模型",
+  description:
+    '一次单轮模型补全（摘要 / 分类 / 翻译这类「智能动作」）。凭证永远在宿主侧，插件只传 prompt 与可选 system；模型必须落在 manifest 声明的白名单内（`{ capability: "llm.chat", models: [...] }`），宿主按当前设置解析供应商 —— 插件拿不到 key、也改不了 baseUrl。单次 prompt ≤ 8 KiB，每插件 10 分钟最多 20 次。',
+  danger: "high",
+  async invoke(args, ctx) {
+    const audit = (outcome: "ok" | "denied" | "error", detail: string): void => {
+      ctx.audit({
+        plugin: ctx.pluginId,
+        capability: "llm.chat",
+        at: new Date().toISOString(),
+        outcome,
+        detail: detail.slice(0, 200),
+      });
+    };
+    if (!isLlmChatArgs(args)) {
+      audit("denied", "invalid args (prompt / system / model shape)");
+      throw new Error(`llm.chat requires { prompt: string ≤ ${LLM_CHAT_PROMPT_MAX_CHARS} chars, system?, model? }`);
+    }
+    // 白名单来自 manifest（安装期 Rust 侧已校验 1-8 条）：缺声明一律拒绝，不回落「不限模型」。
+    const allowed = ctx.grant.models ?? [];
+    if (!allowed.length) {
+      audit("denied", "manifest declared no models allowlist");
+      throw new Error("llm.chat requires a models allowlist in the plugin manifest");
+    }
+    const model = args.model?.trim() || allowed[0];
+    if (!allowed.includes(model)) {
+      audit("denied", `model not in allowlist: ${model}`);
+      throw new Error(`llm.chat model not allowed: ${model} (allowed: ${allowed.join(", ")})`);
+    }
+    if (!llmChatTransport) {
+      audit("denied", "no host transport: llm.chat requires the desktop/server host");
+      throw new Error("llm.chat requires a desktop or server host");
+    }
+    if (!takeLlmChatToken(ctx.pluginId)) {
+      audit("denied", `rate limit exceeded (${LLM_CHAT_MAX_CALLS_PER_WINDOW}/window)`);
+      throw new Error(`llm.chat rate limit exceeded (${LLM_CHAT_MAX_CALLS_PER_WINDOW} per ${LLM_CHAT_WINDOW_MS / 60_000} minutes)`);
+    }
+    const system = args.system?.trim();
+    try {
+      const response = await llmChatTransport({
+        pluginId: ctx.pluginId,
+        model,
+        system: system || undefined,
+        prompt: args.prompt,
+      });
+      audit("ok", `${response.model} · ${response.text.length} chars`);
+      return { text: response.text, model: response.model };
+    } catch (error) {
+      audit("error", (error instanceof Error ? error.message : String(error)).slice(0, 200));
+      throw error;
+    }
+  },
+};
+
 const scheduleCapability: CapabilityDefinition = {
   id: "schedule",
   title: "后台定时",
@@ -1137,6 +1271,7 @@ export const CAPABILITY_REGISTRY: Readonly<Record<string, CapabilityDefinition>>
   [storageKvCapability.id]: storageKvCapability,
   [fsScopedCapability.id]: fsScopedCapability,
   [workspaceReadCapability.id]: workspaceReadCapability,
+  [llmChatCapability.id]: llmChatCapability,
   [notifyCapability.id]: notifyCapability,
   [scheduleCapability.id]: scheduleCapability,
   [pluginAdminCapability.id]: pluginAdminCapability,
