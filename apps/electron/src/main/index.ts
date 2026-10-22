@@ -99,6 +99,10 @@ app.on("before-quit", (event) => {
     return;
   }
   quitting = true;
+  // 放行关窗守卫：主窗的 close 处理器会先看 isReleased()，不放行的话「关闭到托盘」会在
+  // app.quit() 关窗时把窗口藏起来 —— 没有窗口真正被关闭，will-quit 永不触发，托盘「退出」
+  // 就成了「再藏一次」，应用退不掉。
+  guard.release();
 });
 
 // sidecar / Vite 必须等窗口真正收完再停：退出守卫可能把 before-quit 拦下来（用户取消），
