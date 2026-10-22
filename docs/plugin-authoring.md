@@ -285,6 +285,20 @@ const { text, truncated } = await greywork.call("clipboard", { op: "read" });
 - The host bridge picks the reliable path per runtime (Electron main process, Web API in a real
   browser); in the browser a read may be refused without a user gesture, which surfaces as an error.
 
+### Chaining capabilities
+
+One action can call several capabilities in sequence; each call is authorized on its own, so a missing
+grant fails that step only. `plugin-market/packages/demo.brief.{json,js}` is the reference chain:
+`workspace.read` (the README of an authorized root) → `llm.chat` (three-line summary) →
+`artifacts.publish` (Markdown artifact) → `clipboard` (the summary).
+
+- Wrap each step in its own `try/catch` and stop on failure — work already done (a published artifact,
+  a copied summary) survives a later step being denied.
+- Record a short step trail in a text field (`✓ read file · ✗ model summary`) so the user can see
+  where the chain stopped instead of a single opaque error.
+- Truncate before spending: the excerpt sent to the model is capped well under the 8 KiB prompt limit,
+  and the artifact carries the same excerpt rather than the whole file.
+
 ### Scheduled wakeups
 
 `schedule` is **host-driven**: the plugin doesn't call it, it declares an interval and registers a

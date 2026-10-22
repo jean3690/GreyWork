@@ -77,6 +77,9 @@
 | 多窗口/窗口控制 v2  | 悬浮窗只有开/关                                            | `window.floating` 扩展：标题、置顶切换、透明度、位置持久化、多实例；句柄仍不交插件                                                                                                                                                                                                                                                                                           | `plugin_window.rs`                                                                                                                                                                                                                                                                                          |
 
 **P1 完成判据**：出现「读取工作区 README → LLM 总结 → 写入产物面板 → 一键复制」的插件，全部动作都可见、可审计、可撤销授权。
+该判据由演示包 `plugin-market/packages/demo.brief.{json,js}` 兑现：一条 `brief` 动作按序调
+`workspace.read` → `llm.chat` → `artifacts.publish` → `clipboard`，每步单独鉴权、失败即停并写进
+步骤流水，撤销任一授权只让对应那一步变红。
 （`workspace.read` / `llm.chat` / `artifacts.publish` / `clipboard` 已全部落地，该判据已可达。）
 
 ### P2 · 新贡献面（插件不再只有「页面 + 区域」）

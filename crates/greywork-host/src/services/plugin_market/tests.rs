@@ -1126,6 +1126,53 @@ fn demo_wallpaper_package_parses_and_validates() {
 }
 
 #[test]
+fn demo_brief_package_parses_and_validates() {
+    // demo.brief.json 是 P1 判据的端到端演示包（读文件 → 模型摘要 → 发布产物 → 复制）：
+    // 解析 + 校四个能力的声明形态（两个字符串、两个参数化），再把发布占位换成
+    // 合法 entry / sha256 后过全量 validate。
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../plugin-market/packages/demo.brief.json"
+    );
+    let Ok(bytes) = std::fs::read(path) else {
+        // 仓库外构建（单独打包本 crate）跳过。
+        return;
+    };
+    let mut package: PluginPackage =
+        serde_json::from_slice(&bytes).expect("demo.brief.json parses");
+    assert_eq!(package.manifest.id, "demo.brief");
+    assert_eq!(
+        package.manifest.requires.len(),
+        4,
+        "demo.brief chains exactly four capabilities"
+    );
+    let requires = &package.manifest.requires;
+    assert!(requires
+        .iter()
+        .any(|req| matches!(req, CapabilityRequirement::Plain(cap) if cap == "workspace.read")));
+    assert!(requires.iter().any(|req| matches!(
+        req,
+        CapabilityRequirement::Parameterized { capability, models, .. }
+            if capability == "llm.chat" && models.len() == 1 && models[0] == "gpt-4o-mini"
+    )));
+    assert!(requires
+        .iter()
+        .any(|req| matches!(req, CapabilityRequirement::Plain(cap) if cap == "artifacts.publish")));
+    // 只声明 write：读剪贴板要显式 ops: ["read"]，本插件不该多要。
+    assert!(requires.iter().any(|req| matches!(
+        req,
+        CapabilityRequirement::Parameterized { capability, ops, .. }
+            if capability == "clipboard" && ops.len() == 1 && ops[0] == "write"
+    )));
+
+    if let Some(runtime) = package.manifest.runtime.as_mut() {
+        runtime.entry = "https://raw.githubusercontent.com/acme/plugins/main/demo.brief.js".into();
+        runtime.sha256 = "a".repeat(64);
+    }
+    validate_package(&package).expect("demo.brief declaration validates");
+}
+
+#[test]
 fn demo_clipboard_package_parses_and_validates() {
     // demo.clipboard.json 是 clipboard 的「就绪未发布」演示包：解析 + 校 ops 声明，
     // 并把发布占位换成合法 entry / sha256 后过全量 validate。

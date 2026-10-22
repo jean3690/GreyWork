@@ -1,0 +1,112 @@
+{
+  "schemaVersion": 1,
+  "manifest": {
+    "id": "demo.brief",
+    "name": "README 速览",
+    "version": "1.0.0",
+    "description": "P1 判据的端到端演示：一条动作串起 workspace.read → llm.chat → artifacts.publish → clipboard —— 读授权工作区的 README、让模型写三行摘要、发布成 Markdown 产物、摘要进剪贴板。每一步都可见、可审计、可撤销授权。",
+    "kind": "worker",
+    "runtime": {
+      "type": "worker",
+      "entry": "https://raw.githubusercontent.com/OWNER/REPO/COMMIT/demo.brief.js",
+      "sha256": "REPLACE_WITH_64_LOWERCASE_HEX"
+    },
+    "requires": [
+      "workspace.read",
+      {
+        "capability": "llm.chat",
+        "models": ["gpt-4o-mini"]
+      },
+      "artifacts.publish",
+      {
+        "capability": "clipboard",
+        "ops": ["write"]
+      }
+    ],
+    "contributes": {
+      "modes": [
+        {
+          "id": "demo-brief",
+          "title": "README 速览",
+          "icon": "magic",
+          "page": {
+            "eyebrow": "Marketplace plugin · 四能力串联",
+            "heading": "README 速览",
+            "body": "一条动作串起四个能力：workspace.read 读授权工作区里的 README（只读、只在授权根内、单次 256 KiB 截断）→ llm.chat 让宿主侧模型写三行摘要（密钥与端点插件都碰不到）→ artifacts.publish 把「摘要 + 原文摘录」发成 Markdown 产物（查看器自动开 tab）→ clipboard 把摘要写进系统剪贴板。留空路径时自动取第一个授权根的 README.md。任何一步失败都只停在那一步，步骤流水会写清卡在哪；撤销任一能力的授权，对应步骤立刻变红而前面的成果保留。",
+            "fields": [
+              {
+                "key": "path",
+                "label": "文件路径（留空自动取授权根的 README.md）",
+                "kind": "text",
+                "default": "",
+                "maxLength": 512
+              },
+              {
+                "key": "summary",
+                "label": "模型摘要",
+                "kind": "text",
+                "default": "",
+                "maxLength": 4096
+              },
+              {
+                "key": "artifact",
+                "label": "产物路径",
+                "kind": "text",
+                "default": "",
+                "maxLength": 512
+              },
+              {
+                "key": "steps",
+                "label": "步骤流水",
+                "kind": "text",
+                "default": "",
+                "maxLength": 240
+              },
+              {
+                "key": "status",
+                "label": "最近动作",
+                "kind": "text",
+                "default": "尚未运行",
+                "maxLength": 120
+              }
+            ],
+            "outputs": [
+              {
+                "label": "摘要",
+                "valueKey": "summary"
+              },
+              {
+                "label": "步骤",
+                "valueKey": "steps"
+              },
+              {
+                "label": "产物",
+                "valueKey": "artifact"
+              }
+            ],
+            "actions": [
+              {
+                "id": "brief",
+                "label": "生成速览",
+                "style": "primary",
+                "operation": {
+                  "type": "invoke",
+                  "handler": "brief"
+                }
+              },
+              {
+                "id": "copy",
+                "label": "再复制摘要",
+                "style": "secondary",
+                "operation": {
+                  "type": "invoke",
+                  "handler": "copy"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}
