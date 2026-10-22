@@ -34,7 +34,7 @@
       "version": "1.0.0",
       "description": "llm.chat 能力演示：把一段文本交给宿主侧的模型做单轮摘要；凭证永远在宿主侧，模型必须落在 manifest 白名单内。",
       "author": "GreyWork",
-      "downloadUrl": "https://raw.githubusercontent.com/jean3690/greywork-plugin-market/6b5a17f54305dfbe8a84c7ac4470765bcaf1fe02/packages/demo.llm.json",
+      "downloadUrl": "https://raw.githubusercontent.com/jean3690/greywork-plugin-market/26bde008e4d148b6d1d67c5ea4a6e69d15372fef/packages/demo.llm.json",
       "sha256": "65e30c0a8ded283578977da3017b137842f1762c7015e235ea15944d73ea8d50"
     },
     {
@@ -43,7 +43,7 @@
       "version": "1.0.0",
       "description": "artifacts.publish 能力演示：把一段 Markdown 送进产物面板，可预览、下载、在文件夹中打开。",
       "author": "GreyWork",
-      "downloadUrl": "https://raw.githubusercontent.com/jean3690/greywork-plugin-market/6b5a17f54305dfbe8a84c7ac4470765bcaf1fe02/packages/demo.artifacts.json",
+      "downloadUrl": "https://raw.githubusercontent.com/jean3690/greywork-plugin-market/26bde008e4d148b6d1d67c5ea4a6e69d15372fef/packages/demo.artifacts.json",
       "sha256": "1006bcd967ab78562e5b169886c7f20cb4c83e2f1e541bfe6b042b1eb8a6e045"
     },
     {
@@ -52,7 +52,7 @@
       "version": "1.0.0",
       "description": "clipboard 能力演示：把输入框内容写进系统剪贴板，或读回当前剪贴板文本（读需显式声明 ops）。",
       "author": "GreyWork",
-      "downloadUrl": "https://raw.githubusercontent.com/jean3690/greywork-plugin-market/6b5a17f54305dfbe8a84c7ac4470765bcaf1fe02/packages/demo.clipboard.json",
+      "downloadUrl": "https://raw.githubusercontent.com/jean3690/greywork-plugin-market/26bde008e4d148b6d1d67c5ea4a6e69d15372fef/packages/demo.clipboard.json",
       "sha256": "f3868c095bbc11301bc000a04c4720def3b6b1a4b57e324a75096603f879ca2f"
     },
     {
@@ -61,7 +61,7 @@
       "version": "1.0.0",
       "description": "四套动态壁纸（星空 / 极光 / 落日 / 雨夜）：worker 里算出 SVG 指令帧，宿主按 12fps 绘制；可全页预览、可在工作台叠一层，也能弹出桌面透明悬浮窗。点画布换主题。",
       "author": "GreyWork",
-      "downloadUrl": "https://raw.githubusercontent.com/jean3690/greywork-plugin-market/6b5a17f54305dfbe8a84c7ac4470765bcaf1fe02/packages/demo.wallpaper.json",
+      "downloadUrl": "https://raw.githubusercontent.com/jean3690/greywork-plugin-market/26bde008e4d148b6d1d67c5ea4a6e69d15372fef/packages/demo.wallpaper.json",
       "sha256": "ccb6f99c6bb131cdcef80e0daaab6d177c96b38536fb0591e4ae3f2f9cb9ef5b"
     },
     {
@@ -70,9 +70,9 @@
       "version": "1.0.0",
       "description": "P1 判据的端到端演示：一条动作串起 workspace.read → llm.chat → artifacts.publish → clipboard —— 读授权工作区的 README、让模型写三行摘要、发布成 Markdown 产物、摘要进剪贴板。每一步都可见、可审计、可撤销授权。",
       "author": "GreyWork",
-      "downloadUrl": "https://raw.githubusercontent.com/jean3690/greywork-plugin-market/6b5a17f54305dfbe8a84c7ac4470765bcaf1fe02/packages/demo.brief.json",
+      "downloadUrl": "https://raw.githubusercontent.com/jean3690/greywork-plugin-market/26bde008e4d148b6d1d67c5ea4a6e69d15372fef/packages/demo.brief.json",
       "sha256": "591d464595f17f325c1244bcebfd7caa4fd8a3c3b187a46f031842a7695df6f4"
     }
   ],
-  "signature": "sEfBjdFnkMVMjmrqp0hhmw65svnQUgmzxjtneJzJFiFLvtaTOvBLOt3CwgeECeVGDYfx/laM6eotcyasUIprCw=="
+  "signature": "3t4PYgidEgAkSfkMIZBRdt7tTXJ809WRqJYxlLpKPxJwdFTt9dfxu6wfrFKURyWarvCMYdNYTGLtdFhUYlzzCA=="
 }
