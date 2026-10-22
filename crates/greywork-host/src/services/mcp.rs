@@ -336,96 +336,132 @@ fn build_header_map(headers: &[McpHeader]) -> Result<reqwest::header::HeaderMap,
     Ok(map)
 }
 
-/// 远程探活：POST initialize（Accept 含 text/event-stream）→ 取 `Mcp-Session-Id`
-/// → POST initialized 通知 → POST tools/list。
+/// 一次 Streamable HTTP 会话：`initialize` 拿会话 id，之后的请求都带它。
+/// 探活与工具调用共用同一条握手路径 —— 两边对协议细节的理解不会漂移。
+struct HttpSession {
+    client: reqwest::Client,
+    url: String,
+    auth: reqwest::header::HeaderMap,
+    session_id: Option<String>,
+    init_result: Value,
+}
+
+impl HttpSession {
+    async fn open(
+        url: String,
+        headers: Vec<McpHeader>,
+        timeout_secs: Option<u64>,
+    ) -> Result<Self, String> {
+        let lower = url.to_lowercase();
+        if !(lower.starts_with("http://") || lower.starts_with("https://")) {
+            return Err(format!("mcp url must be http(s), got: {url}"));
+        }
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(
+                timeout_secs.unwrap_or(DEFAULT_PROBE_TIMEOUT_SECS),
+            ))
+            .build()
+            .map_err(|error| format!("failed to build http client: {error}"))?;
+        let auth = build_header_map(&headers)?;
+        let response = client
+            .post(&url)
+            .header("Accept", "application/json, text/event-stream")
+            .headers(auth.clone())
+            .json(
+                &json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": init_params() }),
+            )
+            .send()
+            .await
+            .map_err(|error| format!("initialize request failed: {error}"))?;
+        if !response.status().is_success() {
+            return Err(format!("initialize returned HTTP {}", response.status()));
+        }
+        // 存在则后续请求都带上（Streamable HTTP 的会话粘性；deepwiki 这类无状态服务不发）。
+        let session_id = response
+            .headers()
+            .get("Mcp-Session-Id")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string);
+        let body = response
+            .text()
+            .await
+            .map_err(|error| format!("failed to read body: {error}"))?;
+        let init_result = parse_body_result(&body, 1)?;
+        let session = Self {
+            client,
+            url,
+            auth,
+            session_id,
+            init_result,
+        };
+        // initialized 是 notification：无 id、无回包；失败不阻断后续请求。
+        session.notify("notifications/initialized").await;
+        Ok(session)
+    }
+
+    fn with_session(&self, builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        match &self.session_id {
+            Some(session) => builder.header("Mcp-Session-Id", session),
+            None => builder,
+        }
+    }
+
+    async fn request(&self, id: u64, method: &str, params: Value) -> Result<Value, String> {
+        let response = self
+            .with_session(
+                self.client
+                    .post(&self.url)
+                    .header("Accept", "application/json, text/event-stream")
+                    .headers(self.auth.clone()),
+            )
+            .json(&json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }))
+            .send()
+            .await
+            .map_err(|error| format!("{method} request failed: {error}"))?;
+        if !response.status().is_success() {
+            return Err(format!("{method} returned HTTP {}", response.status()));
+        }
+        let body = response
+            .text()
+            .await
+            .map_err(|error| format!("failed to read body: {error}"))?;
+        parse_body_result(&body, id)
+    }
+
+    /// notification 无 id、无回包；失败不阻断后续请求（与旧探活行为一致）。
+    async fn notify(&self, method: &str) {
+        let _ = self
+            .with_session(
+                self.client
+                    .post(&self.url)
+                    .header("Accept", "application/json, text/event-stream")
+                    .headers(self.auth.clone()),
+            )
+            .body(json!({ "jsonrpc": "2.0", "method": method }).to_string())
+            .send()
+            .await;
+    }
+}
+
+/// 远程探活：握手后请求 `tools/list`。
 async fn probe_http(
     url: String,
     headers: Vec<McpHeader>,
     timeout_secs: Option<u64>,
 ) -> Result<McpProbeReport, String> {
-    let lower = url.to_lowercase();
-    if !(lower.starts_with("http://") || lower.starts_with("https://")) {
-        return Err(format!("mcp url must be http(s), got: {url}"));
-    }
-
     let started = Instant::now();
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(
-            timeout_secs.unwrap_or(DEFAULT_PROBE_TIMEOUT_SECS),
-        ))
-        .build()
-        .map_err(|error| format!("failed to build http client: {error}"))?;
-    let auth = build_header_map(&headers)?;
-
-    let init = client
-        .post(&url)
-        .header("Accept", "application/json, text/event-stream")
-        .headers(auth.clone())
-        .json(
-            &json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": init_params() }),
-        )
-        .send()
-        .await
-        .map_err(|error| format!("initialize request failed: {error}"))?;
-    if !init.status().is_success() {
-        return Err(format!("initialize returned HTTP {}", init.status()));
-    }
-
-    // 存在则后续请求都带上（Streamable HTTP 的会话粘性；deepwiki 这类无状态服务不发）。
-    let session_id = init
-        .headers()
-        .get("Mcp-Session-Id")
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_string);
-
-    let body = init
-        .text()
-        .await
-        .map_err(|error| format!("failed to read body: {error}"))?;
-    let init_result = parse_body_result(&body, 1)?;
-    let server_name = init_result
+    let session = HttpSession::open(url, headers, timeout_secs).await?;
+    let server_name = session
+        .init_result
         .pointer("/serverInfo/name")
         .and_then(Value::as_str)
         .map(str::to_string);
-    let server_version = init_result
+    let server_version = session
+        .init_result
         .pointer("/serverInfo/version")
         .and_then(Value::as_str)
         .map(str::to_string);
-
-    let with_session = |builder: reqwest::RequestBuilder| match &session_id {
-        Some(session) => builder.header("Mcp-Session-Id", session),
-        None => builder,
-    };
-
-    let _ = with_session(
-        client
-            .post(&url)
-            .header("Accept", "application/json, text/event-stream")
-            .headers(auth.clone()),
-    )
-    .body(json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }).to_string())
-    .send()
-    .await;
-
-    let list = with_session(
-        client
-            .post(&url)
-            .header("Accept", "application/json, text/event-stream")
-            .headers(auth),
-    )
-    .json(&json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {} }))
-    .send()
-    .await
-    .map_err(|error| format!("tools/list request failed: {error}"))?;
-    if !list.status().is_success() {
-        return Err(format!("tools/list returned HTTP {}", list.status()));
-    }
-    let body = list
-        .text()
-        .await
-        .map_err(|error| format!("failed to read body: {error}"))?;
-    let list_result = parse_body_result(&body, 2)?;
-
+    let list_result = session.request(2, "tools/list", json!({})).await?;
     Ok(McpProbeReport {
         transport: "http".to_string(),
         server_name,
@@ -435,25 +471,135 @@ async fn probe_http(
     })
 }
 
-/// stdio 探活：spawn → initialize → notifications/initialized → tools/list。
-/// 子进程在守卫 drop 时 kill；整体受 timeout 约束。
+/// 子进程守卫：无论哪条路径返回都回收整棵进程树（Windows `taskkill /T`、Unix `killpg`；
+/// 后者依赖 spawn 时设的独立进程组）。`start_kill` 是兜底，防止进程组已不存在时
+/// 漏掉直接子进程。
+struct KillGuard(tokio::process::Child);
+
+impl Drop for KillGuard {
+    fn drop(&mut self) {
+        if let Some(pid) = self.0.id() {
+            crate::process_guard::kill_process_tree(pid);
+        }
+        let _ = self.0.start_kill();
+    }
+}
+
+/// 一次 stdio 会话：spawn → initialize → initialized → 后续请求；drop 时整树回收。
+struct StdioSession {
+    guard: KillGuard,
+    stdin: tokio::process::ChildStdin,
+    reader: tokio::io::BufReader<tokio::process::ChildStdout>,
+    buf: String,
+    init_result: Value,
+}
+
+impl StdioSession {
+    async fn open(
+        command: String,
+        args: Vec<String>,
+        env: Option<HashMap<String, String>>,
+    ) -> Result<Self, String> {
+        let command = crate::process_guard::validate_spawn_command(&command, ALLOWED_MCP_RUNTIMES)?;
+        if let Some(bad) = args.iter().find(|arg| {
+            arg.chars()
+                .any(|c| crate::process_guard::SHELL_META_CHARS.contains(&c))
+        }) {
+            return Err(format!("mcp arg contains forbidden character: {bad:?}"));
+        }
+
+        // Windows 上 npx/bunx 是 .cmd 垫片，CreateProcess 起不来：改由 cmd.exe 承载。
+        // 交给 cmd 的是**裸程序名**（与 ACP 侧同一形态），由它自己按 PATH + PATHEXT 找 ——
+        // 塞探测到的绝对路径要赌 cmd 的引号规则（含空格路径尤其），没必要冒这个险。
+        let mut spawn = if crate::process_guard::batch_program(&command).is_some() {
+            let mut cmd = tokio::process::Command::new("cmd");
+            cmd.arg("/C").arg(&command);
+            cmd
+        } else {
+            tokio::process::Command::new(&command)
+        };
+        // 自成进程组组长：kill_process_tree 靠进程组整组回收，不设的话它找不到同名组
+        // （ESRCH）而静默失效 —— npx → node 的孙子进程会残留。见 process_guard 的契约。
+        crate::process_guard::isolate_process_group(&mut spawn);
+        // Windows 上隐藏控制台窗口（GUI 程序 spawn cmd.exe/控制台程序会闪黑框）
+        crate::process_guard::hide_console_tokio(&mut spawn);
+        // 只改探测不够：MCP server 自己也要按 PATH 找 `npx`/`node`。用户没显式指定 PATH 时
+        // 注入解析到的登录 shell PATH（见 process_guard::init_login_path；Windows 恒为 None）。
+        let mut envs = env.unwrap_or_default();
+        if !envs.contains_key("PATH") {
+            if let Some((key, value)) = crate::process_guard::path_env() {
+                envs.insert(key, value);
+            }
+        }
+        let child = spawn
+            .args(&args)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .envs(envs)
+            .spawn()
+            .map_err(|error| format!("failed to spawn mcp server: {error}"))?;
+
+        let mut guard = KillGuard(child);
+        let stdin = guard
+            .0
+            .stdin
+            .take()
+            .ok_or_else(|| "mcp server stdin unavailable".to_string())?;
+        let stdout = guard
+            .0
+            .stdout
+            .take()
+            .ok_or_else(|| "mcp server stdout unavailable".to_string())?;
+        let mut session = Self {
+            guard,
+            stdin,
+            reader: tokio::io::BufReader::new(stdout),
+            buf: String::new(),
+            init_result: Value::Null,
+        };
+        let init_result = session.request(1, "initialize", init_params()).await?;
+        session.init_result = init_result;
+        // initialized 是 notification：无 id，无需等回包。
+        session.notify("notifications/initialized").await?;
+        Ok(session)
+    }
+
+    async fn request(&mut self, id: u64, method: &str, params: Value) -> Result<Value, String> {
+        use tokio::io::AsyncWriteExt;
+
+        self.stdin
+            .write_all(rpc_request(id, method, params).as_bytes())
+            .await
+            .map_err(|error| format!("failed to write to mcp server: {error}"))?;
+        wait_for_response(&mut self.reader, &mut self.buf, id).await
+    }
+
+    async fn notify(&mut self, method: &str) -> Result<(), String> {
+        use tokio::io::AsyncWriteExt;
+
+        self.stdin
+            .write_all(rpc_notification(method).as_bytes())
+            .await
+            .map_err(|error| format!("failed to write to mcp server: {error}"))
+    }
+
+    /// 主动回收：正常路径显式 kill，别等 Drop 的兜底。
+    async fn close(mut self) {
+        let _ = self.guard.0.kill().await;
+    }
+}
+
+/// stdio 探活：握手后请求 `tools/list`。整体受 timeout 约束。
 async fn probe_stdio(
     command: String,
     args: Vec<String>,
     env: Option<HashMap<String, String>>,
     timeout_secs: Option<u64>,
 ) -> Result<McpProbeReport, String> {
-    let command = crate::process_guard::validate_spawn_command(&command, ALLOWED_MCP_RUNTIMES)?;
-    if let Some(bad) = args.iter().find(|arg| {
-        arg.chars()
-            .any(|c| crate::process_guard::SHELL_META_CHARS.contains(&c))
-    }) {
-        return Err(format!("mcp arg contains forbidden character: {bad:?}"));
-    }
-
     let started = Instant::now();
     let deadline = Duration::from_secs(timeout_secs.unwrap_or(DEFAULT_PROBE_TIMEOUT_SECS));
-    let probe = probe_stdio_inner(&command, &args, env);
+    let probe = probe_stdio_inner(command, args, env);
     tokio::pin!(probe);
 
     match tokio::time::timeout(deadline, probe).await {
@@ -473,97 +619,24 @@ async fn probe_stdio(
 }
 
 async fn probe_stdio_inner(
-    command: &str,
-    args: &[String],
+    command: String,
+    args: Vec<String>,
     env: Option<HashMap<String, String>>,
 ) -> Result<(Option<String>, Option<String>, Vec<McpToolInfo>), String> {
-    use tokio::io::{AsyncWriteExt, BufReader};
-
-    // Windows 上 npx/bunx 是 .cmd 垫片，CreateProcess 起不来：改由 cmd.exe 承载。
-    // 交给 cmd 的是**裸程序名**（与 ACP 侧同一形态），由它自己按 PATH + PATHEXT 找 ——
-    // 塞探测到的绝对路径要赌 cmd 的引号规则（含空格路径尤其），没必要冒这个险。
-    let mut spawn = if crate::process_guard::batch_program(command).is_some() {
-        let mut cmd = tokio::process::Command::new("cmd");
-        cmd.arg("/C").arg(command);
-        cmd
-    } else {
-        tokio::process::Command::new(command)
-    };
-    // 自成进程组组长：kill_process_tree 靠进程组整组回收，不设的话它找不到同名组
-    // （ESRCH）而静默失效 —— npx → node 的孙子进程会残留。见 process_guard 的契约。
-    crate::process_guard::isolate_process_group(&mut spawn);
-    // Windows 上隐藏控制台窗口（GUI 程序 spawn cmd.exe/控制台程序会闪黑框）
-    crate::process_guard::hide_console_tokio(&mut spawn);
-    // 只改探测不够：MCP server 自己也要按 PATH 找 `npx`/`node`。用户没显式指定 PATH 时
-    // 注入解析到的登录 shell PATH（见 process_guard::init_login_path；Windows 恒为 None）。
-    let mut envs = env.unwrap_or_default();
-    if !envs.contains_key("PATH") {
-        if let Some((key, value)) = crate::process_guard::path_env() {
-            envs.insert(key, value);
-        }
-    }
-    let child = spawn
-        .args(args)
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .envs(envs)
-        .spawn()
-        .map_err(|error| format!("failed to spawn mcp server: {error}"))?;
-
-    // 守卫：无论哪条路径返回都回收整棵进程树（Windows `taskkill /T`、Unix `killpg`；
-    // 后者依赖上面设的独立进程组）。`start_kill` 是兜底，防止进程组已不存在时漏掉直接子进程。
-    struct KillGuard(tokio::process::Child);
-    impl Drop for KillGuard {
-        fn drop(&mut self) {
-            if let Some(pid) = self.0.id() {
-                crate::process_guard::kill_process_tree(pid);
-            }
-            let _ = self.0.start_kill();
-        }
-    }
-    let mut guard = KillGuard(child);
-
-    let mut stdin = guard
-        .0
-        .stdin
-        .take()
-        .ok_or_else(|| "mcp server stdin unavailable".to_string())?;
-    let stdout = guard
-        .0
-        .stdout
-        .take()
-        .ok_or_else(|| "mcp server stdout unavailable".to_string())?;
-    let mut reader = BufReader::new(stdout);
-    let mut buf = String::new();
-
-    stdin
-        .write_all(rpc_request(1, "initialize", init_params()).as_bytes())
-        .await
-        .map_err(|error| format!("failed to write to mcp server: {error}"))?;
-    let init_result = wait_for_response(&mut reader, &mut buf, 1).await?;
-    let server_name = init_result
+    let mut session = StdioSession::open(command, args, env).await?;
+    let server_name = session
+        .init_result
         .pointer("/serverInfo/name")
         .and_then(Value::as_str)
         .map(str::to_string);
-    let server_version = init_result
+    let server_version = session
+        .init_result
         .pointer("/serverInfo/version")
         .and_then(Value::as_str)
         .map(str::to_string);
-
-    // initialized 是 notification：无 id，无需等回包。
-    stdin
-        .write_all(rpc_notification("notifications/initialized").as_bytes())
-        .await
-        .map_err(|error| format!("failed to write to mcp server: {error}"))?;
-    stdin
-        .write_all(rpc_request(2, "tools/list", json!({})).as_bytes())
-        .await
-        .map_err(|error| format!("failed to write to mcp server: {error}"))?;
-    let list_result = wait_for_response(&mut reader, &mut buf, 2).await?;
+    let list_result = session.request(2, "tools/list", json!({})).await?;
     let tools = extract_tools(&list_result);
-
-    let _ = guard.0.kill().await;
+    session.close().await;
     Ok((server_name, server_version, tools))
 }
 
@@ -592,6 +665,160 @@ async fn wait_for_response(
             }
         }
     }
+}
+
+// ---------- 工具调用 ----------
+
+/// `tools/call` 的返回：正文文本 + 原始 content（上层按配额裁剪）+ 是否被服务器标记为错误。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpCallReport {
+    pub transport: String,
+    pub is_error: bool,
+    pub text: String,
+    pub content: Value,
+    pub duration_ms: u64,
+}
+
+/// 正文文本的宿主侧硬上限：插件能力层还会再收紧一次（配额分层，不互相依赖）。
+const CALL_TEXT_MAX_CHARS: usize = 16 * 1024;
+const MAX_TOOL_NAME_CHARS: usize = 128;
+
+/// 归一化 `tools/call` 的 result：拼 text 条目、取 isError、原样带回 content 数组。
+fn normalize_call_result(result: &Value) -> (bool, String, Value) {
+    let is_error = result
+        .get("isError")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let content = result
+        .get("content")
+        .cloned()
+        .unwrap_or_else(|| Value::Array(Vec::new()));
+    let text = content
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter(|item| item.get("type").and_then(Value::as_str) == Some("text"))
+                .filter_map(|item| item.get("text").and_then(Value::as_str))
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .unwrap_or_default();
+    (
+        is_error,
+        truncate_chars(&text, CALL_TEXT_MAX_CHARS),
+        content,
+    )
+}
+
+/// 按**字符**截断（不是字节）：中文正文按字节切会把 UTF-8 尾巴切坏。
+fn truncate_chars(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+    let mut clipped: String = text.chars().take(max).collect();
+    clipped.push('…');
+    clipped
+}
+
+/// `tools/call`：握手后调一个工具。`arguments` 必须是 JSON 对象（MCP 要求）。
+pub async fn mcp_call(request: CallArgs) -> Result<McpCallReport, String> {
+    let CallArgs {
+        transport,
+        url,
+        command,
+        args,
+        env,
+        headers,
+        tool,
+        arguments,
+        timeout_secs,
+    } = request;
+    let tool = tool.trim().to_string();
+    if tool.is_empty() {
+        return Err("mcp_call requires a non-empty tool name".to_string());
+    }
+    if tool.chars().count() > MAX_TOOL_NAME_CHARS {
+        return Err(format!(
+            "mcp_call tool name exceeds {MAX_TOOL_NAME_CHARS} characters"
+        ));
+    }
+    let arguments = match arguments {
+        None | Some(Value::Null) => json!({}),
+        Some(Value::Object(map)) => Value::Object(map),
+        Some(_) => return Err("mcp_call arguments must be a JSON object".to_string()),
+    };
+    let params = json!({ "name": tool, "arguments": arguments });
+
+    let started = Instant::now();
+    match transport.as_str() {
+        "http" => {
+            let url = url.ok_or_else(|| "http transport requires url".to_string())?;
+            let session = HttpSession::open(url, headers.unwrap_or_default(), timeout_secs).await?;
+            let result = session.request(2, "tools/call", params).await?;
+            let (is_error, text, content) = normalize_call_result(&result);
+            Ok(McpCallReport {
+                transport: "http".to_string(),
+                is_error,
+                text,
+                content,
+                duration_ms: started.elapsed().as_millis() as u64,
+            })
+        }
+        "stdio" => {
+            let command = command.ok_or_else(|| "stdio transport requires command".to_string())?;
+            let deadline = Duration::from_secs(timeout_secs.unwrap_or(DEFAULT_PROBE_TIMEOUT_SECS));
+            let call = call_stdio(command, args.unwrap_or_default(), env, params);
+            tokio::pin!(call);
+            match tokio::time::timeout(deadline, call).await {
+                Ok(result) => {
+                    let (is_error, text, content) = result?;
+                    Ok(McpCallReport {
+                        transport: "stdio".to_string(),
+                        is_error,
+                        text,
+                        content,
+                        duration_ms: started.elapsed().as_millis() as u64,
+                    })
+                }
+                Err(_) => Err(format!(
+                    "mcp stdio call timed out after {}ms (limit {}s)",
+                    started.elapsed().as_millis(),
+                    deadline.as_secs()
+                )),
+            }
+        }
+        "sse" => Err("sse transport cannot be called; declare it and let the agent connect".into()),
+        other => Err(format!("unknown mcp transport: {other}")),
+    }
+}
+
+async fn call_stdio(
+    command: String,
+    args: Vec<String>,
+    env: Option<HashMap<String, String>>,
+    params: Value,
+) -> Result<(bool, String, Value), String> {
+    let mut session = StdioSession::open(command, args, env).await?;
+    let result = session.request(2, "tools/call", params).await?;
+    session.close().await;
+    Ok(normalize_call_result(&result))
+}
+
+/// `mcp_call` 入参。
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CallArgs {
+    pub transport: String,
+    pub url: Option<String>,
+    pub command: Option<String>,
+    pub args: Option<Vec<String>>,
+    pub env: Option<HashMap<String, String>>,
+    pub headers: Option<Vec<McpHeader>>,
+    pub tool: String,
+    pub arguments: Option<Value>,
+    pub timeout_secs: Option<u64>,
 }
 
 /// `mcp_probe` 入参。
@@ -809,6 +1036,192 @@ mod tests {
             value: "bad\nvalue".into(),
         }])
         .is_err());
+    }
+
+    #[test]
+    fn normalize_call_result_joins_text_items_and_flags_errors() {
+        let result = json!({
+            "content": [
+                { "type": "text", "text": "第一段" },
+                { "type": "image", "data": "AAAA", "mimeType": "image/png" },
+                { "type": "text", "text": "第二段" }
+            ],
+            "isError": true
+        });
+        let (is_error, text, content) = normalize_call_result(&result);
+        assert!(is_error, "isError 要如实带回");
+        assert_eq!(text, "第一段\n第二段", "只拼 text 条目，图片不参与正文");
+        assert_eq!(
+            content.as_array().map(Vec::len),
+            Some(3),
+            "content 原样带回"
+        );
+    }
+
+    #[test]
+    fn normalize_call_result_tolerates_missing_fields() {
+        let (is_error, text, content) = normalize_call_result(&json!({}));
+        assert!(!is_error);
+        assert_eq!(text, "");
+        assert_eq!(content, json!([]));
+    }
+
+    #[test]
+    fn call_text_is_truncated_by_chars_not_bytes() {
+        let text = "字".repeat(CALL_TEXT_MAX_CHARS + 10);
+        let clipped = truncate_chars(&text, CALL_TEXT_MAX_CHARS);
+        // 截断后是 max 个字符 + 一个省略号，且仍是合法 UTF-8。
+        assert_eq!(clipped.chars().count(), CALL_TEXT_MAX_CHARS + 1);
+        assert!(clipped.ends_with('…'));
+    }
+
+    /// 调用入参的默认骨架：stdio + node + 5 秒超时，各用例只覆盖自己关心的字段。
+    fn call_args(tool: &str) -> CallArgs {
+        CallArgs {
+            transport: "stdio".into(),
+            url: None,
+            command: Some("node".into()),
+            args: None,
+            env: None,
+            headers: None,
+            tool: tool.into(),
+            arguments: None,
+            timeout_secs: Some(5),
+        }
+    }
+
+    #[test]
+    fn mcp_call_rejects_bad_tool_and_non_object_arguments() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let empty = runtime.block_on(mcp_call(call_args("   ")));
+        assert!(empty.is_err(), "空工具名不该发起任何连接");
+
+        let not_object = runtime.block_on(mcp_call(CallArgs {
+            arguments: Some(json!([1, 2, 3])),
+            ..call_args("echo")
+        }));
+        assert!(
+            not_object.is_err_and(|error| error.contains("JSON object")),
+            "arguments 必须是对象"
+        );
+    }
+
+    /// stdio 全链路：真起一个最小的换行分隔 JSON-RPC 服务端，走 initialize →
+    /// notifications/initialized → tools/call，验证帧格式与结果归一化。
+    #[tokio::test]
+    async fn stdio_call_round_trip_against_a_fake_server() {
+        let script = r#"
+process.stdin.setEncoding("utf8");
+let buffer = "";
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  let index;
+  while ((index = buffer.indexOf("\n")) >= 0) {
+    const line = buffer.slice(0, index).trim();
+    buffer = buffer.slice(index + 1);
+    if (!line) continue;
+    const message = JSON.parse(line);
+    if (message.id === undefined) continue;
+    let result = {};
+    if (message.method === "initialize") {
+      result = { protocolVersion: "2025-06-18", capabilities: {}, serverInfo: { name: "fake", version: "0.0.1" } };
+    } else if (message.method === "tools/call") {
+      result = {
+        content: [{ type: "text", text: "echo:" + message.params.name + ":" + JSON.stringify(message.params.arguments) }],
+        isError: false,
+      };
+    }
+    process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }) + "\n");
+  }
+});
+"#;
+        let dir = std::env::temp_dir().join(format!("greywork-mcp-call-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let file = dir.join("fake-server.js");
+        std::fs::write(&file, script).expect("write fake server");
+
+        let report = mcp_call(CallArgs {
+            args: Some(vec![file.display().to_string()]),
+            arguments: Some(json!({ "n": 1 })),
+            timeout_secs: Some(20),
+            ..call_args("echo")
+        })
+        .await
+        .expect("fake stdio server responds");
+
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(report.transport, "stdio");
+        assert!(!report.is_error);
+        assert_eq!(report.text, r#"echo:echo:{"n":1}"#);
+        assert_eq!(report.content.as_array().map(Vec::len), Some(1));
+    }
+
+    /// HTTP 全链路：本地起一个假端点，按请求体里的 method 回包（initialize / 通知 / tools/call）。
+    #[tokio::test]
+    async fn http_call_round_trip_against_a_fake_server() {
+        use std::io::{Read, Write};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind fake http server");
+        let port = listener.local_addr().expect("local addr").port();
+        let server = std::thread::spawn(move || {
+            for _ in 0..3 {
+                let Ok((mut socket, _)) = listener.accept() else {
+                    return;
+                };
+                let mut buf = [0u8; 8192];
+                let Ok(read) = socket.read(&mut buf) else {
+                    return;
+                };
+                let request = String::from_utf8_lossy(&buf[..read]).to_string();
+                let body = if request.contains("\"initialize\"") {
+                    json!({
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "result": {
+                            "protocolVersion": PROTOCOL_VERSION,
+                            "capabilities": {},
+                            "serverInfo": { "name": "fake-http", "version": "0.0.1" }
+                        }
+                    })
+                    .to_string()
+                } else if request.contains("\"tools/call\"") {
+                    json!({
+                        "jsonrpc": "2.0",
+                        "id": 2,
+                        "result": { "content": [{ "type": "text", "text": "远程回声" }], "isError": false }
+                    })
+                    .to_string()
+                } else {
+                    String::new()
+                };
+                // Connection: close 让每次请求都新建连接，测试端只需按顺序收三条。
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\nconnection: close\r\ncontent-length: {}\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = socket.write_all(response.as_bytes());
+            }
+        });
+
+        let report = mcp_call(CallArgs {
+            transport: "http".into(),
+            url: Some(format!("http://127.0.0.1:{port}/mcp")),
+            command: None,
+            arguments: Some(json!({})),
+            timeout_secs: Some(10),
+            ..call_args("echo")
+        })
+        .await
+        .expect("fake http server responds");
+        server.join().expect("fake server thread");
+
+        assert_eq!(report.transport, "http");
+        assert_eq!(report.text, "远程回声");
+        assert!(!report.is_error);
     }
 
     /// 真实网络：对 DeepWiki 官方 MCP 端点跑一遍探活。

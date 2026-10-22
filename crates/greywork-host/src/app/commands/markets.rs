@@ -10,6 +10,9 @@ macro_rules! markets_commands {
     { "mcp_probe", auth: Auth::Required, desktop: false, binary: false,
         args: mcp::ProbeArgs,
         run: |_ctx, a| async move { mcp::mcp_probe(a.transport, a.url, a.command, a.args, a.env, a.headers, a.timeout_secs).await.map(Json) } }
+    { "mcp_call", auth: Auth::Required, desktop: false, binary: false,
+        args: mcp::CallArgs,
+        run: |_ctx, a| async move { mcp::mcp_call(a).await.map(Json) } }
 
     // ---- skills_market ----
     { "skills_search", auth: Auth::Required, desktop: false, binary: false,
