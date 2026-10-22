@@ -44,6 +44,13 @@ export const zhCN = {
     edit: "编辑",
     openSettings: "打开设置",
   },
+  /* 无原生文件夹选择器时的手输路径弹层（见 lib/path-prompt）。 */
+  pathPrompt: {
+    title: "输入文件夹路径",
+    description: "当前环境没有系统文件夹选择器。请填写服务端上的文件夹绝对路径；只有服务端已授权（配置的工作区根）的路径才能读取。",
+    placeholder: "/home/user/project",
+    confirm: "使用该路径",
+  },
   titlebar: {
     github: "在 GitHub 上查看本项目",
     update: "检查更新",

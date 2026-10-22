@@ -15,6 +15,7 @@ import { appEvents } from "@/events";
 import { applyAppearance as applyAppearanceToDom } from "@/lib/theme";
 import { modeOfShortcut, visibilityOf, type LayoutMode } from "@/lib/layout-modes";
 import { hasDirtyPreviewTabs, pendingDiscard, requestLeave } from "@/lib/preview-edit-guard";
+import { pathPromptOpen } from "@/lib/path-prompt";
 import { terminalBackend } from "@/lib/terminal-backend";
 import { currentFront } from "@/front/current";
 import { SHELL_WIRINGS, type ShellWiringContext } from "@/features/shell/wiring";
@@ -36,6 +37,8 @@ const SettingsDialog = defineAsyncComponent(() => import("@/features/settings/Se
 const PreviewSider = defineAsyncComponent(() => import("@/features/preview/PreviewSider.vue"));
 const WorkspacePanel = defineAsyncComponent(() => import("@/features/workspace/WorkspacePanel.vue"));
 const TerminalPanel = defineAsyncComponent(() => import("@/features/terminal/TerminalPanel.vue"));
+// 手输路径弹层：只有无原生选择器时才会用到，不必进首屏（Dialog 原语不小）。
+const PathPromptDialog = defineAsyncComponent(() => import("@/features/workspace/PathPromptDialog.vue"));
 
 /**
  * GreyWork 风格外壳：标题栏 + 左侧栏 + 内容区（router-view）+ 右侧预览面板。
@@ -403,6 +406,8 @@ function handleNewChat(): void {
     </div>
     <WorkspaceOverlayRegions />
     <NoticeHost />
+    <!-- 无原生文件夹选择器时的手输路径弹层（见 lib/path-prompt 的由来）。 -->
+    <PathPromptDialog v-if="pathPromptOpen" />
     <!-- 待裁决的 ACP 权限请求：全局浮层，任何路由都能看到并裁决（见组件头注释）。 -->
     <PermissionPromptHost />
     <SettingsDialog v-model:open="settingsOpen" v-model:section="settingsSection" />

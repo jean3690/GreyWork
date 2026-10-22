@@ -45,6 +45,14 @@ export const enUS: MessageSchema = {
     edit: "Edit",
     openSettings: "Open settings",
   },
+  /* In-app path prompt used when there is no native folder picker (see lib/path-prompt). */
+  pathPrompt: {
+    title: "Enter a folder path",
+    description:
+      "This environment has no native folder picker. Enter the absolute path of a folder on the server; only paths the server has authorized (its configured workspace roots) are readable.",
+    placeholder: "/home/user/project",
+    confirm: "Use this path",
+  },
   titlebar: {
     github: "View this project on GitHub",
     update: "Check for updates",

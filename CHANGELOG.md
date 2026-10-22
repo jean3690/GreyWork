@@ -19,6 +19,9 @@
 - **Windows 双击桌面端不再多出一个终端窗口**：sidecar（`greywork-server.exe`）是 console 子系统
   程序，而打包版主进程是 GUI 子系统、自身没有控制台，spawn 时 Windows 会给子进程新分配一个控制台
   窗口。spawn 选项补上 `windowsHide`（首启生成凭据时调 `hash-password` 的那次同理）。
+- **自托管 Web / 浏览器态「添加工作区」不再点了没反应**：没有原生文件夹选择器时，原本回落到
+  `window.prompt` 问路径，而 Chromium 已不实现 prompt（调用即抛错，界面毫无反馈）。改为应用内
+  路径输入弹层（Enter 确认、Esc 取消、空白不可提交），提示里写明只有服务端已授权的路径可读。
 
 ### 性能
 
