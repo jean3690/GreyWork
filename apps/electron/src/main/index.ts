@@ -31,10 +31,23 @@ let sidecarPassword = "";
 let rendererOrigin = "";
 let quitting = false;
 
+/**
+ * 逃生舱：置 `1` 时关掉硬件加速（整窗软件渲染）。
+ *
+ * 起因是 WSLg：那里的 dzn（Vulkan-on-D3D12）不是合规实现，GPU 进程初始化失败时偶尔会把浏览器
+ * 进程一起带崩 —— 表现为启动几秒后 SIGSEGV，终端里只剩一行 `Exiting GPU process`。软件渲染下
+ * 圆角 / 透明仍然有效，代价是预览、终端这些面板吃 CPU。
+ */
+const DISABLE_GPU_ENV = "GREYWORK_DISABLE_GPU";
+
 // Linux/X11 下透明窗口需要 ARGB visual 才会真的透出桌面（主窗圆角靠它，见 window.ts）。
 // 不加 `--disable-gpu`：那只是旧版 NVIDIA 驱动下 alpha 失效的兜底，代价是整窗软件渲染，
-// 对预览 / 终端这些吃 GPU 的面板得不偿失。
+// 对预览 / 终端这些吃 GPU 的面板得不偿失 —— 于是做成显式开关，只在踩到崩溃时关。
 if (process.platform === "linux") app.commandLine.appendSwitch("enable-transparent-visuals");
+if (process.env[DISABLE_GPU_ENV] === "1") {
+  app.disableHardwareAcceleration();
+  console.log("[main] 已关闭硬件加速（" + DISABLE_GPU_ENV + "=1）");
+}
 
 /** 托盘 / 关窗守卫共用的宿主面：窗口是懒取（托盘可能先于窗口建成）。 */
 const trayHost: TrayHost = {

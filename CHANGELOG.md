@@ -30,6 +30,10 @@
 
 ### 修复
 
+- **WSLg 下桌面端偶发启动即崩（SIGSEGV）有了逃生舱**：WSLg 的 dzn（Vulkan-on-D3D12）不是合规实现，
+  GPU 进程初始化失败时偶尔会把浏览器进程一起带崩 —— 终端里只剩一行 `Exiting GPU process`。
+  新增 `GREYWORK_DISABLE_GPU=1`：置 1 关掉硬件加速、整窗软件渲染（圆角与透明仍然有效，代价是
+  预览、终端这些面板吃 CPU）。默认不开，软件渲染对这类面板代价太大。
 - **Windows 双击桌面端不再多出一个终端窗口**：sidecar（`greywork-server.exe`）是 console 子系统
   程序，而打包版主进程是 GUI 子系统、自身没有控制台，spawn 时 Windows 会给子进程新分配一个控制台
   窗口。spawn 选项补上 `windowsHide`（首启生成凭据时调 `hash-password` 的那次同理）。
