@@ -1252,6 +1252,147 @@ const llmChatCapability: CapabilityDefinition = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// artifacts.publish 传输（产物面板；前端能力，浏览器态同样可用）
+// ---------------------------------------------------------------------------
+
+/** 一次产物发布请求：路径由能力层净化后给出，publisher 只负责落盘 + 登记卡片。 */
+export interface PluginArtifactPublishRequest {
+  pluginId: string;
+  /** 展示名（已净化，≤120 字符）。 */
+  name: string;
+  /** VFS 路径（已限定在 plugins/<id>/ 下）。 */
+  path: string;
+  format: "md" | "html" | "csv";
+  data: string;
+}
+
+/**
+ * artifacts.publish 传输层：由外壳注入（产物面板是前端概念，web 预览同样可用）。
+ * 宿主侧不需要新命令 —— 落盘走既有 `deliverArtifact`（VFS + 默认目录 + 事件广播）。
+ */
+export type PluginArtifactPublisher = (request: PluginArtifactPublishRequest) => Promise<{ id: string }>;
+
+let artifactPublisher: PluginArtifactPublisher | null = null;
+
+export function setPluginArtifactPublisher(publisher: PluginArtifactPublisher | null): void {
+  artifactPublisher = publisher;
+}
+
+// ---------------------------------------------------------------------------
+// 能力实现：artifacts.publish
+// ---------------------------------------------------------------------------
+
+/** 单份产物上限 256 KiB：产物面板是「看一眼」的地方，不是文件传输通道。 */
+const ARTIFACT_MAX_BYTES = 256 * 1024;
+const ARTIFACT_NAME_MAX_CHARS = 120;
+/** 限速：10 分钟 20 次（产物会开预览 tab，刷屏比多占几 KB 更烦）。 */
+const ARTIFACT_WINDOW_MS = 10 * 60_000;
+const ARTIFACT_MAX_CALLS_PER_WINDOW = 20;
+/** 允许发布的文本格式：二进制与「能执行的东西」一律不放行（html 由查看器去脚本渲染）。 */
+const ARTIFACT_FORMATS = ["md", "html", "csv"] as const;
+type ArtifactFormat = (typeof ARTIFACT_FORMATS)[number];
+
+const artifactWindows = new Map<string, number[]>();
+
+function takeArtifactToken(pluginId: string): boolean {
+  const now = Date.now();
+  const window = (artifactWindows.get(pluginId) ?? []).filter((ts) => now - ts < ARTIFACT_WINDOW_MS);
+  if (window.length >= ARTIFACT_MAX_CALLS_PER_WINDOW) {
+    artifactWindows.set(pluginId, window);
+    return false;
+  }
+  window.push(now);
+  artifactWindows.set(pluginId, window);
+  return true;
+}
+
+interface ArtifactsPublishArgs {
+  name: string;
+  format: ArtifactFormat;
+  data: string;
+}
+
+function isArtifactsPublishArgs(value: unknown): value is ArtifactsPublishArgs {
+  if (typeof value !== "object" || value === null) return false;
+  const args = value as Record<string, unknown>;
+  if (typeof args.name !== "string" || args.name.trim() === "" || args.name.length > ARTIFACT_NAME_MAX_CHARS) {
+    return false;
+  }
+  if (typeof args.format !== "string" || !ARTIFACT_FORMATS.includes(args.format as ArtifactFormat)) return false;
+  return typeof args.data === "string" && args.data.length > 0 && args.data.length <= ARTIFACT_MAX_BYTES;
+}
+
+/**
+ * 文件名净化：去路径分隔 / 控制字符 / 前后空白，并压掉连续点（防 `..` 段）。
+ * 空结果回落到 "artifact" —— 宁可用默认名，也不让插件通过名字逃出 `plugins/<id>/`。
+ */
+function safeArtifactName(name: string): string {
+  const cleaned = name
+    .replace(/[/\\]/g, "_")
+    .replace(/\p{Cc}/gu, "_")
+    .replace(/\.{2,}/g, ".")
+    .trim();
+  return cleaned.slice(0, ARTIFACT_NAME_MAX_CHARS) || "artifact";
+}
+
+/** 插件 id 在 manifest 里已校验，这里再做一次「只留安全字符」的兜底。 */
+function safePluginSegment(pluginId: string): string {
+  const cleaned = pluginId.replace(/[^a-zA-Z0-9._-]/g, "_");
+  return cleaned || "plugin";
+}
+
+const artifactsPublishCapability: CapabilityDefinition = {
+  id: "artifacts.publish",
+  title: "发布产物",
+  description:
+    "把文本产物（md / html / csv）送进产物面板，用户可预览、下载、在文件夹中打开。落盘位置由宿主决定（VFS 的 plugins/<id>/ 下 + 当前工作区的 artifacts/ 目录），插件给的名字只用于展示；单份 ≤ 256 KiB，每插件 10 分钟最多 20 次。HTML 由查看器去脚本渲染（sandbox 不含 allow-scripts）。",
+  danger: "medium",
+  async invoke(args, ctx) {
+    const audit = (outcome: "ok" | "denied" | "error", detail: string): void => {
+      ctx.audit({
+        plugin: ctx.pluginId,
+        capability: "artifacts.publish",
+        at: new Date().toISOString(),
+        outcome,
+        detail: detail.slice(0, 200),
+      });
+    };
+    if (!isArtifactsPublishArgs(args)) {
+      audit("denied", "invalid args (name / format / data shape)");
+      throw new Error(
+        `artifacts.publish requires { name: string ≤ ${ARTIFACT_NAME_MAX_CHARS} chars, format: ${ARTIFACT_FORMATS.join(" | ")}, data: string ≤ ${ARTIFACT_MAX_BYTES} bytes }`,
+      );
+    }
+    if (!artifactPublisher) {
+      audit("denied", "no artifact publisher: the workbench shell is not mounted");
+      throw new Error("artifacts.publish requires the workbench shell");
+    }
+    if (!takeArtifactToken(ctx.pluginId)) {
+      audit("denied", "rate limit exceeded");
+      throw new Error(
+        `artifacts.publish rate limit exceeded (${ARTIFACT_MAX_CALLS_PER_WINDOW} per ${ARTIFACT_WINDOW_MS / 60_000} minutes)`,
+      );
+    }
+    const name = safeArtifactName(args.name.trim());
+    const path = `plugins/${safePluginSegment(ctx.pluginId)}/${Date.now()}-${name.replace(/\s+/g, "-")}.${args.format}`;
+    try {
+      const { id } = await artifactPublisher({
+        pluginId: ctx.pluginId,
+        name,
+        path,
+        format: args.format,
+        data: args.data,
+      });
+      audit("ok", `${args.format} · ${args.data.length} bytes · ${path}`);
+      return { id, name, path, format: args.format };
+    } catch (error) {
+      audit("error", (error instanceof Error ? error.message : String(error)).slice(0, 200));
+      throw error;
+    }
+  },
+};
+
 const scheduleCapability: CapabilityDefinition = {
   id: "schedule",
   title: "后台定时",
@@ -1272,6 +1413,7 @@ export const CAPABILITY_REGISTRY: Readonly<Record<string, CapabilityDefinition>>
   [fsScopedCapability.id]: fsScopedCapability,
   [workspaceReadCapability.id]: workspaceReadCapability,
   [llmChatCapability.id]: llmChatCapability,
+  [artifactsPublishCapability.id]: artifactsPublishCapability,
   [notifyCapability.id]: notifyCapability,
   [scheduleCapability.id]: scheduleCapability,
   [pluginAdminCapability.id]: pluginAdminCapability,

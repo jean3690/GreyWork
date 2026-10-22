@@ -1036,6 +1036,34 @@ fn demo_llm_package_parses_and_validates() {
 }
 
 #[test]
+fn demo_artifacts_package_parses_and_validates() {
+    // demo.artifacts.json 是 artifacts.publish 的「就绪未发布」演示包：解析 + 校能力声明，
+    // 并把发布占位换成合法 entry / sha256 后过全量 validate。
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../plugin-market/packages/demo.artifacts.json"
+    );
+    let Ok(bytes) = std::fs::read(path) else {
+        // 仓库外构建（单独打包本 crate）跳过。
+        return;
+    };
+    let mut package: PluginPackage =
+        serde_json::from_slice(&bytes).expect("demo.artifacts.json parses");
+    assert_eq!(package.manifest.id, "demo.artifacts");
+    assert!(
+        !package.manifest.requires.is_empty(),
+        "demo.artifacts declares its artifacts.publish requirement"
+    );
+
+    if let Some(runtime) = package.manifest.runtime.as_mut() {
+        runtime.entry =
+            "https://raw.githubusercontent.com/acme/plugins/main/demo.artifacts.js".into();
+        runtime.sha256 = "a".repeat(64);
+    }
+    validate_package(&package).expect("demo.artifacts declaration validates");
+}
+
+#[test]
 fn demo_pointer_package_parses_and_validates() {
     // demo.pointer.json 是「渲染指针事件」的「就绪未发布」演示包：解析 + 校 render.pointer
     // 声明形态（entry / sha256 是待发布占位，不校全量发布包，只把占位换成合法值后过 validate）。

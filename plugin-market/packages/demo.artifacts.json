@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "manifest": {
+    "id": "demo.artifacts",
+    "name": "产物发布",
+    "version": "1.0.0",
+    "description": "artifacts.publish 能力演示：把一段 Markdown 送进产物面板，可预览、下载、在文件夹中打开。",
+    "kind": "worker",
+    "runtime": {
+      "type": "worker",
+      "entry": "https://raw.githubusercontent.com/OWNER/REPO/COMMIT/demo.artifacts.js",
+      "sha256": "REPLACE_WITH_64_LOWERCASE_HEX"
+    },
+    "requires": ["artifacts.publish"],
+    "contributes": {
+      "modes": [
+        {
+          "id": "demo-artifacts",
+          "title": "产物发布",
+          "icon": "folder",
+          "page": {
+            "eyebrow": "Marketplace plugin · artifacts.publish",
+            "heading": "产物发布",
+            "body": "artifacts.publish 把文本产物送进产物面板：落盘位置由宿主决定（VFS 的 plugins/<插件 id>/ 下，再镜像到当前工作区的 artifacts/ 目录），插件给的名字只用于展示。单份上限 256 KiB，每插件 10 分钟最多 20 次；HTML 由查看器去脚本渲染（sandbox 不含 allow-scripts），发布 Markdown / CSV 更稳妥。",
+            "fields": [
+              {
+                "key": "title",
+                "label": "产物名",
+                "kind": "text",
+                "default": "demo-note",
+                "maxLength": 120
+              },
+              {
+                "key": "body",
+                "label": "Markdown 内容",
+                "kind": "text",
+                "default": "# 你好\n\n这是插件发布的产物。",
+                "maxLength": 4096
+              },
+              {
+                "key": "status",
+                "label": "最近动作",
+                "kind": "text",
+                "default": "尚未发布",
+                "maxLength": 120
+              }
+            ],
+            "outputs": [
+              {
+                "label": "动作",
+                "valueKey": "status"
+              }
+            ],
+            "actions": [
+              {
+                "id": "publish",
+                "label": "发布到产物面板",
+                "style": "primary",
+                "operation": {
+                  "type": "invoke",
+                  "handler": "publish"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

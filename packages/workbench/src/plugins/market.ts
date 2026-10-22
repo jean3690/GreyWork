@@ -16,6 +16,7 @@ import {
 import { useCapabilityLoader } from "./current";
 import {
   setNetFetchTransportForHost,
+  setPluginArtifactPublisher,
   setPluginFsTransportForHost,
   setPluginLlmChatTransportForHost,
   setPluginNotifyTransportForHost,
@@ -99,6 +100,27 @@ export function initPluginHostTransport(): void {
     setPluginNotifyTransportForHost((request) => plugins.notify(request));
   }
 }
+
+/**
+ * artifacts.publish 的落点：产物面板是**前端**概念（VFS + 产物卡片），web 预览同样可用，
+ * 所以不挂在 initPluginHostTransport 里 —— 那条路径没有宿主命令就直接返回。
+ *
+ * 动态 import 产物 store：本模块在入口求值，且 plugins 层不静态依赖 stores。
+ * 落盘 / 登记卡片 / 广播事件全部复用 deliverArtifact，插件只是多了一个内容来源。
+ */
+setPluginArtifactPublisher(async (request) => {
+  const { useArtifactStore } = await import("@/stores/artifact");
+  const id = await useArtifactStore().deliverArtifact({
+    name: request.name,
+    path: request.path,
+    meta: `插件 · ${request.pluginId}`,
+    type: "report",
+    source: `plugin:${request.pluginId}`,
+    format: request.format,
+    data: request.data,
+  });
+  return { id };
+});
 
 /** 用户可覆盖为自己的 GitHub raw index；空串表示尚未配置线上目录。 */
 const REGISTRY_URL_KEY = "greywork.plugins.registryUrl";
