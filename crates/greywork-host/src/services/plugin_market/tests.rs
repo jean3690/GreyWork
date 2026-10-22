@@ -1094,6 +1094,38 @@ fn clipboard_requirements_default_to_write_only() {
 }
 
 #[test]
+fn demo_wallpaper_package_parses_and_validates() {
+    // demo.wallpaper.json 是「应用内动态壁纸」演示包：解析 + 校 render/pointer、窗口声明
+    // 与 window.floating 的一致性，并把发布占位换成合法 entry / sha256 后过全量 validate。
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../plugin-market/packages/demo.wallpaper.json"
+    );
+    let Ok(bytes) = std::fs::read(path) else {
+        // 仓库外构建（单独打包本 crate）跳过。
+        return;
+    };
+    let mut package: PluginPackage =
+        serde_json::from_slice(&bytes).expect("demo.wallpaper.json parses");
+    assert_eq!(package.manifest.id, "demo.wallpaper");
+    let render = package
+        .manifest
+        .runtime
+        .as_ref()
+        .and_then(|runtime| runtime.render.as_ref())
+        .expect("demo.wallpaper declares a render loop");
+    assert!(render.pointer, "demo.wallpaper opts into pointer events");
+    assert_eq!(render.fps, Some(12));
+
+    if let Some(runtime) = package.manifest.runtime.as_mut() {
+        runtime.entry =
+            "https://raw.githubusercontent.com/acme/plugins/main/demo.wallpaper.js".into();
+        runtime.sha256 = "a".repeat(64);
+    }
+    validate_package(&package).expect("demo.wallpaper declaration validates");
+}
+
+#[test]
 fn demo_clipboard_package_parses_and_validates() {
     // demo.clipboard.json 是 clipboard 的「就绪未发布」演示包：解析 + 校 ops 声明，
     // 并把发布占位换成合法 entry / sha256 后过全量 validate。

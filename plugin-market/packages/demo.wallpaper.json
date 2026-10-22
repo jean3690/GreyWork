@@ -1,0 +1,140 @@
+{
+  "schemaVersion": 1,
+  "manifest": {
+    "id": "demo.wallpaper",
+    "name": "动态壁纸",
+    "version": "1.0.0",
+    "description": "四套动态壁纸（星空 / 极光 / 落日 / 雨夜）：worker 里算出 SVG 指令帧，宿主按 12fps 绘制；可全页预览、可在工作台叠一层，也能弹出桌面透明悬浮窗。点画布换主题。",
+    "kind": "worker",
+    "runtime": {
+      "type": "worker",
+      "entry": "https://raw.githubusercontent.com/OWNER/REPO/COMMIT/demo.wallpaper.js",
+      "sha256": "REPLACE_WITH_64_LOWERCASE_HEX",
+      "render": {
+        "handler": "draw",
+        "fps": 12,
+        "width": 480,
+        "height": 300,
+        "pointer": true
+      }
+    },
+    "requires": ["window.floating"],
+    "window": {
+      "width": 420,
+      "height": 280
+    },
+    "contributes": {
+      "modes": [
+        {
+          "id": "demo-wallpaper",
+          "title": "动态壁纸",
+          "icon": "sun",
+          "page": {
+            "eyebrow": "Marketplace plugin · worker + render",
+            "heading": "动态壁纸",
+            "body": "四套主题：星空（视差星点 + 每 9 秒一颗流星）、极光（三条正弦光带缓慢漂移）、落日（12 条色带模拟渐变 + 水面倒影）、雨夜（不同速度的雨丝 + 地面涟漪）。动画相位由宿主时钟驱动，暂停时冻结在当前位置；点画布或「下一套主题」切换，右下角常驻时钟。渲染走宿主白名单指令集（无 DOM、无脚本），一帧指令数远低于上限。",
+            "fields": [
+              {
+                "key": "theme",
+                "label": "当前主题",
+                "kind": "text",
+                "default": "starfield",
+                "maxLength": 24
+              },
+              {
+                "key": "speed",
+                "label": "播放速度",
+                "kind": "number",
+                "default": 1,
+                "min": 0.2,
+                "max": 3,
+                "step": 0.1
+              },
+              {
+                "key": "paused",
+                "label": "暂停",
+                "kind": "toggle",
+                "default": false
+              },
+              {
+                "key": "phase",
+                "label": "相位（秒）",
+                "kind": "number",
+                "default": 0,
+                "min": 0
+              },
+              {
+                "key": "phase_at",
+                "label": "相位起点（毫秒时间戳）",
+                "kind": "number",
+                "default": 0,
+                "min": 0
+              },
+              {
+                "key": "note",
+                "label": "状态备注",
+                "kind": "text",
+                "default": "星空 · 点画布换主题",
+                "maxLength": 120
+              }
+            ],
+            "outputs": [
+              {
+                "label": "主题",
+                "valueKey": "theme"
+              },
+              {
+                "label": "速度",
+                "valueKey": "speed"
+              },
+              {
+                "label": "状态",
+                "valueKey": "note"
+              }
+            ],
+            "actions": [
+              {
+                "id": "cycle",
+                "label": "下一套主题",
+                "style": "primary",
+                "operation": {
+                  "type": "invoke",
+                  "handler": "cycle"
+                }
+              },
+              {
+                "id": "toggle",
+                "label": "暂停 / 继续",
+                "style": "secondary",
+                "operation": {
+                  "type": "invoke",
+                  "handler": "toggle"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "uiRegions": [
+        {
+          "region": "workspaceOverlay",
+          "id": "wallpaper.overlay",
+          "title": "壁纸",
+          "order": 6,
+          "width": 200,
+          "height": 130,
+          "actions": [
+            {
+              "id": "cycle",
+              "label": "换主题"
+            },
+            {
+              "id": "toggle",
+              "label": "暂停"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
