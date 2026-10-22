@@ -8,8 +8,8 @@
     "kind": "worker",
     "runtime": {
       "type": "worker",
-      "entry": "https://raw.githubusercontent.com/OWNER/REPO/COMMIT/demo.llm.js",
-      "sha256": "REPLACE_WITH_64_LOWERCASE_HEX"
+      "entry": "https://raw.githubusercontent.com/jean3690/greywork-plugin-market/6b5a17f54305dfbe8a84c7ac4470765bcaf1fe02/packages/demo.llm.js",
+      "sha256": "3325969104b00e44fc8f72f3c184665a6d34cf7d59af7819ec4714f5a893e316"
     },
     "requires": [
       {

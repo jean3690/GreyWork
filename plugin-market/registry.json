@@ -16,8 +16,8 @@
       "version": "1.1.0",
       "description": "下载独立 JavaScript，在隔离 Worker 中执行动作处理器。",
       "author": "GreyWork",
-      "downloadUrl": "https://raw.githubusercontent.com/jean3690/greywork-plugin-market/main/packages/demo.worker.json",
-      "sha256": "945cad00e73963cbb84f17fbfc50c997e434b65598ae490af8499010ebd707a0"
+      "downloadUrl": "https://raw.githubusercontent.com/jean3690/greywork-plugin-market/d184ec5a97674fdd6a4d5d5f732959aeb156f7b8/packages/demo.worker.json",
+      "sha256": "332db7168dd30fc1b1a9769c4e232759d63f18b1c79b893f95290673e1691008"
     },
     {
       "id": "demo.pet",
@@ -25,9 +25,54 @@
       "version": "1.3.0",
       "description": "会饿会困会被撸的小猫：真实时间衰减 + 受控 SVG 动画渲染。",
       "author": "GreyWork",
-      "downloadUrl": "https://raw.githubusercontent.com/jean3690/greywork-plugin-market/main/packages/demo.pet.json",
-      "sha256": "5fbe20d261b7d6ac26f0f41cd078f623aae48c6b6aef9da89c275adfef513eff"
+      "downloadUrl": "https://raw.githubusercontent.com/jean3690/greywork-plugin-market/d184ec5a97674fdd6a4d5d5f732959aeb156f7b8/packages/demo.pet.json",
+      "sha256": "81ae303cfe3e9d687953244bf98ef38af6d92085990fa8d753d0e1baf8da5708"
+    },
+    {
+      "id": "demo.llm",
+      "name": "模型摘要",
+      "version": "1.0.0",
+      "description": "llm.chat 能力演示：把一段文本交给宿主侧的模型做单轮摘要；凭证永远在宿主侧，模型必须落在 manifest 白名单内。",
+      "author": "GreyWork",
+      "downloadUrl": "https://raw.githubusercontent.com/jean3690/greywork-plugin-market/6b5a17f54305dfbe8a84c7ac4470765bcaf1fe02/packages/demo.llm.json",
+      "sha256": "65e30c0a8ded283578977da3017b137842f1762c7015e235ea15944d73ea8d50"
+    },
+    {
+      "id": "demo.artifacts",
+      "name": "产物发布",
+      "version": "1.0.0",
+      "description": "artifacts.publish 能力演示：把一段 Markdown 送进产物面板，可预览、下载、在文件夹中打开。",
+      "author": "GreyWork",
+      "downloadUrl": "https://raw.githubusercontent.com/jean3690/greywork-plugin-market/6b5a17f54305dfbe8a84c7ac4470765bcaf1fe02/packages/demo.artifacts.json",
+      "sha256": "1006bcd967ab78562e5b169886c7f20cb4c83e2f1e541bfe6b042b1eb8a6e045"
+    },
+    {
+      "id": "demo.clipboard",
+      "name": "剪贴板工具",
+      "version": "1.0.0",
+      "description": "clipboard 能力演示：把输入框内容写进系统剪贴板，或读回当前剪贴板文本（读需显式声明 ops）。",
+      "author": "GreyWork",
+      "downloadUrl": "https://raw.githubusercontent.com/jean3690/greywork-plugin-market/6b5a17f54305dfbe8a84c7ac4470765bcaf1fe02/packages/demo.clipboard.json",
+      "sha256": "f3868c095bbc11301bc000a04c4720def3b6b1a4b57e324a75096603f879ca2f"
+    },
+    {
+      "id": "demo.wallpaper",
+      "name": "动态壁纸",
+      "version": "1.0.0",
+      "description": "四套动态壁纸（星空 / 极光 / 落日 / 雨夜）：worker 里算出 SVG 指令帧，宿主按 12fps 绘制；可全页预览、可在工作台叠一层，也能弹出桌面透明悬浮窗。点画布换主题。",
+      "author": "GreyWork",
+      "downloadUrl": "https://raw.githubusercontent.com/jean3690/greywork-plugin-market/6b5a17f54305dfbe8a84c7ac4470765bcaf1fe02/packages/demo.wallpaper.json",
+      "sha256": "ccb6f99c6bb131cdcef80e0daaab6d177c96b38536fb0591e4ae3f2f9cb9ef5b"
+    },
+    {
+      "id": "demo.brief",
+      "name": "README 速览",
+      "version": "1.0.0",
+      "description": "P1 判据的端到端演示：一条动作串起 workspace.read → llm.chat → artifacts.publish → clipboard —— 读授权工作区的 README、让模型写三行摘要、发布成 Markdown 产物、摘要进剪贴板。每一步都可见、可审计、可撤销授权。",
+      "author": "GreyWork",
+      "downloadUrl": "https://raw.githubusercontent.com/jean3690/greywork-plugin-market/6b5a17f54305dfbe8a84c7ac4470765bcaf1fe02/packages/demo.brief.json",
+      "sha256": "591d464595f17f325c1244bcebfd7caa4fd8a3c3b187a46f031842a7695df6f4"
     }
   ],
-  "signature": "w39LSbndU4FisL0iNZs6hFzJc1+R9sbk/I2746KQpJWHaTQYKVcRxuu116U9CVazyL1+afkTTx+X+9sSVaffAg=="
+  "signature": "sEfBjdFnkMVMjmrqp0hhmw65svnQUgmzxjtneJzJFiFLvtaTOvBLOt3CwgeECeVGDYfx/laM6eotcyasUIprCw=="
 }

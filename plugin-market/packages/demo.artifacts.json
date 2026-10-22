@@ -8,8 +8,8 @@
     "kind": "worker",
     "runtime": {
       "type": "worker",
-      "entry": "https://raw.githubusercontent.com/OWNER/REPO/COMMIT/demo.artifacts.js",
-      "sha256": "REPLACE_WITH_64_LOWERCASE_HEX"
+      "entry": "https://raw.githubusercontent.com/jean3690/greywork-plugin-market/6b5a17f54305dfbe8a84c7ac4470765bcaf1fe02/packages/demo.artifacts.js",
+      "sha256": "ba3845451cf1ef655fa4e153b1955af3e6844b15d1be37f4c9149bd86d8180f7"
     },
     "requires": ["artifacts.publish"],
     "contributes": {

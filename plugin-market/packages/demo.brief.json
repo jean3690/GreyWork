@@ -8,8 +8,8 @@
     "kind": "worker",
     "runtime": {
       "type": "worker",
-      "entry": "https://raw.githubusercontent.com/OWNER/REPO/COMMIT/demo.brief.js",
-      "sha256": "REPLACE_WITH_64_LOWERCASE_HEX"
+      "entry": "https://raw.githubusercontent.com/jean3690/greywork-plugin-market/6b5a17f54305dfbe8a84c7ac4470765bcaf1fe02/packages/demo.brief.js",
+      "sha256": "c4c9168e7077991dcb8a4b26e582f163cf067a03d25ae6d3ad9c7bc194e4f73b"
     },
     "requires": [
       "workspace.read",

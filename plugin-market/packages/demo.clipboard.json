@@ -8,8 +8,8 @@
     "kind": "worker",
     "runtime": {
       "type": "worker",
-      "entry": "https://raw.githubusercontent.com/OWNER/REPO/COMMIT/demo.clipboard.js",
-      "sha256": "REPLACE_WITH_64_LOWERCASE_HEX"
+      "entry": "https://raw.githubusercontent.com/jean3690/greywork-plugin-market/6b5a17f54305dfbe8a84c7ac4470765bcaf1fe02/packages/demo.clipboard.js",
+      "sha256": "7c52c48b46d49078be896954f520e6e8800529b19226ccd50fc63c9f27f1013f"
     },
     "requires": [
       {
