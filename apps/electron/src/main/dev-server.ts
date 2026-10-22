@@ -12,7 +12,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 
 import { devServerArgs, devServerEnv, devServerOrigin, devServerPort } from "../shared/dev-server-spec";
 import { desktopDir } from "./paths";
-import { userShellPath } from "./sidecar";
+import { resolveUserShellPath } from "./shell-path";
 
 export interface DevServer {
   readonly port: number;
@@ -85,10 +85,11 @@ export async function startDevServer(input: { sidecarPort: number }): Promise<De
   await freeDevPort(port);
   // 单字符串 + shell:true：Windows 上 pnpm 是 .cmd 垫片，argv 形态直接 spawn 会失败。
   const command = `pnpm ${devServerArgs(port).join(" ")}`;
+  // GUI 会话继承的 PATH 常被截断（同 sidecar 的坑），补登录 shell 的真实 PATH。
+  const shellPath = await resolveUserShellPath(process.env.PATH ?? "");
   const child = spawn(command, {
     cwd: desktopDir(),
-    // GUI 会话继承的 PATH 常被截断（同 sidecar 的坑），补登录 shell 的真实 PATH。
-    env: devServerEnv({ ...process.env, PATH: userShellPath() }, input.sidecarPort),
+    env: devServerEnv({ ...process.env, PATH: shellPath }, input.sidecarPort),
     shell: true,
     // POSIX：自成进程组，退出时能整组杀（见 stopDevServer）；Windows 靠 taskkill /T。
     detached: process.platform !== "win32",

@@ -1,10 +1,17 @@
 import { describe, expect, it } from "vitest";
 
-import { SIDECAR_STDIO, sidecarEnv } from "../src/shared/sidecar-spec";
+import { SIDECAR_SPAWN_OPTIONS, SIDECAR_STDIO, sidecarEnv } from "../src/shared/sidecar-spec";
 
 describe("sidecar 启动规格", () => {
   it("stdin 走管道、stdout/stderr 继承：父死子死 + 日志照旧打在终端", () => {
     expect(SIDECAR_STDIO).toEqual(["pipe", "inherit", "inherit"]);
+  });
+
+  it("Windows 上不给 sidecar 分配控制台窗口（否则双击桌面端会多出一个终端）", () => {
+    // 打包版主进程是 GUI 子系统程序、server 是 console 子系统程序：不设 windowsHide 时
+    // Windows 会新开一个控制台。这条用例把这个选项钉住 —— CI 在 Linux 上跑，肉眼看不出回归。
+    expect(SIDECAR_SPAWN_OPTIONS.windowsHide).toBe(true);
+    expect(SIDECAR_SPAWN_OPTIONS.stdio).toBe(SIDECAR_STDIO);
   });
 
   it("打开「stdin 关闭即退出」，同时保留宿主需要的其它变量", () => {

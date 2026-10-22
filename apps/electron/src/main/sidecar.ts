@@ -15,14 +15,15 @@
  * 密码来源见 `auth.ts`：这里只接收 argon2 PHC 串，经 `GREYWORK_PASSWORD_HASH` 传给 sidecar，
  * **明文不进 env**。
  */
-import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import path from "node:path";
 import { app } from "electron";
 
-import { SIDECAR_STDIO, sidecarEnv } from "../shared/sidecar-spec";
+import { SIDECAR_SPAWN_OPTIONS, sidecarEnv } from "../shared/sidecar-spec";
 import { serverBinaryPath, staticDir } from "./paths";
+import { resolveUserShellPath } from "./shell-path";
 
 export interface Sidecar {
   readonly port: number;
@@ -98,6 +99,9 @@ async function pickPort(preferred: number): Promise<number> {
 async function waitHealth(port: number, child: ChildProcess, timeoutMs = 20_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   const url = `http://127.0.0.1:${port}/api/health`;
+  // 首轮立即请求，之后从 25ms 起步退避到 150ms。sidecar 通常 30ms 内就绪，
+  // 固定 150ms 会把「已经起来」白等掉 100ms 以上（见启动打点）。
+  let retryDelayMs = 25;
   for (;;) {
     if (child.exitCode !== null) {
       throw new Error(`greywork-server 启动后立即退出（code=${child.exitCode}）`);
@@ -109,49 +113,9 @@ async function waitHealth(port: number, child: ChildProcess, timeoutMs = 20_000)
       // 还没起来，继续退避。
     }
     if (Date.now() > deadline) throw new Error(`sidecar 健康检查超时：${url}`);
-    await delay(150);
+    await delay(retryDelayMs);
+    retryDelayMs = Math.min(150, Math.ceil(retryDelayMs * 1.6));
   }
-}
-
-/**
- * sidecar 可见的 PATH。
- *
- * 坑：从桌面图标（非终端）启动时，GUI 会话继承的 PATH 常被截断，不含 `~/.local/bin`、
- * nvm / npm 全局、`~/.cargo/bin` 等 —— 于是 server 的 agent CLI 探测按 PATH 找不到
- * claude / gemini，表现为「agent 列表为空」。这里用登录 shell 取真实 PATH（非 Windows），
- * 再兜底拼上常见用户 bin 目录，去重保序。
- */
-export function userShellPath(): string {
-  const base = process.env.PATH ?? "";
-  if (process.platform === "win32") return base;
-  const parts: string[] = [];
-  const shell = process.env.SHELL;
-  if (shell) {
-    try {
-      const out = execFileSync(shell, ["-lc", 'printf %s "$PATH"'], {
-        timeout: 2000,
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "ignore"],
-      }).trim();
-      if (out) parts.push(out);
-    } catch {
-      // 取不到就只靠下面的常见目录兜底。
-    }
-  }
-  const home = app.getPath("home");
-  parts.push(
-    base,
-    path.join(home, ".local", "bin"),
-    path.join(home, ".cargo", "bin"),
-    path.join(home, ".bun", "bin"),
-    "/usr/local/bin",
-    "/opt/homebrew/bin",
-  );
-  const seen = new Set<string>();
-  const merged = parts
-    .flatMap((entry) => entry.split(path.delimiter))
-    .filter((dir) => dir && !seen.has(dir) && seen.add(dir));
-  return merged.join(path.delimiter);
 }
 
 /** 拉起 sidecar 并等它健康；返回端口与子进程句柄。 */
@@ -164,17 +128,20 @@ export async function startServer(passwordHash: string): Promise<Sidecar> {
   }
   persistPort(port);
   const dataDir = path.join(app.getPath("userData"), "data");
+  // agent CLI 检测靠 PATH；补全登录 shell 的真实 PATH（有缓存，见 shell-path.ts）。
+  const shellPath = await resolveUserShellPath(process.env.PATH ?? "");
   const child = spawn(serverBinaryPath(), [], {
     env: sidecarEnv({
       base: process.env,
-      // agent CLI 检测靠 PATH；补全登录 shell 的 PATH（见 userShellPath）。
-      shellPath: userShellPath(),
+      shellPath,
       port,
       staticDir: staticDir(),
       dataDir,
       passwordHash,
     }),
-    stdio: SIDECAR_STDIO,
+    // stdio 见 SIDECAR_STDIO；windowsHide 让 Windows 不给 console 子系统程序分配新控制台
+    // （否则双击桌面端会多弹一个终端）。
+    ...SIDECAR_SPAWN_OPTIONS,
   });
   running = child;
   child.on("exit", (code) => {

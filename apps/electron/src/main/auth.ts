@@ -32,6 +32,9 @@ function hashPassword(serverBin: string, password: string): string {
     input: `${password}\n${password}\n`,
     encoding: "utf8",
     stdio: ["pipe", "pipe", "ignore"],
+    // Windows：server 是 console 子系统程序，打包版主进程没有控制台 —— 不抑制就会为这次
+    // 首启哈希闪一个控制台窗口（与 sidecar spawn 同一类问题，见 shared/sidecar-spec）。
+    windowsHide: true,
   });
   const match = /\$argon2[^\s]+/.exec(out);
   if (!match) throw new Error(`hash-password 未产出 argon2 串：${JSON.stringify(out.slice(0, 200))}`);

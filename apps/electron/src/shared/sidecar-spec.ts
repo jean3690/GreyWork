@@ -14,6 +14,19 @@
 /** spawn 的 stdio：stdin 走管道（「父死子死」的通道），stdout/stderr 继承终端。 */
 export const SIDECAR_STDIO: ["pipe", "inherit", "inherit"] = ["pipe", "inherit", "inherit"];
 
+/**
+ * spawn 的其余选项（env 之外的都在这儿）。
+ *
+ * `windowsHide: true` 不是可选项：Windows 打包版主进程是 **GUI 子系统**程序（自身没有控制台），
+ * 而 `greywork-server.exe` 是 console 子系统程序 —— 不抑制的话 Windows 会为它**新分配一个
+ * 控制台窗口**，用户看到的就是「双击桌面图标后多出一个终端」。其它平台忽略该选项。
+ * （Rust 侧同类问题的处理见 `greywork-host` 的 `process_guard::hide_console_std`。）
+ */
+export const SIDECAR_SPAWN_OPTIONS: { stdio: ["pipe", "inherit", "inherit"]; windowsHide: boolean } = {
+  stdio: SIDECAR_STDIO,
+  windowsHide: true,
+};
+
 /** sidecar 的环境变量（在 `base` 之上的覆盖项）。 */
 export function sidecarEnv(input: {
   /** 主进程的 `process.env`。 */
