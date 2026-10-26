@@ -81,7 +81,7 @@
     "jszip": "^3.10.1",
     "maplibre-gl": "^6.15.0",
     "marked": "^18.1.1",
-    "mermaid": "^11.17.2",
+    "mermaid": "^12.2.0",
     "pdfjs-dist": "^6.4.299",
     "pinia": "^4.1.0",
     "pptxgenjs": "^4.0.1",
