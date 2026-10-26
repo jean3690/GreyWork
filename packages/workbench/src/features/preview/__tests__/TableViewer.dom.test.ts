@@ -18,6 +18,22 @@ vi.mock("@/stores/vfs", () => ({ useVfsStore: () => ({ readFile: h.readFile }) }
 // 分析面板带着 ECharts 与完整的数据加载链路（首次转译要 1s 上下），这里只关心「有没有被挂上」。
 // `__esModule` 必须显式给：动态 import 拿到的是模块命名空间，Vue 靠它判断要不要取 `.default`，
 // 少了它 Vue 会把整个命名空间当组件，随后 test-utils 读 `__isTeleport` 时撞上 mock 代理抛错。
+vi.mock("@/features/preview/MapViewer.vue", async () => {
+  const { defineComponent, h: render } = await import("vue");
+  return {
+    __esModule: true,
+    default: defineComponent({
+      name: "MapViewer",
+      props: { tab: { type: Object, required: true }, features: { type: Object, default: null } },
+      setup: (props) => () =>
+        render("div", {
+          "data-testid": "csv-map-stub",
+          "data-count": (props.features as { features: unknown[] } | null)?.features.length ?? 0,
+        }),
+    }),
+  };
+});
+
 vi.mock("@/features/preview/DataAnalysisPanel.vue", async () => {
   const { defineComponent, h: render } = await import("vue");
   return {
@@ -117,6 +133,34 @@ describe("TableViewer", () => {
 
     expect(wrapper.find('[data-testid="table-viewer"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="analysis-panel-stub"]').exists()).toBe(true);
+  });
+
+  it("表头没有经纬度列：不摆地图入口", async () => {
+    const wrapper = mountViewer();
+    await flushPromises();
+    expect(wrapper.find('[data-testid="preview-mode-map"]').exists()).toBe(false);
+  });
+
+  it("认出经纬度列：地图模式把点集交给 MapViewer，并提示跳过的行", async () => {
+    h.readFile.mockResolvedValue("name,lon,lat\na,116.39,39.9\nb,,");
+    const wrapper = mountViewer({ mode: "map" });
+    await settle();
+
+    expect(wrapper.get('[data-testid="preview-mode-map"]').attributes("aria-pressed")).toBe("true");
+    expect(wrapper.get('[data-testid="csv-map-stub"]').attributes("data-count")).toBe("1");
+    expect(wrapper.get('[data-testid="csv-map-skipped"]').text()).toContain("1");
+    expect(wrapper.find('[data-testid="table-viewer"]').exists()).toBe(false);
+  });
+
+  it("点地图入口写回 store", async () => {
+    h.readFile.mockResolvedValue("lon,lat\n116.39,39.9");
+    const store = usePreviewStore();
+    store.tabs = [tab()];
+    const wrapper = mountViewer();
+    await flushPromises();
+
+    await wrapper.get('[data-testid="preview-mode-map"]').trigger("click");
+    expect(store.tabs[0].mode).toBe("map");
   });
 
   it("点模式按钮写回 store（模式属于 tab，不属于组件局部状态）", async () => {

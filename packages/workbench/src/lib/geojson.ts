@@ -133,8 +133,57 @@ export function shapesOfCollection(collection: GeoJsonFeatureCollection): GeoJso
   return (["point", "line", "polygon"] as const).filter((shape) => found.has(shape));
 }
 
+/** 每类几何的要素数；某类没有要素时是 0（不是缺键）。 */
+export function countByShape(collection: GeoJsonFeatureCollection): Record<GeoJsonShape, number> {
+  const counts: Record<GeoJsonShape, number> = { point: 0, line: 0, polygon: 0 };
+  for (const feature of collection.features) {
+    const shape = shapeOfGeometry(feature.geometry);
+    if (shape) counts[shape] += 1;
+  }
+  return counts;
+}
+
+/**
+ * 画不出来的要素数：`geometry` 为 null 或类型不认识。
+ *
+ * 这些要素在 MapLibre 里会被静默跳过 —— 不报错、不显示，要素数却把它们算进去了。
+ * 单独数出来给一句提示，比让人对着「12 个要素、地图上却只有 8 个图形」自己猜强。
+ */
+export function unrenderableCount(collection: GeoJsonFeatureCollection): number {
+  return collection.features.reduce((total, feature) => (shapeOfGeometry(feature.geometry) ? total : total + 1), 0);
+}
+
 /** 经纬度包围盒 `[west, south, east, north]`。 */
 export type LonLatBounds = [number, number, number, number];
+
+/**
+ * 包围盒是否落在合法经纬度范围外。
+ *
+ * 用于识别「投影坐标没有重投影」：UTM / 高斯 / Web Mercator 的坐标是米（几十万到两千万），
+ * 远超 ±180 / ±90。这类数据直接交给 MapLibre 会画在地球外的无意义位置，所以除了提示，
+ * 自动 fit 也要跳过（否则视野会被带到一个空区域，看起来像渲染失败）。
+ *
+ * 这只是个「显然不是经纬度」的探针，不判断具体是哪种投影 —— 那需要读 .prj / EPSG 定义，
+ * 超出预览的职责（转换交给 GDAL，见内置技能规划）。
+ */
+export function isOutsideLonLat(bounds: LonLatBounds): boolean {
+  const [west, south, east, north] = bounds;
+  return west < -180 || east > 180 || south < -90 || north > 90;
+}
+
+/**
+ * 单点几何的坐标 `[lon, lat]`；非 Point / 坐标不合法返回 null。
+ *
+ * 属性面板给点要素显示经纬度：shapefile 的 .dbf 里常常没有坐标字段，
+ * 唯一能看到的「这个点在哪」就是几何本身。
+ */
+export function pointOfGeometry(geometry: unknown): [number, number] | null {
+  if (!isObject(geometry) || geometry.type !== "Point") return null;
+  const coordinates = geometry.coordinates;
+  if (!Array.isArray(coordinates)) return null;
+  const [lon, lat] = coordinates;
+  return typeof lon === "number" && typeof lat === "number" ? [lon, lat] : null;
+}
 
 function extendWithCoordinates(bounds: LonLatBounds, node: unknown): void {
   if (!Array.isArray(node)) return;

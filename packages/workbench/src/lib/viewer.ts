@@ -74,11 +74,16 @@ const EXT_KIND: Record<string, ViewerKind> = {
   // 那种情况在 viewer 里明确报错而不是静默空白 —— 见 ModelViewer.vue）。
   glb: "3d",
   gltf: "3d",
-  // GIS：geojson 是文本、shp 是二进制（同目录的 .dbf / .prj 会被顺带读取）。
+  // GIS：geojson / kml / gpx / topojson 是文本，shp / kmz 是二进制容器
+  // （shp 同目录的 .dbf / .prj 会被顺带读取；kmz 是 zip 里装的 kml）。
   // **刻意不收 .json**：绝大多数 .json 是普通数据文件，归到 gis 会让它们失去代码视图。
-  // 需要地图预览就把扩展名改成 .geojson。
+  // 需要地图预览就把扩展名改成 .geojson（TopoJSON 用 .topojson）。
   geojson: "gis",
   shp: "gis",
+  kml: "gis",
+  kmz: "gis",
+  gpx: "gis",
+  topojson: "gis",
   // CAD：DXF 是文本（ASCII），由 dxf-parser 归一化后画到 canvas；DWG / DWF 是
   // Autodesk 的专有二进制容器，纯前端没有可用解码器 —— 归到 legacy-cad 明确提示，
   // 而不是按文本读成乱码。

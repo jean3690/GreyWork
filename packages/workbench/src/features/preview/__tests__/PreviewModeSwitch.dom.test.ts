@@ -7,8 +7,8 @@ import { mount } from "@vue/test-utils";
 import { i18n } from "@/i18n";
 import PreviewModeSwitch from "@/features/preview/PreviewModeSwitch.vue";
 
-function mountSwitch(mode: "table" | "analysis") {
-  return mount(PreviewModeSwitch, { props: { modelValue: mode }, global: { plugins: [i18n] } });
+function mountSwitch(mode: "table" | "analysis" | "map", map = false) {
+  return mount(PreviewModeSwitch, { props: { modelValue: mode, map }, global: { plugins: [i18n] } });
 }
 
 beforeEach(() => {
@@ -28,5 +28,17 @@ describe("PreviewModeSwitch", () => {
     const wrapper = mountSwitch("table");
     await wrapper.get('[data-testid="preview-mode-analysis"]').trigger("click");
     expect(wrapper.emitted("update:modelValue")).toEqual([["analysis"]]);
+  });
+
+  it("地图选项只在 map 为真时出现：没有坐标列的文件不该看到死按钮", () => {
+    expect(mountSwitch("table").find('[data-testid="preview-mode-map"]').exists()).toBe(false);
+    const withMap = mountSwitch("table", true);
+    expect(withMap.get('[data-testid="preview-mode-map"]').text()).toBe("地图");
+  });
+
+  it("点击地图选项发出 map", async () => {
+    const wrapper = mountSwitch("table", true);
+    await wrapper.get('[data-testid="preview-mode-map"]').trigger("click");
+    expect(wrapper.emitted("update:modelValue")).toEqual([["map"]]);
   });
 });

@@ -42,6 +42,10 @@ describe("kindOfPath", () => {
     ["scene.gltf", "3d"],
     ["districts.geojson", "gis"],
     ["districts.shp", "gis"],
+    ["route.kml", "gis"],
+    ["route.kmz", "gis"],
+    ["track.gpx", "gis"],
+    ["prefectures.topojson", "gis"],
     // CAD：DXF 是文本、DWG/DWF 是专有二进制 —— 两者必须分开，否则 DWG 会被当文本读成乱码。
     ["plan.dxf", "cad"],
     ["plan.dwg", "legacy-cad"],

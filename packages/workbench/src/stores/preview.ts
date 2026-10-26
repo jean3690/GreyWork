@@ -26,11 +26,12 @@ const nextTabId = createIdFactory("pv");
 export type PreviewSource = "vfs" | "disk" | "web";
 
 /**
- * 表格类预览的两种呈现方式。
+ * 表格类预览的呈现方式。
  * `table` 是忠实还原（CSV 铺网格 / xlsx 走 Univer），`analysis` 是本仓自己的
- * 统计·筛选·排序·分组·图表视图。
+ * 统计·筛选·排序·分组·图表视图，`map` 只对「认出经纬度列」的 CSV 开放
+ * （xlsx 不会提供这个入口，切不过去）。
  */
-export type PreviewMode = "table" | "analysis";
+export type PreviewMode = "table" | "analysis" | "map";
 
 /**
  * Office 文档（docx / pptx / 老格式 .doc/.ppt 等）的两种呈现方式。
