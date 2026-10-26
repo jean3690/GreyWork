@@ -39,7 +39,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 # 密码哈希：argon2 0.5 的 PasswordHash::verify_password 是常量时间校验。
-argon2 = "0.5"
+argon2 = "0.6"
 # 会话 token / 自动生成密码的随机字节（0.3 已是 greywork-host 的传递依赖）。
 getrandom = "0.3"
 # 会话 token 落内存前先 SHA-256，进程里不留明文 token。
