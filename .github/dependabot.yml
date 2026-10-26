@@ -10,9 +10,24 @@ updates:
         update-types:
           - minor
           - patch
+    ignore:
+      # TypeScript 7 是原生重写版（tsgo），工具链还没跟上：
+      # - vue-tsc 仍 require.resolve("typescript/lib/tsc")，TS 7 已移除该子路径导出，
+      #   直接 ERR_PACKAGE_PATH_NOT_EXPORTED，所有 vue-tsc 包全炸；
+      # - typescript-eslint 8.72 的对等依赖是 typescript >=4.8.4 <6.1.0。
+      # 上游支持前只忽略大版本，5.x 的小版本照常开 PR。
+      - dependency-name: "typescript"
+        update-types:
+          - version-update:semver-major
+
+      # univer 全家必须同版本：12 个 @univerjs/* 在 package.json 里精确 pin 0.25.1，
+      # 且 pnpm-workspace.yaml 的 patch 键钉着 @univerjs/engine-render@0.25.1 ——
+      # 任何单包变动都会让 patch 键失配（ERR_PNPM_UNUSED_PATCH），单包跳大版本还会
+      # 解析出第二套 core（运行时插件与服务对不上）。统一人工升级：全家 bump + 重做 patch。
+      - dependency-name: "@univerjs/*"
 
   - package-ecosystem: cargo
-    directory: /apps/desktop/src-tauri
+    directory: /
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
