@@ -53,8 +53,8 @@
     "@greywork/shell": "workspace:*",
     "@internationalized/date": "3.12.4",
     "@lezer/highlight": "^1.2.5",
-    "@lucide/vue": "^1.59.0",
-    "@tanstack/vue-virtual": "^3.13.47",
+    "@lucide/vue": "^1.61.0",
+    "@tanstack/vue-virtual": "^3.13.48",
     "@univerjs/core": "0.25.1",
     "@univerjs/design": "0.25.1",
     "@univerjs/docs": "0.25.1",
@@ -102,7 +102,7 @@
     "@vitest/coverage-v8": "^5.0.5",
     "@vue/test-utils": "^2.5.1",
     "happy-dom": "^20.14.5",
-    "typescript": "~5.6.2",
+    "typescript": "~5.9.3",
     "vitest": "^5.0.5",
     "vue-tsc": "^3.3.13"
   }
