@@ -11,11 +11,12 @@
  * 主题：按宿主外观选 mermaid 内置主题（dark/default），每次渲染前 initialize 生效。
  * 并发与重入：单块内自增 id 保证 SVG 引用唯一；失败的调用整体抛错，不留半渲染态。
  *
- * **别急着升 12**：12.0.0 的布局管线（paintLayoutEdge → insertEdge）会把携带节点
- * 标签的完整对象 `btoa(JSON.stringify(points))`，而 btoa 是 Latin1-only 的 —— 图里
- * 只要有一个非 ASCII 标签（中文必中）就抛 InvalidCharacterError，整图渲染失败
- * （happy-dom 与真浏览器行为一致，已实测）。等上游修掉再评估；到时它默认换
- * ELK 布局 + neo 观感，还需要显式钉回 `layout: "dagre"` + `look: "classic"`。
+ * **升 12 的两个坑（已处理，别回退）**：
+ * - 12.0.0 的 `btoa(JSON.stringify(points))` 曾把携带中文标签的对象丢给 Latin1 的
+ *   btoa，整图抛 InvalidCharacterError。12.2.0 已把 points 收敛成纯数字，中文节点与
+ *   边标签在真浏览器里渲染正常（同一张图 11 与 12 的输出逐像素对比过）。
+ * - 12 把默认换成 ELK 布局 + neo 观感，同一张图高度会明显变（实测 908px → 1019px）。
+ *   这里显式钉回 `layout: "dagre"` + `look: "classic"`，让升级不改变既有版式。
  */
 import type MermaidDefault from "mermaid";
 import type { MermaidConfig } from "mermaid";
@@ -43,6 +44,9 @@ export async function renderMermaid(source: string, dark: boolean): Promise<{ sv
     securityLevel: "strict",
     suppressErrorRendering: true,
     theme: dark ? "dark" : "default",
+    // 12 起默认 ELK + neo，钉回 11 的 dagre + classic 以保住既有版式（见文件头）。
+    layout: "dagre",
+    look: "classic",
     fontSize: 14,
     themeVariables: { fontFamily: UI_FONT },
   };
