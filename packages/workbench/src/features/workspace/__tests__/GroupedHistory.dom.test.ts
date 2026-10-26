@@ -288,7 +288,10 @@ describe("GroupedHistorySessions · 大量会话虚拟窗口", () => {
   /** 直接挂载会话列表组件：scrollElement 一开始就有（绕开父组件 ref 时序），首帧即可出窗口。 */
   function mountSessions(count: number) {
     const scroller = document.createElement("div");
-    // happy-dom 无布局，offsetWidth/Height 恒 0 —— vue-virtual 用它量视口，给个假视口
+    // happy-dom 无布局，client/offset 尺寸恒 0 —— vue-virtual 用它量视口，给个假视口。
+    // 两套都给：virtual-core 3.19 起量 clientWidth/Height，更早量 offsetWidth/Height。
+    Object.defineProperty(scroller, "clientWidth", { value: 300, configurable: true });
+    Object.defineProperty(scroller, "clientHeight", { value: 600, configurable: true });
     Object.defineProperty(scroller, "offsetWidth", { value: 300, configurable: true });
     Object.defineProperty(scroller, "offsetHeight", { value: 600, configurable: true });
     return {
