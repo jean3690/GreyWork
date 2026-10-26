@@ -44,7 +44,9 @@ macro_rules! markets_commands {
         run: |ctx, a| async move { plugin_market::plugin_market_install(ctx.host.as_ref(), a.registry_url, a.plugin_id).await.map(Json) } }
     { "plugin_market_list_installed", auth: Auth::Required, desktop: false, binary: false,
         args: UnitArgs,
-        run: |ctx, _a| async move { Ok::<_, String>(Json(plugin_market::plugin_market_list_installed(ctx.host.as_ref()))) } }
+        // 内层返回 Result：必须 .map(Json)，否则 Json 会把 Result 本身序列化成 {"Ok":[…]}
+        // —— 渲染端拿到的是对象不是数组，注册已装插件时直接 TypeError: … is not iterable。
+        run: |ctx, _a| async move { plugin_market::plugin_market_list_installed(ctx.host.as_ref()).map(Json) } }
     { "plugin_market_uninstall", auth: Auth::Required, desktop: false, binary: false,
         args: plugin_market::UninstallArgs,
         run: |ctx, a| async move { plugin_market::plugin_market_uninstall(ctx.host.as_ref(), a.plugin_id).map(Json) } }

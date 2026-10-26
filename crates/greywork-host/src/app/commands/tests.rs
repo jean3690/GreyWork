@@ -298,3 +298,27 @@ fn extra_agent_programs_unions_config_and_db_only_under_trusted_host() {
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+/// 已装插件清单必须原样回数组。
+///
+/// 内层函数返回 Result，若把 `Json(...)` 套在 Result 外面，serde 会把 Result 自身序列化成
+/// `{"Ok":[…]}` —— 渲染端 `for (const p of packages)` 与 `installedMarketPlugins.value.map`
+/// 于是双双抛 TypeError（线上表现：市场装完插件弹 "TypeError: e is not iterable"）。
+#[tokio::test]
+async fn plugin_market_list_installed_returns_array() {
+    let tmp = std::env::temp_dir().join(format!("gw-cmd-plugin-list-{}", std::process::id()));
+    let ctx = test_ctx(&tmp);
+
+    let out = dispatch("plugin_market_list_installed", Value::Null, &ctx)
+        .await
+        .expect("dispatch plugin_market_list_installed");
+    let CommandOutput::Json(value) = out else {
+        panic!("plugin_market_list_installed 应返回 JSON");
+    };
+    assert!(
+        value.is_array(),
+        "已装清单必须是数组（不能是 {{\"Ok\":…}} 包装），实际：{value}"
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
