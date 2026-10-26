@@ -19,7 +19,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 agent-client-protocol = "2.0.0"
 futures-util = "0.3"
 # 插件市场包与 registry 签名的 SHA-256 校验。
-sha2 = "0.10"
+sha2 = "0.11"
 # 官方市场 registry 的 ed25519 签名验签（公钥硬编码，私钥离线）。
 ed25519-dalek = { version = "2", features = ["std"] }
 base64 = "0.22"
