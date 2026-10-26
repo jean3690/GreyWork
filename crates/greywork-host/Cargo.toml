@@ -56,7 +56,7 @@ aes = "0.8"
 getrandom = "0.3"
 form_urlencoded = "1"
 # QQ / Discord / 钉钉 / 飞书 / 企业微信的网关长连接都走它。
-tokio-tungstenite = { version = "0.29.0", default-features = false, features = ["rustls-tls-webpki-roots", "connect"] }
+tokio-tungstenite = { version = "0.30.0", default-features = false, features = ["rustls-tls-webpki-roots", "connect"] }
 # QQ 富媒体文件上传的「申请上传」步骤要求带上文件 md5 / sha1（分片合并时的校验依据）。
 md-5 = "0.10"
 sha1 = "0.10"

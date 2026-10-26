@@ -55,5 +55,5 @@ tower = { version = "0.5", features = ["util"] }
 # 读响应体。
 http-body-util = "0.1"
 # WS 集成测试要真实端口 + 真实客户端（升级无法 oneshot）。
-tokio-tungstenite = { version = "0.29", default-features = false, features = ["connect"] }
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect"] }
 futures-util = "0.3"
