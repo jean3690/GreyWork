@@ -762,6 +762,217 @@ class ControlPlaneApiTest {
 	}
 
 	/** 走完 authorize → callback → exchange，返回用户 id。 */
+	@Autowired
+	com.jean.grey.automation.AutomationScheduler automationScheduler;
+
+	@Autowired
+	com.jean.grey.automation.mapper.AutomationTaskMapper automationTaskMapper;
+
+	@Test
+	void automationCronTaskFlowsThroughHostClaim() throws Exception {
+		JsonNode session = enroll("auto@grey.local", "server");
+		String bearer = "Bearer " + session.get("token").asString();
+
+		// cron 非法被拒
+		mockMvc.perform(post("/api/automation/tasks")
+					.header("Authorization", bearer)
+					.contentType(MediaType.APPLICATION_JSON)
+					.content("""
+						{"name":"bad","cronExpr":"99 * * * *","intent":"hi","execution":"host","enabled":true}
+						"""))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.code").value("cron_invalid"));
+
+		MvcResult created = mockMvc.perform(post("/api/automation/tasks")
+					.header("Authorization", bearer)
+					.contentType(MediaType.APPLICATION_JSON)
+					.content("""
+						{"name":"daily","cronExpr":"@daily","intent":"report weather","execution":"host","enabled":true}
+						"""))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.id").isNotEmpty())
+				.andExpect(jsonPath("$.cronExpr").value("0 0 * * *"))
+				.andExpect(jsonPath("$.nextRunAt").isNotEmpty())
+				.andReturn();
+		String taskId = json(created).get("id").asString();
+
+		// 预览：@daily 未来 5 个触发点
+		mockMvc.perform(post("/api/automation/tasks/preview")
+						.header("Authorization", bearer)
+						.contentType(MediaType.APPLICATION_JSON)
+					.content("""
+						{"task":{"name":"p","cronExpr":"@daily","intent":"x","execution":"host","enabled":true}}
+						"""))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.length()").value(5));
+
+		// 未注册宿主认领会被心跳挡下（host_not_found）
+		mockMvc.perform(post("/api/hosts/me/automation/claim")
+						.header("Authorization", bearer)
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{"limit":10}
+								"""))
+				.andExpect(status().isNotFound());
+
+		// 把 next_run_at 拨到当下，触发调度
+		com.jean.grey.automation.entity.AutomationTask due = automationTaskMapper
+					.selectOne(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.jean.grey.automation.entity.AutomationTask>()
+								.eq(com.jean.grey.automation.entity.AutomationTask::getId, taskId));
+		due.setNextRunAt(LocalDateTime.now().minusSeconds(1));
+		automationTaskMapper.updateById(due);
+		automationScheduler.tick();
+
+		// 注册宿主后认领
+		mockMvc.perform(put("/api/hosts/me")
+					.header("Authorization", bearer)
+					.contentType(MediaType.APPLICATION_JSON)
+					.content("""
+							{"name":"host-1","version":"1.0.0","capabilities":[]}
+							"""))
+				.andExpect(status().isOk());
+
+		MvcResult claimed = mockMvc.perform(post("/api/hosts/me/automation/claim")
+					.header("Authorization", bearer)
+					.contentType(MediaType.APPLICATION_JSON)
+					.content("""
+							{"limit":10}
+							"""))
+					.andExpect(status().isOk())
+					.andExpect(jsonPath("$.length()").value(1))
+				.andReturn();
+		long dueId = json(claimed).get(0).get("id").asLong();
+		assertThat(json(claimed).get(0).get("intent").asString()).isEqualTo("report weather");
+
+		// 再认领一次应为空（没有新的到期）
+		mockMvc.perform(post("/api/hosts/me/automation/claim")
+					.header("Authorization", bearer)
+					.contentType(MediaType.APPLICATION_JSON)
+					.content("""
+							{"limit":10}
+							"""))
+					.andExpect(jsonPath("$.length()").value(0));
+
+		// 回执
+		mockMvc.perform(post("/api/hosts/me/automation/due/" + dueId + "/finish")
+					.header("Authorization", bearer)
+					.contentType(MediaType.APPLICATION_JSON)
+					.content("""
+						{"status":"ok","detail":"done","output":"all good"}
+						"""))
+				.andExpect(status().isOk());
+
+		MvcResult runs = mockMvc.perform(get("/api/automation/tasks/runs")
+					.header("Authorization", bearer)
+					.param("taskId", taskId))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.length()").value(1))
+				.andReturn();
+		JsonNode run = json(runs).get(0);
+		assertThat(run.get("mode").asString()).isEqualTo("host");
+		assertThat(run.get("status").asString()).isEqualTo("ok");
+		assertThat(run.get("output").asString()).isEqualTo("all good");
+
+		// cron 游标已推进，lastRunAt 有值
+		MvcResult tasks = mockMvc.perform(get("/api/automation/tasks")
+					.header("Authorization", bearer))
+				.andReturn();
+		JsonNode task = json(tasks).get(0);
+		assertThat(task.get("lastRunAt")).isNotNull();
+		assertThat(task.get("enabled").asBoolean()).isTrue();
+		assertThat(task.get("nextRunAt")).isNotNull();
+	}
+
+	@Test
+	void automationOnceTaskDisablesAfterFire() throws Exception {
+		JsonNode session = enroll("once@grey.local", "desktop");
+		String bearer = "Bearer " + session.get("token").asString();
+
+		MvcResult created = mockMvc.perform(post("/api/automation/tasks")
+					.header("Authorization", bearer)
+					.contentType(MediaType.APPLICATION_JSON)
+					.content(("""
+							{"name":"once","intent":"nap","execution":"host","enabled":true,"onceAt":"%s"}
+							""").formatted(LocalDateTime.now().plusSeconds(1))))
+				.andExpect(status().isOk())
+				.andReturn();
+		String taskId = json(created).get("id").asString();
+
+		Thread.sleep(1100);
+		automationScheduler.tick();
+
+		MvcResult tasks = mockMvc.perform(get("/api/automation/tasks")
+					.header("Authorization", bearer))
+				.andReturn();
+		JsonNode task = json(tasks).get(0);
+		assertThat(task.get("enabled").asBoolean()).isFalse();
+		assertThat(task.get("nextRunAt").isNull()).isTrue();
+	}
+
+	@Test
+	void automationCloudExecutionWritesRun() throws Exception {
+		JsonNode session = enroll("cloudauto@grey.local", "desktop");
+		String bearer = "Bearer " + session.get("token").asString();
+
+		var stub = com.sun.net.httpserver.HttpServer
+					.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+		byte[] reply = ("{\"choices\":[{\"message\":{\"content\":\"cloud-ok\"}}],"
+					+ "\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":3,\"total_tokens\":10}}")
+				.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+		stub.createContext("/chat/completions", exchange -> {
+			exchange.getRequestBody().readAllBytes();
+			exchange.getResponseHeaders().add("Content-Type", "application/json");
+			exchange.sendResponseHeaders(200, reply.length);
+			exchange.getResponseBody().write(reply);
+			exchange.close();
+		});
+		stub.start();
+		try {
+			String stubBase = "http://127.0.0.1:" + stub.getAddress().getPort();
+			mockMvc.perform(post("/api/llm/keys")
+						.header("Authorization", bearer)
+						.contentType(MediaType.APPLICATION_JSON)
+						.content(("""
+							{"provider":"openai","label":"stub","baseUrl":"%s","apiKey":"sk-test"}
+							""").formatted(stubBase)))
+					.andExpect(status().isCreated());
+
+			MvcResult created = mockMvc.perform(post("/api/automation/tasks")
+							.header("Authorization", bearer)
+							.contentType(MediaType.APPLICATION_JSON)
+							.content(("""
+								{"name":"cloud","intent":"say hi","execution":"cloud","model":"gpt-test","enabled":true,"onceAt":"%s"}
+								""").formatted(LocalDateTime.now().plusSeconds(1))))
+							.andExpect(status().isOk())
+							.andReturn();
+			String taskId = json(created).get("id").asString();
+
+			Thread.sleep(1100);
+			automationScheduler.tick();
+
+			// 云端执行走虚拟线程，轮询等待结果落库
+			JsonNode run = null;
+			for (int i = 0; i < 50; i++) {
+				MvcResult runs = mockMvc.perform(get("/api/automation/tasks/runs")
+								.header("Authorization", bearer)
+								.param("taskId", taskId))
+								.andReturn();
+				if (json(runs).size() > 0 && json(runs).get(0).hasNonNull("finishedAt")) {
+					run = json(runs).get(0);
+					break;
+				}
+				Thread.sleep(100);
+			}
+			assertThat(run).as("云端执行应产出运行记录").isNotNull();
+			assertThat(run.get("mode").asString()).isEqualTo("cloud");
+			assertThat(run.get("status").asString()).isEqualTo("ok");
+			assertThat(run.get("output").asString()).isEqualTo("cloud-ok");
+		}
+		finally {
+			stub.stop(0);
+		}
+	}
+
 	private String login(String deviceName, String platform) throws Exception {
 		MvcResult started = mockMvc.perform(get("/api/auth/oidc/stub/authorize")
 						.param("redirect", "http://127.0.0.1:9999/cb")

@@ -70,6 +70,22 @@ grey:
     rpm-limit: ${GREY_LLM_RPM:60}
     # 0 表示不限额
     daily-token-limit: ${GREY_LLM_DAILY_TOKENS:0}
+  ai:
+    # 服务端 AI 调用未指定模型时的默认值；留空则按供应商取内置默认
+    default-model: ${GREY_AI_DEFAULT_MODEL:}
+    max-tokens: ${GREY_AI_MAX_TOKENS:2048}
+    temperature: ${GREY_AI_TEMPERATURE:0.2}
+  automation:
+    # 调度扫描间隔（毫秒）
+    tick-ms: ${GREY_AUTOMATION_TICK_MS:30000}
+    # 宿主认领后的租约：超时未回执则重新入队（防宿主崩溃把任务钉死）
+    claim-lease: ${GREY_AUTOMATION_CLAIM_LEASE:PT30M}
+    # 云端（服务端 AI）并发上限
+    cloud-concurrency: ${GREY_AUTOMATION_CLOUD_CONCURRENCY:4}
+    # 已完成队列/运行记录的保留天数
+    retention-days: ${GREY_AUTOMATION_RETENTION_DAYS:30}
+    # cron 使用的时区；留空 = 服务器默认时区
+    zone: ${GREY_AUTOMATION_ZONE:}
   web:
     allowed-origins: ${GREY_ALLOWED_ORIGINS:http://localhost:5173}
     # 生成 webhook 回调地址时用的对外基地址
