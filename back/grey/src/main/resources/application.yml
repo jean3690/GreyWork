@@ -1,0 +1,77 @@
+spring:
+  application:
+    name: grey
+  # 本地开发由 spring-boot-docker-compose 自动注入连接信息（compose.yaml）
+  # 独立部署时用环境变量覆盖：SPRING_DATASOURCE_URL / _USERNAME / _PASSWORD
+  datasource:
+    hikari:
+      maximum-pool-size: 10
+      pool-name: grey-pool
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    locations: classpath:db/migration
+  threads:
+    virtual:
+      enabled: true
+
+mybatis-plus:
+  mapper-locations: classpath*:/mapper/**/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    banner: false
+    db-config:
+      id-type: assign_id
+      logic-delete-field: deletedAt
+      logic-delete-value: 'NOW(3)'
+      logic-not-delete-value: 'NULL'
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when-authorized
+
+server:
+  port: 8080
+
+grey:
+  auth:
+    # 留空则首次启动随机生成并打到日志；设置后每次启动都与该值对齐（方便自托管）
+    enroll-code: ${GREY_ENROLL_CODE:}
+    session-ttl: PT720H
+  oidc:
+    # 登录成功后跳回客户端的前缀白名单，避免 ticket 被带去外站
+    allowed-redirects: ${GREY_OIDC_REDIRECTS:http://127.0.0.1,http://localhost,greywork://}
+    # 身份源配置示例（provider 名字任意，未填 client-id 视为未启用）：
+    # providers:
+    #   github:
+    #     client-id: xxx
+    #     client-secret: xxx
+    #     authorization-url: https://github.com/login/oauth/authorize
+    #     token-url: https://github.com/login/oauth/access_token
+    #     userinfo-url: https://api.github.com/user
+    #     scopes: [read:user, user:email]
+    #     email-field: email
+    #     link-by-email: true
+    #   google:
+    #     client-id: xxx
+    #     client-secret: xxx
+    #     authorization-url: https://accounts.google.com/o/oauth2/v2/auth
+    #     token-url: https://oauth2.googleapis.com/token
+    #     userinfo-url: https://openidconnect.googleapis.com/v1/userinfo
+  llm:
+    # 32 字节 base64，生成：openssl rand -base64 32
+    master-key: ${GREY_MASTER_KEY:}
+    rpm-limit: ${GREY_LLM_RPM:60}
+    # 0 表示不限额
+    daily-token-limit: ${GREY_LLM_DAILY_TOKENS:0}
+  web:
+    allowed-origins: ${GREY_ALLOWED_ORIGINS:http://localhost:5173}
+    # 生成 webhook 回调地址时用的对外基地址
+    public-base-url: ${GREY_PUBLIC_BASE_URL:http://localhost:8080}
+
