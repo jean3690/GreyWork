@@ -181,6 +181,16 @@ pub async fn run() -> Result<(), String> {
         greywork_host::scheduler::run_ticker(ticker_host, ticker_db, stale_after_ms).await
     });
 
+    // 控制面（back/grey）云端自动化任务消费：GREYWORK_CONTROL_URL/TOKEN 同时配置才启用。
+    // 执行语义与本地兜底一致（LLM 直连单轮，无 ACP），详见 control_plane 模块文档。
+    if let Some(control) = config.control_plane() {
+        let cp_host = Arc::clone(&host);
+        let cp_db = Arc::clone(&db);
+        tokio::spawn(async move {
+            greywork_host::control_plane::run_control_plane_worker(cp_host, cp_db, control).await
+        });
+    }
+
     let ctx = Arc::new(CommandContext {
         host: Arc::clone(&host),
         services: Arc::new(Services {

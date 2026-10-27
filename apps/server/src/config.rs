@@ -71,6 +71,15 @@ pub struct ServerConfig {
     /// `apps/desktop/dist`；`<exe 同目录>/dist` 这种默认对从 `target/debug` 起的人更是惊吓。
     /// Docker 里显式设 `GREYWORK_STATIC_DIR=/app/dist`。
     pub static_dir: Option<PathBuf>,
+    /// 控制面（back/grey Java）基址。与 `control_token` 同时给出时，
+    /// 启动云端自动化任务消费（认领 → LLM 直连执行 → 回执）。
+    pub control_url: Option<String>,
+    /// 控制面设备 token（入场码注册后签发的登录态，720h TTL，过期需换新）。
+    pub control_token: Option<String>,
+    /// 控制面心跳/认领 tick（秒）。
+    pub control_tick_secs: u64,
+    /// 云端单条任务执行超时（秒）。默认 25min，给控制面 30min 认领租约留回收缓冲。
+    pub control_timeout_secs: u64,
     /// LibreOffice `soffice` 可执行文件的**显式路径**覆盖（`GREYWORK_SOFFICE_PATH`）。
     ///
     /// 缺省 = 按 PATH 探测（Docker 镜像内 apt 装的 `/usr/bin/soffice` 即在 PATH 上），
@@ -98,6 +107,10 @@ impl Default for ServerConfig {
             frame_origins: Vec::new(),
             // fail-safe：默认不接管执行权。升级上来的部署不会因为换了版本就突然自己跑任务。
             automation_host_primary: false,
+            control_url: None,
+            control_token: None,
+            control_tick_secs: 30,
+            control_timeout_secs: 1_500,
             static_dir: None,
             soffice_path: None,
         }
@@ -105,6 +118,21 @@ impl Default for ServerConfig {
 }
 
 impl ServerConfig {
+    /// 控制面接入配置：URL 与 token 同时给出才算启用；缺一返回 None（不消费云端任务）。
+    pub fn control_plane(&self) -> Option<greywork_host::control_plane::ControlPlaneConfig> {
+        let base_url = self.control_url.clone().filter(|value| !value.is_empty())?;
+        let token = self
+            .control_token
+            .clone()
+            .filter(|value| !value.is_empty())?;
+        Some(greywork_host::control_plane::ControlPlaneConfig {
+            base_url: base_url.trim_end_matches('/').to_string(),
+            token,
+            tick_secs: self.control_tick_secs,
+            execution_timeout_secs: self.control_timeout_secs,
+        })
+    }
+
     /// 会话有效期。
     pub fn session_ttl(&self) -> std::time::Duration {
         std::time::Duration::from_secs(self.session_ttl_secs)
@@ -173,6 +201,22 @@ impl ServerConfig {
         }
         if let Some(value) = env_str("GREYWORK_FRAME_ORIGINS") {
             self.frame_origins = split_list(&value, ',');
+        }
+        if let Some(value) = env_str("GREYWORK_CONTROL_URL") {
+            self.control_url = Some(value);
+        }
+        if let Some(value) = env_str("GREYWORK_CONTROL_TOKEN") {
+            self.control_token = Some(value);
+        }
+        if let Some(value) = env_str("GREYWORK_CONTROL_TICK_SECS") {
+            self.control_tick_secs = value
+                .parse()
+                .map_err(|_| format!("GREYWORK_CONTROL_TICK_SECS 不是整数: {value}"))?;
+        }
+        if let Some(value) = env_str("GREYWORK_CONTROL_TIMEOUT_SECS") {
+            self.control_timeout_secs = value
+                .parse()
+                .map_err(|_| format!("GREYWORK_CONTROL_TIMEOUT_SECS 不是整数: {value}"))?;
         }
         if let Some(value) = env_str("GREYWORK_AUTOMATION_HOST_PRIMARY") {
             self.automation_host_primary = parse_bool(&value);

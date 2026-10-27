@@ -44,6 +44,6 @@ pub use infra::{
     db, git, http, process_guard, sheet, shell, store_fs, terminal, workspace_fs, worktree,
 };
 pub use services::{
-    acp_host, acp_process, bundled_skills, cron, host_exec, llm, mcp, mcp_registry, office,
-    plugin_market, rag, scheduler, skills_market, sys, update, web_fetch,
+    acp_host, acp_process, bundled_skills, control_plane, cron, host_exec, llm, mcp, mcp_registry,
+    office, plugin_market, rag, scheduler, skills_market, sys, update, web_fetch,
 };

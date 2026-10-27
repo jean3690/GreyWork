@@ -113,7 +113,7 @@ pub async fn claim_and_run(db: &Db, stale_after_ms: i64) -> Vec<Outcome> {
 }
 
 /// 通知正文用的回复预览：取首行、按字符截断（中文按字符切，不会切坏 UTF-8）。
-fn preview(reply: &str) -> String {
+pub(crate) fn preview(reply: &str) -> String {
     const MAX_CHARS: usize = 80;
     let first_line = reply.lines().next().unwrap_or_default().trim();
     if first_line.is_empty() {
@@ -126,42 +126,69 @@ fn preview(reply: &str) -> String {
     out
 }
 
-/// 执行单条：默认 LLM 配置 → 单轮 chat_complete → 新会话落库 → last_run 回写。
-/// 成功返回 (模型回复全文, 新建会话 id)（供通知预览与运行记录会话链接）。
-async fn run_one(db: &Db, item: &AutomationDueDto) -> Result<(String, String), String> {
-    if item.acp_provider_id.is_some() {
-        return Err("任务绑定 ACP 后端：兜底执行只支持本机模型，需在应用内执行".to_string());
-    }
+/// 解析后的默认 LLM 端点（本地兜底与控制面云端任务消费共用）。
+pub struct LlmEndpoint {
+    pub base_url: String,
+    pub model: String,
+    pub api_key_env: String,
+    pub headers: HashMap<String, String>,
+}
+
+/// 从 settings 快照解析默认 LLM 端点：selectedModelProviderId 优先，
+/// 回落第一个带 baseUrl+model 的供应商。
+pub fn resolve_default_llm(db: &Db) -> Result<LlmEndpoint, String> {
     let settings = db
         .load_settings()?
         .ok_or_else(|| "设置未初始化（无模型配置可执行）".to_string())?;
     let (base_url, model, api_key_env, headers) = default_llm_config(&settings)
         .ok_or_else(|| "默认模型供应商缺 baseUrl/model 配置".to_string())?;
+    Ok(LlmEndpoint {
+        base_url,
+        model,
+        api_key_env,
+        headers,
+    })
+}
 
-    let now = chrono::Utc::now().timestamp_millis();
-    let reply = llm::chat_complete(
-        &base_url,
-        &model,
-        &api_key_env,
+/// 单轮 LLM 直连：intent 视为完整指令。`model_override` 允许任务指定模型
+/// （仍用默认供应商的 baseUrl/headers，只换模型名）。
+pub async fn chat_once(
+    endpoint: &LlmEndpoint,
+    intent: &str,
+    model_override: Option<&str>,
+) -> Result<String, String> {
+    llm::chat_complete(
+        &endpoint.base_url,
+        model_override
+            .filter(|model| !model.is_empty())
+            .unwrap_or(&endpoint.model),
+        &endpoint.api_key_env,
         vec![llm::LlmChatMessage {
             role: "user".into(),
-            content: serde_json::json!(item.intent.clone()),
+            content: serde_json::json!(intent),
         }],
         "auto",
-        &headers,
+        &endpoint.headers,
     )
-    .await?;
+    .await
+}
 
-    let user_id = format!("host-u-{now}");
-    let assistant_id = format!("host-a-{now}");
+/// 把一轮宿主执行落成本地会话（应用内可见），返回会话 id。
+pub fn record_host_conversation(
+    db: &Db,
+    name: &str,
+    intent: &str,
+    reply: &str,
+) -> Result<String, String> {
+    let now = chrono::Utc::now().timestamp_millis();
     let user_message = json!({
-        "id": user_id,
+        "id": format!("host-u-{now}"),
         "role": "user",
-        "content": item.intent,
+        "content": intent,
         "ts": now,
     });
     let assistant_message = json!({
-        "id": assistant_id,
+        "id": format!("host-a-{now}"),
         "role": "assistant",
         "content": reply,
         "ts": now,
@@ -169,11 +196,24 @@ async fn run_one(db: &Db, item: &AutomationDueDto) -> Result<(String, String), S
     let conversation_id = format!("host-{now}");
     db.insert_host_execution(
         &conversation_id,
-        &item.name,
+        name,
         None,
         &user_message,
         &assistant_message,
     )?;
+    Ok(conversation_id)
+}
+
+/// 执行单条：默认 LLM 配置 → 单轮 chat_complete → 新会话落库 → last_run 回写。
+/// 成功返回 (模型回复全文, 新建会话 id)（供通知预览与运行记录会话链接）。
+async fn run_one(db: &Db, item: &AutomationDueDto) -> Result<(String, String), String> {
+    if item.acp_provider_id.is_some() {
+        return Err("任务绑定 ACP 后端：兜底执行只支持本机模型，需在应用内执行".to_string());
+    }
+    let endpoint = resolve_default_llm(db)?;
+    let reply = chat_once(&endpoint, &item.intent, None).await?;
+    let conversation_id = record_host_conversation(db, &item.name, &item.intent, &reply)?;
+    let now = chrono::Utc::now().timestamp_millis();
     db.automation_mark_last_run(&item.task_id, now)?;
     Ok((reply, conversation_id))
 }

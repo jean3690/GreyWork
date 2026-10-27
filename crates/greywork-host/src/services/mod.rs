@@ -5,6 +5,7 @@
 pub mod acp_host;
 pub mod acp_process;
 pub mod bundled_skills;
+pub mod control_plane;
 pub mod cron;
 pub mod host_exec;
 pub mod llm;
