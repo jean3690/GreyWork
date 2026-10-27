@@ -26,5 +26,18 @@ services:
       timeout: 3s
       retries: 20
 
+  # 对象存储（S3 兼容）。应用侧用 GREY_S3_ENDPOINT=http://127.0.0.1:9000 与这里的端口对齐，
+  # 并把 GREY_S3_ACCESS_KEY / GREY_S3_SECRET_KEY 设成与下方一致。
+  rustfs:
+    image: 'rustfs/rustfs:latest'
+    environment:
+      - 'RUSTFS_ACCESS_KEY=greywork'
+      - 'RUSTFS_SECRET_KEY=greywork-secret'
+    ports:
+      - '9000'
+    volumes:
+      - 'rustfs-data:/data'
+
 volumes:
   mysql-data:
+  rustfs-data:

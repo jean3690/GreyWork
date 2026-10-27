@@ -86,6 +86,24 @@ grey:
     retention-days: ${GREY_AUTOMATION_RETENTION_DAYS:30}
     # cron 使用的时区；留空 = 服务器默认时区
     zone: ${GREY_AUTOMATION_ZONE:}
+  storage:
+    # 对象存储（RustFS / 任意 S3 兼容服务）；未启用时上传接口返回 storage_disabled
+    enabled: ${GREY_S3_ENABLED:false}
+    endpoint: ${GREY_S3_ENDPOINT:http://127.0.0.1:9000}
+    region: ${GREY_S3_REGION:us-east-1}
+    access-key: ${GREY_S3_ACCESS_KEY:}
+    secret-key: ${GREY_S3_SECRET_KEY:}
+    bucket: ${GREY_S3_BUCKET:greywork}
+    # RustFS 默认按路径寻址：http://host:9000/bucket/key
+    path-style: ${GREY_S3_PATH_STYLE:true}
+    # 预签名上传/下载链接有效期
+    presign-ttl: ${GREY_S3_PRESIGN_TTL:PT15M}
+    # 单对象上限（默认 500 MiB）
+    max-object-bytes: ${GREY_S3_MAX_OBJECT_BYTES:524288000}
+    # 配置后 public 对象直接走该前缀（CDN / 反向代理）
+    public-base-url: ${GREY_S3_PUBLIC_BASE_URL:}
+    # 未完成上传的清理时限
+    pending-ttl: ${GREY_S3_PENDING_TTL:PT24H}
   web:
     allowed-origins: ${GREY_ALLOWED_ORIGINS:http://localhost:5173}
     # 生成 webhook 回调地址时用的对外基地址

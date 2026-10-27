@@ -47,6 +47,11 @@ class ControlPlaneApiTest {
 	static final GenericContainer<?> REDIS = new GenericContainer<>("redis:7-alpine")
 			.withExposedPorts(6379);
 
+	@Container
+	static final GenericContainer<?> RUSTFS = new GenericContainer<>("rustfs/rustfs:latest")
+			.withEnv("RUSTFS_ACCESS_KEY", "greytest")
+			.withEnv("RUSTFS_SECRET_KEY", "greytest-secret")
+			.withExposedPorts(9000);
 
 	static final java.security.KeyPair MARKET_KEYS = generateMarketKeys();
 
@@ -133,6 +138,15 @@ class ControlPlaneApiTest {
 				.encodeToString(MARKET_KEYS.getPrivate().getEncoded()));
 	}
 
+	@DynamicPropertySource
+	static void storageProperties(DynamicPropertyRegistry registry) {
+		registry.add("grey.storage.enabled", () -> "true");
+		registry.add("grey.storage.endpoint",
+				() -> "http://" + RUSTFS.getHost() + ":" + RUSTFS.getMappedPort(9000));
+		registry.add("grey.storage.access-key", () -> "greytest");
+		registry.add("grey.storage.secret-key", () -> "greytest-secret");
+		registry.add("grey.storage.bucket", () -> "greywork-test");
+	}
 
 	@DynamicPropertySource
 	static void redisProperties(DynamicPropertyRegistry registry) {
@@ -971,6 +985,95 @@ class ControlPlaneApiTest {
 		finally {
 			stub.stop(0);
 		}
+	}
+
+	@Test
+	void storagePresignedRoundTrip() throws Exception {
+		JsonNode session = enroll("storage@grey.local", "desktop");
+		String bearer = "Bearer " + session.get("token").asString();
+
+		mockMvc.perform(get("/api/storage/config").header("Authorization", bearer))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.enabled").value(true))
+				.andExpect(jsonPath("$.bucket").value("greywork-test"));
+
+		MvcResult created = mockMvc.perform(post("/api/storage/uploads")
+						.header("Authorization", bearer)
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{"name":"hello world.txt","contentType":"text/plain","sizeBytes":11}
+								"""))
+				.andExpect(status().isOk())
+				.andReturn();
+		JsonNode ticket = json(created);
+		long objectId = ticket.get("id").asLong();
+		assertThat(ticket.get("uploadUrl").asString()).contains("greywork-test");
+
+		byte[] payload = "hello world".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+		var client = java.net.http.HttpClient.newHttpClient();
+		var put = java.net.http.HttpRequest
+				.newBuilder(URI.create(ticket.get("uploadUrl").asString()))
+				.header("Content-Type", "text/plain")
+				.PUT(java.net.http.HttpRequest.BodyPublishers.ofByteArray(payload))
+				.build();
+		var putResponse = client.send(put, java.net.http.HttpResponse.BodyHandlers.ofString());
+		assertThat(putResponse.statusCode()).as("预签名 PUT 应成功").isEqualTo(200);
+
+		mockMvc.perform(post("/api/storage/objects/" + objectId + "/complete")
+						.header("Authorization", bearer))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.status").value("ready"));
+
+		// 大小谎报会被 complete 拦下
+		MvcResult lying = mockMvc.perform(post("/api/storage/uploads")
+						.header("Authorization", bearer)
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{"name":"liar.bin","contentType":"application/octet-stream","sizeBytes":5}
+								"""))
+				.andReturn();
+		long liarId = json(lying).get("id").asLong();
+		// 真的上传 11 字节，再按声明的 5 字节去 complete → 大小不一致
+		var liarPut = java.net.http.HttpRequest
+				.newBuilder(URI.create(json(lying).get("uploadUrl").asString()))
+				.header("Content-Type", "application/octet-stream")
+				.PUT(java.net.http.HttpRequest.BodyPublishers.ofByteArray(payload))
+				.build();
+		client.send(liarPut, java.net.http.HttpResponse.BodyHandlers.ofString());
+		mockMvc.perform(post("/api/storage/objects/" + liarId + "/complete")
+						.header("Authorization", bearer))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.code").value("size_mismatch"));
+
+		MvcResult dl = mockMvc.perform(get("/api/storage/objects/" + objectId + "/download")
+						.header("Authorization", bearer))
+				.andExpect(status().isOk())
+				.andReturn();
+		String url = json(dl).get("url").asString();
+		var get = java.net.http.HttpRequest.newBuilder(URI.create(url)).GET().build();
+		var getResponse = client.send(get, java.net.http.HttpResponse.BodyHandlers.ofByteArray());
+		assertThat(getResponse.statusCode()).as("预签名 GET 应成功").isEqualTo(200);
+		assertThat(getResponse.body()).isEqualTo(payload);
+
+		// 未确认对象不允许下载
+		mockMvc.perform(get("/api/storage/objects/" + liarId + "/download")
+						.header("Authorization", bearer))
+				.andExpect(status().isBadRequest());
+
+		// 越权访问
+		JsonNode other = enroll("storage2@grey.local", "desktop");
+		mockMvc.perform(get("/api/storage/objects/" + objectId)
+						.header("Authorization", "Bearer " + other.get("token").asString()))
+				.andExpect(status().isNotFound());
+
+		// 删除后消失
+		mockMvc.perform(delete("/api/storage/objects/" + objectId)
+						.header("Authorization", bearer))
+				.andExpect(status().isOk());
+		mockMvc.perform(get("/api/storage/objects/" + objectId)
+						.header("Authorization", bearer))
+				.andExpect(status().isNotFound());
+		client.close();
 	}
 
 	private String login(String deviceName, String platform) throws Exception {
