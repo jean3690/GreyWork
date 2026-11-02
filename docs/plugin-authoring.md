@@ -461,6 +461,30 @@ palette commands they only navigate to the package's page; they never run plugin
   never write into another package's entry.
 - The bar only shows **active** packages; disabling one removes its entries until re-enabled.
 
+### Keyboard shortcuts
+
+`contributes.keybindings` binds a global key to "open this package's page". Same navigation-only
+trade-off as palette commands and context-menu entries.
+
+```jsonc
+"contributes": {
+  "keybindings": [
+    { "id": "open", "key": "mod+shift+p", "mode": "demo-pet" }
+  ]
+}
+```
+
+- `key` is written as modifiers + one base key: modifiers are `mod` (Cmd on macOS, Ctrl elsewhere),
+  `ctrl`, `alt`, `shift` — in that order, and at least one of `mod` / `ctrl` / `alt` is required
+  (plain `shift+letter` would type into whatever has focus). The base key is a lowercase letter, a
+  digit, or `F1`-`F12` (function keys may be used bare, e.g. `f9`). Letters are case-insensitive.
+- 1-8 entries per package; `id` is unique inside the package; the same **combination** may only be
+  claimed once across all packages (a later registration is rejected at registration time).
+- Host shortcuts always win: a plugin key that collides with a host shortcut simply never fires.
+  Reserved today: mod+n, mod+b, mod+e, mod+backslash, mod+backquote and mod+1 through mod+4.
+- The navigation-only rule is the same as every other contribution surface: a shortcut opens the
+  package's page, it does not run plugin code.
+
 ### Floating windows
 
 A worker plugin that declares `window.floating` **and** a `window` block can be popped out of the

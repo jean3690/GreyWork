@@ -52,6 +52,11 @@
   最近一条、限 80 字、滤控制字符，未声明的 id 直接丢弃）；点击条目跳插件页。只显示已激活插件，
   停用即消失。此前 P2 的「命令面板 / 右键菜单 / 设置项」同批已落地。
 
+- **插件快捷键**：`contributes.keybindings` 声明 `{ id, key, mode? }`（≤8 条）。key 是「修饰键
+  （mod / ctrl / alt / shift 按序，mod / ctrl / alt 至少其一）+ 小写字母 / 数字 / F1-F12（F 键可裸用）」，
+  组合键全局唯一、注册期冲突即拒；命中后打开插件页（与命令 / 右键同一导航取舍）。
+  宿主快捷键（mod+n、mod+b、mod+e、mod+`\`、mod+``、mod+1~4）始终优先。
+
 ### 改进
 
 - **GIS 矢量预览补全**：geojson / shp 之外新增 **KML / KMZ / GPX / TopoJSON**（KMZ 用动态
