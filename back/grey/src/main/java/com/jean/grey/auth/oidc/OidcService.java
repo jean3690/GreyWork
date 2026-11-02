@@ -6,6 +6,7 @@ import com.jean.grey.account.mapper.AppUserMapper;
 import com.jean.grey.auth.entity.UserIdentity;
 import com.jean.grey.auth.mapper.UserIdentityMapper;
 import com.jean.grey.common.ApiException;
+import com.jean.grey.common.Emails;
 import com.jean.grey.common.Hashes;
 import com.jean.grey.config.OidcProperties;
 import java.net.URI;
@@ -190,7 +191,8 @@ public class OidcService {
 			throw new ApiException(HttpStatus.BAD_GATEWAY, "oidc_subject_missing",
 					"身份源没有返回用户标识字段 " + provider.subjectField());
 		}
-		String email = text(profile, provider.emailField());
+		// 与入场码路径同一套归一化：否则同一个人在两条登录路径上会开出两个账号。
+		String email = Emails.normalize(text(profile, provider.emailField()));
 		String displayName = text(profile, provider.nameField());
 
 		UserIdentity existing = identityMapper.selectOne(Wrappers.<UserIdentity>lambdaQuery()
@@ -201,13 +203,14 @@ public class OidcService {
 		}
 
 		AppUser user = null;
-		if (provider.linkByEmail() && email != null && !email.isBlank()) {
-			user = appUserMapper.selectOne(Wrappers.<AppUser>lambdaQuery()
-					.eq(AppUser::getEmail, email));
+		if (provider.linkByEmail() && email != null) {
+			// LOWER(email) 命中归一化之前写入的历史行（见 AuthService#findByEmail 的说明）。
+			user = appUserMapper.selectOne(Wrappers.<AppUser>query()
+					.apply("LOWER(email) = {0}", email));
 		}
 		if (user == null) {
 			user = new AppUser();
-			user.setEmail(email != null && !email.isBlank() ? email : syntheticEmail(providerId, subject));
+			user.setEmail(email != null ? email : syntheticEmail(providerId, subject));
 			user.setDisplayName(displayName != null && !displayName.isBlank()
 					? displayName
 					: user.getEmail());

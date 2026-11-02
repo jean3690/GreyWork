@@ -8,6 +8,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.jean.grey.account.entity.AppUser;
+import com.jean.grey.account.mapper.AppUserMapper;
 import com.jean.grey.auth.entity.EnrollmentCode;
 import com.jean.grey.auth.mapper.EnrollmentCodeMapper;
 import com.jean.grey.common.Hashes;
@@ -162,6 +164,9 @@ class ControlPlaneApiTest {
 
 	@Autowired
 	EnrollmentCodeMapper enrollmentCodeMapper;
+
+	@Autowired
+	AppUserMapper appUserMapper;
 
 	@Autowired
 	org.springframework.data.redis.core.StringRedisTemplate redis;
@@ -1130,6 +1135,74 @@ class ControlPlaneApiTest {
 				.andExpect(jsonPath("$.code").value("oidc_state_invalid"));
 
 		return session.get("user").get("id").asString();
+	}
+
+
+	/**
+	 * 禁用账号必须同时挡住两件事：手上没到期的 token 立刻失效，重新登录也进不来。
+	 * 以前 status / deleted_at 只有字段没有读者，禁用等于没禁用。
+	 */
+	@Test
+	void disabledUserLosesSessionAndCannotEnrollAgain() throws Exception {
+		JsonNode session = enroll("disabled@grey.local", "desktop");
+		String token = session.get("token").asString();
+		Long userId = session.get("user").get("id").asLong();
+
+		AppUser user = appUserMapper.selectById(userId);
+		user.setStatus("disabled");
+		appUserMapper.updateById(user);
+
+		mockMvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + token))
+				.andExpect(status().isUnauthorized());
+
+		mockMvc.perform(post("/api/auth/enroll")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{"code":"%s","email":"disabled@grey.local","deviceName":"second","platform":"server"}
+								""".formatted(newCode())))
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.code").value("user_disabled"));
+	}
+
+	/** 同一邮箱的不同大小写写法必须落到同一个账号（否则设备 / 同步 / 配额会按 user 分家）。 */
+	@Test
+	void emailIsNormalizedAcrossLogins() throws Exception {
+		JsonNode first = enroll("Case.User@Grey.Local", "desktop");
+		JsonNode second = enroll("case.user@grey.local", "phone");
+
+		assertThat(second.get("user").get("id").asLong())
+				.isEqualTo(first.get("user").get("id").asLong());
+		assertThat(second.get("user").get("email").asString()).isEqualTo("case.user@grey.local");
+		assertThat(appUserMapper.selectById(first.get("user").get("id").asLong()).getEmail())
+				.isEqualTo("case.user@grey.local");
+	}
+
+	/** 连续失败到阈值后先 429；成功一次会清零，所以正常用户不会被误伤。 */
+	@Test
+	void enrollFailuresAreRateLimited() throws Exception {
+		String client = "127.0.0.1";
+		redis.delete("grey:auth:enroll-fail:" + client);
+
+		try {
+			for (int attempt = 0; attempt < 10; attempt++) {
+				mockMvc.perform(post("/api/auth/enroll")
+								.contentType(MediaType.APPLICATION_JSON)
+								.content("""
+										{"code":"WRONG-CODE","email":"brute@grey.local","deviceName":"x","platform":"server"}
+										"""))
+						.andExpect(status().isUnauthorized());
+			}
+			mockMvc.perform(post("/api/auth/enroll")
+							.contentType(MediaType.APPLICATION_JSON)
+							.content("""
+									{"code":"WRONG-CODE","email":"brute@grey.local","deviceName":"x","platform":"server"}
+									"""))
+					.andExpect(status().isTooManyRequests())
+					.andExpect(jsonPath("$.code").value("enroll_rate_limited"));
+		}
+		finally {
+			redis.delete("grey:auth:enroll-fail:" + client);
+		}
 	}
 
 	private JsonNode enroll(String email, String platform) throws Exception {

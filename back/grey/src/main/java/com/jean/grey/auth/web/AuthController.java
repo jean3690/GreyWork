@@ -4,6 +4,7 @@ import com.jean.grey.account.entity.AppUser;
 import com.jean.grey.account.mapper.AppUserMapper;
 import com.jean.grey.auth.AuthPrincipal;
 import com.jean.grey.auth.AuthService;
+import com.jean.grey.auth.AuthRateLimiter;
 import com.jean.grey.auth.BearerTokenFilter;
 import com.jean.grey.auth.entity.UserDevice;
 import com.jean.grey.auth.mapper.UserDeviceMapper;
@@ -31,13 +32,16 @@ public class AuthController {
 	private final TokenService tokenService;
 	private final UserDeviceMapper userDeviceMapper;
 	private final AppUserMapper appUserMapper;
+	private final AuthRateLimiter rateLimiter;
 
 	public AuthController(AuthService authService, TokenService tokenService,
-			UserDeviceMapper userDeviceMapper, AppUserMapper appUserMapper) {
+			UserDeviceMapper userDeviceMapper, AppUserMapper appUserMapper,
+			AuthRateLimiter rateLimiter) {
 		this.authService = authService;
 		this.tokenService = tokenService;
 		this.userDeviceMapper = userDeviceMapper;
 		this.appUserMapper = appUserMapper;
+		this.rateLimiter = rateLimiter;
 	}
 
 	public record EnrollRequest(
@@ -62,10 +66,23 @@ public class AuthController {
 
 	@PostMapping("/enroll")
 	@ResponseStatus(HttpStatus.CREATED)
-	public SessionView enroll(@Valid @RequestBody EnrollRequest request) {
-		AuthService.Enrolled enrolled = authService.enroll(request.code(), request.email(),
-				request.displayName(), request.deviceName(), request.platform());
-		return new SessionView(enrolled.token(), userView(enrolled.user()), deviceView(enrolled.device()));
+	public SessionView enroll(@Valid @RequestBody EnrollRequest request, HttpServletRequest http) {
+		// 入场码是唯一能在未登录态被猜的凭据：连续失败到阈值就先拦住这个来源，
+		// 免得接口变成「猜码 + 顺带建号」的入口。成功一次即清零。
+		String client = http.getRemoteAddr();
+		rateLimiter.assertAllowed(client);
+		try {
+			AuthService.Enrolled enrolled = authService.enroll(request.code(), request.email(),
+					request.displayName(), request.deviceName(), request.platform());
+			rateLimiter.clear(client);
+			return new SessionView(enrolled.token(), userView(enrolled.user()), deviceView(enrolled.device()));
+		}
+		catch (ApiException ex) {
+			if (ex.getStatus() == HttpStatus.UNAUTHORIZED) {
+				rateLimiter.recordFailure(client);
+			}
+			throw ex;
+		}
 	}
 
 	@PostMapping("/logout")

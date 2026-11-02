@@ -44,6 +44,10 @@ grey:
     # 留空则首次启动随机生成并打到日志；设置后每次启动都与该值对齐（方便自托管）
     enroll-code: ${GREY_ENROLL_CODE:}
     session-ttl: PT720H
+    # 入场码连续失败上限与窗口：只对失败计数，成功一次即清零（正常用户多设备登录不受影响）。
+    # 按来源地址分桶；反向代理后请让容器把真实地址写进 remoteAddr，不要依赖 X-Forwarded-For。
+    enroll-max-failures: ${GREY_ENROLL_MAX_FAILURES:10}
+    enroll-fail-window: PT10M
   oidc:
     # 登录成功后跳回客户端的前缀白名单，避免 ticket 被带去外站
     allowed-redirects: ${GREY_OIDC_REDIRECTS:http://127.0.0.1,http://localhost,greywork://}

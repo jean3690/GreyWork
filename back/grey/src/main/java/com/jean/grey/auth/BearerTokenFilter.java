@@ -31,6 +31,12 @@ public class BearerTokenFilter extends OncePerRequestFilter {
 		if (header != null && header.startsWith("Bearer ")) {
 			String token = header.substring(7).trim();
 				tokenService.resolve(token).ifPresent(principal -> {
+					// 账号被禁用 / 删除后，手上还没过期的 token 也必须立刻失效。
+					// 顺手把会话回收：之后同一枚 token 连「查库」这一步都不用走，直接 401。
+					if (!authService.isActive(principal.userId())) {
+						tokenService.revoke(token);
+						return;
+					}
 					var authentication = new UsernamePasswordAuthenticationToken(principal, token, List.of());
 					SecurityContextHolder.getContext().setAuthentication(authentication);
 					request.setAttribute(ATTR_TOKEN, token);
