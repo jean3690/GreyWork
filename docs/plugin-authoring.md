@@ -367,6 +367,32 @@ greywork.registerSchedule(async (state) => ({ ticks: (state.ticks ?? 0) + 1, at:
   workbench, so it needs no desktop/server host. The `effectiveRegionSchedule` gate means an
   unauthorized or undeclared plugin never gets a clock.
 
+### Command palette entries
+
+`contributes.commands` puts a package's entry points into the global **⌘K / Ctrl+K** search (the
+titlebar search panel). Entries are grouped as "Plugin commands" and land on the package's own page.
+
+```jsonc
+"contributes": {
+  "modes": [/* … */],
+  "commands": [
+    { "id": "feed", "title": "给猫喂食", "description": "宠物插件 · 饱食 +20", "mode": "demo-pet" }
+  ]
+}
+```
+
+- 1-16 entries per package. `id` must be a key (letters / digits / `._-`), **globally unique**:
+  the palette is one flat list, so a second package claiming the same id is rejected at registration
+  time (`ContributionConflictError`); ids also have to be unique inside one package.
+- `title` is 1-60 chars, `description` ≤120, neither may contain control characters.
+- `mode` must name one of the package's own modes (defaults to the first one). A command whose page
+  does not exist is rejected at install time instead of failing with a blank route later.
+- **Navigation only.** There is deliberately no `handler`: the palette can be opened from any page,
+  where the package's worker is not mounted yet, and running plugin code from the palette would be a
+  standing execution surface. Plugin logic stays behind the page the command opens.
+- Entries disappear immediately when the plugin is disabled or uninstalled (the palette reads the
+  same seam snapshot as the sidebar), so there is no separate cleanup path.
+
 ### Floating windows
 
 A worker plugin that declares `window.floating` **and** a `window` block can be popped out of the
