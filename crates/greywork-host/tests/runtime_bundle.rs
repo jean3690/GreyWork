@@ -5,6 +5,10 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+
+/// 两个测试都要改进程级环境变量：并行跑会互相拔掉对方的变量（曾让探测拿到系统 PATH）。
+static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 use greywork_host::process_guard::{is_bundled_program, probe_program, RUNTIME_DIR_ENV};
 
@@ -31,6 +35,7 @@ fn write_program(dir: &Path, name: &str) -> PathBuf {
 
 #[test]
 fn probes_bundled_bin_and_mingit_layout() {
+    let _env = ENV_LOCK.lock().expect("env lock");
     let root = std::env::temp_dir().join(format!("greywork-runtime-{}", std::process::id()));
     fs::remove_dir_all(&root).ok();
 
@@ -58,6 +63,7 @@ fn probes_bundled_bin_and_mingit_layout() {
 
 #[test]
 fn missing_runtime_dir_is_not_an_error() {
+    let _env = ENV_LOCK.lock().expect("env lock");
     std::env::set_var(RUNTIME_DIR_ENV, "/nonexistent/greywork-runtime");
     // 目录不存在 = 没捆绑：不 panic，也不把 PATH 搞坏。
     assert!(!is_bundled_program(Path::new("/usr/bin/rg")));

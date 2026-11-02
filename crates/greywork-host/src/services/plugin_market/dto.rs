@@ -191,6 +191,9 @@ pub struct DeclarativeContributions {
     /// 限长并过滤控制字符）。点击条目打开本包的 mode 页。
     #[serde(default)]
     pub status_bar: Vec<MarketStatusBar>,
+    /// 键盘快捷键（v2）：全局按键，命中后打开本包的 mode 页。
+    #[serde(default)]
+    pub keybindings: Vec<MarketKeybinding>,
     /// 设置项（v2）：插件把自己的配置表单放进设置中心。
     ///
     /// 值与 `storage.kv` 共用同一份命名空间（key 即字段 key），所以插件代码用
@@ -213,6 +216,24 @@ pub struct MarketContextMenu {
     pub label: String,
     /// 出现在哪些区域：fileTree / preview / conversation（1-3 条，不重复）。
     pub targets: Vec<String>,
+    /// 要打开的 mode id；缺省取该包的第一个 mode。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+}
+
+/// 键盘快捷键：与命令 / 右键一样**只做导航**。
+///
+/// key 的书写约定（安装期校验，宿主按同一规则归一化后匹配按键事件）：
+/// `修饰键按 mod, ctrl, alt, shift 的顺序` + 单个主键（小写字母 / 数字 / F1-F12），
+/// 且 mod / ctrl / alt 至少有一个 —— 纯 shift+字母会打进输入框，不允许。
+/// `mod` 在 macOS 是 Cmd、其它平台是 Ctrl；声明 `ctrl+x` 时两条平台键都能命中。
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarketKeybinding {
+    /// 全局唯一 id（宿主侧跨插件冲突检测的键）。
+    pub id: String,
+    /// 组合键（如 `mod+shift+p`）。
+    pub key: String,
     /// 要打开的 mode id；缺省取该包的第一个 mode。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<String>,

@@ -5,12 +5,14 @@ import type { DeclarativeValue, InstalledPluginPackage } from "./market-types";
 import type {
   CommandContribution,
   ContextMenuContribution,
+  KeybindingContribution,
   PluginContextTarget,
   PluginManifest,
   StatusBarContribution,
   UiRegionContribution,
 } from "./types";
 import type { CodePluginRuntime, PluginPointerEvent } from "./code-runtime";
+import { normalizeKeybindingKey } from "./keybindings";
 import { effectiveRegionSchedule } from "./scheduler";
 import { isPluginCapabilityGranted } from "./runtime";
 
@@ -72,6 +74,15 @@ export function adaptInstalledPlugin(pluginPackage: InstalledPluginPackage, runt
       pluginId: source.id,
     }))
     .filter((entry) => entry.modeId !== "");
+  // 快捷键：归一化失败的条目丢弃（安装期已校验，这里只是防呆）。
+  const keybindings: KeybindingContribution[] = (source.contributes.keybindings ?? [])
+    .map((entry) => ({
+      id: entry.id,
+      binding: normalizeKeybindingKey(entry.key) ?? "",
+      modeId: entry.mode ?? firstModeId ?? "",
+      pluginId: source.id,
+    }))
+    .filter((entry) => entry.binding !== "" && entry.modeId !== "");
   const commands: CommandContribution[] = (source.contributes.commands ?? [])
     .map((command) => ({
       id: command.id,
@@ -119,6 +130,7 @@ export function adaptInstalledPlugin(pluginPackage: InstalledPluginPackage, runt
       commands,
       contextMenu,
       statusBar,
+      keybindings,
     },
   };
 }

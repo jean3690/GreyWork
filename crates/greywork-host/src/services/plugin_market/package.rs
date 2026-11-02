@@ -10,7 +10,125 @@ use super::validate::{
 };
 use super::{MAX_PLUGIN_FETCH_BYTES_CEILING, MIN_PLUGIN_FETCH_BYTES};
 
-/// 状态栏条目数上界（底部只有一条细栏）。
+/// 快捷键条数上界：全局按键是稀缺资源，一个插件占一排就说不过去。
+const MAX_PLUGIN_KEYBINDINGS: usize = 8;
+/// 快捷键允许的修饰键（必须按此顺序书写，便于包内去重与前端同口径匹配）。
+const KEYBINDING_MODIFIERS: [&str; 4] = ["mod", "ctrl", "alt", "shift"];
+
+/// 快捷键声明校验（安装期第一道门；宿主快捷键优先，冲突的插件键运行时等于不存在）。
+///
+/// 语义：最多 8 条；id 走 validate_key、包内唯一；key 必须是「修饰键（按
+/// mod, ctrl, alt, shift 顺序，mod/ctrl/alt 至少其一）+ 单个主键（小写字母 / 数字 /
+/// F1-F12）」，包内不允许两条相同的组合键；mode 指向本包声明过的页面（缺省第一个）。
+fn validate_keybindings(
+    manifest: &MarketPluginManifest,
+    mode_ids: &std::collections::HashSet<String>,
+) -> Result<(), String> {
+    let entries = &manifest.contributes.keybindings;
+    if entries.len() > MAX_PLUGIN_KEYBINDINGS {
+        return Err(format!(
+            "keybindings must contain at most {MAX_PLUGIN_KEYBINDINGS} entries"
+        ));
+    }
+    if !entries.is_empty() && manifest.contributes.modes.is_empty() {
+        return Err("keybindings requires at least one mode to open".to_string());
+    }
+    let mut seen_ids = std::collections::HashSet::new();
+    let mut seen_keys = std::collections::HashSet::new();
+    for entry in entries {
+        validate_key(&entry.id, "keybinding id")?;
+        if !seen_ids.insert(&entry.id) {
+            return Err(format!("duplicate keybinding id in package: {}", entry.id));
+        }
+        validate_keybinding_key(&entry.key)?;
+        // 主键大小写不敏感（前端按 event.key 小写匹配），重复检测也按同一口径。
+        if !seen_keys.insert(entry.key.to_ascii_lowercase()) {
+            return Err(format!(
+                "duplicate keybinding {} in package: {}",
+                entry.key, entry.id
+            ));
+        }
+        if let Some(mode) = &entry.mode {
+            if !mode_ids.contains(mode) {
+                return Err(format!(
+                    "keybinding {} targets unknown mode: {mode}",
+                    entry.id
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// 单条组合键校验（见 MarketKeybinding 的书写约定）。
+///
+/// 主键形态：小写字母 / 数字（需带 mod/ctrl/alt 修饰，纯 shift 会打进输入框）或 F1-F12
+/// （功能键可裸用）。修饰键必须按 mod, ctrl, alt, shift 的顺序子集出现，天然去重。
+fn validate_keybinding_key(key: &str) -> Result<(), String> {
+    let is_function_key = |base: &str| {
+        matches!(base.len(), 2 | 3)
+            && base.starts_with('f')
+            && base[1..]
+                .parse::<u8>()
+                .is_ok_and(|number| (1..=12).contains(&number))
+    };
+    let parts: Vec<&str> = key.split('+').collect();
+    if parts.len() == 1 {
+        if is_function_key(parts[0]) {
+            return Ok(());
+        }
+        return Err(format!(
+            "keybinding base key must be a lowercase letter, a digit, or F1-F12 (with a modifier): {key}"
+        ));
+    }
+    if parts.len() > KEYBINDING_MODIFIERS.len() + 1 {
+        return Err(format!("invalid keybinding key: {key}"));
+    }
+    let (modifiers, base) = parts.split_at(parts.len() - 1);
+    let base = base[0].to_ascii_lowercase();
+    if !(base.len() == 1
+        && base
+            .chars()
+            .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit()))
+        && !is_function_key(&base)
+    {
+        return Err(format!(
+            "keybinding base key must be a lowercase letter, a digit, or F1-F12: {key}"
+        ));
+    }
+    let mut has_primary = false;
+    let mut last = 0usize;
+    for modifier in modifiers {
+        let at = KEYBINDING_MODIFIERS
+            .iter()
+            .position(|allowed| allowed == modifier)
+            .ok_or_else(|| {
+                format!(
+                    "keybinding modifiers must appear in the order {} : {key}",
+                    KEYBINDING_MODIFIERS.join(", ")
+                )
+            })?;
+        // 严格递增 = 子集按序出现，重复修饰键自然被拒。
+        if at < last {
+            return Err(format!(
+                "keybinding modifiers must appear in the order {} : {key}",
+                KEYBINDING_MODIFIERS.join(", ")
+            ));
+        }
+        last = at + 1;
+        if *modifier != "shift" {
+            has_primary = true;
+        }
+    }
+    if !has_primary {
+        return Err(format!(
+            "keybinding requires at least one of mod / ctrl / alt : {key}"
+        ));
+    }
+    Ok(())
+}
+
+/// 状态栏声明校验（安装期第一道门；运行时更新走 `greywork.setStatus`，不经过这里）。
 const MAX_PLUGIN_STATUS_ITEMS: usize = 8;
 /// 状态栏文案长度上界。
 const STATUS_LABEL_MAX_CHARS: usize = 60;
@@ -762,6 +880,7 @@ pub(super) fn validate_package(package: &super::dto::PluginPackage) -> Result<()
     validate_context_menu(manifest, &mode_ids)?;
     validate_settings_schema(&manifest.contributes.settings_schema)?;
     validate_status_bar(manifest, &mode_ids)?;
+    validate_keybindings(manifest, &mode_ids)?;
 
     if let Some(window) = &manifest.window {
         if manifest.kind != PluginKind::Worker

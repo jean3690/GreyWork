@@ -23,6 +23,8 @@ import MinimalSider from "@/features/shell/MinimalSider.vue";
 import Titlebar from "@/features/shell/Titlebar.vue";
 import NoticeHost from "@/features/shell/NoticeHost.vue";
 import PluginStatusBar from "@/features/shell/PluginStatusBar.vue";
+import { useCapabilityLoader } from "@/plugins/current";
+import { eventBinding } from "@/plugins/keybindings";
 import WorkspaceOverlayRegions from "@/features/shell/WorkspaceOverlayRegions.vue";
 
 /**
@@ -254,6 +256,19 @@ function onWindowKeydown(event: KeyboardEvent): void {
     if (layoutMode) {
       event.preventDefault();
       applyLayoutMode(layoutMode);
+      return;
+    }
+  }
+  // 插件快捷键：宿主快捷键优先（上面的分支都 return 了才会走到这里），
+  // 冲突的插件键因此等于不存在 —— 这是刻意取舍，不让插件遮蔽宿主的按键。
+  const binding = eventBinding(event);
+  if (binding) {
+    const entry = useCapabilityLoader()
+      .snapshot()
+      .keybindings.find((item) => item.binding === binding);
+    if (entry) {
+      event.preventDefault();
+      void router.push(`/plugin/${entry.modeId}`);
       return;
     }
   }

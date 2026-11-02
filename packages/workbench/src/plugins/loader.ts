@@ -30,7 +30,7 @@ export class DuplicatePluginError extends Error {
   }
 }
 export class ContributionConflictError extends Error {
-  constructor(kind: "mode" | "uiRegion" | "command" | "contextMenu" | "statusBar", id: string, ownerId: string) {
+  constructor(kind: "mode" | "uiRegion" | "command" | "contextMenu" | "statusBar" | "keybinding", id: string, ownerId: string) {
     super(`${kind} contribution id already registered: ${id} (owned by ${ownerId})`);
     this.name = "ContributionConflictError";
   }
@@ -119,6 +119,9 @@ function manifestToPlugin(manifest: PluginManifest): Plugin.Object<Context> {
       for (const entry of manifest.contributes?.statusBar ?? []) {
         ctx.effect(() => ctx.seam.registerStatusBar(entry));
       }
+      for (const entry of manifest.contributes?.keybindings ?? []) {
+        ctx.effect(() => ctx.seam.registerKeybinding(entry));
+      }
       for (const capability of manifest.contributes?.capabilities ?? []) {
         ctx.effect(() => ctx.seam.registerCapability(capability));
       }
@@ -186,6 +189,7 @@ export function createCapabilityLoader(): CapabilityLoader {
     const claimedCommands = new Map<string, string>();
     const claimedContextMenus = new Map<string, string>();
     const claimedStatusItems = new Map<string, string>();
+    const claimedKeybindings = new Map<string, string>();
     for (const manifest of manifestById.values()) {
       for (const mode of manifest.contributes?.modes ?? []) claimedModes.set(mode.id, manifest.id);
       for (const region of manifest.contributes?.uiRegions ?? []) claimedRegions.set(region.id, manifest.id);
@@ -193,6 +197,7 @@ export function createCapabilityLoader(): CapabilityLoader {
       for (const command of manifest.contributes?.commands ?? []) claimedCommands.set(command.id, manifest.id);
       for (const entry of manifest.contributes?.contextMenu ?? []) claimedContextMenus.set(entry.id, manifest.id);
       for (const entry of manifest.contributes?.statusBar ?? []) claimedStatusItems.set(entry.id, manifest.id);
+      for (const entry of manifest.contributes?.keybindings ?? []) claimedKeybindings.set(entry.binding, manifest.id);
     }
 
     const ownModes = new Set<string>();
@@ -230,6 +235,14 @@ export function createCapabilityLoader(): CapabilityLoader {
       const owner = claimedStatusItems.get(entry.id) ?? (ownStatusItems.has(entry.id) ? candidate.id : undefined);
       if (owner) throw new ContributionConflictError("statusBar", entry.id, owner);
       ownStatusItems.add(entry.id);
+    }
+
+    // 组合键是全局资源：两个插件抢同一个键，后注册的必然永远不触发，注册期就拒掉。
+    const ownKeybindings = new Set<string>();
+    for (const entry of candidate.contributes?.keybindings ?? []) {
+      const owner = claimedKeybindings.get(entry.binding) ?? (ownKeybindings.has(entry.binding) ? candidate.id : undefined);
+      if (owner) throw new ContributionConflictError("keybinding", entry.binding, owner);
+      ownKeybindings.add(entry.binding);
     }
   }
 

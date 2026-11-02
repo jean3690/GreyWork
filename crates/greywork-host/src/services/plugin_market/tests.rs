@@ -4,8 +4,9 @@ use super::dto::{
     CapabilityRequirement, CodePluginRuntime, DeclarativeAction, DeclarativeContributions,
     DeclarativeField, DeclarativeMode, DeclarativeOperation, DeclarativeOutput, DeclarativePage,
     ManifestMcpServerRef, ManifestSchedule, ManifestScheduleKind, MarketCommand, MarketContextMenu,
-    MarketPluginManifest, MarketRegionAction, MarketStatusBar, MarketUiRegionContribution,
-    PluginKind, PluginPackage, PluginRegistry, PluginRegistryEntry, PluginWindowDecl, RenderLoop,
+    MarketKeybinding, MarketPluginManifest, MarketRegionAction, MarketStatusBar,
+    MarketUiRegionContribution, PluginKind, PluginPackage, PluginRegistry, PluginRegistryEntry,
+    PluginWindowDecl, RenderLoop,
 };
 use super::install::{install_package_at, list_installed_at};
 use super::net_fetch::validate_plugin_fetch_url;
@@ -69,6 +70,7 @@ fn demo_package() -> PluginPackage {
                 context_menu: Vec::new(),
                 status_bar: Vec::new(),
                 settings_schema: Vec::new(),
+                keybindings: Vec::new(),
             },
         },
         code: None,
@@ -1677,4 +1679,65 @@ fn status_bar_entries_are_bounded_and_target_declared_modes() {
         .map(|index| item(&format!("s-{index}"), "x", None))
         .collect();
     assert!(with_items(many).is_err());
+}
+
+/// 快捷键：修饰键顺序 / 主键形态 / 重复检测。
+#[test]
+fn keybindings_validate_key_shape_and_targets() {
+    let with_bindings = |entries: Vec<MarketKeybinding>| {
+        let mut package = demo_package();
+        package.manifest.contributes.keybindings = entries;
+        validate_package(&package)
+    };
+    let entry = |id: &str, key: &str, mode: Option<&str>| MarketKeybinding {
+        id: id.into(),
+        key: key.into(),
+        mode: mode.map(str::to_string),
+    };
+
+    with_bindings(vec![
+        entry("open", "mod+shift+p", Some("demo-counter")),
+        entry("focus", "ctrl+alt+k", None),
+        entry("tools", "f9", None),
+    ])
+    .expect("合法组合键");
+
+    // 主键形态：多字符 / 保留词不行；字母大小写不敏感（归一化后比对）。
+    assert!(with_bindings(vec![entry("open", "mod+esc", None)]).is_err());
+    assert!(with_bindings(vec![entry("open", "mod+esc", None)]).is_err());
+    assert!(with_bindings(vec![entry("open", "mod+F13", None)]).is_err());
+    // 纯 shift（会打进输入框）；修饰键乱序；只有主键没有修饰键。
+    assert!(with_bindings(vec![entry("open", "shift+p", None)]).is_err());
+    assert!(with_bindings(vec![entry("open", "shift+mod+p", None)]).is_err());
+    assert!(with_bindings(vec![entry("open", "p", None)]).is_err());
+    // 未知 mode；包内重复 id / 重复组合键。
+    let error = with_bindings(vec![entry("open", "mod+shift+p", Some("nope"))]).unwrap_err();
+    assert!(error.contains("unknown mode"), "{error}");
+    assert!(with_bindings(vec![
+        entry("open", "mod+shift+p", None),
+        entry("open2", "mod+shift+p", None)
+    ])
+    .is_err());
+    // 大小写视为同一条组合键。
+    assert!(with_bindings(vec![
+        entry("open", "mod+shift+p", None),
+        entry("open2", "mod+shift+P", None)
+    ])
+    .is_err());
+    assert!(with_bindings(vec![
+        entry("dup", "mod+p", None),
+        entry("dup", "mod+p", None)
+    ])
+    .is_err());
+    // 超过 8 条。
+    let many: Vec<MarketKeybinding> = (0..9)
+        .map(|index| {
+            entry(
+                &format!("kb-{index}"),
+                &format!("mod+alt+f{}", index + 1),
+                None,
+            )
+        })
+        .collect();
+    assert!(with_bindings(many).is_err());
 }

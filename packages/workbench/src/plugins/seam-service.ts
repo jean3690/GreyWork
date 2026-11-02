@@ -5,7 +5,14 @@
 // 读取 modes/uiRegions 两个 ref 建立响应式依赖。
 import { Service, type Context } from "@cordisjs/core";
 import { markRaw, ref, type Ref } from "vue";
-import type { CommandContribution, ContextMenuContribution, ModeContribution, StatusBarContribution, UiRegionContribution } from "./types";
+import type {
+  CommandContribution,
+  ContextMenuContribution,
+  KeybindingContribution,
+  ModeContribution,
+  StatusBarContribution,
+  UiRegionContribution,
+} from "./types";
 
 declare module "@cordisjs/core" {
   interface Context {
@@ -20,6 +27,7 @@ export class SeamService extends Service {
   readonly commands: Ref<CommandContribution[]> = ref([]);
   readonly contextMenu: Ref<ContextMenuContribution[]> = ref([]);
   readonly statusBar: Ref<StatusBarContribution[]> = ref([]);
+  readonly keybindings: Ref<KeybindingContribution[]> = ref([]);
 
   constructor(ctx: Context) {
     super(ctx, "seam", true); // immediate:装载后立即可用
@@ -67,6 +75,13 @@ export class SeamService extends Service {
     };
   }
 
+  registerKeybinding(contribution: KeybindingContribution): () => void {
+    this.keybindings.value.push(contribution);
+    return () => {
+      this.keybindings.value = this.keybindings.value.filter((entry) => entry.binding !== contribution.binding);
+    };
+  }
+
   registerCapability(capability: string): () => void {
     this.capabilities.value.push(capability);
     return () => {
@@ -80,6 +95,7 @@ export class SeamService extends Service {
     commands: CommandContribution[];
     contextMenu: ContextMenuContribution[];
     statusBar: StatusBarContribution[];
+    keybindings: KeybindingContribution[];
   }> {
     return {
       modes: this.modes.value,
@@ -87,6 +103,7 @@ export class SeamService extends Service {
       commands: this.commands.value,
       contextMenu: this.contextMenu.value,
       statusBar: this.statusBar.value,
+      keybindings: this.keybindings.value,
     };
   }
 }

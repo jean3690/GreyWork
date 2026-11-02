@@ -64,6 +64,13 @@ export interface PluginCommandDecl {
   mode?: string;
 }
 
+/** 键盘快捷键（v2）：全局按键，命中后打开本包页面。 */
+export interface PluginKeybindingDecl {
+  id: string;
+  key: string;
+  mode?: string;
+}
+
 /** 状态栏条目（v2）：底部细栏里的一条常驻文案。 */
 export interface PluginStatusBarDecl {
   id: string;
@@ -108,6 +115,8 @@ export interface MarketPluginManifest {
     settingsSchema?: DeclarativeField[];
     /** 状态栏条目（v2）：label 是初始文案，运行时可用 setStatus 更新。 */
     statusBar?: PluginStatusBarDecl[];
+    /** 键盘快捷键（v2）：宿主快捷键优先，冲突的插件键等于不存在。 */
+    keybindings?: PluginKeybindingDecl[];
   };
 }
 

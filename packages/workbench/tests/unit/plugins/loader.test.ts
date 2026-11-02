@@ -331,3 +331,31 @@ describe("状态栏贡献", () => {
     expect(() => loader.register(statusPlugin("ext.s2", [{ id: "sync", label: "y" }]))).toThrow(ContributionConflictError);
   });
 });
+
+describe("快捷键贡献", () => {
+  const keyPlugin = (id: string, binding: string): PluginManifest => ({
+    id,
+    name: id,
+    version: "0.1.0",
+    contributes: {
+      modes: [{ id: `${id}-page`, title: id, component: Dummy }],
+      keybindings: [{ id: "open", binding, modeId: `${id}-page`, pluginId: id }],
+    },
+  });
+
+  it("激活后进快照、停用后消失", async () => {
+    const loader = createCapabilityLoader();
+    loader.register(keyPlugin("ext.k", "mod+shift+p"));
+    await loader.activate("ext.k");
+    expect(loader.snapshot().keybindings).toEqual([{ id: "open", binding: "mod+shift+p", modeId: "ext.k-page", pluginId: "ext.k" }]);
+
+    await loader.deactivate("ext.k");
+    expect(loader.snapshot().keybindings).toEqual([]);
+  });
+
+  it("组合键跨插件重名被拒（后注册的永远不触发，注册期就拒掉）", () => {
+    const loader = createCapabilityLoader();
+    loader.register(keyPlugin("ext.k1", "mod+shift+p"));
+    expect(() => loader.register(keyPlugin("ext.k2", "mod+shift+p"))).toThrow(ContributionConflictError);
+  });
+});

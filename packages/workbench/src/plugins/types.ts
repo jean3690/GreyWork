@@ -83,6 +83,17 @@ export interface StatusBarContribution {
   pluginId: string;
 }
 
+/** 键盘快捷键：全局按键，命中后打开插件页。宿主快捷键优先。 */
+export interface KeybindingContribution {
+  /** 全局唯一 id。 */
+  id: string;
+  /** 归一化后的组合键（唯一，冲突检测的键）。 */
+  binding: string;
+  /** 目标插件页：/plugin/:modeId。 */
+  modeId: string;
+  pluginId: string;
+}
+
 export interface PluginManifest {
   /** 如 "core.views" */
   id: string;
@@ -102,6 +113,7 @@ export interface PluginManifest {
     commands?: CommandContribution[];
     contextMenu?: ContextMenuContribution[];
     statusBar?: StatusBarContribution[];
+    keybindings?: KeybindingContribution[];
   };
   /** 其他 PluginManifest.id；loader 据此拓扑排序 */
   dependsOn?: string[];
@@ -129,5 +141,6 @@ export interface CapabilitySeam {
     commands: CommandContribution[];
     contextMenu: ContextMenuContribution[];
     statusBar: StatusBarContribution[];
+    keybindings: KeybindingContribution[];
   }>;
 }
