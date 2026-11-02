@@ -21,13 +21,15 @@ public class AuthService {
 	private final AppUserMapper appUserMapper;
 	private final UserDeviceMapper userDeviceMapper;
 	private final TokenService tokenService;
+	private final RolePolicy rolePolicy;
 
 	public AuthService(EnrollmentCodeMapper enrollmentCodeMapper, AppUserMapper appUserMapper,
-			UserDeviceMapper userDeviceMapper, TokenService tokenService) {
+			UserDeviceMapper userDeviceMapper, TokenService tokenService, RolePolicy rolePolicy) {
 		this.enrollmentCodeMapper = enrollmentCodeMapper;
 		this.appUserMapper = appUserMapper;
 		this.userDeviceMapper = userDeviceMapper;
 		this.tokenService = tokenService;
+		this.rolePolicy = rolePolicy;
 	}
 
 	public record Enrolled(String token, AppUser user, UserDevice device) {
@@ -59,6 +61,7 @@ public class AuthService {
 			user.setEmail(normalizedEmail);
 			user.setDisplayName(displayName == null || displayName.isBlank() ? normalizedEmail : displayName);
 			user.setStatus("active");
+			user.setRole(rolePolicy.roleFor(normalizedEmail));
 			appUserMapper.insert(user);
 		}
 		else if (!normalizedEmail.equals(user.getEmail())) {
@@ -74,6 +77,7 @@ public class AuthService {
 	public Enrolled issueSession(Long userId, String deviceName, String platform) {
 		AppUser user = appUserMapper.selectById(userId);
 		requireActive(user);
+		syncRole(user);
 		UserDevice device = new UserDevice();
 		device.setUserId(userId);
 		device.setName(deviceName);
@@ -98,10 +102,27 @@ public class AuthService {
 		}
 	}
 
-	/** 带 token 的请求用：true 表示账号仍可用（过滤链据此决定要不要认这枚 token）。 */
-	public boolean isActive(Long userId) {
+	/**
+	 * 带 token 的请求用：可用则返回当前用户（过滤链据此决定认不认这枚 token、给什么角色），
+	 * 被禁用 / 已删除返回 null。
+	 */
+	public AppUser loadActive(Long userId) {
 		AppUser user = appUserMapper.selectById(userId);
-		return user != null && user.getDeletedAt() == null && "active".equalsIgnoreCase(user.getStatus());
+		if (user == null || user.getDeletedAt() != null
+				|| !"active".equalsIgnoreCase(user.getStatus())) {
+			return null;
+		}
+		return user;
+	}
+
+	/** 配置名单变了就以名单为准补齐角色（只提不降，理由见 AdminBootstrap）。 */
+	private void syncRole(AppUser user) {
+		String expected = rolePolicy.roleFor(user.getEmail());
+		if (!RolePolicy.ADMIN.equals(expected) || RolePolicy.ADMIN.equals(user.getRole())) {
+			return;
+		}
+		user.setRole(RolePolicy.ADMIN);
+		appUserMapper.updateById(user);
 	}
 
 	/**

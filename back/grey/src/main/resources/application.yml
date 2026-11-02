@@ -43,6 +43,9 @@ grey:
   auth:
     # 留空则首次启动随机生成并打到日志；设置后每次启动都与该值对齐（方便自托管）
     enroll-code: ${GREY_ENROLL_CODE:}
+    # 管理员邮箱名单（逗号分隔）：命中者在登录时获得 admin 角色，启动时也会对已有账号对齐一次
+    # （只提不降）。admin 才能访问 /api/admin/**（用户管理 / 入场码签发）。
+    admin-emails: ${GREY_ADMIN_EMAILS:}
     session-ttl: PT720H
     # 入场码连续失败上限与窗口：只对失败计数，成功一次即清零（正常用户多设备登录不受影响）。
     # 按来源地址分桶；反向代理后请让容器把真实地址写进 remoteAddr，不要依赖 X-Forwarded-For。

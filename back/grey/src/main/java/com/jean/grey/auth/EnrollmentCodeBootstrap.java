@@ -4,7 +4,6 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.jean.grey.auth.entity.EnrollmentCode;
 import com.jean.grey.auth.mapper.EnrollmentCodeMapper;
 import com.jean.grey.common.Hashes;
-import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,9 +19,6 @@ import org.springframework.stereotype.Component;
 public class EnrollmentCodeBootstrap implements ApplicationRunner {
 
 	private static final Logger log = LoggerFactory.getLogger(EnrollmentCodeBootstrap.class);
-	private static final String ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-	private static final SecureRandom RANDOM = new SecureRandom();
-
 	private final EnrollmentCodeMapper enrollmentCodeMapper;
 	private final String configuredCode;
 
@@ -44,7 +40,7 @@ public class EnrollmentCodeBootstrap implements ApplicationRunner {
 		if (active != null && active > 0) {
 			return;
 		}
-		String code = randomCode();
+		String code = EnrollmentCodes.random();
 		register(code);
 		log.warn("未设置 GREY_ENROLL_CODE，已生成一次性入场码：{}（24 小时内有效，仅显示这一次）", code);
 	}
@@ -67,14 +63,6 @@ public class EnrollmentCodeBootstrap implements ApplicationRunner {
 		code.setCodeHash(hash);
 		code.setExpiresAt(LocalDateTime.now().plusDays(1));
 		enrollmentCodeMapper.insert(code);
-	}
-
-	private static String randomCode() {
-		StringBuilder builder = new StringBuilder(10);
-		for (int i = 0; i < 10; i++) {
-			builder.append(ALPHABET.charAt(RANDOM.nextInt(ALPHABET.length())));
-		}
-		return builder.toString();
 	}
 
 }

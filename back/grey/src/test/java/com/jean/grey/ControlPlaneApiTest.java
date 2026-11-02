@@ -3,6 +3,7 @@ package com.jean.grey;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -36,7 +37,9 @@ import tools.jackson.databind.ObjectMapper;
 @Testcontainers
 @SpringBootTest(properties = {
 		"grey.llm.master-key=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
-		"grey.llm.rpm-limit=3"
+		"grey.llm.rpm-limit=3",
+		// 运维面测试的固定管理员（RolePolicy 在登录时按名单定角色）。
+		"grey.auth.admin-emails=Admin@Grey.local"
 })
 @AutoConfigureMockMvc
 class ControlPlaneApiTest {
@@ -1203,6 +1206,136 @@ class ControlPlaneApiTest {
 		finally {
 			redis.delete("grey:auth:enroll-fail:" + client);
 		}
+	}
+
+
+	// ---------- 运维面（/api/admin/**）：角色门禁 + 用户管理 + 入场码签发 ----------
+
+	private static final String ADMIN_EMAIL = "admin@grey.local";
+
+	private String adminToken() throws Exception {
+		return enroll(ADMIN_EMAIL, "server").get("token").asString();
+	}
+
+	private String bearerOf(JsonNode session) {
+		return "Bearer " + session.get("token").asString();
+	}
+
+	@Test
+	void adminEndpointsRequireAdminRole() throws Exception {
+		JsonNode member = enroll("member@grey.local", "desktop");
+		mockMvc.perform(get("/api/admin/users").header("Authorization", bearerOf(member)))
+				.andExpect(status().isForbidden());
+		mockMvc.perform(post("/api/admin/enroll-codes").header("Authorization", bearerOf(member)))
+				.andExpect(status().isForbidden());
+
+		JsonNode admin = enroll(ADMIN_EMAIL, "server");
+		// 名单命中的账号在登录时就拿到 admin 角色（大小写不敏感）。
+		assertThat(admin.get("user").get("role").asString()).isEqualTo("admin");
+		mockMvc.perform(get("/api/admin/users").header("Authorization", bearerOf(admin)))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$[?(@.email=='" + ADMIN_EMAIL + "')]").isNotEmpty());
+	}
+
+	@Test
+	void adminCanDisableUserButNotThemselves() throws Exception {
+		JsonNode victim = enroll("victim@grey.local", "desktop");
+		long victimId = victim.get("user").get("id").asLong();
+		JsonNode admin = enroll(ADMIN_EMAIL, "server");
+
+		mockMvc.perform(patch("/api/admin/users/" + victimId)
+						.header("Authorization", bearerOf(admin))
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{"status":"disabled"}
+								"""))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.status").value("disabled"));
+
+		// 禁用即连坐：手上没过期的 token 立刻失效。
+		mockMvc.perform(get("/api/auth/me").header("Authorization", bearerOf(victim)))
+				.andExpect(status().isUnauthorized());
+
+		long adminId = admin.get("user").get("id").asLong();
+		mockMvc.perform(patch("/api/admin/users/" + adminId)
+						.header("Authorization", bearerOf(admin))
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{"status":"disabled"}
+								"""))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.code").value("cannot_disable_self"));
+	}
+
+	@Test
+	void adminCanIssueAndRevokeEnrollmentCodes() throws Exception {
+		String adminBearer = "Bearer " + adminToken();
+
+		MvcResult issued = mockMvc.perform(post("/api/admin/enroll-codes")
+						.header("Authorization", adminBearer)
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{"expiresInHours":2}
+								"""))
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.item.status").value("active"))
+				.andReturn();
+		JsonNode payload = json(issued);
+		String code = payload.get("code").asString();
+		long codeId = payload.get("item").get("id").asLong();
+		// 列表只回哈希前缀（8 位），不回明文。
+		mockMvc.perform(get("/api/admin/enroll-codes").header("Authorization", adminBearer))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$[0].hashPrefix").isString())
+				.andExpect(jsonPath("$[0].code").doesNotExist());
+
+		// 签发的码能直接登录。
+		mockMvc.perform(post("/api/auth/enroll")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{"code":"%s","email":"issued@grey.local","deviceName":"d","platform":"server"}
+								""".formatted(code)))
+				.andExpect(status().isCreated());
+
+		// 已用过的码不能撤销（审计线索）；未用过的可以，撤销后即失效。
+		mockMvc.perform(delete("/api/admin/enroll-codes/" + codeId).header("Authorization", adminBearer))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.code").value("enroll_code_used"));
+
+		MvcResult spare = mockMvc.perform(post("/api/admin/enroll-codes").header("Authorization", adminBearer))
+				.andExpect(status().isCreated())
+				.andReturn();
+		JsonNode sparePayload = json(spare);
+		mockMvc.perform(delete("/api/admin/enroll-codes/" + sparePayload.get("item").get("id").asLong())
+						.header("Authorization", adminBearer))
+				.andExpect(status().isNoContent());
+		mockMvc.perform(post("/api/auth/enroll")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{"code":"%s","email":"revoked@grey.local","deviceName":"d","platform":"server"}
+								""".formatted(sparePayload.get("code").asString())))
+				.andExpect(status().isUnauthorized());
+	}
+
+	@Test
+	void adminCanKickSessionsWithoutDisablingTheAccount() throws Exception {
+		JsonNode victim = enroll("kick@grey.local", "desktop");
+		long victimId = victim.get("user").get("id").asLong();
+		String adminBearer = "Bearer " + adminToken();
+
+		mockMvc.perform(delete("/api/admin/users/" + victimId + "/sessions").header("Authorization", adminBearer))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.devices").value(1));
+
+		mockMvc.perform(get("/api/auth/me").header("Authorization", bearerOf(victim)))
+				.andExpect(status().isUnauthorized());
+		// 账号本身仍可用：重新入场没有任何障碍。
+		mockMvc.perform(post("/api/auth/enroll")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{"code":"%s","email":"kick@grey.local","deviceName":"second","platform":"server"}
+								""".formatted(newCode())))
+				.andExpect(status().isCreated());
 	}
 
 	private JsonNode enroll(String email, String platform) throws Exception {

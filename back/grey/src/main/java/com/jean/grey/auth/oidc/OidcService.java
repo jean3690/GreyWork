@@ -3,6 +3,7 @@ package com.jean.grey.auth.oidc;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.jean.grey.account.entity.AppUser;
 import com.jean.grey.account.mapper.AppUserMapper;
+import com.jean.grey.auth.RolePolicy;
 import com.jean.grey.auth.entity.UserIdentity;
 import com.jean.grey.auth.mapper.UserIdentityMapper;
 import com.jean.grey.common.ApiException;
@@ -52,10 +53,12 @@ public class OidcService {
 	private final ObjectMapper objectMapper;
 	private final HttpClient http;
 	private final String publicBaseUrl;
+	private final RolePolicy rolePolicy;
 
 	public OidcService(OidcProperties properties, StringRedisTemplate redis,
 			AppUserMapper appUserMapper, UserIdentityMapper identityMapper, ObjectMapper objectMapper,
-			@Value("${grey.web.public-base-url:http://localhost:8080}") String publicBaseUrl) {
+			@Value("${grey.web.public-base-url:http://localhost:8080}") String publicBaseUrl,
+			RolePolicy rolePolicy) {
 		this.properties = properties;
 		this.redis = redis;
 		this.appUserMapper = appUserMapper;
@@ -64,6 +67,7 @@ public class OidcService {
 		this.publicBaseUrl = publicBaseUrl.endsWith("/")
 				? publicBaseUrl.substring(0, publicBaseUrl.length() - 1)
 				: publicBaseUrl;
+		this.rolePolicy = rolePolicy;
 		this.http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
 	}
 
@@ -215,6 +219,7 @@ public class OidcService {
 					? displayName
 					: user.getEmail());
 			user.setStatus("active");
+			user.setRole(rolePolicy.roleFor(user.getEmail()));
 			appUserMapper.insert(user);
 		}
 

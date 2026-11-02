@@ -52,7 +52,7 @@ public class AuthController {
 			@NotBlank @Size(max = 32) String platform) {
 	}
 
-	public record UserView(Long id, String email, String displayName) {
+	public record UserView(Long id, String email, String displayName, String role) {
 	}
 
 	public record DeviceView(Long id, String name, String platform) {
@@ -105,7 +105,7 @@ public class AuthController {
 	}
 
 	private static UserView userView(AppUser user) {
-		return new UserView(user.getId(), user.getEmail(), user.getDisplayName());
+		return new UserView(user.getId(), user.getEmail(), user.getDisplayName(), user.getRole());
 	}
 
 	private static DeviceView deviceView(UserDevice device) {

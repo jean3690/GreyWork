@@ -4,6 +4,7 @@ import com.jean.grey.common.Hashes;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.util.Base64;
+import java.util.Collection;
 import java.util.Optional;
 import java.util.Set;
 import org.springframework.beans.factory.annotation.Value;
@@ -66,6 +67,11 @@ public class TokenService {
 			hashes.forEach(hash -> redis.delete(SESSION_PREFIX + hash));
 		}
 		redis.delete(key);
+	}
+
+	/** 一次踢掉多台设备（禁用账号 / 运维「退出所有设备」）。 */
+	public void revokeDevices(Collection<Long> deviceIds) {
+		deviceIds.forEach(this::revokeDevice);
 	}
 
 	/** 设备心跳节流：5 分钟内只落库一次。 */

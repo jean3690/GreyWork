@@ -22,6 +22,9 @@ public class AppUser {
 
 	private String status;
 
+	/** user / admin：admin 才能进 /api/admin/**（见 SecurityConfig）。 */
+	private String role;
+
 	@TableField(fill = FieldFill.INSERT)
 	private LocalDateTime createdAt;
 

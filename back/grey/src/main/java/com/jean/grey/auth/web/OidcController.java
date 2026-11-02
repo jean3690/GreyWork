@@ -69,7 +69,7 @@ public class OidcController {
 				payload.deviceName(), payload.platform());
 		return new AuthController.SessionView(enrolled.token(),
 				new AuthController.UserView(enrolled.user().getId(), enrolled.user().getEmail(),
-						enrolled.user().getDisplayName()),
+						enrolled.user().getDisplayName(), enrolled.user().getRole()),
 				new AuthController.DeviceView(enrolled.device().getId(),
 						enrolled.device().getName(), enrolled.device().getPlatform()));
 	}
