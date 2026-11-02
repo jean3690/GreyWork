@@ -30,6 +30,7 @@ function makeWindow(label: string, platform = "linux"): HostWindow {
     show: () => Promise.resolve(),
     scaleFactor: () => Promise.resolve(1),
     startDragging: () => Promise.resolve(),
+    setAlwaysOnTop: () => Promise.resolve(false),
     onResized: (handler) => h.onResized(handler),
     onFocusChanged: () => Promise.resolve(() => undefined),
   };

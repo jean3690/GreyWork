@@ -65,6 +65,8 @@ export const IPC = {
     notify: "shell:plugins:notify",
     openWindow: "shell:plugins:open-window",
     closeWindow: "shell:plugins:close-window",
+    /** 悬浮窗内切换自己那扇窗的置顶（按调用方 webContents 定位，多开也不会开错）。 */
+    setAlwaysOnTop: "shell:plugins:set-always-on-top",
   },
   /** 通用系统通知（不带插件归属前缀）；插件通知走 `plugins.notify`。 */
   notify: {

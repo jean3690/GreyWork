@@ -50,6 +50,8 @@ contextBridge.exposeInMainWorld("__GREYWORK_SHELL__", {
     confirmExit: () => ipcRenderer.invoke(IPC.closeGuard.confirmExit),
     onCloseRequested: (handler: () => void) => subscribe(IPC.closeGuard.closeRequested, () => handler()),
     onExitRequested: (handler: () => void) => subscribe(IPC.closeGuard.exitRequested, () => handler()),
+    // 仅插件悬浮窗用：切换自己那扇窗的置顶（主窗调用是无副作用的空操作）。
+    setAlwaysOnTop: (next: boolean) => ipcRenderer.invoke(IPC.plugins.setAlwaysOnTop, next),
   },
   clipboard: {
     writeText: (text: string) => ipcRenderer.invoke(IPC.clipboard.writeText, text),

@@ -16,7 +16,7 @@ import * as browserView from "./browser-view";
 import * as guard from "./close-guard";
 import { notifyPlugin, sendSystemNotification } from "./notify";
 import { openDirectory, openFiles } from "./picker";
-import { closePluginWindow, openPluginWindow } from "./plugin-window";
+import { closePluginWindow, openPluginWindow, setAlwaysOnTopForWebContents } from "./plugin-window";
 import { openExternal, openPath, revealPath } from "./opener";
 import { applyTrayLabels, hideToTray, isCloseToTray, isTrayAvailable, setCloseToTray, type TrayHost } from "./tray";
 
@@ -150,6 +150,12 @@ export function registerIpc(host: IpcHost): void {
   });
   on(IPC.plugins.closeWindow, (pluginId) => {
     if (typeof pluginId === "string") closePluginWindow(pluginId);
+  });
+  // 悬浮窗的「钉住」：不按 pluginId 查表，而是作用于发起调用的那扇窗（多开时同插件多窗，
+  // 用 id 会切错对象）。返回切换后的实际状态，渲染端据它更新按钮。
+  ipcMain.handle(IPC.plugins.setAlwaysOnTop, (event, next: unknown) => {
+    if (!isTrustedSender(event, host.rendererOrigin())) throw new Error("untrusted sender");
+    return setAlwaysOnTopForWebContents(event.sender, next === true);
   });
 
   /* ===== 通用系统通知（不带归属前缀；服务端的 `host://notify` 事件落到这里）===== */

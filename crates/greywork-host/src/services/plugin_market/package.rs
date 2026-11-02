@@ -10,6 +10,11 @@ use super::validate::{
 };
 use super::{MAX_PLUGIN_FETCH_BYTES_CEILING, MIN_PLUGIN_FETCH_BYTES};
 
+/// 悬浮窗标题长度上界（与设置页 / 任务栏的展示宽度相当）。
+const WINDOW_TITLE_MAX_CHARS: usize = 64;
+/// 悬浮窗不透明度下界：再低就只剩一团影子，用户会以为窗口丢了。
+const WINDOW_OPACITY_MIN: f32 = 0.2;
+
 /// schedule 间隔下界（分钟）：5 分钟，防高频空转。
 const SCHEDULE_MIN_MIN: u32 = 5;
 /// schedule 间隔上界（分钟）：24 小时。
@@ -522,6 +527,28 @@ pub(super) fn validate_package(package: &super::dto::PluginPackage) -> Result<()
         for size in [window.width, window.height] {
             if size == 0 || size > 512 {
                 return Err("plugin window size must be 1-512 pixels".to_string());
+            }
+        }
+        if let Some(title) = &window.title {
+            let trimmed = title.trim();
+            if trimmed.is_empty() {
+                return Err("plugin window title must not be empty".to_string());
+            }
+            if trimmed.chars().count() > WINDOW_TITLE_MAX_CHARS {
+                return Err(format!(
+                    "plugin window title exceeds {WINDOW_TITLE_MAX_CHARS} characters"
+                ));
+            }
+            if trimmed.chars().any(char::is_control) {
+                return Err("plugin window title must not contain control characters".to_string());
+            }
+        }
+        if let Some(opacity) = window.opacity {
+            // NaN 也走这条：contains 对 NaN 恒为 false。
+            if !(WINDOW_OPACITY_MIN..=1.0).contains(&opacity) {
+                return Err(format!(
+                    "plugin window opacity must be between {WINDOW_OPACITY_MIN} and 1.0"
+                ));
             }
         }
         // 脱窗是受控能力：声明窗口就必须同时声明 window.floating（用户授权门禁的输入）。

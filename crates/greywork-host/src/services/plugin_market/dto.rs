@@ -51,11 +51,26 @@ pub struct MarketPluginManifest {
 }
 
 /// 悬浮窗声明：宿主按此建透明置顶小窗；内容 = 该包的 render 指令流。
-#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+///
+/// v2 的四个可选字段都**不改变资格判定**（仍是 worker + render + window + window.floating），
+/// 只影响窗口本身的形态：标题、默认置顶、不透明度、是否允许多开。
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginWindowDecl {
     pub width: u32,
     pub height: u32,
+    /// 窗口标题（缺省用 manifest.name）；≤64 字符、无控制字符。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// 是否默认置顶（缺省 true：宠物类小窗几乎都要压在别的窗口上）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub always_on_top: Option<bool>,
+    /// 不透明度 0.2-1.0（缺省 1.0）：再低就只剩一团影子了。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opacity: Option<f32>,
+    /// 是否允许多开（缺省 false；开着时同一插件最多 4 个窗口）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub multiple: Option<bool>,
 }
 
 /// manifest `requires` 项：字符串 = 无参数；对象 = 带资源参数

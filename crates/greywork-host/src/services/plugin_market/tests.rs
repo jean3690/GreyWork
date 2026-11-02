@@ -148,6 +148,10 @@ fn window_declaration_requires_the_floating_capability() {
     package.manifest.window = Some(PluginWindowDecl {
         width: 160,
         height: 140,
+        title: None,
+        always_on_top: None,
+        opacity: None,
+        multiple: None,
     });
     assert!(validate_package(&package).is_err());
 
@@ -1453,4 +1457,51 @@ fn mcp_connect_servers_parse_from_json() {
         }
         CapabilityRequirement::Plain(other) => panic!("parsed as plain: {other}"),
     }
+}
+
+/// v2 悬浮窗形态字段：缺省一律通过（老包不受影响），越界才拒。
+#[test]
+fn window_v2_fields_are_optional_and_bounded() {
+    let window_package = |window: PluginWindowDecl| {
+        let mut package = demo_package();
+        package.manifest.kind = PluginKind::Worker;
+        package.manifest.runtime = Some(CodePluginRuntime {
+            runtime_type: "worker".into(),
+            entry: "https://raw.githubusercontent.com/acme/plugins/main/demo.js".into(),
+            sha256: "a".repeat(64),
+            render: Some(RenderLoop {
+                handler: "draw".into(),
+                fps: Some(12),
+                width: Some(160),
+                height: Some(140),
+                pointer: false,
+            }),
+        });
+        package.manifest.requires = vec![CapabilityRequirement::Plain("window.floating".into())];
+        package.manifest.window = Some(window);
+        validate_package(&package)
+    };
+    let decl = |title: Option<&str>, opacity: Option<f32>| PluginWindowDecl {
+        width: 160,
+        height: 140,
+        title: title.map(str::to_string),
+        always_on_top: Some(false),
+        opacity,
+        multiple: Some(true),
+    };
+
+    window_package(decl(None, None)).expect("老包（只有宽高）继续通过");
+    window_package(decl(Some("  桌面宠物  "), Some(0.6))).expect("合法标题与不透明度");
+    window_package(decl(Some("本地文件"), Some(0.2))).expect("中文标题、下界不透明度");
+
+    // 空标题 / 超长 / 控制字符：拒绝。
+    assert!(window_package(decl(Some("   "), None)).is_err());
+    let long = "标".repeat(65);
+    assert!(window_package(decl(Some(&long), None)).is_err());
+    assert!(window_package(decl(Some("a\u{7}b"), None)).is_err());
+
+    // 不透明度：低于 0.2 / 高于 1.0 / NaN 都拒绝。
+    assert!(window_package(decl(None, Some(0.19))).is_err());
+    assert!(window_package(decl(None, Some(1.1))).is_err());
+    assert!(window_package(decl(None, Some(f32::NAN))).is_err());
 }

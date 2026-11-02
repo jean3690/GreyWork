@@ -40,6 +40,11 @@ export interface HostWindow {
   scaleFactor(): Promise<number>;
   /** 开始拖动窗口。Electron 下走 CSS `-webkit-app-region`，此调用为空操作。 */
   startDragging(): Promise<void>;
+  /**
+   * 切换本窗口的置顶（插件悬浮窗的「钉住」按钮）。
+   * 返回切换后的实际状态；主窗等不支持置顶的窗口返回 false。
+   */
+  setAlwaysOnTop(next: boolean): Promise<boolean>;
   /** 尺寸变化（最大化状态回灌）。 */
   onResized(handler: () => void): Promise<UnlistenFn>;
   /** 焦点变化（内嵌浏览器覆盖层据此让位）。 */
@@ -80,6 +85,8 @@ interface ElectronShellBridge {
     confirmExit(): Promise<void>;
     onCloseRequested(handler: () => void): UnlistenFn;
     onExitRequested(handler: () => void): UnlistenFn;
+    /** 仅插件悬浮窗有意义：切换自己那扇窗的置顶，返回切换后的实际状态。 */
+    setAlwaysOnTop(next: boolean): Promise<boolean>;
   };
   clipboard: {
     writeText(text: string): Promise<void>;
@@ -170,6 +177,7 @@ export function hostWindow(): HostWindow | null {
       show: () => Promise.resolve(), // 主进程 ready-to-show 已显示，渲染端无需再管
       scaleFactor: () => Promise.resolve(window.devicePixelRatio || 1),
       startDragging: () => Promise.resolve(), // CSS app-region 托管，见 main.ts 注入的样式
+      setAlwaysOnTop: (next: boolean) => w.setAlwaysOnTop(next),
       onResized: (handler) => Promise.resolve(w.onResized(handler)),
       onFocusChanged: (handler) => Promise.resolve(w.onFocusChanged(handler)),
     };
