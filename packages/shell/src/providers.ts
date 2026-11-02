@@ -12,6 +12,14 @@ export interface AgentProviderConfig {
   detect?: string[];
   /** 未安装时的安装提示（设置页展示）。 */
   installHint?: string;
+  /**
+   * 该后端自己的登录命令（在**内置终端**里跑，需要 TTY 的交互式登录）。
+   *
+   * 为什么不由我们代管凭据：这些 agent 各自有登录流程与凭据落点（如 opencode 写
+   * `~/.local/share/opencode/auth.json`），替它们存一份 API key 只会多出一条会跟上游
+   * 脱节的路径。宿主只负责把命令送进一个真 PTY，登录本身仍由 agent 自己做。
+   */
+  login?: { command: string; hint?: string };
   /** 展示图标（lib/icons 图标名）；缺省由 agentProviderIcon 兜底。 */
   icon?: string;
   /**
@@ -75,7 +83,8 @@ export const DEFAULT_AGENT_PROVIDERS: AgentProviderConfig[] = [
     command: "opencode acp",
     enabled: true,
     detect: ["opencode"],
-    installHint: "opencode.ai 安装后加入 PATH",
+    installHint: "随安装包内置；回落到 PATH 时需 opencode.ai 安装",
+    login: { command: "opencode auth login", hint: "在终端里选择供应商完成登录" },
     // opencode 默认对 edit/shell/webfetch 一律「放行」且从不发 session/request_permission，
     // 于是宿主的只读/工作区档位根本没有裁决入口（agent 不问，宿主就没机会拦）。
     // 这里把它拉回「询问」，让档位与权限卡片真正生效：全权档宿主会瞬时自动放行，

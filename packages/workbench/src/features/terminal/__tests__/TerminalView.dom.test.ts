@@ -172,6 +172,16 @@ describe("TerminalView", () => {
     expect(wrapper.emitted("opened")?.[0]).toEqual(["s1"]);
   });
 
+  it("带 pendingCommand 打开时，会话就绪后自动敲进那行命令并上报 consumed", async () => {
+    // 设置页「登录」入口依赖这条：命令必须进真 PTY（交互式登录要 TTY）。
+    const wrapper = mountView({ ...TAB, pendingCommand: "opencode auth login" });
+    await flushPromises();
+
+    expect(mocks.write).toHaveBeenCalledWith("s1", "opencode auth login\r");
+    // 上报由 store 清掉 pendingCommand：面板卸载重挂时不该再敲一遍。
+    expect(wrapper.emitted("commandConsumed")?.[0]).toEqual(["s1"]);
+  });
+
   it("把本会话的输出 base64 解码后写进 xterm，并按 sessionId 过滤", async () => {
     mountView();
     await flushPromises();

@@ -217,3 +217,18 @@ describe("推理等级枚举", () => {
     }
   });
 });
+
+describe("预设的登录入口", () => {
+  it("内置的 opencode 声明自己的登录命令（凭据由 agent 自己管，宿主不代存）", () => {
+    const opencode = DEFAULT_AGENT_PROVIDERS.find((provider) => provider.id === "opencode");
+    expect(opencode?.login?.command).toBe("opencode auth login");
+  });
+
+  it("登录命令必须能原样敲进 PTY：单行、不含 shell 元字符", () => {
+    for (const provider of DEFAULT_AGENT_PROVIDERS) {
+      const command = provider.login?.command;
+      if (!command) continue;
+      expect(command).not.toMatch(/[;&|<>$`()\n\r]/);
+    }
+  });
+});

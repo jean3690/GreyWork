@@ -21,6 +21,9 @@ import { useAgentStore } from "@/stores/agent";
 
 const props = defineProps<{ section: string }>();
 
+/** 面板要求关掉自己（如「登录」要把交互留给身后的终端面板）。 */
+const emit = defineEmits<{ close: [] }>();
+
 const { t } = useI18n();
 const agent = useAgentStore();
 
@@ -57,7 +60,7 @@ onMounted(() => {
       <p class="mt-1 text-[12px] text-dim2">{{ meta.desc }}</p>
     </header>
 
-    <AgentSettingsPane v-if="section === 'agent'" />
+    <AgentSettingsPane v-if="section === 'agent'" @close="emit('close')" />
     <AssistantSettingsPane v-else-if="section === 'assistant'" />
     <AppearanceSettingsPane v-else-if="section === 'appearance'" />
     <ModeSettingsPane v-else-if="section === 'mode'" />

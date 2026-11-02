@@ -28,6 +28,8 @@ export interface AgentProgramProbe {
   program: string;
   installed: boolean;
   path: string | null;
+  /** 命中的可执行文件来自随包分发的运行时（设置页显示「内置」）。 */
+  bundled?: boolean;
 }
 
 export const agentsBackend = {

@@ -51,6 +51,13 @@ export interface TerminalTab {
    * 面板因视口变化被卸载重挂时同样靠它避免重复开会话。
    */
   attached?: boolean;
+  /**
+   * 会话起来后要**自动敲进去**的一行命令（如 `opencode auth login`）。
+   *
+   * 只在打开新会话时生效、写入后即清空：它是「从别处拉起的带命令终端」，不是会话状态。
+   * 走真 PTY 而不是 `child_process` —— 交互式登录要 TTY（选供应商、贴 key）。
+   */
+  pendingCommand?: string;
 }
 
 /** 落盘的标签页字段：运行状态 / 错误不持久化，恢复时以宿主清单为准。 */
@@ -316,8 +323,12 @@ export const useTerminalStore = defineStore("terminal", () => {
     return shells.value.find((shell) => shell.id === shellId)?.label ?? shellId;
   }
 
-  /** 新建一个标签页（不在此开会话：由 TerminalView 订阅事件后再 `terminal_open`）。 */
-  async function addTab(shellId?: string): Promise<string | null> {
+  /**
+   * 新建一个标签页（不在此开会话：由 TerminalView 订阅事件后再 `terminal_open`）。
+   *
+   * `pendingCommand` 会由视图在会话就绪后自动敲进去（见 `TerminalTab.pendingCommand`）。
+   */
+  async function addTab(shellId?: string, pendingCommand?: string): Promise<string | null> {
     if (creating) return null;
     creating = true;
     try {
@@ -335,6 +346,7 @@ export const useTerminalStore = defineStore("terminal", () => {
         shellId: chosen,
         shellLabel: label,
         status: "starting",
+        ...(pendingCommand ? { pendingCommand } : {}),
       };
       tabs.value = [...tabs.value, tab];
       activeId.value = sessionId;
@@ -344,6 +356,12 @@ export const useTerminalStore = defineStore("terminal", () => {
     } finally {
       creating = false;
     }
+  }
+
+  /** 预置命令已敲进 PTY：清掉它，避免面板卸载重挂时重复执行。 */
+  function clearPendingCommand(sessionId: string): void {
+    const tab = tabs.value.find((candidate) => candidate.sessionId === sessionId);
+    if (tab?.pendingCommand) delete tab.pendingCommand;
   }
 
   /** 确保至少有一个标签页（展开终端 / 恢复时调用）。 */
@@ -461,6 +479,7 @@ export const useTerminalStore = defineStore("terminal", () => {
     hydrate,
     setPendingShell,
     addTab,
+    clearPendingCommand,
     ensureTab,
     closeTab,
     restartTab,

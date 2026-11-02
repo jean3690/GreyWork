@@ -454,6 +454,7 @@ onBeforeUnmount(() => {
             :tab="tab"
             :search-open="terminal.activeId === tab.sessionId && searchOpen"
             @opened="terminal.markRunning"
+            @command-consumed="terminal.clearPendingCommand"
             @exited="terminal.markExited"
             @failed="terminal.markError"
             @close-search="searchOpen = false"

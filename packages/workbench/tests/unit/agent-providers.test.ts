@@ -213,6 +213,32 @@ describe("agent 后端目录（桌面态：SQLite 真源）", () => {
     expect(agentStore.providerInstallLabel(codex)).toBe("首次启动下载");
   });
 
+  it("内置运行时命中 → 状态显示「内置」，压过「已安装」", async () => {
+    // 随包分发的 opencode 会被宿主前置进 PATH，探测结果带 bundled：
+    // 设置页据此区分「我们带的」（无需联网、版本受控）与「用户自己装的」。
+    installInvoke(dbProviders);
+    invokeMock.mockImplementation((cmd: string) => {
+      switch (cmd) {
+        case "db_agents_load":
+          return Promise.resolve(dbProviders);
+        case "acp_detect_programs":
+          return Promise.resolve([
+            { program: "opencode", installed: true, path: "/opt/GreyWork/resources/runtime/bin/opencode", bundled: true },
+          ]);
+        default:
+          return Promise.resolve(undefined);
+      }
+    });
+    const agentStore = useAgentStore();
+    await agentStore.providersHydrated;
+    await settleSync();
+    await agentStore.refreshAgentDetection();
+
+    const opencode = agentStore.agentProviders.find((p) => p.id === "opencode")!;
+    expect(agentStore.providerInstalled(opencode)).toBe(true);
+    expect(agentStore.providerInstallLabel(opencode)).toBe("内置");
+  });
+
   it("npx 型后端未预装 → 提示首次启动下载（不是未安装）", async () => {
     installInvoke(null);
     invokeMock.mockImplementation((cmd: string) => {

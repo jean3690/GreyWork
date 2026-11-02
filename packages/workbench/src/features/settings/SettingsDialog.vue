@@ -91,7 +91,7 @@ function rowClass(active: boolean): string {
         </nav>
 
         <div class="min-h-0 flex-1 overflow-hidden">
-          <SettingsView :section="props.section" />
+          <SettingsView :section="props.section" @close="close" />
         </div>
       </div>
     </DialogContent>

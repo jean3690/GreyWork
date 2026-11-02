@@ -119,10 +119,10 @@ export function createProvidersSlice({ state, getRuntime }: ProvidersDeps): Prov
   /** 恢复上次选择：偏好 ACP agent → 预选但不连接（发送时才起 runtime）；Local → 默认。 */
   state.routeToAcp.value = Boolean(savedProvider?.enabled);
 
-  /** detect/installHint 属于前端预设、不落库；从 SQLite 读回时按 id 补回。 */
+  /** detect/installHint/login 属于前端预设、不落库；从 SQLite 读回时按 id 补回。 */
   function withPresetMeta(provider: AgentProviderConfig): AgentProviderConfig {
     const preset = state.registry.get(provider.id);
-    return preset ? { ...provider, detect: preset.detect, installHint: preset.installHint } : provider;
+    return preset ? { ...provider, detect: preset.detect, installHint: preset.installHint, login: preset.login } : provider;
   }
 
   /**
@@ -181,8 +181,15 @@ export function createProvidersSlice({ state, getRuntime }: ProvidersDeps): Prov
     return programs.some((program) => agentDetection.value[program]?.installed === true);
   }
 
-  /** 设置页状态文案：未装且命令走 npx → 首次启动按需下载，否则直说未安装。 */
+  /** 该后端是否由随包内置的运行时提供（比「用户自己装了」更强：无需联网、版本受控）。 */
+  function providerBundled(provider: AgentProviderConfig): boolean {
+    const programs = provider.detect ?? [];
+    return programs.some((program) => agentDetection.value[program]?.bundled === true);
+  }
+
+  /** 设置页状态文案：内置 > 已安装；未装且命令走 npx → 首次启动按需下载，否则直说未安装。 */
   function providerInstallLabel(provider: AgentProviderConfig): string {
+    if (providerBundled(provider)) return "内置";
     const installed = providerInstalled(provider);
     if (installed === null) return "";
     if (installed) return "已安装";

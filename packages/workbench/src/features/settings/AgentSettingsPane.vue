@@ -15,6 +15,7 @@ import { formatHeaderText, parseHeaderText } from "@/stores/agent/shared";
 import { useAgentStore } from "@/stores/agent";
 import { useCommandCapabilitiesStore } from "@/stores/command-capabilities";
 import { useSettingsStore } from "@/stores/settings";
+import { useTerminalStore } from "@/stores/terminal";
 import { runtimeMode } from "@greywork/host-ipc";
 import { i18n } from "@/i18n";
 
@@ -22,6 +23,22 @@ const t = i18n.global.t;
 
 const settings = useSettingsStore();
 const agent = useAgentStore();
+const terminal = useTerminalStore();
+
+/** 设置弹窗关掉自己：登录要落到身后的终端面板，弹窗留在上面会挡住交互式提示。 */
+const emit = defineEmits<{ close: [] }>();
+
+/**
+ * 走 agent 自己的登录流程（需要 TTY）：在内置终端里敲命令。
+ *
+ * 不由宿主代管凭据 —— 每个 agent 的登录方式和凭据落点都不一样，替它们存一份只会多出
+ * 一条会跟上游脱节的路径。
+ */
+function openProviderLogin(provider: AgentProviderConfig): void {
+  if (!provider.login) return;
+  void terminal.addTab(undefined, provider.login.command);
+  emit("close");
+}
 
 const capabilities = useCommandCapabilitiesStore();
 void capabilities.ensureCatalog();
@@ -573,6 +590,22 @@ async function removeAgentDraft(): Promise<void> {
               <span class="shrink-0 text-[11px]" :class="agent.providerInstalled(provider) === true ? 'text-accent' : 'text-dim2'">
                 {{ agent.providerInstallLabel(provider) }}
               </span>
+            </Hint>
+            <!-- 登录：只有「本机能跑起来」的后端才给入口（装都没装时先让他看到未安装）。
+                 命令送进内置终端，agent 自己的交互式登录（选供应商 / 贴 key）照常进行。 -->
+            <Hint
+              v-if="provider.login && agent.providerInstalled(provider) === true && terminal.available"
+              :text="provider.login.hint ?? null"
+              multiline
+            >
+              <button
+                type="button"
+                :data-testid="`agent-login-${provider.id}`"
+                class="shrink-0 cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-0.5 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground"
+                @click.stop="openProviderLogin(provider)"
+              >
+                登录
+              </button>
             </Hint>
             <button
               v-if="agent.isCustomAgentProvider(provider.id) && !agentCatalogReadOnly"

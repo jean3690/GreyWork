@@ -38,6 +38,8 @@ const t = i18n.global.t;
 const SPINNER_DELAY_MS = 350;
 const emit = defineEmits<{
   (event: "opened", sessionId: string): void;
+  /** 预置命令（`tab.pendingCommand`）已敲进 PTY：调用方据此清掉它。 */
+  (event: "commandConsumed", sessionId: string): void;
   (event: "exited", sessionId: string): void;
   (event: "failed", sessionId: string, message: string): void;
   (event: "closeSearch"): void;
@@ -295,6 +297,13 @@ async function start(): Promise<void> {
       live = true;
       emit("opened", sessionId);
       instance.focus();
+      // 带命令打开（设置页的「登录」入口）：会话已就绪，把整行写进 PTY。
+      // 写完上报 consumed —— 由 store 清掉 pendingCommand，面板卸载重挂时不该再敲一遍。
+      const pending = props.tab.pendingCommand;
+      if (pending) {
+        void terminalBackend.write(sessionId, pending + "\r");
+        emit("commandConsumed", sessionId);
+      }
     }
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));
