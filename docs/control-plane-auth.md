@@ -34,6 +34,16 @@ GREY_ADMIN_EMAILS="ops@example.com,boss@example.com"
 
 `/api/admin/**` 需要 `ROLE_ADMIN`，其余接口只要登录。角色每次请求从库里读，改库下一次请求即生效。
 
+## 运维台页面
+
+浏览器打开 `/admin`（如 `http://localhost:8080/admin`）就是运维台：同源单页，无构建、无外部依赖。
+
+- 登录：填入场码 + 管理员邮箱，走的就是 `/api/auth/enroll`；角色不是 admin 会直接拒绝进后台。
+  token 存 sessionStorage（关标签页即失效），点「退出」会调 `/api/auth/logout` 回收。
+- 用户页：搜索（邮箱 / 昵称）、启用 / 禁用、踢下线，操作结果就地提示。
+- 入场码页：选有效期签发（明文只显示这一次，可一键复制）、查看状态、撤销未使用的码。
+- 页面公开可取但**不含任何数据**：所有数据接口仍走 `/api/admin/**` 的 `ROLE_ADMIN` 门禁。
+
 ## 运维端点
 
 ### 用户

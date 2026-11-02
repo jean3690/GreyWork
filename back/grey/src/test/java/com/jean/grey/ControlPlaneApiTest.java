@@ -1209,6 +1209,19 @@ class ControlPlaneApiTest {
 	}
 
 
+
+	/** 运维台页面公开可取（不含数据），数据接口仍然要管理员。 */
+	@Test
+	void adminConsoleIsPublicButItsDataIsNot() throws Exception {
+		MvcResult page = mockMvc.perform(get("/admin")).andExpect(status().isOk()).andReturn();
+		// 页面本身可公开取到（数据面仍然要管理员，见下一条断言）。
+		assertThat(page.getResponse().getContentType()).startsWith("text/html");
+		assertThat(page.getResponse().getContentAsString()).contains("GreyWork 运维台");
+		mockMvc.perform(get("/admin/index.html")).andExpect(status().isOk());
+		mockMvc.perform(get("/api/admin/users"))
+				.andExpect(status().isUnauthorized());
+	}
+
 	// ---------- 运维面（/api/admin/**）：角色门禁 + 用户管理 + 入场码签发 ----------
 
 	private static final String ADMIN_EMAIL = "admin@grey.local";

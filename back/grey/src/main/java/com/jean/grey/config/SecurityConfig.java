@@ -35,6 +35,8 @@ public class SecurityConfig {
 						.requestMatchers(HttpMethod.GET, "/api/market/packages", "/api/market/packages/**",
 								"/api/market/registry.json", "/api/market/download/**").permitAll()
 						.requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
+						// 运维台页面（静态 HTML + 同源 fetch）公开可取：页面不含数据，数据面在 /api/admin/**。
+						.requestMatchers("/admin", "/admin/", "/admin/**").permitAll()
 						// 运维面：角色由 BearerTokenFilter 按库里的 role 列写成 ROLE_ADMIN。
 						.requestMatchers("/api/admin/**").hasRole("ADMIN")
 						.anyRequest().authenticated())
