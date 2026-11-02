@@ -1,6 +1,6 @@
 //! 键名 / 版本 / URL / sha256 / 页面 schema 的基础校验。
 
-use super::dto::{DeclarativeOperation, DeclarativePage};
+use super::dto::{DeclarativeField, DeclarativeOperation, DeclarativePage};
 use super::ALLOWED_GITHUB_HOSTS;
 
 pub fn validate_key(raw: &str, label: &str) -> Result<(), String> {
@@ -79,14 +79,15 @@ fn validate_value_kind(value: &serde_json::Value, kind: &str) -> bool {
     }
 }
 
-pub(super) fn validate_page(mode_id: &str, page: &DeclarativePage) -> Result<(), String> {
-    if page.fields.len() > 32 || page.outputs.len() > 32 || page.actions.len() > 32 {
-        return Err(format!(
-            "mode {mode_id} exceeds 32 fields, outputs, or actions"
-        ));
-    }
+/// 字段表校验：页面与插件设置共用同一套规则（key / label / kind 与默认值 / 数值边界 / 去重）。
+///
+/// 返回 key → kind 的映射；页面用它校验 outputs 的引用，设置项忽略返回值。
+pub(super) fn validate_fields(
+    context: &str,
+    fields: &[DeclarativeField],
+) -> Result<std::collections::HashMap<String, String>, String> {
     let mut field_kinds = std::collections::HashMap::new();
-    for field in &page.fields {
+    for field in fields {
         validate_key(&field.key, "field key")?;
         if field.label.trim().is_empty() || field.label.len() > 120 {
             return Err(format!(
@@ -120,15 +121,22 @@ pub(super) fn validate_page(mode_id: &str, page: &DeclarativePage) -> Result<(),
             return Err(format!("field {} has invalid step or maxLength", field.key));
         }
         if field_kinds
-            .insert(field.key.as_str(), field.kind.as_str())
+            .insert(field.key.clone(), field.kind.clone())
             .is_some()
         {
-            return Err(format!(
-                "duplicate field key in mode {mode_id}: {}",
-                field.key
-            ));
+            return Err(format!("duplicate field key in {context}: {}", field.key));
         }
     }
+    Ok(field_kinds)
+}
+
+pub(super) fn validate_page(mode_id: &str, page: &DeclarativePage) -> Result<(), String> {
+    if page.fields.len() > 32 || page.outputs.len() > 32 || page.actions.len() > 32 {
+        return Err(format!(
+            "mode {mode_id} exceeds 32 fields, outputs, or actions"
+        ));
+    }
+    let field_kinds = validate_fields(&format!("mode {mode_id}"), &page.fields)?;
     for output in &page.outputs {
         if output.label.trim().is_empty() || !field_kinds.contains_key(output.value_key.as_str()) {
             return Err(format!(
@@ -170,7 +178,7 @@ pub(super) fn validate_page(mode_id: &str, page: &DeclarativePage) -> Result<(),
                 }
             }
             DeclarativeOperation::Increment { key, amount } => {
-                if field_kinds.get(key.as_str()) != Some(&"number")
+                if field_kinds.get(key.as_str()).map(String::as_str) != Some("number")
                     || amount.is_some_and(|value| !value.is_finite())
                 {
                     return Err(format!(

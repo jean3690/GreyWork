@@ -1008,9 +1008,18 @@ export const enUS: MessageSchema = {
       localai: { title: "Local AI", desc: "Workspace semantic retrieval (RAG) and speech-to-text (STT)" },
       system: { title: "System", desc: "Environment info and sandbox" },
       mcp: { title: "MCP", desc: "External tool servers: declared to the agent, connected by it" },
+      plugins: {
+        title: "Plugin settings",
+        desc: "Forms declared by enabled plugins (same storage.kv namespace the plugin reads)",
+      },
       skills: { title: "Skills", desc: "Workspace skills: install / update / remove and the official market" },
       storage: { title: "Storage", desc: "Session persistence and remote sync" },
       team: { title: "Team", desc: "Members and collaboration spaces" },
+    },
+    plugins: {
+      empty: "No installed plugin declares settings yet. Plugins with settingsSchema show up here.",
+      saved: "Saved",
+      failed: "Save failed: {message}",
     },
     tray: {
       title: "System tray",

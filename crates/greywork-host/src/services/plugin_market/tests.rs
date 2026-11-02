@@ -67,6 +67,7 @@ fn demo_package() -> PluginPackage {
                 ui_regions: Vec::new(),
                 commands: Vec::new(),
                 context_menu: Vec::new(),
+                settings_schema: Vec::new(),
             },
         },
         code: None,
@@ -1597,4 +1598,51 @@ fn context_menu_contributions_validate_targets_and_labels() {
         .map(|index| entry(&format!("menu-{index}"), "x", &["preview"], None))
         .collect();
     assert!(with_menu(many).is_err());
+}
+
+/// 设置项：与页面字段同一套规则，只多一个条数上限。
+#[test]
+fn settings_schema_reuses_field_rules_and_is_bounded() {
+    let with_schema = |fields: Vec<DeclarativeField>| {
+        let mut package = demo_package();
+        package.manifest.contributes.settings_schema = fields;
+        validate_package(&package)
+    };
+    let field = |key: &str, kind: &str, default: serde_json::Value| DeclarativeField {
+        key: key.into(),
+        label: key.into(),
+        description: None,
+        kind: kind.into(),
+        default,
+        min: None,
+        max: None,
+        step: None,
+        max_length: None,
+    };
+
+    with_schema(vec![
+        field("api_base", "text", serde_json::json!("https://example.com")),
+        field("interval", "number", serde_json::json!(15)),
+        field("enabled", "toggle", serde_json::json!(true)),
+    ])
+    .expect("合法设置项");
+
+    // 默认值类型必须与 kind 一致；未知 kind 直接拒。
+    assert!(with_schema(vec![field("bad", "number", serde_json::json!("nope"))]).is_err());
+    assert!(with_schema(vec![field("bad", "color", serde_json::json!("red"))]).is_err());
+    // 非 number 带数值边界 / 非 text 带 maxLength。
+    let mut numeric_bounds = field("bad", "text", serde_json::json!("x"));
+    numeric_bounds.min = Some(1.0);
+    assert!(with_schema(vec![numeric_bounds]).is_err());
+    // 重复 key。
+    assert!(with_schema(vec![
+        field("dup", "text", serde_json::json!("a")),
+        field("dup", "text", serde_json::json!("b"))
+    ])
+    .is_err());
+    // 超过 16 条。
+    let many: Vec<DeclarativeField> = (0..17)
+        .map(|index| field(&format!("f-{index}"), "text", serde_json::json!("x")))
+        .collect();
+    assert!(with_schema(many).is_err());
 }

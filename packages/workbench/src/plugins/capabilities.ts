@@ -623,6 +623,37 @@ function writeKvArchive(archive: KvArchive): void {
 
 let kvArchive: KvArchive = readKvArchive();
 
+/**
+ * 设置页读写插件 KV 的宿主入口：与 storage.kv 共用**同一份命名空间与配额**。
+ *
+ * 为什么要共用：插件在代码里用 `greywork.call("storage.kv", { op: "get", key })` 读到的就是
+ * 这里写下的值 —— 设置页与插件之间只有一条数据路径，不会出现「设置写一份、插件读另一份」。
+ */
+export function readPluginKv(pluginId: string, key: string): unknown {
+  const namespace = kvArchive[pluginId];
+  return namespace && Object.prototype.hasOwnProperty.call(namespace, key) ? namespace[key] : undefined;
+}
+
+/** 写入一个 KV 值；校验（JSON 安全 / 单值 / 总量）与 storage.kv 的 set 完全同口径。 */
+export function writePluginKv(pluginId: string, key: string, value: unknown): void {
+  if (!isStorageKvValue(value)) {
+    throw new Error("storage.kv value must be JSON-safe (finite numbers, strings, booleans, arrays and plain objects only)");
+  }
+  const serialized = JSON.stringify(value) as string;
+  if (serialized.length > KV_MAX_VALUE_BYTES) {
+    throw new Error(`storage.kv value exceeds the ${KV_MAX_VALUE_BYTES} byte per-value limit`);
+  }
+  const namespace: KvNamespace = kvArchive[pluginId] ?? {};
+  const has = Object.prototype.hasOwnProperty.call(namespace, key);
+  const previousBytes = has ? (JSON.stringify(namespace[key])?.length ?? 0) : 0;
+  if (namespaceBytes(namespace) - previousBytes + serialized.length > KV_MAX_TOTAL_BYTES) {
+    throw new Error(`storage.kv namespace exceeds the ${KV_MAX_TOTAL_BYTES} byte per-plugin quota`);
+  }
+  namespace[key] = value;
+  kvArchive[pluginId] = namespace;
+  writeKvArchive(kvArchive);
+}
+
 /** 测试钩子：清空内存与持久化存储（单测 / e2e 共享）。 */
 export function resetStorageKvForTest(): void {
   kvArchive = {};
@@ -719,23 +750,13 @@ const storageKvCapability: CapabilityDefinition = {
         return { value: has(args.key!) ? namespace[args.key!] : null };
       }
       case "set": {
-        if (!isStorageKvValue(args.value)) {
-          audit("denied", "value is not JSON-safe (undefined/functions/NaN/circular references and Date/Map/Set are rejected)");
-          throw new Error("storage.kv value must be JSON-safe (finite numbers, strings, booleans, arrays and plain objects only)");
+        // 校验与配额统一走 writePluginKv（设置页写的是同一条路径）。
+        try {
+          writePluginKv(ctx.pluginId, args.key!, args.value);
+        } catch (error) {
+          audit("denied", error instanceof Error ? error.message : "invalid value");
+          throw error;
         }
-        const serialized = JSON.stringify(args.value) as string;
-        if (serialized.length > KV_MAX_VALUE_BYTES) {
-          audit("denied", `value exceeds ${KV_MAX_VALUE_BYTES} bytes`);
-          throw new Error(`storage.kv value exceeds the ${KV_MAX_VALUE_BYTES} byte per-value limit`);
-        }
-        const previousBytes = has(args.key!) ? (JSON.stringify(namespace[args.key!])?.length ?? 0) : 0;
-        if (namespaceBytes(namespace) - previousBytes + serialized.length > KV_MAX_TOTAL_BYTES) {
-          audit("denied", `namespace would exceed ${KV_MAX_TOTAL_BYTES} bytes`);
-          throw new Error(`storage.kv namespace exceeds the ${KV_MAX_TOTAL_BYTES} byte per-plugin quota`);
-        }
-        namespace[args.key!] = args.value;
-        kvArchive[ctx.pluginId] = namespace;
-        writeKvArchive(kvArchive);
         audit("ok", `set ${args.key}`);
         return { ok: true };
       }

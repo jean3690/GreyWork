@@ -11,6 +11,7 @@ import AgentSettingsPane from "@/features/settings/AgentSettingsPane.vue";
 import AppearanceSettingsPane from "@/features/settings/AppearanceSettingsPane.vue";
 import AssistantSettingsPane from "@/features/settings/AssistantSettingsPane.vue";
 import McpPane from "@/features/settings/McpPane.vue";
+import PluginSettingsPane from "@/features/settings/PluginSettingsPane.vue";
 import LocalAiSettingsPane from "@/features/settings/LocalAiSettingsPane.vue";
 import ModeSettingsPane from "@/features/settings/ModeSettingsPane.vue";
 import ServicesSettingsPane from "@/features/settings/ServicesSettingsPane.vue";
@@ -37,6 +38,7 @@ const SECTION_KEYS = [
   "system",
   "mcp",
   "skills",
+  "plugins",
   "storage",
   "team",
 ] as const;
@@ -64,6 +66,7 @@ onMounted(() => {
     <AssistantSettingsPane v-else-if="section === 'assistant'" />
     <AppearanceSettingsPane v-else-if="section === 'appearance'" />
     <ModeSettingsPane v-else-if="section === 'mode'" />
+    <PluginSettingsPane v-else-if="section === 'plugins'" />
     <ServicesSettingsPane v-else-if="section === 'services'" />
     <LocalAiSettingsPane v-else-if="section === 'localai'" />
     <SystemSettingsPane v-else-if="section === 'system'" />

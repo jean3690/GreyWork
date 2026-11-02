@@ -1,14 +1,17 @@
 //! manifest 与包的整体校验（能力、区域、窗口声明）。
 
 use super::dto::{
-    CapabilityRequirement, DeclarativeOperation, ManifestMcpServerRef, ManifestScheduleKind,
-    MarketPluginManifest, PluginKind,
+    CapabilityRequirement, DeclarativeField, DeclarativeOperation, ManifestMcpServerRef,
+    ManifestScheduleKind, MarketPluginManifest, PluginKind,
 };
 use super::validate::{
-    validate_dir_key, validate_github_url, validate_key, validate_page, validate_sha256,
-    validate_version,
+    validate_dir_key, validate_fields, validate_github_url, validate_key, validate_page,
+    validate_sha256, validate_version,
 };
 use super::{MAX_PLUGIN_FETCH_BYTES_CEILING, MIN_PLUGIN_FETCH_BYTES};
+
+/// 插件设置项条数上界：设置中心是一页表单，不该被单个插件刷满。
+const MAX_PLUGIN_SETTINGS_FIELDS: usize = 16;
 
 /// 右键菜单条目数上界。
 const MAX_PLUGIN_CONTEXT_MENUS: usize = 8;
@@ -402,6 +405,23 @@ fn validate_mcp_connect_servers(servers: &[ManifestMcpServerRef]) -> Result<(), 
     Ok(())
 }
 
+/// 设置项校验：字段规则与页面字段完全同源（`validate_fields`），只多一个条数上限。
+///
+/// 值落在插件自己的 `storage.kv` 命名空间里，因此 key 的形态、默认值类型、数值边界都沿用
+/// 页面字段的口径 —— 插件作者不需要学两套 schema。
+fn validate_settings_schema(fields: &[DeclarativeField]) -> Result<(), String> {
+    if fields.is_empty() {
+        return Ok(());
+    }
+    if fields.len() > MAX_PLUGIN_SETTINGS_FIELDS {
+        return Err(format!(
+            "settingsSchema must contain at most {MAX_PLUGIN_SETTINGS_FIELDS} fields"
+        ));
+    }
+    validate_fields("settings schema", fields)?;
+    Ok(())
+}
+
 /// 右键菜单声明校验（安装期第一道门；冲突检测在前端 loader）。
 ///
 /// 语义：
@@ -684,6 +704,7 @@ pub(super) fn validate_package(package: &super::dto::PluginPackage) -> Result<()
     }
     validate_commands(manifest, &mode_ids)?;
     validate_context_menu(manifest, &mode_ids)?;
+    validate_settings_schema(&manifest.contributes.settings_schema)?;
 
     if let Some(window) = &manifest.window {
         if manifest.kind != PluginKind::Worker

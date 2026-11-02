@@ -995,8 +995,14 @@ export const zhCN = {
       system: { title: "系统", desc: "环境信息与沙盒" },
       mcp: { title: "MCP", desc: "外部工具服务器：声明给 agent，由 agent 连接" },
       skills: { title: "技能", desc: "工作区技能：安装 / 更新 / 卸载与官方市场" },
+      plugins: { title: "插件配置", desc: "已启用插件声明的设置项（与插件自己的 storage.kv 同源）" },
       storage: { title: "存储", desc: "会话落盘与远端同步" },
       team: { title: "团队", desc: "成员与协作空间" },
+    },
+    plugins: {
+      empty: "还没有插件声明设置项。安装带 settingsSchema 的插件后会出现在这里。",
+      saved: "已保存",
+      failed: "保存失败：{message}",
     },
     tray: {
       title: "系统托盘",

@@ -97,6 +97,8 @@ export interface MarketPluginManifest {
     commands?: PluginCommandDecl[];
     /** 右键菜单条目（v2）：文件树 / 预览 / 对话三处。 */
     contextMenu?: PluginContextMenuDecl[];
+    /** 设置项（v2）：字段值与 storage.kv 共用命名空间（key 即字段 key）。 */
+    settingsSchema?: DeclarativeField[];
   };
 }
 

@@ -185,6 +185,13 @@ pub struct DeclarativeContributions {
     /// 右键菜单条目（v2）：在文件树 / 预览 / 对话三处追加「打开插件」。
     #[serde(default)]
     pub context_menu: Vec<MarketContextMenu>,
+    /// 设置项（v2）：插件把自己的配置表单放进设置中心。
+    ///
+    /// 值与 `storage.kv` 共用同一份命名空间（key 即字段 key），所以插件代码用
+    /// `greywork.call("storage.kv", { op: "get", key })` 就能读到用户在设置页改的值 ——
+    /// 不新增第二条存储路径，也不会出现「设置页写一份、插件读另一份」的漂移。
+    #[serde(default)]
+    pub settings_schema: Vec<DeclarativeField>,
 }
 
 /// 右键菜单条目：与命令一样**只做导航**（文案 + 目标页），不带可执行 handler。
