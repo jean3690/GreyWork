@@ -57,6 +57,13 @@ jobs:
           shared-key: rust
       - uses: ./.github/actions/setup-node
 
+      # 与 ci.yml 的 electron job 同一缓存键：版本没变时不再重复下载 ~150MB。
+      - name: Cache bundled runtimes
+        uses: actions/cache@v4
+        with:
+          path: node_modules/.cache/greywork-runtime
+          key: greywork-runtime-${{ matrix.os }}-${{ hashFiles('scripts/runtime-versions.json') }}
+
       - name: Prepare artifacts (server + renderer + shell)
         run: pnpm electron:prep
 
