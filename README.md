@@ -27,6 +27,10 @@ messaging channels so you can drive the machine from your phone.
   out-of-workspace and write-in-read-only operations, per-kind "always allow" memory scoped to a
   session, and a read-only **permission trace** left in the message stream explaining what was
   approved, by whom, and why.
+- **Works out of the box** — the desktop installer ships a small runtime (MinGit on Windows, plus
+  `opencode`, `rg`, `fd`, `jq`), prepended to the host PATH so agents start on a machine that was
+  never set up. Such backends are labelled _built-in_, and their own interactive login
+  (`opencode auth login`) runs in a real PTY from the settings row.
 
 **Workspace**
 

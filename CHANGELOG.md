@@ -8,6 +8,18 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **桌面安装包内置运行时**：随包装上 MinGit（Windows）、`opencode`、`rg`、`fd`、`jq`，
+  宿主把 `<runtime>/bin` 与 `<runtime>/git/cmd` 前置进 PATH（排在登录 shell 解析结果之前），
+  于是从没配过开发机的电脑也能直接起 agent，git / 检索类工具也不再靠用户自装。探测与
+  spawn 共用同一条 PATH（找得到就启动得了）；未取包的开发态与之前行为一致。版本与 sha256
+  记在 `scripts/runtime-versions.json`，`pnpm run runtime:fetch` 按目标平台拉取并校验。
+- **内置后端可一键登录**：设置页对内置 / 已装的后端给出「登录」按钮，关掉设置弹窗把
+  agent 自己的登录命令（如 `opencode auth login`）敲进内置终端的真 PTY —— 交互式登录要 TTY，
+  凭据仍由 agent 自己管（宿主不代存、不镜像模型供应商的 key）。状态文案同时多出「内置」
+  一档，与「已安装」区分开。
+
 ### 改进
 
 - **GIS 矢量预览补全**：geojson / shp 之外新增 **KML / KMZ / GPX / TopoJSON**（KMZ 用动态
