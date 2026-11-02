@@ -59,7 +59,7 @@ describe("PluginSettingsPane", () => {
 
     await wrapper.get('[data-testid="plugin-setting-demo.cfg-api_base"] input').setValue("https://grey.local");
     expect(readPluginKv("demo.cfg", "api_base")).toBe("https://grey.local");
-    expect(wrapper.get('[data-testid="plugin-settings-saved"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="plugin-settings-saved"]').exists()).toBe(true);
   });
 
   it("数字按声明的 min/max 夹紧，开关写布尔", async () => {
@@ -78,7 +78,7 @@ describe("PluginSettingsPane", () => {
     const disabled = mount(PluginSettingsPane, { global: { plugins: [i18n] } });
     await flushPromises();
     expect(disabled.find('[data-testid="plugin-settings-demo.cfg"]').exists()).toBe(false);
-    expect(disabled.get('[data-testid="plugin-settings-empty"]').exists()).toBe(true);
+    expect(disabled.find('[data-testid="plugin-settings-empty"]').exists()).toBe(true);
 
     enabled.isPluginEnabled.mockReturnValue(true);
     market.installedMarketPlugins.value = [
@@ -86,6 +86,6 @@ describe("PluginSettingsPane", () => {
     ];
     const plain = mount(PluginSettingsPane, { global: { plugins: [i18n] } });
     await flushPromises();
-    expect(plain.get('[data-testid="plugin-settings-empty"]').exists()).toBe(true);
+    expect(plain.find('[data-testid="plugin-settings-empty"]').exists()).toBe(true);
   });
 });
