@@ -6,7 +6,7 @@
 发版流程：新增条目补进对应版本标题下 → 打 `v*` 标签 → `.github/workflows/release.yml` 会自动从本文件
 抽取该版本条目作为 Release 说明。**不要手改 Release 正文**，改这里。
 
-## [Unreleased]
+## [0.10.0] - 2026-11-02
 
 ### 新增
 
