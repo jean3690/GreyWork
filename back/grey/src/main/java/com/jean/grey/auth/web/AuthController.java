@@ -11,6 +11,7 @@ import com.jean.grey.auth.mapper.UserDeviceMapper;
 import com.jean.grey.auth.TokenService;
 import com.jean.grey.common.ApiException;
 import jakarta.servlet.http.HttpServletRequest;
+import java.util.Map;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
@@ -18,7 +19,9 @@ import jakarta.validation.constraints.Size;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -92,6 +95,18 @@ public class AuthController {
 		if (token instanceof String value) {
 			tokenService.revoke(value);
 		}
+	}
+
+	/**
+	 * 退出其他设备（默认保留当前设备）。给用户的「我换了手机 / 丢了平板」一个自助入口，
+	 * 不用去找管理员踢下线；includeCurrent=true 就是全撤，当前设备随后会拿到 401。
+	 */
+	@DeleteMapping("/sessions")
+	public Map<String, Object> revokeSessions(@AuthenticationPrincipal AuthPrincipal principal,
+			@RequestParam(defaultValue = "false") boolean includeCurrent) {
+		int devices = authService.revokeSessions(principal.userId(),
+				includeCurrent ? null : principal.deviceId());
+		return Map.of("devices", devices, "currentRevoked", includeCurrent);
 	}
 
 	@GetMapping("/me")

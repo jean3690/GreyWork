@@ -47,7 +47,11 @@ public class BearerTokenFilter extends OncePerRequestFilter {
 					var authentication = new UsernamePasswordAuthenticationToken(principal, token, authorities);
 					SecurityContextHolder.getContext().setAuthentication(authentication);
 					request.setAttribute(ATTR_TOKEN, token);
-					authService.touch(principal.deviceId());
+					// 设备心跳命中（5 分钟一次）时顺带把会话 TTL 拉满：语义从「登录后 30 天」
+					// 变成「空闲 30 天」，一直有活动的设备不会被突然登出。
+					if (authService.touch(principal.deviceId())) {
+						tokenService.extend(token);
+					}
 				});
 		}
 		chain.doFilter(request, response);

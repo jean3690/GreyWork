@@ -11,6 +11,7 @@ import com.jean.grey.common.ApiException;
 import com.jean.grey.common.Emails;
 import com.jean.grey.common.Hashes;
 import java.time.LocalDateTime;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,14 +23,17 @@ public class AuthService {
 	private final UserDeviceMapper userDeviceMapper;
 	private final TokenService tokenService;
 	private final RolePolicy rolePolicy;
+	private final int maxDevices;
 
 	public AuthService(EnrollmentCodeMapper enrollmentCodeMapper, AppUserMapper appUserMapper,
-			UserDeviceMapper userDeviceMapper, TokenService tokenService, RolePolicy rolePolicy) {
+			UserDeviceMapper userDeviceMapper, TokenService tokenService, RolePolicy rolePolicy,
+			@Value("${grey.auth.max-devices:20}") int maxDevices) {
 		this.enrollmentCodeMapper = enrollmentCodeMapper;
 		this.appUserMapper = appUserMapper;
 		this.userDeviceMapper = userDeviceMapper;
 		this.tokenService = tokenService;
 		this.rolePolicy = rolePolicy;
+		this.maxDevices = Math.max(1, maxDevices);
 	}
 
 	public record Enrolled(String token, AppUser user, UserDevice device) {
@@ -83,6 +87,7 @@ public class AuthService {
 		device.setName(deviceName);
 		device.setPlatform(platform);
 		userDeviceMapper.insert(device);
+		pruneDevices(userId, device.getId());
 		return new Enrolled(tokenService.issue(userId, device.getId()), user, device);
 	}
 
@@ -136,13 +141,56 @@ public class AuthService {
 				.apply("LOWER(email) = {0}", normalizedEmail));
 	}
 
-	public void touch(Long deviceId) {
-		if (!tokenService.claimLastSeenSlot(deviceId)) {
+	/**
+	 * 设备数上限：超出时淘汰**最久没出现**的设备（按注册时间，新的在后），并吊销其会话。
+	 *
+	 * 为什么要有：每次入场码 / OIDC 登录都会插一行设备，没有上限时一台机器反复重装会攒出
+	 * 几十行垃圾，运维面的设备列表也就失去意义。淘汰最老的而保留刚登记的，符合「这台还在用」。
+	 */
+	private void pruneDevices(Long userId, Long keepDeviceId) {
+		var devices = userDeviceMapper.selectList(Wrappers.<UserDevice>lambdaQuery()
+				.eq(UserDevice::getUserId, userId)
+				.orderByDesc(UserDevice::getCreatedAt));
+		if (devices.size() <= maxDevices) {
 			return;
+		}
+		var stale = devices.subList(maxDevices, devices.size()).stream()
+				.map(UserDevice::getId)
+				.filter(id -> !id.equals(keepDeviceId))
+				.toList();
+		if (stale.isEmpty()) {
+			return;
+		}
+		stale.forEach(userDeviceMapper::deleteById);
+		tokenService.revokeDevices(stale);
+	}
+
+	/** 设备心跳：5 分钟节流；返回 true 表示这次真的写了库（调用方据此顺带续期会话）。 */
+	public boolean touch(Long deviceId) {
+		if (!tokenService.claimLastSeenSlot(deviceId)) {
+			return false;
 		}
 		userDeviceMapper.update(null, Wrappers.<UserDevice>lambdaUpdate()
 				.set(UserDevice::getLastSeenAt, LocalDateTime.now())
 				.eq(UserDevice::getId, deviceId));
+		return true;
+	}
+
+	/**
+	 * 退出设备：只撤会话、保留设备行（设备本身还在，下次登录复用同一台的身份）。
+	 *
+	 * @param keepDeviceId 保留哪台设备（通常是当前设备）；null 表示全撤
+	 * @return 被撤会话的设备数
+	 */
+	public int revokeSessions(Long userId, Long keepDeviceId) {
+		var devices = userDeviceMapper.selectList(Wrappers.<UserDevice>lambdaQuery()
+				.eq(UserDevice::getUserId, userId))
+				.stream()
+				.map(UserDevice::getId)
+				.filter(id -> !id.equals(keepDeviceId))
+				.toList();
+		tokenService.revokeDevices(devices);
+		return devices.size();
 	}
 
 }

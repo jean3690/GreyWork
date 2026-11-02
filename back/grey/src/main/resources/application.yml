@@ -51,6 +51,8 @@ grey:
     # 按来源地址分桶；反向代理后请让容器把真实地址写进 remoteAddr，不要依赖 X-Forwarded-For。
     enroll-max-failures: ${GREY_ENROLL_MAX_FAILURES:10}
     enroll-fail-window: PT10M
+    # 每用户设备数上限：超出时淘汰最久没出现的设备并吊销会话（防止反复重装攒垃圾行）
+    max-devices: ${GREY_MAX_DEVICES:20}
   oidc:
     # 登录成功后跳回客户端的前缀白名单，避免 ticket 被带去外站
     allowed-redirects: ${GREY_OIDC_REDIRECTS:http://127.0.0.1,http://localhost,greywork://}

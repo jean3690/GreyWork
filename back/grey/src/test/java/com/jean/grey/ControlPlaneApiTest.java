@@ -17,6 +17,7 @@ import com.jean.grey.common.Hashes;
 import java.net.URI;
 import java.time.LocalDateTime;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -39,7 +40,9 @@ import tools.jackson.databind.ObjectMapper;
 		"grey.llm.master-key=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
 		"grey.llm.rpm-limit=3",
 		// 运维面测试的固定管理员（RolePolicy 在登录时按名单定角色）。
-		"grey.auth.admin-emails=Admin@Grey.local"
+		"grey.auth.admin-emails=Admin@Grey.local",
+		// 设备上限调小，才能在测试里几轮登录就触发淘汰。
+		"grey.auth.max-devices=3"
 })
 @AutoConfigureMockMvc
 class ControlPlaneApiTest {
@@ -1349,6 +1352,53 @@ class ControlPlaneApiTest {
 								{"code":"%s","email":"kick@grey.local","deviceName":"second","platform":"server"}
 								""".formatted(newCode())))
 				.andExpect(status().isCreated());
+	}
+
+
+	/** 会话是「空闲过期」而不是「登录后固定 30 天」：有活动就把 TTL 拉回满值。 */
+	@Test
+void activeSessionSlidesItsTtl() throws Exception {
+		JsonNode session = enroll("slide@grey.local", "desktop");
+		String token = session.get("token").asString();
+		String key = "grey:sess:" + Hashes.sha256Hex(token);
+
+		// 先人为压到 60 秒，模拟「离过期不远」；再发一次请求，应该被拉回 session-ttl。
+		redis.expire(key, java.time.Duration.ofSeconds(60));
+		mockMvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + token))
+				.andExpect(status().isOk());
+		assertThat(redis.getExpire(key, TimeUnit.SECONDS)).isGreaterThan(120);
+	}
+
+	/** 超过设备上限时淘汰最老的设备，并吊销它的会话（否则旧 token 还能继续用）。 */
+	@Test
+void oldestDevicesArePrunedBeyondTheCap() throws Exception {
+		JsonNode oldest = enroll("cap@grey.local", "desktop");
+		enroll("cap@grey.local", "phone");
+		enroll("cap@grey.local", "tablet");
+		JsonNode newest = enroll("cap@grey.local", "server");
+
+		mockMvc.perform(get("/api/devices").header("Authorization", bearerOf(newest)))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.length()").value(3));
+		mockMvc.perform(get("/api/auth/me").header("Authorization", bearerOf(oldest)))
+				.andExpect(status().isUnauthorized());
+	}
+
+	/** 用户自助「退出其他设备」：当前设备保留，其它设备的 token 立即失效。 */
+	@Test
+void userCanRevokeOtherSessionsButStaySignedIn() throws Exception {
+		JsonNode current = enroll("self@grey.local", "desktop");
+		JsonNode other = enroll("self@grey.local", "phone");
+
+		mockMvc.perform(delete("/api/auth/sessions").header("Authorization", bearerOf(current)))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.devices").value(1))
+				.andExpect(jsonPath("$.currentRevoked").value(false));
+
+		mockMvc.perform(get("/api/auth/me").header("Authorization", bearerOf(other)))
+				.andExpect(status().isUnauthorized());
+		mockMvc.perform(get("/api/auth/me").header("Authorization", bearerOf(current)))
+				.andExpect(status().isOk());
 	}
 
 	private JsonNode enroll(String email, String platform) throws Exception {

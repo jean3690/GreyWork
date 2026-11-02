@@ -69,6 +69,27 @@ public class TokenService {
 		redis.delete(key);
 	}
 
+	/**
+	 * 滑动续期：把会话与设备集合的 TTL 重新拉满（由过滤链在「设备心跳节流」命中时调用，
+	 * 也就是最多每 5 分钟一次，不会每个请求都写 Redis）。
+	 *
+	 * 语义是**空闲超时**而不是「登录后固定 30 天」：一直有活动的设备不会突然被登出，
+	 * 而放着不用的会话仍会按 session-ttl 过期。要立刻失效仍走 logout / 踢下线 / 禁用。
+	 */
+	public void extend(String token) {
+		String hash = hash(token);
+		String key = SESSION_PREFIX + hash;
+		String value = redis.opsForValue().get(key);
+		if (value == null) {
+			return;
+		}
+		redis.expire(key, ttl);
+		String[] parts = value.split(":");
+		if (parts.length == 2) {
+			redis.expire(DEVICE_PREFIX + parts[1], ttl);
+		}
+	}
+
 	/** 一次踢掉多台设备（禁用账号 / 运维「退出所有设备」）。 */
 	public void revokeDevices(Collection<Long> deviceIds) {
 		deviceIds.forEach(this::revokeDevice);

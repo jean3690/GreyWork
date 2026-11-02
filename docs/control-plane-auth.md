@@ -16,9 +16,15 @@
 - 入场码连续失败会限流：默认 10 次 / 10 分钟（`GREY_ENROLL_MAX_FAILURES`），只计失败、成功清零。
 - 账号 `status` 非 `active`（或被逻辑删除）时：不能登录（403 `user_disabled`），存量 token 立即失效。
 
-登录态是一枚不透明 token（Redis 里只存 sha256，默认 30 天 `grey.auth.session-ttl`）：
-`Authorization: Bearer <token>`。`POST /api/auth/logout` 撤当前 token，`GET /api/auth/me` 回当前
-用户与设备（含 `role`）。
+登录态是一枚不透明 token（Redis 里只存 sha256），`Authorization: Bearer <token>`。
+
+- **TTL 是空闲超时**（默认 30 天 `grey.auth.session-ttl`）：设备有活动时随心跳（5 分钟节流）
+  把 TTL 拉回满值，一直用的设备不会突然被登出；放着不用的会话照常过期。
+- 撤销入口：`POST /api/auth/logout`（当前）、`DELETE /api/auth/sessions`（其他设备，
+  `?includeCurrent=true` 全撤）、`DELETE /api/devices/{id}`（指定设备）、管理员禁用 / 踢下线。
+- **设备数上限**（默认 20，`GREY_MAX_DEVICES`）：超出时淘汰最久没出现的设备并吊销其会话，
+  避免反复重装攒出一堆设备行。
+- `GET /api/auth/me` 回当前用户与设备（含 `role`）。
 
 ## 角色
 
@@ -64,6 +70,8 @@ GREY_ADMIN_EMAILS="ops@example.com,boss@example.com"
 
 ## 已知边界
 
-- 没有 token 续期 / 轮换：到期重新登录；丢了设备用「踢下线」。
+- 没有 token 轮换：token 是固定串，靠滑动 TTL + 撤销入口控制生命周期；真要「换 token」得
+  先有能持久化新 token 的客户端。
+- 没有「记住我」与多因素：单用户自托管，入场码本身就是第二因素。
 - 没有邮箱验证：入场码本身就是准入门槛（`enroll` 会按邮箱建号）。
 - 没有细粒度权限点：两档角色 + URL 前缀门禁；出现第三方协作用户再谈。
