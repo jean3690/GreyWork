@@ -393,6 +393,29 @@ titlebar search panel). Entries are grouped as "Plugin commands" and land on the
 - Entries disappear immediately when the plugin is disabled or uninstalled (the palette reads the
   same seam snapshot as the sidebar), so there is no separate cleanup path.
 
+### Context menu entries
+
+`contributes.contextMenu` adds "open with plugin" items to the host's own right-click menus. Like
+palette commands they only navigate to the package's page; they never run plugin code.
+
+```jsonc
+"contributes": {
+  "modes": [/* … */],
+  "contextMenu": [
+    { "id": "open-in-pet", "label": "在宠物里打开", "targets": ["fileTree", "preview"], "mode": "demo-pet" }
+  ]
+}
+```
+
+- `targets` picks where the item shows up: `fileTree`, `preview`, `conversation` (1-3 entries, no
+  duplicates). Unknown areas are rejected at install time so a package never claims a surface the
+  host does not have.
+- 1-8 entries per package; `id` is global (a second package claiming it is rejected at registration
+  time, same as palette commands), `label` is 1-40 chars without control characters.
+- `mode` must name one of the package's modes (defaults to the first).
+- Items appear under a "插件" group after the host's own entries — no host item is ever hidden, and
+  when a package contributes nothing to a surface the menu is byte-for-byte the old one.
+
 ### Floating windows
 
 A worker plugin that declares `window.floating` **and** a `window` block can be popped out of the

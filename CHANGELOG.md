@@ -37,6 +37,10 @@
   注册期即拒），`mode` 必须指向本包声明过的页面。刻意只做导航：面板可从任何页面唤起，那时目标页
   worker 还没装载，在面板里直接跑插件代码等于多一个常驻执行面。停用/卸载随 seam 快照立即消失。
 
+- **插件右键菜单条目**：`contributes.contextMenu` 声明 `{ id, label, targets, mode? }`，targets 限
+  `fileTree` / `preview` / `conversation` 三处（1-3 条，安装期白名单），条目以「插件」分组追加在宿主
+  条目之后，只做导航（打开插件页），没有贡献时菜单逐字不变。id 跨插件唯一，停用/卸载随 seam 清理。
+
 ### 改进
 
 - **GIS 矢量预览补全**：geojson / shp 之外新增 **KML / KMZ / GPX / TopoJSON**（KMZ 用动态
