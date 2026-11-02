@@ -46,6 +46,14 @@ export interface CodePluginRuntime {
 export interface PluginWindowDecl {
   width: number;
   height: number;
+  /** 窗口标题（缺省用 manifest.name）；宿主侧还会再夹一次长度与控制字符。 */
+  title?: string;
+  /** 初始是否置顶（缺省 true）；窗口内可再切换。 */
+  alwaysOnTop?: boolean;
+  /** 不透明度 0.2-1（缺省 1）。 */
+  opacity?: number;
+  /** 是否允许多开（缺省 false，最多 4 个实例）。 */
+  multiple?: boolean;
 }
 
 export interface MarketPluginManifest {

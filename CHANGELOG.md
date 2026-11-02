@@ -26,6 +26,12 @@
   自己连）；arguments ≤ 16 KiB、30 次/分钟、30s 超时（封顶 60s），返回只给正文；宿主
   `plugin_mcp_call` 与前端 broker 各自复核一次工具白名单。
 
+- **插件悬浮窗 v2**：`window` 声明增 `title` / `alwaysOnTop` / `opacity` / `multiple` 四个可选字段。
+  标题缺省回落 manifest.name，不透明度夹在 0.2-1，置顶可在窗口头部的「钉住」按钮运行时切换；
+  几何按窗口 label 存进 `plugin-window-bounds.json`，重开时拉回可见区（拔掉外接屏不会开到屏幕外）；
+  `multiple: true` 时同一插件可开最多 4 个实例（标签 `plugin-window-<id>::<n>`），停用/卸载一次关全。
+  窗口句柄仍不下放给插件，资格判定与 v1 一致。
+
 ### 改进
 
 - **GIS 矢量预览补全**：geojson / shp 之外新增 **KML / KMZ / GPX / TopoJSON**（KMZ 用动态

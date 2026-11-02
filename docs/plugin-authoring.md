@@ -41,7 +41,9 @@ A package file is a `PluginPackage`:
   },
 
   "requires": ["window.floating"], // capability declarations (plain string, or object with params — see Capabilities)
-  "window": { "width": 200, "height": 200 }, // optional; needs requires: window.floating + worker+render
+  // optional; needs requires: window.floating + worker+render. v2 fields (title / alwaysOnTop /
+  // opacity / multiple) are optional and only change the window's shape.
+  "window": { "width": 200, "height": 200, "title": "桌面宠物", "alwaysOnTop": true, "opacity": 0.9, "multiple": false },
 
   "contributes": {
     "modes": [/* 1-8 full-page modes */],
@@ -52,7 +54,8 @@ A package file is a `PluginPackage`:
 
 Validation lives in `crates/greywork-host/src/services/plugin_market/package.rs` (`validate_package`); a package that
 fails it is rejected before it touches disk. Key bounds: `entry` must be an allowed GitHub HTTPS host,
-`sha256` lowercase hex, render `fps` 1-60, canvas 1-512 px, `uiRegions` titles 1-80 chars, region
+`sha256` lowercase hex, render `fps` 1-60, canvas 1-512 px, window size 1-512 px, window title
+≤64 chars (no control characters), window opacity 0.2-1, `uiRegions` titles 1-80 chars, region
 action labels ≤20 chars, mode titles ≤120, headings ≤160, eyebrow ≤120, body ≤16 KiB.
 
 ### Modes
@@ -118,7 +121,7 @@ user, and (3) registered in the host catalog (`packages/workbench/src/plugins/ca
 | `clipboard`         | medium | `"clipboard"` (write) / `{ "capability": "clipboard", "ops": ["read","write"] }`                                                    | Read/write the system clipboard; **read is denied by default** and must be declared via `ops`; ≤64 KiB per call, 20 calls/min, reads audited by length only                                                               |
 | `notify`            | low    | `"notify"`                                                                                                                          | System notification `{ title, body }`; title gets a `[plugin-id] ` attribution prefix, 10 calls/min, desktop host only                                                                                                    |
 | `schedule`          | low    | `{ "capability": "schedule", "schedule": { "kind": "interval", "min": 5 } }`                                                        | Host-driven background wakeups: fires `registerSchedule` while a mount surface is alive, 5-1440 min interval, catch-up once on reactivation                                                                               |
-| `window.floating`   | medium | `"window.floating"`                                                                                                                 | Host-managed transparent always-on-top window rendering the render loop                                                                                                                                                   |
+| `window.floating`   | medium | `"window.floating"`                                                                                                                 | Host-managed transparent window rendering the render loop; title / always-on-top / opacity / instances come from the `window` block (see Floating windows)                                                                |
 | `plugin-admin`      | high   | `"plugin-admin"`                                                                                                                    | Host trust mark for built-ins; not callable from plugin code                                                                                                                                                              |
 
 `requires` is also the activation gate: enabling a plugin whose grants are missing fails with a
@@ -363,6 +366,35 @@ greywork.registerSchedule(async (state) => ({ ticks: (state.ticks ?? 0) + 1, at:
 - Works in the browser preview too — unlike `notify`/`fs.scoped`, the scheduler lives in the
   workbench, so it needs no desktop/server host. The `effectiveRegionSchedule` gate means an
   unauthorized or undeclared plugin never gets a clock.
+
+### Floating windows
+
+A worker plugin that declares `window.floating` **and** a `window` block can be popped out of the
+workbench into an OS-level window (the pet in the demo packages). The host creates and owns that
+window; the plugin still has no handle to it — it only supplies the render loop.
+
+```jsonc
+"requires": ["window.floating"],
+"window": {
+  "width": 200,
+  "height": 200,
+  "title": "桌面宠物",   // optional, ≤64 chars; falls back to manifest.name
+  "alwaysOnTop": true,  // optional, default true
+  "opacity": 0.9,       // optional, 0.2-1, default 1
+  "multiple": false     // optional, default false; up to 4 instances
+}
+```
+
+- **Position is remembered per window**: the host stores the last bounds in
+  `plugin-window-bounds.json` and pulls them back onto a visible display on reopen (unplugging a
+  monitor cannot strand the window off-screen). Size still comes from the declaration.
+- **Pin** is a button in the window's own header: it toggles always-on-top at runtime through the
+  host (the toggle targets _that_ window, so multiple instances never affect each other).
+- **Multiple instances**: with `multiple: true` each "pop out" opens the next free instance
+  (`plugin-window-<id>::2`, …) up to **4**; once full, the last window is focused instead. Disabling
+  or uninstalling the plugin closes **all** of its windows.
+- The window content is the same sandboxed worker + render-command pipeline as the in-app region —
+  no DOM, no extra privileges. `opacity` only affects the transparent shell, not the canvas bounds.
 
 ### Render commands
 

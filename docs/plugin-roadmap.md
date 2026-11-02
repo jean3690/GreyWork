@@ -74,7 +74,7 @@
 | `mcp.connect`       | 插件声明要连某个 MCP server，复用现有 MCP 市场与客户端     | ✅ **已实现（按名引用，不改初稿的「自带配置」）**：manifest 只写 `{ capability: "mcp.connect", servers: [{ name, tools }] }` —— `name` 必须是用户已在设置里配置的服务器，`tools` 必填 1-16 条（空清单 = 不授权，不允许「整台服务器全放」）。连接参数与凭据由宿主从设置解析，插件既指定不了地址也碰不到 key。只代理 http / stdio（sse 留给 agent）；arguments ≤ 16 KiB、30 次/分钟、30s 超时（封顶 60s）；宿主 `plugin_mcp_call` 再复核一次工具白名单（纵深防御） | `services/mcp*.rs`、`McpMarketSection.vue`                                                                                                                                                                                                                                                                  |
 | `clipboard`         | 插件读/写系统剪贴板                                        | ✅ **已实现**：宿主剪贴板门面（Electron 主进程 / 浏览器 Web API）按运行时分叉；**字符串形态只给 write，读必须声明 `ops: ["read"]`**（安装期校验 read/write 子集、不重复）；单次 ≤ 64 KiB、每插件 1 分钟 20 次；审计只记长度，剪贴板内容绝不落日志                                                                                                                                                                                                                | `capabilities.ts::clipboardCapability`、`market.ts` 注入 `hostClipboard()`、`package.rs::validate_clipboard_ops`；单测 `tests/unit/plugins/capabilities.clipboard.test.ts` + `plugin_market::tests`；demo `plugin-market/packages/demo.clipboard.{json,js}`（待发布）                                       |
 | `artifacts.publish` | 插件把产物（文本/JSON/小文件）送进会话产物面板，用户可预览 | ✅ **已实现**：`{ name, format, data }`（md / html / csv，单份 ≤ 256 KiB）经前端能力层落盘 —— 路径净化后写 `plugins/<id>/`（VFS），再走既有 `deliverArtifact` 镜像到工作区 `artifacts/` 并广播 `artifact:created`（查看器自动开 tab）；HTML 由查看器去脚本渲染（sandbox 无 `allow-scripts`）；每插件 10 分钟 20 次，全部调用进审计                                                                                                                               | `stores/artifact.ts::deliverArtifact`、`lib/viewer.ts`、`market.ts` 注入 publisher；单测 `tests/unit/plugins/capabilities.artifacts.test.ts`；demo `plugin-market/packages/demo.artifacts.{json,js}`（待发布）                                                                                              |
-| 多窗口/窗口控制 v2  | 悬浮窗只有开/关                                            | `window.floating` 扩展：标题、置顶切换、透明度、位置持久化、多实例；句柄仍不交插件                                                                                                                                                                                                                                                                                                                                                                               | `plugin_window.rs`                                                                                                                                                                                                                                                                                          |
+| 多窗口/窗口控制 v2  | 悬浮窗只有开/关                                            | ✅ **已实现**：`window` 声明增可选 `title`（≤64）/ `alwaysOnTop`（缺省 true）/ `opacity`（0.2-1）/ `multiple`（缺省 false，最多 4 实例）。几何按 label 记在 `plugin-window-bounds.json`，开窗时经 `placeWindow` 拉回可见区；置顶可在窗口头部的「钉住」按钮运行时切换（按 webContents 定位，多开不串）；实例标签 `plugin-window-<id>::<n>`（用 `::` 而非 `-`，否则 id 里的 `-` 会把后缀搅进来）。句柄仍不交插件，停用/卸载关掉该插件全部窗口                      | `plugin_window.rs`                                                                                                                                                                                                                                                                                          |
 
 **P1 完成判据**：出现「读取工作区 README → LLM 总结 → 写入产物面板 → 一键复制」的插件，全部动作都可见、可审计、可撤销授权。
 该判据由演示包 `plugin-market/packages/demo.brief.{json,js}` 兑现：一条 `brief` 动作按序调
@@ -118,21 +118,21 @@
 
 > danger 与授权形态仅为草案，落地时按惯例逐一评审（`net.fetch` 是「声明式参数授权」的样板）。
 
-| 能力                 | 危险级   | 授权形态                               | 依赖面                                          | 归属阶段          |
-| -------------------- | -------- | -------------------------------------- | ----------------------------------------------- | ----------------- |
-| `storage.kv`         | low      | 字符串                                 | 前端模块                                        | P0                |
-| `fs.scoped`          | medium   | 字符串                                 | Rust 新增 `plugin_fs_*` → 已新增 `plugin_fs`    | P0 ✅             |
-| `notify`             | low      | 字符串                                 | 已有 `notify.rs` → 已落地 `plugin_notify`       | P0 ✅             |
-| `schedule`           | low      | `{kind:"interval", min}`               | 前端调度器（工作台持有 worker）                 | P0 ✅             |
-| `net.fetch` v2       | medium   | `{hosts, methods?, paths?, maxBytes?}` | `net_fetch.rs` 扩展（`stream` 留后续）          | P0 ✅（流式待做） |
-| `window.floating` v2 | medium   | `{windows:[...]}`                      | `plugin_window.rs`                              | P1                |
-| `workspace.read`     | high     | root 白名单                            | `workspace_fs` 复用 → 已落地 `plugin_workspace` | P1 ✅             |
-| `llm.chat`           | high     | `{models:[…]}` 白名单                  | `services/llm` → 已落地 `llm_chat_complete`     | P1 ✅             |
-| `mcp.connect`        | high     | `{ servers: [{ name, tools }] }`       | `services/mcp*`                                 | P1 ✅             |
-| `clipboard`          | medium   | `ops` 子集（缺省 write）               | 宿主剪贴板桥 → 已落地 `hostClipboard()`         | P1 ✅             |
-| `artifacts.publish`  | medium   | 字符串                                 | 产物目录 + viewer → 已落地前端 publisher        | P1 ✅             |
-| `run.command`        | **不做** | —                                      | 至多经 `process_guard` 白名单给**用户自签**包   | 长期              |
-| `wasm` 运行时        | —        | —                                      | 宿主嵌入式解释器                                | P3                |
+| 能力                 | 危险级   | 授权形态                                        | 依赖面                                          | 归属阶段          |
+| -------------------- | -------- | ----------------------------------------------- | ----------------------------------------------- | ----------------- |
+| `storage.kv`         | low      | 字符串                                          | 前端模块                                        | P0                |
+| `fs.scoped`          | medium   | 字符串                                          | Rust 新增 `plugin_fs_*` → 已新增 `plugin_fs`    | P0 ✅             |
+| `notify`             | low      | 字符串                                          | 已有 `notify.rs` → 已落地 `plugin_notify`       | P0 ✅             |
+| `schedule`           | low      | `{kind:"interval", min}`                        | 前端调度器（工作台持有 worker）                 | P0 ✅             |
+| `net.fetch` v2       | medium   | `{hosts, methods?, paths?, maxBytes?}`          | `net_fetch.rs` 扩展（`stream` 留后续）          | P0 ✅（流式待做） |
+| `window.floating` v2 | medium   | `{ title?, alwaysOnTop?, opacity?, multiple? }` | `plugin-window.ts`（Electron 壳）               | P1 ✅             |
+| `workspace.read`     | high     | root 白名单                                     | `workspace_fs` 复用 → 已落地 `plugin_workspace` | P1 ✅             |
+| `llm.chat`           | high     | `{models:[…]}` 白名单                           | `services/llm` → 已落地 `llm_chat_complete`     | P1 ✅             |
+| `mcp.connect`        | high     | `{ servers: [{ name, tools }] }`                | `services/mcp*`                                 | P1 ✅             |
+| `clipboard`          | medium   | `ops` 子集（缺省 write）                        | 宿主剪贴板桥 → 已落地 `hostClipboard()`         | P1 ✅             |
+| `artifacts.publish`  | medium   | 字符串                                          | 产物目录 + viewer → 已落地前端 publisher        | P1 ✅             |
+| `run.command`        | **不做** | —                                               | 至多经 `process_guard` 白名单给**用户自签**包   | 长期              |
+| `wasm` 运行时        | —        | —                                               | 宿主嵌入式解释器                                | P3                |
 
 ---
 
