@@ -10,6 +10,13 @@ use super::validate::{
 };
 use super::{MAX_PLUGIN_FETCH_BYTES_CEILING, MIN_PLUGIN_FETCH_BYTES};
 
+/// 右键菜单条目数上界。
+const MAX_PLUGIN_CONTEXT_MENUS: usize = 8;
+/// 右键菜单文案长度上界（一行菜单项的宽度）。
+const CONTEXT_LABEL_MAX_CHARS: usize = 40;
+/// 允许挂载右键菜单的区域（宿主已实现的三处）。
+const CONTEXT_MENU_TARGETS: [&str; 3] = ["fileTree", "preview", "conversation"];
+
 /// 命令面板条目数上界：一个插件的快捷动作不该把 ⌘K 刷成一页。
 const MAX_PLUGIN_COMMANDS: usize = 16;
 /// 命令标题长度上界（面板一行的展示宽度）。
@@ -395,6 +402,87 @@ fn validate_mcp_connect_servers(servers: &[ManifestMcpServerRef]) -> Result<(), 
     Ok(())
 }
 
+/// 右键菜单声明校验（安装期第一道门；冲突检测在前端 loader）。
+///
+/// 语义：
+/// - 最多 8 条，id 走 validate_key、包内唯一；
+/// - label 1-40 字符、无控制字符（会原样进菜单）；
+/// - targets 必须落在宿主已实现的三个区域里，1-3 条且不重复 —— 宿主没实现的区域宁可
+///   安装期拒掉，也不要让插件以为「点得到」；
+/// - mode 必须指向本包声明过的页面（缺省取第一个），理由同 commands。
+fn validate_context_menu(
+    manifest: &MarketPluginManifest,
+    mode_ids: &std::collections::HashSet<String>,
+) -> Result<(), String> {
+    let entries = &manifest.contributes.context_menu;
+    if entries.len() > MAX_PLUGIN_CONTEXT_MENUS {
+        return Err(format!(
+            "contextMenu contribution must contain at most {MAX_PLUGIN_CONTEXT_MENUS} entries"
+        ));
+    }
+    if !entries.is_empty() && manifest.contributes.modes.is_empty() {
+        return Err("contextMenu contribution requires at least one mode to open".to_string());
+    }
+    let mut seen = std::collections::HashSet::new();
+    for entry in entries {
+        validate_key(&entry.id, "context menu id")?;
+        if !seen.insert(&entry.id) {
+            return Err(format!(
+                "duplicate context menu id in package: {}",
+                entry.id
+            ));
+        }
+        let label = entry.label.trim();
+        if label.is_empty() {
+            return Err(format!("contextMenu {} requires a label", entry.id));
+        }
+        if label.chars().count() > CONTEXT_LABEL_MAX_CHARS {
+            return Err(format!(
+                "contextMenu {} label exceeds {CONTEXT_LABEL_MAX_CHARS} characters",
+                entry.id
+            ));
+        }
+        if label.chars().any(char::is_control) {
+            return Err(format!(
+                "contextMenu {} label must not contain control characters",
+                entry.id
+            ));
+        }
+        if entry.targets.is_empty() || entry.targets.len() > CONTEXT_MENU_TARGETS.len() {
+            return Err(format!(
+                "contextMenu {} must declare 1-{} targets",
+                entry.id,
+                CONTEXT_MENU_TARGETS.len()
+            ));
+        }
+        let mut seen_targets = std::collections::HashSet::new();
+        for target in &entry.targets {
+            if !CONTEXT_MENU_TARGETS.contains(&target.as_str()) {
+                return Err(format!(
+                    "contextMenu {} has unknown target: {target} (expected {})",
+                    entry.id,
+                    CONTEXT_MENU_TARGETS.join(" / ")
+                ));
+            }
+            if !seen_targets.insert(target) {
+                return Err(format!(
+                    "duplicate target {target} in contextMenu {}",
+                    entry.id
+                ));
+            }
+        }
+        if let Some(mode) = &entry.mode {
+            if !mode_ids.contains(mode) {
+                return Err(format!(
+                    "contextMenu {} targets unknown mode: {mode}",
+                    entry.id
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// 命令面板条目校验（安装期第一道门；跨包 id 冲突由前端 loader 的冲突检测再挡一次）。
 ///
 /// 语义：
@@ -595,6 +683,7 @@ pub(super) fn validate_package(package: &super::dto::PluginPackage) -> Result<()
         }
     }
     validate_commands(manifest, &mode_ids)?;
+    validate_context_menu(manifest, &mode_ids)?;
 
     if let Some(window) = &manifest.window {
         if manifest.kind != PluginKind::Worker

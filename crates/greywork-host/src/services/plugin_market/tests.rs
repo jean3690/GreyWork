@@ -3,7 +3,7 @@ use sha2::{Digest, Sha256};
 use super::dto::{
     CapabilityRequirement, CodePluginRuntime, DeclarativeAction, DeclarativeContributions,
     DeclarativeField, DeclarativeMode, DeclarativeOperation, DeclarativeOutput, DeclarativePage,
-    ManifestMcpServerRef, ManifestSchedule, ManifestScheduleKind, MarketCommand,
+    ManifestMcpServerRef, ManifestSchedule, ManifestScheduleKind, MarketCommand, MarketContextMenu,
     MarketPluginManifest, MarketRegionAction, MarketUiRegionContribution, PluginKind,
     PluginPackage, PluginRegistry, PluginRegistryEntry, PluginWindowDecl, RenderLoop,
 };
@@ -66,6 +66,7 @@ fn demo_package() -> PluginPackage {
                 }],
                 ui_regions: Vec::new(),
                 commands: Vec::new(),
+                context_menu: Vec::new(),
             },
         },
         code: None,
@@ -1547,4 +1548,53 @@ fn command_contributions_are_bounded_and_must_target_a_declared_mode() {
         .map(|index| command(&format!("cmd-{index}"), "x", None))
         .collect();
     assert!(with_commands(many).is_err());
+}
+
+/// 右键菜单条目：区域白名单 + 必须指向本包页面。
+#[test]
+fn context_menu_contributions_validate_targets_and_labels() {
+    let with_menu = |entries: Vec<MarketContextMenu>| {
+        let mut package = demo_package();
+        package.manifest.contributes.context_menu = entries;
+        validate_package(&package)
+    };
+    let entry = |id: &str, label: &str, targets: &[&str], mode: Option<&str>| MarketContextMenu {
+        id: id.into(),
+        label: label.into(),
+        targets: targets.iter().map(|target| (*target).to_string()).collect(),
+        mode: mode.map(str::to_string),
+    };
+
+    with_menu(vec![entry(
+        "open",
+        "在插件里打开",
+        &["fileTree", "preview"],
+        Some("demo-counter"),
+    )])
+    .expect("合法条目");
+    with_menu(vec![entry("open", "在插件里打开", &["conversation"], None)])
+        .expect("缺省取第一个 mode");
+
+    // 未知区域 / 空区域 / 重复区域。
+    let error = with_menu(vec![entry("open", "x", &["timeline"], None)]).unwrap_err();
+    assert!(error.contains("unknown target"), "{error}");
+    assert!(with_menu(vec![entry("open", "x", &[], None)]).is_err());
+    assert!(with_menu(vec![entry("open", "x", &["preview", "preview"], None)]).is_err());
+
+    // 空 / 超长 / 控制字符 label；未知 mode；重复 id；超条数。
+    assert!(with_menu(vec![entry("open", "   ", &["preview"], None)]).is_err());
+    let long = "标".repeat(41);
+    assert!(with_menu(vec![entry("open", &long, &["preview"], None)]).is_err());
+    assert!(with_menu(vec![entry("open", "a\u{7}b", &["preview"], None)]).is_err());
+    let error = with_menu(vec![entry("open", "x", &["preview"], Some("nope"))]).unwrap_err();
+    assert!(error.contains("unknown mode"), "{error}");
+    assert!(with_menu(vec![
+        entry("open", "x", &["preview"], None),
+        entry("open", "y", &["preview"], None)
+    ])
+    .is_err());
+    let many: Vec<MarketContextMenu> = (0..9)
+        .map(|index| entry(&format!("menu-{index}"), "x", &["preview"], None))
+        .collect();
+    assert!(with_menu(many).is_err());
 }

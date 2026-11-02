@@ -260,3 +260,39 @@ describe("命令面板贡献", () => {
     ).toThrow(ContributionConflictError);
   });
 });
+
+describe("右键菜单贡献", () => {
+  const menuPlugin = (id: string, entries: Array<{ id: string; label: string }>): PluginManifest => ({
+    id,
+    name: id,
+    version: "0.1.0",
+    contributes: {
+      modes: [{ id: `${id}-page`, title: id, component: Dummy }],
+      contextMenu: entries.map((entry) => ({
+        id: entry.id,
+        label: entry.label,
+        targets: ["fileTree"],
+        modeId: `${id}-page`,
+        pluginId: id,
+      })),
+    },
+  });
+
+  it("激活后进快照、停用后消失", async () => {
+    const loader = createCapabilityLoader();
+    loader.register(menuPlugin("ext.menu", [{ id: "open", label: "用插件打开" }]));
+    await loader.activate("ext.menu");
+    expect(loader.snapshot().contextMenu).toEqual([
+      { id: "open", label: "用插件打开", targets: ["fileTree"], modeId: "ext.menu-page", pluginId: "ext.menu" },
+    ]);
+
+    await loader.deactivate("ext.menu");
+    expect(loader.snapshot().contextMenu).toEqual([]);
+  });
+
+  it("条目 id 跨插件重名被拒（右键文案重叠会让人以为点了同一件事）", () => {
+    const loader = createCapabilityLoader();
+    loader.register(menuPlugin("ext.m1", [{ id: "open", label: "打开" }]));
+    expect(() => loader.register(menuPlugin("ext.m2", [{ id: "open", label: "打开" }]))).toThrow(ContributionConflictError);
+  });
+});

@@ -21,6 +21,7 @@ import FileTree from "@/features/preview/FileTree.vue";
 import GitChangePanel from "@/features/preview/GitChangePanel.vue";
 import PreviewSurface from "@/features/preview/PreviewSurface.vue";
 import WebFetchDialog from "@/features/preview/WebFetchDialog.vue";
+import { useRouter } from "vue-router";
 import ContextMenuRegion from "@/features/shared/ContextMenuRegion.vue";
 import { DEFAULT_PREVIEW_PANEL_PX, MAX_PREVIEW_PANEL_PX, MIN_PREVIEW_PANEL_PX, PREVIEW_TAB_BAR_HEIGHT } from "@/lib/layout";
 import { openWithSystemApp, resolveTabDiskPath } from "@/lib/open-external";
@@ -35,6 +36,8 @@ import { isPreviewDirty, previewSaver } from "@/lib/preview-save";
 import { cancelDiscard, confirmDiscard, pendingDiscard, requestLeave } from "@/lib/preview-edit-guard";
 import { syncUnsavedChanges } from "@/lib/close-guard";
 import ConfirmDialog from "@/features/settings/ConfirmDialog.vue";
+import { useCapabilityLoader } from "@/plugins/current";
+import { pluginContextMenuItems } from "@/plugins/context-menu";
 import { i18n } from "@/i18n";
 
 type Section = "files" | "preview" | "git";
@@ -121,32 +124,47 @@ function diskPathOf(id: string): string | null {
   return tab ? resolveTabDiskPath(tab) : null;
 }
 
+const router = useRouter();
+const capabilityLoader = useCapabilityLoader();
+
+/** 标签 / 空白面两处右键都带上插件条目（同一 region = 同一份贡献）。 */
+function withPluginItems(items: ContextMenuItem[]): ContextMenuItem[] {
+  return [
+    ...items,
+    ...pluginContextMenuItems(capabilityLoader.snapshot().contextMenu, "preview", (modeId) => void router.push(`/plugin/${modeId}`)),
+  ];
+}
+
 function buildTabMenu(target: ContextTarget | null): ContextMenuItem[] {
-  return buildPreviewTabItems(target, t, {
-    activate: (id) => activateTab(id),
-    reload: (id) => {
-      const tab = tabById(id);
-      if (tab) reloadTab(tab.path);
-    },
-    close: (id) => requestClose({ kind: "one", id }),
-    closeOthers: (id) => requestClose({ kind: "others", id }),
-    closeAll: () => requestClose({ kind: "all" }),
-    copyPath: (text) => void copyText(text),
-    openExternal: (path) => void openExternal(path),
-    reveal: (path) => void revealPath(path),
-    diskPath: diskPathOf,
-    displayPath: (id) => diskPathOf(id) ?? tabById(id)?.path ?? "",
-    hasMultiple: preview.tabs.length > 1,
-  });
+  return withPluginItems(
+    buildPreviewTabItems(target, t, {
+      activate: (id) => activateTab(id),
+      reload: (id) => {
+        const tab = tabById(id);
+        if (tab) reloadTab(tab.path);
+      },
+      close: (id) => requestClose({ kind: "one", id }),
+      closeOthers: (id) => requestClose({ kind: "others", id }),
+      closeAll: () => requestClose({ kind: "all" }),
+      copyPath: (text) => void copyText(text),
+      openExternal: (path) => void openExternal(path),
+      reveal: (path) => void revealPath(path),
+      diskPath: diskPathOf,
+      displayPath: (id) => diskPathOf(id) ?? tabById(id)?.path ?? "",
+      hasMultiple: preview.tabs.length > 1,
+    }),
+  );
 }
 
 function buildEmptyMenu(): ContextMenuItem[] {
-  return buildPreviewEmptyItems(t, {
-    openFiles: () => switchSection("files"),
-    fetchWeb: () => (fetchDialogOpen.value = true),
-    closeAll: () => requestClose({ kind: "all" }),
-    hasTabs: preview.tabs.length > 0,
-  });
+  return withPluginItems(
+    buildPreviewEmptyItems(t, {
+      openFiles: () => switchSection("files"),
+      fetchWeb: () => (fetchDialogOpen.value = true),
+      closeAll: () => requestClose({ kind: "all" }),
+      hasTabs: preview.tabs.length > 0,
+    }),
+  );
 }
 
 /** 双击把手复位到默认宽度：比「拖回大概位置」可靠，也是常见的分隔条约定。 */

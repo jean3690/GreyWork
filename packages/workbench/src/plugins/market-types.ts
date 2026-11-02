@@ -64,6 +64,15 @@ export interface PluginCommandDecl {
   mode?: string;
 }
 
+/** 右键菜单条目（v2）：在宿主既有右键菜单里追加「打开插件」，只做导航。 */
+export interface PluginContextMenuDecl {
+  id: string;
+  label: string;
+  /** fileTree / preview / conversation（安装期已按白名单校验）。 */
+  targets: string[];
+  mode?: string;
+}
+
 export interface MarketPluginManifest {
   id: string;
   name: string;
@@ -86,6 +95,8 @@ export interface MarketPluginManifest {
     uiRegions?: MarketUiRegionContribution[];
     /** 命令面板条目（v2）：出现在 ⌘K / 标题栏搜索里，命中后打开本包的 mode 页。 */
     commands?: PluginCommandDecl[];
+    /** 右键菜单条目（v2）：文件树 / 预览 / 对话三处。 */
+    contextMenu?: PluginContextMenuDecl[];
   };
 }
 

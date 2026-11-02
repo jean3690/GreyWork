@@ -30,7 +30,7 @@ export class DuplicatePluginError extends Error {
   }
 }
 export class ContributionConflictError extends Error {
-  constructor(kind: "mode" | "uiRegion" | "command", id: string, ownerId: string) {
+  constructor(kind: "mode" | "uiRegion" | "command" | "contextMenu", id: string, ownerId: string) {
     super(`${kind} contribution id already registered: ${id} (owned by ${ownerId})`);
     this.name = "ContributionConflictError";
   }
@@ -113,6 +113,9 @@ function manifestToPlugin(manifest: PluginManifest): Plugin.Object<Context> {
       for (const command of manifest.contributes?.commands ?? []) {
         ctx.effect(() => ctx.seam.registerCommand(command));
       }
+      for (const entry of manifest.contributes?.contextMenu ?? []) {
+        ctx.effect(() => ctx.seam.registerContextMenu(entry));
+      }
       for (const capability of manifest.contributes?.capabilities ?? []) {
         ctx.effect(() => ctx.seam.registerCapability(capability));
       }
@@ -178,11 +181,13 @@ export function createCapabilityLoader(): CapabilityLoader {
     const claimedModes = new Map<string, string>();
     const claimedRegions = new Map<string, string>();
     const claimedCommands = new Map<string, string>();
+    const claimedContextMenus = new Map<string, string>();
     for (const manifest of manifestById.values()) {
       for (const mode of manifest.contributes?.modes ?? []) claimedModes.set(mode.id, manifest.id);
       for (const region of manifest.contributes?.uiRegions ?? []) claimedRegions.set(region.id, manifest.id);
       // 命令是全局命名空间（⌘K 一张表）：跨插件重名会让用户点中「另一家的同名动作」。
       for (const command of manifest.contributes?.commands ?? []) claimedCommands.set(command.id, manifest.id);
+      for (const entry of manifest.contributes?.contextMenu ?? []) claimedContextMenus.set(entry.id, manifest.id);
     }
 
     const ownModes = new Set<string>();
@@ -204,6 +209,14 @@ export function createCapabilityLoader(): CapabilityLoader {
       const owner = claimedCommands.get(command.id) ?? (ownCommands.has(command.id) ? candidate.id : undefined);
       if (owner) throw new ContributionConflictError("command", command.id, owner);
       ownCommands.add(command.id);
+    }
+
+    // 右键条目与命令共用「全局 id」语义：菜单项文案来自插件，重名会让用户以为点了同一件事。
+    const ownContextMenus = new Set<string>();
+    for (const entry of candidate.contributes?.contextMenu ?? []) {
+      const owner = claimedContextMenus.get(entry.id) ?? (ownContextMenus.has(entry.id) ? candidate.id : undefined);
+      if (owner) throw new ContributionConflictError("contextMenu", entry.id, owner);
+      ownContextMenus.add(entry.id);
     }
   }
 

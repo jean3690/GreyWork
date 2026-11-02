@@ -2,7 +2,7 @@ import { h, markRaw } from "vue";
 import DeclarativePluginView from "./DeclarativePluginView.vue";
 import PluginRegionHost from "@/features/plugins/PluginRegionHost.vue";
 import type { DeclarativeValue, InstalledPluginPackage } from "./market-types";
-import type { CommandContribution, PluginManifest, UiRegionContribution } from "./types";
+import type { CommandContribution, ContextMenuContribution, PluginContextTarget, PluginManifest, UiRegionContribution } from "./types";
 import type { CodePluginRuntime, PluginPointerEvent } from "./code-runtime";
 import { effectiveRegionSchedule } from "./scheduler";
 import { isPluginCapabilityGranted } from "./runtime";
@@ -45,6 +45,17 @@ export function adaptInstalledPlugin(pluginPackage: InstalledPluginPackage, runt
   }
   // 命令面板条目：mode 缺省指向该包的第一个页面（Rust 安装期已保证 commands 非空时必有 mode）。
   const firstModeId = source.contributes.modes[0]?.id;
+  // 右键条目：目标区域安装期已校验，这里仍按白名单过滤一遍（手工改过 plugin.json 的包）。
+  const allowedTargets: readonly PluginContextTarget[] = ["fileTree", "preview", "conversation"];
+  const contextMenu: ContextMenuContribution[] = (source.contributes.contextMenu ?? [])
+    .map((entry) => ({
+      id: entry.id,
+      label: entry.label,
+      targets: entry.targets.filter((target): target is PluginContextTarget => (allowedTargets as readonly string[]).includes(target)),
+      modeId: entry.mode ?? firstModeId ?? "",
+      pluginId: source.id,
+    }))
+    .filter((entry) => entry.modeId !== "" && entry.targets.length > 0);
   const commands: CommandContribution[] = (source.contributes.commands ?? [])
     .map((command) => ({
       id: command.id,
@@ -90,6 +101,7 @@ export function adaptInstalledPlugin(pluginPackage: InstalledPluginPackage, runt
       })),
       uiRegions,
       commands,
+      contextMenu,
     },
   };
 }

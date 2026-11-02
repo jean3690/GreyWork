@@ -15,6 +15,8 @@ import type { Attachment, MessageComment, ThreadMessage } from "@/types";
 import MinimalComposer from "@/features/guid/MinimalComposer.vue";
 import Icon from "@/features/shared/Icon.vue";
 import Hint from "@/features/shared/Hint.vue";
+import { useCapabilityLoader } from "@/plugins/current";
+import { pluginContextMenuItems } from "@/plugins/context-menu";
 import ContextMenuRegion from "@/features/shared/ContextMenuRegion.vue";
 import {
   buildComposerItems,
@@ -447,7 +449,19 @@ function performDelete(): void {
   sessionStore.truncateMessages(threadId, index);
 }
 
+const capabilityLoader = useCapabilityLoader();
+
+/** 宿主条目 + 插件贡献；页头空白的「无菜单」语义保持不变（不因为插件而凭空冒出来）。 */
 function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
+  const base = buildMenuBase(target);
+  if (!base.length) return base;
+  return [
+    ...base,
+    ...pluginContextMenuItems(capabilityLoader.snapshot().contextMenu, "conversation", (modeId) => void router.push(`/plugin/${modeId}`)),
+  ];
+}
+
+function buildMenuBase(target: ContextTarget | null): ContextMenuItem[] {
   if (target?.ctx === "message") {
     const id = target.el.dataset.messageId;
     const message = messages.value.find((candidate) => candidate.id === id);

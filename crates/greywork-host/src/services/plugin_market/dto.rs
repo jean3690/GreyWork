@@ -182,6 +182,27 @@ pub struct DeclarativeContributions {
     /// 命令面板条目（v2）：声明式动作，命中后打开该包自己的某个 mode 页。
     #[serde(default)]
     pub commands: Vec<MarketCommand>,
+    /// 右键菜单条目（v2）：在文件树 / 预览 / 对话三处追加「打开插件」。
+    #[serde(default)]
+    pub context_menu: Vec<MarketContextMenu>,
+}
+
+/// 右键菜单条目：与命令一样**只做导航**（文案 + 目标页），不带可执行 handler。
+///
+/// 右键是「作用于当前对象」的入口，最容易让人以为菜单项会处理选中的文件；所以这一档刻意
+/// 不把它和动作绑定 —— 插件拿到的是「用户点了我的入口」，具体处理仍在它自己的页面里。
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarketContextMenu {
+    /// 全局唯一 id（宿主侧跨插件冲突检测的键）。
+    pub id: String,
+    /// 菜单项文案（1-40 字符）。
+    pub label: String,
+    /// 出现在哪些区域：fileTree / preview / conversation（1-3 条，不重复）。
+    pub targets: Vec<String>,
+    /// 要打开的 mode id；缺省取该包的第一个 mode。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
 }
 
 /// 命令面板条目：**只做导航**，不携带可执行代码。

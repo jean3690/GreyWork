@@ -58,6 +58,20 @@ export interface CommandContribution {
   pluginId: string;
 }
 
+/** 右键菜单可挂载的区域（与 Rust 侧 CONTEXT_MENU_TARGETS 同口径）。 */
+export type PluginContextTarget = "fileTree" | "preview" | "conversation";
+
+/** 右键菜单条目：同样只做导航（点开插件页），不绑定选中对象。 */
+export interface ContextMenuContribution {
+  /** 全局唯一 id（跨插件冲突检测的键）。 */
+  id: string;
+  label: string;
+  targets: PluginContextTarget[];
+  /** 目标插件页：/plugin/:modeId。 */
+  modeId: string;
+  pluginId: string;
+}
+
 export interface PluginManifest {
   /** 如 "core.views" */
   id: string;
@@ -75,6 +89,7 @@ export interface PluginManifest {
      */
     capabilities?: string[];
     commands?: CommandContribution[];
+    contextMenu?: ContextMenuContribution[];
   };
   /** 其他 PluginManifest.id；loader 据此拓扑排序 */
   dependsOn?: string[];
@@ -96,5 +111,10 @@ export interface CapabilitySeam {
   activate(id: string): Promise<void>;
   /** 从快照摘除；被依赖时拒绝并抛错 */
   deactivate(id: string): Promise<void>;
-  snapshot(): Readonly<{ modes: ModeContribution[]; uiRegions: UiRegionContribution[]; commands: CommandContribution[] }>;
+  snapshot(): Readonly<{
+    modes: ModeContribution[];
+    uiRegions: UiRegionContribution[];
+    commands: CommandContribution[];
+    contextMenu: ContextMenuContribution[];
+  }>;
 }

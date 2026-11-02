@@ -11,6 +11,7 @@ import { hasNativeShell } from "@greywork/host-ipc";
 import { useVirtualizer } from "@tanstack/vue-virtual";
 import Icon from "@/features/shared/Icon.vue";
 import Hint from "@/features/shared/Hint.vue";
+import { useRouter } from "vue-router";
 import ContextMenuRegion from "@/features/shared/ContextMenuRegion.vue";
 import NewEntryDialog from "@/features/preview/NewEntryDialog.vue";
 import ConfirmDialog from "@/features/settings/ConfirmDialog.vue";
@@ -23,6 +24,8 @@ import { copyText } from "@/lib/clipboard";
 import { openWithSystemApp } from "@/lib/open-external";
 import { revealInFolder } from "@/lib/reveal";
 import { requestLeave } from "@/lib/preview-edit-guard";
+import { useCapabilityLoader } from "@/plugins/current";
+import { pluginContextMenuItems } from "@/plugins/context-menu";
 import { i18n } from "@/i18n";
 import { notify } from "@/stores/notice";
 import { useFileTreeStore, type FileTreeNode } from "@/stores/fileTree";
@@ -418,7 +421,18 @@ function nodeOf(path: string): FileTreeNode | undefined {
   return rows.value.find((row) => row.node.path === path)?.node;
 }
 
+const router = useRouter();
+const capabilityLoader = useCapabilityLoader();
+
+/** 宿主条目 + 插件贡献：右键里的「打开插件」与 ⌘K 一样只做导航。 */
 function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
+  return [
+    ...buildMenuBase(target),
+    ...pluginContextMenuItems(capabilityLoader.snapshot().contextMenu, "fileTree", (modeId) => void router.push(`/plugin/${modeId}`)),
+  ];
+}
+
+function buildMenuBase(target: ContextTarget | null): ContextMenuItem[] {
   // 菜单只给路径，按路径回查节点补出 name / kind（与 activateByPath 同一手法）。
   return buildFileTreeItems(target, t, {
     activate: activateByPath,
