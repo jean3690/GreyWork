@@ -2,7 +2,7 @@ import { h, markRaw } from "vue";
 import DeclarativePluginView from "./DeclarativePluginView.vue";
 import PluginRegionHost from "@/features/plugins/PluginRegionHost.vue";
 import type { DeclarativeValue, InstalledPluginPackage } from "./market-types";
-import type { PluginManifest, UiRegionContribution } from "./types";
+import type { CommandContribution, PluginManifest, UiRegionContribution } from "./types";
 import type { CodePluginRuntime, PluginPointerEvent } from "./code-runtime";
 import { effectiveRegionSchedule } from "./scheduler";
 import { isPluginCapabilityGranted } from "./runtime";
@@ -43,6 +43,17 @@ export function adaptInstalledPlugin(pluginPackage: InstalledPluginPackage, runt
       });
     }
   }
+  // 命令面板条目：mode 缺省指向该包的第一个页面（Rust 安装期已保证 commands 非空时必有 mode）。
+  const firstModeId = source.contributes.modes[0]?.id;
+  const commands: CommandContribution[] = (source.contributes.commands ?? [])
+    .map((command) => ({
+      id: command.id,
+      title: command.title,
+      description: command.description,
+      modeId: command.mode ?? firstModeId ?? "",
+      pluginId: source.id,
+    }))
+    .filter((command) => command.modeId !== "");
   return {
     id: source.id,
     name: source.name,
@@ -78,6 +89,7 @@ export function adaptInstalledPlugin(pluginPackage: InstalledPluginPackage, runt
         }),
       })),
       uiRegions,
+      commands,
     },
   };
 }

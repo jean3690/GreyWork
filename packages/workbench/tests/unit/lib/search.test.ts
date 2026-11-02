@@ -134,3 +134,38 @@ describe("buildSearchItems", () => {
     expect(searchItems(items, "限流").map((entry) => entry.id)).toEqual(["session:s1"]);
   });
 });
+
+describe("插件命令条目", () => {
+  const commands = [
+    { pluginId: "demo.pet", id: "feed", title: "给猫喂食", description: "宠物插件", modeId: "demo-pet" },
+    { pluginId: "demo.pet", id: "pet", title: "撸猫", modeId: "demo-pet" },
+  ];
+
+  it("命令排在会话之后、导航之前，命中后跳 /plugin/<modeId>", () => {
+    const items = buildSearchItems({
+      sessions: [{ id: "s1", title: "会话", workspaceId: null, messages: [] }],
+      commands,
+      navItems: [{ path: "/team", label: "团队" }],
+      settingsSections: [{ key: "agent", title: "Agent" }],
+      statusOf: () => "idle",
+    });
+    expect(items.map((entry) => entry.kind)).toEqual(["session", "command", "command", "nav", "settings"]);
+    expect(items[1]).toMatchObject({ id: "command:demo.pet:feed", label: "给猫喂食", description: "宠物插件", path: "/plugin/demo-pet" });
+  });
+
+  it("插件 id 也参与检索（记得插件名就能搜到它的命令）", () => {
+    const items = buildSearchItems({ sessions: [], commands, navItems: [], settingsSections: [], statusOf: () => "idle" });
+    expect(searchItems(items, "demo.pet").map((entry) => entry.id)).toEqual(["command:demo.pet:feed", "command:demo.pet:pet"]);
+    expect(searchItems(items, "喂食").map((entry) => entry.id)).toEqual(["command:demo.pet:feed"]);
+  });
+
+  it("没声明命令时索引与以前完全一致", () => {
+    const items = buildSearchItems({
+      sessions: [{ id: "s1", title: "会话", workspaceId: null, messages: [] }],
+      navItems: [{ path: "/team", label: "团队" }],
+      settingsSections: [{ key: "agent", title: "Agent" }],
+      statusOf: () => "idle",
+    });
+    expect(items.map((entry) => entry.kind)).toEqual(["session", "nav", "settings"]);
+  });
+});

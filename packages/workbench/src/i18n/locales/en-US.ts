@@ -188,7 +188,7 @@ export const enUS: MessageSchema = {
     filterStatus: "Status",
     filterWorkspace: "Workspace",
     type: { all: "All", session: "Sessions", feature: "Features" },
-    kind: { nav: "Feature", settings: "Settings" },
+    kind: { command: "Plugin commands", nav: "Feature", settings: "Settings" },
     workspaceAll: "All workspaces",
     workspaceGeneral: "General",
     empty: "No matching results",

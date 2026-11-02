@@ -10,6 +10,13 @@ use super::validate::{
 };
 use super::{MAX_PLUGIN_FETCH_BYTES_CEILING, MIN_PLUGIN_FETCH_BYTES};
 
+/// 命令面板条目数上界：一个插件的快捷动作不该把 ⌘K 刷成一页。
+const MAX_PLUGIN_COMMANDS: usize = 16;
+/// 命令标题长度上界（面板一行的展示宽度）。
+const COMMAND_TITLE_MAX_CHARS: usize = 60;
+/// 命令说明长度上界。
+const COMMAND_DESCRIPTION_MAX_CHARS: usize = 120;
+
 /// 悬浮窗标题长度上界（与设置页 / 任务栏的展示宽度相当）。
 const WINDOW_TITLE_MAX_CHARS: usize = 64;
 /// 悬浮窗不透明度下界：再低就只剩一团影子，用户会以为窗口丢了。
@@ -388,6 +395,81 @@ fn validate_mcp_connect_servers(servers: &[ManifestMcpServerRef]) -> Result<(), 
     Ok(())
 }
 
+/// 命令面板条目校验（安装期第一道门；跨包 id 冲突由前端 loader 的冲突检测再挡一次）。
+///
+/// 语义：
+/// - 最多 16 条，id 走 validate_key、包内唯一；
+/// - title 1-60 字符、description ≤120、都不含控制字符（会原样进 ⌘K 列表）；
+/// - mode 必须指向本包声明过的 mode（缺省取第一个）—— 目标页不存在时，命令点下去只会得到
+///   一条空白路由，这种「看起来能用其实不能」的声明要在安装期就拒掉。
+fn validate_commands(
+    manifest: &MarketPluginManifest,
+    mode_ids: &std::collections::HashSet<String>,
+) -> Result<(), String> {
+    let commands = &manifest.contributes.commands;
+    if commands.len() > MAX_PLUGIN_COMMANDS {
+        return Err(format!(
+            "commands contribution must contain at most {MAX_PLUGIN_COMMANDS} entries"
+        ));
+    }
+    if !commands.is_empty() && manifest.contributes.modes.is_empty() {
+        return Err("commands contribution requires at least one mode to open".to_string());
+    }
+    let mut seen = std::collections::HashSet::new();
+    for command in commands {
+        validate_key(&command.id, "command id")?;
+        if !seen.insert(&command.id) {
+            return Err(format!("duplicate command id in package: {}", command.id));
+        }
+        let title = command.title.trim();
+        if title.is_empty() {
+            return Err(format!("command {} requires a title", command.id));
+        }
+        if title.chars().count() > COMMAND_TITLE_MAX_CHARS {
+            return Err(format!(
+                "command {} title exceeds {COMMAND_TITLE_MAX_CHARS} characters",
+                command.id
+            ));
+        }
+        if title.chars().any(char::is_control) {
+            return Err(format!(
+                "command {} title must not contain control characters",
+                command.id
+            ));
+        }
+        if let Some(description) = &command.description {
+            if description.chars().count() > COMMAND_DESCRIPTION_MAX_CHARS {
+                return Err(format!(
+                    "command {} description exceeds {COMMAND_DESCRIPTION_MAX_CHARS} characters",
+                    command.id
+                ));
+            }
+            if description.chars().any(char::is_control) {
+                return Err(format!(
+                    "command {} description must not contain control characters",
+                    command.id
+                ));
+            }
+        }
+        match &command.mode {
+            Some(mode) if !mode_ids.contains(mode) => {
+                return Err(format!(
+                    "command {} targets unknown mode: {mode}",
+                    command.id
+                ))
+            }
+            None if manifest.contributes.modes.is_empty() => {
+                return Err(format!(
+                    "command {} requires a mode (the package declares none)",
+                    command.id
+                ))
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 /// manifest 是否声明了 `window.floating` 能力。
 ///
 /// 悬浮窗由宿主托管，但「能开窗」这件事必须在 manifest 里显式声明（用户据此知情授权）；
@@ -478,7 +560,7 @@ pub(super) fn validate_package(package: &super::dto::PluginPackage) -> Result<()
         if mode.id == "plugins" {
             return Err("mode id plugins is reserved for the built-in plugin center".to_string());
         }
-        if !mode_ids.insert(&mode.id) {
+        if !mode_ids.insert(mode.id.clone()) {
             return Err(format!("duplicate mode id in package: {}", mode.id));
         }
         if mode.title.trim().is_empty() || mode.page.heading.trim().is_empty() {
@@ -512,6 +594,8 @@ pub(super) fn validate_package(package: &super::dto::PluginPackage) -> Result<()
             return Err("invoke actions require a worker plugin".to_string());
         }
     }
+    validate_commands(manifest, &mode_ids)?;
+
     if let Some(window) = &manifest.window {
         if manifest.kind != PluginKind::Worker
             || manifest

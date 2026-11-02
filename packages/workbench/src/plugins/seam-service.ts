@@ -5,7 +5,7 @@
 // 读取 modes/uiRegions 两个 ref 建立响应式依赖。
 import { Service, type Context } from "@cordisjs/core";
 import { markRaw, ref, type Ref } from "vue";
-import type { ModeContribution, UiRegionContribution } from "./types";
+import type { CommandContribution, ModeContribution, UiRegionContribution } from "./types";
 
 declare module "@cordisjs/core" {
   interface Context {
@@ -17,6 +17,7 @@ export class SeamService extends Service {
   readonly modes: Ref<ModeContribution[]> = ref([]);
   readonly uiRegions: Ref<UiRegionContribution[]> = ref([]);
   readonly capabilities: Ref<string[]> = ref([]);
+  readonly commands: Ref<CommandContribution[]> = ref([]);
 
   constructor(ctx: Context) {
     super(ctx, "seam", true); // immediate:装载后立即可用
@@ -37,6 +38,15 @@ export class SeamService extends Service {
     };
   }
 
+  registerCommand(contribution: CommandContribution): () => void {
+    this.commands.value.push(contribution);
+    return () => {
+      this.commands.value = this.commands.value.filter(
+        (command) => !(command.pluginId === contribution.pluginId && command.id === contribution.id),
+      );
+    };
+  }
+
   registerCapability(capability: string): () => void {
     this.capabilities.value.push(capability);
     return () => {
@@ -44,7 +54,7 @@ export class SeamService extends Service {
     };
   }
 
-  snapshot(): Readonly<{ modes: ModeContribution[]; uiRegions: UiRegionContribution[] }> {
-    return { modes: this.modes.value, uiRegions: this.uiRegions.value };
+  snapshot(): Readonly<{ modes: ModeContribution[]; uiRegions: UiRegionContribution[]; commands: CommandContribution[] }> {
+    return { modes: this.modes.value, uiRegions: this.uiRegions.value, commands: this.commands.value };
   }
 }

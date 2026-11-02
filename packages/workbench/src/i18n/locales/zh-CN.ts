@@ -185,7 +185,7 @@ export const zhCN = {
     filterStatus: "状态",
     filterWorkspace: "工作区",
     type: { all: "全部", session: "会话", feature: "功能" },
-    kind: { nav: "功能", settings: "设置" },
+    kind: { command: "插件命令", nav: "功能", settings: "设置" },
     workspaceAll: "全部工作区",
     workspaceGeneral: "普通对话",
     empty: "没有匹配的结果",

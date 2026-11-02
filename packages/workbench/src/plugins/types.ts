@@ -41,6 +41,23 @@ export interface UiRegionContribution {
   overflow?: boolean;
 }
 
+/**
+ * 命令面板条目：插件把自己的入口交给宿主的 ⌘K / 标题栏搜索。
+ *
+ * 只做导航（modeId 指向插件自己的页）：面板可能在任何页面被唤起，此时目标页的 worker
+ * 还没装载；在这里直接跑插件代码等于多了一个常驻执行面。动作留在页内，命令只负责带路。
+ */
+export interface CommandContribution {
+  /** 全局唯一 id（跨插件冲突检测的键）。 */
+  id: string;
+  title: string;
+  description?: string;
+  /** 目标插件页：/plugin/:modeId。 */
+  modeId: string;
+  /** 归属插件 id（冲突提示与展示用）。 */
+  pluginId: string;
+}
+
 export interface PluginManifest {
   /** 如 "core.views" */
   id: string;
@@ -57,6 +74,7 @@ export interface PluginManifest {
      * 不构成启用条件（启用门禁看根级 `requires`）。
      */
     capabilities?: string[];
+    commands?: CommandContribution[];
   };
   /** 其他 PluginManifest.id；loader 据此拓扑排序 */
   dependsOn?: string[];
@@ -78,5 +96,5 @@ export interface CapabilitySeam {
   activate(id: string): Promise<void>;
   /** 从快照摘除；被依赖时拒绝并抛错 */
   deactivate(id: string): Promise<void>;
-  snapshot(): Readonly<{ modes: ModeContribution[]; uiRegions: UiRegionContribution[] }>;
+  snapshot(): Readonly<{ modes: ModeContribution[]; uiRegions: UiRegionContribution[]; commands: CommandContribution[] }>;
 }

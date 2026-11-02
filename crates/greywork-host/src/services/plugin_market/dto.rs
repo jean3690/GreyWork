@@ -179,6 +179,29 @@ pub struct DeclarativeContributions {
     /// 区域贡献（v2）：worker 包把渲染循环挂到宿主区域（shellSidebar/activityPanel）。
     #[serde(default)]
     pub ui_regions: Vec<MarketUiRegionContribution>,
+    /// 命令面板条目（v2）：声明式动作，命中后打开该包自己的某个 mode 页。
+    #[serde(default)]
+    pub commands: Vec<MarketCommand>,
+}
+
+/// 命令面板条目：**只做导航**，不携带可执行代码。
+///
+/// 为什么不让插件在这里挂 handler：⌘K 是「从任何地方跳过去」的入口，目标页可能还没装载
+/// worker；在面板里跑一段插件代码等于给了一个常驻的后台执行面。动作仍由目标页自己暴露，
+/// 命令只负责把用户带过去（mode 缺省 = 该包的第一个 mode）。
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarketCommand {
+    /// 全局唯一 id（宿主侧跨插件冲突检测的键）。
+    pub id: String,
+    /// 面板里的显示名（1-60 字符）。
+    pub title: String,
+    /// 可选的补充说明（≤120 字符）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// 要打开的 mode id；缺省取该包的第一个 mode。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

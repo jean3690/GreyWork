@@ -3,9 +3,9 @@ use sha2::{Digest, Sha256};
 use super::dto::{
     CapabilityRequirement, CodePluginRuntime, DeclarativeAction, DeclarativeContributions,
     DeclarativeField, DeclarativeMode, DeclarativeOperation, DeclarativeOutput, DeclarativePage,
-    ManifestMcpServerRef, ManifestSchedule, ManifestScheduleKind, MarketPluginManifest,
-    MarketRegionAction, MarketUiRegionContribution, PluginKind, PluginPackage, PluginRegistry,
-    PluginRegistryEntry, PluginWindowDecl, RenderLoop,
+    ManifestMcpServerRef, ManifestSchedule, ManifestScheduleKind, MarketCommand,
+    MarketPluginManifest, MarketRegionAction, MarketUiRegionContribution, PluginKind,
+    PluginPackage, PluginRegistry, PluginRegistryEntry, PluginWindowDecl, RenderLoop,
 };
 use super::install::{install_package_at, list_installed_at};
 use super::net_fetch::validate_plugin_fetch_url;
@@ -65,6 +65,7 @@ fn demo_package() -> PluginPackage {
                     },
                 }],
                 ui_regions: Vec::new(),
+                commands: Vec::new(),
             },
         },
         code: None,
@@ -1504,4 +1505,46 @@ fn window_v2_fields_are_optional_and_bounded() {
     assert!(window_package(decl(None, Some(0.19))).is_err());
     assert!(window_package(decl(None, Some(1.1))).is_err());
     assert!(window_package(decl(None, Some(f32::NAN))).is_err());
+}
+
+/// 命令面板条目：声明式导航，必须指向本包声明过的 mode。
+#[test]
+fn command_contributions_are_bounded_and_must_target_a_declared_mode() {
+    let with_commands = |commands: Vec<MarketCommand>| {
+        let mut package = demo_package();
+        package.manifest.contributes.commands = commands;
+        validate_package(&package)
+    };
+    let command = |id: &str, title: &str, mode: Option<&str>| MarketCommand {
+        id: id.into(),
+        title: title.into(),
+        description: Some("喂食 / 抚摸".into()),
+        mode: mode.map(str::to_string),
+    };
+
+    with_commands(vec![command("feed", "喂食", Some("demo-counter"))]).expect("指向已有 mode");
+    // mode 缺省 = 第一个 mode（包里有 mode 就合法）。
+    with_commands(vec![command("pet", "摸摸", None)]).expect("缺省取第一个 mode");
+
+    // 指向不存在的 mode：拒绝（否则点下去只有空白路由）。
+    let error = with_commands(vec![command("feed", "喂食", Some("nope"))]).unwrap_err();
+    assert!(error.contains("unknown mode"), "{error}");
+
+    // 空 / 超长 / 控制字符标题。
+    assert!(with_commands(vec![command("feed", "   ", None)]).is_err());
+    let long = "标".repeat(61);
+    assert!(with_commands(vec![command("feed", &long, None)]).is_err());
+    assert!(with_commands(vec![command("feed", "a\u{7}b", None)]).is_err());
+
+    // 重复 id、非法 id、超过 16 条。
+    assert!(with_commands(vec![
+        command("feed", "喂食", None),
+        command("feed", "再喂", None)
+    ])
+    .is_err());
+    assert!(with_commands(vec![command("Bad Id", "x", None)]).is_err());
+    let many: Vec<MarketCommand> = (0..17)
+        .map(|index| command(&format!("cmd-{index}"), "x", None))
+        .collect();
+    assert!(with_commands(many).is_err());
 }

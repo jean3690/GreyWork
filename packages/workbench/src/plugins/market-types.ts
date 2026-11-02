@@ -56,6 +56,14 @@ export interface PluginWindowDecl {
   multiple?: boolean;
 }
 
+/** 命令面板条目（v2）：只做导航，目标页由 mode 指定（缺省第一个 mode）。 */
+export interface PluginCommandDecl {
+  id: string;
+  title: string;
+  description?: string;
+  mode?: string;
+}
+
 export interface MarketPluginManifest {
   id: string;
   name: string;
@@ -76,6 +84,8 @@ export interface MarketPluginManifest {
      * 内容 = runtime.render 的 handler 指令流 + 可选动作按钮；无 Vue 代码。
      */
     uiRegions?: MarketUiRegionContribution[];
+    /** 命令面板条目（v2）：出现在 ⌘K / 标题栏搜索里，命中后打开本包的 mode 页。 */
+    commands?: PluginCommandDecl[];
   };
 }
 

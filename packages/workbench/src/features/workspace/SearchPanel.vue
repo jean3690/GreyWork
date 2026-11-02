@@ -51,6 +51,8 @@ const index = computed<SearchItem[]>(() =>
       messages: session.messages,
     })),
     navItems: buildNavItems(useCapabilityLoader().snapshot().modes),
+    // 插件命令：同一份 seam 快照，插件停用/卸载即从索引里消失（无需额外清理钩子）。
+    commands: useCapabilityLoader().snapshot().commands,
     settingsSections: SETTINGS_SECTIONS.map((section) => ({
       key: section.key,
       title: t(`settings.sections.${section.key}.title`),
@@ -71,8 +73,15 @@ const results = computed<SearchItem[]>(() =>
 /** 会话专属筛选（状态 / 工作区）只在没选「功能」时才有意义。 */
 const sessionFiltersVisible = computed(() => typeFilter.value !== "feature");
 
-const KIND_ORDER: readonly SearchKind[] = ["session", "nav", "settings"];
-const KIND_ICON: Record<SearchKind, string> = { session: "message", nav: "magic", settings: "setting" };
+const KIND_ORDER: readonly SearchKind[] = ["session", "command", "nav", "settings"];
+const KIND_ICON: Record<SearchKind, string> = { session: "message", command: "lightning", nav: "magic", settings: "setting" };
+/** 分组标题的 i18n key（会话复用它已有的类型文案）。 */
+const KIND_LABEL: Record<SearchKind, string> = {
+  session: "search.type.session",
+  command: "search.kind.command",
+  nav: "search.kind.nav",
+  settings: "search.kind.settings",
+};
 
 /** 分组渲染；键盘导航用同一顺序的扁平表。 */
 const groups = computed(() =>
@@ -258,9 +267,7 @@ function focusInput(event: Event): void {
       <template v-for="group in groups" :key="group.kind">
         <div class="flex items-center gap-1.5 px-3 pt-2 pb-1 text-[10px] tracking-wide text-dim2 uppercase">
           <Icon :name="KIND_ICON[group.kind]" :size="10" />
-          {{
-            group.kind === "session" ? t("search.type.session") : group.kind === "nav" ? t("search.kind.nav") : t("search.kind.settings")
-          }}
+          {{ t(KIND_LABEL[group.kind]) }}
         </div>
         <button
           v-for="item in group.items"

@@ -11,7 +11,7 @@
  */
 import type { SessionStatus } from "./session-status";
 
-export type SearchKind = "session" | "nav" | "settings";
+export type SearchKind = "session" | "command" | "nav" | "settings";
 /** 用户可见的筛选大类：会话 vs 功能入口。 */
 export type SearchType = "session" | "feature";
 
@@ -43,6 +43,7 @@ export interface SearchFilters {
 
 const KIND_TYPE: Record<SearchKind, SearchType> = {
   session: "session",
+  command: "feature",
   nav: "feature",
   settings: "feature",
 };
@@ -113,6 +114,9 @@ export function sessionKeywords(messages: readonly { content: string }[]): strin
 export interface BuildSearchItemsInput {
   sessions: readonly { id: string; title: string; workspaceId: string | null; messages: readonly { content: string }[] }[];
   navItems: readonly { path: string; label: string }[];
+  /** 插件命令面板条目（插件贡献，命中后打开它自己的 mode 页）。 */
+  commands?: readonly { pluginId: string; id: string; title: string; description?: string; modeId: string }[];
+
   settingsSections: readonly { key: string; title: string; description?: string }[];
   /** 会话状态查询（由调用方注入 useSessionStatus，保持本模块纯净）。 */
   statusOf: (id: string) => SessionStatus;
@@ -139,6 +143,16 @@ export function buildSearchItems(input: BuildSearchItemsInput): SearchItem[] {
     path: item.path,
   }));
 
+  const commands: SearchItem[] = (input.commands ?? []).map((command) => ({
+    id: `command:${command.pluginId}:${command.id}`,
+    kind: "command",
+    label: command.title,
+    description: command.description,
+    path: `/plugin/${command.modeId}`,
+    // 插件 id 参与匹配：用户记得「那个宠物插件」比记得命令名更容易。
+    keywords: command.pluginId,
+  }));
+
   const settings: SearchItem[] = input.settingsSections.map((section) => ({
     id: `settings:${section.key}`,
     kind: "settings",
@@ -147,5 +161,5 @@ export function buildSearchItems(input: BuildSearchItemsInput): SearchItem[] {
     section: section.key,
   }));
 
-  return [...sessions, ...nav, ...settings];
+  return [...sessions, ...commands, ...nav, ...settings];
 }

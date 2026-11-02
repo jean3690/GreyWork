@@ -30,7 +30,7 @@ export class DuplicatePluginError extends Error {
   }
 }
 export class ContributionConflictError extends Error {
-  constructor(kind: "mode" | "uiRegion", id: string, ownerId: string) {
+  constructor(kind: "mode" | "uiRegion" | "command", id: string, ownerId: string) {
     super(`${kind} contribution id already registered: ${id} (owned by ${ownerId})`);
     this.name = "ContributionConflictError";
   }
@@ -110,6 +110,9 @@ function manifestToPlugin(manifest: PluginManifest): Plugin.Object<Context> {
       for (const region of manifest.contributes?.uiRegions ?? []) {
         ctx.effect(() => ctx.seam.registerUiRegion(region));
       }
+      for (const command of manifest.contributes?.commands ?? []) {
+        ctx.effect(() => ctx.seam.registerCommand(command));
+      }
       for (const capability of manifest.contributes?.capabilities ?? []) {
         ctx.effect(() => ctx.seam.registerCapability(capability));
       }
@@ -174,9 +177,12 @@ export function createCapabilityLoader(): CapabilityLoader {
   function assertContributionIds(candidate: PluginManifest): void {
     const claimedModes = new Map<string, string>();
     const claimedRegions = new Map<string, string>();
+    const claimedCommands = new Map<string, string>();
     for (const manifest of manifestById.values()) {
       for (const mode of manifest.contributes?.modes ?? []) claimedModes.set(mode.id, manifest.id);
       for (const region of manifest.contributes?.uiRegions ?? []) claimedRegions.set(region.id, manifest.id);
+      // 命令是全局命名空间（⌘K 一张表）：跨插件重名会让用户点中「另一家的同名动作」。
+      for (const command of manifest.contributes?.commands ?? []) claimedCommands.set(command.id, manifest.id);
     }
 
     const ownModes = new Set<string>();
@@ -191,6 +197,13 @@ export function createCapabilityLoader(): CapabilityLoader {
       const owner = claimedRegions.get(region.id) ?? (ownRegions.has(region.id) ? candidate.id : undefined);
       if (owner) throw new ContributionConflictError("uiRegion", region.id, owner);
       ownRegions.add(region.id);
+    }
+
+    const ownCommands = new Set<string>();
+    for (const command of candidate.contributes?.commands ?? []) {
+      const owner = claimedCommands.get(command.id) ?? (ownCommands.has(command.id) ? candidate.id : undefined);
+      if (owner) throw new ContributionConflictError("command", command.id, owner);
+      ownCommands.add(command.id);
     }
   }
 

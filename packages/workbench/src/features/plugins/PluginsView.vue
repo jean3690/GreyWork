@@ -64,6 +64,10 @@ const contributedModes = computed(() => loader.snapshot().modes.map((mode) => ({
 const contributedRegions = computed(() =>
   loader.snapshot().uiRegions.map((region) => ({ region: region.region, id: region.id, title: region.title })),
 );
+/** 命令面板条目（归属插件 + 标题），同一响应式来源。 */
+const contributedCommands = computed(() =>
+  loader.snapshot().commands.map((command) => ({ pluginId: command.pluginId, id: command.id, title: command.title })),
+);
 
 const busyId = ref<string | null>(null);
 /** 停用 core.plugins（自身）前的两步确认。 */
@@ -738,6 +742,13 @@ async function confirmUninstall(): Promise<void> {
       <span v-for="mode in contributedModes" :key="mode.id" :data-testid="`mode-chip-${mode.id}`">{{ mode.title }}</span>
       <span v-for="region in contributedRegions" :key="region.id" :data-testid="`region-chip-${region.region}-${region.id}`">
         {{ region.region }} · {{ region.title }}
+      </span>
+      <span
+        v-for="command in contributedCommands"
+        :key="`${command.pluginId}:${command.id}`"
+        :data-testid="`command-chip-${command.pluginId}-${command.id}`"
+      >
+        {{ command.title }}
       </span>
     </div>
 

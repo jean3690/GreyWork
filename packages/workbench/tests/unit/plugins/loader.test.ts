@@ -214,3 +214,49 @@ describe("capability loader", () => {
     expect(loader.isCapabilityGranted("ext.plain", "net.fetch")).toBe(false);
   });
 });
+
+const commandPlugin = (id: string, commands: Array<{ id: string; title: string }>): PluginManifest => ({
+  id,
+  name: id,
+  version: "0.1.0",
+  contributes: {
+    modes: [{ id: `${id}-page`, title: id, component: Dummy }],
+    commands: commands.map((command) => ({
+      id: command.id,
+      title: command.title,
+      modeId: `${id}-page`,
+      pluginId: id,
+    })),
+  },
+});
+
+describe("命令面板贡献", () => {
+  it("激活后进快照、停用后消失（面板与视图读同一份 seam）", async () => {
+    const loader = createCapabilityLoader();
+    loader.register(commandPlugin("ext.pet", [{ id: "feed", title: "喂猫" }]));
+    await loader.activate("ext.pet");
+
+    expect(loader.snapshot().commands).toEqual([{ id: "feed", title: "喂猫", modeId: "ext.pet-page", pluginId: "ext.pet" }]);
+
+    await loader.deactivate("ext.pet");
+    expect(loader.snapshot().commands).toEqual([]);
+  });
+
+  it("命令 id 是全局命名空间：跨插件重名被拒", () => {
+    const loader = createCapabilityLoader();
+    loader.register(commandPlugin("ext.a", [{ id: "feed", title: "喂猫" }]));
+    expect(() => loader.register(commandPlugin("ext.b", [{ id: "feed", title: "喂狗" }]))).toThrow(ContributionConflictError);
+  });
+
+  it("同包内重复命令 id 也被拒", () => {
+    const loader = createCapabilityLoader();
+    expect(() =>
+      loader.register(
+        commandPlugin("ext.dup", [
+          { id: "feed", title: "喂猫" },
+          { id: "feed", title: "再喂" },
+        ]),
+      ),
+    ).toThrow(ContributionConflictError);
+  });
+});
