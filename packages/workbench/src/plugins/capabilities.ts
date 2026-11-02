@@ -37,6 +37,8 @@ export interface CapabilityCallContext {
     schedule?: ManifestScheduleDeclaration;
     models?: string[];
     ops?: string[];
+    /** mcp.connect：按名字引用的服务器 + 工具白名单。 */
+    servers?: ManifestMcpServerRef[];
   };
   /** 审计写入（能力实现内部在关键决策点调用）。 */
   audit(entry: CapabilityAuditEntry): void;
@@ -48,6 +50,19 @@ export interface ManifestScheduleDeclaration {
   kind: "interval";
   /** 最小触发间隔（分钟），5..1440。 */
   min: number;
+}
+
+/**
+ * mcp.connect 的一台服务器引用：**按名字引用用户在设置页已配置的服务器**。
+ *
+ * 为什么不让插件自带 url / command / env：那等于给沙箱插件「连任意地址」或「自带凭据」
+ * 的权限。连接参数永远由宿主从设置里取，插件只点名。
+ */
+export interface ManifestMcpServerRef {
+  /** 与设置页里的服务器 name 一致。 */
+  name: string;
+  /** 允许调用的工具名（1-16 条；空 = 不授权任何工具）。 */
+  tools: string[];
 }
 
 /**
@@ -66,6 +81,7 @@ export type CapabilityGrantSpec =
       schedule?: ManifestScheduleDeclaration;
       models?: string[];
       ops?: string[];
+      servers?: ManifestMcpServerRef[];
     };
 
 /** 归一化：把 requires 项映成 { capability, params }。 */
@@ -78,6 +94,7 @@ export function normalizeGrantSpec(spec: CapabilityGrantSpec): {
   schedule?: ManifestScheduleDeclaration;
   models?: string[];
   ops?: string[];
+  servers?: ManifestMcpServerRef[];
 } {
   return typeof spec === "string"
     ? { capability: spec }
@@ -90,6 +107,7 @@ export function normalizeGrantSpec(spec: CapabilityGrantSpec): {
         schedule: spec.schedule,
         models: spec.models,
         ops: spec.ops,
+        servers: spec.servers,
       };
 }
 
@@ -1257,6 +1275,161 @@ const llmChatCapability: CapabilityDefinition = {
 };
 
 // ---------------------------------------------------------------------------
+// mcp.connect 传输（连接参数由宿主从设置解析；插件只有服务器名与工具名）
+// ---------------------------------------------------------------------------
+
+/** 一次 MCP 工具调用：服务器与工具已在能力层按 manifest 白名单校验过。 */
+export interface PluginMcpCallRequest {
+  pluginId: string;
+  server: string;
+  tool: string;
+  arguments?: Record<string, unknown>;
+  /** 能力层按 manifest 校验过的工具白名单：宿主侧再复核一次（纵深防御）。 */
+  allowedTools: string[];
+}
+
+/** 宿主回传的正文（content 里的图片 / base64 由宿主丢弃，worker 只拿文本）。 */
+export interface PluginMcpCallResponse {
+  transport: string;
+  isError: boolean;
+  text: string;
+  durationMs: number;
+}
+
+/**
+ * mcp.connect 传输层：由外壳注入。宿主按**用户设置**里的同名服务器解析 transport /
+ * url / command / env / headers，再走 `plugin_mcp_call`（宿主侧再复核一遍工具白名单，
+ * 并把超时收紧到 30s / 封顶 60s）。插件既看不到凭据，也指定不了要连哪台机器。
+ * 无宿主（web 预览）时调用失败并记 denied 审计。
+ */
+export type PluginMcpTransport = (request: PluginMcpCallRequest) => Promise<PluginMcpCallResponse>;
+
+let mcpTransport: PluginMcpTransport | null = null;
+
+export function setPluginMcpTransportForHost(transport: PluginMcpTransport | null): void {
+  mcpTransport = transport;
+}
+
+// ---------------------------------------------------------------------------
+// 能力实现：mcp.connect
+// ---------------------------------------------------------------------------
+
+/** 单次 arguments 的 JSON 字节上限（与宿主 MAX_PLUGIN_MCP_ARGUMENT_BYTES 同一口径）。 */
+const MCP_MAX_ARGUMENT_BYTES = 16 * 1024;
+/** 服务器名 / 工具名长度上限（与 manifest 校验一致）。 */
+const MCP_MAX_SERVER_NAME_CHARS = 64;
+const MCP_MAX_TOOL_CHARS = 128;
+/** 限速：1 分钟 30 次。MCP 调用会启动子进程 / 打远端，比纯前端能力更贵。 */
+const MCP_WINDOW_MS = 60_000;
+const MCP_MAX_CALLS_PER_WINDOW = 30;
+
+const mcpWindows = new Map<string, number[]>();
+
+function takeMcpToken(pluginId: string): boolean {
+  const now = Date.now();
+  const window = (mcpWindows.get(pluginId) ?? []).filter((ts) => now - ts < MCP_WINDOW_MS);
+  if (window.length >= MCP_MAX_CALLS_PER_WINDOW) {
+    mcpWindows.set(pluginId, window);
+    return false;
+  }
+  window.push(now);
+  mcpWindows.set(pluginId, window);
+  return true;
+}
+
+/** 测试钩子：清空限速窗口。 */
+export function resetMcpRateLimitForTest(): void {
+  mcpWindows.clear();
+}
+
+interface McpCallArgs {
+  server: string;
+  tool: string;
+  arguments?: Record<string, unknown>;
+}
+
+function isMcpCallArgs(value: unknown): value is McpCallArgs {
+  if (typeof value !== "object" || value === null) return false;
+  const args = value as Record<string, unknown>;
+  if (typeof args.server !== "string" || args.server.trim() === "") return false;
+  if (args.server.length > MCP_MAX_SERVER_NAME_CHARS) return false;
+  if (typeof args.tool !== "string" || args.tool.trim() === "") return false;
+  if (args.tool.length > MCP_MAX_TOOL_CHARS) return false;
+  if (args.arguments === undefined) return true;
+  const payload = args.arguments;
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return false;
+  // 与宿主同口径：按 UTF-8 字节算（JSON 字符串长度是 UTF-16 码元，中文会低估）。
+  try {
+    return new TextEncoder().encode(JSON.stringify(payload)).length <= MCP_MAX_ARGUMENT_BYTES;
+  } catch {
+    // 循环引用 / 不可序列化：按参数非法拒绝。
+    return false;
+  }
+}
+
+const mcpConnectCapability: CapabilityDefinition = {
+  id: "mcp.connect",
+  title: "调用 MCP 工具",
+  description:
+    "调用用户在设置页配置的 MCP 服务器上的工具。插件只能在 manifest 里**按名字引用**服务器并显式列出工具（1-4 台、每台 1-16 个工具），连接参数与凭据全部由宿主从设置解析 —— 插件拿不到、也改不了。只支持 http / stdio 传输（sse 请声明给 agent 自己连）；单次 arguments ≤ 16 KiB，每插件 1 分钟最多 30 次，返回只给正文。",
+  danger: "high",
+  async invoke(args, ctx) {
+    const audit = (outcome: "ok" | "denied" | "error", detail: string): void => {
+      ctx.audit({
+        plugin: ctx.pluginId,
+        capability: "mcp.connect",
+        at: new Date().toISOString(),
+        outcome,
+        detail: detail.slice(0, 200),
+      });
+    };
+    if (!isMcpCallArgs(args)) {
+      audit("denied", "invalid args (server / tool / arguments shape)");
+      throw new Error(`mcp.connect requires { server: string, tool: string, arguments?: object ≤ ${MCP_MAX_ARGUMENT_BYTES} bytes }`);
+    }
+    // 白名单来自 manifest（安装期 Rust 侧已校验）：缺声明一律拒绝，不回落「全部服务器」。
+    const servers = ctx.grant.servers ?? [];
+    if (!servers.length) {
+      audit("denied", "manifest declared no servers allowlist");
+      throw new Error("mcp.connect requires a servers allowlist in the plugin manifest");
+    }
+    const serverName = args.server.trim();
+    const server = servers.find((entry) => entry.name.trim() === serverName);
+    if (!server) {
+      audit("denied", `server not in allowlist: ${serverName}`);
+      throw new Error(`mcp.connect server not allowed: ${serverName} (allowed: ${servers.map((entry) => entry.name).join(", ")})`);
+    }
+    const tool = args.tool.trim();
+    if (!server.tools.some((allowed) => allowed.trim() === tool)) {
+      audit("denied", `tool not in allowlist: ${serverName}/${tool}`);
+      throw new Error(`mcp.connect tool not allowed: ${tool} (allowed on ${serverName}: ${server.tools.join(", ")})`);
+    }
+    if (!mcpTransport) {
+      audit("denied", "no host transport: mcp.connect requires the desktop/server host");
+      throw new Error("mcp.connect requires a desktop or server host");
+    }
+    if (!takeMcpToken(ctx.pluginId)) {
+      audit("denied", `rate limit exceeded (${MCP_MAX_CALLS_PER_WINDOW}/window)`);
+      throw new Error(`mcp.connect rate limit exceeded (${MCP_MAX_CALLS_PER_WINDOW} per ${MCP_WINDOW_MS / 60_000} minute)`);
+    }
+    try {
+      const response = await mcpTransport({
+        pluginId: ctx.pluginId,
+        server: serverName,
+        tool,
+        arguments: args.arguments,
+        allowedTools: server.tools,
+      });
+      audit("ok", `${serverName}/${tool} · ${response.text.length} chars${response.isError ? " (tool error)" : ""}`);
+      return { transport: response.transport, isError: response.isError, text: response.text };
+    } catch (error) {
+      audit("error", (error instanceof Error ? error.message : String(error)).slice(0, 200));
+      throw error;
+    }
+  },
+};
+
+// ---------------------------------------------------------------------------
 // artifacts.publish 传输（产物面板；前端能力，浏览器态同样可用）
 // ---------------------------------------------------------------------------
 
@@ -1523,6 +1696,7 @@ export const CAPABILITY_REGISTRY: Readonly<Record<string, CapabilityDefinition>>
   [fsScopedCapability.id]: fsScopedCapability,
   [workspaceReadCapability.id]: workspaceReadCapability,
   [llmChatCapability.id]: llmChatCapability,
+  [mcpConnectCapability.id]: mcpConnectCapability,
   [artifactsPublishCapability.id]: artifactsPublishCapability,
   [clipboardCapability.id]: clipboardCapability,
   [notifyCapability.id]: notifyCapability,

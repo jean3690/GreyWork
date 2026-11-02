@@ -12,6 +12,7 @@ import {
   capabilityTitle,
   normalizeGrantSpec,
   recordCapabilityAudit,
+  type ManifestMcpServerRef,
   type ManifestScheduleDeclaration,
 } from "./capabilities";
 
@@ -246,6 +247,7 @@ export function createCapabilityLoader(): CapabilityLoader {
     schedule?: ManifestScheduleDeclaration;
     models?: string[];
     ops?: string[];
+    servers?: ManifestMcpServerRef[];
   } | null {
     for (const spec of manifestById.get(id)?.requires ?? []) {
       const grant = normalizeGrantSpec(spec);

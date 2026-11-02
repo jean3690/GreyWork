@@ -106,19 +106,20 @@ Capabilities are **granted per plugin**: authorizing `net.fetch` for plugin A ne
 plugin B. A plugin only gets a capability if it is (1) declared in `requires`, (2) authorized by the
 user, and (3) registered in the host catalog (`packages/workbench/src/plugins/capabilities.ts`).
 
-| Capability          | Danger | Declared as                                                                                                                         | Notes                                                                                                                                                                    |
-| ------------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `net.fetch`         | medium | `{ "capability": "net.fetch", "hosts": ["api.github.com"], "methods": ["GET","POST"], "paths": ["/graphql"], "maxBytes": 4194304 }` | HTTPS requests; `GET`/`HEAD` by default, opt-in `POST` limited to declared path templates; 30 calls/min; 1 MiB per request/response by default (≤8 MiB)                  |
-| `storage.kv`        | low    | `"storage.kv"`                                                                                                                      | Plugin-scoped KV: `get`/`set`/`remove`/`list`/`clear`, any JSON value, 256 KiB per plugin / 64 KiB per value                                                             |
-| `fs.scoped`         | medium | `"fs.scoped"`                                                                                                                       | Plugin-private file area: `read`/`write`/`remove`/`list`/`stat`, relative paths only, symlinks refused, 1 MiB per file / 8 MiB per plugin                                |
-| `workspace.read`    | high   | `"workspace.read"`                                                                                                                  | Read-only access to user-authorized workspace roots: `roots` lists them, `read` previews text files (≤256 KiB, truncated; binary/dirs refused); desktop/server host only |
-| `llm.chat`          | high   | `{ "capability": "llm.chat", "models": ["gpt-4o-mini"] }`                                                                           | One-shot completion (`prompt`, optional `system`/`model`); credentials stay host-side, the host resolves the configured provider; 8 KiB prompt, 20 calls/10 min          |
-| `artifacts.publish` | medium | `"artifacts.publish"`                                                                                                               | Publish text artifacts (`md`/`html`/`csv`) into the artifact panel; ≤256 KiB, 20 calls/10 min; HTML renders without scripts                                              |
-| `clipboard`         | medium | `"clipboard"` (write) / `{ "capability": "clipboard", "ops": ["read","write"] }`                                                    | Read/write the system clipboard; **read is denied by default** and must be declared via `ops`; ≤64 KiB per call, 20 calls/min, reads audited by length only              |
-| `notify`            | low    | `"notify"`                                                                                                                          | System notification `{ title, body }`; title gets a `[plugin-id] ` attribution prefix, 10 calls/min, desktop host only                                                   |
-| `schedule`          | low    | `{ "capability": "schedule", "schedule": { "kind": "interval", "min": 5 } }`                                                        | Host-driven background wakeups: fires `registerSchedule` while a mount surface is alive, 5-1440 min interval, catch-up once on reactivation                              |
-| `window.floating`   | medium | `"window.floating"`                                                                                                                 | Host-managed transparent always-on-top window rendering the render loop                                                                                                  |
-| `plugin-admin`      | high   | `"plugin-admin"`                                                                                                                    | Host trust mark for built-ins; not callable from plugin code                                                                                                             |
+| Capability          | Danger | Declared as                                                                                                                         | Notes                                                                                                                                                                                                                     |
+| ------------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `net.fetch`         | medium | `{ "capability": "net.fetch", "hosts": ["api.github.com"], "methods": ["GET","POST"], "paths": ["/graphql"], "maxBytes": 4194304 }` | HTTPS requests; `GET`/`HEAD` by default, opt-in `POST` limited to declared path templates; 30 calls/min; 1 MiB per request/response by default (≤8 MiB)                                                                   |
+| `storage.kv`        | low    | `"storage.kv"`                                                                                                                      | Plugin-scoped KV: `get`/`set`/`remove`/`list`/`clear`, any JSON value, 256 KiB per plugin / 64 KiB per value                                                                                                              |
+| `fs.scoped`         | medium | `"fs.scoped"`                                                                                                                       | Plugin-private file area: `read`/`write`/`remove`/`list`/`stat`, relative paths only, symlinks refused, 1 MiB per file / 8 MiB per plugin                                                                                 |
+| `workspace.read`    | high   | `"workspace.read"`                                                                                                                  | Read-only access to user-authorized workspace roots: `roots` lists them, `read` previews text files (≤256 KiB, truncated; binary/dirs refused); desktop/server host only                                                  |
+| `llm.chat`          | high   | `{ "capability": "llm.chat", "models": ["gpt-4o-mini"] }`                                                                           | One-shot completion (`prompt`, optional `system`/`model`); credentials stay host-side, the host resolves the configured provider; 8 KiB prompt, 20 calls/10 min                                                           |
+| `mcp.connect`       | high   | `{ "capability": "mcp.connect", "servers": [{ "name": "fs", "tools": ["read_file"] }] }`                                            | Call tools on **MCP servers the user already configured in Settings**, referenced by name; 1-4 servers, 1-16 tools each; http + stdio only (sse stays agent-only); ≤16 KiB arguments, 30 calls/min, 30s timeout (60s cap) |
+| `artifacts.publish` | medium | `"artifacts.publish"`                                                                                                               | Publish text artifacts (`md`/`html`/`csv`) into the artifact panel; ≤256 KiB, 20 calls/10 min; HTML renders without scripts                                                                                               |
+| `clipboard`         | medium | `"clipboard"` (write) / `{ "capability": "clipboard", "ops": ["read","write"] }`                                                    | Read/write the system clipboard; **read is denied by default** and must be declared via `ops`; ≤64 KiB per call, 20 calls/min, reads audited by length only                                                               |
+| `notify`            | low    | `"notify"`                                                                                                                          | System notification `{ title, body }`; title gets a `[plugin-id] ` attribution prefix, 10 calls/min, desktop host only                                                                                                    |
+| `schedule`          | low    | `{ "capability": "schedule", "schedule": { "kind": "interval", "min": 5 } }`                                                        | Host-driven background wakeups: fires `registerSchedule` while a mount surface is alive, 5-1440 min interval, catch-up once on reactivation                                                                               |
+| `window.floating`   | medium | `"window.floating"`                                                                                                                 | Host-managed transparent always-on-top window rendering the render loop                                                                                                                                                   |
+| `plugin-admin`      | high   | `"plugin-admin"`                                                                                                                    | Host trust mark for built-ins; not callable from plugin code                                                                                                                                                              |
 
 `requires` is also the activation gate: enabling a plugin whose grants are missing fails with a
 `CapabilityRequiredError`, and the plugin center surfaces which capability still needs authorizing.
@@ -152,6 +153,14 @@ const file = await greywork.call("workspace.read", { op: "read", path: "README.m
 
 // One-shot model completion (model must be allowlisted in the manifest; credentials stay host-side)
 const { text } = await greywork.call("llm.chat", { prompt: "Summarize: …", system: "Be terse." });
+
+// MCP tool call: the server must be configured in Settings and named in the manifest;
+// connection params and credentials stay host-side, the plugin only names server + tool
+const { text, isError } = await greywork.call("mcp.connect", {
+  server: "fs",
+  tool: "read_file",
+  arguments: { path: "README.md" },
+});
 
 // Clipboard: writing is allowed by the plain grant, reading needs ops: ["read"]
 await greywork.call("clipboard", { op: "write", text: "copied by the plugin" });
@@ -236,6 +245,39 @@ const { text, model } = await greywork.call("llm.chat", {
   from plugin code.
 - 20 calls per 10 minutes per plugin, every call audited (`ok` / `denied` / `error`).
 - No host (web preview) means the call fails with a `denied` audit entry, same as `workspace.read`.
+
+### MCP tools
+
+`mcp.connect` lets a plugin call tools on an **MCP server the user already configured** (Settings →
+MCP). The manifest names the server and the exact tools; everything connection-shaped (URL, command,
+env, auth headers) is read from the user's settings by the host and never enters the worker.
+
+```jsonc
+"requires": [
+  { "capability": "mcp.connect", "servers": [{ "name": "fs", "tools": ["read_file", "list_dir"] }] }
+]
+```
+
+```js
+const { text, isError } = await greywork.call("mcp.connect", {
+  server: "fs",
+  tool: "read_file",
+  arguments: { path: "README.md" },
+});
+```
+
+- `servers` (required, 1-4 entries): each `{ name, tools }`, where `name` must equal the server name
+  in Settings. `tools` is mandatory (1-16 entries) — an empty list means "no tools", so there is no
+  way to ask for "everything on this server". The plain string form `"mcp.connect"` is rejected at
+  install time.
+- `arguments` must be a JSON object (≤16 KiB serialized). The host returns **text only** — image /
+  base64 content blocks are dropped so a single call cannot flood the worker.
+- Transports: `http` and `stdio`. `sse` servers can be declared for the agent to connect to, but
+  they are not proxied for plugins.
+- 30 calls per minute per plugin, 30s timeout (clamped to 60s), and the host re-checks the tool
+  allowlist independently of the renderer — the settings-backed grant is the first gate, not the only one.
+- A server that is disabled or renamed in Settings makes the call fail with a clear error; the plugin
+  has no way to fall back to another server.
 
 ### Publishing artifacts
 

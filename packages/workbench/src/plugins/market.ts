@@ -20,6 +20,7 @@ import {
   setPluginClipboardTransportForHost,
   setPluginFsTransportForHost,
   setPluginLlmChatTransportForHost,
+  setPluginMcpTransportForHost,
   setPluginNotifyTransportForHost,
   setPluginWorkspaceTransportForHost,
 } from "./capabilities";
@@ -92,6 +93,30 @@ export function initPluginHostTransport(): void {
       headers: provider.headers,
     });
     return { text, model: request.model };
+  });
+  // mcp.connect：manifest 只给服务器名，连接参数（url / command / env / headers）在这里
+  // 从**用户设置**里按名字解析。插件全程看不到凭据，也指定不了要连哪台机器。
+  setPluginMcpTransportForHost(async (request) => {
+    const { useSettingsStore } = await import("@/stores/settings");
+    const entry = useSettingsStore().mcpServers.find((server) => server.enabled && server.name.trim() === request.server.trim());
+    if (!entry) {
+      throw new Error(`mcp.connect: server is not configured or enabled in settings: ${request.server}`);
+    }
+    return invoke<{ transport: string; isError: boolean; text: string; durationMs: number }>("plugin_mcp_call", {
+      request: {
+        pluginId: request.pluginId,
+        server: entry.name,
+        transport: entry.transport,
+        url: entry.url,
+        command: entry.command,
+        args: entry.args,
+        env: entry.env,
+        headers: entry.headers,
+        tool: request.tool,
+        arguments: request.arguments,
+        allowedTools: request.allowedTools,
+      },
+    });
   });
   // notify 是**桌面专属**能力（Tauri / Electron）：只在有原生桌面壳时注册传输层。
   // 纯服务端（自托管 web）不注册，插件调用会按「无宿主」失败并记审计 —— 这正是

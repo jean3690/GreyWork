@@ -86,16 +86,31 @@ const installTarget = ref<{
     version: string;
     description?: string;
     kind?: string;
-    requires: Array<{ capability: string; hosts?: string[] }>;
+    requires: Array<{
+      capability: string;
+      hosts?: string[];
+      servers?: Array<{ name: string; tools: string[] }>;
+    }>;
   };
 } | null>(null);
 /** 升级请求标志：确认弹窗的「确认」按此分流到 install 或 upgrade。 */
 const isUpgradeRequest = ref(false);
 
+/**
+ * 能力参数的短摘要（chip / 安装弹窗共用）：net.fetch 是域名白名单，mcp.connect 是
+ * 「服务器(工具/工具)」。空摘要 = 该能力没有可展示的参数。
+ */
+function capabilityParams(params: { hosts?: string[]; servers?: Array<{ name: string; tools: string[] }> }): string {
+  if (params.hosts?.length) return params.hosts.join("、");
+  if (params.servers?.length) return params.servers.map((server) => `${server.name}(${server.tools.join("/")})`).join("、");
+  return "";
+}
+
 const installRequirements = computed(() =>
   (installTarget.value?.manifest.requires ?? []).map((grant) => ({
     capability: grant.capability,
     hosts: grant.hosts,
+    servers: grant.servers,
     title: capabilityTitle(grant.capability),
     danger: CAPABILITY_REGISTRY[grant.capability]?.danger ?? "high",
     description: CAPABILITY_REGISTRY[grant.capability]?.description ?? "未知能力（宿主未登记）",
@@ -187,8 +202,8 @@ const requiredCapabilitiesByPlugin = computed(() =>
       manifest.id,
       (manifest.requires ?? []).map((spec) =>
         typeof spec === "string"
-          ? { capability: spec, hosts: undefined as string[] | undefined }
-          : { capability: spec.capability, hosts: spec.hosts },
+          ? { capability: spec, hosts: undefined as string[] | undefined, servers: undefined }
+          : { capability: spec.capability, hosts: spec.hosts, servers: spec.servers },
       ),
     ]),
   ),
@@ -591,7 +606,7 @@ async function confirmUninstall(): Promise<void> {
                 <Hint
                   v-for="required in requiredCapabilitiesByPlugin[manifest.id]"
                   :key="required.capability"
-                  :text="required.hosts?.length ? `域名白名单：${required.hosts.join(', ')}` : null"
+                  :text="capabilityParams(required) || null"
                   multiline
                 >
                   <button
@@ -605,7 +620,7 @@ async function confirmUninstall(): Promise<void> {
                       toggleGrant(manifest.id, required.capability);
                     "
                   >
-                    {{ capabilityTitle(required.capability) }}{{ required.hosts?.length ? ` · ${required.hosts.join(", ")}` : "" }} ·
+                    {{ capabilityTitle(required.capability) }}{{ capabilityParams(required) ? ` · ${capabilityParams(required)}` : "" }} ·
                     {{ grantLabel(manifest.id, required.capability) }}
                   </button>
                 </Hint>
@@ -766,7 +781,9 @@ async function confirmUninstall(): Promise<void> {
             <code class="font-mono text-[9.5px] text-dim2">{{ required.capability }}</code>
           </div>
           <p class="mt-1 text-[11px] leading-relaxed text-dim">{{ required.description }}</p>
-          <p v-if="required.hosts?.length" class="mt-1 font-mono text-[10px] text-dim2">域名白名单：{{ required.hosts.join("、") }}</p>
+          <p v-if="capabilityParams(required)" class="mt-1 font-mono text-[10px] text-dim2">
+            {{ required.hosts?.length ? "域名白名单" : "MCP 服务器与工具" }}：{{ capabilityParams(required) }}
+          </p>
         </div>
         <p v-if="!installRequirements.length" class="text-[11px] text-dim2">无能力请求（纯声明式插件）。</p>
       </div>
