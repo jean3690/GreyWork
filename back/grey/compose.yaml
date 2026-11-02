@@ -1,27 +1,27 @@
 services:
   mysql:
-    image: 'mysql:8.4'
+    image: "mysql:8.4"
     environment:
-      - 'MYSQL_DATABASE=mydatabase'
-      - 'MYSQL_PASSWORD=secret'
-      - 'MYSQL_ROOT_PASSWORD=verysecret'
-      - 'MYSQL_USER=myuser'
+      - "MYSQL_DATABASE=mydatabase"
+      - "MYSQL_PASSWORD=secret"
+      - "MYSQL_ROOT_PASSWORD=verysecret"
+      - "MYSQL_USER=myuser"
     ports:
-      - '3306'
+      - "3306"
     volumes:
-      - 'mysql-data:/var/lib/mysql'
+      - "mysql-data:/var/lib/mysql"
     healthcheck:
-      test: ['CMD', 'mysqladmin', 'ping', '-h', '127.0.0.1', '-u', 'root', '-pverysecret']
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-pverysecret"]
       interval: 5s
       timeout: 3s
       retries: 20
 
   redis:
-    image: 'redis:7-alpine'
+    image: "redis:7-alpine"
     ports:
-      - '6379'
+      - "6379"
     healthcheck:
-      test: ['CMD', 'redis-cli', 'ping']
+      test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -29,14 +29,14 @@ services:
   # 对象存储（S3 兼容）。应用侧用 GREY_S3_ENDPOINT=http://127.0.0.1:9000 与这里的端口对齐，
   # 并把 GREY_S3_ACCESS_KEY / GREY_S3_SECRET_KEY 设成与下方一致。
   rustfs:
-    image: 'rustfs/rustfs:latest'
+    image: "rustfs/rustfs:latest"
     environment:
-      - 'RUSTFS_ACCESS_KEY=greywork'
-      - 'RUSTFS_SECRET_KEY=greywork-secret'
+      - "RUSTFS_ACCESS_KEY=greywork"
+      - "RUSTFS_SECRET_KEY=greywork-secret"
     ports:
-      - '9000'
+      - "9000"
     volumes:
-      - 'rustfs-data:/data'
+      - "rustfs-data:/data"
 
 volumes:
   mysql-data:
