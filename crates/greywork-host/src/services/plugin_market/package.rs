@@ -10,6 +10,11 @@ use super::validate::{
 };
 use super::{MAX_PLUGIN_FETCH_BYTES_CEILING, MIN_PLUGIN_FETCH_BYTES};
 
+/// 状态栏条目数上界（底部只有一条细栏）。
+const MAX_PLUGIN_STATUS_ITEMS: usize = 8;
+/// 状态栏文案长度上界。
+const STATUS_LABEL_MAX_CHARS: usize = 60;
+
 /// 插件设置项条数上界：设置中心是一页表单，不该被单个插件刷满。
 const MAX_PLUGIN_SETTINGS_FIELDS: usize = 16;
 
@@ -405,6 +410,57 @@ fn validate_mcp_connect_servers(servers: &[ManifestMcpServerRef]) -> Result<(), 
     Ok(())
 }
 
+/// 状态栏声明校验（安装期第一道门；运行时更新走 `greywork.setStatus`，不经过这里）。
+///
+/// 语义：最多 8 条、id 走 validate_key 且包内唯一；label 1-60 字符、无控制字符；
+/// mode 指向本包声明过的页面（缺省第一个）—— 点一条状态却没有可打开的页，等于死链。
+fn validate_status_bar(
+    manifest: &MarketPluginManifest,
+    mode_ids: &std::collections::HashSet<String>,
+) -> Result<(), String> {
+    let items = &manifest.contributes.status_bar;
+    if items.len() > MAX_PLUGIN_STATUS_ITEMS {
+        return Err(format!(
+            "statusBar must contain at most {MAX_PLUGIN_STATUS_ITEMS} entries"
+        ));
+    }
+    if !items.is_empty() && manifest.contributes.modes.is_empty() {
+        return Err("statusBar requires at least one mode to open".to_string());
+    }
+    let mut seen = std::collections::HashSet::new();
+    for item in items {
+        validate_key(&item.id, "status bar id")?;
+        if !seen.insert(&item.id) {
+            return Err(format!("duplicate status bar id in package: {}", item.id));
+        }
+        let label = item.label.trim();
+        if label.is_empty() {
+            return Err(format!("statusBar {} requires a label", item.id));
+        }
+        if label.chars().count() > STATUS_LABEL_MAX_CHARS {
+            return Err(format!(
+                "statusBar {} label exceeds {STATUS_LABEL_MAX_CHARS} characters",
+                item.id
+            ));
+        }
+        if label.chars().any(char::is_control) {
+            return Err(format!(
+                "statusBar {} label must not contain control characters",
+                item.id
+            ));
+        }
+        if let Some(mode) = &item.mode {
+            if !mode_ids.contains(mode) {
+                return Err(format!(
+                    "statusBar {} targets unknown mode: {mode}",
+                    item.id
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// 设置项校验：字段规则与页面字段完全同源（`validate_fields`），只多一个条数上限。
 ///
 /// 值落在插件自己的 `storage.kv` 命名空间里，因此 key 的形态、默认值类型、数值边界都沿用
@@ -705,6 +761,7 @@ pub(super) fn validate_package(package: &super::dto::PluginPackage) -> Result<()
     validate_commands(manifest, &mode_ids)?;
     validate_context_menu(manifest, &mode_ids)?;
     validate_settings_schema(&manifest.contributes.settings_schema)?;
+    validate_status_bar(manifest, &mode_ids)?;
 
     if let Some(window) = &manifest.window {
         if manifest.kind != PluginKind::Worker

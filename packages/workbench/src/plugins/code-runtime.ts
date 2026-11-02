@@ -48,6 +48,13 @@ interface WorkerHostCall {
   args: unknown;
 }
 
+/** 状态栏更新：单向消息，没有回执（丢了就等下一次更新，不值得加超时表）。 */
+interface WorkerStatusMessage {
+  type: "status";
+  id: string;
+  text: string;
+}
+
 interface WorkerResponse {
   type: "result";
   requestId: number;
@@ -76,7 +83,12 @@ export interface CodePluginRuntime {
   dispose(): void;
 }
 
-export type CodePluginRuntimeFactory = (pluginPackage: InstalledPluginPackage, callCapability: HostCapabilityCall) => CodePluginRuntime;
+export type CodePluginRuntimeFactory = (
+  pluginPackage: InstalledPluginPackage,
+  callCapability: HostCapabilityCall,
+  /** worker 主动推送的状态栏文案（`greywork.setStatus`）；未注入时消息被丢弃。 */
+  onStatus?: (id: string, text: string) => void,
+) => CodePluginRuntime;
 
 const INVOCATION_TIMEOUT_MS = 10_000;
 const HOST_CALL_TIMEOUT_MS = 20_000;
@@ -125,6 +137,15 @@ globalThis.greywork = Object.freeze({
       self.postMessage({ type: "host-call", requestId, capability, args });
     });
   },
+  // 状态栏更新：只覆盖 manifest 里声明过的条目，宿主侧按 id 过滤（未声明的 id 直接丢弃，
+  // 插件无法往别家条目上写）。文本会再经宿主限长与去控制字符。
+  setStatus(id, text) {
+    if (typeof id !== "string" || !/^[a-z0-9][a-z0-9._:-]{0,63}$/.test(id)) {
+      throw new TypeError("invalid GreyWork status id");
+    }
+    if (typeof text !== "string") throw new TypeError("GreyWork status text must be a string");
+    self.postMessage({ type: "status", id, text });
+  },
 });
 self.addEventListener("message", async (event) => {
   const message = event.data;
@@ -165,6 +186,7 @@ export function isPatch(value: unknown): value is CodePluginPatch | undefined {
 export function createWorkerCodePluginRuntime(
   pluginPackage: InstalledPluginPackage,
   callCapability: HostCapabilityCall,
+  onStatus?: (id: string, text: string) => void,
 ): CodePluginRuntime {
   if (pluginPackage.manifest.kind !== "worker" || !pluginPackage.code) {
     throw new Error(`plugin ${pluginPackage.manifest.id} has no installed worker code`);
@@ -189,7 +211,7 @@ export function createWorkerCodePluginRuntime(
     pendingHostCalls.clear();
   }
 
-  worker.addEventListener("message", (event: MessageEvent<WorkerResponse | WorkerHostCall>) => {
+  worker.addEventListener("message", (event: MessageEvent<WorkerResponse | WorkerHostCall | WorkerStatusMessage>) => {
     const message = event.data;
     if (!message) return;
     // 宿主能力调用：worker 内 greywork.call 的请求。宿主侧收口鉴权后回发结果；
@@ -230,6 +252,13 @@ export function createWorkerCodePluginRuntime(
           }
         },
       );
+      return;
+    }
+    if (message.type === "status") {
+      // id 由宿主再核一次（manifest 声明的条目才会被渲染）；这里只做字符串兜底。
+      if (typeof message.id === "string" && typeof message.text === "string") {
+        onStatus?.(message.id, message.text);
+      }
       return;
     }
     if (message.type !== "result") return;

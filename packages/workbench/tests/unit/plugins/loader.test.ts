@@ -296,3 +296,38 @@ describe("右键菜单贡献", () => {
     expect(() => loader.register(menuPlugin("ext.m2", [{ id: "open", label: "打开" }]))).toThrow(ContributionConflictError);
   });
 });
+
+describe("状态栏贡献", () => {
+  const statusPlugin = (id: string, entries: Array<{ id: string; label: string }>): PluginManifest => ({
+    id,
+    name: id,
+    version: "0.1.0",
+    contributes: {
+      modes: [{ id: `${id}-page`, title: id, component: Dummy }],
+      statusBar: entries.map((entry) => ({
+        id: entry.id,
+        label: entry.label,
+        modeId: `${id}-page`,
+        pluginId: id,
+      })),
+    },
+  });
+
+  it("激活后进快照、停用后消失", async () => {
+    const loader = createCapabilityLoader();
+    loader.register(statusPlugin("ext.status", [{ id: "sync", label: "上次成功 10:24" }]));
+    await loader.activate("ext.status");
+    expect(loader.snapshot().statusBar).toEqual([
+      { id: "sync", label: "上次成功 10:24", modeId: "ext.status-page", pluginId: "ext.status" },
+    ]);
+
+    await loader.deactivate("ext.status");
+    expect(loader.snapshot().statusBar).toEqual([]);
+  });
+
+  it("条目 id 跨插件重名被拒（setStatus 按 id 寻址，重名会更新到别家条目）", () => {
+    const loader = createCapabilityLoader();
+    loader.register(statusPlugin("ext.s1", [{ id: "sync", label: "x" }]));
+    expect(() => loader.register(statusPlugin("ext.s2", [{ id: "sync", label: "y" }]))).toThrow(ContributionConflictError);
+  });
+});

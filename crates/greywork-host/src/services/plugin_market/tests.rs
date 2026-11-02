@@ -4,8 +4,8 @@ use super::dto::{
     CapabilityRequirement, CodePluginRuntime, DeclarativeAction, DeclarativeContributions,
     DeclarativeField, DeclarativeMode, DeclarativeOperation, DeclarativeOutput, DeclarativePage,
     ManifestMcpServerRef, ManifestSchedule, ManifestScheduleKind, MarketCommand, MarketContextMenu,
-    MarketPluginManifest, MarketRegionAction, MarketUiRegionContribution, PluginKind,
-    PluginPackage, PluginRegistry, PluginRegistryEntry, PluginWindowDecl, RenderLoop,
+    MarketPluginManifest, MarketRegionAction, MarketStatusBar, MarketUiRegionContribution,
+    PluginKind, PluginPackage, PluginRegistry, PluginRegistryEntry, PluginWindowDecl, RenderLoop,
 };
 use super::install::{install_package_at, list_installed_at};
 use super::net_fetch::validate_plugin_fetch_url;
@@ -67,6 +67,7 @@ fn demo_package() -> PluginPackage {
                 ui_regions: Vec::new(),
                 commands: Vec::new(),
                 context_menu: Vec::new(),
+                status_bar: Vec::new(),
                 settings_schema: Vec::new(),
             },
         },
@@ -1645,4 +1646,35 @@ fn settings_schema_reuses_field_rules_and_is_bounded() {
         .map(|index| field(&format!("f-{index}"), "text", serde_json::json!("x")))
         .collect();
     assert!(with_schema(many).is_err());
+}
+
+/// 状态栏条目：id / 文案 / 目标页三条约束。
+#[test]
+fn status_bar_entries_are_bounded_and_target_declared_modes() {
+    let with_items = |items: Vec<MarketStatusBar>| {
+        let mut package = demo_package();
+        package.manifest.contributes.status_bar = items;
+        validate_package(&package)
+    };
+    let item = |id: &str, label: &str, mode: Option<&str>| MarketStatusBar {
+        id: id.into(),
+        label: label.into(),
+        mode: mode.map(str::to_string),
+    };
+
+    with_items(vec![item("sync", "上次成功 10:24", Some("demo-counter"))]).expect("合法条目");
+    with_items(vec![item("sync", "上次成功", None)]).expect("缺省取第一个 mode");
+
+    let error = with_items(vec![item("sync", "x", Some("nope"))]).unwrap_err();
+    assert!(error.contains("unknown mode"), "{error}");
+    assert!(with_items(vec![item("sync", "   ", None)]).is_err());
+    let long = "字".repeat(61);
+    assert!(with_items(vec![item("sync", &long, None)]).is_err());
+    assert!(with_items(vec![item("sync", "a\u{7}b", None)]).is_err());
+    assert!(with_items(vec![item("Bad Id", "x", None)]).is_err());
+    assert!(with_items(vec![item("sync", "x", None), item("sync", "y", None)]).is_err());
+    let many: Vec<MarketStatusBar> = (0..9)
+        .map(|index| item(&format!("s-{index}"), "x", None))
+        .collect();
+    assert!(with_items(many).is_err());
 }

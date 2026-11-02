@@ -185,6 +185,12 @@ pub struct DeclarativeContributions {
     /// 右键菜单条目（v2）：在文件树 / 预览 / 对话三处追加「打开插件」。
     #[serde(default)]
     pub context_menu: Vec<MarketContextMenu>,
+    /// 状态栏条目（v2）：常驻在窗口底部的一条细栏。
+    ///
+    /// label 是**初始文案**；插件运行时可用 `greywork.setStatus(id, text)` 更新（宿主只收纯文本，
+    /// 限长并过滤控制字符）。点击条目打开本包的 mode 页。
+    #[serde(default)]
+    pub status_bar: Vec<MarketStatusBar>,
     /// 设置项（v2）：插件把自己的配置表单放进设置中心。
     ///
     /// 值与 `storage.kv` 共用同一份命名空间（key 即字段 key），所以插件代码用
@@ -208,6 +214,21 @@ pub struct MarketContextMenu {
     /// 出现在哪些区域：fileTree / preview / conversation（1-3 条，不重复）。
     pub targets: Vec<String>,
     /// 要打开的 mode id；缺省取该包的第一个 mode。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+}
+
+/// 状态栏条目：id + 初始文案 + 可选目标页。
+///
+/// label 是初始值；运行时可被 `greywork.setStatus(id, text)` 覆盖（宿主侧限长、滤控制字符）。
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarketStatusBar {
+    /// 全局唯一 id（跨插件冲突检测与 setStatus 的寻址键）。
+    pub id: String,
+    /// 初始文案（1-60 字符）。
+    pub label: String,
+    /// 点击后打开的 mode id；缺省取该包的第一个 mode。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<String>,
 }

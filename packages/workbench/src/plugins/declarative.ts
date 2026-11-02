@@ -2,7 +2,14 @@ import { h, markRaw } from "vue";
 import DeclarativePluginView from "./DeclarativePluginView.vue";
 import PluginRegionHost from "@/features/plugins/PluginRegionHost.vue";
 import type { DeclarativeValue, InstalledPluginPackage } from "./market-types";
-import type { CommandContribution, ContextMenuContribution, PluginContextTarget, PluginManifest, UiRegionContribution } from "./types";
+import type {
+  CommandContribution,
+  ContextMenuContribution,
+  PluginContextTarget,
+  PluginManifest,
+  StatusBarContribution,
+  UiRegionContribution,
+} from "./types";
 import type { CodePluginRuntime, PluginPointerEvent } from "./code-runtime";
 import { effectiveRegionSchedule } from "./scheduler";
 import { isPluginCapabilityGranted } from "./runtime";
@@ -56,6 +63,15 @@ export function adaptInstalledPlugin(pluginPackage: InstalledPluginPackage, runt
       pluginId: source.id,
     }))
     .filter((entry) => entry.modeId !== "" && entry.targets.length > 0);
+  // 状态栏：与命令同一取舍 —— 条目只负责把用户带到插件页。
+  const statusBar: StatusBarContribution[] = (source.contributes.statusBar ?? [])
+    .map((entry) => ({
+      id: entry.id,
+      label: entry.label,
+      modeId: entry.mode ?? firstModeId ?? "",
+      pluginId: source.id,
+    }))
+    .filter((entry) => entry.modeId !== "");
   const commands: CommandContribution[] = (source.contributes.commands ?? [])
     .map((command) => ({
       id: command.id,
@@ -102,6 +118,7 @@ export function adaptInstalledPlugin(pluginPackage: InstalledPluginPackage, runt
       uiRegions,
       commands,
       contextMenu,
+      statusBar,
     },
   };
 }

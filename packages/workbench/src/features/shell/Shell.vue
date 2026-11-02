@@ -22,6 +22,7 @@ import { SHELL_WIRINGS, type ShellWiringContext } from "@/features/shell/wiring"
 import MinimalSider from "@/features/shell/MinimalSider.vue";
 import Titlebar from "@/features/shell/Titlebar.vue";
 import NoticeHost from "@/features/shell/NoticeHost.vue";
+import PluginStatusBar from "@/features/shell/PluginStatusBar.vue";
 import WorkspaceOverlayRegions from "@/features/shell/WorkspaceOverlayRegions.vue";
 
 /**
@@ -406,6 +407,8 @@ function handleNewChat(): void {
         <TerminalPanel v-if="terminal.available" />
       </div>
     </div>
+    <!-- 插件状态栏：底部通栏细条，只在有插件声明 statusBar 时出现（组件内部自判空）。 -->
+    <PluginStatusBar />
     <WorkspaceOverlayRegions />
     <NoticeHost />
     <!-- 无原生文件夹选择器时的手输路径弹层（见 lib/path-prompt 的由来）。 -->

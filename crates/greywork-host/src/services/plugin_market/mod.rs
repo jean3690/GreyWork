@@ -44,8 +44,9 @@ pub use dto::{
     CapabilityRequirement, CodePluginRuntime, DeclarativeAction, DeclarativeContributions,
     DeclarativeField, DeclarativeMode, DeclarativeOperation, DeclarativeOutput, DeclarativePage,
     ManifestMcpServerRef, ManifestSchedule, ManifestScheduleKind, MarketCommand, MarketContextMenu,
-    MarketPluginManifest, MarketRegionAction, MarketUiRegionContribution, PluginInstallReport,
-    PluginKind, PluginPackage, PluginRegistry, PluginRegistryEntry, PluginWindowDecl, RenderLoop,
+    MarketPluginManifest, MarketRegionAction, MarketStatusBar, MarketUiRegionContribution,
+    PluginInstallReport, PluginKind, PluginPackage, PluginRegistry, PluginRegistryEntry,
+    PluginWindowDecl, RenderLoop,
 };
 pub use net_fetch::{plugin_net_fetch, PluginFetchRequest, PluginFetchResponse};
 pub use package::declares_window_floating;

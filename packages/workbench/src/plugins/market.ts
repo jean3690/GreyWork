@@ -25,6 +25,7 @@ import {
   setPluginWorkspaceTransportForHost,
 } from "./capabilities";
 import { closePluginWindow } from "./plugin-window";
+import { setPluginStatus } from "./status";
 
 /**
  * 把 net.fetch 能力挂到宿主 IPC：Rust 侧对 hosts 白名单做二次校验（纵深防御），
@@ -228,7 +229,15 @@ function registerInstalled(packages: readonly InstalledPluginPackage[]): void {
     // 都经宿主 loader.callCapability 现场鉴权（声明 + 全局授权 + 注册表三重校验）。
     const runtime =
       pluginPackage.manifest.kind === "worker"
-        ? runtimeFactory(pluginPackage, (capability, args) => useCapabilityLoader().callCapability(id, capability, args))
+        ? runtimeFactory(
+            pluginPackage,
+            (capability, args) => useCapabilityLoader().callCapability(id, capability, args),
+            // 状态栏更新：id 必须来自本包声明的条目，否则丢弃（防止写到别人家的条目上）。
+            (statusId, text) => {
+              const declared = pluginPackage.manifest.contributes.statusBar?.some((entry) => entry.id === statusId);
+              if (declared) setPluginStatus(id, statusId, text);
+            },
+          )
         : undefined;
     if (runtime) codeRuntimes.set(id, runtime);
     try {

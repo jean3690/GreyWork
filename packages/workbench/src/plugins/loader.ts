@@ -30,7 +30,7 @@ export class DuplicatePluginError extends Error {
   }
 }
 export class ContributionConflictError extends Error {
-  constructor(kind: "mode" | "uiRegion" | "command" | "contextMenu", id: string, ownerId: string) {
+  constructor(kind: "mode" | "uiRegion" | "command" | "contextMenu" | "statusBar", id: string, ownerId: string) {
     super(`${kind} contribution id already registered: ${id} (owned by ${ownerId})`);
     this.name = "ContributionConflictError";
   }
@@ -116,6 +116,9 @@ function manifestToPlugin(manifest: PluginManifest): Plugin.Object<Context> {
       for (const entry of manifest.contributes?.contextMenu ?? []) {
         ctx.effect(() => ctx.seam.registerContextMenu(entry));
       }
+      for (const entry of manifest.contributes?.statusBar ?? []) {
+        ctx.effect(() => ctx.seam.registerStatusBar(entry));
+      }
       for (const capability of manifest.contributes?.capabilities ?? []) {
         ctx.effect(() => ctx.seam.registerCapability(capability));
       }
@@ -182,12 +185,14 @@ export function createCapabilityLoader(): CapabilityLoader {
     const claimedRegions = new Map<string, string>();
     const claimedCommands = new Map<string, string>();
     const claimedContextMenus = new Map<string, string>();
+    const claimedStatusItems = new Map<string, string>();
     for (const manifest of manifestById.values()) {
       for (const mode of manifest.contributes?.modes ?? []) claimedModes.set(mode.id, manifest.id);
       for (const region of manifest.contributes?.uiRegions ?? []) claimedRegions.set(region.id, manifest.id);
       // 命令是全局命名空间（⌘K 一张表）：跨插件重名会让用户点中「另一家的同名动作」。
       for (const command of manifest.contributes?.commands ?? []) claimedCommands.set(command.id, manifest.id);
       for (const entry of manifest.contributes?.contextMenu ?? []) claimedContextMenus.set(entry.id, manifest.id);
+      for (const entry of manifest.contributes?.statusBar ?? []) claimedStatusItems.set(entry.id, manifest.id);
     }
 
     const ownModes = new Set<string>();
@@ -217,6 +222,14 @@ export function createCapabilityLoader(): CapabilityLoader {
       const owner = claimedContextMenus.get(entry.id) ?? (ownContextMenus.has(entry.id) ? candidate.id : undefined);
       if (owner) throw new ContributionConflictError("contextMenu", entry.id, owner);
       ownContextMenus.add(entry.id);
+    }
+
+    // 状态栏 id 也是全局的：setStatus 按 id 寻址，重名会让更新打到别家的条目上。
+    const ownStatusItems = new Set<string>();
+    for (const entry of candidate.contributes?.statusBar ?? []) {
+      const owner = claimedStatusItems.get(entry.id) ?? (ownStatusItems.has(entry.id) ? candidate.id : undefined);
+      if (owner) throw new ContributionConflictError("statusBar", entry.id, owner);
+      ownStatusItems.add(entry.id);
     }
   }
 

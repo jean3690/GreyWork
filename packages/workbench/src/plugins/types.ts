@@ -72,6 +72,17 @@ export interface ContextMenuContribution {
   pluginId: string;
 }
 
+/** 状态栏条目：常驻底部细栏；点击打开插件页。 */
+export interface StatusBarContribution {
+  /** 全局唯一 id（也是 `greywork.setStatus` 的寻址键）。 */
+  id: string;
+  /** 初始文案（运行时可能被插件更新覆盖）。 */
+  label: string;
+  /** 目标插件页：/plugin/:modeId。 */
+  modeId: string;
+  pluginId: string;
+}
+
 export interface PluginManifest {
   /** 如 "core.views" */
   id: string;
@@ -90,6 +101,7 @@ export interface PluginManifest {
     capabilities?: string[];
     commands?: CommandContribution[];
     contextMenu?: ContextMenuContribution[];
+    statusBar?: StatusBarContribution[];
   };
   /** 其他 PluginManifest.id；loader 据此拓扑排序 */
   dependsOn?: string[];
@@ -116,5 +128,6 @@ export interface CapabilitySeam {
     uiRegions: UiRegionContribution[];
     commands: CommandContribution[];
     contextMenu: ContextMenuContribution[];
+    statusBar: StatusBarContribution[];
   }>;
 }

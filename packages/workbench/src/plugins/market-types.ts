@@ -64,6 +64,13 @@ export interface PluginCommandDecl {
   mode?: string;
 }
 
+/** 状态栏条目（v2）：底部细栏里的一条常驻文案。 */
+export interface PluginStatusBarDecl {
+  id: string;
+  label: string;
+  mode?: string;
+}
+
 /** 右键菜单条目（v2）：在宿主既有右键菜单里追加「打开插件」，只做导航。 */
 export interface PluginContextMenuDecl {
   id: string;
@@ -99,6 +106,8 @@ export interface MarketPluginManifest {
     contextMenu?: PluginContextMenuDecl[];
     /** 设置项（v2）：字段值与 storage.kv 共用命名空间（key 即字段 key）。 */
     settingsSchema?: DeclarativeField[];
+    /** 状态栏条目（v2）：label 是初始文案，运行时可用 setStatus 更新。 */
+    statusBar?: PluginStatusBarDecl[];
   };
 }
 
