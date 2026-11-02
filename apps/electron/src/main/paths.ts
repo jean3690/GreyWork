@@ -61,6 +61,20 @@ export function trayIconPath(): string {
 }
 
 /**
+ * 随包分发的运行时根目录（内置 git / opencode / rg / fd / jq）。
+ *
+ * 打包态由 electron-builder `extraResources` 落到 `resources/runtime`；开发态取
+ * `apps/electron/runtime`（`pnpm run runtime:fetch` 拉取，一次只服务一个目标平台）。
+ * 目录不存在就返回 `undefined`——开发机没取过包时行为与内置之前完全一致。
+ */
+export function runtimeDir(): string | undefined {
+  const dir = app.isPackaged
+    ? path.join(process.resourcesPath, "runtime")
+    : path.join(__dirname, "..", "..", "runtime");
+  return existsSync(path.join(dir, "bin")) ? dir : undefined;
+}
+
+/**
  * 插件包落盘根：sidecar（服务端）把已装插件放在 `<dataDir>/plugins/<id>/`
  * （`greywork_host::plugin_market::plugins_root` = `app_data_dir/plugins`）。
  * 插件悬浮窗要读 `plugin.json` 校验窗口声明，所以这里跟 sidecar 用同一个数据目录。

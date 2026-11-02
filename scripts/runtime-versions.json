@@ -1,0 +1,214 @@
+{
+  "_comment": "随安装包分发的运行时（内置 git / opencode / rg / fd / jq）。版本与 sha256 取自上游 GitHub Release 资产的 digest；改版本必须同步改 sha256，脚本会校验。",
+  "targets": {
+    "win32-x64": {
+      "files": [
+        {
+          "id": "rg",
+          "version": "15.2.0",
+          "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-x86_64-pc-windows-msvc.zip",
+          "sha256": "71b2fef860abe467217a538ff31de02f5258807c0129f771846f87bd029aafc5",
+          "archive": "zip",
+          "member": "ripgrep-15.2.0-x86_64-pc-windows-msvc/rg.exe",
+          "dest": "bin/rg.exe"
+        },
+        {
+          "id": "fd",
+          "version": "10.5.0",
+          "url": "https://github.com/sharkdp/fd/releases/download/v10.5.0/fd-v10.5.0-x86_64-pc-windows-msvc.zip",
+          "sha256": "a227701b8551c35a9931d9f6da75503cf86d88e182d71fb849a70864c5d57cd7",
+          "archive": "zip",
+          "member": "fd-v10.5.0-x86_64-pc-windows-msvc/fd.exe",
+          "dest": "bin/fd.exe"
+        },
+        {
+          "id": "jq",
+          "version": "1.8.2",
+          "url": "https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-windows-amd64.exe",
+          "sha256": "a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627",
+          "archive": "none",
+          "member": "jq-windows-amd64.exe",
+          "dest": "bin/jq.exe"
+        },
+        {
+          "id": "opencode",
+          "version": "1.19.4",
+          "url": "https://github.com/sst/opencode/releases/download/v1.19.4/opencode-windows-x64.zip",
+          "sha256": "93b899277bd6f68803009e32bf71772ce43c34b18adf1e93b9b4d8780fdf62e5",
+          "archive": "zip",
+          "member": "opencode.exe",
+          "dest": "bin/opencode.exe"
+        },
+        {
+          "id": "git",
+          "version": "2.56.0.3",
+          "url": "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.3/MinGit-2.56.0.3-64-bit.zip",
+          "sha256": "2e5619966e588fde5f8122c5557cad50c0fbafcaed736689f40ec1dfb1d78ea7",
+          "archive": "zip",
+          "tree": true,
+          "dest": "git"
+        }
+      ]
+    },
+    "linux-x64": {
+      "files": [
+        {
+          "id": "rg",
+          "version": "15.2.0",
+          "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-x86_64-unknown-linux-musl.tar.gz",
+          "sha256": "33e15bcf1624b25cdd2a55813a47a2f95dbe126268203e76aa6a585d1e7b149c",
+          "archive": "tar.gz",
+          "member": "ripgrep-15.2.0-x86_64-unknown-linux-musl/rg",
+          "dest": "bin/rg"
+        },
+        {
+          "id": "fd",
+          "version": "10.5.0",
+          "url": "https://github.com/sharkdp/fd/releases/download/v10.5.0/fd-v10.5.0-x86_64-unknown-linux-musl.tar.gz",
+          "sha256": "761c72dc8e120d85b22292063be8a796e2eeb20eb3e4f38b8fa2343ccf3514a7",
+          "archive": "tar.gz",
+          "member": "fd-v10.5.0-x86_64-unknown-linux-musl/fd",
+          "dest": "bin/fd"
+        },
+        {
+          "id": "jq",
+          "version": "1.8.2",
+          "url": "https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-linux-amd64",
+          "sha256": "b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f",
+          "archive": "none",
+          "member": "jq-linux-amd64",
+          "dest": "bin/jq"
+        },
+        {
+          "id": "opencode",
+          "version": "1.19.4",
+          "url": "https://github.com/sst/opencode/releases/download/v1.19.4/opencode-linux-x64.tar.gz",
+          "sha256": "849bd6b3d959a1d2ef200ed1634a51c79a45ca236aa26665d75debd694805cce",
+          "archive": "tar.gz",
+          "member": "opencode",
+          "dest": "bin/opencode"
+        }
+      ]
+    },
+    "linux-arm64": {
+      "files": [
+        {
+          "id": "rg",
+          "version": "15.2.0",
+          "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-aarch64-unknown-linux-musl.tar.gz",
+          "sha256": "800b1e7206afe799dfb5a6901f23147cfaabe0e52210538100f61e86e1740915",
+          "archive": "tar.gz",
+          "member": "ripgrep-15.2.0-aarch64-unknown-linux-musl/rg",
+          "dest": "bin/rg"
+        },
+        {
+          "id": "fd",
+          "version": "10.5.0",
+          "url": "https://github.com/sharkdp/fd/releases/download/v10.5.0/fd-v10.5.0-aarch64-unknown-linux-musl.tar.gz",
+          "sha256": "d76c4317f7d5dba69f8a2a15856c90c777e7f0dd4e85f0de8c76de6992c374d4",
+          "archive": "tar.gz",
+          "member": "fd-v10.5.0-aarch64-unknown-linux-musl/fd",
+          "dest": "bin/fd"
+        },
+        {
+          "id": "jq",
+          "version": "1.8.2",
+          "url": "https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-linux-arm64",
+          "sha256": "8b85c817833814ddca00a144c33705546355afccf0cf39b188f3cdb48b852309",
+          "archive": "none",
+          "member": "jq-linux-arm64",
+          "dest": "bin/jq"
+        },
+        {
+          "id": "opencode",
+          "version": "1.19.4",
+          "url": "https://github.com/sst/opencode/releases/download/v1.19.4/opencode-linux-arm64.tar.gz",
+          "sha256": "8568230ccd847dc93e95b9f6894379077d3e014a16b48040743573e77c23e85f",
+          "archive": "tar.gz",
+          "member": "opencode",
+          "dest": "bin/opencode"
+        }
+      ]
+    },
+    "darwin-x64": {
+      "files": [
+        {
+          "id": "rg",
+          "version": "15.2.0",
+          "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-x86_64-apple-darwin.tar.gz",
+          "sha256": "af7825fcc69a2afc7a7aea55fc9af90e26421d8f20fe59df32e233c0b8a231c1",
+          "archive": "tar.gz",
+          "member": "ripgrep-15.2.0-x86_64-apple-darwin/rg",
+          "dest": "bin/rg"
+        },
+        {
+          "id": "fd",
+          "version": "10.5.0",
+          "url": "https://github.com/sharkdp/fd/releases/download/v10.5.0/fd-v10.5.0-x86_64-apple-darwin.tar.gz",
+          "sha256": "7e31028c62c6955877735d0406807aa484c2a5e6f86235a59e26c29c301da590",
+          "archive": "tar.gz",
+          "member": "fd-v10.5.0-x86_64-apple-darwin/fd",
+          "dest": "bin/fd"
+        },
+        {
+          "id": "jq",
+          "version": "1.8.2",
+          "url": "https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-macos-amd64",
+          "sha256": "e94b266e3c26690550006abe63152b782280f4e14374accdf04cbde844f00bc0",
+          "archive": "none",
+          "member": "jq-macos-amd64",
+          "dest": "bin/jq"
+        },
+        {
+          "id": "opencode",
+          "version": "1.19.4",
+          "url": "https://github.com/sst/opencode/releases/download/v1.19.4/opencode-darwin-x64.zip",
+          "sha256": "123ebd72609c4f8dbae0485cdac39b9aedfeb6576b2eef64f2e73152b1de82f4",
+          "archive": "zip",
+          "member": "opencode",
+          "dest": "bin/opencode"
+        }
+      ]
+    },
+    "darwin-arm64": {
+      "files": [
+        {
+          "id": "rg",
+          "version": "15.2.0",
+          "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-aarch64-apple-darwin.tar.gz",
+          "sha256": "3750b2e93f37e0c692657da574d7019a101c0084da05a790c83fd335bad973e4",
+          "archive": "tar.gz",
+          "member": "ripgrep-15.2.0-aarch64-apple-darwin/rg",
+          "dest": "bin/rg"
+        },
+        {
+          "id": "fd",
+          "version": "10.5.0",
+          "url": "https://github.com/sharkdp/fd/releases/download/v10.5.0/fd-v10.5.0-aarch64-apple-darwin.tar.gz",
+          "sha256": "b67e1836c468e42e411984b56e52fa7abec08c2bd22c867398e7cc134aac5e12",
+          "archive": "tar.gz",
+          "member": "fd-v10.5.0-aarch64-apple-darwin/fd",
+          "dest": "bin/fd"
+        },
+        {
+          "id": "jq",
+          "version": "1.8.2",
+          "url": "https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-macos-arm64",
+          "sha256": "2d75340ba57a4b4b4c8708a21c2dc8e958a48aaa8bba13b27f77f6e4c0eca07e",
+          "archive": "none",
+          "member": "jq-macos-arm64",
+          "dest": "bin/jq"
+        },
+        {
+          "id": "opencode",
+          "version": "1.19.4",
+          "url": "https://github.com/sst/opencode/releases/download/v1.19.4/opencode-darwin-arm64.zip",
+          "sha256": "c400a2f8c8ab7e99478a7f4dd1a466b57bf33888e520d85c55780a5464c4b689",
+          "archive": "zip",
+          "member": "opencode",
+          "dest": "bin/opencode"
+        }
+      ]
+    }
+  }
+}

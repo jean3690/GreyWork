@@ -41,3 +41,8 @@ plugin-market/.signing-key.pem
 
 # updater 签名私钥：绝不入库，填进 GitHub Secrets
 .secrets/
+
+# 内置运行时（git / opencode / rg / fd / jq）：由 `pnpm run runtime:fetch` 按目标平台拉取，
+# 单个平台上百 MB，绝不入库。清单与摘要见 scripts/runtime-versions.json。
+/apps/electron/runtime/
+/apps/electron/.runtime-tmp/

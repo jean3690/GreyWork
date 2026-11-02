@@ -37,6 +37,8 @@ export function sidecarEnv(input: {
   readonly staticDir: string;
   readonly dataDir: string;
   readonly passwordHash: string;
+  /** 随包分发的运行时根目录；缺省 = 没捆绑（宿主不前置任何 PATH 条目）。 */
+  readonly runtimeDir?: string;
 }): NodeJS.ProcessEnv {
   return {
     ...input.base,
@@ -45,6 +47,9 @@ export function sidecarEnv(input: {
     GREYWORK_STATIC_DIR: input.staticDir,
     GREYWORK_DATA_DIR: input.dataDir,
     GREYWORK_PASSWORD_HASH: input.passwordHash,
+    // 内置运行时：宿主据此把 <runtime>/bin 与 <runtime>/git/cmd 前置进 PATH
+    // （探测与 spawn 同一条路径），设置页再按它把「已安装」标成「内置」。
+    ...(input.runtimeDir ? { GREYWORK_RUNTIME_DIR: input.runtimeDir } : {}),
     // 本机可信宿主：sidecar 就绑在环回上、只服务本窗口。开启后服务端解除三处
     // 「网络暴露部署」的 fail-closed 加固 —— 不再钳制 ACP 沙箱/档位、放行
     // db_agents_sync、acp_start 改读 DB 里的后端目录（见 apps/server config::apply_trusted_host）。

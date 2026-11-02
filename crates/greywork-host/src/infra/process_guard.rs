@@ -301,6 +301,61 @@ const PATH_MARKER_BEGIN: &str = "__GREYWORK_PATH_BEGIN__";
 #[cfg(unix)]
 const PATH_MARKER_END: &str = "__GREYWORK_PATH_END__";
 
+/// 随安装包分发的运行时根目录（Electron 壳经 `GREYWORK_RUNTIME_DIR` 传入）。
+pub const RUNTIME_DIR_ENV: &str = "GREYWORK_RUNTIME_DIR";
+
+/// 捆绑运行时根目录；未配置或目录不存在返回 `None`（开发态没取过包就是这种情况）。
+pub fn runtime_dir() -> Option<PathBuf> {
+    let raw = std::env::var_os(RUNTIME_DIR_ENV)?;
+    if raw.is_empty() {
+        return None;
+    }
+    let dir = PathBuf::from(raw);
+    dir.is_dir().then_some(dir)
+}
+
+/// 要前置进 PATH 的捆绑目录（按优先级）。
+///
+/// 布局是**打包约定**，宿主只认这两处：
+/// - `<root>/bin`：单文件工具（opencode / rg / fd / jq）；
+/// - `<root>/git/cmd`：Windows MinGit 的 `git.exe` 落点，与 Git for Windows 自己加进 PATH
+///   的目录一致（MinGit 的 DLL 在 `mingw64/bin`，由 git.exe 按自身路径加载，不必进 PATH）。
+fn runtime_path_dirs() -> Vec<PathBuf> {
+    let Some(root) = runtime_dir() else {
+        return Vec::new();
+    };
+    [root.join("bin"), root.join("git").join("cmd")]
+        .into_iter()
+        .filter(|dir| dir.is_dir())
+        .collect()
+}
+
+/// 该路径是否来自捆绑运行时（设置页据此显示「内置」而不是「已安装」）。
+pub fn is_bundled_program(path: &Path) -> bool {
+    runtime_dir()
+        .map(|root| path.starts_with(&root))
+        .unwrap_or(false)
+}
+
+/// 纯函数版本：把 `dirs` 前置到 PATH 值上，保留原顺序并去重。
+fn prepend_dirs(dirs: &[PathBuf], base: OsString) -> OsString {
+    if dirs.is_empty() {
+        return base;
+    }
+    let mut out: Vec<PathBuf> = dirs.to_vec();
+    for dir in std::env::split_paths(&base) {
+        if !dir.as_os_str().is_empty() && !out.contains(&dir) {
+            out.push(dir);
+        }
+    }
+    std::env::join_paths(out).unwrap_or(base)
+}
+
+/// 把捆绑运行时目录前置到 PATH 值上。
+fn prepend_runtime_dirs(base: OsString) -> OsString {
+    prepend_dirs(&runtime_path_dirs(), base)
+}
+
 /// 解析登录 shell 的 PATH 并缓存（`lib.rs` 的 setup 里调一次，**立即返回**）。
 ///
 /// 打包版从 Finder/Dock 或 `.desktop` 启动时继承的是极简 PATH（macOS 上是 launchd 的
@@ -324,8 +379,11 @@ pub fn init_login_path() {
             Some(login) => merge_paths(&login, &inherited.to_string_lossy()),
             None => inherited.to_string_lossy().into_owned(),
         };
+        // 捆绑运行时排最前：内置的 git/opencode 优先于用户 PATH 里的同名程序，
+        // 版本与行为因此可预期（用户自己的配置在 `$HOME` 里，与二进制无关，不受影响）。
+        let merged = prepend_runtime_dirs(OsString::from(merged));
         if !merged.is_empty() {
-            let _ = LOGIN_PATH.set(OsString::from(merged));
+            let _ = LOGIN_PATH.set(merged);
         }
     });
 }
@@ -338,24 +396,31 @@ pub fn effective_path() -> Option<OsString> {
             return Some(value.clone());
         }
     }
-    std::env::var_os("PATH")
+    // 登录 shell 还没解析完（或解析失败）的窗口期也要能用到捆绑运行时：
+    // opencode / rg 是原生二进制，不依赖登录 shell。
+    std::env::var_os("PATH").map(prepend_runtime_dirs)
 }
 
 /// 需要把 PATH **显式注入**子进程环境时返回 `("PATH", value)`；无需注入则 `None`。
 ///
 /// 只覆盖 GUI 启动那种「继承的 PATH 是残缺的」情形：只改探测不够，`npx`/`node` 自己
-/// 也要按 PATH 找下一跳。Windows 的 PATH 来自注册表、本来就完整，故恒为 `None`。
+/// 也要按 PATH 找下一跳。Windows 的 PATH 来自注册表、本来就完整 —— 但捆绑运行时不在
+/// 注册表里，有捆绑时同样要注入，否则「探测得到、启动找不到」。
 pub fn path_env() -> Option<(String, String)> {
     #[cfg(unix)]
     {
-        LOGIN_PATH
-            .get()
-            .map(|value| ("PATH".to_string(), value.to_string_lossy().into_owned()))
+        if let Some(value) = LOGIN_PATH.get() {
+            return Some(("PATH".to_string(), value.to_string_lossy().into_owned()));
+        }
     }
-    #[cfg(not(unix))]
-    {
-        None
+    if runtime_path_dirs().is_empty() {
+        return None;
     }
+    let base = std::env::var_os("PATH").unwrap_or_default();
+    Some((
+        "PATH".to_string(),
+        prepend_runtime_dirs(base).to_string_lossy().into_owned(),
+    ))
 }
 
 /// 该用哪个 shell 跑登录脚本：`$SHELL` 可用则用，否则按常见路径兜底。
@@ -630,6 +695,28 @@ mod tests {
             None
         );
         assert_eq!(parse_marked_path(b""), None);
+    }
+
+    /// 捆绑目录前置且去重：内置工具优先，重复条目只留一份。
+    ///
+    /// 用 `join_paths` 拼输入，好让同一份断言在 Windows（`;`）与 unix（`:`）上都成立。
+    #[test]
+    fn prepend_dirs_puts_runtime_first_and_dedups() {
+        let bundle = PathBuf::from("/bundle/bin");
+        let base = std::env::join_paths(["/usr/bin", "/bundle/bin", "/bin"]).unwrap();
+        let merged = prepend_dirs(std::slice::from_ref(&bundle), base);
+        let parts: Vec<PathBuf> = std::env::split_paths(&merged).collect();
+        assert_eq!(parts.first(), Some(&bundle));
+        assert_eq!(parts.iter().filter(|part| **part == bundle).count(), 1);
+        assert!(parts.contains(&PathBuf::from("/usr/bin")));
+        assert!(parts.contains(&PathBuf::from("/bin")));
+    }
+
+    /// 没有捆绑目录时原样返回：开发态 / 没取过包的机器行为不变。
+    #[test]
+    fn prepend_dirs_without_bundles_is_identity() {
+        let base = std::env::join_paths(["/usr/bin", "/bin"]).unwrap();
+        assert_eq!(prepend_dirs(&[], base.clone()), base);
     }
 
     /// 合并结果必须是「登录优先 + 继承不丢」，且跳过空段（POSIX 里等价于 CWD）。

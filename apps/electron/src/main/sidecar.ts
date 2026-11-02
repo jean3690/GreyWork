@@ -22,7 +22,7 @@ import path from "node:path";
 import { app } from "electron";
 
 import { SIDECAR_SPAWN_OPTIONS, sidecarEnv } from "../shared/sidecar-spec";
-import { serverBinaryPath, staticDir } from "./paths";
+import { runtimeDir, serverBinaryPath, staticDir } from "./paths";
 import { resolveUserShellPath } from "./shell-path";
 
 export interface Sidecar {
@@ -138,6 +138,7 @@ export async function startServer(passwordHash: string): Promise<Sidecar> {
       staticDir: staticDir(),
       dataDir,
       passwordHash,
+      runtimeDir: runtimeDir(),
     }),
     // stdio 见 SIDECAR_STDIO；windowsHide 让 Windows 不给 console 子系统程序分配新控制台
     // （否则双击桌面端会多弹一个终端）。

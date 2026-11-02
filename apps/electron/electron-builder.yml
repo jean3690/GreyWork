@@ -25,12 +25,19 @@ files:
 # asar 外资源（落到 process.resourcesPath，供 spawn / 读取）：
 # - static：已构建的渲染层 SPA，sidecar 的 GREYWORK_STATIC_DIR 指向它；
 # - icons：托盘图标（主进程 tray.ts 读）；
+# - runtime：内置运行时（git / opencode / rg / fd / jq），由 `pnpm run runtime:fetch`
+#   按当前目标平台拉取；缺失时目录为空，应用退化为「只探测系统 PATH」；
 # - server：sidecar 二进制，按平台在各段里加（扩展名不同）。
 extraResources:
   - from: ../desktop/dist
     to: static
   - from: resources/icons/32x32.png
     to: icons/32x32.png
+  # 目录不存在会让 electron-builder 直接报错，故用通配把「没取包」当作合法状态。
+  - from: runtime
+    to: runtime
+    filter:
+      - "**/*"
 
 mac:
   icon: resources/icons/icon.icns

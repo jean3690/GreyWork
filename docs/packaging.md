@@ -112,6 +112,60 @@ pnpm --filter @greywork/electron package     # electron-builder    → apps/elec
 | `resources/server/`    | the `greywork-server` binary for that platform | spawned as a sidecar on launch              |
 | `resources/icons/`     | tray icon + installer icons                    | runtime + per-platform installer icons      |
 
+### Built-in runtime (bundled tools)
+
+The desktop installer ships a small runtime so the app works without a preconfigured
+developer machine. Sources, versions and digests live in
+[`scripts/runtime-versions.json`](../scripts/runtime-versions.json); `pnpm run runtime:fetch`
+downloads them into `apps/electron/runtime/` (git-ignored, one target platform at a time) and
+`electron:prep` calls it before packaging.
+
+| Tool           | Platforms        | Where it lands            | Why                                                  |
+| -------------- | ---------------- | ------------------------- | ---------------------------------------------------- |
+| `git`          | Windows (MinGit) | `runtime/git/cmd/git.exe` | git panel / worktree / diff are dead without it      |
+| `opencode`     | all              | `runtime/bin/opencode`    | the one agent that runs out of the box (MIT, native) |
+| `rg`/`fd`/`jq` | all              | `runtime/bin/`            | agents shell out to these constantly                 |
+
+Rules that make it work end to end:
+
+- The shell passes `GREYWORK_RUNTIME_DIR=<resourcesPath>/runtime` to the sidecar. The host
+  prepends `<root>/bin` and `<root>/git/cmd` to PATH **ahead of the login-shell PATH**
+  (`process_guard::runtime_path_dirs`), so the bundled copies win over whatever the user has.
+  Detection (`acp_detect_programs`) and spawning share that one PATH, so "found in the settings
+  page" implies "starts".
+- `acp_detect_programs` reports a `bundled` flag; the settings page then shows **内置** instead of
+  **已安装**.
+- MinGit is distributed as a whole tree and `git.exe` resolves its DLLs from `mingw64/bin`
+  relative to itself, so only `git/cmd` is added to PATH — do not flatten the tree.
+- The folder is optional at runtime: if `runtime/bin` is missing the host behaves exactly as
+  before (probe/login-shell PATH only). That's what keeps `pnpm dev` working without a fetch.
+
+Not bundled, on purpose: `node`/`npx` (the bundled agent is native; `npx`-only adapters still
+download on first start), LibreOffice (300MB+, needed only for high-fidelity office preview) and
+the proprietary agents — Claude Code, Codex, Copilot, Cursor, Droid. Those are either closed
+source or account-bound, so redistributing them inside our installer is a licensing problem, not
+a technical one; they stay "detect + install hint" or install into `userData` on demand.
+
+### Signing in to a bundled agent
+
+The bundled `opencode` manages its own credentials (`~/.local/share/opencode/auth.json`).
+GreyWork deliberately does **not** mirror the app's model providers into it and never stores its
+keys: each agent has its own login flow and credential location, and a second copy would silently
+drift from upstream.
+
+- A preset may declare `login: { command, hint }` (`packages/shell/src/providers.ts`). For
+  `opencode` that is `opencode auth login`.
+- When such a backend is installed/bundled and the host supports terminals, the agent settings row
+  shows a **登录** button. It closes the settings dialog, opens the built-in PTY
+  (`terminal.addTab(shell, command)`) and types the command once the session is up — the login UI
+  needs a real TTY (provider picker, key paste).
+- The agent process inherits `HOME` / `XDG_*`, so credentials written there are picked up by the
+  next ACP session; restart the session after logging in.
+
+Size: `opencode` alone is a ~210MB single binary (~76MB compressed), so a Windows installer goes
+from ~110MB to roughly ~180MB. Bumping a version means editing the manifest **and** its sha256
+(the fetch script refuses a digest mismatch).
+
 Targets: Linux `AppImage`, Windows `nsis`, macOS `dmg`. CI builds with `--dir` (unpacked) only:
 the per-platform installers pull extra tooling at build time, which is flaky on CI runners —
 actual installers are produced in `release.yml` and attached to the draft Release.
@@ -253,5 +307,6 @@ e2e:served`, which logs in and opens markdown / HTML / PDF / xlsx previews while
   to an ACP backend are deliberately **not** executed host-side: swapping executors would silently
   change what the task does. Their runs are recorded as failed and picked up by the next cron window
   while an app is attached.
-- **Agent runtimes are not bundled.** Add `node` / `python3` / `uvx` etc. in a derived image and list
+- **Agent runtimes are not bundled in the image** (the desktop installer does bundle a small set —
+  see [Built-in runtime](#built-in-runtime-bundled-tools) above). Add `node` / `python3` / `uvx` etc. in a derived image and list
   them in `GREYWORK_AGENT_PROGRAMS` if you need those ACP backends.
