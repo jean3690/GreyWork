@@ -41,6 +41,12 @@
   `fileTree` / `preview` / `conversation` 三处（1-3 条，安装期白名单），条目以「插件」分组追加在宿主
   条目之后，只做导航（打开插件页），没有贡献时菜单逐字不变。id 跨插件唯一，停用/卸载随 seam 清理。
 
+- **插件设置项**：`contributes.settingsSchema` 让插件把配置表单放进设置中心的新分区「插件配置」
+  （与页面字段同一套 schema，≤16 条；text / number / toggle）。值写进插件自己的 `storage.kv`
+  命名空间（key 即字段 key），插件代码用 `greywork.call("storage.kv", …)` 直接读到——不新建第二份
+  存储，也就不会出现「设置页写一份、插件读另一份」。只列启用中的插件，写入复用同一套 JSON 安全与
+  配额校验。
+
 ### 改进
 
 - **GIS 矢量预览补全**：geojson / shp 之外新增 **KML / KMZ / GPX / TopoJSON**（KMZ 用动态

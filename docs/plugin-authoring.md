@@ -393,6 +393,30 @@ titlebar search panel). Entries are grouped as "Plugin commands" and land on the
 - Entries disappear immediately when the plugin is disabled or uninstalled (the palette reads the
   same seam snapshot as the sidebar), so there is no separate cleanup path.
 
+### Settings schema
+
+`contributes.settingsSchema` puts a package's configuration into Settings → **插件配置**. Fields use
+the exact same shape as page fields (`key` / `label` / `kind` / `default` / bounds), so there is one
+schema to learn.
+
+```jsonc
+"contributes": {
+  "settingsSchema": [
+    { "key": "api_base", "label": "接口地址", "kind": "text", "default": "https://example.com", "maxLength": 200 },
+    { "key": "interval", "label": "轮询间隔（分钟）", "kind": "number", "default": 15, "min": 5, "max": 60, "step": 5 },
+    { "key": "enabled", "label": "启用", "kind": "toggle", "default": true }
+  ]
+}
+```
+
+- Kinds: `text` / `number` / `toggle`; up to 16 fields, keys unique, `default` must match the kind.
+- **Values live in the plugin's own `storage.kv` namespace, keyed by the field key.** Read them at
+  runtime with `greywork.call("storage.kv", { op: "get", key: "interval" })` — no second store, no
+  copy that can drift from what the plugin writes itself.
+- The pane only lists **enabled** packages; disabling a plugin takes its form away (values stay in KV).
+- Writes go through the same JSON-safety and quota checks as the capability (64 KiB per value, 256 KiB
+  per plugin); a rejected write shows the reason in the pane instead of silently dropping the edit.
+
 ### Context menu entries
 
 `contributes.contextMenu` adds "open with plugin" items to the host's own right-click menus. Like
