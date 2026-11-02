@@ -440,6 +440,27 @@ palette commands they only navigate to the package's page; they never run plugin
 - Items appear under a "插件" group after the host's own entries — no host item is ever hidden, and
   when a package contributes nothing to a surface the menu is byte-for-byte the old one.
 
+### Status bar
+
+`contributes.statusBar` adds persistent entries to a thin bar at the bottom of the shell —
+"last sync 10:24" style.
+
+```jsonc
+"contributes": {
+  "statusBar": [{ "id": "sync", "label": "上次成功 10:24", "mode": "demo-pet" }]
+}
+```
+
+- 1-8 entries per package; `id` is globally unique (it doubles as the addressing key for
+  `setStatus`); `label` is 1-60 chars; `mode` must be one of the package's modes (defaults to the
+  first) and is where a click lands.
+- A worker updates the text at runtime with `greywork.setStatus("sync", "同步中…")`. The host keeps
+  the **last** text per entry (control characters become spaces, capped at 80 chars), survives the
+  plugin page being closed, and falls back to the manifest label when nothing was ever set.
+- The id must be declared in the manifest — updates to undeclared ids are dropped, so a package can
+  never write into another package's entry.
+- The bar only shows **active** packages; disabling one removes its entries until re-enabled.
+
 ### Floating windows
 
 A worker plugin that declares `window.floating` **and** a `window` block can be popped out of the
