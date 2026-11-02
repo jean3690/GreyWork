@@ -16,7 +16,8 @@
 //! - [`net_fetch`]：前端 net.fetch 能力的宿主侧代理；
 //! - [`plugin_fs`]：前端 fs.scoped 能力的宿主侧沙箱；
 //! - [`plugin_workspace`]：前端 workspace.read 能力的宿主侧只读入口；
-//! - [`plugin_notify`]：前端 notify 能力的宿主侧校验与归属合成（投递在桌面壳）。
+//! - [`plugin_notify`]：前端 notify 能力的宿主侧校验与归属合成（投递在桌面壳）；
+//! - [`plugin_mcp`]：前端 mcp.connect 能力的宿主侧代理（白名单复核 + 超时收紧）。
 
 mod commands;
 mod dto;
@@ -25,6 +26,7 @@ mod install;
 mod net_fetch;
 mod package;
 mod plugin_fs;
+mod plugin_mcp;
 mod plugin_notify;
 mod plugin_workspace;
 mod registry;
@@ -41,13 +43,16 @@ pub use commands::{
 pub use dto::{
     CapabilityRequirement, CodePluginRuntime, DeclarativeAction, DeclarativeContributions,
     DeclarativeField, DeclarativeMode, DeclarativeOperation, DeclarativeOutput, DeclarativePage,
-    ManifestSchedule, ManifestScheduleKind, MarketPluginManifest, MarketRegionAction,
-    MarketUiRegionContribution, PluginInstallReport, PluginKind, PluginPackage, PluginRegistry,
-    PluginRegistryEntry, PluginWindowDecl, RenderLoop,
+    ManifestMcpServerRef, ManifestSchedule, ManifestScheduleKind, MarketPluginManifest,
+    MarketRegionAction, MarketUiRegionContribution, PluginInstallReport, PluginKind, PluginPackage,
+    PluginRegistry, PluginRegistryEntry, PluginWindowDecl, RenderLoop,
 };
 pub use net_fetch::{plugin_net_fetch, PluginFetchRequest, PluginFetchResponse};
 pub use package::declares_window_floating;
 pub use plugin_fs::{plugin_fs, PluginFsEntry, PluginFsOp, PluginFsRequest, PluginFsResponse};
+pub use plugin_mcp::{
+    plugin_mcp_call, PluginMcpCallRequest, PluginMcpCallResponse, MAX_PLUGIN_MCP_ARGUMENT_BYTES,
+};
 pub use plugin_notify::{compose_plugin_notify, PluginNotifyRequest, PluginNotifyResponse};
 pub use plugin_workspace::{
     plugin_workspace, PluginWorkspaceOp, PluginWorkspaceRequest, PluginWorkspaceResponse,

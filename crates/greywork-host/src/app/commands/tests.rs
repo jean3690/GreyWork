@@ -108,7 +108,7 @@ const DESKTOP_ONLY: &[&str] = &[
 
 #[test]
 fn commands_table_shape() {
-    assert_eq!(COMMANDS.len(), 188, "命令总数应为 188");
+    assert_eq!(COMMANDS.len(), 189, "命令总数应为 189");
 
     // 命令名唯一。
     let mut names: Vec<&str> = COMMANDS.iter().map(|c| c.name).collect();

@@ -87,7 +87,24 @@ pub enum CapabilityRequirement {
         /// clipboard 专属：允许的操作子集（`read` / `write`；缺省等于只允许 write）。
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         ops: Vec<String>,
+        /// mcp.connect 专属：允许调用的 MCP 服务器与工具白名单（其它能力不得携带）。
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        servers: Vec<ManifestMcpServerRef>,
     },
+}
+
+/// mcp.connect 的一台服务器引用：**按名字引用用户在设置页已配置的服务器**。
+///
+/// 为什么不让插件自带 command / url / env：那等于给沙箱插件「执行任意命令」或
+/// 「自带凭据」的权限。插件只能点名用户已配置并启用的服务器，连接参数永远由宿主从设置里取。
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManifestMcpServerRef {
+    /// 与设置页里的服务器 name 完全一致。
+    pub name: String,
+    /// 允许调用的工具名（1-16 条，必须显式声明；空 = 不授权任何工具）。
+    #[serde(default)]
+    pub tools: Vec<String>,
 }
 
 /// schedule 能力的定时参数：`{ "kind": "interval", "min": 60 }`。

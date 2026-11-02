@@ -1,8 +1,8 @@
 //! manifest 与包的整体校验（能力、区域、窗口声明）。
 
 use super::dto::{
-    CapabilityRequirement, DeclarativeOperation, ManifestScheduleKind, MarketPluginManifest,
-    PluginKind,
+    CapabilityRequirement, DeclarativeOperation, ManifestMcpServerRef, ManifestScheduleKind,
+    MarketPluginManifest, PluginKind,
 };
 use super::validate::{
     validate_dir_key, validate_github_url, validate_key, validate_page, validate_sha256,
@@ -17,6 +17,15 @@ const SCHEDULE_MAX_MIN: u32 = 24 * 60;
 
 /// llm.chat 模型白名单条数上界。
 const LLM_CHAT_MAX_MODELS: usize = 8;
+
+/// mcp.connect 服务器条目上界：插件不该把整个 MCP 市场都据为己有。
+const MCP_CONNECT_MAX_SERVERS: usize = 4;
+/// mcp.connect 单台服务器的工具白名单条数上界。
+const MCP_CONNECT_MAX_TOOLS: usize = 16;
+/// 服务器名长度上界（与设置页展示宽度相当）。
+const MCP_CONNECT_MAX_SERVER_NAME_LEN: usize = 64;
+/// 工具名长度上界（与宿主 mcp::mcp_call 的 MAX_TOOL_NAME_CHARS 一致）。
+const MCP_CONNECT_MAX_TOOL_LEN: usize = 128;
 /// llm.chat 单个模型 id 长度上界。
 const LLM_CHAT_MAX_MODEL_LEN: usize = 128;
 
@@ -35,6 +44,7 @@ pub(super) fn validate_requirement(requirement: &CapabilityRequirement) -> Resul
                 "net.fetch" => Err("net.fetch requires a host allowlist: use { \"capability\": \"net.fetch\", \"hosts\": [...] }".to_string()),
                 "schedule" => Err("schedule requires an interval: use { \"capability\": \"schedule\", \"schedule\": { \"kind\": \"interval\", \"min\": 60 } }".to_string()),
                 "llm.chat" => Err("llm.chat requires a model allowlist: use { \"capability\": \"llm.chat\", \"models\": [\"gpt-4o-mini\"] }".to_string()),
+                "mcp.connect" => Err("mcp.connect requires a server allowlist: use { \"capability\": \"mcp.connect\", \"servers\": [{ \"name\": \"fs\", \"tools\": [\"read_file\"] }] }".to_string()),
                 _ => Ok(()),
             }
         }
@@ -47,6 +57,7 @@ pub(super) fn validate_requirement(requirement: &CapabilityRequirement) -> Resul
             schedule,
             models,
             ops,
+            servers,
         } => {
             validate_key(capability, "required capability")?;
             match capability.as_str() {
@@ -63,6 +74,12 @@ pub(super) fn validate_requirement(requirement: &CapabilityRequirement) -> Resul
                     if !ops.is_empty() {
                         return Err(
                             "net.fetch does not accept ops; use the ops of clipboard".to_string()
+                        );
+                    }
+                    if !servers.is_empty() {
+                        return Err(
+                            "net.fetch does not accept servers; use the servers of mcp.connect"
+                                .to_string(),
                         );
                     }
                     validate_net_fetch_params(hosts, methods, paths, *max_bytes)?;
@@ -83,6 +100,12 @@ pub(super) fn validate_requirement(requirement: &CapabilityRequirement) -> Resul
                     if !ops.is_empty() {
                         return Err("llm.chat does not accept ops".to_string());
                     }
+                    if !servers.is_empty() {
+                        return Err(
+                            "llm.chat does not accept servers; use the servers of mcp.connect"
+                                .to_string(),
+                        );
+                    }
                     validate_llm_chat_models(models)
                 }
                 "clipboard" => {
@@ -95,6 +118,12 @@ pub(super) fn validate_requirement(requirement: &CapabilityRequirement) -> Resul
                     if max_bytes.is_some() || schedule.is_some() || !models.is_empty() {
                         return Err(
                             "clipboard does not accept maxBytes / schedule / models parameters"
+                                .to_string(),
+                        );
+                    }
+                    if !servers.is_empty() {
+                        return Err(
+                            "clipboard does not accept servers; use the servers of mcp.connect"
                                 .to_string(),
                         );
                     }
@@ -119,6 +148,9 @@ pub(super) fn validate_requirement(requirement: &CapabilityRequirement) -> Resul
                     if !ops.is_empty() {
                         return Err("schedule does not accept ops".to_string());
                     }
+                    if !servers.is_empty() {
+                        return Err("schedule does not accept servers".to_string());
+                    }
                     let Some(declared) = schedule else {
                         return Err("schedule requires schedule parameters: { \"kind\": \"interval\", \"min\": 60 }".to_string());
                     };
@@ -131,6 +163,25 @@ pub(super) fn validate_requirement(requirement: &CapabilityRequirement) -> Resul
                         ));
                     }
                     Ok(())
+                }
+                "mcp.connect" => {
+                    if !hosts.is_empty() || !methods.is_empty() || !paths.is_empty() {
+                        return Err(
+                            "mcp.connect does not accept net.fetch parameters (hosts/methods/paths)"
+                                .to_string(),
+                        );
+                    }
+                    if max_bytes.is_some() || schedule.is_some() {
+                        return Err("mcp.connect does not accept maxBytes / schedule parameters"
+                            .to_string());
+                    }
+                    if !models.is_empty() {
+                        return Err("mcp.connect does not accept models".to_string());
+                    }
+                    if !ops.is_empty() {
+                        return Err("mcp.connect does not accept ops".to_string());
+                    }
+                    validate_mcp_connect_servers(servers)
                 }
                 _ => Err(format!(
                     "capability {capability} does not accept parameters; use the plain string form"
@@ -266,6 +317,67 @@ fn validate_clipboard_ops(ops: &[String]) -> Result<(), String> {
         }
         if !seen.insert(op.as_str()) {
             return Err(format!("duplicate clipboard op: {op}"));
+        }
+    }
+    Ok(())
+}
+
+/// mcp.connect 声明校验（安装期第一道门；执行期由前端 broker 与宿主命令各再校验一次）。
+///
+/// 语义：
+/// - 1-4 台服务器，**按名字引用用户已配置的服务器**（见 ManifestMcpServerRef）；
+///   名字非空、≤64 字符、无控制字符 —— 名字是用户自己起的，允许中文，不按标识符收紧；
+/// - 每台服务器必须显式给出 1-16 个工具名（空清单等于「授权全部工具」，一律拒绝）；
+/// - 工具名非空、≤128 字符、无控制字符，同一服务器内不重复；服务器之间不重复。
+fn validate_mcp_connect_servers(servers: &[ManifestMcpServerRef]) -> Result<(), String> {
+    if servers.is_empty() || servers.len() > MCP_CONNECT_MAX_SERVERS {
+        return Err(format!(
+            "mcp.connect servers allowlist must contain 1-{MCP_CONNECT_MAX_SERVERS} entries"
+        ));
+    }
+    let mut seen_servers = std::collections::HashSet::new();
+    for server in servers {
+        let name = server.name.trim();
+        if name.is_empty() {
+            return Err("mcp.connect server name must not be empty".to_string());
+        }
+        if name.chars().count() > MCP_CONNECT_MAX_SERVER_NAME_LEN {
+            return Err(format!(
+                "mcp.connect server name exceeds {MCP_CONNECT_MAX_SERVER_NAME_LEN} characters"
+            ));
+        }
+        if name.chars().any(char::is_control) {
+            return Err("mcp.connect server name must not contain control characters".to_string());
+        }
+        if !seen_servers.insert(name) {
+            return Err(format!("duplicate server in mcp.connect allowlist: {name}"));
+        }
+        if server.tools.is_empty() || server.tools.len() > MCP_CONNECT_MAX_TOOLS {
+            return Err(format!(
+                "mcp.connect server {name} must declare 1-{MCP_CONNECT_MAX_TOOLS} tools"
+            ));
+        }
+        let mut seen_tools = std::collections::HashSet::new();
+        for tool in &server.tools {
+            let trimmed = tool.trim();
+            if trimmed.is_empty() {
+                return Err(format!("mcp.connect tool name must not be empty ({name})"));
+            }
+            if trimmed.chars().count() > MCP_CONNECT_MAX_TOOL_LEN {
+                return Err(format!(
+                    "mcp.connect tool name exceeds {MCP_CONNECT_MAX_TOOL_LEN} characters ({name})"
+                ));
+            }
+            if trimmed.chars().any(char::is_control) {
+                return Err(format!(
+                    "mcp.connect tool name must not contain control characters ({name})"
+                ));
+            }
+            if !seen_tools.insert(trimmed) {
+                return Err(format!(
+                    "duplicate tool {trimmed} in mcp.connect allowlist ({name})"
+                ));
+            }
         }
     }
     Ok(())

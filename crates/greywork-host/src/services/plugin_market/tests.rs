@@ -3,9 +3,9 @@ use sha2::{Digest, Sha256};
 use super::dto::{
     CapabilityRequirement, CodePluginRuntime, DeclarativeAction, DeclarativeContributions,
     DeclarativeField, DeclarativeMode, DeclarativeOperation, DeclarativeOutput, DeclarativePage,
-    ManifestSchedule, ManifestScheduleKind, MarketPluginManifest, MarketRegionAction,
-    MarketUiRegionContribution, PluginKind, PluginPackage, PluginRegistry, PluginRegistryEntry,
-    PluginWindowDecl, RenderLoop,
+    ManifestMcpServerRef, ManifestSchedule, ManifestScheduleKind, MarketPluginManifest,
+    MarketRegionAction, MarketUiRegionContribution, PluginKind, PluginPackage, PluginRegistry,
+    PluginRegistryEntry, PluginWindowDecl, RenderLoop,
 };
 use super::install::{install_package_at, list_installed_at};
 use super::net_fetch::validate_plugin_fetch_url;
@@ -416,6 +416,7 @@ fn net_fetch_requirement(
         capability: "net.fetch".into(),
         models: vec![],
         ops: vec![],
+        servers: vec![],
         hosts: hosts.iter().map(|host| host.to_string()).collect(),
         methods: methods.iter().map(|method| method.to_string()).collect(),
         paths: paths.iter().map(|path| path.to_string()).collect(),
@@ -449,6 +450,7 @@ fn net_fetch_requirements_require_a_valid_host_allowlist() {
         capability: "plugin-admin".into(),
         models: vec![],
         ops: vec![],
+        servers: vec![],
         hosts: vec!["api.github.com".into()],
         methods: vec![],
         paths: vec![],
@@ -591,6 +593,7 @@ fn schedule_requirements_require_a_valid_interval_declaration() {
             capability: "schedule".into(),
             models: vec![],
             ops: vec![],
+            servers: vec![],
             hosts: vec![],
             methods: vec![],
             paths: vec![],
@@ -629,6 +632,7 @@ fn schedule_requirements_require_a_valid_interval_declaration() {
         capability: "schedule".into(),
         models: vec![],
         ops: vec![],
+        servers: vec![],
         hosts: vec![],
         methods: vec![],
         paths: vec![],
@@ -644,6 +648,7 @@ fn schedule_requirements_require_a_valid_interval_declaration() {
         capability: "schedule".into(),
         models: vec![],
         ops: vec![],
+        servers: vec![],
         hosts: vec!["api.github.com".into()],
         methods: vec![],
         paths: vec![],
@@ -662,6 +667,7 @@ fn schedule_requirements_require_a_valid_interval_declaration() {
         capability: "net.fetch".into(),
         models: vec![],
         ops: vec![],
+        servers: vec![],
         hosts: vec![],
         methods: vec![],
         paths: vec![],
@@ -680,6 +686,7 @@ fn schedule_requirements_require_a_valid_interval_declaration() {
         capability: "notify".into(),
         models: vec![],
         ops: vec![],
+        servers: vec![],
         hosts: vec![],
         methods: vec!["GET".into()],
         paths: vec![],
@@ -695,6 +702,7 @@ fn schedule_requirements_require_a_valid_interval_declaration() {
         capability: "schedule".into(),
         models: vec![],
         ops: vec![],
+        servers: vec![],
         hosts: vec![],
         methods: vec![],
         paths: vec![],
@@ -719,6 +727,7 @@ fn llm_chat_requirement(models: &[&str]) -> CapabilityRequirement {
         schedule: None,
         models: models.iter().map(|model| model.to_string()).collect(),
         ops: vec![],
+        servers: vec![],
     }
 }
 
@@ -761,6 +770,7 @@ fn llm_chat_requirements_require_a_model_allowlist() {
         schedule: None,
         models: vec!["gpt-4o-mini".into()],
         ops: vec![],
+        servers: vec![],
     }];
     let error = validate_package(&package).unwrap_err();
     assert!(
@@ -779,6 +789,7 @@ fn llm_chat_requirements_require_a_model_allowlist() {
         schedule: None,
         models: vec!["gpt-4o-mini".into()],
         ops: vec![],
+        servers: vec![],
     }];
     let error = validate_package(&package).unwrap_err();
     assert!(error.contains("does not accept models"), "{error}");
@@ -796,6 +807,7 @@ fn llm_chat_requirements_require_a_model_allowlist() {
         }),
         models: vec!["gpt-4o-mini".into()],
         ops: vec![],
+        servers: vec![],
     }];
     let error = validate_package(&package).unwrap_err();
     assert!(error.contains("schedule does not accept models"), "{error}");
@@ -1032,6 +1044,7 @@ fn clipboard_requirement(ops: &[&str]) -> CapabilityRequirement {
         schedule: None,
         models: vec![],
         ops: ops.iter().map(|op| op.to_string()).collect(),
+        servers: vec![],
     }
 }
 
@@ -1070,6 +1083,7 @@ fn clipboard_requirements_default_to_write_only() {
         schedule: None,
         models: vec![],
         ops: vec!["write".into()],
+        servers: vec![],
     }];
     let error = validate_package(&package).unwrap_err();
     assert!(
@@ -1088,6 +1102,7 @@ fn clipboard_requirements_default_to_write_only() {
         schedule: None,
         models: vec![],
         ops: vec!["read".into()],
+        servers: vec![],
     }];
     let error = validate_package(&package).unwrap_err();
     assert!(error.contains("does not accept ops"), "{error}");
@@ -1325,4 +1340,117 @@ fn render_loop_pointer_flag_defaults_false_and_parses_true() {
     let with: RenderLoop = serde_json::from_str(r#"{"handler":"draw","pointer":true}"#)
         .expect("render with pointer parses");
     assert!(with.pointer);
+}
+
+/// mcp.connect 参数化声明构造器：服务器名 + 工具白名单。
+fn mcp_requirement(servers: &[(&str, &[&str])]) -> CapabilityRequirement {
+    CapabilityRequirement::Parameterized {
+        capability: "mcp.connect".into(),
+        hosts: vec![],
+        methods: vec![],
+        paths: vec![],
+        max_bytes: None,
+        schedule: None,
+        models: vec![],
+        ops: vec![],
+        servers: servers
+            .iter()
+            .map(|(name, tools)| ManifestMcpServerRef {
+                name: (*name).to_string(),
+                tools: tools.iter().map(|tool| (*tool).to_string()).collect(),
+            })
+            .collect(),
+    }
+}
+
+#[test]
+fn mcp_connect_requires_named_servers_with_tool_allowlists() {
+    let validate = |requirement| {
+        let mut package = demo_package();
+        package.manifest.requires = vec![requirement];
+        validate_package(&package)
+    };
+
+    // 字符串形态没有服务器白名单：拒绝并指向参数化写法。
+    let error = validate(CapabilityRequirement::Plain("mcp.connect".into())).unwrap_err();
+    assert!(error.contains("server allowlist"), "{error}");
+
+    // 正常声明：用户已配置的服务器名 + 显式工具白名单。
+    validate(mcp_requirement(&[("fs", &["read_file", "list_dir"])]))
+        .expect("named server with tools validates");
+
+    // 空服务器清单 / 空工具清单都等于「授权全部」，一律拒绝。
+    assert!(validate(mcp_requirement(&[])).is_err());
+    assert!(validate(mcp_requirement(&[("fs", &[])])).is_err());
+    // 同名服务器重复、同服务器内工具重复。
+    assert!(validate(mcp_requirement(&[("fs", &["a"]), ("fs", &["b"])])).is_err());
+    assert!(validate(mcp_requirement(&[("fs", &["a", "a"])])).is_err());
+    // 名字允许中文（用户自己起的），但不能是控制字符。
+    validate(mcp_requirement(&[("本地文件", &["read_file"])])).expect("non-ascii name is fine");
+    let mut control = mcp_requirement(&[("fs", &["read_file"])]);
+    if let CapabilityRequirement::Parameterized { servers, .. } = &mut control {
+        // 首尾空白会被 trim（手写 manifest 容错），但内部的控制字符必须拒绝。
+        servers[0].name = "fs\tx".into();
+    }
+    assert!(validate(control).is_err());
+}
+
+#[test]
+fn mcp_connect_does_not_accept_other_capability_parameters() {
+    let mut wrong = mcp_requirement(&[("fs", &["read_file"])]);
+    if let CapabilityRequirement::Parameterized { hosts, .. } = &mut wrong {
+        hosts.push("api.github.com".into());
+    }
+    let mut package = demo_package();
+    package.manifest.requires = vec![wrong];
+    let error = validate_package(&package).unwrap_err();
+    assert!(error.contains("does not accept"), "{error}");
+
+    // servers 反过来也不能挂在别的能力上（否则等于绕过安装期校验夹带连接声明）。
+    let mut llm = CapabilityRequirement::Parameterized {
+        capability: "llm.chat".into(),
+        hosts: vec![],
+        methods: vec![],
+        paths: vec![],
+        max_bytes: None,
+        schedule: None,
+        models: vec!["gpt-4o-mini".into()],
+        ops: vec![],
+        servers: vec![],
+    };
+    if let CapabilityRequirement::Parameterized { servers, .. } = &mut llm {
+        servers.push(ManifestMcpServerRef {
+            name: "fs".into(),
+            tools: vec!["read_file".into()],
+        });
+    }
+    let mut package = demo_package();
+    package.manifest.requires = vec![llm];
+    let error = validate_package(&package).unwrap_err();
+    assert!(
+        error.contains("llm.chat does not accept servers"),
+        "{error}"
+    );
+}
+
+#[test]
+fn mcp_connect_servers_parse_from_json() {
+    // untagged 枚举里多一个字段不能让老包解析失败，也不能让新包落到「无参数」分支。
+    let requirement: CapabilityRequirement = serde_json::from_str(
+        r#"{"capability":"mcp.connect","servers":[{"name":"fs","tools":["read_file"]}]}"#,
+    )
+    .expect("mcp.connect declaration parses");
+    match requirement {
+        CapabilityRequirement::Parameterized {
+            capability,
+            servers,
+            ..
+        } => {
+            assert_eq!(capability, "mcp.connect");
+            assert_eq!(servers.len(), 1);
+            assert_eq!(servers[0].name, "fs");
+            assert_eq!(servers[0].tools, vec!["read_file".to_string()]);
+        }
+        CapabilityRequirement::Plain(other) => panic!("parsed as plain: {other}"),
+    }
 }

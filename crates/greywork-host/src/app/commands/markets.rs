@@ -62,6 +62,10 @@ macro_rules! markets_commands {
         run: |ctx, a| async move { plugin_market::plugin_workspace(ctx.services.workspace.as_ref(), a).map(Json) } }
     // 系统通知是桌面专属（headless 无系统通知）：投递在桌面壳 `notify::send`，
     // 宿主侧只做校验 + 归属合成。dispatch 在解析入参前即拒绝。
+    // MCP 代理（mcp.connect）：连接参数由 broker 从用户设置取，宿主复核工具白名单 + 超时。
+    { "plugin_mcp_call", auth: Auth::Required, desktop: false, binary: false,
+        args: plugin_market::PluginMcpCallRequest,
+        run: |_ctx, a| async move { plugin_market::plugin_mcp_call(a).await.map(Json) } }
     { "plugin_notify", auth: Auth::Required, desktop: true, binary: false,
         args: plugin_market::PluginNotifyRequest,
         run: |_ctx, _a| async move { Err::<Json<plugin_market::PluginNotifyResponse>, String>("仅桌面端可用".into()) } }
