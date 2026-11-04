@@ -695,6 +695,47 @@ describe("HTTP 契约", () => {
     expect((await call("rag_status")).body).toEqual({ chunks: 0, files: 0, model: null, dim: null });
   });
 
+  it("skills_install / skills_uninstall：两阶段落盘与卸载", async () => {
+    const call = async (command: string, args: unknown) => {
+      const response = await fetch(`${base}/api/command`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ command, args }),
+      });
+      return { status: response.status, body: await response.json() };
+    };
+
+    const files = [
+      { path: "SKILL.md", contents: "# demo\n" },
+      { path: "scripts/run.sh", contents: "echo hi\n" },
+      // 危险路径：绝对路径 / .. / 反斜杠都该被拒。
+      { path: "../escape.txt", contents: "x" },
+    ];
+    const installed = await call("skills_install", {
+      workspaceRoot: workspaceDir,
+      skillId: "demo-skill",
+      files,
+    });
+    expect(installed.status).toBe(400);
+    expect((installed.body as { error: string }).error).toContain("unsafe file path rejected");
+
+    const ok = await call("skills_install", {
+      workspaceRoot: workspaceDir,
+      skillId: "demo-skill",
+      files: files.slice(0, 2),
+    });
+    expect(ok.status).toBe(200);
+    expect((ok.body as { filesWritten: number }).filesWritten).toBe(2);
+    expect(readFileSync(path.join(workspaceDir, ".agents", "skills", "demo-skill", "SKILL.md"), "utf8")).toBe("# demo\n");
+
+    expect((await call("skills_uninstall", { workspaceRoot: workspaceDir, skillId: "demo-skill" })).status).toBe(200);
+    expect(existsSync(path.join(workspaceDir, ".agents", "skills", "demo-skill"))).toBe(false);
+
+    // 非法 id（大写 / 空格）必须拒绝。
+    const badId = await call("skills_uninstall", { workspaceRoot: workspaceDir, skillId: "Bad Id" });
+    expect(badId.status).toBe(400);
+  });
+
   it("web_fetch 的 SSRF 防线：环回 / 非法协议在解析阶段就被拒", async () => {
     const call = async (url: string) => {
       const response = await fetch(`${base}/api/command`, {
@@ -719,7 +760,7 @@ describe("HTTP 契约", () => {
 
   it("rag_index_build / rag_search：分块 → 向量化 → 余弦检索", async () => {
     const baseUrl = `http://127.0.0.1:${(provider.address() as NodeAddressInfo).port}`;
-    const call = async (command: string, args: unknown) => {
+    const call = async (command: string, args: unknown = {}) => {
       const response = await fetch(`${base}/api/command`, {
         method: "POST",
         headers: { cookie, "content-type": "application/json" },

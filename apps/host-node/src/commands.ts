@@ -12,6 +12,7 @@ import manifest from "./command-manifest.json" with { type: "json" };
 
 import { shellCatalog } from "./shell-catalog.js";
 import { detectPrograms } from "./acp-probe.js";
+import { skillsInstall, skillsUninstall } from "./skills.js";
 import { fetchPage } from "./web-fetch.js";
 import { checkUpdate } from "./update.js";
 import type { AgentProvider, AutomationRunInput, AutomationTask, Db, TeamRun } from "./db.js";
@@ -246,6 +247,22 @@ HANDLERS.set("worktree_release", async (args, ctx) => {
   await releaseWorktree(ctx.access, root, runGit);
   return null;
 });
+HANDLERS.set("skills_install", async (args) => {
+  const value = args as { workspaceRoot?: unknown; skillId?: unknown; files?: unknown } | null;
+  if (typeof value?.workspaceRoot !== "string" || typeof value?.skillId !== "string" || !Array.isArray(value.files)) {
+    throw new CommandError(400, "缺少参数 workspaceRoot / skillId / files");
+  }
+  return skillsInstall(value.workspaceRoot, value.skillId, value.files as { path: string; contents: string }[]);
+});
+HANDLERS.set("skills_uninstall", async (args) => {
+  const value = args as { workspaceRoot?: unknown; skillId?: unknown } | null;
+  if (typeof value?.workspaceRoot !== "string" || typeof value?.skillId !== "string") {
+    throw new CommandError(400, "缺少参数 workspaceRoot / skillId");
+  }
+  skillsUninstall(value.workspaceRoot, value.skillId);
+  return null;
+});
+
 HANDLERS.set("web_fetch", async (args) => {
   const url = (args as { url?: unknown } | null)?.url;
   if (typeof url !== "string") throw new CommandError(400, "缺少参数 url");

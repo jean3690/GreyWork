@@ -73,7 +73,7 @@ function canonicalExisting(raw: string): string {
  * 拒绝结尾的 `.` / 空格（Windows 会静默剥掉，导致两个名字落到同一个文件）、控制字符、
  * 分隔符与通配符，以及 Windows 设备名（CON / PRN / AUX / NUL / COM1-9 / LPT1-9，带扩展名也算）。
  */
-function isSafePathSegment(segment: string): boolean {
+export function isSafePathSegment(segment: string): boolean {
   if (segment === "" || segment === "." || segment === "..") return false;
   if (/[. ]$/.test(segment)) return false;
   // 控制字符（NUL / DEL / C1）逐码点判断：正则字面量写控制字符会被 lint 判为可疑模式。
