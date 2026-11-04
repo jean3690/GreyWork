@@ -9,7 +9,7 @@
  * 写入规则（与 Rust 一致，防多实例互踩）：内容相同 → skipped；磁盘版本更新 → conflicts 且
  * 不写；只删调用方显式列出的 id，绝不扫目录清扫。
  */
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import type { WorkspaceAccess } from "./workspace-access.js";
@@ -325,4 +325,78 @@ export class SessionFileStore {
     if (!isSafeSessionId(sessionId)) throw new Error(`非法会话 id: ${sessionId}`);
     rmSync(path.join(this.root, ATTACHMENTS_SUB_DIR, sessionId), { recursive: true, force: true });
   }
+
+  /**
+   * 工作区改绑文件夹后把既有会话文件搬到新目录（Rust `store_sessions_relocate` 同语义）。
+   * 归一化比较避免「同一目录不同写法」自我搬迁；目标侧版本更新视为冲突两边保留。
+   */
+  relocate(request: { sessionIds: string[]; fromFolder?: string | null; toFolder?: string | null }): RelocateReport {
+    const authorizedFolder = (folder: string | null | undefined): void => {
+      if (!folder) return;
+      const resolved = this.access.resolveExisting(folder);
+      if (!statSync(resolved).isDirectory()) throw new Error("工作区授权路径不是目录");
+    };
+    authorizedFolder(request.fromFolder);
+    authorizedFolder(request.toFolder);
+    const lock = StoreLock.acquire(this.root);
+    try {
+      const from = sessionDirForFolder(this.root, request.fromFolder ?? null);
+      const to = sessionDirForFolder(this.root, request.toFolder ?? null);
+      const report: RelocateReport = { moved: 0, missing: [], conflicts: [] };
+      if (path.resolve(from) === path.resolve(to)) return report;
+      for (const id of request.sessionIds) {
+        const source = sessionPath(from, id);
+        let payload: string;
+        try {
+          payload = readFileSync(source, "utf8");
+        } catch {
+          report.missing.push(id);
+          continue;
+        }
+        const target = sessionPath(to, id);
+        let existing: string | null = null;
+        try {
+          existing = readFileSync(target, "utf8");
+        } catch {
+          existing = null;
+        }
+        if (existing !== null) {
+          const sourceAt = diskUpdatedAt(payload);
+          const targetAt = diskUpdatedAt(existing);
+          // 目标存在但无法判定新旧：保守视为冲突，不动任何一边。
+          const newer = targetAt !== null && sourceAt !== null ? targetAt > sourceAt : true;
+          if (newer) {
+            report.conflicts.push(id);
+            continue;
+          }
+        }
+        try {
+          renameSync(source, target);
+        } catch {
+          // 同分区 rename 失败（跨设备/被占用）回落读写 + 删源：
+          // 目标已写好而源删不掉只是留一份冗余，不该判为失败。
+          try {
+            writeFileSync(target, payload);
+          } catch (error) {
+            throw new Error(`搬迁会话 ${id} 失败: ${(error as Error).message}`, { cause: error });
+          }
+          try {
+            rmSync(source);
+          } catch {
+            // 已保留源文件，可接受。
+          }
+        }
+        report.moved += 1;
+      }
+      return report;
+    } finally {
+      lock.release();
+    }
+  }
+}
+
+export interface RelocateReport {
+  moved: number;
+  missing: string[];
+  conflicts: string[];
 }

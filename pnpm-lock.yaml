@@ -167,6 +167,9 @@ importers:
 
   apps/host-node:
     dependencies:
+      '@e965/xlsx':
+        specifier: 0.20.3
+        version: 0.20.3
       '@wechatbot/wechatbot':
         specifier: ^2.2.0
         version: 2.2.0
@@ -886,6 +889,11 @@ packages:
 
   '@dimforge/rapier3d-compat@0.12.0':
     resolution: {integrity: sha512-uekIGetywIgopfD97oDL5PfeezkFpNhwlzlaEYNOA0N6ghdsOvh/HYjSMek5Q2O1PYvRSDFcqFVJl4r4ZBwOow==}
+
+  '@e965/xlsx@0.20.3':
+    resolution: {integrity: sha512-703RN/3OdsRD5mtse2HBX7Um7xwaP9tlswEG6svOtjqokXoX7rJdQj7DyabD2I+xk22RgaIIU+R6BHgkpZGB/w==}
+    engines: {node: '>=0.8'}
+    hasBin: true
 
   '@electron/asar@3.2.1':
     resolution: {integrity: sha512-hE2cQMZ5+4o7+6T2lUaVbxIzrOjZZfX7dB02xuapyYFJZEAiWTelq6J3mMoxzd0iONDvYLPVKecB5tyjIoVDVA==}
@@ -5574,6 +5582,8 @@ snapshots:
       ajv-keywords: 3.5.2(ajv@6.15.0)
 
   '@dimforge/rapier3d-compat@0.12.0': {}
+
+  '@e965/xlsx@0.20.3': {}
 
   '@electron/asar@3.2.1':
     dependencies:

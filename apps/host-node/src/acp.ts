@@ -447,6 +447,31 @@ export class AcpHost {
     session.proc.stdin?.write(JSON.stringify({ jsonrpc: "2.0", method: "session/cancel", params: { sessionId } }) + "\n");
   }
 
+  /**
+   * 关闭 agent 侧会话（Rust `acp_close_session` 同语义）：agent 未声明 close 能力或
+   * 调用方带来的 sessionId 已过期（前端状态滞后）时返回 false 而不是报错。
+   */
+  async closeSession(handle: number, expectedSessionId: string | null): Promise<boolean> {
+    const session = this.require(handle);
+    const sessionId = session.sessionId;
+    if (!sessionId) return false;
+    if (expectedSessionId !== null && expectedSessionId !== sessionId) return false;
+    if (!session.closeSession) return false;
+    try {
+      await session.request?.("session/close", { sessionId });
+    } catch (error) {
+      throw new Error(`session/close failed: ${(error as Error).message}`, { cause: error });
+    }
+    session.sessionId = undefined;
+    session.workspaceRoot = null;
+    session.modes = null;
+    // 会话都关了，在途回合的取消句柄也不再有效；留着只会让后续 stop 打到旧请求。
+    session.turns.clear();
+    this.releasePendingPermissions(handle);
+    this.emit("session-closed", { handle, sessionId, closed: true });
+    return true;
+  }
+
   respondPermission(requestId: number, optionId: string | null): void {
     const pending = this.pendingPermissions.get(requestId);
     if (!pending) throw new Error(`unknown permission request ${requestId}`);

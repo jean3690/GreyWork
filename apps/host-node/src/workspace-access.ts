@@ -68,6 +68,11 @@ function canonicalExisting(raw: string): string {
   }
 }
 
+/** 离开宿主的路径一律不带 verbatim 前缀（与 Rust `path_safety::strip_verbatim_prefix` 对齐）。 */
+function stripVerbatimPrefix(target: string): string {
+  return target.startsWith("\\\\?\\") ? target.slice(4) : target;
+}
+
 /**
  * 新建条目的名字安全：与 `core/path_safety.rs::is_safe_path_segment` 同一套规则 ——
  * 拒绝结尾的 `.` / 空格（Windows 会静默剥掉，导致两个名字落到同一个文件）、控制字符、
@@ -130,6 +135,51 @@ export class WorkspaceAccess {
       this.persist();
     }
     return canonical;
+  }
+
+  /**
+   * 系统选择器单条授权（Rust `authorize_selected_path` 同名语义）：文件与目录都收 ——
+   * 目录入 roots、文件入 files，其它形态（socket 等）拒绝。
+   */
+  authorizePickedPath(raw: string): string {
+    const canonical = canonicalExisting(raw);
+    const stat = statSync(canonical);
+    if (stat.isDirectory()) {
+      if (!this.roots.includes(canonical)) {
+        this.roots.push(canonical);
+        this.persist();
+      }
+    } else if (stat.isFile()) {
+      if (!this.files.includes(canonical)) {
+        this.files.push(canonical);
+        this.persist();
+      }
+    } else {
+      throw new Error("只允许授权普通文件或目录");
+    }
+    return canonical;
+  }
+
+  /**
+   * `fs_authorize_picked_paths`：逐条走单条语义（与 Rust 一致：某条失败即中断，
+   * 之前的条目保持已授权 —— 与桌面壳 `pick_workspace_folder` 的返回同形态）。
+   */
+  authorizePickedPaths(paths: string[]): string[] {
+    return paths.map((raw) => stripVerbatimPrefix(this.authorizePickedPath(raw)));
+  }
+
+  /** OS 拖放：只认普通文件，目录被忽略（不让整批失败）。 */
+  authorizeDropPaths(paths: string[]): void {
+    const files: string[] = [];
+    for (const raw of paths) {
+      const canonical = canonicalExisting(raw);
+      if (statSync(canonical).isFile()) files.push(canonical);
+    }
+    if (files.length === 0) return;
+    for (const file of files) {
+      if (!this.files.includes(file)) this.files.push(file);
+    }
+    this.persist();
   }
 
   /** 解析已有路径：canonicalize + 必须落在某个授权根内（或被单独授权的文件）。 */
