@@ -857,6 +857,60 @@ HANDLERS.set("wecom_disconnect", async (_args) => {
   return { connected: false };
 });
 
+// DingTalk send：通过 access_token 调 REST API
+HANDLERS.set("dingtalk_send", async (args) => {
+  const v = args as { chatId?: unknown; text?: unknown; credentials?: unknown } | null;
+  if (typeof v?.chatId !== "string" || typeof v?.text !== "string") throw new CommandError(400, "缺少参数 chatId / text");
+  const creds = v.credentials as { clientId?: string; clientSecret?: string } | undefined;
+  if (!creds?.clientId || !creds?.clientSecret) throw new Error("钉钉凭证未配置");
+  const tokenRes = await fetch("https://api.dingtalk.com/v1.0/oauth2/accessToken", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ appKey: creds.clientId, appSecret: creds.clientSecret }),
+  });
+  const { accessToken } = await tokenRes.json() as { accessToken: string };
+  const response = await fetch(`https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend`, {
+    method: "POST",
+    headers: { "x-acs-dingtalk-access-token": accessToken, "content-type": "application/json" },
+    body: JSON.stringify({ robotCode: creds.clientId, userIds: [v.chatId], msgKey: "sampleText", msgParam: JSON.stringify({ content: v.text }) }),
+  });
+  if (!response.ok) throw new Error(`钉钉 send returned ${response.status}`);
+  return { ok: true };
+});
+
+// QQ send：通过 QQ Bot API
+HANDLERS.set("qq_send", async (args) => {
+  const v = args as { chatId?: unknown; text?: unknown; credentials?: unknown } | null;
+  if (typeof v?.chatId !== "string" || typeof v?.text !== "string") throw new CommandError(400, "缺少参数 chatId / text");
+  const creds = v.credentials as { appId?: string; appSecret?: string } | undefined;
+  if (!creds?.appId || !creds?.appSecret) throw new Error("QQ 凭证未配置");
+  const tokenRes = await fetch("https://bots.qq.com/app/getAppAccessToken", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ appId: creds.appId, clientSecret: creds.appSecret }),
+  });
+  const { access_token } = await tokenRes.json() as { access_token: string };
+  const response = await fetch(`https://api.sgroup.qq.com/v2/users/${v.chatId}/messages`, {
+    method: "POST",
+    headers: { "authorization": `QQBot ${access_token}`, "content-type": "application/json" },
+    body: JSON.stringify({ content: v.text, msg_type: 0, msg_id: "" }),
+  });
+  if (!response.ok) throw new Error(`QQ send returned ${response.status}`);
+  return { ok: true };
+});
+
+// WeCom send：通过 WeCom Bot API
+HANDLERS.set("wecom_send", async (args) => {
+  const v = args as { chatId?: unknown; text?: unknown; credentials?: unknown } | null;
+  if (typeof v?.text !== "string") throw new CommandError(400, "缺少参数 text");
+  const creds = v.credentials as { botId?: string; secret?: string } | undefined;
+  if (!creds?.botId) throw new Error("企微凭证未配置");
+  const response = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=${creds.botId}`, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ msgtype: "text", text: { content: v.text } }),
+  });
+  if (!response.ok) throw new Error(`企微 send returned ${response.status}`);
+  return { ok: true };
+});
+
 HANDLERS.set("check_update", async () => checkUpdate());
 
 HANDLERS.set("llm_chat_start", async (args, ctx) => {
