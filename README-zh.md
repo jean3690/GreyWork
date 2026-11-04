@@ -118,7 +118,8 @@ greyWork/
 git clone https://github.com/jean3690/GreyWork.git
 cd GreyWork
 pnpm install
-pnpm electron:dev   # 起桌面应用（Electron 窗口 + 自动拉起的本地服务端）
+pnpm electron:dev:all   # 编译 Rust sidecar 再起桌面应用（首次 / 改过 Rust 代码用这个）
+pnpm electron:dev       # 只起 Electron：直接用已有的 target/debug/greywork-server
 ```
 
 纯浏览器预览（无宿主）用 `pnpm dev` 起桌面端渲染层的 Vite 开发服务器；`pnpm dev:web` 起浏览器
@@ -131,20 +132,21 @@ pnpm electron:dev   # 起桌面应用（Electron 窗口 + 自动拉起的本地�
 
 ## 常用命令
 
-| 命令                    | 说明                                          |
-| ----------------------- | --------------------------------------------- |
-| `pnpm dev`              | 桌面端渲染层 Vite 开发服务器（预览态）        |
-| `pnpm dev:web`          | 浏览器前端 Vite 开发服务器（`apps/web`）      |
-| `pnpm dev:admin`        | 运维台 Vite 开发服务器（`apps/admin`，5174）  |
-| `pnpm electron:dev`     | 桌面应用（Electron + 本地服务端）             |
-| `pnpm lint`             | 全仓 ESLint                                   |
-| `pnpm format`           | Prettier 写入（`format:check` 仅校验）        |
-| `pnpm typecheck`        | 全 workspace TypeScript 检查                  |
-| `pnpm test`             | 各 package 跑 Vitest                          |
-| `pnpm build`            | 构建两个前端（`build:desktop` / `build:web`） |
-| `pnpm build:admin`      | 运维台产物写入后端 resources（随 jar 发布）   |
-| `pnpm electron:package` | 构建桌面安装包（AppImage / NSIS / dmg）       |
-| `pnpm check`            | `typecheck` + `build`                         |
+| 命令                    | 说明                                                          |
+| ----------------------- | ------------------------------------------------------------- |
+| `pnpm dev`              | 桌面端渲染层 Vite 开发服务器（预览态）                        |
+| `pnpm dev:web`          | 浏览器前端 Vite 开发服务器（`apps/web`）                      |
+| `pnpm dev:admin`        | 运维台 Vite 开发服务器（`apps/admin`，5174）                  |
+| `pnpm electron:dev`     | 桌面应用（不编译 Rust，用已有 debug 二进制）                  |
+| `pnpm electron:dev:all` | 先 `cargo build` 再起桌面应用；`--watch` 改 Rust 自动重编重启 |
+| `pnpm lint`             | 全仓 ESLint                                                   |
+| `pnpm format`           | Prettier 写入（`format:check` 仅校验）                        |
+| `pnpm typecheck`        | 全 workspace TypeScript 检查                                  |
+| `pnpm test`             | 各 package 跑 Vitest                                          |
+| `pnpm build`            | 构建两个前端（`build:desktop` / `build:web`）                 |
+| `pnpm build:admin`      | 运维台产物写入后端 resources（随 jar 发布）                   |
+| `pnpm electron:package` | 构建桌面安装包（AppImage / NSIS / dmg）                       |
+| `pnpm check`            | `typecheck` + `build`                                         |
 
 Rust 侧（仓库根执行，workspace 单一 manifest）：`cargo fmt`、`cargo clippy --all-targets -- -D warnings`、
 `cargo test` —— 带 `--all-targets` 才会连 `tests/`、`examples/` 一起 lint。

@@ -18,6 +18,7 @@
     "build:admin": "pnpm --filter @greywork/admin build",
     "build:desktop": "pnpm --filter @greywork/desktop build",
     "electron:dev": "pnpm --filter @greywork/electron dev",
+    "electron:dev:all": "node scripts/electron-dev.mjs",
     "electron:start": "pnpm --filter @greywork/electron start",
     "electron:build": "pnpm --filter @greywork/electron build",
     "electron:typecheck": "pnpm --filter @greywork/electron typecheck",

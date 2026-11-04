@@ -125,7 +125,8 @@ the full doc index is [docs/README.md](docs/README.md).
 git clone https://github.com/jean3690/GreyWork.git
 cd GreyWork
 pnpm install
-pnpm electron:dev   # Desktop app (Electron window + auto-started local server)
+pnpm electron:dev:all   # build the Rust sidecar, then launch the desktop app
+pnpm electron:dev       # Electron only: reuses target/debug/greywork-server as-is
 ```
 
 For a plain browser preview (no host), `pnpm dev` starts the desktop renderer's Vite dev server;
@@ -138,20 +139,21 @@ and open `http://localhost:8080/admin`. Admin credentials come from `GREY_ADMIN_
 
 ## Common Commands
 
-| Command                 | Description                                        |
-| ----------------------- | -------------------------------------------------- |
-| `pnpm dev`              | Desktop renderer Vite dev server (preview mode)    |
-| `pnpm dev:web`          | Browser front Vite dev server (`apps/web`)         |
-| `pnpm dev:admin`        | Admin console Vite dev server (`apps/admin`, 5174) |
-| `pnpm electron:dev`     | Desktop app (Electron + local server)              |
-| `pnpm lint`             | ESLint across the repo + the radius guard          |
-| `pnpm format`           | Format with Prettier (`format:check` to verify)    |
-| `pnpm typecheck`        | TypeScript check across all workspace packages     |
-| `pnpm test`             | Vitest across all packages                         |
-| `pnpm build`            | Build both fronts (`build:desktop` / `build:web`)  |
-| `pnpm build:admin`      | Build admin console into the backend resources     |
-| `pnpm electron:package` | Build desktop installers (AppImage / NSIS / dmg)   |
-| `pnpm check`            | `typecheck` + `build`                              |
+| Command                 | Description                                                      |
+| ----------------------- | ---------------------------------------------------------------- |
+| `pnpm dev`              | Desktop renderer Vite dev server (preview mode)                  |
+| `pnpm dev:web`          | Browser front Vite dev server (`apps/web`)                       |
+| `pnpm dev:admin`        | Admin console Vite dev server (`apps/admin`, 5174)               |
+| `pnpm electron:dev`     | Desktop app, no Rust build (uses the debug binary)               |
+| `pnpm electron:dev:all` | `cargo build` then desktop app; `--watch` rebuilds on Rust edits |
+| `pnpm lint`             | ESLint across the repo + the radius guard                        |
+| `pnpm format`           | Format with Prettier (`format:check` to verify)                  |
+| `pnpm typecheck`        | TypeScript check across all workspace packages                   |
+| `pnpm test`             | Vitest across all packages                                       |
+| `pnpm build`            | Build both fronts (`build:desktop` / `build:web`)                |
+| `pnpm build:admin`      | Build admin console into the backend resources                   |
+| `pnpm electron:package` | Build desktop installers (AppImage / NSIS / dmg)                 |
+| `pnpm check`            | `typecheck` + `build`                                            |
 
 Rust side (from the repo root — single workspace manifest): `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 `cargo test` — `--all-targets` so `tests/` and `examples/` are linted too.
