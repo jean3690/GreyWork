@@ -14,17 +14,7 @@
  */
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import {
-  existsSync,
-  lstatSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  statSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import type { WorkspaceAccess } from "./workspace-access.js";
@@ -135,20 +125,16 @@ let snapshotSeq = 0;
 
 function gitRun(cwd: string, args: string[], envs: Record<string, string> = {}): string {
   try {
-    return execFileSync(
-      "git",
-      ["-c", "core.quotepath=false", ...args],
-      { cwd, env: { ...process.env, GIT_TERMINAL_PROMPT: "0", ...envs }, stdio: ["ignore", "pipe", "pipe"] },
-    ).toString();
+    return execFileSync("git", ["-c", "core.quotepath=false", ...args], {
+      cwd,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0", ...envs },
+      stdio: ["ignore", "pipe", "pipe"],
+    }).toString();
   } catch (error) {
     const err = error as { stderr?: Buffer | string; stdout?: Buffer | string; message?: string };
     const stderr = typeof err.stderr === "string" ? err.stderr : Buffer.from(err.stderr ?? "").toString();
     const stdout = typeof err.stdout === "string" ? err.stdout : Buffer.from(err.stdout ?? "").toString();
-    throw new Error(
-      stderr.trim() === ""
-        ? (stdout.trim() === "" ? (err.message ?? "git failed") : stdout.trimEnd())
-        : stderr.trimEnd(),
-    );
+    throw new Error(stderr.trim() === "" ? (stdout.trim() === "" ? (err.message ?? "git failed") : stdout.trimEnd()) : stderr.trimEnd());
   }
 }
 
@@ -356,10 +342,7 @@ function ownGitSnapshot(access: WorkspaceAccess, rootRaw: string): string {
 /** 记一次工作区快照：临时索引（GIT_INDEX_FILE）构建整树 tree，写成 refs/greywork/snap/<id>。 */
 export function snapshotWorktree(access: WorkspaceAccess, rootRaw: string): string {
   const root = ownGitSnapshot(access, rootRaw);
-  const indexFile = path.join(
-    process.env.TMPDIR ?? "/tmp",
-    `greywork-idx-${Date.now().toString(16)}-${process.pid}-${snapshotSeq++}`,
-  );
+  const indexFile = path.join(process.env.TMPDIR ?? "/tmp", `greywork-idx-${Date.now().toString(16)}-${process.pid}-${snapshotSeq++}`);
   rmSync(indexFile, { force: true });
   let commit: string;
   try {
@@ -367,14 +350,18 @@ export function snapshotWorktree(access: WorkspaceAccess, rootRaw: string): stri
     gitRun(root, ["add", "-A"], { GIT_INDEX_FILE: indexFile });
     const tree = gitRun(root, ["write-tree"], { GIT_INDEX_FILE: indexFile }).trim();
     const parent = gitRun(root, ["rev-parse", "HEAD"]).trim();
-    commit = gitRun(
-      root,
-      [
-        "-c", "user.name=greywork",
-        "-c", "user.email=greywork@localhost",
-        "commit-tree", tree, "-p", parent, "-m", "greywork snapshot",
-      ],
-    ).trim();
+    commit = gitRun(root, [
+      "-c",
+      "user.name=greywork",
+      "-c",
+      "user.email=greywork@localhost",
+      "commit-tree",
+      tree,
+      "-p",
+      parent,
+      "-m",
+      "greywork snapshot",
+    ]).trim();
   } finally {
     rmSync(indexFile, { force: true });
   }
@@ -394,4 +381,3 @@ export function restoreWorktree(access: WorkspaceAccess, rootRaw: string, refere
   gitRun(root, ["clean", "-fdq"]);
   gitRun(root, ["reset", "-q"]);
 }
-

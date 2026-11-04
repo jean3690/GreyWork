@@ -1,8 +1,7 @@
 import { execFileSync } from "node:child_process";
-import { createServer as createHttpServer } from "node:http";
-import type { AddressInfo as NodeAddressInfo } from "node:net";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import type { AddressInfo } from "node:net";
+import { createServer as createHttpServer } from "node:http";
+import type { AddressInfo, AddressInfo as NodeAddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -98,6 +97,7 @@ const { server, close } = createHostServer({
   access,
   acp,
   db,
+  dataDir: dataDir,
   rag,
   store,
   llm,
@@ -870,7 +870,13 @@ describe("HTTP 契约", () => {
     const git = (...args: string[]) =>
       execFileSync("git", args, {
         cwd: repo,
-        env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.com", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.com" },
+        env: {
+          ...process.env,
+          GIT_AUTHOR_NAME: "t",
+          GIT_AUTHOR_EMAIL: "t@example.com",
+          GIT_COMMITTER_NAME: "t",
+          GIT_COMMITTER_EMAIL: "t@example.com",
+        },
         stdio: "ignore",
       });
     git("init", "-q", "-b", "main");
@@ -904,6 +910,35 @@ describe("HTTP 契约", () => {
 
     // 清理：release 后快照目录消失（worktree remove 会把目录一并删掉）。
     expect((await call("worktree_release", { root: wt.root })).status).toBe(200);
+  });
+
+  it("plugin_market_list_installed / uninstall", async () => {
+    const call = async (command: string, args: unknown) => {
+      const response = await fetch(`${base}/api/command`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ command, args }),
+      });
+      return { status: response.status, body: await response.json() };
+    };
+
+    // 手动写入一个合法的 plugin.json 到 plugins 目录。
+    const pluginsDir = path.join(dataDir, "plugins", "demo.test");
+    mkdirSync(pluginsDir, { recursive: true });
+    writeFileSync(
+      path.join(pluginsDir, "plugin.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        manifest: { id: "demo.test", name: "Test Plugin", version: "1.0.0", kind: "declarative" },
+      }),
+    );
+
+    const installed = (await call("plugin_market_list_installed", {})).body as { manifest: { id: string } }[];
+    console.log("PLUGIN_LIST_DEBUG:", JSON.stringify(installed));
+    expect(installed.some((pkg) => pkg.manifest.id === "demo.test")).toBe(true);
+
+    expect((await call("plugin_market_uninstall", { pluginId: "demo.test" })).status).toBe(200);
+    expect((await call("plugin_market_list_installed", {})).body).not.toContain(expect.objectContaining({ manifest: { id: "demo.test" } }));
   });
 
   it("db_settings：空库回 null，写入后可读回且类型原样", async () => {

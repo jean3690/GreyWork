@@ -106,6 +106,7 @@ async function main(): Promise<void> {
     access,
     acp,
     db,
+    dataDir: config.dataDir,
     extraPrograms: () => [],
     rag,
     store,

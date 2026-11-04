@@ -36,6 +36,7 @@ export interface HostServerOptions {
   extraPrograms(trustedHost: boolean): string[];
   bus: EventBus;
   store: SessionFileStore;
+  dataDir: string;
   llm: LlmStreamHost;
   terminal: TerminalHost;
 }
@@ -201,6 +202,7 @@ export function createHostServer(options: HostServerOptions): { server: Server; 
             rag: options.rag,
             bus: options.bus,
             store: options.store,
+            dataDir: config.dataDir,
             llm: options.llm,
             terminal: options.terminal,
             trustedHost: config.trustedHost,
