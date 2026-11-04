@@ -12,7 +12,7 @@ import manifest from "./command-manifest.json" with { type: "json" };
 
 import { shellCatalog } from "./shell-catalog.js";
 import { detectPrograms } from "./acp-probe.js";
-import type { AgentProvider, Db } from "./db.js";
+import type { AgentProvider, AutomationRunInput, AutomationTask, Db, TeamRun } from "./db.js";
 import { gitChanges, gitCurrentBranch, gitDiff, gitStatus } from "./git.js";
 import type { SessionFileStore, WorkspaceDir } from "./session-store.js";
 import type { TerminalHost } from "./terminal.js";
@@ -174,6 +174,38 @@ HANDLERS.set("terminal_close", async (args, ctx) => {
   return null;
 });
 
+HANDLERS.set("db_automations_load", async (_args, ctx) => ctx.db.loadAutomations());
+HANDLERS.set("db_automations_sync", async (args, ctx) => {
+  const tasks = (args as { tasks?: unknown } | null)?.tasks;
+  if (!Array.isArray(tasks)) throw new CommandError(400, "缺少参数 tasks");
+  ctx.db.syncAutomations(tasks as AutomationTask[]);
+  return null;
+});
+HANDLERS.set("db_automations_due_list", async (_args, ctx) => ctx.db.automationDueList());
+HANDLERS.set("db_automations_due_finish", async (args, ctx) => {
+  const value = args as { id?: unknown; status?: unknown } | null;
+  if (typeof value?.id !== "number" || typeof value?.status !== "string") {
+    throw new CommandError(400, "缺少参数 id / status");
+  }
+  return ctx.db.automationDueFinish(value.id, value.status);
+});
+HANDLERS.set("db_automation_runs_load", async (args, ctx) => {
+  const limit = (args as { limit?: unknown } | null)?.limit;
+  return ctx.db.automationRunsLoad(typeof limit === "number" ? limit : 200);
+});
+HANDLERS.set("db_automation_run_record", async (args, ctx) => {
+  const run = (args as { run?: unknown } | null)?.run;
+  if (!run || typeof run !== "object") throw new CommandError(400, "缺少参数 run");
+  ctx.db.automationRunRecord(run as AutomationRunInput);
+  return null;
+});
+HANDLERS.set("db_team_runs_load", async (_args, ctx) => ctx.db.loadTeamRuns());
+HANDLERS.set("db_team_runs_sync", async (args, ctx) => {
+  const runs = (args as { runs?: unknown } | null)?.runs;
+  if (!Array.isArray(runs)) throw new CommandError(400, "缺少参数 runs");
+  ctx.db.syncTeamRuns(runs as TeamRun[]);
+  return null;
+});
 HANDLERS.set("db_agents_load", async (_args, ctx) => ctx.db.loadAgentProviders());
 HANDLERS.set("db_agents_sync", async (args, ctx) => {
   const providers = (args as { providers?: unknown } | null)?.providers;

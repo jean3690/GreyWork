@@ -469,6 +469,50 @@ describe("HTTP 契约", () => {
     expect((await call("acp_list", {})).body).toEqual([]);
   });
 
+  it("db_automations / runs / team_runs：同步、读回与运行记录", async () => {
+    const call = async (command: string, args: unknown) => {
+      const response = await fetch(`${base}/api/command`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ command, args }),
+      });
+      return { status: response.status, body: await response.json() };
+    };
+
+    const task = {
+      id: "a1",
+      name: "每日摘要",
+      schedule: "每天 09:00",
+      cron: "0 9 * * *",
+      target: "",
+      intent: "summarize",
+      enabled: true,
+      lastRun: 0,
+      acpProviderId: null,
+      onceAt: null,
+    };
+    expect((await call("db_automations_load", {})).body).toBeNull();
+    expect((await call("db_automations_sync", { tasks: [task] })).status).toBe(200);
+    expect((await call("db_automations_load", {})).body).toEqual([task]);
+    expect((await call("db_automations_due_list", {})).body).toEqual([]);
+    expect((await call("db_automations_due_finish", { id: 999, status: "success" })).body).toBe(false);
+
+    expect(
+      (
+        await call("db_automation_run_record", {
+          run: { taskId: "a1", name: task.name, status: "success", detail: "ok", sessionId: null, mode: "llm", ranAt: 1000 },
+        })
+      ).status,
+    ).toBe(200);
+    const runs = (await call("db_automation_runs_load", { limit: 200 })).body as { taskId: string; status: string }[];
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({ taskId: "a1", status: "success" });
+
+    expect((await call("db_team_runs_load", {})).body).toBeNull();
+    expect((await call("db_team_runs_sync", { runs: [{ id: "r1", payload: { plan: [1, 2] } }] })).status).toBe(200);
+    expect((await call("db_team_runs_load", {})).body).toEqual([{ id: "r1", payload: { plan: [1, 2] } }]);
+  });
+
   it("db_settings：空库回 null，写入后可读回且类型原样", async () => {
     const call = async (command: string, args: unknown = {}) => {
       const response = await fetch(`${base}/api/command`, {

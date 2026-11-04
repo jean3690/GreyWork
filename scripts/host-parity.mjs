@@ -254,6 +254,37 @@ function argsFor(command, side) {
       };
     case "db_agents_load":
       return {};
+    case "db_automations_sync":
+      return {
+        tasks: [
+          {
+            id: "a1",
+            name: "每日摘要",
+            schedule: "每天 09:00",
+            cron: "0 9 * * *",
+            target: "",
+            intent: "summarize",
+            enabled: true,
+            lastRun: 0,
+            acpProviderId: null,
+            onceAt: null,
+          },
+        ],
+      };
+    case "db_automations_load":
+    case "db_automations_due_list":
+    case "db_team_runs_load":
+      return {};
+    case "db_automations_due_finish":
+      return { id: 999, status: "success" };
+    case "db_automation_runs_load":
+      return { limit: 200 };
+    case "db_automation_run_record":
+      return {
+        run: { taskId: "a1", name: "每日摘要", status: "success", detail: "ok", sessionId: null, mode: "llm", ranAt: 1000 },
+      };
+    case "db_team_runs_sync":
+      return { runs: [{ id: "r1", payload: { plan: [1, 2] } }] };
     case "acp_detect_programs":
       return { programs: ["git", "definitely-not-a-program-xyz"] };
     case "acp_list":
@@ -374,8 +405,15 @@ try {
   }
 
   // 读类命令在写完之后再复读一次：db_settings_sync 的响应只是 null，真值要回读才知道。
-  const readBack = candidates.filter(
-    (command) => command === "db_settings_load" || command === "store_sessions_load" || command === "db_agents_load",
+  const readBack = candidates.filter((command) =>
+    [
+      "db_settings_load",
+      "store_sessions_load",
+      "db_agents_load",
+      "db_automations_load",
+      "db_automation_runs_load",
+      "db_team_runs_load",
+    ].includes(command),
   );
   for (const command of readBack) {
     // 复读也要带该命令的参数（`store_sessions_load` 的 workspaces 是必填，不会走默认值）。

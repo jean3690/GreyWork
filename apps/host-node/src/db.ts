@@ -106,6 +106,69 @@ export interface AgentProvider {
   env?: string | null;
 }
 
+export interface AutomationTask {
+  id: string;
+  name: string;
+  schedule: string;
+  cron: string | null;
+  /** 展示用调度描述之外的可选字段：与 Rust 的 camelCase 输出一致。 */
+  target: string;
+  intent: string;
+  enabled: boolean;
+  lastRun: number | null;
+  acpProviderId: string | null;
+  onceAt: number | null;
+}
+
+interface AutomationTaskRow {
+  id: string;
+  name: string;
+  schedule: string;
+  cron: string | null;
+  target: string;
+  intent: string;
+  enabled: number;
+  last_run: number | null;
+  acp_provider_id: string | null;
+  once_at: number | null;
+}
+
+export interface AutomationDue {
+  id: number;
+  taskId: string;
+  name: string;
+  target: string;
+  intent: string;
+  acpProviderId: string | null;
+  dueAt: number;
+}
+
+export interface AutomationRun {
+  id: number;
+  taskId: string;
+  name: string;
+  status: string;
+  detail: string | null;
+  sessionId: string | null;
+  mode: string;
+  ranAt: number;
+}
+
+export interface AutomationRunInput {
+  taskId: string;
+  name: string;
+  status: string;
+  detail?: string | null;
+  sessionId?: string | null;
+  mode: string;
+  ranAt: number;
+}
+
+export interface TeamRun {
+  id: string;
+  payload: unknown;
+}
+
 export class Db {
   private readonly conn: DatabaseSync;
 
@@ -193,6 +256,193 @@ export class Db {
       this.conn.exec("ROLLBACK");
       throw new Error(`写入后端目录失败: ${(error as Error).message}`, { cause: error });
     }
+  }
+
+  /** 自动化任务：未接管 → null；否则按 rowid 顺序返回。 */
+  loadAutomations(): AutomationTask[] | null {
+    if (!this.marker("automation_initialized")) return null;
+    const rows = this.conn
+      .prepare(
+        `SELECT id, name, schedule, cron, target, intent, enabled, last_run, acp_provider_id, once_at
+         FROM automation_tasks ORDER BY rowid`,
+      )
+      .all() as unknown as AutomationTaskRow[];
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      schedule: row.schedule,
+      cron: row.cron,
+      target: row.target,
+      intent: row.intent,
+      enabled: row.enabled !== 0,
+      // last_run 是 NOT NULL DEFAULT 0（非 Option）：与 Rust 的 i64 一致，回 0 而不是 null。
+      lastRun: row.last_run ?? 0,
+      acpProviderId: row.acp_provider_id,
+      onceAt: row.once_at,
+    }));
+  }
+
+  /** 全量替换自动化任务；同时清掉孤儿运行记录（无外键，需显式删）。 */
+  syncAutomations(tasks: AutomationTask[]): void {
+    this.conn.exec("BEGIN");
+    try {
+      this.conn
+        .prepare("INSERT INTO meta (key, value) VALUES ('automation_initialized', '1') ON CONFLICT(key) DO NOTHING")
+        .run();
+      const existing = this.conn.prepare("SELECT id FROM automation_tasks").all() as { id: string }[];
+      const kept = new Set(tasks.map((task) => task.id));
+      const remove = this.conn.prepare("DELETE FROM automation_tasks WHERE id = ?1");
+      for (const row of existing) {
+        if (!kept.has(row.id)) remove.run(row.id);
+      }
+      const upsert = this.conn.prepare(
+        `INSERT INTO automation_tasks (id, name, schedule, cron, target, intent, enabled, last_run, acp_provider_id, once_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+         ON CONFLICT(id) DO UPDATE SET
+           name = ?2, schedule = ?3, cron = ?4, target = ?5,
+           intent = ?6, enabled = ?7, last_run = ?8, acp_provider_id = ?9, once_at = ?10`,
+      );
+      for (const task of tasks) {
+        upsert.run(
+          task.id,
+          task.name,
+          task.schedule,
+          task.cron ?? null,
+          task.target,
+          task.intent,
+          task.enabled ? 1 : 0,
+          task.lastRun ?? 0,
+          task.acpProviderId ?? null,
+          task.onceAt ?? null,
+        );
+      }
+      this.conn.prepare("DELETE FROM automation_runs WHERE task_id NOT IN (SELECT id FROM automation_tasks)").run();
+      this.conn.exec("COMMIT");
+    } catch (error) {
+      this.conn.exec("ROLLBACK");
+      throw new Error(`写入自动化失败: ${(error as Error).message}`, { cause: error });
+    }
+  }
+
+  /** 可执行到期队列：pending 且 due_at 在最近 60 分钟内（更早的由 sweep 清掉，不执行）。 */
+  automationDueList(): AutomationDue[] {
+    const cutoff = Date.now() - 3_600_000;
+    const rows = this.conn
+      .prepare(
+        `SELECT id, task_id, name, target, intent, acp_provider_id, due_at FROM automation_due
+         WHERE status = 'pending' AND due_at >= ?1 ORDER BY due_at, id`,
+      )
+      .all(cutoff) as {
+      id: number;
+      task_id: string;
+      name: string;
+      target: string;
+      intent: string;
+      acp_provider_id: string | null;
+      due_at: number;
+    }[];
+    return rows.map((row) => ({
+      id: row.id,
+      taskId: row.task_id,
+      name: row.name,
+      target: row.target,
+      intent: row.intent,
+      acpProviderId: row.acp_provider_id,
+      dueAt: row.due_at,
+    }));
+  }
+
+  /** 认领完成：pending → 终态（原子条件更新，防双执行者双跑）；返回是否认领成功。 */
+  automationDueFinish(id: number, status: string): boolean {
+    const result = this.conn
+      .prepare("UPDATE automation_due SET status = ?2, updated_at = ?3 WHERE id = ?1 AND status = 'pending'")
+      .run(id, status, Date.now());
+    return Number(result.changes) > 0;
+  }
+
+  /** 运行记录：新→旧，最多 limit 条。 */
+  automationRunsLoad(limit: number): AutomationRun[] {
+    const rows = this.conn
+      .prepare(
+        `SELECT id, task_id, name, status, detail, session_id, mode, ran_at
+         FROM automation_runs ORDER BY ran_at DESC, id DESC LIMIT ?1`,
+      )
+      .all(limit) as {
+      id: number;
+      task_id: string;
+      name: string;
+      status: string;
+      detail: string | null;
+      session_id: string | null;
+      mode: string;
+      ran_at: number;
+    }[];
+    return rows.map((row) => ({
+      id: row.id,
+      taskId: row.task_id,
+      name: row.name,
+      status: row.status,
+      detail: row.detail,
+      sessionId: row.session_id,
+      mode: row.mode,
+      ranAt: row.ran_at,
+    }));
+  }
+
+  /** 记一条运行结果；写入后按 task 裁剪，只留最近 50 条。 */
+  automationRunRecord(run: AutomationRunInput): void {
+    this.conn
+      .prepare(
+        `INSERT INTO automation_runs (task_id, name, status, detail, session_id, mode, ran_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`,
+      )
+      .run(run.taskId, run.name, run.status, run.detail ?? null, run.sessionId ?? null, run.mode, run.ranAt);
+    this.conn
+      .prepare(
+        `DELETE FROM automation_runs WHERE task_id = ?1 AND id NOT IN (
+           SELECT id FROM automation_runs WHERE task_id = ?1 ORDER BY ran_at DESC, id DESC LIMIT 50
+         )`,
+      )
+      .run(run.taskId);
+  }
+
+  loadTeamRuns(): TeamRun[] | null {
+    if (!this.marker("team_runs_initialized")) return null;
+    const rows = this.conn.prepare("SELECT id, payload FROM team_runs ORDER BY rowid").all() as {
+      id: string;
+      payload: string;
+    }[];
+    return rows.map((row) => ({ id: row.id, payload: JSON.parse(row.payload) }));
+  }
+
+  syncTeamRuns(runs: TeamRun[]): void {
+    this.conn.exec("BEGIN");
+    try {
+      this.conn
+        .prepare("INSERT INTO meta (key, value) VALUES ('team_runs_initialized', '1') ON CONFLICT(key) DO NOTHING")
+        .run();
+      const existing = this.conn.prepare("SELECT id FROM team_runs").all() as { id: string }[];
+      const kept = new Set(runs.map((run) => run.id));
+      const remove = this.conn.prepare("DELETE FROM team_runs WHERE id = ?1");
+      for (const row of existing) {
+        if (!kept.has(row.id)) remove.run(row.id);
+      }
+      const upsert = this.conn.prepare(
+        "INSERT INTO team_runs (id, payload) VALUES (?1, ?2) ON CONFLICT(id) DO UPDATE SET payload = ?2",
+      );
+      for (const run of runs) upsert.run(run.id, JSON.stringify(run.payload));
+      this.conn.exec("COMMIT");
+    } catch (error) {
+      this.conn.exec("ROLLBACK");
+      throw new Error(`写入存档失败: ${(error as Error).message}`, { cause: error });
+    }
+  }
+
+  private marker(key: string): boolean {
+    const row = this.conn.prepare("SELECT value FROM meta WHERE key = ?1").get(key) as
+      | { value?: string }
+      | undefined;
+    return row !== undefined;
   }
 
   /** 全量替换设置快照：upsert，没有接管标记语义（空对象也合法）。 */
