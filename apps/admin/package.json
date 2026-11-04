@@ -1,0 +1,30 @@
+{
+  "name": "@greywork/admin",
+  "version": "0.10.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && cross-env NODE_OPTIONS=--max-old-space-size=4096 vite build",
+    "preview": "vite preview",
+    "typecheck": "vue-tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@element-plus/icons-vue": "^2.3.2",
+    "element-plus": "^2.14.7",
+    "pinia": "^4.1.0",
+    "vue": "^3.5.44",
+    "vue-router": "^5.4.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.10",
+    "cross-env": "^10.1.0",
+    "typescript": "~5.6.2",
+    "vite": "^8.3.4",
+    "vue-tsc": "^3.3.13",
+    "@vue/test-utils": "^2.5.1",
+    "happy-dom": "^20.14.5",
+    "vitest": "^5.0.5"
+  }
+}

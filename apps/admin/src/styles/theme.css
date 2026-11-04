@@ -1,0 +1,231 @@
+/* ===== GreyWork 运维台主题 =====
+ *
+ * 与产品前端同一套色系（GitHub-dark：panel #161b22 / line #30363d / accent #58a6ff），
+ * 但这里覆盖的是 Element Plus 的 CSS 变量 —— 组件库自身的浅色默认值在暗色页面上会显得
+ * 发灰，必须逐项对齐，否则表格、弹窗、输入框是三种不同的底色。
+ */
+
+:root {
+  color-scheme: dark;
+  --gw-bg: #0b0f14;
+  --gw-side: #0d1117;
+  --gw-panel: #161b22;
+  --gw-panel-2: #1c232c;
+  --gw-line: #30363d;
+  --gw-line-soft: #232a33;
+  --gw-text: #e6edf3;
+  --gw-dim: #8b949e;
+  --gw-accent: #58a6ff;
+  --gw-mint: #3fb950;
+  --gw-amber: #d29922;
+  --gw-red: #f85149;
+  --gw-violet: #a371f7;
+}
+
+html.dark {
+  --el-color-primary: #58a6ff;
+  --el-color-primary-light-3: #4890e0;
+  --el-color-primary-light-5: #3a76b8;
+  --el-color-primary-light-7: #2c5a8c;
+  --el-color-primary-light-8: #244a73;
+  --el-color-primary-light-9: #1b3857;
+  --el-color-primary-dark-2: #79b8ff;
+
+  --el-color-success: #3fb950;
+  --el-color-warning: #d29922;
+  --el-color-danger: #f85149;
+  --el-color-error: #f85149;
+  --el-color-info: #8b949e;
+
+  --el-bg-color: #0b0f14;
+  --el-bg-color-page: #0b0f14;
+  --el-bg-color-overlay: #161b22;
+  --el-fill-color-blank: #161b22;
+  --el-fill-color: #1c232c;
+  --el-fill-color-light: #1c232c;
+  --el-fill-color-lighter: #202731;
+  --el-fill-color-extra-light: #141a21;
+  --el-border-color: #30363d;
+  --el-border-color-light: #262d36;
+  --el-border-color-lighter: #21272f;
+  --el-border-color-extra-light: #1b2129;
+  --el-text-color-primary: #e6edf3;
+  --el-text-color-regular: #c9d1d9;
+  --el-text-color-secondary: #8b949e;
+  --el-text-color-placeholder: #6e7681;
+  --el-mask-color: rgba(1, 4, 9, 0.78);
+  --el-border-radius-base: 8px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--gw-bg);
+  color: var(--gw-text);
+  font:
+    13.5px/1.55 "Inter",
+    ui-sans-serif,
+    system-ui,
+    "Segoe UI",
+    "PingFang SC",
+    "Microsoft YaHei",
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--gw-accent);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #2b333d;
+  border: 2px solid transparent;
+  background-clip: content-box;
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3d4753;
+  background-clip: content-box;
+}
+
+/* ===== 通用页内布局 ===== */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 1240px;
+}
+
+.gw-card {
+  background: var(--gw-panel);
+  border: 1px solid var(--gw-line);
+  border-radius: 12px;
+  padding: 18px 20px;
+  min-width: 0;
+}
+
+.gw-card > header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.gw-card h3 {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.gw-card h4 {
+  margin: 18px 0 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--gw-dim);
+}
+
+.gw-dim {
+  color: var(--gw-dim);
+}
+
+.gw-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.gw-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.gw-toolbar .spacer {
+  flex: 1;
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+}
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.grid-2-even {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 980px) {
+  .grid-2,
+  .grid-2-even {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.gw-empty {
+  padding: 32px 12px;
+  text-align: center;
+  color: var(--gw-dim);
+  font-size: 12.5px;
+}
+
+/* Element Plus 细节：表格贴合暗色卡片 */
+.el-table {
+  --el-table-bg-color: transparent;
+  --el-table-tr-bg-color: transparent;
+  --el-table-header-bg-color: #12171e;
+  --el-table-border-color: var(--gw-line-soft);
+  --el-table-row-hover-bg-color: #1b222b;
+  font-size: 12.5px;
+}
+
+.el-table th.el-table__cell {
+  color: var(--gw-dim);
+  font-weight: 500;
+}
+
+.el-table .cell {
+  line-height: 1.5;
+}
+
+.el-drawer__header {
+  margin-bottom: 8px;
+  color: var(--gw-text);
+}
+
+.el-dialog {
+  border: 1px solid var(--gw-line);
+}
+
+.el-message-box {
+  border: 1px solid var(--gw-line);
+}
+
+.el-progress-bar__outer {
+  background: #212831;
+}

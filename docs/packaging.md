@@ -193,6 +193,36 @@ app name comes from the package name, in packaged builds from `productName` (`Gr
   rustls (`rustls-tls` / `rustls-tls-webpki-roots`), which vendors its own crypto.
 - WebView2 ships with Windows 10+; on older images install the Evergreen Runtime.
 
+## Java control plane (`back/grey`)
+
+The control plane is a separate deployment from the Rust host; it owns accounts, channels, the model
+gateway, storage and automations, and ships its own admin console.
+
+```bash
+# 仓库根：只在改过运维台前端时需要；产物已随源码入库
+pnpm build:admin
+
+cd back/grey
+./mvnw clean package      # → target/grey-0.0.1-SNAPSHOT.jar
+java -jar target/grey-0.0.1-SNAPSHOT.jar
+```
+
+- **Runtime deps:** JRE 25, MySQL 8, Redis 7. Flyway runs migrations on boot
+  (`src/main/resources/db/migration/`), so the schema needs no manual setup.
+- **SPA inside the jar:** the build lives under `BOOT-INF/classes/static/admin`; no Node is needed at
+  runtime. Routing is hash-based, so only `/admin` needs to map to `index.html` — there is no
+  history fallback.
+- **Required env:** `GREY_ADMIN_EMAILS` + `GREY_ADMIN_PASSWORD` (admin console), `GREY_MASTER_KEY`
+  (encrypts user LLM keys), and `SPRING_DATASOURCE_*` / `SPRING_DATA_REDIS_*` for external DB/Redis.
+  Full list: [back/grey/.env.example](../back/grey/.env.example).
+- **Reverse proxy:** expose `/api/**` and `/admin/**` on the same origin. Hashed assets under
+  `/admin/assets/` can be cached for a year; `/admin` and `/admin/index.html` should be `no-cache`
+  so a redeploy is picked up immediately.
+- **Health:** `GET /actuator/health` (public). Put TLS in front and keep
+  `GREY_ALLOWED_ORIGINS` empty unless a frontend is genuinely hosted on another origin.
+- **Container image:** there is no Dockerfile for this service yet; a minimal one is
+  `eclipse-temurin:25-jre` + the jar + the env above.
+
 ## Self-hosting the web server (Docker)
 
 The headless server (`apps/server`, see [architecture.md](architecture.md#headless-server-appsserver))
