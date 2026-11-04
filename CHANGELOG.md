@@ -33,8 +33,11 @@
 - **Node 宿主骨架 `apps/host-node`（迁移起点）**：把 headless 宿主的 HTTP 面按 Rust 契约重建 ——
   8 条路由、cookie/Bearer 会话、argon2 PHC 校验、登录限流、静态托管缓存头、WS `host://hello`，
   以及从 Rust 导出的 189 条命令元数据（`available` 标出已迁移项）。P0 只迁了一条叶子命令
-  （`store_default_root`），未迁移命令回明确的 501 而不是假装可用。方案、阶段与风险见
-  [docs/node-backend-migration.md](docs/node-backend-migration.md)；Electron 默认仍用 Rust 二进制。
+  （`store_default_root`、`terminal_shells`），未迁移命令回明确的 501 而不是假装可用。
+  新增 `pnpm host:parity` 双轨对照：同一份环境变量起两个宿主，逐命令比对状态码与响应体，
+  迁移的每条命令都以它为准；可信宿主命令名单（`TRUSTED_HOST_ONLY`）也已按 Rust 同口径移植。
+  方案、阶段与风险见 [docs/node-backend-migration.md](docs/node-backend-migration.md)；
+  Electron 默认仍用 Rust 二进制。
 - **插件类型包 `@greywork/plugin-types`**：把插件作者要面对的契约集中成一套零运行时类型——
   包清单 / 声明式页面 / 贡献面、worker 的 `greywork` 全局（registerAction / registerSchedule /
   registerPointer / call / setStatus）、渲染指令集与各能力签名。第三方作者可以先用

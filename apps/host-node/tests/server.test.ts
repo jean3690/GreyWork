@@ -96,6 +96,8 @@ describe("HTTP 契约", () => {
     expect(list.find((item) => item.name === "reveal_path")?.available).toBe(false);
     // 尚未迁移的普通命令：可用性必须是 false，避免前端「点了才报错」。
     expect(list.find((item) => item.name === "git_status")?.available).toBe(false);
+    // 可信宿主专属命令在普通部署里也不可用（与 policy.rs 的 TRUSTED_HOST_ONLY 同名单）。
+    expect(list.find((item) => item.name === "terminal_shells")?.available).toBe(false);
   });
 
   it("已迁移命令走真实实现", async () => {
@@ -128,6 +130,10 @@ describe("HTTP 契约", () => {
     const unmigrated = await call("git_status");
     expect(unmigrated.status).toBe(501);
     expect(unmigrated.body.error).toContain("尚未迁移");
+
+    const untrusted = await call("terminal_shells");
+    expect(untrusted.status).toBe(403);
+    expect(untrusted.body.error).toContain("可信宿主");
   });
 
   it("登出清会话与 cookie", async () => {

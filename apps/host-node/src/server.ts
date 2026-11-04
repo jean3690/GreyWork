@@ -172,13 +172,13 @@ export function createHostServer(options: HostServerOptions): { server: Server; 
       }
 
       if (pathname === "/api/commands" && method === "GET") {
-        return sendJson(response, 200, listCommands());
+        return sendJson(response, 200, listCommands(config.trustedHost));
       }
 
       if (pathname === "/api/command" && method === "POST") {
         const body = (await readJson(request)) as { command?: unknown; args?: unknown } | null;
         try {
-          const result = await dispatch(body?.command, body?.args ?? null);
+          const result = await dispatch(body?.command, body?.args ?? null, config.trustedHost);
           return sendJson(response, 200, result ?? null);
         } catch (error) {
           if (error instanceof CommandError) {

@@ -14,6 +14,8 @@ import path from "node:path";
 
 import manifest from "./command-manifest.json" with { type: "json" };
 
+import { shellCatalog } from "./shell-catalog.js";
+
 export interface CommandMeta {
   name: string;
   auth: "required" | "none";
@@ -28,6 +30,27 @@ export interface CommandView extends CommandMeta {
 
 export const COMMANDS: readonly CommandMeta[] = manifest as CommandMeta[];
 
+/**
+ * 可信宿主才放行的命令（与 apps/server/src/policy.rs 的 `TRUSTED_HOST_ONLY` 同名单）。
+ * 这些是「只要能开终端就等于拿到本机任意代码执行」的面，网络暴露部署必须关掉。
+ */
+const TRUSTED_HOST_ONLY = new Set([
+  "db_agents_sync",
+  "fs_authorize_drop_paths",
+  "fs_authorize_picked_paths",
+  "shell_run",
+  "terminal_close",
+  "terminal_list",
+  "terminal_open",
+  "terminal_resize",
+  "terminal_shells",
+  "terminal_write",
+]);
+
+export function isDenied(name: string, trustedHost: boolean): boolean {
+  return !trustedHost && TRUSTED_HOST_ONLY.has(name);
+}
+
 /** 已迁移命令的实现表。键必须是 manifest 里存在的名字（有单测兜住）。 */
 const HANDLERS = new Map<string, (args: unknown) => Promise<unknown>>();
 
@@ -40,15 +63,16 @@ function storeDefaultRoot(): string {
 }
 
 HANDLERS.set("store_default_root", async () => storeDefaultRoot());
+HANDLERS.set("terminal_shells", async () => shellCatalog());
 
 export function isMigrated(name: string): boolean {
   return HANDLERS.has(name);
 }
 
-export function listCommands(): CommandView[] {
+export function listCommands(trustedHost: boolean): CommandView[] {
   return COMMANDS.map((meta) => ({
     ...meta,
-    available: !meta.desktopOnly && isMigrated(meta.name),
+    available: !meta.desktopOnly && !isDenied(meta.name, trustedHost) && isMigrated(meta.name),
   }));
 }
 
@@ -61,7 +85,7 @@ export class CommandError extends Error {
   }
 }
 
-export async function dispatch(name: unknown, args: unknown): Promise<unknown> {
+export async function dispatch(name: unknown, args: unknown, trustedHost: boolean): Promise<unknown> {
   if (typeof name !== "string" || name === "") {
     throw new CommandError(400, "缺少命令名");
   }
@@ -72,6 +96,9 @@ export async function dispatch(name: unknown, args: unknown): Promise<unknown> {
   }
   if (meta.desktopOnly) {
     throw new CommandError(403, `命令 ${name} 仅桌面端可用`);
+  }
+  if (isDenied(name, trustedHost)) {
+    throw new CommandError(403, `命令 ${name} 需要可信宿主（本机桌面端）`);
   }
   const handler = HANDLERS.get(name);
   if (!handler) {

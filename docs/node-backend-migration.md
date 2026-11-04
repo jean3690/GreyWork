@@ -3,8 +3,9 @@
 > 目标：把 headless 宿主（`apps/server` + `crates/greywork-host`，约 42.5k 行生产代码、189 条命令）
 > 换成 Node 实现（`apps/host-node`），**API 契约不变**，桌面端 / 浏览器端 / Docker 部署零改动。
 >
-> 现状：P0 已完成（HTTP + 会话 + 命令分发骨架 + 静态托管 + 事件流，20 条测试），
-> 命令实现仍在 Rust 侧，Electron 默认仍 spawn Rust 二进制。
+> 现状：P0 已完成（HTTP + 会话 + 命令分发骨架 + 静态托管 + 事件流，20 条测试）；
+> P1 进行中——双轨对照脚本已落地，内核命令开始按领域迁移（`store_default_root`、
+> `terminal_shells` 已通过对照）。Electron 默认仍 spawn Rust 二进制。
 
 ---
 
@@ -98,7 +99,7 @@
 
 ## 7. 双轨对照怎么跑
 
-新增 `scripts/host-parity.mjs`（P1 交付）：
+已交付 `scripts/host-parity.mjs`（`pnpm host:parity`）：
 
 1. 以同一份 `GREYWORK_*` 环境变量分别启动 Rust 与 Node 宿主（不同端口、不同数据目录）；
 2. 登录拿 token，按「命令 + 参数」清单逐条打 `POST /api/command`；

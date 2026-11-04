@@ -40,7 +40,8 @@
     "disks": "node scripts/disks-reclaim.mjs",
     "disks:reclaim": "node scripts/disks-reclaim.mjs --apply",
     "prepare": "husky",
-    "electron:dev:fresh": "node scripts/electron-dev-fresh.mjs"
+    "electron:dev:fresh": "node scripts/electron-dev-fresh.mjs",
+    "host:parity": "node scripts/host-parity.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
