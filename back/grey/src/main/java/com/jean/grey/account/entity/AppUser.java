@@ -25,6 +25,9 @@ public class AppUser {
 	/** user / admin：admin 才能进 /api/admin/**（见 SecurityConfig）。 */
 	private String role;
 
+	/** bcrypt 密码哈希；NULL 表示该账号没开密码登录（普通用户恒为 NULL）。 */
+	private String passwordHash;
+
 	@TableField(fill = FieldFill.INSERT)
 	private LocalDateTime createdAt;
 

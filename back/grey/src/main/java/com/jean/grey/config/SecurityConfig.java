@@ -32,10 +32,12 @@ public class SecurityConfig {
 						.requestMatchers(HttpMethod.POST, "/api/auth/enroll").permitAll()
 						.requestMatchers("/api/auth/oidc/**").permitAll()
 						.requestMatchers(HttpMethod.POST, "/api/channels/webhook/*").permitAll()
-						.requestMatchers(HttpMethod.GET, "/api/market/packages", "/api/market/packages/**",
-								"/api/market/registry.json", "/api/market/download/**").permitAll()
+					// 运维台登录本身必须匿名可达（它就是拿 token 的入口），其余 /api/admin/** 仍要 admin。
+					.requestMatchers(HttpMethod.POST, "/api/admin/auth/login").permitAll()
+					.requestMatchers(HttpMethod.GET, "/api/market/packages", "/api/market/packages/**",
+							"/api/market/registry.json", "/api/market/download/**").permitAll()
 						.requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
-						// 运维台页面（静态 HTML + 同源 fetch）公开可取：页面不含数据，数据面在 /api/admin/**。
+						// 运维台页面（Vue SPA 产物 + 同源 fetch）公开可取：页面不含数据，数据面在 /api/admin/**。
 						.requestMatchers("/admin", "/admin/", "/admin/**").permitAll()
 						// 运维面：角色由 BearerTokenFilter 按库里的 role 列写成 ROLE_ADMIN。
 						.requestMatchers("/api/admin/**").hasRole("ADMIN")
@@ -58,7 +60,7 @@ public class SecurityConfig {
 				.map(String::trim)
 				.filter(origin -> !origin.isEmpty())
 				.toList());
-		config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+		config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
 		config.setAllowedHeaders(List.of("Authorization", "Content-Type"));
 		config.setMaxAge(3600L);
 		UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();

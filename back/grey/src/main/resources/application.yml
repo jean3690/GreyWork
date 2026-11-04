@@ -46,6 +46,9 @@ grey:
     # 管理员邮箱名单（逗号分隔）：命中者在登录时获得 admin 角色，启动时也会对已有账号对齐一次
     # （只提不降）。admin 才能访问 /api/admin/**（用户管理 / 入场码签发）。
     admin-emails: ${GREY_ADMIN_EMAILS:}
+    # 运维台初始密码：首次启动时为 admin-emails 里的账号建号并写入该密码（bcrypt）。
+    # 留空则随机生成并打印到日志；已有密码的账号不会被覆盖（忘记密码走入场码登录后改）。
+    admin-password: ${GREY_ADMIN_PASSWORD:}
     session-ttl: PT720H
     # 入场码连续失败上限与窗口：只对失败计数，成功一次即清零（正常用户多设备登录不受影响）。
     # 按来源地址分桶；反向代理后请让容器把真实地址写进 remoteAddr，不要依赖 X-Forwarded-For。

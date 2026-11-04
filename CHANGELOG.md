@@ -6,6 +6,24 @@
 发版流程：新增条目补进对应版本标题下 → 打 `v*` 标签 → `.github/workflows/release.yml` 会自动从本文件
 抽取该版本条目作为 Release 说明。**不要手改 Release 正文**，改这里。
 
+## [未发布]
+
+### 新增
+
+- **运维台（`apps/admin`）**：Vue 3 + Vite + Element Plus 独立 SPA，构建产物写进
+  `back/grey/src/main/resources/static/admin`，`mvn clean package` 的 jar 自带 `/admin`。
+  七个页面：概览、用户与设备、入场码、宿主、通道绑定、模型与用量、审计日志。
+- **管理员账号密码登录**：`POST /api/admin/auth/login`，bcrypt 存 `app_user.password_hash`；
+  启动时按 `GREY_ADMIN_EMAILS` 建号并种 `GREY_ADMIN_PASSWORD`（留空随机打印日志）；
+  改密入口 `POST /api/admin/auth/password`；失败限流与入场码分开计数。
+- **控制面聚合接口**：`GET /api/admin/overview`、`/api/admin/hosts`、`/api/admin/channels`
+  （含 `POST /api/admin/channels/{id}/status` 硬停用）、`/api/admin/llm/keys`、
+  `/api/admin/llm/usage`；运维动作与管理员登录写入 `audit_log`。
+
+### 修正
+
+- V10 迁移重复创建 `idx_user_identity_user`（V1 baseline 已建）导致 MySQL 1061、Flyway 启动失败。
+
 ## [0.10.0] - 2026-11-02
 
 ### 新增

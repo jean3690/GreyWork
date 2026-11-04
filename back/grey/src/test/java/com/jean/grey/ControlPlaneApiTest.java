@@ -40,7 +40,9 @@ import tools.jackson.databind.ObjectMapper;
 		"grey.llm.master-key=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
 		"grey.llm.rpm-limit=3",
 		// 运维面测试的固定管理员（RolePolicy 在登录时按名单定角色）。
-		"grey.auth.admin-emails=Admin@Grey.local",
+		"grey.auth.admin-emails=Admin@Grey.local,ops@grey.local",
+		// 启动时给名单里的账号种密码；ops@grey.local 专门用来验密码登录（不与 enroll 测试抢设备额度）。
+		"grey.auth.admin-password=AdminPass123",
 		// 设备上限调小，才能在测试里几轮登录就触发淘汰。
 		"grey.auth.max-devices=3"
 })
@@ -1399,6 +1401,162 @@ void userCanRevokeOtherSessionsButStaySignedIn() throws Exception {
 				.andExpect(status().isUnauthorized());
 		mockMvc.perform(get("/api/auth/me").header("Authorization", bearerOf(current)))
 				.andExpect(status().isOk());
+	}
+
+
+	@Test
+	void adminCanListAndRevokeSingleDevice() throws Exception {
+		JsonNode victim = enroll("devuser@grey.local", "desktop");
+		JsonNode second = enroll("devuser@grey.local", "phone");
+		long victimId = victim.get("user").get("id").asLong();
+		String adminBearer = "Bearer " + adminToken();
+
+		mockMvc.perform(get("/api/admin/users/" + victimId + "/devices").header("Authorization", adminBearer))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.length()").value(2));
+
+		// 找出 victim 当前设备（用 victim 自己的 token 查 /api/devices 的 current 标记），只吊销那一台。
+		JsonNode devices = json(mockMvc.perform(get("/api/devices")
+				.header("Authorization", bearerOf(victim)))
+				.andExpect(status().isOk()).andReturn());
+		long currentDevice = -1;
+		for (JsonNode d : devices) {
+			if (d.get("current").asBoolean()) currentDevice = d.get("id").asLong();
+		}
+		mockMvc.perform(delete("/api/admin/users/" + victimId + "/devices/" + currentDevice)
+				.header("Authorization", adminBearer))
+				.andExpect(status().isOk());
+
+		mockMvc.perform(get("/api/admin/users/" + victimId + "/devices").header("Authorization", adminBearer))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.length()").value(1));
+		// 被吊销那台的会话立刻失效，另一台仍可用。
+		mockMvc.perform(get("/api/auth/me").header("Authorization", bearerOf(victim)))
+				.andExpect(status().isUnauthorized());
+		mockMvc.perform(get("/api/auth/me").header("Authorization", bearerOf(second)))
+				.andExpect(status().isOk());
+	}
+
+	@Test
+	void adminCanChangeUserRoleButNotSelf() throws Exception {
+		JsonNode target = enroll("roleuser@grey.local", "desktop");
+		long targetId = target.get("user").get("id").asLong();
+		JsonNode admin = enroll(ADMIN_EMAIL, "server");
+		long adminId = admin.get("user").get("id").asLong();
+		String adminBearer = bearerOf(admin);
+
+		// 非名单内账号可手动提成 admin，再降回 user。
+		mockMvc.perform(patch("/api/admin/users/" + targetId)
+				.header("Authorization", adminBearer)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"role\":\"admin\"}"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.role").value("admin"));
+		mockMvc.perform(patch("/api/admin/users/" + targetId)
+				.header("Authorization", adminBearer)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"role\":\"user\"}"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.role").value("user"));
+
+		// 不能改自己的角色，避免把自己锁在运维面之外。
+		mockMvc.perform(patch("/api/admin/users/" + adminId)
+				.header("Authorization", adminBearer)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"role\":\"user\"}"))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.code").value("cannot_change_own_role"));
+	}
+
+	@Test
+	void adminUserDetailAggregatesDevicesAndProviders() throws Exception {
+		JsonNode victim = enroll("detailuser@grey.local", "desktop");
+		enroll("detailuser@grey.local", "phone");
+		long victimId = victim.get("user").get("id").asLong();
+		String adminBearer = "Bearer " + adminToken();
+		mockMvc.perform(get("/api/admin/users/" + victimId + "/detail").header("Authorization", adminBearer))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.email").value("detailuser@grey.local"))
+				.andExpect(jsonPath("$.deviceCount").value(2))
+				.andExpect(jsonPath("$.providers").isArray());
+	}
+
+	@Test
+	void adminAuditLogRecordsPrivilegedActions() throws Exception {
+		JsonNode victim = enroll("audituser@grey.local", "desktop");
+		long victimId = victim.get("user").get("id").asLong();
+		String adminBearer = "Bearer " + adminToken();
+		mockMvc.perform(patch("/api/admin/users/" + victimId)
+				.header("Authorization", adminBearer)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"status\":\"disabled\"}"))
+				.andExpect(status().isOk());
+		mockMvc.perform(get("/api/admin/audit?targetType=user&targetId=" + victimId)
+				.header("Authorization", adminBearer))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$[?(@.action=='user_disable')]").isNotEmpty());
+	}
+
+	@Test
+	void adminAuditEndpointRequiresAdminRole() throws Exception {
+		JsonNode member = enroll("auditmember@grey.local", "desktop");
+		mockMvc.perform(get("/api/admin/audit").header("Authorization", bearerOf(member)))
+				.andExpect(status().isForbidden());
+	}
+
+	// ---------- 运维台：账号密码登录 + 概览 / 资源端点 ----------
+
+	@Test
+	void adminConsoleLogsInWithPasswordAndSeesOverview() throws Exception {
+		MvcResult login = mockMvc.perform(post("/api/admin/auth/login")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"email\":\"ops@grey.local\",\"password\":\"AdminPass123\"}"))
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.user.role").value("admin"))
+				.andExpect(jsonPath("$.device.name").value("运维台"))
+				.andReturn();
+		String bearer = "Bearer " + json(login).get("token").asString();
+
+		mockMvc.perform(get("/api/admin/overview").header("Authorization", bearer))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.users.total").isNumber())
+				.andExpect(jsonPath("$.devices.total").isNumber())
+				.andExpect(jsonPath("$.trend.length()").value(7))
+				.andExpect(jsonPath("$.recentAudits").isArray());
+		mockMvc.perform(get("/api/admin/hosts").header("Authorization", bearer))
+				.andExpect(status().isOk());
+		mockMvc.perform(get("/api/admin/channels").header("Authorization", bearer))
+				.andExpect(status().isOk());
+		mockMvc.perform(get("/api/admin/llm/keys").header("Authorization", bearer))
+				.andExpect(status().isOk());
+		mockMvc.perform(get("/api/admin/llm/usage").header("Authorization", bearer))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.byProvider").isArray());
+	}
+
+	/** 密码错 / 非管理员账号都回同一个 401，避免把登录接口变成账号枚举器。 */
+	@Test
+	void adminConsolePasswordLoginRejectsBadCredentials() throws Exception {
+		mockMvc.perform(post("/api/admin/auth/login")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"email\":\"ops@grey.local\",\"password\":\"wrong-password\"}"))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.code").value("admin_login_invalid"));
+		// 普通用户即使被猜中密码（这里本来也没密码）也不能进运维台。
+		mockMvc.perform(post("/api/admin/auth/login")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"email\":\"member@grey.local\",\"password\":\"whatever-1\"}"))
+				.andExpect(status().isUnauthorized());
+	}
+
+	@Test
+	void adminConsoleResourcesAreAdminOnly() throws Exception {
+		JsonNode member = enroll("resource-member@grey.local", "desktop");
+		for (String path : new String[] { "/api/admin/overview", "/api/admin/hosts",
+				"/api/admin/channels", "/api/admin/llm/keys", "/api/admin/llm/usage" }) {
+			mockMvc.perform(get(path).header("Authorization", bearerOf(member)))
+					.andExpect(status().isForbidden());
+		}
 	}
 
 	private JsonNode enroll(String email, String platform) throws Exception {

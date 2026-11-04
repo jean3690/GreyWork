@@ -1,6 +1,6 @@
 # GreyWork Architecture
 
-GreyWork is a monorepo implementing a desktop-first AI agent application. It uses pnpm workspaces with TypeScript packages in `packages/`, an Electron desktop shell in `apps/electron/`, two renderer frontends (`apps/desktop` and `apps/web`) built from the same `@greywork/workbench` sources, and a headless Rust server (`apps/server/`) backed by shared domain logic in `crates/greywork-host/`.
+GreyWork is a monorepo implementing a desktop-first AI agent application. It uses pnpm workspaces with TypeScript packages in `packages/`, an Electron desktop shell in `apps/electron/`, two renderer frontends (`apps/desktop` and `apps/web`) built from the same `@greywork/workbench` sources, and a headless Rust server (`apps/server/`) backed by shared domain logic in `crates/greywork-host/`. A separate Java control plane (`back/grey`) owns accounts, channels, the model gateway, storage and automations; its admin console is `apps/admin`.
 
 ## Monorepo Layout
 
@@ -10,7 +10,10 @@ greyWork/
 │   ├── desktop/              # Desktop renderer SPA (Vite + Vue), served by the Electron shell / server
 │   ├── web/                  # Browser front: same workbench, narrower FrontSpec
 │   ├── electron/             # Electron shell: main process + preload + sidecar orchestration
-│   └── server/               # Headless axum server: HTTP command endpoint + WS events + login
+│   ├── server/               # Headless axum server: HTTP command endpoint + WS events + login
+│   └── admin/                # Admin console SPA for the Java control plane (standalone, no workbench)
+├── back/
+│   └── grey/                 # Java control plane (Spring Boot 4 + MyBatis-Plus + MySQL + Redis)
 ├── crates/
 │   └── greywork-host/        # Shared domain logic (host-transport-free) used by every host
 ├── packages/
@@ -122,6 +125,8 @@ cowork      ← core
 plugins     ← core
 workbench   ← agents, editor, llm, acp, shell, plugins, coop, core
 apps/*      ← workbench (desktop / web = frontends; electron = shell; server = Rust host)
+apps/admin  ← 独立依赖（vue / vue-router / pinia / element-plus），刻意不依赖 workbench
+back/grey   ← 独立 JVM 服务，不在 pnpm / cargo 依赖图里
 ```
 
 **Key rules (enforced by ESLint):**
@@ -185,12 +190,34 @@ the repo N times. Desktop is served at the root by its sidecar, and `apps/web` i
 root-path deployment, so both emit the shared assets; merging them into one deployment would require
 moving desktop to `base: "/desktop/"` and turning its `emitsSharedAssets` off.
 
+## Admin console (`apps/admin` + `back/grey`)
+
+The control plane is intentionally a **separate stack** from the desktop product:
+
+- **Independent frontend.** `apps/admin` uses Vue 3 + Vite + Element Plus directly and does not
+  import `@greywork/workbench`. The ops page therefore has no `FrontSpec`, no plugin runtime and no
+  host bridge; it only speaks `/api/admin/**`. This keeps the jar self-contained and the console
+  bundle free of product features.
+- **Built into the backend.** `pnpm build:admin` writes to
+  `back/grey/src/main/resources/static/admin`; the output is committed, so `mvn clean package`
+  produces a jar that serves `/admin` without Node. Routing is hash-based (`/admin/#/users`), so the
+  server only needs the single `/admin` → `index.html` mapping in `AdminPageController`.
+- **Separate auth surface.** The console logs in with an admin-only email + password
+  (`app_user.password_hash`, bcrypt); normal clients still use one-time enrollment codes or OIDC.
+  All data endpoints stay behind `ROLE_ADMIN` and mutations are written to `audit_log`.
+- **Deployment shape.** Java service (JRE 25 + MySQL + Redis) next to — not inside — the Rust host.
+  Env vars, endpoints and troubleshooting live in
+  [control-plane-auth.md](control-plane-auth.md); frontend conventions in
+  [apps/admin/README.md](../apps/admin/README.md).
+
 ## Build & Package
 
 - All packages use source-direct execution (TypeScript via Vite/vue-tsc), no separate build step for packages.
 - `pnpm build` builds **both** fronts (`build:desktop` → `apps/desktop/dist`, `build:web` →
   `apps/web/dist`). Deployments build only what they serve: the Electron packaging script and the
   Docker image use `build:desktop`, since both serve the desktop SPA.
+- `pnpm build:admin` builds the ops console into the Java backend resources (see above); it is not
+  part of `pnpm build` because the control plane ships its own jar.
 - The desktop app packages via electron-builder (`apps/electron/electron-builder.yml`).
 - Domain logic lives in `crates/greywork-host/` (a single Cargo workspace at the repo root, one `Cargo.lock`), shared by both hosts. It is organised into four layers — `core/` (leaf utilities), `infra/` (DB, git, http, workspace FS), `services/` (LLM, ACP, MCP, RAG, office, skills, cron), `channels/` (chat transports) and `app/` (the `commands` face) — with a strict downward dependency direction (L0 ← L1 ← L2 ← L3 ← L4). `lib.rs` re-exports every module back to the crate root, so `greywork_host::<mod>` paths are unchanged. Major domains: `services/llm/` (OpenAI-compatible stream -> events), `services/acp_host/`, `services/mcp*.rs`, `services/host_exec.rs` (automation-queue consumer, **not** process exec — that is `infra/process_guard.rs`), `infra/http.rs` / `services/web_fetch.rs`, `infra/workspace_fs/` (authorized workspace root resolution + file reads) and `infra/git.rs` (git CLI surfaced as `git_*` commands, scoped to the authorized root). The command face has a single source of truth: `commands::COMMANDS` + `commands::dispatch`.
 - `apps/electron/src/main/` keeps the host-specific modules (window / tray / notify / close-guard / navigation / menu / logger / browser-view / picker / plugin-window / sidecar / auth).
@@ -201,7 +228,12 @@ moving desktop to `base: "/desktop/"` and turning its `emitsSharedAssets` off.
 
 - Each package with testable logic has a `tests/` directory using Vitest.
 - `pnpm -r test` runs all tests across packages with coverage enabled where configured.
+  `apps/admin` has a small Vitest suite (happy-dom) for pure logic and the trend chart; full-page
+  behaviour is covered by manual smoke plus the backend contract tests.
 - Rust tests run via `cargo test --locked` from the **repo root** (single workspace: `greywork-host` + server).
+- The Java control plane runs `./mvnw test`; `ControlPlaneApiTest` uses Testcontainers (MySQL 8.4,
+  Redis 7, RustFS) and covers auth, sync, hosts, channels, the LLM gateway, market, storage,
+  automations and the admin surface.
 - Coverage thresholds are configured per-package in `vitest.config.ts`.
 - **Cross-language ACP gate**: `pnpm --filter @greywork/acp test:integration` drives the real
   renderer-side ACP client (`@greywork/acp` → the host-command transport → `POST /api/command` +
