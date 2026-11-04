@@ -373,6 +373,74 @@ HANDLERS.set("plugin_market_uninstall", async (args, ctx) => {
   return null;
 });
 
+HANDLERS.set("office_convert_info", async () => {
+  // soffice 路径来自环境变量；未设置则转换功能不可用。
+  const soffice = process.env.GREYWORK_SOFFICE_PATH ?? "";
+  return { available: soffice !== "", path: soffice || null };
+});
+HANDLERS.set("plugin_window_open", async () => {
+  // 插件悬浮窗是 Electron 桌面壳专属能力：headless 服务端没有对应物。
+  throw new Error("插件悬浮窗仅在桌面端可用");
+});
+HANDLERS.set("plugin_window_close", async () => {
+  throw new Error("插件悬浮窗仅在桌面端可用");
+});
+
+HANDLERS.set("mcp_probe", async (args) => {
+  // MCP 服务器探活：stdio 模式 spawn 子进程发 initialize 请求；HTTP 模式发 POST。
+  // P1 的 Node 宿主只支持 Streamable HTTP 探活（stdio 需要子进程管理，后续补齐）。
+  const value = args as { url?: unknown } | null;
+  const url = typeof value?.url === "string" ? value.url.trim() : "";
+  if (url === "") throw new Error("mcp_probe url is required");
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "greywork-host", version: "0.1.0" } } }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    return { transport: "http", isError: !response.ok, text: await response.text().catch(() => "") };
+  } catch (error) {
+    return { transport: "http", isError: true, text: (error as Error).message };
+  }
+});
+HANDLERS.set("mcp_call", async (args) => {
+  const value = args as { server?: unknown; tool?: unknown; args?: unknown } | null;
+  if (typeof value?.server !== "string" || typeof value?.tool !== "string") {
+    throw new Error("mcp_call requires server and tool");
+  }
+  // 完整的 MCP 工具调用需要 MCP 客户端（stdio + Streamable HTTP 两种传输），
+  // 与 Rust 的 mcp.rs 对齐——这是后续批次的工作。
+  throw new Error("mcp_call 尚未迁移到 Node 宿主");
+});
+
+HANDLERS.set("skills_search", async (args) => {
+  const value = args as { origin?: unknown; query?: unknown } | null;
+  const origin = typeof value?.origin === "string" && value.origin.trim() !== "" ? value.origin : "https://greywork-skills.pages.dev";
+  const query = typeof value?.query === "string" ? value.query.trim() : "";
+  if (query === "") throw new Error("query is empty");
+  const response = await fetch(`${origin}/api/skills?q=${encodeURIComponent(query)}`, { signal: AbortSignal.timeout(15_000) });
+  if (!response.ok) throw new Error(`skills search returned ${response.status}`);
+  return response.json();
+});
+HANDLERS.set("skills_download", async (args) => {
+  const value = args as { origin?: unknown; entryRef?: unknown } | null;
+  const origin = typeof value?.origin === "string" && value.origin.trim() !== "" ? value.origin : "https://greywork-skills.pages.dev";
+  const entryRef = typeof value?.entryRef === "string" ? value.entryRef : "";
+  const parts = entryRef.split("/");
+  if (parts.length !== 3) throw new Error("invalid entry ref (expect owner/repo/slug)");
+  const url = `${origin}/api/download/${parts[0]}/${parts[1]}/${parts[2]}`;
+  const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+  if (!response.ok) throw new Error(`skills download returned ${response.status}`);
+  return response.json();
+});
+
+HANDLERS.set("skills_bundled_list", async () => []);
+HANDLERS.set("skills_install_bundled", async (args) => {
+  const skillId = (args as { skillId?: unknown } | null)?.skillId;
+  throw new Error(`bundled skill ${String(skillId)} not found in Node host`);
+});
+
 HANDLERS.set("web_fetch", async (args) => {
   const url = (args as { url?: unknown } | null)?.url;
   if (typeof url !== "string") throw new CommandError(400, "缺少参数 url");
