@@ -17,7 +17,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { createServer as createHttpServer } from "node:http";
 import { createServer } from "node:net";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -86,6 +86,12 @@ const STATEFUL_COMMANDS = new Set([
   "llm_chat_stop",
   // 以下命令需要特定参数或外部状态，错误文案由各宿主自行定义（ serde vs 自定义校验），不参与逐字节对照。
   "mcp_probe", "mcp_call",
+  // 本机模型 agent 回合会 spawn 真实任务与事件流，无法逐字节对照。
+  "llm_agent_start", "llm_agent_stop",
+  // ACP 会话关闭依赖在飞会话，由 ACP 端到端用例覆盖。
+  "acp_close_session",
+  // 官方注册表是实时数据，两次独立请求的内容可能不同。
+  "mcp_search",
   "skills_search", "skills_download", "skills_bundled_list", "skills_install_bundled",
   "plugin_net_fetch", "plugin_fs", "plugin_workspace",
   "office_convert_info",
@@ -100,6 +106,9 @@ const STATEFUL_COMMANDS = new Set([
   "plugin_market_list_installed", "plugin_market_uninstall",
   // 依赖磁盘上已有的快照目录，响应随环境变化。
   "worktree_release",
+  // 扫码登录 / 扫码创建应用：二维码内容每次都不同（一次性 token），无法逐字节对照。
+  "wechat_login_qr", "wechat_login_poll", "wechat_login_cancel",
+  "dingtalk_register_begin", "feishu_register_begin", "qq_register_begin",
 ]);
 
 const args = new Set(process.argv.slice(2));
@@ -269,6 +278,11 @@ for (const side of ["rust", "node"]) {
   git("commit", "-qm", "init");
   writeFileSync(path.join(repo, "a.txt"), "one\ntwo\n");
   writeFileSync(path.join(repo, "untracked.txt"), "new\n");
+  // 表格 fixture：fs_read_sheet 的对照样本（Rust calamine 与 Node 解析器共用同一份）。
+  copyFileSync(
+    path.join(root, "crates", "greywork-host", "tests", "fixtures", "sample.xls"),
+    path.join(workspaceDir, "sample.xls"),
+  );
 }
 
 /**
@@ -384,6 +398,22 @@ function argsFor(command, side) {
       return { runs: [{ id: "r1", payload: { plan: [1, 2] } }] };
     case "acp_detect_programs":
       return { programs: ["git", "definitely-not-a-program-xyz"] };
+    case "fs_authorize_drop_paths":
+      // 拖放：只认普通文件（hello.txt 已在夹具里）。返回 null，两边一致。
+      return { paths: [path.join(workspaceDir, "hello.txt")] };
+    case "fs_authorize_picked_paths":
+      // 选择器：目录成为授权根，返回 canonical 路径。
+      return { paths: [workspaceDir] };
+    case "fs_read_sheet":
+      // 老格式 .xls：两侧解析器对同一份 fixture 必须逐格一致。
+      return { path: path.join(workspaceDir, "sample.xls"), sheet: null, maxRows: null };
+    case "store_sessions_relocate":
+      // 空清单：搬迁报告为空，两侧形状一致。
+      return { sessionIds: [], fromFolder: null, toFolder: null };
+    case "office_oauth_status":
+      return { clientId: "parity-not-authorized" };
+    case "office_oauth_logout":
+      return { clientId: "parity-not-authorized" };
     case "acp_list":
       return {};
     case "db_settings_sync":
