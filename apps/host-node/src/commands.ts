@@ -18,7 +18,20 @@ import { skillsInstall, skillsUninstall } from "./skills.js";
 import { fetchPage } from "./web-fetch.js";
 import { checkUpdate } from "./update.js";
 import type { AgentProvider, AutomationRunInput, AutomationTask, Db, TeamRun } from "./db.js";
-import { gitChanges, gitCurrentBranch, gitDiff, gitStatus, runGit } from "./git.js";
+import {
+  gitChanges,
+  gitCommit,
+  gitCurrentBranch,
+  gitDiff,
+  gitLog,
+  gitShow,
+  gitStage,
+  gitStatus,
+  gitBranchList,
+  gitUnstage,
+  runGit,
+} from "./git.js";
+import os from "node:os";
 import { ragIndexBuild, ragSearch } from "./rag.js";
 import { listWorktrees, provisionWorktree, releaseWorktree, restoreWorktree, snapshotWorktree } from "./worktree.js";
 import { chatComplete, embed, listModels, transcribe, type LlmChatMessage, type LlmStreamHost } from "./llm.js";
@@ -401,6 +414,74 @@ HANDLERS.set("acp_set_config", async (args, ctx) => {
   }
   return ctx.acp.setConfig(value.handle, value.configId, value.value ?? null);
 });
+HANDLERS.set("git_stage", async (args, ctx) => {
+  const value = args as { root?: unknown; paths?: unknown; all?: unknown } | null;
+  if (typeof value?.root !== "string") throw new CommandError(400, "缺少参数 root");
+  await gitStage(ctx.access, value.root, Array.isArray(value.paths) ? (value.paths as string[]) : [], value.all === true);
+  return null;
+});
+HANDLERS.set("git_unstage", async (args, ctx) => {
+  const value = args as { root?: unknown; paths?: unknown; all?: unknown } | null;
+  if (typeof value?.root !== "string") throw new CommandError(400, "缺少参数 root");
+  await gitUnstage(ctx.access, value.root, Array.isArray(value.paths) ? (value.paths as string[]) : [], value.all === true);
+  return null;
+});
+HANDLERS.set("git_commit", async (args, ctx) => {
+  const value = args as { root?: unknown; message?: unknown; all?: unknown } | null;
+  if (typeof value?.root !== "string" || typeof value?.message !== "string") {
+    throw new CommandError(400, "缺少参数 root / message");
+  }
+  return gitCommit(ctx.access, value.root, value.message, value.all === true);
+});
+HANDLERS.set("git_branch_list", async (args, ctx) => {
+  const root = (args as { root?: unknown } | null)?.root;
+  if (typeof root !== "string") throw new CommandError(400, "缺少参数 root");
+  return gitBranchList(ctx.access, root);
+});
+HANDLERS.set("git_log", async (args, ctx) => {
+  const value = args as { root?: unknown; limit?: unknown; skip?: unknown } | null;
+  if (typeof value?.root !== "string") throw new CommandError(400, "缺少参数 root");
+  return gitLog(
+    ctx.access,
+    value.root,
+    typeof value.limit === "number" ? value.limit : null,
+    typeof value.skip === "number" ? value.skip : null,
+  );
+});
+HANDLERS.set("git_show", async (args, ctx) => {
+  const value = args as { root?: unknown; hash?: unknown; path?: unknown } | null;
+  if (typeof value?.root !== "string" || typeof value?.hash !== "string") {
+    throw new CommandError(400, "缺少参数 root / hash");
+  }
+  return gitShow(ctx.access, value.root, value.hash, typeof value.path === "string" ? value.path : null);
+});
+
+HANDLERS.set("shell_run", async (args, ctx) => {
+  const value = args as { command?: unknown; cwd?: unknown; timeoutMs?: unknown } | null;
+  if (typeof value?.command !== "string" || value.command === "") throw new CommandError(400, "缺少参数 command");
+  const { shellRun } = await import("./shell-run.js");
+  return shellRun(
+    value.command,
+    typeof value.cwd === "string" ? value.cwd : ctx.access.root,
+    typeof value.timeoutMs === "number" ? value.timeoutMs : 120_000,
+  );
+});
+
+HANDLERS.set("sys_info", async (_args, ctx) => {
+  const schemaVersion = ctx.db.schemaVersion();
+  return {
+    version: "0.1.0",
+    schemaVersion,
+    logDir: null,
+    activeAgents: ctx.acp.sessionCount(),
+    os: process.platform,
+    trayAvailable: false,
+    totalMemoryBytes: os.totalmem(),
+    cpuCount: os.cpus().length,
+    pinnedTier: null,
+  };
+});
+
 HANDLERS.set("check_update", async () => checkUpdate());
 
 HANDLERS.set("llm_chat_start", async (args, ctx) => {

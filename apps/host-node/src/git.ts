@@ -241,3 +241,118 @@ export async function gitCurrentBranch(access: WorkspaceAccess, root: string): P
   const output = await runGit(resolveRoot(access, root), ["branch", "--show-current"]);
   return output.trim();
 }
+
+/* ===== 写面与历史 ===== */
+
+export async function gitStage(access: WorkspaceAccess, root: string, paths: string[], all: boolean): Promise<void> {
+  const resolved = resolveRoot(access, root);
+  if (all) {
+    await runGit(resolved, ["add", "-A"]);
+    return;
+  }
+  if (paths.length === 0) throw new Error("没有指定要暂存的文件");
+  for (const p of paths) validateRelPath(p);
+  await runGit(resolved, ["add", "--", ...paths]);
+}
+
+export async function gitUnstage(access: WorkspaceAccess, root: string, paths: string[], all: boolean): Promise<void> {
+  const resolved = resolveRoot(access, root);
+  let hasHead = true;
+  try {
+    await runGit(resolved, ["rev-parse", "--verify", "HEAD"]);
+  } catch {
+    hasHead = false;
+  }
+  const args: string[] = hasHead ? ["restore", "--staged"] : ["rm", "--cached", "-r", "-q"];
+  args.push("--");
+  if (all) {
+    args.push(".");
+  } else {
+    if (paths.length === 0) throw new Error("没有指定要取消暂存的文件");
+    for (const p of paths) validateRelPath(p);
+    args.push(...paths);
+  }
+  await runGit(resolved, args);
+}
+
+export interface CommitResult {
+  hash: string;
+  message: string;
+  timestamp: string;
+}
+
+export async function gitCommit(access: WorkspaceAccess, root: string, message: string, all: boolean): Promise<CommitResult> {
+  const resolved = resolveRoot(access, root);
+  const trimmed = message.trim();
+  if (trimmed === "") throw new Error("提交信息不能为空");
+  if (all) {
+    await runGit(resolved, ["add", "-A"]);
+  } else {
+    const staged = await runGit(resolved, ["diff", "--cached", "--name-only"]);
+    if (staged.trim() === "") throw new Error("没有已暂存的变更");
+  }
+  await runGit(resolved, ["commit", "-m", trimmed]);
+  const hash = (await runGit(resolved, ["rev-parse", "--short", "HEAD"])).trim();
+  const timestamp = (await runGit(resolved, ["show", "-s", "--format=%cI", "HEAD"])).trim();
+  return { hash, message: trimmed, timestamp };
+}
+
+export async function gitBranchList(access: WorkspaceAccess, root: string): Promise<string[]> {
+  const output = await runGit(resolveRoot(access, root), ["branch", "--format=%(refname:short)"]);
+  return output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "");
+}
+
+export interface GitCommitInfo {
+  hash: string;
+  shortHash: string;
+  author: string;
+  email: string;
+  timestamp: string;
+  subject: string;
+  refs: string;
+}
+
+const LOG_FORMAT = "--format=%H%x1f%h%x1f%an%x1f%ae%x1f%cI%x1f%s%x1f%D%x1e";
+
+export async function gitLog(access: WorkspaceAccess, root: string, limit?: number | null, skip?: number | null): Promise<GitCommitInfo[]> {
+  const resolved = resolveRoot(access, root);
+  try {
+    await runGit(resolved, ["rev-parse", "--verify", "HEAD"]);
+  } catch {
+    return [];
+  }
+  const clampedLimit = Math.min(Math.max(limit ?? 50, 1), 200);
+  const output = await runGit(resolved, ["log", "--max-count=" + clampedLimit, "--skip=" + (skip ?? 0), LOG_FORMAT]);
+  return output
+    .split("\x1e")
+    .filter((record) => record.trim() !== "")
+    .map((record) => {
+      const parts = record.trim().replace(/^\n/, "").split("\x1f");
+      if (parts.length < 6) return null;
+      return {
+        hash: parts[0],
+        shortHash: parts[1],
+        author: parts[2],
+        email: parts[3],
+        timestamp: parts[4],
+        subject: parts.slice(5, parts.length - 1).join("\x1f"),
+        refs: parts[parts.length - 1].trim(),
+      };
+    })
+    .filter((item): item is GitCommitInfo => item !== null);
+}
+
+export async function gitShow(access: WorkspaceAccess, root: string, hash: string, filePath?: string | null): Promise<string> {
+  const resolved = resolveRoot(access, root);
+  if (hash === "" || hash.startsWith("-")) throw new Error("非法版本号: " + hash);
+  if (!/^[0-9a-fA-F]+$/.test(hash)) throw new Error("非法版本号: " + hash);
+  const args = ["show", "--format=", "--patch", hash];
+  if (filePath) {
+    validateRelPath(filePath);
+    args.push("--", filePath);
+  }
+  return runGit(resolved, args);
+}

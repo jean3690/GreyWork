@@ -174,7 +174,7 @@ describe("HTTP 契约", () => {
     // 桌面专属命令任何宿主都不可调用。
     expect(list.find((item) => item.name === "reveal_path")?.available).toBe(false);
     // 尚未迁移的普通命令：可用性必须是 false，避免前端「点了才报错」。
-    expect(list.find((item) => item.name === "git_stage")?.available).toBe(false);
+    expect(list.find((item) => item.name === "channel_send_media")?.available).toBe(false);
     // 可信宿主下 terminal_shells 已迁移且允许调用。
     expect(list.find((item) => item.name === "terminal_shells")?.available).toBe(true);
   });
@@ -207,7 +207,7 @@ describe("HTTP 契约", () => {
     const desktop = await call("reveal_path");
     expect(desktop.status).toBe(403);
 
-    const unmigrated = await call("git_stage");
+    const unmigrated = await call("channel_send_media");
     expect(unmigrated.status).toBe(501);
     expect(unmigrated.body.error).toContain("尚未迁移");
 
