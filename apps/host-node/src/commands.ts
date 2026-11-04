@@ -38,6 +38,7 @@ import { listWorktrees, provisionWorktree, releaseWorktree, restoreWorktree, sna
 import { chatComplete, embed, listModels, transcribe, type LlmChatMessage, type LlmStreamHost } from "./llm.js";
 import type { AcpHost } from "./acp.js";
 import { validateDirKey } from "./plugin-market.js";
+import { saveCredentials, telegramSend, telegramStatus } from "./channel-telegram.js";
 import type { EventBus } from "./events.js";
 import type { SessionFileStore, WorkspaceDir } from "./session-store.js";
 import type { RagIndexHost } from "./rag.js";
@@ -611,6 +612,21 @@ HANDLERS.set("sys_info", async (_args, ctx) => {
     cpuCount: os.cpus().length,
     pinnedTier: null,
   };
+});
+
+HANDLERS.set("telegram_status", async (_args, ctx) => telegramStatus(ctx.dataDir));
+HANDLERS.set("telegram_save_credentials", async (args, ctx) => {
+  const value = args as { botToken?: unknown } | null;
+  if (typeof value?.botToken !== "string") throw new CommandError(400, "缺少参数 botToken");
+  saveCredentials(ctx.dataDir, value.botToken);
+  return null;
+});
+HANDLERS.set("telegram_send", async (args, ctx) => {
+  const value = args as { chatId?: unknown; text?: unknown } | null;
+  if (typeof value?.chatId !== "string" || typeof value?.text !== "string") {
+    throw new CommandError(400, "缺少参数 chatId / text");
+  }
+  return telegramSend(ctx.dataDir, value.chatId, value.text);
 });
 
 HANDLERS.set("check_update", async () => checkUpdate());
