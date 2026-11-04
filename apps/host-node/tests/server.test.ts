@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -111,7 +112,7 @@ describe("HTTP 契约", () => {
     // 桌面专属命令任何宿主都不可调用。
     expect(list.find((item) => item.name === "reveal_path")?.available).toBe(false);
     // 尚未迁移的普通命令：可用性必须是 false，避免前端「点了才报错」。
-    expect(list.find((item) => item.name === "git_status")?.available).toBe(false);
+    expect(list.find((item) => item.name === "git_stage")?.available).toBe(false);
     // 可信宿主专属命令在普通部署里也不可用（与 policy.rs 的 TRUSTED_HOST_ONLY 同名单）。
     expect(list.find((item) => item.name === "terminal_shells")?.available).toBe(false);
   });
@@ -144,7 +145,7 @@ describe("HTTP 契约", () => {
     const desktop = await call("reveal_path");
     expect(desktop.status).toBe(403);
 
-    const unmigrated = await call("git_status");
+    const unmigrated = await call("git_stage");
     expect(unmigrated.status).toBe(501);
     expect(unmigrated.body.error).toContain("尚未迁移");
 
@@ -236,6 +237,64 @@ describe("HTTP 契约", () => {
     const rootDelete = await call("fs_delete_path", { path: workspaceDir });
     expect(rootDelete.status).toBe(400);
     expect(rootDelete.body.error).toContain("已授权的工作区根目录");
+  });
+
+  it("git 只读四条：status / changes / diff / current_branch", async () => {
+    const repo = path.join(workspaceDir, "repo");
+    mkdirSync(repo, { recursive: true });
+    const git = (...args: string[]) =>
+      execFileSync("git", args, {
+        cwd: repo,
+        stdio: "pipe",
+        env: {
+          ...process.env,
+          GIT_AUTHOR_NAME: "t",
+          GIT_AUTHOR_EMAIL: "t@example.com",
+          GIT_COMMITTER_NAME: "t",
+          GIT_COMMITTER_EMAIL: "t@example.com",
+        },
+      });
+    git("init", "-q", "-b", "main");
+    writeFileSync(path.join(repo, "a.txt"), "one\n");
+    git("add", "-A");
+    git("commit", "-qm", "init");
+    writeFileSync(path.join(repo, "a.txt"), "one\ntwo\n");
+    writeFileSync(path.join(repo, "untracked.txt"), "new\n");
+
+    const call = async (command: string, args: unknown) => {
+      const response = await fetch(`${base}/api/command`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ command, args }),
+      });
+      return { status: response.status, body: await response.json() };
+    };
+
+    const branch = await call("git_current_branch", { root: repo });
+    expect(branch.body).toBe("main");
+
+    const status = (await call("git_status", { root: repo })).body as { path: string; status: string }[];
+    expect(status.find((item) => item.path === "a.txt")?.status).toBe("modified");
+    expect(status.find((item) => item.path === "untracked.txt")?.status).toBe("untracked");
+
+    const changes = (await call("git_changes", { root: repo })).body as {
+      path: string;
+      index: string | null;
+      worktree: string | null;
+      add: number;
+    }[];
+    const modified = changes.find((item) => item.path === "a.txt");
+    expect(modified?.worktree).toBe("modified");
+    expect(modified?.index).toBeNull();
+    expect(modified?.add).toBe(1);
+
+    const diff = (await call("git_diff", { root: repo, path: "a.txt", staged: false })).body as string;
+    expect(diff).toContain("+two");
+
+    // 越界路径（`..` / 绝对路径）必须在跑 git 之前就被拒。
+    const escaped = await call("git_diff", { root: repo, path: "../outside.txt", staged: false });
+    expect(escaped.status).toBe(400);
+    expect((escaped.body as { error: string }).error).toContain("非法路径");
   });
 
   it("db_settings：空库回 null，写入后可读回且类型原样", async () => {

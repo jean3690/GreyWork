@@ -12,6 +12,7 @@ import manifest from "./command-manifest.json" with { type: "json" };
 
 import { shellCatalog } from "./shell-catalog.js";
 import type { Db } from "./db.js";
+import { gitChanges, gitCurrentBranch, gitDiff, gitStatus } from "./git.js";
 import type { WorkspaceAccess } from "./workspace-access.js";
 
 export interface CommandMeta {
@@ -114,6 +115,25 @@ HANDLERS.set("fs_copy_path", async (args, ctx) => {
   ctx.access.copyPath(from, to);
   return null;
 });
+/** git 入参：`{ root }`（授权根内的目录）。 */
+function rootArg(args: unknown): string {
+  const value = (args as { root?: unknown } | null)?.root;
+  if (typeof value !== "string" || value === "") {
+    throw new CommandError(400, "缺少参数 root");
+  }
+  return value;
+}
+
+HANDLERS.set("git_status", async (args, ctx) => gitStatus(ctx.access, rootArg(args)));
+HANDLERS.set("git_changes", async (args, ctx) => gitChanges(ctx.access, rootArg(args)));
+HANDLERS.set("git_diff", async (args, ctx) => {
+  const value = args as { root?: unknown; path?: unknown; staged?: unknown } | null;
+  const root = rootArg(args);
+  const filePath = typeof value?.path === "string" && value.path !== "" ? value.path : null;
+  return gitDiff(ctx.access, root, filePath, value?.staged === true);
+});
+HANDLERS.set("git_current_branch", async (args, ctx) => gitCurrentBranch(ctx.access, rootArg(args)));
+
 HANDLERS.set("db_settings_load", async (_args, ctx) => ctx.db.loadSettings());
 HANDLERS.set("db_settings_sync", async (args, ctx) => {
   const settings = (args as { settings?: unknown } | null)?.settings;

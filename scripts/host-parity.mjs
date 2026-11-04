@@ -13,7 +13,7 @@
  * 前提：`cargo build -p greywork-server`（或 `pnpm electron:dev:all` 跑过一次）与
  * `pnpm --filter @greywork/host-node build`，Node 宿主读 dist/。
  */
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -148,6 +148,25 @@ for (const side of ["rust", "node"]) {
   writeFileSync(path.join(workspaceDir, side, "victim.txt"), "bye");
   writeFileSync(path.join(workspaceDir, side, "before.txt"), "move me");
   writeFileSync(path.join(workspaceDir, side, "copy-src.txt"), "copy me");
+  // git 只读命令需要真实仓库：固定分支名与提交时间，避免默认配置把差异带进来。
+  const repo = path.join(workspaceDir, side, "repo");
+  mkdirSync(repo, { recursive: true });
+  const gitEnv = {
+    ...process.env,
+    GIT_AUTHOR_NAME: "parity",
+    GIT_AUTHOR_EMAIL: "parity@example.com",
+    GIT_COMMITTER_NAME: "parity",
+    GIT_COMMITTER_EMAIL: "parity@example.com",
+    GIT_AUTHOR_DATE: "2026-01-01T00:00:00Z",
+    GIT_COMMITTER_DATE: "2026-01-01T00:00:00Z",
+  };
+  const git = (...args) => execFileSync("git", args, { cwd: repo, env: gitEnv, stdio: "ignore" });
+  git("init", "-q", "-b", "main");
+  writeFileSync(path.join(repo, "a.txt"), "one\n");
+  git("add", "-A");
+  git("commit", "-qm", "init");
+  writeFileSync(path.join(repo, "a.txt"), "one\ntwo\n");
+  writeFileSync(path.join(repo, "untracked.txt"), "new\n");
 }
 
 /**
@@ -175,6 +194,12 @@ function argsFor(command, side) {
       return { from: path.join(own, "before.txt"), to: path.join(own, "after.txt") };
     case "fs_copy_path":
       return { from: path.join(own, "copy-src.txt"), to: path.join(own, "copy-dst.txt") };
+    case "git_status":
+    case "git_changes":
+    case "git_current_branch":
+      return { root: path.join(own, "repo") };
+    case "git_diff":
+      return { root: path.join(own, "repo"), path: "a.txt", staged: false };
     case "db_settings_sync":
       // 两端写各自的库（数据目录不同），但内容必须一致，方便写后复读比对。
       return { settings: { theme: "codex", fontSize: "large", parity: true } };
