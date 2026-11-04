@@ -38,7 +38,8 @@ import { listWorktrees, provisionWorktree, releaseWorktree, restoreWorktree, sna
 import { chatComplete, embed, listModels, transcribe, type LlmChatMessage, type LlmStreamHost } from "./llm.js";
 import type { AcpHost } from "./acp.js";
 import { validateDirKey } from "./plugin-market.js";
-import { channelStatus, saveChannelCredentials, clearChannelCredentials } from "./channel-credentials.js";
+import { getBot, isConnected } from "./wechat-channel.js";
+import { channelStatus, saveChannelCredentials, clearChannelCredentials, loadChannelCredentials } from "./channel-credentials.js";
 import { saveCredentials, telegramSend, telegramStatus } from "./channel-telegram.js";
 import type { EventBus } from "./events.js";
 import type { SessionFileStore, WorkspaceDir } from "./session-store.js";
@@ -749,6 +750,38 @@ HANDLERS.set("feishu_send", async (args) => {
   });
   if (!response.ok) throw new Error(`飞书 send returned ${response.status}`);
   return { ok: true };
+});
+
+HANDLERS.set("wechat_status", async (_args, ctx) => {
+  const creds = loadChannelCredentials(ctx.dataDir, "wechat");
+  return { configured: creds !== null, connected: isConnected() };
+});
+HANDLERS.set("wechat_connect", async (_args, ctx) => {
+  const creds = loadChannelCredentials(ctx.dataDir, "wechat");
+  if (!creds) throw new Error("微信 bot token 未配置");
+  const bot = getBot(ctx.dataDir);
+  if (!isConnected()) {
+    await bot.start();
+  }
+  return { connected: true };
+});
+HANDLERS.set("wechat_disconnect", async (_args, ctx) => {
+  const bot = getBot(ctx.dataDir);
+  await bot.stop();
+  return { connected: false };
+});
+HANDLERS.set("wechat_send", async (args, ctx) => {
+  const value = args as { userId?: unknown; text?: unknown } | null;
+  if (typeof value?.userId !== "string" || typeof value?.text !== "string") {
+    throw new CommandError(400, "缺少参数 userId / text");
+  }
+  const bot = getBot(ctx.dataDir);
+  await bot.send(value.userId, value.text);
+  return { ok: true };
+});
+HANDLERS.set("wechat_logout", async () => {
+  // SDK 没有 logout 方法——断连由 stop 处理，凭据由 clearChannelCredentials 清理。
+  return { loggedOut: true };
 });
 
 HANDLERS.set("check_update", async () => checkUpdate());
