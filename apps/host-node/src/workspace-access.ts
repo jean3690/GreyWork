@@ -33,6 +33,8 @@ import { PROBE_PREFIX_BYTES, probeBytes, readPrefix, type FileProbe } from "./te
 
 const MAX_TEXT_BYTES = 10 * 1024 * 1024;
 const MAX_BINARY_BYTES = 20 * 1024 * 1024;
+/** 媒体专用的硬顶：真实视频与带贴图的模型普遍超过 20MB，按预览口径卡死等于这类文件打不开。 */
+const MAX_MEDIA_BYTES = 128 * 1024 * 1024;
 
 export interface DirEntryInfo {
   name: string;
@@ -367,6 +369,33 @@ export class WorkspaceAccess {
       return readFileSync(file);
     } catch (error) {
       throw new Error(`读取文件失败: ${(error as Error).message}`, { cause: error });
+    }
+  }
+
+  /** 读媒体（视频 / 3D / GIS）：上限由调用方给并夹到 128MB（缺省 20MB）。 */
+  readMedia(raw: string, maxBytes: unknown): Buffer {
+    const requested = typeof maxBytes === "number" && Number.isFinite(maxBytes) ? Math.floor(maxBytes) : MAX_BINARY_BYTES;
+    const limit = Math.min(Math.max(requested, 0), MAX_MEDIA_BYTES);
+    const file = this.resolveExisting(raw);
+    const metadata = statSync(file);
+    if (metadata.size > limit) {
+      throw new Error(`文件超过 ${Math.floor(limit / (1024 * 1024))}MB 上限`);
+    }
+    return readFileSync(file);
+  }
+
+  /** 写二进制（base64 载荷，≤20MB）；上限以**解码后**字节数为准。 */
+  writeBinary(raw: string, dataBase64: string): void {
+    // base64 会把载荷撑大约 4/3：先按编码串长度粗筛，避免为一个超大字符串白分配缓冲。
+    const maxEncoded = (MAX_BINARY_BYTES / 3) * 4 + 8;
+    if (dataBase64.length > maxEncoded) throw new Error("文件超过 20MB 上限");
+    const data = Buffer.from(dataBase64, "base64");
+    if (data.length > MAX_BINARY_BYTES) throw new Error("文件超过 20MB 上限");
+    const target = this.resolveWrite(raw);
+    try {
+      writeFileSync(target, data);
+    } catch (error) {
+      throw new Error(`写入文件失败: ${(error as Error).message}`, { cause: error });
     }
   }
 

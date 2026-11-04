@@ -47,7 +47,8 @@
   会话不因前端断连回收），需要 `allowBuilds` 放开 node-pty 的编译脚本。二进制读取
   （`fs_read_binary`）与文件探测（`fs_probe_file`，UTF-8 / BOM / CRLF / 二进制占比）也已迁移，
   二进制结果按 `application/octet-stream` + `x-greywork-binary: 1` 回原始字节；顺带把未知命令的
-  状态码从 400 修正为 404（与 `apps/server` 的路由层一致）。
+  状态码从 400 修正为 404（与 `apps/server` 的路由层一致）。`fs_read_media`（20MB 缺省、
+  128MB 硬顶，超限报错不截断）与 `fs_write_binary`（base64 解码后 ≤20MB）也一并迁移。
   新增 `pnpm host:parity` 双轨对照：同一份环境变量起两个宿主，逐命令比对状态码与响应体，
   迁移的每条命令都以它为准；可信宿主命令名单（`TRUSTED_HOST_ONLY`）也已按 Rust 同口径移植。
   方案、阶段与风险见 [docs/node-backend-migration.md](docs/node-backend-migration.md)；

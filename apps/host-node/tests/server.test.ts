@@ -340,6 +340,31 @@ describe("HTTP 契约", () => {
     expect(bytes.equals(payload)).toBe(true);
   });
 
+  it("fs_write_binary / fs_read_media：base64 写入与媒体原始字节", async () => {
+    const call = async (command: string, args: unknown) => {
+      const response = await fetch(`${base}/api/command`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ command, args }),
+      });
+      return response;
+    };
+
+    const target = path.join(workspaceDir, "written.bin");
+    const payload = Buffer.from([0xde, 0xad, 0xbe, 0xef]);
+    expect((await call("fs_write_binary", { path: target, dataBase64: payload.toString("base64") })).status).toBe(200);
+    expect(readFileSync(target).equals(payload)).toBe(true);
+
+    const media = await call("fs_read_media", { path: target, maxBytes: 1024 * 1024 });
+    expect(media.status).toBe(200);
+    expect(Buffer.from(await media.arrayBuffer()).equals(payload)).toBe(true);
+
+    // 超过调用方给的额度必须报错而不是截断（半截视频在播放器里表现为「格式损坏」）。
+    const tooSmall = await call("fs_read_media", { path: target, maxBytes: 2 });
+    expect(tooSmall.status).toBe(400);
+    expect(((await tooSmall.json()) as { error: string }).error).toContain("上限");
+  });
+
   it("db_settings：空库回 null，写入后可读回且类型原样", async () => {
     const call = async (command: string, args: unknown = {}) => {
       const response = await fetch(`${base}/api/command`, {

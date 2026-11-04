@@ -162,6 +162,7 @@ for (const side of ["rust", "node"]) {
   writeFileSync(path.join(workspaceDir, side, "copy-src.txt"), "copy me");
   // 二进制读取的夹具：含 NUL 与控制字符，检验 `looks_binary` 与原始字节透传。
   writeFileSync(path.join(workspaceDir, side, "binary.bin"), Buffer.from([0x00, 0x01, 0x02, 0xff, 0x00, 0x10]));
+  writeFileSync(path.join(workspaceDir, side, "media.bin"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
   // git 只读命令需要真实仓库：固定分支名与提交时间，避免默认配置把差异带进来。
   const repo = path.join(workspaceDir, side, "repo");
   mkdirSync(repo, { recursive: true });
@@ -212,6 +213,10 @@ function argsFor(command, side) {
       return { path: path.join(workspaceDir, "hello.txt") };
     case "fs_read_binary":
       return { path: path.join(own, "binary.bin") };
+    case "fs_read_media":
+      return { path: path.join(own, "media.bin"), maxBytes: 1024 * 1024 };
+    case "fs_write_binary":
+      return { path: path.join(own, "written.bin"), dataBase64: Buffer.from([0xde, 0xad, 0xbe, 0xef]).toString("base64") };
     case "git_status":
     case "git_changes":
     case "git_current_branch":
@@ -357,6 +362,17 @@ try {
         failures += 1;
         console.log(`  ✗ 副作用不一致：${side}/${effect.name} exists=${present} content=${JSON.stringify(content)}`);
       }
+    }
+  }
+
+  // 二进制写入：按字节比对（utf8 读法会把内容变成替换字符，掩盖真实差异）。
+  const expectedBin = Buffer.from([0xde, 0xad, 0xbe, 0xef]);
+  for (const side of ["rust", "node"]) {
+    const target = path.join(workspaceDir, side, "written.bin");
+    const actual = existsSync(target) ? readFileSync(target) : null;
+    if (!actual || !actual.equals(expectedBin)) {
+      failures += 1;
+      console.log(`  ✗ 二进制写入不一致：${side}/written.bin = ${actual ? actual.toString("hex") : "(缺失)"}`);
     }
   }
 

@@ -79,6 +79,16 @@ HANDLERS.set("fs_list_dir", async (args, ctx) => ctx.access.listDir(pathArg(args
 HANDLERS.set("fs_read_text_file", async (args, ctx) => ctx.access.readTextFile(pathArg(args)));
 HANDLERS.set("fs_read_binary", async (args, ctx) => new BinaryOutput(ctx.access.readBinary(pathArg(args))));
 HANDLERS.set("fs_probe_file", async (args, ctx) => ctx.access.probeFile(pathArg(args)));
+HANDLERS.set("fs_read_media", async (args, ctx) => {
+  const maxBytes = (args as { maxBytes?: unknown } | null)?.maxBytes;
+  return new BinaryOutput(ctx.access.readMedia(pathArg(args), maxBytes));
+});
+HANDLERS.set("fs_write_binary", async (args, ctx) => {
+  const data = (args as { dataBase64?: unknown } | null)?.dataBase64;
+  if (typeof data !== "string") throw new CommandError(400, "缺少参数 dataBase64");
+  ctx.access.writeBinary(pathArg(args), data);
+  return null;
+});
 HANDLERS.set("fs_write_text_file", async (args, ctx) => {
   const content = (args as { content?: unknown } | null)?.content;
   if (typeof content !== "string") throw new CommandError(400, "缺少参数 content");
