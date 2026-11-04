@@ -149,6 +149,27 @@ function windowsShells(): ShellOption[] {
   return out;
 }
 
+/**
+ * 在 PATH（+ Windows 的 PATHEXT）上探测可执行文件；**不 canonicalize**（与 Rust
+ * `probe_program` 一致：回的是 PATH 条目拼出来的路径，不是 realpath）。
+ * 绝对路径直接检查自身（`Path::join` 遇到绝对路径会替换前项）。
+ */
+export function probeProgramPath(program: string): string | null {
+  const pathValue = process.env.PATH ?? "";
+  const candidates =
+    process.platform === "win32" && path.extname(program) === ""
+      ? (process.env.PATHEXT ?? ".EXE;.CMD;.BAT").split(";").filter((ext) => ext !== "").map((ext) => program + ext)
+      : [program];
+  for (const dir of pathValue.split(path.delimiter)) {
+    for (const candidate of candidates) {
+      if (candidate === "") continue;
+      const full = path.isAbsolute(candidate) ? candidate : path.join(dir === "" ? "." : dir, candidate);
+      if (isExecutableFile(full)) return full;
+    }
+  }
+  return null;
+}
+
 export function detectShells(): ShellOption[] {
   if (process.platform === "win32") return windowsShells();
   if (process.platform === "linux" || process.platform === "darwin") return unixShells();

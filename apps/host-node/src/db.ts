@@ -97,6 +97,15 @@ CREATE TABLE rag_meta (
 );`,
 ];
 
+export interface AgentProvider {
+  id: string;
+  name: string;
+  kind: string;
+  command: string;
+  enabled: boolean;
+  env?: string | null;
+}
+
 export class Db {
   private readonly conn: DatabaseSync;
 
@@ -129,6 +138,60 @@ export class Db {
       return JSON.parse(row.value);
     } catch (error) {
       throw new Error(`解析设置 JSON 失败: ${(error as Error).message}`, { cause: error });
+    }
+  }
+
+  /** ACP 后端目录：未接管（无 marker）→ null，与 Rust 的 Option<Vec<_>> 一致。 */
+  loadAgentProviders(): AgentProvider[] | null {
+    const marker = this.conn
+      .prepare("SELECT value FROM meta WHERE key = 'agent_providers_initialized'")
+      .get() as { value?: string } | undefined;
+    if (!marker) return null;
+    const rows = this.conn
+      .prepare("SELECT id, name, kind, command, enabled, env FROM agent_providers ORDER BY rowid")
+      .all() as { id: string; name: string; kind: string; command: string; enabled: number; env: string | null }[];
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      kind: row.kind,
+      command: row.command,
+      enabled: row.enabled !== 0,
+      env: row.env,
+    }));
+  }
+
+  /** 全量替换 ACP 后端目录（事务；首次写接管标记）。 */
+  syncAgentProviders(providers: AgentProvider[]): void {
+    this.conn.exec("BEGIN");
+    try {
+      this.conn
+        .prepare("INSERT INTO meta (key, value) VALUES ('agent_providers_initialized', '1') ON CONFLICT(key) DO NOTHING")
+        .run();
+      const existing = this.conn.prepare("SELECT id FROM agent_providers").all() as { id: string }[];
+      const kept = new Set(providers.map((provider) => provider.id));
+      const remove = this.conn.prepare("DELETE FROM agent_providers WHERE id = ?1");
+      for (const row of existing) {
+        if (!kept.has(row.id)) remove.run(row.id);
+      }
+      const upsert = this.conn.prepare(
+        `INSERT INTO agent_providers (id, name, kind, command, enabled, env)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT(id) DO UPDATE SET name = ?2, kind = ?3, command = ?4, enabled = ?5, env = ?6`,
+      );
+      for (const provider of providers) {
+        upsert.run(
+          provider.id,
+          provider.name,
+          provider.kind,
+          provider.command,
+          provider.enabled ? 1 : 0,
+          provider.env ?? null,
+        );
+      }
+      this.conn.exec("COMMIT");
+    } catch (error) {
+      this.conn.exec("ROLLBACK");
+      throw new Error(`写入后端目录失败: ${(error as Error).message}`, { cause: error });
     }
   }
 

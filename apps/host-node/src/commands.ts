@@ -11,7 +11,8 @@
 import manifest from "./command-manifest.json" with { type: "json" };
 
 import { shellCatalog } from "./shell-catalog.js";
-import type { Db } from "./db.js";
+import { detectPrograms } from "./acp-probe.js";
+import type { AgentProvider, Db } from "./db.js";
 import { gitChanges, gitCurrentBranch, gitDiff, gitStatus } from "./git.js";
 import type { SessionFileStore, WorkspaceDir } from "./session-store.js";
 import type { TerminalHost } from "./terminal.js";
@@ -172,6 +173,21 @@ HANDLERS.set("terminal_close", async (args, ctx) => {
   ctx.terminal.close(value.sessionId);
   return null;
 });
+
+HANDLERS.set("db_agents_load", async (_args, ctx) => ctx.db.loadAgentProviders());
+HANDLERS.set("db_agents_sync", async (args, ctx) => {
+  const providers = (args as { providers?: unknown } | null)?.providers;
+  if (!Array.isArray(providers)) throw new CommandError(400, "缺少参数 providers");
+  ctx.db.syncAgentProviders(providers as AgentProvider[]);
+  return null;
+});
+HANDLERS.set("acp_detect_programs", async (args) => {
+  const programs = (args as { programs?: unknown } | null)?.programs;
+  if (!Array.isArray(programs)) throw new CommandError(400, "缺少参数 programs");
+  return detectPrograms(programs as string[]);
+});
+// 尚无 ACP 会话（acp_start 未迁移）：清单恒为空，形状与 Rust 一致。
+HANDLERS.set("acp_list", async () => []);
 
 HANDLERS.set("store_sessions_load", async (args, ctx) => {
   const workspaces = ((args as { workspaces?: unknown } | null)?.workspaces ?? []) as WorkspaceDir[];

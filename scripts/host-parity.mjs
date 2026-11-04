@@ -245,6 +245,19 @@ function argsFor(command, side) {
       return { workspaces: [] };
     case "attachments_prune_session":
       return { sessionId: "s1" };
+    case "db_agents_sync":
+      return {
+        providers: [
+          { id: "p1", name: "Agent One", kind: "acp", command: "git --acp", enabled: true, env: null },
+          { id: "p2", name: "Agent Two", kind: "acp", command: "npx -y agent", enabled: false, env: "{\"K\":\"V\"}" },
+        ],
+      };
+    case "db_agents_load":
+      return {};
+    case "acp_detect_programs":
+      return { programs: ["git", "definitely-not-a-program-xyz"] };
+    case "acp_list":
+      return {};
     case "db_settings_sync":
       // 两端写各自的库（数据目录不同），但内容必须一致，方便写后复读比对。
       return { settings: { theme: "codex", fontSize: "large", parity: true } };
@@ -361,7 +374,9 @@ try {
   }
 
   // 读类命令在写完之后再复读一次：db_settings_sync 的响应只是 null，真值要回读才知道。
-  const readBack = candidates.filter((command) => command === "db_settings_load" || command === "store_sessions_load");
+  const readBack = candidates.filter(
+    (command) => command === "db_settings_load" || command === "store_sessions_load" || command === "db_agents_load",
+  );
   for (const command of readBack) {
     // 复读也要带该命令的参数（`store_sessions_load` 的 workspaces 是必填，不会走默认值）。
     const [rust, node] = await Promise.all([

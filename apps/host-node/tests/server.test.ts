@@ -427,6 +427,48 @@ describe("HTTP 契约", () => {
     expect((await call("attachments_prune_session", { sessionId: "../etc" })).status).toBe(400);
   });
 
+  it("db_agents：未接管回 null → 同步 → 读回 → 删除缺失项", async () => {
+    const call = async (command: string, args: unknown) => {
+      const response = await fetch(`${base}/api/command`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ command, args }),
+      });
+      return { status: response.status, body: await response.json() };
+    };
+
+    expect((await call("db_agents_load", {})).body).toBeNull();
+    const providers = [
+      { id: "p1", name: "Agent One", kind: "acp", command: "git --acp", enabled: true, env: null },
+      { id: "p2", name: "Agent Two", kind: "acp", command: "npx -y agent", enabled: false, env: "{\"K\":\"V\"}" },
+    ];
+    expect((await call("db_agents_sync", { providers })).status).toBe(200);
+    expect((await call("db_agents_load", {})).body).toEqual(providers);
+
+    // 少一个 → 缺失项被删（全量替换语义）。
+    expect((await call("db_agents_sync", { providers: [providers[0]] })).status).toBe(200);
+    expect((await call("db_agents_load", {})).body).toEqual([providers[0]]);
+  });
+
+  it("acp_detect_programs 按 PATH 探测，acp_list 无会话时为空", async () => {
+    const call = async (command: string, args: unknown) => {
+      const response = await fetch(`${base}/api/command`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ command, args }),
+      });
+      return { status: response.status, body: await response.json() };
+    };
+    const probes = (await call("acp_detect_programs", { programs: ["git", "definitely-not-a-program-xyz", "  "] }))
+      .body as { program: string; installed: boolean; path: string | null; bundled: boolean }[];
+    expect(probes).toHaveLength(2);
+    expect(probes[0]).toMatchObject({ program: "git", installed: true, bundled: false });
+    expect(probes[0].path?.endsWith("git")).toBe(true);
+    expect(probes[1]).toMatchObject({ program: "definitely-not-a-program-xyz", installed: false, path: null });
+
+    expect((await call("acp_list", {})).body).toEqual([]);
+  });
+
   it("db_settings：空库回 null，写入后可读回且类型原样", async () => {
     const call = async (command: string, args: unknown = {}) => {
       const response = await fetch(`${base}/api/command`, {
