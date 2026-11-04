@@ -9,6 +9,7 @@
 import { statSync } from "node:fs";
 import { basename } from "node:path";
 
+import type { EventBus } from "./events.js";
 import type { WorkspaceAccess } from "./workspace-access.js";
 
 const RESPONSE_READ_HINT = "（检查 Base URL 是否正确、本地服务是否在运行）";
@@ -221,6 +222,169 @@ async function collectSseText(response: Response): Promise<string> {
     }
   }
   return text;
+}
+
+/**
+ * 流式聊天宿主：请求 id 分配 + 可中止句柄。
+ *
+ * 事件走 `llm://event`（全局广播，消费方凭 `clientToken` 过滤自己那一笔）：
+ * `llm-delta` / `llm-thinking-delta` / `llm-done` / `llm-error`。正文与思考各自独立合批，
+ * 合批窗口 30ms —— 逐 chunk 广播会在长回复里把事件数放大一个数量级。
+ */
+export class LlmStreamHost {
+  private nextId = 0;
+  private readonly streams = new Map<number, AbortController>();
+
+  constructor(private readonly bus: EventBus) {}
+
+  async start(args: {
+    baseUrl: string;
+    model: string;
+    apiKeyEnv?: string | null;
+    messages: LlmChatMessage[];
+    reasoningEffort?: string;
+    headers?: Record<string, string>;
+    temperature?: number | null;
+    maxTokens?: number | null;
+    clientToken?: string | null;
+  }): Promise<number> {
+    const baseUrl = args.baseUrl.trim();
+    if (baseUrl === "" || args.model.trim() === "") throw new Error("base_url and model are required");
+    const apiKey = resolveApiKey(args.apiKeyEnv);
+    const body: Record<string, unknown> = {
+      model: args.model,
+      stream: true,
+      messages: args.messages.map((message) => ({ role: message.role, content: message.content })),
+    };
+    const effort = reasoningEffort(args.reasoningEffort ?? "");
+    if (effort !== null) body.reasoning_effort = effort;
+    if (typeof args.temperature === "number") body.temperature = args.temperature;
+    if (typeof args.maxTokens === "number") body.max_tokens = args.maxTokens;
+
+    const controller = new AbortController();
+    const response = await fetch(endpointUrl(baseUrl, "chat/completions"), {
+      method: "POST",
+      headers: { "content-type": "application/json", ...authHeaders(apiKey, args.headers) },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      throw new Error(`llm endpoint returned ${response.status}: ${truncate(text, 200)}${RESPONSE_READ_HINT}`);
+    }
+    const requestId = this.nextId++;
+    this.streams.set(requestId, controller);
+    const token = (args.clientToken ?? "").trim();
+    void this.consume(requestId, response, token, controller);
+    return requestId;
+  }
+
+  /** 中止：与 Rust 一致，只杀任务、不再补发事件。 */
+  stop(requestId: number): boolean {
+    const controller = this.streams.get(requestId);
+    if (!controller) return false;
+    controller.abort();
+    this.streams.delete(requestId);
+    return true;
+  }
+
+  private emit(token: string, kind: string, payload: Record<string, unknown>): void {
+    if (token !== "") payload.clientToken = token;
+    this.bus.broadcast("llm://event", { kind, payload });
+  }
+
+  private async consume(requestId: number, response: Response, token: string, controller: AbortController): Promise<void> {
+    const flush = (kind: string, text: string) => {
+      if (text !== "") this.emit(token, kind, { delta: text });
+    };
+    let content = "";
+    let thinking = "";
+    const finish = () => {
+      flush("llm-delta", content);
+      flush("llm-thinking-delta", thinking);
+      content = "";
+      thinking = "";
+    };
+
+    try {
+      const contentType = response.headers.get("content-type") ?? "";
+      if (!contentType.includes("text/event-stream")) {
+        // 服务端忽略 stream：整包 JSON 也要按增量语义发一次。
+        const payload = (await readJson(response)) as { choices?: { message?: { content?: unknown } }[] };
+        const text = payload?.choices?.[0]?.message?.content;
+        if (typeof text === "string" && text !== "") {
+          content = text;
+          finish();
+        }
+        this.emit(token, "llm-done", {});
+        return;
+      }
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("响应没有可读流");
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let timer: NodeJS.Timeout | null = null;
+      const schedule = () => {
+        if (timer !== null) return;
+        timer = setTimeout(() => {
+          timer = null;
+          finish();
+        }, 30);
+      };
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let newline = buffer.indexOf("\n");
+        while (newline >= 0) {
+          const line = buffer.slice(0, newline).trim();
+          buffer = buffer.slice(newline + 1);
+          newline = buffer.indexOf("\n");
+          if (!line.startsWith("data:")) continue;
+          const payload = line.slice(5).trim();
+          if (payload === "[DONE]") {
+            if (timer !== null) clearTimeout(timer);
+            finish();
+            this.emit(token, "llm-done", {});
+            return;
+          }
+          try {
+            const parsed = JSON.parse(payload) as {
+              choices?: { delta?: { content?: unknown; reasoning_content?: unknown; reasoning?: unknown } }[];
+              error?: { message?: unknown };
+            };
+            if (typeof parsed.error?.message === "string") throw new Error(parsed.error.message);
+            const delta = parsed.choices?.[0]?.delta;
+            if (typeof delta?.content === "string") {
+              content += delta.content;
+              schedule();
+            }
+            const reason =
+              typeof delta?.reasoning_content === "string"
+                ? delta.reasoning_content
+                : typeof delta?.reasoning === "string"
+                  ? delta.reasoning
+                  : "";
+            if (reason !== "") {
+              thinking += reason;
+              schedule();
+            }
+          } catch (error) {
+            if (error instanceof SyntaxError) continue;
+            throw error;
+          }
+        }
+      }
+      if (timer !== null) clearTimeout(timer);
+      finish();
+      this.emit(token, "llm-done", {});
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      this.emit(token, "llm-error", { message: (error as Error).message });
+    } finally {
+      this.streams.delete(requestId);
+    }
+  }
 }
 
 const TRANSCRIBE_MAX_BYTES = 20 * 1024 * 1024;

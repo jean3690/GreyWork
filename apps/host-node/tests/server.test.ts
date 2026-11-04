@@ -12,6 +12,7 @@ import { LoginThrottle, SessionStore, passwordChecker } from "../src/auth.js";
 import { Db } from "../src/db.js";
 import { isDenied } from "../src/commands.js";
 import { EventBus } from "../src/events.js";
+import { LlmStreamHost } from "../src/llm.js";
 import { SessionFileStore } from "../src/session-store.js";
 import { TerminalHost } from "../src/terminal.js";
 import { loadConfig } from "../src/config.js";
@@ -75,6 +76,7 @@ for (const root of config.workspaceRoots) access.authorizeSelectedPath(root);
 const db = new Db(path.join(dataDir, "greywork.db"));
 const bus = new EventBus();
 const store = new SessionFileStore(access);
+const llm = new LlmStreamHost(bus);
 const terminal = new TerminalHost(bus, access);
 
 const { server, close } = createHostServer({
@@ -85,6 +87,7 @@ const { server, close } = createHostServer({
   access,
   db,
   store,
+  llm,
   bus,
   terminal,
 });
@@ -581,6 +584,55 @@ describe("HTTP 契约", () => {
     const missing = await call("llm_list_models", { baseUrl, apiKeyEnv: "GREYWORK_TEST_UNSET_KEY" });
     expect(missing.status).toBe(400);
     expect((missing.body as { error: string }).error).toContain("未设置 API Key");
+  });
+
+  it("llm_chat_start 走事件流，llm_chat_stop 中止", async () => {
+    const baseUrl = `http://127.0.0.1:${(provider.address() as NodeAddressInfo).port}`;
+    const token = cookie.split("=")[1];
+    const socket = new WebSocket(`${base.replace("http", "ws")}/api/events?token=${token}`);
+    const frames: { event: string; payload: { kind?: string; payload?: { delta?: string; clientToken?: string } } }[] = [];
+    socket.on("message", (raw) => frames.push(JSON.parse(String(raw))));
+    await new Promise<void>((resolve, reject) => {
+      socket.once("open", () => resolve());
+      socket.once("error", reject);
+    });
+
+    const call = async (command: string, args: unknown) => {
+      const response = await fetch(`${base}/api/command`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ command, args }),
+      });
+      return { status: response.status, body: await response.json() };
+    };
+
+    const started = await call("llm_chat_start", {
+      baseUrl,
+      model: "m",
+      messages: [{ role: "user", content: "hi" }],
+      clientToken: "turn-1",
+    });
+    expect(started.status).toBe(200);
+    expect(typeof started.body).toBe("number");
+
+    const deadline = Date.now() + 3000;
+    while (Date.now() < deadline) {
+      if (frames.some((frame) => frame.payload.kind === "llm-done")) break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    const llmFrames = frames.filter((frame) => frame.event === "llm://event");
+    const text = llmFrames
+      .filter((frame) => frame.payload.kind === "llm-delta")
+      .map((frame) => frame.payload.payload?.delta ?? "")
+      .join("");
+    expect(text).toBe("hello");
+    expect(llmFrames.some((frame) => frame.payload.kind === "llm-done")).toBe(true);
+    // clientToken 原样回灌（全局广播靠它区分调用方）。
+    expect(llmFrames.every((frame) => frame.payload.payload?.clientToken === "turn-1")).toBe(true);
+
+    // 未知 id 的 stop 回 false（与 Rust 的可中止句柄语义一致）。
+    expect((await call("llm_chat_stop", { requestId: 9999 })).body).toBe(false);
+    socket.close();
   });
 
   it("db_settings：空库回 null，写入后可读回且类型原样", async () => {

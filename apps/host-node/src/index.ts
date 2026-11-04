@@ -21,6 +21,7 @@ import { createHostServer } from "./server.js";
 import { resolveStaticRoot } from "./static-site.js";
 import { WorkspaceAccess } from "./workspace-access.js";
 import { EventBus } from "./events.js";
+import { LlmStreamHost } from "./llm.js";
 import { SessionFileStore } from "./session-store.js";
 import { TerminalHost } from "./terminal.js";
 
@@ -91,6 +92,7 @@ async function main(): Promise<void> {
   const db = new Db(path.join(config.dataDir, "greywork.db"));
   const bus = new EventBus();
   const store = new SessionFileStore(access);
+  const llm = new LlmStreamHost(bus);
   const terminal = new TerminalHost(bus, access);
   const { server, close } = createHostServer({
     config,
@@ -100,6 +102,7 @@ async function main(): Promise<void> {
     access,
     db,
     store,
+    llm,
     bus,
     terminal,
   });

@@ -55,7 +55,15 @@ const provider = createHttpServer((request, response) => {
 });
 
 /** 依赖活会话 / 输出含进程级 id 的命令：不参与逐字节对照。 */
-const STATEFUL_COMMANDS = new Set(["terminal_open", "terminal_write", "terminal_resize", "terminal_close"]);
+const STATEFUL_COMMANDS = new Set([
+  "terminal_open",
+  "terminal_write",
+  "terminal_resize",
+  "terminal_close",
+  // 流式聊天靠事件通道，响应只是一个 requestId，无法逐字节对照。
+  "llm_chat_start",
+  "llm_chat_stop",
+]);
 
 const args = new Set(process.argv.slice(2));
 const keep = args.has("--keep");

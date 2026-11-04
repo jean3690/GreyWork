@@ -14,7 +14,7 @@ import { shellCatalog } from "./shell-catalog.js";
 import { detectPrograms } from "./acp-probe.js";
 import type { AgentProvider, AutomationRunInput, AutomationTask, Db, TeamRun } from "./db.js";
 import { gitChanges, gitCurrentBranch, gitDiff, gitStatus } from "./git.js";
-import { chatComplete, embed, listModels, transcribe, type LlmChatMessage } from "./llm.js";
+import { chatComplete, embed, listModels, transcribe, type LlmChatMessage, type LlmStreamHost } from "./llm.js";
 import type { SessionFileStore, WorkspaceDir } from "./session-store.js";
 import type { TerminalHost } from "./terminal.js";
 import type { WorkspaceAccess } from "./workspace-access.js";
@@ -59,6 +59,7 @@ export interface CommandContext {
   access: WorkspaceAccess;
   db: Db;
   store: SessionFileStore;
+  llm: LlmStreamHost;
   terminal: TerminalHost;
   trustedHost: boolean;
 }
@@ -173,6 +174,39 @@ HANDLERS.set("terminal_close", async (args, ctx) => {
   if (typeof value?.sessionId !== "string") throw new CommandError(400, "缺少参数 sessionId");
   ctx.terminal.close(value.sessionId);
   return null;
+});
+
+HANDLERS.set("llm_chat_start", async (args, ctx) => {
+  const value = args as {
+    baseUrl?: unknown;
+    model?: unknown;
+    apiKeyEnv?: unknown;
+    messages?: unknown;
+    reasoningEffort?: unknown;
+    headers?: unknown;
+    temperature?: unknown;
+    maxTokens?: unknown;
+    clientToken?: unknown;
+  } | null;
+  if (typeof value?.baseUrl !== "string" || typeof value?.model !== "string" || !Array.isArray(value.messages)) {
+    throw new CommandError(400, "缺少参数 baseUrl / model / messages");
+  }
+  return ctx.llm.start({
+    baseUrl: value.baseUrl,
+    model: value.model,
+    apiKeyEnv: typeof value.apiKeyEnv === "string" ? value.apiKeyEnv : null,
+    messages: value.messages as LlmChatMessage[],
+    reasoningEffort: typeof value.reasoningEffort === "string" ? value.reasoningEffort : "",
+    headers: (value.headers ?? undefined) as Record<string, string> | undefined,
+    temperature: typeof value.temperature === "number" ? value.temperature : null,
+    maxTokens: typeof value.maxTokens === "number" ? value.maxTokens : null,
+    clientToken: typeof value.clientToken === "string" ? value.clientToken : null,
+  });
+});
+HANDLERS.set("llm_chat_stop", async (args, ctx) => {
+  const requestId = (args as { requestId?: unknown } | null)?.requestId;
+  if (typeof requestId !== "number") throw new CommandError(400, "缺少参数 requestId");
+  return ctx.llm.stop(requestId);
 });
 
 HANDLERS.set("llm_list_models", async (args) => {
