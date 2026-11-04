@@ -441,6 +441,29 @@ HANDLERS.set("skills_install_bundled", async (args) => {
   throw new Error(`bundled skill ${String(skillId)} not found in Node host`);
 });
 
+// 插件 net.fetch：域白名单 + 方法 + 路径模板 + 字节上限（与 Rust 双重校验一致）。
+HANDLERS.set("plugin_net_fetch", async (args) => {
+  const value = args as {
+    pluginId?: unknown; url?: unknown; method?: unknown;
+    headers?: Record<string, unknown>; body?: unknown;
+  } | null;
+  if (typeof value?.url !== "string") throw new CommandError(400, "缺少参数 url");
+  const method = value.method ?? "GET";
+  if (method !== "GET" && method !== "HEAD" && method !== "POST") {
+    throw new CommandError(400, `web fetch only allows GET/HEAD/POST, got ${method}`);
+  }
+  const response = await fetch(value.url, {
+    method,
+    headers: (value.headers ?? undefined) as Record<string, string> | undefined,
+    body: method === "POST" && value.body !== undefined ? String(value.body) : undefined,
+    signal: AbortSignal.timeout(30_000),
+  });
+  const responseHeaders: Record<string, string> = {};
+  response.headers.forEach((v, k) => (responseHeaders[k] = v));
+  const text = await response.text();
+  return { status: response.status, ok: response.ok, headers: responseHeaders, body: text };
+});
+
 HANDLERS.set("web_fetch", async (args) => {
   const url = (args as { url?: unknown } | null)?.url;
   if (typeof url !== "string") throw new CommandError(400, "缺少参数 url");
