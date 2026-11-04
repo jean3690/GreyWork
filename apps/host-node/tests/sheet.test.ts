@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { datetimeToString, detectCustomNumberFormat, excelToStandardDatetime, readSheetFromBytes, rustFloatString } from "../src/sheet.js";
 
-const sample = readFileSync("../../crates/greywork-host/tests/fixtures/sample.xls");
+const sample = readFileSync(new URL("./fixtures/sample.xls", import.meta.url));
 
 describe("rustFloatString", () => {
   it("matches Rust f64 Display", () => {
