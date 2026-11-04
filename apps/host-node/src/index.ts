@@ -15,6 +15,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 
 import { LoginThrottle, SessionStore, passwordChecker } from "./auth.js";
+import { Db } from "./db.js";
 import { loadConfig } from "./config.js";
 import { createHostServer } from "./server.js";
 import { resolveStaticRoot } from "./static-site.js";
@@ -84,7 +85,8 @@ async function main(): Promise<void> {
   for (const root of config.workspaceRoots) {
     console.log(`[host-node] 预置授权根: ${access.authorizeSelectedPath(root)}`);
   }
-  const { server, close } = createHostServer({ config, sessions, throttle, staticRoot, access });
+  const db = new Db(path.join(config.dataDir, "greywork.db"));
+  const { server, close } = createHostServer({ config, sessions, throttle, staticRoot, access, db });
 
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
@@ -101,6 +103,7 @@ async function main(): Promise<void> {
     stopping = true;
     console.log(`[host-node] 关闭（${reason}）`);
     await close();
+    db.close();
     process.exit(0);
   };
 

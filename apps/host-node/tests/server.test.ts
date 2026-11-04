@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 
 import { LoginThrottle, SessionStore, passwordChecker } from "../src/auth.js";
+import { Db } from "../src/db.js";
 import { loadConfig } from "../src/config.js";
 import { createHostServer } from "../src/server.js";
 import { resolveStaticRoot } from "../src/static-site.js";
@@ -34,6 +35,7 @@ const sessions = new SessionStore(passwordChecker(config), config.sessionTtlSecs
 const throttle = new LoginThrottle();
 const access = new WorkspaceAccess(workspaceDir, path.join(dataDir, "workspace-path-access.json"));
 for (const root of config.workspaceRoots) access.authorizeSelectedPath(root);
+const db = new Db(path.join(dataDir, "greywork.db"));
 
 const { server, close } = createHostServer({
   config,
@@ -41,6 +43,7 @@ const { server, close } = createHostServer({
   throttle,
   staticRoot: resolveStaticRoot(config.staticDir),
   access,
+  db,
 });
 
 let base = "";
@@ -65,6 +68,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await close();
+  db.close();
 });
 
 describe("HTTP 契约", () => {
@@ -197,6 +201,27 @@ describe("HTTP 契约", () => {
     const outside = await call("fs_write_text_file", { path: "/tmp/gw-should-not-exist.txt", content: "x" });
     expect(outside.status).toBe(400);
     expect((outside.body as { error: string }).error).toContain("未获用户授权");
+  });
+
+  it("db_settings：空库回 null，写入后可读回且类型原样", async () => {
+    const call = async (command: string, args: unknown = {}) => {
+      const response = await fetch(`${base}/api/command`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ command, args }),
+      });
+      return { status: response.status, body: await response.json() };
+    };
+
+    const empty = await call("db_settings_load");
+    expect(empty.status).toBe(200);
+    expect(empty.body).toBeNull();
+
+    const snapshot = { theme: "codex", fontSize: "large", workspaceDir: workspaceDir, nested: { a: [1, 2] } };
+    expect((await call("db_settings_sync", { settings: snapshot })).status).toBe(200);
+
+    const loaded = await call("db_settings_load");
+    expect(loaded.body).toEqual(snapshot);
   });
 
   it("未授权路径的读取被拒（400 + 授权提示）", async () => {

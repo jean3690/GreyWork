@@ -165,6 +165,9 @@ function argsFor(command, side) {
       return { path: path.join(own, "fresh") };
     case "fs_create_file":
       return { path: path.join(own, "created", "new.txt") };
+    case "db_settings_sync":
+      // 两端写各自的库（数据目录不同），但内容必须一致，方便写后复读比对。
+      return { settings: { theme: "codex", fontSize: "large", parity: true } };
     default:
       return {};
   }
@@ -262,6 +265,22 @@ try {
     console.log(`  ✗ ${command}`);
     console.log(`    rust: ${rust.status} ${stableStringify(left)}`);
     console.log(`    node: ${node.status} ${stableStringify(right)}`);
+  }
+
+  // 读类命令在写完之后再复读一次：db_settings_sync 的响应只是 null，真值要回读才知道。
+  const readBack = candidates.filter((command) => command === "db_settings_load");
+  for (const command of readBack) {
+    const [rust, node] = await Promise.all([call(rustPort, rustToken, command, {}), call(nodePort, nodeToken, command, {})]);
+    const left = normalize(rust.body, replace);
+    const right = normalize(node.body, replace);
+    if (rust.status === node.status && stableStringify(left) === stableStringify(right)) {
+      console.log(`  ✓ ${command}（写后复读，HTTP ${rust.status}）`);
+    } else {
+      failures += 1;
+      console.log(`  ✗ ${command}（写后复读）`);
+      console.log(`    rust: ${rust.status} ${stableStringify(left)}`);
+      console.log(`    node: ${node.status} ${stableStringify(right)}`);
+    }
   }
 
   // 写面光比响应不够（两边都回 null）；落盘结果也必须一致。

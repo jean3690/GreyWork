@@ -11,6 +11,7 @@
 import manifest from "./command-manifest.json" with { type: "json" };
 
 import { shellCatalog } from "./shell-catalog.js";
+import type { Db } from "./db.js";
 import type { WorkspaceAccess } from "./workspace-access.js";
 
 export interface CommandMeta {
@@ -51,6 +52,7 @@ export function isDenied(name: string, trustedHost: boolean): boolean {
 /** 命令实现拿到的宿主上下文（只放已迁移能力，避免半迁移状态下出现半初始化的对象）。 */
 export interface CommandContext {
   access: WorkspaceAccess;
+  db: Db;
   trustedHost: boolean;
 }
 
@@ -88,6 +90,13 @@ HANDLERS.set("fs_create_file", async (args, ctx) => {
 });
 HANDLERS.set("fs_create_dir", async (args, ctx) => {
   ctx.access.createDir(pathArg(args));
+  return null;
+});
+HANDLERS.set("db_settings_load", async (_args, ctx) => ctx.db.loadSettings());
+HANDLERS.set("db_settings_sync", async (args, ctx) => {
+  const settings = (args as { settings?: unknown } | null)?.settings;
+  if (settings === undefined) throw new CommandError(400, "缺少参数 settings");
+  ctx.db.syncSettings(settings);
   return null;
 });
 

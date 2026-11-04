@@ -4,9 +4,9 @@
 > 换成 Node 实现（`apps/host-node`），**API 契约不变**，桌面端 / 浏览器端 / Docker 部署零改动。
 >
 > 现状：P0 已完成（HTTP + 会话 + 命令分发骨架 + 静态托管 + 事件流，20 条测试）；
-> P1 进行中——双轨对照脚本已落地，路径授权面、读面与基本写面已迁移（`store_default_root`、
-> `terminal_shells`、`fs_list_dir`、`fs_read_text_file`、`fs_write_text_file`、`fs_ensure_dir`、
-> `fs_create_file`、`fs_create_dir` 均通过对照）。Electron 默认仍 spawn Rust 二进制。
+> P1 进行中——双轨对照脚本已落地，路径授权面、读写面与设置存储已迁移（10 条命令通过对照；
+> SQLite 迁移链与 Rust 逐条一致，Node 建的库可被 Rust 直接打开并读回设置）。
+> Electron 默认仍 spawn Rust 二进制。
 
 ---
 
