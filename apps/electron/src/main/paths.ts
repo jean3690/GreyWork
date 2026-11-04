@@ -36,6 +36,14 @@ export function serverBinaryPath(): string {
   return path.join(requireRepoRoot(), "target", "debug", SERVER_BIN_NAME);
 }
 
+/**
+ * Node 宿主入口（`GREYWORK_HOST_KIND=node` 时 sidecar 改 spawn 它而不是 Rust 二进制）。
+ * 开发态：`apps/host-node/dist/index.js`（`pnpm --filter @greywork/host-node build` 产物）。
+ */
+export function nodeServerEntryPath(): string {
+  return path.join(requireRepoRoot(), "apps", "host-node", "dist", "index.js");
+}
+
 /** 渲染层 SPA 目录（sidecar 的 `GREYWORK_STATIC_DIR`）。 */
 export function staticDir(): string {
   if (app.isPackaged) return path.join(process.resourcesPath, "static");

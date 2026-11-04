@@ -22,7 +22,7 @@ import path from "node:path";
 import { app } from "electron";
 
 import { SIDECAR_SPAWN_OPTIONS, sidecarEnv } from "../shared/sidecar-spec";
-import { runtimeDir, serverBinaryPath, staticDir } from "./paths";
+import { nodeServerEntryPath, runtimeDir, serverBinaryPath, staticDir } from "./paths";
 import { resolveUserShellPath } from "./shell-path";
 
 export interface Sidecar {
@@ -130,7 +130,11 @@ export async function startServer(passwordHash: string): Promise<Sidecar> {
   const dataDir = path.join(app.getPath("userData"), "data");
   // agent CLI 检测靠 PATH；补全登录 shell 的真实 PATH（有缓存，见 shell-path.ts）。
   const shellPath = await resolveUserShellPath(process.env.PATH ?? "");
-  const child = spawn(serverBinaryPath(), [], {
+  // GREYWORK_HOST_KIND=node 时 spawn Node 宿主而不是 Rust 二进制（迁移期间的切换开关）。
+  const hostKind = process.env.GREYWORK_HOST_KIND === "node" ? "node" : "rust";
+  const spawnBinary = hostKind === "node" ? process.execPath : serverBinaryPath();
+  const spawnArgs = hostKind === "node" ? [nodeServerEntryPath()] : [];
+  const child = spawn(spawnBinary, spawnArgs, {
     env: sidecarEnv({
       base: process.env,
       shellPath,
