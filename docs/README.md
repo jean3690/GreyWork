@@ -7,6 +7,7 @@
 | [control-plane-api.md](control-plane-api.md)                       | 控制面业务接口一览（同步 / 宿主 / 通道 / 模型 / 市场 / 自动化 / 存储） |
 | [demo-walkthrough.md](demo-walkthrough.md)                         | 运维台答辩演示脚本（准备 → 登录 → 签发码 → 用户/设备 → 审计）          |
 | [packaging.md](packaging.md)                                       | 桌面安装包、浏览器端托管、Java 控制面打包、Docker 自托管               |
+| [node-backend-migration.md](node-backend-migration.md)             | 后端从 Rust 迁到 Node 的方案、阶段与进度（P0 已完成）                  |
 | [plugin-authoring.md](plugin-authoring.md)                         | 插件 manifest、能力授权、声明式 UI 与宿主 API                          |
 | [plugin-roadmap.md](plugin-roadmap.md)                             | 插件系统能力展望                                                       |
 | [ui-design.md](ui-design.md)                                       | 视觉规范、主题令牌、交互基线                                           |

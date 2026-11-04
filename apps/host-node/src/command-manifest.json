@@ -1,0 +1,1136 @@
+[
+  {
+    "name": "sys_info",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "reveal_path",
+    "auth": "required",
+    "desktopOnly": true,
+    "binary": false
+  },
+  {
+    "name": "open_path",
+    "auth": "required",
+    "desktopOnly": true,
+    "binary": false
+  },
+  {
+    "name": "set_unsaved_changes",
+    "auth": "required",
+    "desktopOnly": true,
+    "binary": false
+  },
+  {
+    "name": "confirm_exit",
+    "auth": "required",
+    "desktopOnly": true,
+    "binary": false
+  },
+  {
+    "name": "browser_open",
+    "auth": "required",
+    "desktopOnly": true,
+    "binary": false
+  },
+  {
+    "name": "browser_set_bounds",
+    "auth": "required",
+    "desktopOnly": true,
+    "binary": false
+  },
+  {
+    "name": "browser_set_visible",
+    "auth": "required",
+    "desktopOnly": true,
+    "binary": false
+  },
+  {
+    "name": "browser_navigate",
+    "auth": "required",
+    "desktopOnly": true,
+    "binary": false
+  },
+  {
+    "name": "browser_back",
+    "auth": "required",
+    "desktopOnly": true,
+    "binary": false
+  },
+  {
+    "name": "browser_forward",
+    "auth": "required",
+    "desktopOnly": true,
+    "binary": false
+  },
+  {
+    "name": "browser_reload",
+    "auth": "required",
+    "desktopOnly": true,
+    "binary": false
+  },
+  {
+    "name": "browser_stop",
+    "auth": "required",
+    "desktopOnly": true,
+    "binary": false
+  },
+  {
+    "name": "browser_close",
+    "auth": "required",
+    "desktopOnly": true,
+    "binary": false
+  },
+  {
+    "name": "acp_permission_respond",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "acp_start",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "acp_new_session",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "acp_load_session",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "acp_close_session",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "acp_send",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "acp_set_config",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "acp_set_mode",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "acp_stop",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "acp_cancel_session",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "acp_set_permission_tier",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "acp_list",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "acp_detect_programs",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "llm_chat_start",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "llm_chat_stop",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "llm_chat_complete",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "llm_agent_start",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "llm_agent_stop",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "llm_list_models",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "llm_embed",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "llm_transcribe",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "rag_index_build",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "rag_search",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "rag_status",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "rag_clear",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "office_host_info",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "office_preview_open",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "office_oauth_begin",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "office_oauth_submit",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "office_oauth_status",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "office_oauth_logout",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "office_convert_info",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "office_convert_to_pdf",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": true
+  },
+  {
+    "name": "mcp_probe",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "mcp_call",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "skills_search",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "skills_download",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "skills_install",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "skills_uninstall",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "skills_bundled_list",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "skills_install_bundled",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "plugin_market_catalog",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "plugin_market_install",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "plugin_market_list_installed",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "plugin_market_uninstall",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "plugin_net_fetch",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "plugin_fs",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "plugin_workspace",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "plugin_mcp_call",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "plugin_notify",
+    "auth": "required",
+    "desktopOnly": true,
+    "binary": false
+  },
+  {
+    "name": "plugin_market_preview",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "plugin_window_open",
+    "auth": "required",
+    "desktopOnly": true,
+    "binary": false
+  },
+  {
+    "name": "plugin_window_close",
+    "auth": "required",
+    "desktopOnly": true,
+    "binary": false
+  },
+  {
+    "name": "mcp_search",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "web_fetch",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "wechat_status",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "wechat_login_qr",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "wechat_login_poll",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "wechat_login_cancel",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "wechat_connect",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "wechat_disconnect",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "wechat_logout",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "wechat_send",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "wechat_send_typing",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "channel_take_media",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": true
+  },
+  {
+    "name": "channel_send_media",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "channel_media_capabilities",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "dingtalk_status",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "dingtalk_save_credentials",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "dingtalk_clear_credentials",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "dingtalk_register_begin",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "dingtalk_register_poll",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "dingtalk_register_cancel",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "dingtalk_connect",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "dingtalk_disconnect",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "dingtalk_send",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "feishu_status",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "feishu_save_credentials",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "feishu_clear_credentials",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "feishu_register_begin",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "feishu_register_poll",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "feishu_register_cancel",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "feishu_connect",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "feishu_disconnect",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "feishu_send",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "telegram_status",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "telegram_save_credentials",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "telegram_clear_credentials",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "telegram_connect",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "telegram_disconnect",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "telegram_send",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "telegram_bot_link",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "discord_status",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "discord_save_credentials",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "discord_clear_credentials",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "discord_connect",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "discord_disconnect",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "discord_send",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "qq_status",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "qq_save_credentials",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "qq_register_begin",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "qq_register_poll",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "qq_register_cancel",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "qq_clear_credentials",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "qq_connect",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "qq_disconnect",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "qq_send",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "wecom_status",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "wecom_save_credentials",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "wecom_clear_credentials",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "wecom_connect",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "wecom_disconnect",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "wecom_send",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "shell_run",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "terminal_shells",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "terminal_list",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "terminal_open",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "terminal_write",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "terminal_resize",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "terminal_close",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "fs_read_text_file",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "fs_read_binary",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": true
+  },
+  {
+    "name": "fs_read_media",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": true
+  },
+  {
+    "name": "fs_probe_file",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "fs_write_text_file",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "fs_write_binary",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "fs_ensure_dir",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "fs_create_file",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "fs_create_dir",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "fs_rename_path",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "fs_copy_path",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "fs_delete_path",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "fs_list_dir",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "fs_authorize_drop_paths",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "fs_authorize_picked_paths",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "fs_pick_files",
+    "auth": "required",
+    "desktopOnly": true,
+    "binary": false
+  },
+  {
+    "name": "fs_read_sheet",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "git_status",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "git_changes",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "git_diff",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "git_stage",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "git_unstage",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "git_commit",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "git_current_branch",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "git_branch_list",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "git_log",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "git_show",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "store_sessions_load",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "store_sessions_sync",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "store_default_root",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "attachments_prune_session",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "store_sessions_relocate",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "pick_workspace_folder",
+    "auth": "required",
+    "desktopOnly": true,
+    "binary": false
+  },
+  {
+    "name": "worktree_provision",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "worktree_release",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "worktree_list",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "worktree_snapshot",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "worktree_restore",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "db_settings_load",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "db_settings_sync",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "db_automations_load",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "db_automations_sync",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "db_automations_due_list",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "db_automations_due_finish",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "db_automation_runs_load",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "db_automation_run_record",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "db_team_runs_load",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "db_team_runs_sync",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "db_agents_load",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "db_agents_sync",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "set_close_to_tray",
+    "auth": "required",
+    "desktopOnly": true,
+    "binary": false
+  },
+  {
+    "name": "set_tray_labels",
+    "auth": "required",
+    "desktopOnly": true,
+    "binary": false
+  },
+  {
+    "name": "close_main_window",
+    "auth": "required",
+    "desktopOnly": true,
+    "binary": false
+  },
+  {
+    "name": "check_update",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "open_external",
+    "auth": "required",
+    "desktopOnly": true,
+    "binary": false
+  }
+]
