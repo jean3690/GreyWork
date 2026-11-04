@@ -11,6 +11,7 @@
  */
 import {
   closeSync,
+  copyFileSync,
   existsSync,
   fsyncSync,
   lstatSync,
@@ -20,6 +21,7 @@ import {
   readFileSync,
   realpathSync,
   renameSync,
+  rmSync,
   statSync,
   unlinkSync,
   writeFileSync,
@@ -213,6 +215,106 @@ export class WorkspaceAccess {
     }
   }
 
+  /**
+   * 解析**条目本身**（不跟随符号链接），要求父目录在授权根内。
+   * 删除 / 改名 / 复制走这条：`resolveExisting` 会把链接解成目标，对「操作这个条目」是错的。
+   */
+  resolveEntry(raw: string): string {
+    const requested = validateAbsolute(raw);
+    const parent = path.dirname(requested);
+    const canonicalParent = canonicalExisting(parent);
+    if (!this.roots.some((root) => isWithin(root, canonicalParent))) {
+      throw new Error(`路径未获用户授权: ${path.join(canonicalParent, path.basename(requested))}`);
+    }
+    return path.join(canonicalParent, path.basename(requested));
+  }
+
+  /** 可删除 / 可改名 / 可复制的源条目：不能是文件系统根，也不能是已授权工作区根。 */
+  private movableSource(raw: string): string {
+    const requested = validateAbsolute(raw);
+    if (path.parse(requested).root === requested) {
+      throw new Error("不能操作文件系统根目录");
+    }
+    const canonical = canonicalExisting(requested);
+    if (this.roots.includes(canonical)) {
+      throw new Error("不能移动或删除已授权的工作区根目录");
+    }
+    const entry = this.resolveEntry(raw);
+    let exists = true;
+    try {
+      lstatSync(entry);
+    } catch {
+      exists = false;
+    }
+    if (!exists) throw new Error(`路径不存在: ${entry}`);
+    return entry;
+  }
+
+  /** 删除：目录递归删（删的是条目本身，不跟随链接）。 */
+  deletePath(raw: string): void {
+    const entry = this.movableSource(raw);
+    try {
+      if (lstatSync(entry).isDirectory()) {
+        rmSync(entry, { recursive: true });
+      } else {
+        unlinkSync(entry);
+      }
+    } catch (error) {
+      throw new Error(`删除失败: ${(error as Error).message}`, { cause: error });
+    }
+  }
+
+  /** 改名 / 移动：撞名显式失败（Unix rename 会静默覆盖），跨设备降级为复制 + 删源。 */
+  renamePath(from: string, to: string): void {
+    const source = this.movableSource(from);
+    const target = this.resolveNewEntry(to);
+    if (comparable(source) === comparable(target)) throw new Error("新名称与原名称相同");
+    if (isWithin(source, target)) throw new Error("不能把文件夹移动到它自己内部");
+    if (existsSync(target)) throw new Error(`目标已存在: ${target}`);
+    try {
+      renameSync(source, target);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EXDEV") {
+        this.moveAcrossDevices(source, target);
+        return;
+      }
+      throw new Error(`移动失败: ${(error as Error).message}`, { cause: error });
+    }
+  }
+
+  /** 跨挂载点：先复制、成功后再删源（中途失败最多多个副本，不会丢数据）。 */
+  private moveAcrossDevices(source: string, target: string): void {
+    if (hasLinkInside(source)) {
+      throw new Error("条目内含符号链接，跨磁盘分区移动会丢失这些链接；请改用复制后手动删除");
+    }
+    try {
+      copyEntry(source, target);
+    } catch (error) {
+      rmSync(target, { recursive: true, force: true });
+      throw new Error(`跨磁盘分区移动失败（复制阶段）: ${(error as Error).message}`, { cause: error });
+    }
+    try {
+      rmSync(source, { recursive: true });
+    } catch (error) {
+      throw new Error(`已复制到目标，但删除源失败: ${(error as Error).message} —— 请手动删除 ${source}`, { cause: error });
+    }
+  }
+
+  /** 复制（目录递归）：源不能是符号链接，目标必须不存在，且不能复制进自身内部。 */
+  copyPath(from: string, to: string): void {
+    const source = this.movableSource(from);
+    if (lstatSync(source).isSymbolicLink()) throw new Error("不支持复制符号链接");
+    const target = this.resolveNewEntry(to);
+    if (isWithin(source, target)) throw new Error("不能把文件夹复制到它自己内部");
+    if (existsSync(target)) throw new Error(`目标已存在: ${target}`);
+    try {
+      copyEntry(source, target);
+    } catch (error) {
+      rmSync(target, { recursive: true, force: true });
+      throw new Error(`复制失败: ${(error as Error).message}`, { cause: error });
+    }
+  }
+
   /** 浅层列目录：越界或断链的符号链接项直接不出现（与 Rust 一致）。 */
   listDir(raw: string): DirEntryInfo[] {
     const dir = this.resolveExisting(raw);
@@ -336,6 +438,42 @@ export function decodeText(buffer: Buffer): string {
   } catch {
     // 非 UTF-8：简中 Windows 的「ANSI」多为 GBK 系，GB18030 是其超集。
     return new TextDecoder("gb18030").decode(body);
+  }
+}
+
+/** 路径比较：Linux 区分大小写；Windows / macOS 折叠大小写与分隔符（与 Rust 的 same_path 一致）。 */
+function comparable(value: string): string {
+  return process.platform === "linux" ? value : value.replace(/\\/g, "/").toLowerCase();
+}
+
+/** 递归复制：目录内的符号链接一律跳过（跟随会把根外内容搬进来，环状链接会无限展开）。 */
+function copyEntry(source: string, target: string): void {
+  const stat = lstatSync(source);
+  if (stat.isSymbolicLink()) return;
+  if (stat.isDirectory()) {
+    mkdirSync(target);
+    for (const name of readdirSync(source)) {
+      copyEntry(path.join(source, name), path.join(target, name));
+    }
+    return;
+  }
+  copyFileSync(source, target);
+}
+
+/** 条目自身或（目录递归地）其内任一条目是否含符号链接；读不到按「有」处理（保守拒绝）。 */
+function hasLinkInside(entry: string): boolean {
+  let stat;
+  try {
+    stat = lstatSync(entry);
+  } catch {
+    return true;
+  }
+  if (stat.isSymbolicLink()) return true;
+  if (!stat.isDirectory()) return false;
+  try {
+    return readdirSync(entry).some((name) => hasLinkInside(path.join(entry, name)));
+  } catch {
+    return true;
   }
 }
 

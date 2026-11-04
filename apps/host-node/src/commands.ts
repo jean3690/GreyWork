@@ -92,6 +92,28 @@ HANDLERS.set("fs_create_dir", async (args, ctx) => {
   ctx.access.createDir(pathArg(args));
   return null;
 });
+HANDLERS.set("fs_delete_path", async (args, ctx) => {
+  ctx.access.deletePath(pathArg(args));
+  return null;
+});
+/** 改名 / 复制共用入参：`{ from, to }`，两边都必须是字符串。 */
+function transferArgs(args: unknown): { from: string; to: string } {
+  const value = args as { from?: unknown; to?: unknown } | null;
+  if (typeof value?.from !== "string" || typeof value?.to !== "string") {
+    throw new CommandError(400, "缺少参数 from / to");
+  }
+  return { from: value.from, to: value.to };
+}
+HANDLERS.set("fs_rename_path", async (args, ctx) => {
+  const { from, to } = transferArgs(args);
+  ctx.access.renamePath(from, to);
+  return null;
+});
+HANDLERS.set("fs_copy_path", async (args, ctx) => {
+  const { from, to } = transferArgs(args);
+  ctx.access.copyPath(from, to);
+  return null;
+});
 HANDLERS.set("db_settings_load", async (_args, ctx) => ctx.db.loadSettings());
 HANDLERS.set("db_settings_sync", async (args, ctx) => {
   const settings = (args as { settings?: unknown } | null)?.settings;

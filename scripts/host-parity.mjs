@@ -144,6 +144,10 @@ writeFileSync(path.join(workspaceDir, "sub", "nested.txt"), "nested\n");
 // 写面各自一个子目录：两边不能互相踩（同一个路径写两次，第二次的 EEXIST 会变成假差异）。
 for (const side of ["rust", "node"]) {
   mkdirSync(path.join(workspaceDir, side, "created"), { recursive: true });
+  // 删除 / 改名 / 复制的夹具：两边各一份，互不影响。
+  writeFileSync(path.join(workspaceDir, side, "victim.txt"), "bye");
+  writeFileSync(path.join(workspaceDir, side, "before.txt"), "move me");
+  writeFileSync(path.join(workspaceDir, side, "copy-src.txt"), "copy me");
 }
 
 /**
@@ -165,6 +169,12 @@ function argsFor(command, side) {
       return { path: path.join(own, "fresh") };
     case "fs_create_file":
       return { path: path.join(own, "created", "new.txt") };
+    case "fs_delete_path":
+      return { path: path.join(own, "victim.txt") };
+    case "fs_rename_path":
+      return { from: path.join(own, "before.txt"), to: path.join(own, "after.txt") };
+    case "fs_copy_path":
+      return { from: path.join(own, "copy-src.txt"), to: path.join(own, "copy-dst.txt") };
     case "db_settings_sync":
       // 两端写各自的库（数据目录不同），但内容必须一致，方便写后复读比对。
       return { settings: { theme: "codex", fontSize: "large", parity: true } };
@@ -280,6 +290,24 @@ try {
       console.log(`  ✗ ${command}（写后复读）`);
       console.log(`    rust: ${rust.status} ${stableStringify(left)}`);
       console.log(`    node: ${node.status} ${stableStringify(right)}`);
+    }
+  }
+
+  // 删除 / 改名 / 复制同样要验副作用：响应都是 null，差别只体现在文件系统上。
+  const sideEffects = [
+    { name: "victim.txt", exists: false, content: null },
+    { name: "after.txt", exists: true, content: "move me" },
+    { name: "copy-dst.txt", exists: true, content: "copy me" },
+  ];
+  for (const effect of sideEffects) {
+    for (const side of ["rust", "node"]) {
+      const target = path.join(workspaceDir, side, effect.name);
+      const present = existsSync(target);
+      const content = present && effect.content !== null ? readFileSync(target, "utf8") : null;
+      if (present !== effect.exists || (effect.content !== null && content !== effect.content)) {
+        failures += 1;
+        console.log(`  ✗ 副作用不一致：${side}/${effect.name} exists=${present} content=${JSON.stringify(content)}`);
+      }
     }
   }
 

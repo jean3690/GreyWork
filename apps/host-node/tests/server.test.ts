@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -201,6 +201,41 @@ describe("HTTP 契约", () => {
     const outside = await call("fs_write_text_file", { path: "/tmp/gw-should-not-exist.txt", content: "x" });
     expect(outside.status).toBe(400);
     expect((outside.body as { error: string }).error).toContain("未获用户授权");
+  });
+
+  it("删除 / 改名 / 复制：撞名与越界都要拦，授权根不许动", async () => {
+    const call = async (command: string, args: unknown) => {
+      const response = await fetch(`${base}/api/command`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ command, args }),
+      });
+      return { status: response.status, body: (await response.json()) as { error?: string } };
+    };
+    const dir = path.join(workspaceDir, "transfer");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, "victim.txt"), "bye");
+    writeFileSync(path.join(dir, "before.txt"), "move me");
+    writeFileSync(path.join(dir, "copy-src.txt"), "copy me");
+
+    expect((await call("fs_copy_path", { from: path.join(dir, "copy-src.txt"), to: path.join(dir, "copy-dst.txt") })).status).toBe(200);
+    expect(readFileSync(path.join(dir, "copy-dst.txt"), "utf8")).toBe("copy me");
+
+    const copyCollision = await call("fs_copy_path", { from: path.join(dir, "copy-src.txt"), to: path.join(dir, "copy-dst.txt") });
+    expect(copyCollision.status).toBe(400);
+    expect(copyCollision.body.error).toContain("目标已存在");
+
+    expect((await call("fs_rename_path", { from: path.join(dir, "before.txt"), to: path.join(dir, "after.txt") })).status).toBe(200);
+    expect(existsSync(path.join(dir, "after.txt"))).toBe(true);
+    expect(existsSync(path.join(dir, "before.txt"))).toBe(false);
+
+    expect((await call("fs_delete_path", { path: path.join(dir, "victim.txt") })).status).toBe(200);
+    expect(existsSync(path.join(dir, "victim.txt"))).toBe(false);
+
+    // 授权根本身不许删（否则账本指向不存在的目录）。
+    const rootDelete = await call("fs_delete_path", { path: workspaceDir });
+    expect(rootDelete.status).toBe(400);
+    expect(rootDelete.body.error).toContain("已授权的工作区根目录");
   });
 
   it("db_settings：空库回 null，写入后可读回且类型原样", async () => {

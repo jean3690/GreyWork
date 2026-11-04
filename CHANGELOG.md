@@ -39,7 +39,8 @@
   越界按路径分量判定；读写面共 8 条命令通过双轨对照，写面还比对落盘内容而不只是响应。
   数据面用 Node 内置 `node:sqlite`，迁移链与 Rust `schema.rs` 的 10 版逐条一致（PRAGMA 同为
   WAL / foreign_keys / busy_timeout），`db_settings_load` / `db_settings_sync` 已通过对照，
-  Node 建的 `greywork.db` 可被 Rust 直接打开并读回设置。
+  Node 建的 `greywork.db` 可被 Rust 直接打开并读回设置。删除 / 改名 / 复制也按 Rust 的
+  `movable_source` 规则迁移（不许动授权根、不许移进自身子树、撞名显式失败、跨设备降级为复制+删源）。
   新增 `pnpm host:parity` 双轨对照：同一份环境变量起两个宿主，逐命令比对状态码与响应体，
   迁移的每条命令都以它为准；可信宿主命令名单（`TRUSTED_HOST_ONLY`）也已按 Rust 同口径移植。
   方案、阶段与风险见 [docs/node-backend-migration.md](docs/node-backend-migration.md)；
