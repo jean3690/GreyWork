@@ -64,6 +64,9 @@ messaging channels so you can drive the machine from your phone.
 - **Two frontends, one backend**: besides the desktop SPA, `apps/web` is a browser front that declares a
   narrower feature set through the `FrontSpec` contract (no tray, no channel listeners). Both consume
   the same `@greywork/workbench` sources and the same server API.
+- **Separate Java control plane** (`back/grey`): accounts and devices, channel bindings, model
+  gateway, object storage, automations and the plugin market, with its own admin console
+  (`apps/admin`, Vue 3 + Element Plus) protected by admin-only password login and audit logging.
 - Bilingual UI (zh-CN / en-US); host capabilities degrade gracefully when the UI runs in a browser.
 
 ## Tech Stack
@@ -74,6 +77,7 @@ messaging channels so you can drive the machine from your phone.
 | UI      | Vue 3, Vite, Pinia, vue-router, vue-i18n, Tailwind, shadcn-vue (reka-ui)                                |
 | Editing | CodeMirror 6, Univer (spreadsheets / docs)                                                              |
 | Plugins | Cordis micro-kernel                                                                                     |
+| Control | Spring Boot 4, MyBatis-Plus, MySQL, Redis, Flyway; admin console in Vue 3 + Vite + Element Plus         |
 | Tooling | pnpm workspaces, TypeScript, Vitest (node + dom projects), ESLint, Prettier                             |
 
 ## Project Structure
@@ -84,7 +88,10 @@ greyWork/
 │   ├── desktop/              # Desktop renderer SPA (Vite + Vue; Electron shell & server hosting)
 │   ├── web/                  # Browser front (same workbench, narrower FrontSpec)
 │   ├── electron/             # Electron shell: main process + preload + sidecar orchestration
-│   └── server/               # Headless server (axum): command surface / WS events / static hosting
+│   ├── server/               # Headless server (axum): command surface / WS events / static hosting
+│   └── admin/                # Control-plane admin SPA (Vue 3 + Element Plus; standalone)
+├── back/
+│   └── grey/                 # Java control plane: auth / channels / LLM gateway / storage / automations
 ├── crates/
 │   └── greywork-host/        # Domain layer: command registry, ACP host, plugin market, channels
 ├── packages/
@@ -105,7 +112,8 @@ greyWork/
 Dependency direction is enforced by ESLint: leaf packages depend only on `@greywork/core` (or
 nothing), `workbench` composes them, and nothing in `packages/` may import from `apps/`.
 
-See [docs/architecture.md](docs/architecture.md) for the full dependency graph and host domains.
+See [docs/architecture.md](docs/architecture.md) for the full dependency graph and host domains;
+the full doc index is [docs/README.md](docs/README.md).
 
 ## Quick Start
 
@@ -123,20 +131,27 @@ pnpm electron:dev   # Desktop app (Electron window + auto-started local server)
 For a plain browser preview (no host), `pnpm dev` starts the desktop renderer's Vite dev server;
 `pnpm dev:web` starts the browser front (`apps/web`, port 1421) so both can run side by side.
 
+The Java control plane (`back/grey`) ships an admin console: run `./mvnw spring-boot:run` in
+`back/grey`, then `pnpm dev:admin` for `http://localhost:5174/admin/`; or run `pnpm build:admin`
+and open `http://localhost:8080/admin`. Admin credentials come from `GREY_ADMIN_EMAILS` /
+`GREY_ADMIN_PASSWORD` — see [docs/control-plane-auth.md](docs/control-plane-auth.md).
+
 ## Common Commands
 
-| Command                 | Description                                       |
-| ----------------------- | ------------------------------------------------- |
-| `pnpm dev`              | Desktop renderer Vite dev server (preview mode)   |
-| `pnpm dev:web`          | Browser front Vite dev server (`apps/web`)        |
-| `pnpm electron:dev`     | Desktop app (Electron + local server)             |
-| `pnpm lint`             | ESLint across the repo + the radius guard         |
-| `pnpm format`           | Format with Prettier (`format:check` to verify)   |
-| `pnpm typecheck`        | TypeScript check across all workspace packages    |
-| `pnpm test`             | Vitest across all packages                        |
-| `pnpm build`            | Build both fronts (`build:desktop` / `build:web`) |
-| `pnpm electron:package` | Build desktop installers (AppImage / NSIS / dmg)  |
-| `pnpm check`            | `typecheck` + `build`                             |
+| Command                 | Description                                        |
+| ----------------------- | -------------------------------------------------- |
+| `pnpm dev`              | Desktop renderer Vite dev server (preview mode)    |
+| `pnpm dev:web`          | Browser front Vite dev server (`apps/web`)         |
+| `pnpm dev:admin`        | Admin console Vite dev server (`apps/admin`, 5174) |
+| `pnpm electron:dev`     | Desktop app (Electron + local server)              |
+| `pnpm lint`             | ESLint across the repo + the radius guard          |
+| `pnpm format`           | Format with Prettier (`format:check` to verify)    |
+| `pnpm typecheck`        | TypeScript check across all workspace packages     |
+| `pnpm test`             | Vitest across all packages                         |
+| `pnpm build`            | Build both fronts (`build:desktop` / `build:web`)  |
+| `pnpm build:admin`      | Build admin console into the backend resources     |
+| `pnpm electron:package` | Build desktop installers (AppImage / NSIS / dmg)   |
+| `pnpm check`            | `typecheck` + `build`                              |
 
 Rust side (from the repo root — single workspace manifest): `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 `cargo test` — `--all-targets` so `tests/` and `examples/` are linted too.
@@ -148,6 +163,9 @@ signing still needs: [docs/packaging.md](docs/packaging.md).
 
 - Vitest runs in two projects — `node` for pure logic and `dom` for component behavior; coverage
   thresholds are configured per package.
+- The Java control plane uses `./mvnw test`; `ControlPlaneApiTest` boots MySQL / Redis / RustFS via
+  Testcontainers and covers auth, channels, the LLM gateway, storage, automations and the admin
+  surface (first run pulls the images).
 - `.github/workflows/ci.yml` mirrors the local hooks but runs the web checks as four parallel jobs —
   lint (ESLint + the radius guard, then Prettier), typecheck, vitest, renderer build — so the wall clock
   is the slowest job instead of their sum, plus a Rust job (`cargo fmt` → `cargo clippy --locked` →

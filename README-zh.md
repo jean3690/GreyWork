@@ -58,6 +58,8 @@ GreyWork 把外部编码智能体（走 **Agent Client Protocol**）与本机 Op
 - Electron 桌面外壳（Linux / macOS / Windows）+ headless Rust 服务端 + Vue 3 渲染层。
 - **一个后端、多个前端**：除桌面端 SPA 外，`apps/web` 是浏览器前端，通过 `FrontSpec` 契约声明
   更窄的特性集（不装托盘、不注册通道监听）；两端消费同一份 `@greywork/workbench` 源码与同一套服务端 API。
+- **独立的 Java 控制面**（`back/grey`）：账号与设备、通道绑定、模型网关、对象存储、自动化、插件市场；
+  自带运维台（`apps/admin`，Vue 3 + Element Plus），账号密码登录，所有运维动作留审计。
 - 中英双语界面（zh-CN / en-US）；界面跑在浏览器里时，宿主能力自动降级为只读提示。
 
 ## 技术栈
@@ -68,6 +70,7 @@ GreyWork 把外部编码智能体（走 **Agent Client Protocol**）与本机 Op
 | 界面   | Vue 3、Vite、Pinia、vue-router、vue-i18n、Tailwind、shadcn-vue（reka-ui）                             |
 | 编辑   | CodeMirror 6、Univer（表格 / 文档）                                                                   |
 | 插件   | Cordis 微内核                                                                                         |
+| 控制面 | Spring Boot 4、MyBatis-Plus、MySQL、Redis、Flyway；运维台 Vue 3 + Vite + Element Plus                 |
 | 工程   | pnpm workspace、TypeScript、Vitest（node + dom 两个 project）、ESLint、Prettier                       |
 
 ## 目录结构
@@ -78,7 +81,10 @@ greyWork/
 │   ├── desktop/              # 桌面端渲染层 SPA（Vite + Vue；Electron 壳与服务端静态托管共用）
 │   ├── web/                  # 浏览器前端（同一份 workbench，更窄的 FrontSpec）
 │   ├── electron/             # Electron 壳：主进程 + preload + sidecar 编排
-│   └── server/               # headless 服务端（axum）：命令面 / WS 事件 / 静态托管
+│   ├── server/               # headless 服务端（axum）：命令面 / WS 事件 / 静态托管
+│   └── admin/                # 控制面运维台 SPA（Vue 3 + Element Plus；独立于 workbench）
+├── back/
+│   └── grey/                 # Java 控制面：认证 / 通道 / 模型网关 / 存储 / 自动化 / 运维台后端
 ├── crates/
 │   └── greywork-host/        # 领域层：命令面真源、ACP 托管、插件市场、消息通道
 ├── packages/
@@ -99,7 +105,8 @@ greyWork/
 依赖方向由 ESLint 强制：叶子包只依赖 `@greywork/core`（或零依赖），`workbench` 负责组合，
 且 `packages/` 一律不得反向依赖 `apps/`。
 
-完整依赖图与宿主模块划分见 [docs/architecture.md](docs/architecture.md)。
+完整依赖图与宿主模块划分见 [docs/architecture.md](docs/architecture.md)；全部文档入口见
+[docs/README.md](docs/README.md)。
 
 ## 快速开始
 
@@ -117,18 +124,25 @@ pnpm electron:dev   # 起桌面应用（Electron 窗口 + 自动拉起的本地�
 纯浏览器预览（无宿主）用 `pnpm dev` 起桌面端渲染层的 Vite 开发服务器；`pnpm dev:web` 起浏览器
 前端（`apps/web`，端口 1421），两端可同时运行。
 
+控制面（Java 后端 `back/grey`）自带运维台：先在 `back/grey` 下 `./mvnw spring-boot:run`，
+再 `pnpm dev:admin` 打开 `http://localhost:5174/admin/`；或者 `pnpm build:admin` 后直接访问
+`http://localhost:8080/admin`。管理员账号与初始密码来自 `GREY_ADMIN_EMAILS` /
+`GREY_ADMIN_PASSWORD`，详见 [docs/control-plane-auth.md](docs/control-plane-auth.md)。
+
 ## 常用命令
 
 | 命令                    | 说明                                          |
 | ----------------------- | --------------------------------------------- |
 | `pnpm dev`              | 桌面端渲染层 Vite 开发服务器（预览态）        |
 | `pnpm dev:web`          | 浏览器前端 Vite 开发服务器（`apps/web`）      |
+| `pnpm dev:admin`        | 运维台 Vite 开发服务器（`apps/admin`，5174）  |
 | `pnpm electron:dev`     | 桌面应用（Electron + 本地服务端）             |
 | `pnpm lint`             | 全仓 ESLint                                   |
 | `pnpm format`           | Prettier 写入（`format:check` 仅校验）        |
 | `pnpm typecheck`        | 全 workspace TypeScript 检查                  |
 | `pnpm test`             | 各 package 跑 Vitest                          |
 | `pnpm build`            | 构建两个前端（`build:desktop` / `build:web`） |
+| `pnpm build:admin`      | 运维台产物写入后端 resources（随 jar 发布）   |
 | `pnpm electron:package` | 构建桌面安装包（AppImage / NSIS / dmg）       |
 | `pnpm check`            | `typecheck` + `build`                         |
 
@@ -151,6 +165,8 @@ Rust 侧（仓库根执行，workspace 单一 manifest）：`cargo fmt`、`cargo
   并开一个 draft Release。Release 正文自动取自 [CHANGELOG.md](CHANGELOG.md) 里该版本的条目，
   三个平台都成功后取消 draft 即发布。打包与 CI 共用同一份 Rust 缓存键，因此 tag 构建直接
   复用 master 上已编译好的依赖产物。
+- 控制面（`back/grey`）用 `./mvnw test`：`ControlPlaneApiTest` 通过 Testcontainers 起
+  MySQL / Redis / RustFS，盖到认证、通道、模型网关、存储、自动化与运维面；首次运行需要拉镜像。
 - 钩子让 CI 不是第一个发现问题的地方：pre-commit 在暂存区含 `.rs` 时跑 `cargo fmt --check`；
   pre-push 跑 `pnpm lint && pnpm -r test`，本轮推送触及 Rust workspace（`crates/`、`apps/server`）时再按 CI 的顺序补
   `cargo fmt --check` → `cargo clippy --locked --all-targets -- -D warnings` → `cargo test --locked`
