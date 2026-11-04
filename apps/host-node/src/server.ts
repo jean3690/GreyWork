@@ -18,6 +18,7 @@ import type { AcpHost } from "./acp.js";
 import type { Db } from "./db.js";
 import type { RagIndexHost } from "./rag.js";
 import type { LlmStreamHost } from "./llm.js";
+import type { LlmAgentHost } from "./llm-agent.js";
 import type { SessionFileStore } from "./session-store.js";
 import type { TerminalHost } from "./terminal.js";
 import type { WorkspaceAccess } from "./workspace-access.js";
@@ -38,6 +39,7 @@ export interface HostServerOptions {
   store: SessionFileStore;
   dataDir: string;
   llm: LlmStreamHost;
+  llmAgent: LlmAgentHost;
   terminal: TerminalHost;
 }
 
@@ -204,6 +206,7 @@ export function createHostServer(options: HostServerOptions): { server: Server; 
             store: options.store,
             dataDir: config.dataDir,
             llm: options.llm,
+            llmAgent: options.llmAgent,
             terminal: options.terminal,
             trustedHost: config.trustedHost,
             extraPrograms: options.extraPrograms,

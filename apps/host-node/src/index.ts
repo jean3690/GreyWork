@@ -23,6 +23,7 @@ import { WorkspaceAccess } from "./workspace-access.js";
 import { EventBus } from "./events.js";
 import { AcpHost } from "./acp.js";
 import { LlmStreamHost } from "./llm.js";
+import { LlmAgentHost } from "./llm-agent.js";
 import { RagIndexHost } from "./rag.js";
 import { SessionFileStore } from "./session-store.js";
 import { TerminalHost } from "./terminal.js";
@@ -96,6 +97,7 @@ async function main(): Promise<void> {
   const store = new SessionFileStore(access);
   const acp = new AcpHost(bus, access);
   const llm = new LlmStreamHost(bus);
+  const llmAgent = new LlmAgentHost(bus, access);
   const rag = new RagIndexHost(db);
   const terminal = new TerminalHost(bus, access);
   const { server, close } = createHostServer({
@@ -111,6 +113,7 @@ async function main(): Promise<void> {
     rag,
     store,
     llm,
+    llmAgent,
     bus,
     terminal,
   });

@@ -14,6 +14,7 @@ import { RagIndexHost } from "../src/rag.js";
 import { isDenied } from "../src/commands.js";
 import { EventBus } from "../src/events.js";
 import { LlmStreamHost } from "../src/llm.js";
+import { LlmAgentHost } from "../src/llm-agent.js";
 import { SessionFileStore } from "../src/session-store.js";
 import { TerminalHost } from "../src/terminal.js";
 import { loadConfig } from "../src/config.js";
@@ -86,6 +87,7 @@ const bus = new EventBus();
 const store = new SessionFileStore(access);
 const acp = new AcpHost(bus, access);
 const llm = new LlmStreamHost(bus);
+const llmAgent = new LlmAgentHost(bus, access);
 const rag = new RagIndexHost(db);
 const terminal = new TerminalHost(bus, access);
 
@@ -101,6 +103,7 @@ const { server, close } = createHostServer({
   rag,
   store,
   llm,
+  llmAgent,
   bus,
   terminal,
   extraPrograms: (trustedHost: boolean) => (trustedHost ? ["mock-agent"] : []),
@@ -173,8 +176,8 @@ describe("HTTP 契约", () => {
     expect(defaultRoot?.available).toBe(true);
     // 桌面专属命令任何宿主都不可调用。
     expect(list.find((item) => item.name === "reveal_path")?.available).toBe(false);
-    // 尚未迁移的普通命令：可用性必须是 false，避免前端「点了才报错」。
-    expect(list.find((item) => item.name === "channel_send_media")?.available).toBe(false);
+    // 普通命令全部迁移完毕：可用性必须是 true（迁移完成态）。
+    expect(list.find((item) => item.name === "channel_send_media")?.available).toBe(true);
     // 可信宿主下 terminal_shells 已迁移且允许调用。
     expect(list.find((item) => item.name === "terminal_shells")?.available).toBe(true);
   });
@@ -191,7 +194,7 @@ describe("HTTP 契约", () => {
     expect(root).toBe(realpathSync(workspaceDir));
   });
 
-  it("未知命令 400、桌面专属 403、未迁移 501（错误信封一致）", async () => {
+  it("未知命令 404、桌面专属 403（错误信封一致）", async () => {
     const call = async (command: string) => {
       const response = await fetch(`${base}/api/command`, {
         method: "POST",
@@ -206,10 +209,6 @@ describe("HTTP 契约", () => {
 
     const desktop = await call("reveal_path");
     expect(desktop.status).toBe(403);
-
-    const unmigrated = await call("channel_send_media");
-    expect(unmigrated.status).toBe(501);
-    expect(unmigrated.body.error).toContain("尚未迁移");
 
     // 非可信宿主只在单测里验策略（主 server 以桌面口径开着可信开关）。
     expect(isDenied("terminal_shells", false)).toBe(true);
