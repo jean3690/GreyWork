@@ -15,8 +15,8 @@
  * 密码来源见 `auth.ts`：这里只接收 argon2 PHC 串，经 `GREYWORK_PASSWORD_HASH` 传给 sidecar，
  * **明文不进 env**。
  */
-import { spawn, type ChildProcess } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import path from "node:path";
 import { app } from "electron";
@@ -118,6 +118,37 @@ async function waitHealth(port: number, child: ChildProcess, timeoutMs = 20_000)
   }
 }
 
+
+/**
+ * 宿主可用 Node 的两级解析：
+ * 1. 随包运行时 <runtimeDir>/bin/node（runtime:fetch 分发，打包态唯一可靠来源）；
+ * 2. 登录 shell PATH 上的 node，且版本 ≥22.5（node:sqlite 的硬要求；开发态走 nvm 等）。
+ * 返回 "node" 表示交给子进程 env 里的 PATH 解析；null = 只剩 execPath 兜底。
+ */
+function bundledHostNode(runtimeDir?: string): string | null {
+  if (!runtimeDir) return null;
+  const candidate = path.join(runtimeDir, "bin", process.platform === "win32" ? "node.exe" : "node");
+  return existsSync(candidate) ? candidate : null;
+}
+
+function hostNodeOnPath(shellPath: string): string | null {
+  try {
+    const version = execFileSync("node", ["-p", "process.versions.node"], {
+      env: { ...process.env, PATH: shellPath },
+      timeout: 5000,
+      encoding: "utf8",
+    }).trim();
+    const [major, minor] = version.split(".").map(Number);
+    if (major > 22 || (major === 22 && minor >= 5)) return "node";
+    console.error("[sidecar] PATH 上的 node 版本 " + version + " < 22.5（node:sqlite 硬要求）");
+    return null;
+  } catch {
+    console.error("[sidecar] PATH 上找不到可用的 node");
+    return null;
+  }
+}
+
+/** 拉起 sidecar 并等它健康；返回端口与子进程句柄。 */
 /** 拉起 sidecar 并等它健康；返回端口与子进程句柄。 */
 export async function startServer(passwordHash: string): Promise<Sidecar> {
   // 固定端口（跨启动稳定）：优先复用上次落盘的端口，被占用才顺延并重新落盘。
@@ -131,7 +162,20 @@ export async function startServer(passwordHash: string): Promise<Sidecar> {
   // agent CLI 检测靠 PATH；补全登录 shell 的真实 PATH（有缓存，见 shell-path.ts）。
   const shellPath = await resolveUserShellPath(process.env.PATH ?? "");
   // Rust 宿主已删除：sidecar 恒为 Node 宿主（apps/host-node/dist）。
-  const child = spawn(process.execPath, [nodeServerEntryPath()], {
+  // 宿主依赖 node:sqlite（Node ≥22.5），而 Electron 30 内置的是 Node 20 —— 不能拿
+  // process.execPath 硬跑。优先级：随包运行时的 node（runtime:fetch 分发）→ 用户 PATH
+  // 上的 node（开发态，nvm 等管理 ≥22.5）→ 兜底 execPath + ELECTRON_RUN_AS_NODE
+  // （明确告警：该路径在 Electron 30 上必然失败，留作 Electron 升级到 Node 22 后的通道）。
+  const bundledNode = bundledHostNode(runtimeDir());
+  const pathNode = bundledNode ? null : hostNodeOnPath(shellPath);
+  const spawnBinary = bundledNode ?? pathNode ?? process.execPath;
+  if (!bundledNode && !pathNode) {
+    console.error(
+      "[sidecar] PATH 与随包运行时里都没有 Node ≥22.5（node:sqlite 的硬要求）：" +
+        "回退到 Electron 内置 Node 并会启动失败。请安装 Node ≥22.5 或先跑 pnpm runtime:fetch",
+    );
+  }
+  const child = spawn(spawnBinary, [nodeServerEntryPath()], {
     env: sidecarEnv({
       base: process.env,
       shellPath,
@@ -140,6 +184,7 @@ export async function startServer(passwordHash: string): Promise<Sidecar> {
       dataDir,
       passwordHash,
       runtimeDir: runtimeDir(),
+      runAsNode: spawnBinary === process.execPath,
     }),
     // stdio 见 SIDECAR_STDIO；windowsHide 让 Windows 不给 console 子系统程序分配新控制台
     // （否则双击桌面端会多弹一个终端）。
