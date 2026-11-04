@@ -77,6 +77,8 @@ HANDLERS.set("store_default_root", async (_args, ctx) => ctx.access.root);
 HANDLERS.set("terminal_shells", async () => shellCatalog());
 HANDLERS.set("fs_list_dir", async (args, ctx) => ctx.access.listDir(pathArg(args)));
 HANDLERS.set("fs_read_text_file", async (args, ctx) => ctx.access.readTextFile(pathArg(args)));
+HANDLERS.set("fs_read_binary", async (args, ctx) => new BinaryOutput(ctx.access.readBinary(pathArg(args))));
+HANDLERS.set("fs_probe_file", async (args, ctx) => ctx.access.probeFile(pathArg(args)));
 HANDLERS.set("fs_write_text_file", async (args, ctx) => {
   const content = (args as { content?: unknown } | null)?.content;
   if (typeof content !== "string") throw new CommandError(400, "缺少参数 content");
@@ -178,6 +180,13 @@ export function listCommands(trustedHost: boolean): CommandView[] {
   }));
 }
 
+/** 二进制结果（原始字节走 HTTP body，不套 JSON）：`fs_read_binary` 这类命令用。 */
+export class BinaryOutput {
+  constructor(readonly data: Buffer) {}
+}
+
+export type CommandOutput = { kind: "json"; value: unknown } | { kind: "binary"; data: Buffer };
+
 export class CommandError extends Error {
   constructor(
     readonly status: number,
@@ -187,20 +196,20 @@ export class CommandError extends Error {
   }
 }
 
-export async function dispatch(name: unknown, args: unknown, ctx: CommandContext): Promise<unknown> {
+export async function dispatch(name: unknown, args: unknown, ctx: CommandContext): Promise<CommandOutput> {
   if (typeof name !== "string" || name === "") {
     throw new CommandError(400, "缺少命令名");
   }
   const meta = COMMANDS.find((item) => item.name === name);
   if (!meta) {
-    // 与 Rust 的 `未知命令: {name}` 同一信封与状态码（400）。
-    throw new CommandError(400, `未知命令: ${name}`);
+    // 路由层先查命令表：未知命令是 404（不是参数错误 400），与 apps/server 的 run_command 一致。
+    throw new CommandError(404, `未知命令: ${name}`);
   }
   if (meta.desktopOnly) {
     throw new CommandError(403, `命令 ${name} 仅桌面端可用`);
   }
   if (isDenied(name, ctx.trustedHost)) {
-    throw new CommandError(403, `命令 ${name} 需要可信宿主（本机桌面端）`);
+    throw new CommandError(403, `命令 ${name} 在服务端不可用`);
   }
   const handler = HANDLERS.get(name);
   if (!handler) {
@@ -208,7 +217,8 @@ export async function dispatch(name: unknown, args: unknown, ctx: CommandContext
     throw new CommandError(501, `命令 ${name} 尚未迁移到 Node 宿主`);
   }
   try {
-    return await handler(args, ctx);
+    const value = await handler(args, ctx);
+    return value instanceof BinaryOutput ? { kind: "binary", data: value.data } : { kind: "json", value: value ?? null };
   } catch (error) {
     if (error instanceof CommandError) throw error;
     // 与 Rust 的 dispatch 同口径：命令实现失败一律 400 + 原文（前端直接展示这句）。

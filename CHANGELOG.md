@@ -44,7 +44,10 @@
   git 只读四条（`status` / `changes` / `diff` / `current_branch`）也已迁移：同一套授权根解析、
   argv 数组调用、`GIT_TERMINAL_PROMPT=0` 与 30s 超时杀进程组。真 PTY 终端也迁移完成
   （`node-pty`：输出 base64 原始字节经 `terminal://data` 推送、退出推 `terminal://exit`，
-  会话不因前端断连回收），需要 `allowBuilds` 放开 node-pty 的编译脚本。
+  会话不因前端断连回收），需要 `allowBuilds` 放开 node-pty 的编译脚本。二进制读取
+  （`fs_read_binary`）与文件探测（`fs_probe_file`，UTF-8 / BOM / CRLF / 二进制占比）也已迁移，
+  二进制结果按 `application/octet-stream` + `x-greywork-binary: 1` 回原始字节；顺带把未知命令的
+  状态码从 400 修正为 404（与 `apps/server` 的路由层一致）。
   新增 `pnpm host:parity` 双轨对照：同一份环境变量起两个宿主，逐命令比对状态码与响应体，
   迁移的每条命令都以它为准；可信宿主命令名单（`TRUSTED_HOST_ONLY`）也已按 Rust 同口径移植。
   方案、阶段与风险见 [docs/node-backend-migration.md](docs/node-backend-migration.md)；

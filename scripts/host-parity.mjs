@@ -15,6 +15,7 @@
  */
 import { execFileSync, spawn } from "node:child_process";
 import { createServer } from "node:net";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -92,12 +93,20 @@ async function call(port, token, command, commandArgs) {
     headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
     body: JSON.stringify({ command, args: commandArgs }),
   });
-  const text = await response.text();
+  const bytes = Buffer.from(await response.arrayBuffer());
+  const contentType = response.headers.get("content-type") ?? "";
+  // 二进制命令回原始字节：比对 sha256 + 长度（逐字节 base64 化只会把差异埋进日志里）。
+  if (!contentType.includes("json")) {
+    return {
+      status: response.status,
+      body: { binary: true, bytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") },
+    };
+  }
   let body;
   try {
-    body = text === "" ? null : JSON.parse(text);
+    body = bytes.length === 0 ? null : JSON.parse(bytes.toString("utf8"));
   } catch {
-    body = text;
+    body = bytes.toString("utf8");
   }
   return { status: response.status, body };
 }
@@ -151,6 +160,8 @@ for (const side of ["rust", "node"]) {
   writeFileSync(path.join(workspaceDir, side, "victim.txt"), "bye");
   writeFileSync(path.join(workspaceDir, side, "before.txt"), "move me");
   writeFileSync(path.join(workspaceDir, side, "copy-src.txt"), "copy me");
+  // 二进制读取的夹具：含 NUL 与控制字符，检验 `looks_binary` 与原始字节透传。
+  writeFileSync(path.join(workspaceDir, side, "binary.bin"), Buffer.from([0x00, 0x01, 0x02, 0xff, 0x00, 0x10]));
   // git 只读命令需要真实仓库：固定分支名与提交时间，避免默认配置把差异带进来。
   const repo = path.join(workspaceDir, side, "repo");
   mkdirSync(repo, { recursive: true });
@@ -197,6 +208,10 @@ function argsFor(command, side) {
       return { from: path.join(own, "before.txt"), to: path.join(own, "after.txt") };
     case "fs_copy_path":
       return { from: path.join(own, "copy-src.txt"), to: path.join(own, "copy-dst.txt") };
+    case "fs_probe_file":
+      return { path: path.join(workspaceDir, "hello.txt") };
+    case "fs_read_binary":
+      return { path: path.join(own, "binary.bin") };
     case "git_status":
     case "git_changes":
     case "git_current_branch":

@@ -29,7 +29,10 @@ import {
 } from "node:fs";
 import path from "node:path";
 
+import { PROBE_PREFIX_BYTES, probeBytes, readPrefix, type FileProbe } from "./text-probe.js";
+
 const MAX_TEXT_BYTES = 10 * 1024 * 1024;
+const MAX_BINARY_BYTES = 20 * 1024 * 1024;
 
 export interface DirEntryInfo {
   name: string;
@@ -351,6 +354,28 @@ export class WorkspaceAccess {
       });
     }
     return out;
+  }
+
+  /** 读二进制（≤20MB，原始字节；超限报错而不是截断）。 */
+  readBinary(raw: string): Buffer {
+    const file = this.resolveExisting(raw);
+    const metadata = statSync(file);
+    if (metadata.size > MAX_BINARY_BYTES) {
+      throw new Error("文件超过 20MB 上限");
+    }
+    try {
+      return readFileSync(file);
+    } catch (error) {
+      throw new Error(`读取文件失败: ${(error as Error).message}`, { cause: error });
+    }
+  }
+
+  /** 探测文件能否按文本预览 / 编辑（只读前 8KB，不把大文件整个读进来）。 */
+  probeFile(raw: string): FileProbe {
+    const file = this.resolveExisting(raw);
+    const metadata = statSync(file);
+    const prefix = readPrefix(file, PROBE_PREFIX_BYTES);
+    return probeBytes(prefix, metadata.size);
   }
 
   /** 读文本文件（10MB 上限）：UTF-8 优先，带 BOM 剥掉，非 UTF-8 按 GB18030 兜底。 */

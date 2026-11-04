@@ -149,7 +149,7 @@ describe("HTTP 契约", () => {
       return { status: response.status, body: (await response.json()) as { error: string } };
     };
     const unknown = await call("definitely_not_a_command");
-    expect(unknown.status).toBe(400);
+    expect(unknown.status).toBe(404);
     expect(unknown.body.error).toContain("未知命令");
 
     const desktop = await call("reveal_path");
@@ -305,6 +305,39 @@ describe("HTTP 契约", () => {
     const escaped = await call("git_diff", { root: repo, path: "../outside.txt", staged: false });
     expect(escaped.status).toBe(400);
     expect((escaped.body as { error: string }).error).toContain("非法路径");
+  });
+
+  it("fs_probe_file / fs_read_binary：文本与二进制分流，二进制走原始字节", async () => {
+    const callRaw = async (command: string, args: unknown) => {
+      const response = await fetch(`${base}/api/command`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ command, args }),
+      });
+      return response;
+    };
+
+    const text = path.join(workspaceDir, "hello.txt");
+    const probeText = (await (await callRaw("fs_probe_file", { path: text })).json()) as {
+      size: number;
+      binary: boolean;
+      utf8: boolean;
+      bom: boolean;
+    };
+    expect(probeText).toMatchObject({ size: 13, binary: false, utf8: true, bom: false });
+
+    const binPath = path.join(workspaceDir, "bin.dat");
+    const payload = Buffer.from([0x00, 0x01, 0x02, 0xff, 0x00, 0x10]);
+    writeFileSync(binPath, payload);
+    const probeBin = (await (await callRaw("fs_probe_file", { path: binPath })).json()) as { binary: boolean };
+    expect(probeBin.binary).toBe(true);
+
+    const response = await callRaw("fs_read_binary", { path: binPath });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/octet-stream");
+    expect(response.headers.get("x-greywork-binary")).toBe("1");
+    const bytes = Buffer.from(await response.arrayBuffer());
+    expect(bytes.equals(payload)).toBe(true);
   });
 
   it("db_settings：空库回 null，写入后可读回且类型原样", async () => {

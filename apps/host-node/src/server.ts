@@ -185,13 +185,25 @@ export function createHostServer(options: HostServerOptions): { server: Server; 
       if (pathname === "/api/command" && method === "POST") {
         const body = (await readJson(request)) as { command?: unknown; args?: unknown } | null;
         try {
-          const result = await dispatch(body?.command, body?.args ?? null, {
+          const output = await dispatch(body?.command, body?.args ?? null, {
             access: options.access,
             db: options.db,
             terminal: options.terminal,
             trustedHost: config.trustedHost,
           });
-          return sendJson(response, 200, result ?? null);
+          if (output.kind === "binary") {
+            // 与 Rust 的 binary_response 一致：原始字节 + octet-stream，并显式标记
+            // （有些代理会改写 Content-Type，前端据此确认这是二进制结果）。
+            response.writeHead(200, {
+              "content-type": "application/octet-stream",
+              "content-length": String(output.data.length),
+              "cache-control": "no-store",
+              "x-greywork-binary": "1",
+            });
+            response.end(output.data);
+            return;
+          }
+          return sendJson(response, 200, output.value);
         } catch (error) {
           if (error instanceof CommandError) {
             return sendJson(response, error.status, { error: error.message });
