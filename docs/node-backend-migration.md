@@ -4,7 +4,7 @@
 > 换成 Node 实现（`apps/host-node`），**API 契约不变**，桌面端 / 浏览器端 / Docker 部署零改动。
 >
 > 现状：P0 已完成（HTTP + 会话 + 命令分发骨架 + 静态托管 + 事件流，20 条测试）；
-> P1 进行中——双轨对照脚本已落地，路径授权面、读写面（含二进制 / 媒体 / 文件探测）、删除/改名/复制、会话存储、设置存储、git 只读四条与真 PTY 终端已迁移（25 条无状态命令通过对照；
+> P1 接近完成——双轨对照脚本已落地，路径授权面、读写面（含二进制 / 媒体 / 文件探测）、删除/改名/复制、会话存储、SQLite 全家（设置 / 自动化 / 编排 / 后端目录）、git 只读四条、真 PTY 终端、LLM（聚合四条 + 流式两条）、RAG 状态/清空、worktree 回收、技能安装/卸载、check_update、web_fetch（SSRF）与 **ACP 会话托管** 已迁移（47 条无状态命令通过对照；
 > SQLite 迁移链与 Rust 逐条一致，Node 建的库可被 Rust 直接打开并读回设置）。
 > Electron 默认仍 spawn Rust 二进制。
 
@@ -58,13 +58,13 @@
 
 ## 4. 阶段与验收
 
-| 阶段             | 范围                                                                                                                                                                 | 验收                                                                                                       |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| **P0（已完成）** | `apps/host-node` 骨架：config / 会话与 argon2 / 8 条路由 / 命令分发 / 静态托管 / WS / `hash-password`；命令清单导出                                                  | 20 条测试（会话、限流、cookie、401/403/400/501、静态缓存头、安全头、WS 鉴权与 hello）；`pnpm typecheck` 绿 |
-| **P1**           | 工作台核心：`db_settings_*`、`fs_*`、`git_*`、`shell_run`、`store_*`、`worktree_*`、`terminal_*`（node-pty）、`sys_info`；中间件补齐（完整 CSP、Origin、令牌桶限流） | 双轨对照全绿；桌面端以 `GREYWORK_HOST_KIND=node` 跑通「新建会话 → 改文件 → 终端」                          |
-| **P2**           | ACP 托管与 LLM：`acp_start/send/…`（stdio 子进程 + JSON-RPC）、`llm_chat_*`（流式）、`/api/media`（Range）、`office_preview_open` 宿主侧                             | 对话主链路双轨对照；流式事件序列一致                                                                       |
-| **P3**           | 通道七件套（微信走 `@wechatbot/wechatbot`），含凭据落盘 0600、事件与命令、媒体收发                                                                                   | 每条通道一组「状态 / 登录 / 收发 / 断开」对照测试；微信真机扫码冒烟                                        |
-| **P4**           | 插件市场、RAG、office 转换、自动化调度、control-plane 同步；随后删除 Rust 宿主                                                                                       | 全量双轨对照；打包三平台安装包（桌面 / Docker）；删除 `apps/server` 与 `crates/greywork-host`              |
+| 阶段                   | 范围                                                                                                                                                                                                                  | 验收                                                                                                                   |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| **P0（已完成）**       | `apps/host-node` 骨架：config / 会话与 argon2 / 8 条路由 / 命令分发 / 静态托管 / WS / `hash-password`；命令清单导出                                                                                                   | 20 条测试（会话、限流、cookie、401/403/400/501、静态缓存头、安全头、WS 鉴权与 hello）；`pnpm typecheck` 绿             |
+| **P1（已完成 32 条）** | 工作台核心：`db_settings_*` / `fs_*`（15）/ `git_*`（4）/ `store_*`（3）/ `worktree_list/release`（2）/ `terminal_*`（5，node-pty）；中间件补齐（CSP / Origin / 限流仍有简化项）                                      | 双轨对照全绿；Node 建的 SQLite 库 Rust 可直接打开；桌面端以 `GREYWORK_HOST_KIND=node` 跑通「新建会话 → 改文件 → 终端」 |
+| **P2（已完成 14 条）** | ACP 会话托管（start / new_session / load_session / send / 权限应答 / set_mode / set_config / set_permission_tier / cancel / stop）与 LLM（list_models / embed / chat_complete / transcribe / chat_start / chat_stop） | mock agent 端到端（含权限请求应答）；本地 mock 端点的双轨对照；`llm_agent_start/stop` 与 `/api/media` 仍未迁移         |
+| **P3（部分，2 条）**   | 通道七件套（微信走 `@wechatbot/wechatbot`，其余手写协议），含凭据落盘 0600、事件与命令、媒体收发                                                                                                                      | 每条通道一组「状态 / 登录 / 收发 / 断开」对照测试；微信真机扫码冒烟                                                    |
+| **P4（部分）**         | 插件市场、RAG（status/clear 已迁，build/search 未迁）、office 转换、control-plane 同步；随后删除 Rust 宿主                                                                                                            | 全量双轨对照；打包三平台安装包（桌面 / Docker）；删除 `apps/server` 与 `crates/greywork-host`                          |
 
 **每个阶段的 Definition of Done**：双轨对照全绿 + 原有 Rust 测试里对应用例在 Node 侧有等价覆盖 +
 文档（本文的进度表、`docs/*.md` 里的实现链接）同步。
