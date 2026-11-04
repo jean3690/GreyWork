@@ -49,6 +49,10 @@
   二进制结果按 `application/octet-stream` + `x-greywork-binary: 1` 回原始字节；顺带把未知命令的
   状态码从 400 修正为 404（与 `apps/server` 的路由层一致）。`fs_read_media`（20MB 缺省、
   128MB 硬顶，超限报错不截断）与 `fs_write_binary`（base64 解码后 ≤20MB）也一并迁移。
+  会话存储（`store_sessions_load/sync`、`attachments_prune_session`）按文件面迁移：默认
+  `~/.greyWork/sessions` + 各工作区 `.greyWork/sessions`、`.ready` 就绪标记、`active.json`、
+  「建目录」式跨进程锁（30s 陈旧接管）；写入遵循「内容相同跳过 / 磁盘更新记冲突不覆盖 /
+  只删显式列出的 id」。
   新增 `pnpm host:parity` 双轨对照：同一份环境变量起两个宿主，逐命令比对状态码与响应体，
   迁移的每条命令都以它为准；可信宿主命令名单（`TRUSTED_HOST_ONLY`）也已按 Rust 同口径移植。
   方案、阶段与风险见 [docs/node-backend-migration.md](docs/node-backend-migration.md)；

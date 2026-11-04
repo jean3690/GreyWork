@@ -148,6 +148,12 @@ function stableStringify(value) {
 
 const label = process.env.HOME ? path.basename(process.env.HOME) : "user";
 const dirs = [mkdtempSync(path.join(tmpdir(), "gw-parity-rust-")), mkdtempSync(path.join(tmpdir(), "gw-parity-node-"))];
+// HOME 也要各给一份：会话文件落在 ~/.greyWork，共用一个 HOME 会让两个宿主互写同一个目录。
+const homes = dirs.map((dir) => {
+  const home = path.join(dir, "home");
+  mkdirSync(home, { recursive: true });
+  return home;
+});
 // 两边共用的工作区夹具：同一批文件、同一个绝对路径（只靠 GREYWORK_WORKSPACE_ROOTS 授权）。
 const workspaceDir = mkdtempSync(path.join(tmpdir(), "gw-parity-ws-"));
 writeFileSync(path.join(workspaceDir, "hello.txt"), "hello parity\n");
@@ -223,6 +229,22 @@ function argsFor(command, side) {
       return { root: path.join(own, "repo") };
     case "git_diff":
       return { root: path.join(own, "repo"), path: "a.txt", staged: false };
+    case "store_sessions_sync":
+      return {
+        snapshot: {
+          sessions: [
+            { id: "s1", title: "one", workspaceId: null, createdAt: 900, updatedAt: 1000, messages: [] },
+            { id: "s2", title: "two", workspaceId: null, createdAt: 1900, updatedAt: 2000, messages: [] },
+          ],
+          activeSessionId: "s2",
+        },
+        workspaces: [],
+        deletedSessionIds: [],
+      };
+    case "store_sessions_load":
+      return { workspaces: [] };
+    case "attachments_prune_session":
+      return { sessionId: "s1" };
     case "db_settings_sync":
       // 两端写各自的库（数据目录不同），但内容必须一致，方便写后复读比对。
       return { settings: { theme: "codex", fontSize: "large", parity: true } };
@@ -232,7 +254,7 @@ function argsFor(command, side) {
 }
 const [rustPort, nodePort] = [await freePort(), await freePort()];
 
-function spawnHost(binary, argv, port, dataDir, name) {
+function spawnHost(binary, argv, port, dataDir, name, home) {
   const child = spawn(binary, argv, {
     cwd: root,
     stdio: ["ignore", "pipe", "pipe"],
@@ -245,6 +267,8 @@ function spawnHost(binary, argv, port, dataDir, name) {
       // 反而把最值得对照的一批排除掉了。
       GREYWORK_TRUSTED_HOST: "1",
       GREYWORK_WORKSPACE_ROOTS: workspaceDir,
+      HOME: home,
+      USERPROFILE: home,
       // 静态目录两边都不设：对照只关心 API。
     },
   });
@@ -254,7 +278,10 @@ function spawnHost(binary, argv, port, dataDir, name) {
   return { child, name, log };
 }
 
-const hosts = [spawnHost(rustBinary, [], rustPort, dirs[0], "rust"), spawnHost(process.execPath, [nodeEntry], nodePort, dirs[1], "node")];
+const hosts = [
+  spawnHost(rustBinary, [], rustPort, dirs[0], "rust", homes[0]),
+  spawnHost(process.execPath, [nodeEntry], nodePort, dirs[1], "node", homes[1]),
+];
 
 function shutdown() {
   for (const host of hosts) host.child.kill("SIGTERM");
@@ -281,6 +308,8 @@ try {
     [path.join(workspaceDir, "rust"), "<WS>/<HOST>"],
     [path.join(workspaceDir, "node"), "<WS>/<HOST>"],
     [workspaceDir, "<WS>"],
+    [homes[0], "<HOME>"],
+    [homes[1], "<HOME>"],
     [dirs[0], "<DATA>"],
     [dirs[1], "<DATA>"],
   ];
@@ -332,9 +361,13 @@ try {
   }
 
   // 读类命令在写完之后再复读一次：db_settings_sync 的响应只是 null，真值要回读才知道。
-  const readBack = candidates.filter((command) => command === "db_settings_load");
+  const readBack = candidates.filter((command) => command === "db_settings_load" || command === "store_sessions_load");
   for (const command of readBack) {
-    const [rust, node] = await Promise.all([call(rustPort, rustToken, command, {}), call(nodePort, nodeToken, command, {})]);
+    // 复读也要带该命令的参数（`store_sessions_load` 的 workspaces 是必填，不会走默认值）。
+    const [rust, node] = await Promise.all([
+      call(rustPort, rustToken, command, argsFor(command, "rust")),
+      call(nodePort, nodeToken, command, argsFor(command, "node")),
+    ]);
     const left = normalize(rust.body, replace);
     const right = normalize(node.body, replace);
     if (rust.status === node.status && stableStringify(left) === stableStringify(right)) {
@@ -398,6 +431,9 @@ try {
   }
 } catch (error) {
   console.error("[parity] 执行失败：", error);
+  for (const host of hosts) {
+    if (host.log.length) console.error(`--- ${host.name} 输出 ---\n${host.log.join("")}`);
+  }
   failures += 1;
 } finally {
   shutdown();

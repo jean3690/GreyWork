@@ -21,6 +21,7 @@ import { createHostServer } from "./server.js";
 import { resolveStaticRoot } from "./static-site.js";
 import { WorkspaceAccess } from "./workspace-access.js";
 import { EventBus } from "./events.js";
+import { SessionFileStore } from "./session-store.js";
 import { TerminalHost } from "./terminal.js";
 
 /** 与 Rust `config::hash_password` 的 argon2 参数对齐（argon2 crate 默认值）。 */
@@ -89,6 +90,7 @@ async function main(): Promise<void> {
   }
   const db = new Db(path.join(config.dataDir, "greywork.db"));
   const bus = new EventBus();
+  const store = new SessionFileStore(access);
   const terminal = new TerminalHost(bus, access);
   const { server, close } = createHostServer({
     config,
@@ -97,6 +99,7 @@ async function main(): Promise<void> {
     staticRoot,
     access,
     db,
+    store,
     bus,
     terminal,
   });

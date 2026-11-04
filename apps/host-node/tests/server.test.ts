@@ -10,6 +10,7 @@ import { LoginThrottle, SessionStore, passwordChecker } from "../src/auth.js";
 import { Db } from "../src/db.js";
 import { isDenied } from "../src/commands.js";
 import { EventBus } from "../src/events.js";
+import { SessionFileStore } from "../src/session-store.js";
 import { TerminalHost } from "../src/terminal.js";
 import { loadConfig } from "../src/config.js";
 import { createHostServer } from "../src/server.js";
@@ -43,6 +44,7 @@ const access = new WorkspaceAccess(workspaceDir, path.join(dataDir, "workspace-p
 for (const root of config.workspaceRoots) access.authorizeSelectedPath(root);
 const db = new Db(path.join(dataDir, "greywork.db"));
 const bus = new EventBus();
+const store = new SessionFileStore(access);
 const terminal = new TerminalHost(bus, access);
 
 const { server, close } = createHostServer({
@@ -52,6 +54,7 @@ const { server, close } = createHostServer({
   staticRoot: resolveStaticRoot(config.staticDir),
   access,
   db,
+  store,
   bus,
   terminal,
 });
@@ -363,6 +366,65 @@ describe("HTTP 契约", () => {
     const tooSmall = await call("fs_read_media", { path: target, maxBytes: 2 });
     expect(tooSmall.status).toBe(400);
     expect(((await tooSmall.json()) as { error: string }).error).toContain("上限");
+  });
+
+  it("store_sessions：未接管回 null → 同步 → 读回 → 冲突 → 删除", async () => {
+    const call = async (command: string, args: unknown) => {
+      const response = await fetch(`${base}/api/command`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ command, args }),
+      });
+      return { status: response.status, body: await response.json() };
+    };
+
+    expect((await call("store_sessions_load", { workspaces: [] })).body).toBeNull();
+
+    const snapshot = {
+      sessions: [
+        { id: "s1", title: "one", workspaceId: null, createdAt: 900, updatedAt: 1000, messages: [] },
+        { id: "s2", title: "two", workspaceId: null, createdAt: 1900, updatedAt: 2000, messages: [] },
+      ],
+      activeSessionId: "s2",
+    };
+    const first = await call("store_sessions_sync", { snapshot, workspaces: [], deletedSessionIds: [] });
+    expect(first.body).toEqual({ written: 2, skipped: 0, deleted: 0, conflicts: [] });
+
+    const loaded = await call("store_sessions_load", { workspaces: [] });
+    expect(loaded.body).toEqual({ sessions: [snapshot.sessions[1], snapshot.sessions[0]], activeSessionId: "s2" });
+
+    // 内容没变 → 全部 skipped（不重复落盘）。
+    const again = await call("store_sessions_sync", { snapshot, workspaces: [], deletedSessionIds: [] });
+    expect((again.body as { skipped: number }).skipped).toBe(2);
+
+    // 磁盘更晚 → 冲突且不覆盖。
+    const stale = await call("store_sessions_sync", {
+      snapshot: {
+        sessions: [{ id: "s1", title: "stale", workspaceId: null, createdAt: 400, updatedAt: 500, messages: [] }],
+        activeSessionId: "s1",
+      },
+      workspaces: [],
+      deletedSessionIds: [],
+    });
+    expect((stale.body as { conflicts: { id: string }[] }).conflicts.map((item) => item.id)).toEqual(["s1"]);
+    const afterConflict = await call("store_sessions_load", { workspaces: [] });
+    expect((afterConflict.body as { sessions: { id: string; title: string }[] }).sessions.find((item) => item.id === "s1")?.title).toBe(
+      "one",
+    );
+
+    // 只删显式列出的 id。
+    const deleted = await call("store_sessions_sync", {
+      snapshot: { sessions: [], activeSessionId: null },
+      workspaces: [],
+      deletedSessionIds: ["s1"],
+    });
+    expect((deleted.body as { deleted: number }).deleted).toBe(1);
+    const final = await call("store_sessions_load", { workspaces: [] });
+    expect((final.body as { sessions: { id: string }[] }).sessions.map((item) => item.id)).toEqual(["s2"]);
+
+    expect((await call("attachments_prune_session", { sessionId: "s1" })).status).toBe(200);
+    // 非法 id 必须拒绝（附件目录是「渲染端能调删除」的命令）。
+    expect((await call("attachments_prune_session", { sessionId: "../etc" })).status).toBe(400);
   });
 
   it("db_settings：空库回 null，写入后可读回且类型原样", async () => {

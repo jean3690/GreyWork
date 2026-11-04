@@ -15,6 +15,7 @@ import { attachEvents, type EventBus } from "./events.js";
 import { serveStatic } from "./static-site.js";
 import type { HostConfig } from "./config.js";
 import type { Db } from "./db.js";
+import type { SessionFileStore } from "./session-store.js";
 import type { TerminalHost } from "./terminal.js";
 import type { WorkspaceAccess } from "./workspace-access.js";
 
@@ -27,6 +28,7 @@ export interface HostServerOptions {
   staticRoot: string | null;
   access: WorkspaceAccess;
   db: Db;
+  store: SessionFileStore;
   bus: EventBus;
   terminal: TerminalHost;
 }
@@ -188,6 +190,7 @@ export function createHostServer(options: HostServerOptions): { server: Server; 
           const output = await dispatch(body?.command, body?.args ?? null, {
             access: options.access,
             db: options.db,
+            store: options.store,
             terminal: options.terminal,
             trustedHost: config.trustedHost,
           });

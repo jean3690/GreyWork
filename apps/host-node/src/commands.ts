@@ -13,6 +13,7 @@ import manifest from "./command-manifest.json" with { type: "json" };
 import { shellCatalog } from "./shell-catalog.js";
 import type { Db } from "./db.js";
 import { gitChanges, gitCurrentBranch, gitDiff, gitStatus } from "./git.js";
+import type { SessionFileStore, WorkspaceDir } from "./session-store.js";
 import type { TerminalHost } from "./terminal.js";
 import type { WorkspaceAccess } from "./workspace-access.js";
 
@@ -55,6 +56,7 @@ export function isDenied(name: string, trustedHost: boolean): boolean {
 export interface CommandContext {
   access: WorkspaceAccess;
   db: Db;
+  store: SessionFileStore;
   terminal: TerminalHost;
   trustedHost: boolean;
 }
@@ -168,6 +170,26 @@ HANDLERS.set("terminal_close", async (args, ctx) => {
   const value = args as { sessionId?: unknown } | null;
   if (typeof value?.sessionId !== "string") throw new CommandError(400, "缺少参数 sessionId");
   ctx.terminal.close(value.sessionId);
+  return null;
+});
+
+HANDLERS.set("store_sessions_load", async (args, ctx) => {
+  const workspaces = ((args as { workspaces?: unknown } | null)?.workspaces ?? []) as WorkspaceDir[];
+  return ctx.store.load(workspaces);
+});
+HANDLERS.set("store_sessions_sync", async (args, ctx) => {
+  const value = args as { snapshot?: unknown; workspaces?: unknown; deletedSessionIds?: unknown } | null;
+  if (!value || typeof value.snapshot !== "object" || value.snapshot === null) {
+    throw new CommandError(400, "缺少参数 snapshot");
+  }
+  const workspaces = (value.workspaces ?? []) as WorkspaceDir[];
+  const deleted = Array.isArray(value.deletedSessionIds) ? (value.deletedSessionIds as string[]) : [];
+  return ctx.store.sync(value.snapshot as { sessions: unknown[]; activeSessionId: string | null }, workspaces, deleted);
+});
+HANDLERS.set("attachments_prune_session", async (args, ctx) => {
+  const sessionId = (args as { sessionId?: unknown } | null)?.sessionId;
+  if (typeof sessionId !== "string") throw new CommandError(400, "缺少参数 sessionId");
+  ctx.store.pruneAttachments(sessionId);
   return null;
 });
 
