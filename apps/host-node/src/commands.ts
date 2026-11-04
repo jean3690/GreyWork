@@ -622,6 +622,21 @@ HANDLERS.set("telegram_save_credentials", async (args, ctx) => {
   saveCredentials(ctx.dataDir, value.botToken);
   return null;
 });
+HANDLERS.set("discord_send", async (args) => {
+  const v = args as { channelId?: unknown; content?: unknown; credentials?: unknown } | null;
+  if (typeof v?.channelId !== "string" || typeof v?.content !== "string") throw new CommandError(400, "缺少参数 channelId / content");
+  const creds = v.credentials as { token?: string } | undefined;
+  if (!creds?.token) throw new Error("Discord bot token 未配置");
+  const response = await fetch(`https://discord.com/api/v10/channels/${v.channelId}/messages`, {
+    method: "POST",
+    headers: { "authorization": `Bot ${creds.token}`, "content-type": "application/json" },
+    body: JSON.stringify({ content: v.content }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!response.ok) throw new Error(`Discord send returned ${response.status}`);
+  return { ok: true };
+});
+
 HANDLERS.set("telegram_send", async (args, ctx) => {
   const value = args as { chatId?: unknown; text?: unknown } | null;
   if (typeof value?.chatId !== "string" || typeof value?.text !== "string") {
@@ -713,6 +728,27 @@ HANDLERS.set("wechat_save_credentials", async (args, ctx) => {
 HANDLERS.set("wechat_clear_credentials", async (_args, ctx) => {
   clearChannelCredentials(ctx.dataDir, "wechat");
   return null;
+});
+
+HANDLERS.set("feishu_send", async (args) => {
+  const v = args as { chatId?: unknown; text?: unknown; credentials?: unknown } | null;
+  if (typeof v?.chatId !== "string" || typeof v?.text !== "string") throw new CommandError(400, "缺少参数 chatId / text");
+  const creds = v.credentials as { appId?: string; appSecret?: string } | undefined;
+  if (!creds?.appId || !creds?.appSecret) throw new Error("飞书凭证未配置");
+  const tokenRes = await fetch("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ app_id: creds.appId, app_secret: creds.appSecret }),
+  });
+  const tokenBody = await tokenRes.json() as { tenant_access_token?: string };
+  if (!tokenBody.tenant_access_token) throw new Error("飞书 token 获取失败");
+  const response = await fetch("https://open.feishu.cn/open-apis/im/v1/messages", {
+    method: "POST",
+    headers: { "authorization": `Bearer ${tokenBody.tenant_access_token}`, "content-type": "application/json" },
+    body: JSON.stringify({ receive_id_type: "chat_id", msg_type: "text", content: JSON.stringify({ text: v.text }) }),
+  });
+  if (!response.ok) throw new Error(`飞书 send returned ${response.status}`);
+  return { ok: true };
 });
 
 HANDLERS.set("check_update", async () => checkUpdate());
