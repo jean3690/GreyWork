@@ -158,7 +158,10 @@ export function probeProgramPath(program: string): string | null {
   const pathValue = process.env.PATH ?? "";
   const candidates =
     process.platform === "win32" && path.extname(program) === ""
-      ? (process.env.PATHEXT ?? ".EXE;.CMD;.BAT").split(";").filter((ext) => ext !== "").map((ext) => program + ext)
+      ? (process.env.PATHEXT ?? ".EXE;.CMD;.BAT")
+          .split(";")
+          .filter((ext) => ext !== "")
+          .map((ext) => program + ext)
       : [program];
   for (const dir of pathValue.split(path.delimiter)) {
     for (const candidate of candidates) {

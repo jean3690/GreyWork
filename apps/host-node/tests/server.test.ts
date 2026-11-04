@@ -1,4 +1,6 @@
 import { execFileSync } from "node:child_process";
+import { createServer as createHttpServer } from "node:http";
+import type { AddressInfo as NodeAddressInfo } from "node:net";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -40,6 +42,34 @@ const config = loadConfig({
 
 const sessions = new SessionStore(passwordChecker(config), config.sessionTtlSecs);
 const throttle = new LoginThrottle();
+// 本地 OpenAI 兼容 mock：模型清单 / 向量 / SSE 补全 / 转写各一条路由。
+const provider = createHttpServer((request, response) => {
+  const url = request.url ?? "";
+  if (request.method === "GET" && url.endsWith("/v1/models")) {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ data: [{ id: "b-model" }, { id: "a-model" }] }));
+    return;
+  }
+  if (request.method === "POST" && url.endsWith("/v1/embeddings")) {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ data: [{ embedding: [1, 2, 3] }, { embedding: [0.5, 0.25, 0.125] }] }));
+    return;
+  }
+  if (request.method === "POST" && url.endsWith("/v1/chat/completions")) {
+    response.writeHead(200, { "content-type": "text/event-stream" });
+    response.write('data: {"choices":[{"delta":{"content":"hel"}}]}\n\n');
+    response.write('data: {"choices":[{"delta":{"content":"lo"}}]}\n\n');
+    response.end("data: [DONE]\n\n");
+    return;
+  }
+  if (request.method === "POST" && url.endsWith("/v1/audio/transcriptions")) {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ text: "transcribed" }));
+    return;
+  }
+  response.writeHead(404).end();
+});
+
 const access = new WorkspaceAccess(workspaceDir, path.join(dataDir, "workspace-path-access.json"));
 for (const root of config.workspaceRoots) access.authorizeSelectedPath(root);
 const db = new Db(path.join(dataDir, "greywork.db"));
@@ -74,6 +104,7 @@ async function login(): Promise<string> {
 }
 
 beforeAll(async () => {
+  await new Promise<void>((resolve) => provider.listen(0, "127.0.0.1", () => resolve()));
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   cookie = await login();
@@ -83,6 +114,7 @@ afterAll(async () => {
   terminal.disposeAll();
   await close();
   db.close();
+  await new Promise<void>((resolve) => provider.close(() => resolve()));
 });
 
 describe("HTTP 契约", () => {
@@ -440,7 +472,7 @@ describe("HTTP 契约", () => {
     expect((await call("db_agents_load", {})).body).toBeNull();
     const providers = [
       { id: "p1", name: "Agent One", kind: "acp", command: "git --acp", enabled: true, env: null },
-      { id: "p2", name: "Agent Two", kind: "acp", command: "npx -y agent", enabled: false, env: "{\"K\":\"V\"}" },
+      { id: "p2", name: "Agent Two", kind: "acp", command: "npx -y agent", enabled: false, env: '{"K":"V"}' },
     ];
     expect((await call("db_agents_sync", { providers })).status).toBe(200);
     expect((await call("db_agents_load", {})).body).toEqual(providers);
@@ -459,8 +491,12 @@ describe("HTTP 契约", () => {
       });
       return { status: response.status, body: await response.json() };
     };
-    const probes = (await call("acp_detect_programs", { programs: ["git", "definitely-not-a-program-xyz", "  "] }))
-      .body as { program: string; installed: boolean; path: string | null; bundled: boolean }[];
+    const probes = (await call("acp_detect_programs", { programs: ["git", "definitely-not-a-program-xyz", "  "] })).body as {
+      program: string;
+      installed: boolean;
+      path: string | null;
+      bundled: boolean;
+    }[];
     expect(probes).toHaveLength(2);
     expect(probes[0]).toMatchObject({ program: "git", installed: true, bundled: false });
     expect(probes[0].path?.endsWith("git")).toBe(true);
@@ -511,6 +547,40 @@ describe("HTTP 契约", () => {
     expect((await call("db_team_runs_load", {})).body).toBeNull();
     expect((await call("db_team_runs_sync", { runs: [{ id: "r1", payload: { plan: [1, 2] } }] })).status).toBe(200);
     expect((await call("db_team_runs_load", {})).body).toEqual([{ id: "r1", payload: { plan: [1, 2] } }]);
+  });
+
+  it("LLM 四条：模型清单 / 向量 / 流式聚合 / 转写", async () => {
+    const baseUrl = `http://127.0.0.1:${(provider.address() as NodeAddressInfo).port}`;
+    const call = async (command: string, args: unknown) => {
+      const response = await fetch(`${base}/api/command`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ command, args }),
+      });
+      return { status: response.status, body: await response.json() };
+    };
+
+    expect((await call("llm_list_models", { baseUrl })).body).toEqual(["a-model", "b-model"]);
+    expect((await call("llm_embed", { baseUrl, model: "bge-m3", input: ["a", "b"] })).body).toEqual({
+      embeddings: [
+        [1, 2, 3],
+        [0.5, 0.25, 0.125],
+      ],
+      dim: 3,
+      model: "bge-m3",
+    });
+    expect((await call("llm_chat_complete", { baseUrl, model: "m", messages: [{ role: "user", content: "hi" }] })).body).toBe("hello");
+
+    const audio = path.join(workspaceDir, "voice.wav");
+    writeFileSync(audio, Buffer.from([0x52, 0x49, 0x46, 0x46]));
+    expect((await call("llm_transcribe", { baseUrl, model: "whisper-1", path: audio })).body).toEqual({
+      text: "transcribed",
+    });
+
+    // 未设置的环境变量名必须在发请求前就报错（不许把占位符带出去）。
+    const missing = await call("llm_list_models", { baseUrl, apiKeyEnv: "GREYWORK_TEST_UNSET_KEY" });
+    expect(missing.status).toBe(400);
+    expect((missing.body as { error: string }).error).toContain("未设置 API Key");
   });
 
   it("db_settings：空库回 null，写入后可读回且类型原样", async () => {

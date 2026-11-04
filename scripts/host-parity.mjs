@@ -14,6 +14,7 @@
  * `pnpm --filter @greywork/host-node build`，Node 宿主读 dist/。
  */
 import { execFileSync, spawn } from "node:child_process";
+import { createServer as createHttpServer } from "node:http";
 import { createServer } from "node:net";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -25,6 +26,33 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const rustBinary = path.join(root, "target", "debug", "greywork-server");
 const nodeEntry = path.join(root, "apps", "host-node", "dist", "index.js");
 const PASSWORD = "parity-pass";
+
+/** 本地 OpenAI 兼容 mock：两条 LLM 命令都打它，避免对照依赖外网或真实 key。 */
+const provider = createHttpServer((request, response) => {
+  const url = request.url ?? "";
+  if (request.method === "GET" && url.endsWith("/v1/models")) {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ data: [{ id: "b-model" }, { id: "a-model" }] }));
+    return;
+  }
+  if (request.method === "POST" && url.endsWith("/v1/embeddings")) {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ data: [{ embedding: [1, 2, 3] }] }));
+    return;
+  }
+  if (request.method === "POST" && url.endsWith("/v1/chat/completions")) {
+    response.writeHead(200, { "content-type": "text/event-stream" });
+    response.write('data: {"choices":[{"delta":{"content":"hel"}}]}\n\n');
+    response.end('data: {"choices":[{"delta":{"content":"lo"}}]}\n\n' + "data: [DONE]\n\n");
+    return;
+  }
+  if (request.method === "POST" && url.endsWith("/v1/audio/transcriptions")) {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ text: "transcribed" }));
+    return;
+  }
+  response.writeHead(404).end();
+});
 
 /** 依赖活会话 / 输出含进程级 id 的命令：不参与逐字节对照。 */
 const STATEFUL_COMMANDS = new Set(["terminal_open", "terminal_write", "terminal_resize", "terminal_close"]);
@@ -168,6 +196,7 @@ for (const side of ["rust", "node"]) {
   writeFileSync(path.join(workspaceDir, side, "copy-src.txt"), "copy me");
   // 二进制读取的夹具：含 NUL 与控制字符，检验 `looks_binary` 与原始字节透传。
   writeFileSync(path.join(workspaceDir, side, "binary.bin"), Buffer.from([0x00, 0x01, 0x02, 0xff, 0x00, 0x10]));
+  writeFileSync(path.join(workspaceDir, side, "voice.wav"), Buffer.from([0x52, 0x49, 0x46, 0x46]));
   writeFileSync(path.join(workspaceDir, side, "media.bin"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
   // git 只读命令需要真实仓库：固定分支名与提交时间，避免默认配置把差异带进来。
   const repo = path.join(workspaceDir, side, "repo");
@@ -249,11 +278,19 @@ function argsFor(command, side) {
       return {
         providers: [
           { id: "p1", name: "Agent One", kind: "acp", command: "git --acp", enabled: true, env: null },
-          { id: "p2", name: "Agent Two", kind: "acp", command: "npx -y agent", enabled: false, env: "{\"K\":\"V\"}" },
+          { id: "p2", name: "Agent Two", kind: "acp", command: "npx -y agent", enabled: false, env: '{"K":"V"}' },
         ],
       };
     case "db_agents_load":
       return {};
+    case "llm_list_models":
+      return { baseUrl: providerUrl };
+    case "llm_embed":
+      return { baseUrl: providerUrl, model: "bge-m3", input: ["a"] };
+    case "llm_chat_complete":
+      return { baseUrl: providerUrl, model: "m", messages: [{ role: "user", content: "hi" }] };
+    case "llm_transcribe":
+      return { baseUrl: providerUrl, model: "whisper-1", path: path.join(own, "voice.wav") };
     case "db_automations_sync":
       return {
         tasks: [
@@ -297,6 +334,8 @@ function argsFor(command, side) {
   }
 }
 const [rustPort, nodePort] = [await freePort(), await freePort()];
+await new Promise((resolve) => provider.listen(0, "127.0.0.1", resolve));
+const providerUrl = `http://127.0.0.1:${provider.address().port}`;
 
 function spawnHost(binary, argv, port, dataDir, name, home) {
   const child = spawn(binary, argv, {
@@ -329,6 +368,7 @@ const hosts = [
 
 function shutdown() {
   for (const host of hosts) host.child.kill("SIGTERM");
+  provider.close();
   if (keep) return;
   for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
   rmSync(workspaceDir, { recursive: true, force: true });

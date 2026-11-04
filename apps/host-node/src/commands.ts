@@ -14,6 +14,7 @@ import { shellCatalog } from "./shell-catalog.js";
 import { detectPrograms } from "./acp-probe.js";
 import type { AgentProvider, AutomationRunInput, AutomationTask, Db, TeamRun } from "./db.js";
 import { gitChanges, gitCurrentBranch, gitDiff, gitStatus } from "./git.js";
+import { chatComplete, embed, listModels, transcribe, type LlmChatMessage } from "./llm.js";
 import type { SessionFileStore, WorkspaceDir } from "./session-store.js";
 import type { TerminalHost } from "./terminal.js";
 import type { WorkspaceAccess } from "./workspace-access.js";
@@ -172,6 +173,77 @@ HANDLERS.set("terminal_close", async (args, ctx) => {
   if (typeof value?.sessionId !== "string") throw new CommandError(400, "缺少参数 sessionId");
   ctx.terminal.close(value.sessionId);
   return null;
+});
+
+HANDLERS.set("llm_list_models", async (args) => {
+  const value = args as { baseUrl?: unknown; apiKeyEnv?: unknown; headers?: unknown } | null;
+  if (typeof value?.baseUrl !== "string") throw new CommandError(400, "缺少参数 baseUrl");
+  return listModels({
+    baseUrl: value.baseUrl,
+    apiKeyEnv: typeof value.apiKeyEnv === "string" ? value.apiKeyEnv : null,
+    headers: (value.headers ?? undefined) as Record<string, string> | undefined,
+  });
+});
+HANDLERS.set("llm_embed", async (args) => {
+  const value = args as {
+    baseUrl?: unknown;
+    model?: unknown;
+    apiKeyEnv?: unknown;
+    headers?: unknown;
+    input?: unknown;
+  } | null;
+  if (typeof value?.baseUrl !== "string" || typeof value?.model !== "string") {
+    throw new CommandError(400, "缺少参数 baseUrl / model");
+  }
+  return embed({
+    baseUrl: value.baseUrl,
+    model: value.model,
+    apiKeyEnv: typeof value.apiKeyEnv === "string" ? value.apiKeyEnv : null,
+    headers: (value.headers ?? undefined) as Record<string, string> | undefined,
+    input: Array.isArray(value.input) ? (value.input as string[]) : [],
+  });
+});
+HANDLERS.set("llm_chat_complete", async (args) => {
+  const value = args as {
+    baseUrl?: unknown;
+    model?: unknown;
+    apiKeyEnv?: unknown;
+    messages?: unknown;
+    reasoningEffort?: unknown;
+    headers?: unknown;
+  } | null;
+  if (typeof value?.baseUrl !== "string" || typeof value?.model !== "string" || !Array.isArray(value.messages)) {
+    throw new CommandError(400, "缺少参数 baseUrl / model / messages");
+  }
+  return chatComplete({
+    baseUrl: value.baseUrl,
+    model: value.model,
+    apiKeyEnv: typeof value.apiKeyEnv === "string" ? value.apiKeyEnv : null,
+    messages: value.messages as LlmChatMessage[],
+    reasoningEffort: typeof value.reasoningEffort === "string" ? value.reasoningEffort : "",
+    headers: (value.headers ?? undefined) as Record<string, string> | undefined,
+  });
+});
+HANDLERS.set("llm_transcribe", async (args, ctx) => {
+  const value = args as {
+    baseUrl?: unknown;
+    model?: unknown;
+    apiKeyEnv?: unknown;
+    headers?: unknown;
+    path?: unknown;
+    language?: unknown;
+  } | null;
+  if (typeof value?.baseUrl !== "string" || typeof value?.model !== "string" || typeof value?.path !== "string") {
+    throw new CommandError(400, "缺少参数 baseUrl / model / path");
+  }
+  return transcribe(ctx.access, {
+    baseUrl: value.baseUrl,
+    model: value.model,
+    apiKeyEnv: typeof value.apiKeyEnv === "string" ? value.apiKeyEnv : null,
+    headers: (value.headers ?? undefined) as Record<string, string> | undefined,
+    path: value.path,
+    language: typeof value.language === "string" ? value.language : null,
+  });
 });
 
 HANDLERS.set("db_automations_load", async (_args, ctx) => ctx.db.loadAutomations());

@@ -206,13 +206,17 @@ export class Db {
 
   /** ACP 后端目录：未接管（无 marker）→ null，与 Rust 的 Option<Vec<_>> 一致。 */
   loadAgentProviders(): AgentProvider[] | null {
-    const marker = this.conn
-      .prepare("SELECT value FROM meta WHERE key = 'agent_providers_initialized'")
-      .get() as { value?: string } | undefined;
+    const marker = this.conn.prepare("SELECT value FROM meta WHERE key = 'agent_providers_initialized'").get() as
+      { value?: string } | undefined;
     if (!marker) return null;
-    const rows = this.conn
-      .prepare("SELECT id, name, kind, command, enabled, env FROM agent_providers ORDER BY rowid")
-      .all() as { id: string; name: string; kind: string; command: string; enabled: number; env: string | null }[];
+    const rows = this.conn.prepare("SELECT id, name, kind, command, enabled, env FROM agent_providers ORDER BY rowid").all() as {
+      id: string;
+      name: string;
+      kind: string;
+      command: string;
+      enabled: number;
+      env: string | null;
+    }[];
     return rows.map((row) => ({
       id: row.id,
       name: row.name,
@@ -227,9 +231,7 @@ export class Db {
   syncAgentProviders(providers: AgentProvider[]): void {
     this.conn.exec("BEGIN");
     try {
-      this.conn
-        .prepare("INSERT INTO meta (key, value) VALUES ('agent_providers_initialized', '1') ON CONFLICT(key) DO NOTHING")
-        .run();
+      this.conn.prepare("INSERT INTO meta (key, value) VALUES ('agent_providers_initialized', '1') ON CONFLICT(key) DO NOTHING").run();
       const existing = this.conn.prepare("SELECT id FROM agent_providers").all() as { id: string }[];
       const kept = new Set(providers.map((provider) => provider.id));
       const remove = this.conn.prepare("DELETE FROM agent_providers WHERE id = ?1");
@@ -242,14 +244,7 @@ export class Db {
          ON CONFLICT(id) DO UPDATE SET name = ?2, kind = ?3, command = ?4, enabled = ?5, env = ?6`,
       );
       for (const provider of providers) {
-        upsert.run(
-          provider.id,
-          provider.name,
-          provider.kind,
-          provider.command,
-          provider.enabled ? 1 : 0,
-          provider.env ?? null,
-        );
+        upsert.run(provider.id, provider.name, provider.kind, provider.command, provider.enabled ? 1 : 0, provider.env ?? null);
       }
       this.conn.exec("COMMIT");
     } catch (error) {
@@ -286,9 +281,7 @@ export class Db {
   syncAutomations(tasks: AutomationTask[]): void {
     this.conn.exec("BEGIN");
     try {
-      this.conn
-        .prepare("INSERT INTO meta (key, value) VALUES ('automation_initialized', '1') ON CONFLICT(key) DO NOTHING")
-        .run();
+      this.conn.prepare("INSERT INTO meta (key, value) VALUES ('automation_initialized', '1') ON CONFLICT(key) DO NOTHING").run();
       const existing = this.conn.prepare("SELECT id FROM automation_tasks").all() as { id: string }[];
       const kept = new Set(tasks.map((task) => task.id));
       const remove = this.conn.prepare("DELETE FROM automation_tasks WHERE id = ?1");
@@ -418,18 +411,14 @@ export class Db {
   syncTeamRuns(runs: TeamRun[]): void {
     this.conn.exec("BEGIN");
     try {
-      this.conn
-        .prepare("INSERT INTO meta (key, value) VALUES ('team_runs_initialized', '1') ON CONFLICT(key) DO NOTHING")
-        .run();
+      this.conn.prepare("INSERT INTO meta (key, value) VALUES ('team_runs_initialized', '1') ON CONFLICT(key) DO NOTHING").run();
       const existing = this.conn.prepare("SELECT id FROM team_runs").all() as { id: string }[];
       const kept = new Set(runs.map((run) => run.id));
       const remove = this.conn.prepare("DELETE FROM team_runs WHERE id = ?1");
       for (const row of existing) {
         if (!kept.has(row.id)) remove.run(row.id);
       }
-      const upsert = this.conn.prepare(
-        "INSERT INTO team_runs (id, payload) VALUES (?1, ?2) ON CONFLICT(id) DO UPDATE SET payload = ?2",
-      );
+      const upsert = this.conn.prepare("INSERT INTO team_runs (id, payload) VALUES (?1, ?2) ON CONFLICT(id) DO UPDATE SET payload = ?2");
       for (const run of runs) upsert.run(run.id, JSON.stringify(run.payload));
       this.conn.exec("COMMIT");
     } catch (error) {
@@ -439,9 +428,7 @@ export class Db {
   }
 
   private marker(key: string): boolean {
-    const row = this.conn.prepare("SELECT value FROM meta WHERE key = ?1").get(key) as
-      | { value?: string }
-      | undefined;
+    const row = this.conn.prepare("SELECT value FROM meta WHERE key = ?1").get(key) as { value?: string } | undefined;
     return row !== undefined;
   }
 
