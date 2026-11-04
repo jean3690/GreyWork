@@ -8,7 +8,6 @@
 // 用法：node scripts/version-sync.mjs [--check]
 //   --check：只校验是否已一致，不一致则退出 1（给 CI / 发版前置用）。
 //
-// 注意：apps/server 有自己的版本线（服务端可独立发版），刻意不在同步范围。
 
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";

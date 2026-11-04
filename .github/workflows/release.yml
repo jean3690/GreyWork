@@ -52,9 +52,6 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-rust
-        with:
-          shared-key: rust
       - uses: ./.github/actions/setup-node
 
       # 与 ci.yml 的 electron job 同一缓存键：版本没变时不再重复下载 ~150MB。

@@ -93,9 +93,8 @@ jobs:
       - name: Desktop renderer (preview chain)
         run: pnpm --filter @greywork/desktop e2e
 
-  # Electron 的「整包能否出来」是唯一的桌面打包门禁：需要显式编三样东西（sidecar 二进制 /
+  # Electron 的「整包能否出来」是唯一的桌面打包门禁：需要显式编三样东西（Node 宿主 /
   # 渲染层 SPA / 壳的 out）—— 由 `electron:prep` 串起来。
-  # setup-rust 会顺带装 webkit 那套（Linux），编 greywork-server 用不上，但复用 composite 更省心。
   electron:
     name: Electron Bundle (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -106,10 +105,6 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-rust
-        with:
-          # 与 acp-e2e / release 同一个缓存键：这条线也要编 greywork-server，依赖产物可共用。
-          shared-key: rust
       - uses: ./.github/actions/setup-node
 
       # 内置运行时（git / opencode / rg / fd / jq）按 runtime-versions.json 的哈希做缓存：
@@ -123,7 +118,7 @@ jobs:
       - name: Unit tests (electron shell)
         run: pnpm --filter @greywork/electron test
 
-      - name: Prepare artifacts (server + renderer + shell)
+      - name: Prepare artifacts (host + renderer + shell)
         run: pnpm electron:prep
 
       # 只出未压缩目录（--dir）：三平台的安装器 / 磁盘镜像各有额外工具链要在构建时下载
@@ -131,125 +126,3 @@ jobs:
       - name: Package (unpacked)
         run: pnpm --filter @greywork/electron package:dir
 
-  rust:
-    name: Cargo Test (workspace)
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-
-      # 边界守卫：greywork-host 是领域逻辑层，宿主传输（Tauri / Electron）只允许出现在
-      # 壳侧。一旦它依赖 tauri / electron，服务端就编不进或被拖进 GUI 依赖树（且这类错误
-      # 在本地很难第一眼看出）。只匹配「依赖声明行」，不匹配注释里提到的名字。
-      - name: Guard greywork-host has no host-transport dependency
-        run: |
-          if grep -nE '^[[:space:]]*(tauri(-[a-zA-Z0-9_-]+)?|electron)[[:space:]]*=' crates/greywork-host/Cargo.toml; then
-            echo "::error::crates/greywork-host/Cargo.toml 不得依赖 tauri / electron"
-            exit 1
-          fi
-
-      - uses: ./.github/actions/setup-rust
-        with:
-          components: clippy,rustfmt
-
-      # fmt / clippy / test 共用一个 job 和一个 target 目录：三者编译的产物互相复用，
-      # 拆开反而各自从缓存恢复一遍、各自重编一遍本地 crate。
-      # 三条命令都在仓库根跑（不加 working-directory）：Cargo.lock 与 workspace 根
-      # manifest 都在根，从子目录跑会让 `--locked` 找不到锁文件。fmt/clippy/test
-      # 默认覆盖整个 workspace（greywork-host + apps/server），正是我们要的。
-      - name: Rustfmt
-        run: cargo fmt --check
-
-      # --locked：Cargo.lock 与 Cargo.toml 不一致时立刻失败，而不是在 CI 里静默改锁文件。
-      # --all-targets：不加就只检查 lib/bin，tests/ 与 examples/ 里的代码不受 lint
-      # 覆盖（本仓 tests/ 下有多个集成测试文件）。实测本地全量通过，加上不产生新告警。
-      - name: Clippy
-        run: cargo clippy --locked --all-targets -- -D warnings
-
-      - name: Tests
-        run: cargo test --locked
-
-  # 跨语言 ACP 门禁：渲染端 TS client × 真实 Rust 宿主。两侧 SDK 是**独立版本线**
-  # （`@agentclientprotocol/sdk` 1.5.0 ↔ `agent-client-protocol` 2.2.0 / schema 1.9.1），
-  # 各自编译过、单测过都不代表两边接得上 —— 这一个 job 用真进程把这条缝堵上。
-  #
-  # 为什么复用 `setup-rust`（而非裸装 toolchain + rust-cache）：它会白装一套 webkit/gtk
-  # 系统依赖（greywork-server 不依赖 tauri），但**共享缓存键**能避免新增一份依赖缓存 ——
-  # 本仓缓存额度已顶到 10GB 上限（见 setup-rust 里的测算），按 job 名另起一个键就会把
-  # master 的那份挤出去。宁可多付 40 秒 apt。
-  acp-e2e:
-    name: ACP E2E (renderer TS × Rust host)
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-rust
-        with:
-          shared-key: rust
-      - uses: ./.github/actions/setup-node
-
-      # 门禁要求产物在 target/debug/greywork-server，且刻意不替调用方构建。
-      # 不需要 chromium（不起浏览器），也不需要前端产物（只走 /api，不设 GREYWORK_STATIC_DIR）。
-      - name: Build greywork-server
-        run: cargo build -p greywork-server
-
-      - name: Cross-language ACP gate
-        run: pnpm --filter @greywork/acp test:integration
-
-  # Windows 专属代码在 ubuntu 的 rust job 里根本编不到（taskkill 的创建标志、cmd /C
-  # 垫片、盘符相对路径与保留设备名、逐字前缀）。cargo test 会把 cfg(windows) 的分支
-  # 全编一遍，也能真正跑起 #[cfg(windows)] 的用例，所以这一个 job 同时覆盖编译与行为。
-  windows:
-    name: Windows (cargo test · vitest)
-    runs-on: windows-latest
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v4
-      # 不传 shared-key：desktop job 的 windows 行打的是 release 包，这里是 debug 的
-      # 测试构建，两者共用同一个键只会互相覆盖对方的 profile 产物。用 job 名做默认键，
-      # 各自稳定。缓存额度已接近仓库上限，这一点在 setup-rust 里有说明。
-      - uses: ./.github/actions/setup-rust
-      - uses: ./.github/actions/setup-node
-
-      # 与 rust job 相同的 --locked：Cargo.lock 与 Cargo.toml 不一致时立刻失败。
-      # greywork-host 的测试里有多个会真的拉起 mock agent（node 脚本），走的就是
-      # 「宿主拼命令行 → 交 shell 执行」这条路径，Windows 上最容易踩坑。
-      # 在仓库根跑，覆盖整个 workspace（greywork-host + apps/server）——
-      # 因此服务端也必须跨平台可编译（unix-only 代码要 cfg 包裹）。
-      - name: Cargo Test (workspace)
-        run: cargo test --locked
-
-      # 前端跑与 ubuntu 的 test job 同一套（core 的盘符路径工具、workbench 的标题栏
-      # 适配都在里面）。在此之前没有任何 JS 测试跑在 Windows 上。
-      - name: Tests (vitest)
-        run: pnpm -r test
-
-  # macOS 的 cfg 分支（APFS 大小写折叠、路径比较）在 ubuntu 的 rust job 里编不到，
-  # 与 windows job 对称：一次 cargo test 同时覆盖 macOS 专属代码的编译与行为。
-  macos:
-    name: macOS (cargo test · vitest)
-    runs-on: macos-latest
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v4
-      # 不传 shared-key：desktop job 的 macOS 行打的是 release + universal-apple-darwin，
-      # 这里是 debug 的测试构建，共用键只会互相覆盖对方的 profile 产物（理由同 windows job）。
-      - uses: ./.github/actions/setup-rust
-        with:
-          # setup-rust 装的是 minimal profile，clippy 不会自带 —— 与 ubuntu 的 rust job 同理。
-          # 顺带补上：ubuntu 看不到 cfg(target_os = "macos")，macOS 专属的未使用 import /
-          # 死代码此前无人管。
-          components: clippy
-      - uses: ./.github/actions/setup-node
-
-      - name: Clippy (workspace)
-        run: cargo clippy --locked --all-targets -- -D warnings
-
-      # 与 rust job 相同的 --locked：Cargo.lock 与 Cargo.toml 不一致时立刻失败。
-      - name: Cargo Test (workspace)
-        run: cargo test --locked
-
-      # 前端也跑一遍：macOS 上走的是与 ubuntu 相同的 vite/vitest，但涉及平台分支的
-      # 渲染端用例（core 的路径工具按平台分叉）值得在第三个平台上确认一次。
-      - name: Tests (vitest)
-        run: pnpm -r test

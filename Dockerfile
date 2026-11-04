@@ -17,24 +17,25 @@ RUN --mount=type=cache,id=gw-pnpm,target=/pnpm/store \
     if [ -n "$NPM_REGISTRY" ]; then export npm_config_registry="$NPM_REGISTRY"; fi && \
     pnpm install --frozen-lockfile && pnpm build:desktop
 
-########## 2) 构建 headless 服务端二进制 ##########
-FROM rust:1-bookworm AS server
-# rusqlite(bundled) 要 C 编译器（基础镜像已带 gcc/make）；rustls 的 aws-lc-rs 要 cmake。
-RUN apt-get update && apt-get install -y --no-install-recommends cmake \
+########## 2) 构建 Node 宿主（apps/host-node，含原生模块 node-pty 的编译） ##########
+FROM node:22-bookworm-slim AS server
+ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH
+RUN corepack enable
+# node-pty 是原生模块：安装期要 node-gyp 编译（python3 + make + g++）。
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY . .
-# -p greywork-server 只编译该包 + greywork-host，不牵扯桌面壳（Tauri/WebKit 系统依赖）。
-RUN --mount=type=cache,id=gw-cargo-registry,target=/usr/local/cargo/registry \
-    --mount=type=cache,id=gw-cargo-git,target=/usr/local/cargo/git \
-    --mount=type=cache,id=gw-cargo-target,target=/src/target \
-    cargo build --release --locked -p greywork-server \
-    && cp target/release/greywork-server /usr/local/bin/greywork-server
+RUN --mount=type=cache,id=gw-pnpm,target=/pnpm/store \
+    pnpm install --frozen-lockfile && pnpm --filter @greywork/host-node build
+# deploy 产出独立目录：dist + 生产依赖（node-pty 已编译好），运行时零构建工具。
+RUN --mount=type=cache,id=gw-pnpm,target=/pnpm/store \
+    pnpm --filter @greywork/host-node deploy --prod /out
 
-########## 3) 运行时（最小面：无 Node、无构建工具） ##########
-FROM debian:bookworm-slim AS runtime
+########## 3) 运行时（node:22-slim：宿主是 Node 程序；apt 只装 CLI 依赖） ##########
+FROM node:22-bookworm-slim AS runtime
 # git：git_* 命令走系统 git CLI；ca-certificates：出站 HTTPS（模型 / 通道）验证根证书。
-# ACP agent 运行时（node / npx / python3 / uvx …）本镜像不含 —— 按需在派生镜像里装，
+# ACP agent 运行时（npx / python3 / uvx …）本镜像只带 node —— 其余按需在派生镜像里装，
 # 并用 GREYWORK_AGENT_PROGRAMS 显式放行（白名单是冻结的，只信配置，不读 DB）。
 #
 # LibreOffice（writer + impress，够覆盖 docx/pptx/.doc/.ppt）：本仓「高保真(PDF)」预览的
@@ -53,7 +54,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN useradd --system --create-home --home-dir /home/greywork --uid 10001 greywork \
     && mkdir -p /data \
     && chown greywork:greywork /data
-COPY --from=server /usr/local/bin/greywork-server /usr/local/bin/greywork-server
+COPY --from=server /out /app/host
 COPY --from=web /src/apps/desktop/dist /app/web
 ENV GREYWORK_BIND=0.0.0.0:8787 \
     GREYWORK_STATIC_DIR=/app/web \
@@ -65,6 +66,7 @@ USER greywork
 # 内置探针（镜像无 curl / wget）：连本机 /api/health，200 → 退出 0。
 # 静态托管缺 index.html 会启动硬失败，探针据此不会「healthy 但 UI 404」。
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD ["greywork-server", "healthcheck"]
-# 无子命令 → 起服务；也可 `docker run … greywork-server hash-password` 生成密码哈希。
-ENTRYPOINT ["greywork-server"]
+    CMD ["node", "-e", "const p = (process.env.GREYWORK_BIND || '').split(':').pop() || 8787; fetch('http://127.0.0.1:' + p + '/api/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+# 无子命令 → 起服务；也可 `docker run … host-node hash-password` 生成密码哈希。
+WORKDIR /app/host
+ENTRYPOINT ["node", "dist/index.js"]

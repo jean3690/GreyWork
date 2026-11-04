@@ -14,9 +14,8 @@ on:
       - .dockerignore
       - docker-compose.yml
       - .env.example
-      - apps/server/**
+      - apps/host-node/**
       - apps/desktop/**
-      - crates/greywork-host/**
       - packages/**
       - patches/**
       - Cargo.toml
@@ -44,14 +43,14 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build image
-        run: docker build -t greywork-server:ci .
+        run: docker build -t greywork-host-node:ci .
 
       - name: Smoke test (health + served SPA)
         run: |
           set -euo pipefail
           docker run -d --name gw-ci -p 127.0.0.1:8787:8787 \
             -e GREYWORK_PASSWORD=ci-password \
-            greywork-server:ci
+            greywork-host-node:ci
           # 首启要建库 / 写 auth.json；轮询而不是 sleep 定值。
           for _ in $(seq 1 60); do
             if curl -fsS http://127.0.0.1:8787/api/health >/dev/null 2>&1; then break; fi

@@ -26,11 +26,6 @@ updates:
       # 解析出第二套 core（运行时插件与服务对不上）。统一人工升级：全家 bump + 重做 patch。
       - dependency-name: "@univerjs/*"
 
-  - package-ecosystem: cargo
-    directory: /
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
 
   - package-ecosystem: github-actions
     directory: /
