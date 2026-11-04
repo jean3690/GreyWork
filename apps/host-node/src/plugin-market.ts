@@ -46,7 +46,7 @@ function validateKey(raw: string, label: string): void {
   if (!valid) throw new Error(`invalid ${label}: ${JSON.stringify(raw)}`);
 }
 
-function validateDirKey(raw: string, label: string): void {
+export function validateDirKey(raw: string, label: string): void {
   validateKey(raw, label);
   if (!/^[a-z0-9][a-z0-9._-]*$/.test(raw) || raw.endsWith(".") || raw.endsWith(" ")) {
     throw new Error(`invalid ${label}: ${JSON.stringify(raw)}`);

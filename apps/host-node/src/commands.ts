@@ -11,6 +11,7 @@
 import manifest from "./command-manifest.json" with { type: "json" };
 
 import { shellCatalog } from "./shell-catalog.js";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { detectPrograms } from "./acp-probe.js";
 import { marketInstall, marketPreview } from "./plugin-market.js";
@@ -36,6 +37,7 @@ import { ragIndexBuild, ragSearch } from "./rag.js";
 import { listWorktrees, provisionWorktree, releaseWorktree, restoreWorktree, snapshotWorktree } from "./worktree.js";
 import { chatComplete, embed, listModels, transcribe, type LlmChatMessage, type LlmStreamHost } from "./llm.js";
 import type { AcpHost } from "./acp.js";
+import { validateDirKey } from "./plugin-market.js";
 import type { EventBus } from "./events.js";
 import type { SessionFileStore, WorkspaceDir } from "./session-store.js";
 import type { RagIndexHost } from "./rag.js";
@@ -299,6 +301,44 @@ HANDLERS.set("skills_uninstall", async (args) => {
   }
   skillsUninstall(value.workspaceRoot, value.skillId);
   return null;
+});
+
+// 插件运行时：plugin_fs = 插件私有 KV 存储（<dataDir>/plugins/<pluginId>/storage/）。
+// 与 Rust 的 plugin_fs.rs 同语义：path 净化后限制在插件根内，read/write/remove 三操作。
+HANDLERS.set("plugin_fs", async (args, ctx) => {
+  const value = args as { pluginId?: unknown; op?: unknown; path?: unknown; data?: unknown } | null;
+  if (typeof value?.pluginId !== "string" || typeof value?.op !== "string" || typeof value?.path !== "string") {
+    throw new CommandError(400, "缺少参数 pluginId / op / path");
+  }
+  validateDirKey(value.pluginId, "plugin id");
+  const pluginRoot = path.join(ctx.dataDir, "plugins", value.pluginId, "storage");
+  const target = path.resolve(pluginRoot, value.path);
+  if (!target.startsWith(pluginRoot + path.sep) && target !== pluginRoot) {
+    throw new Error("路径未获用户授权");
+  }
+  mkdirSync(pluginRoot, { recursive: true });
+  switch (value.op) {
+    case "read": return readFileSync(target, "utf8");
+    case "write": writeFileSync(target, String(value.data ?? ""), "utf8"); return { ok: true };
+    case "remove": rmSync(target); return { ok: true };
+    default: throw new Error(`unknown plugin_fs op: ${value.op}`);
+  }
+});
+// plugin_workspace：只做形态校验，返回授权根清单。
+HANDLERS.set("plugin_workspace", async (args, ctx) => {
+  const pluginId = (args as { pluginId?: unknown } | null)?.pluginId;
+  validateDirKey(typeof pluginId === "string" ? pluginId : "", "plugin id");
+  return { roots: ctx.access.authorizedRoots() };
+});
+// plugin_notify：推通知给前端（由渲染端的事件系统消费）。
+HANDLERS.set("plugin_notify", async (args, ctx) => {
+  const value = args as { pluginId?: unknown; title?: unknown; body?: unknown } | null;
+  if (typeof value?.pluginId !== "string" || typeof value?.title !== "string" || typeof value?.body !== "string") {
+    throw new CommandError(400, "缺少参数 pluginId / title / body");
+  }
+  if (value.title.length > 64 || value.body.length > 240) throw new Error("标题或正文超长");
+  ctx.bus.broadcast("plugin://notify", { pluginId: value.pluginId, title: value.title, body: value.body });
+  return { sent: true, title: value.title, body: value.body };
 });
 
 HANDLERS.set("plugin_market_catalog", async (args) => {
