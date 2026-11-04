@@ -20,6 +20,8 @@ import { loadConfig } from "./config.js";
 import { createHostServer } from "./server.js";
 import { resolveStaticRoot } from "./static-site.js";
 import { WorkspaceAccess } from "./workspace-access.js";
+import { EventBus } from "./events.js";
+import { TerminalHost } from "./terminal.js";
 
 /** 与 Rust `config::hash_password` 的 argon2 参数对齐（argon2 crate 默认值）。 */
 async function hashPassword(password: string): Promise<string> {
@@ -86,7 +88,18 @@ async function main(): Promise<void> {
     console.log(`[host-node] 预置授权根: ${access.authorizeSelectedPath(root)}`);
   }
   const db = new Db(path.join(config.dataDir, "greywork.db"));
-  const { server, close } = createHostServer({ config, sessions, throttle, staticRoot, access, db });
+  const bus = new EventBus();
+  const terminal = new TerminalHost(bus, access);
+  const { server, close } = createHostServer({
+    config,
+    sessions,
+    throttle,
+    staticRoot,
+    access,
+    db,
+    bus,
+    terminal,
+  });
 
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
@@ -102,6 +115,7 @@ async function main(): Promise<void> {
     if (stopping) return;
     stopping = true;
     console.log(`[host-node] 关闭（${reason}）`);
+    terminal.disposeAll();
     await close();
     db.close();
     process.exit(0);

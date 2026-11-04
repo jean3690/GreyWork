@@ -13,6 +13,7 @@ import manifest from "./command-manifest.json" with { type: "json" };
 import { shellCatalog } from "./shell-catalog.js";
 import type { Db } from "./db.js";
 import { gitChanges, gitCurrentBranch, gitDiff, gitStatus } from "./git.js";
+import type { TerminalHost } from "./terminal.js";
 import type { WorkspaceAccess } from "./workspace-access.js";
 
 export interface CommandMeta {
@@ -54,6 +55,7 @@ export function isDenied(name: string, trustedHost: boolean): boolean {
 export interface CommandContext {
   access: WorkspaceAccess;
   db: Db;
+  terminal: TerminalHost;
   trustedHost: boolean;
 }
 
@@ -133,6 +135,29 @@ HANDLERS.set("git_diff", async (args, ctx) => {
   return gitDiff(ctx.access, root, filePath, value?.staged === true);
 });
 HANDLERS.set("git_current_branch", async (args, ctx) => gitCurrentBranch(ctx.access, rootArg(args)));
+
+HANDLERS.set("terminal_list", async (_args, ctx) => ctx.terminal.list());
+HANDLERS.set("terminal_open", async (args, ctx) => ctx.terminal.open((args ?? {}) as never));
+HANDLERS.set("terminal_write", async (args, ctx) => {
+  const value = args as { sessionId?: unknown; data?: unknown } | null;
+  if (typeof value?.sessionId !== "string" || typeof value?.data !== "string") {
+    throw new CommandError(400, "缺少参数 sessionId / data");
+  }
+  ctx.terminal.write(value.sessionId, value.data);
+  return null;
+});
+HANDLERS.set("terminal_resize", async (args, ctx) => {
+  const value = args as { sessionId?: unknown; cols?: unknown; rows?: unknown } | null;
+  if (typeof value?.sessionId !== "string") throw new CommandError(400, "缺少参数 sessionId");
+  ctx.terminal.resize(value.sessionId, value.cols, value.rows);
+  return null;
+});
+HANDLERS.set("terminal_close", async (args, ctx) => {
+  const value = args as { sessionId?: unknown } | null;
+  if (typeof value?.sessionId !== "string") throw new CommandError(400, "缺少参数 sessionId");
+  ctx.terminal.close(value.sessionId);
+  return null;
+});
 
 HANDLERS.set("db_settings_load", async (_args, ctx) => ctx.db.loadSettings());
 HANDLERS.set("db_settings_sync", async (args, ctx) => {

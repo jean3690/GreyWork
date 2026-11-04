@@ -11,10 +11,11 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { clearCookie, sessionCookie, tokenFromCookie } from "./auth.js";
 import type { LoginThrottle, SessionStore } from "./auth.js";
 import { CommandError, dispatch, listCommands } from "./commands.js";
-import { attachEvents } from "./events.js";
+import { attachEvents, type EventBus } from "./events.js";
 import { serveStatic } from "./static-site.js";
 import type { HostConfig } from "./config.js";
 import type { Db } from "./db.js";
+import type { TerminalHost } from "./terminal.js";
 import type { WorkspaceAccess } from "./workspace-access.js";
 
 const MAX_BODY_BYTES = 32 * 1024 * 1024;
@@ -26,6 +27,8 @@ export interface HostServerOptions {
   staticRoot: string | null;
   access: WorkspaceAccess;
   db: Db;
+  bus: EventBus;
+  terminal: TerminalHost;
 }
 
 class HttpError extends Error {
@@ -185,6 +188,7 @@ export function createHostServer(options: HostServerOptions): { server: Server; 
           const result = await dispatch(body?.command, body?.args ?? null, {
             access: options.access,
             db: options.db,
+            terminal: options.terminal,
             trustedHost: config.trustedHost,
           });
           return sendJson(response, 200, result ?? null);
@@ -207,12 +211,14 @@ export function createHostServer(options: HostServerOptions): { server: Server; 
     }
   });
 
-  const detachEvents = attachEvents(server, sessions);
+  const detachEvents = attachEvents(server, sessions, options.bus, config.version);
 
   return {
     server,
     close: async () => {
       detachEvents();
+      // keep-alive 连接（浏览器 / undici）会让 server.close 一直等下去：先全部断开再收尾。
+      server.closeAllConnections?.();
       await new Promise<void>((resolve) => server.close(() => resolve()));
     },
   };

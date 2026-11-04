@@ -4,6 +4,9 @@
  *
  * 鉴权：cookie 优先（浏览器 WS API 不能设 Authorization 头），CLI 可用 `?token=`。
  * 校验失败直接销毁 socket，不升级 —— 与 Rust 的「401 后再不建立连接」等价。
+ *
+ * 事件尽力而为（与 Tauri emit 同语义）：订阅者落后就丢帧、不重放；前端重连后应重跑
+ * 若干 `*_load` 命令做一次状态对齐。
  */
 import type { IncomingMessage, Server } from "node:http";
 import type { Duplex } from "node:stream";
@@ -14,6 +17,31 @@ import type { SessionStore } from "./auth.js";
 
 const HEARTBEAT_MS = 30_000;
 
+/** 事件出口：终端输出等长连接数据都经它广播给所有已订阅的 WS 客户端。 */
+export class EventBus {
+  private readonly clients = new Set<WebSocket>();
+
+  add(client: WebSocket): void {
+    this.clients.add(client);
+  }
+
+  remove(client: WebSocket): void {
+    this.clients.delete(client);
+  }
+
+  broadcast(event: string, payload: unknown): void {
+    const frame = JSON.stringify({ event, payload });
+    for (const client of this.clients) {
+      if (client.readyState === client.OPEN) client.send(frame);
+    }
+  }
+
+  closeAll(): void {
+    for (const client of this.clients) client.close();
+    this.clients.clear();
+  }
+}
+
 function tokenFromRequest(request: IncomingMessage): string | null {
   const cookie = tokenFromCookie(request.headers.cookie);
   if (cookie) return cookie;
@@ -21,7 +49,7 @@ function tokenFromRequest(request: IncomingMessage): string | null {
   return url.searchParams.get("token") || null;
 }
 
-export function attachEvents(server: Server, sessions: SessionStore): () => void {
+export function attachEvents(server: Server, sessions: SessionStore, bus: EventBus, version: string): () => void {
   const wss = new WebSocketServer({ noServer: true });
   const timers = new Map<WebSocket, NodeJS.Timeout>();
 
@@ -42,13 +70,15 @@ export function attachEvents(server: Server, sessions: SessionStore): () => void
   };
 
   wss.on("connection", (ws: WebSocket) => {
-    ws.send(JSON.stringify({ event: "host://hello", payload: { version: "node" } }));
+    bus.add(ws);
+    ws.send(JSON.stringify({ event: "host://hello", payload: { version } }));
     const timer = setInterval(() => {
       // 心跳只探活：客户端不回应也不踢，断线由 TCP / 浏览器侧发现。
       if (ws.readyState === ws.OPEN) ws.ping();
     }, HEARTBEAT_MS);
     timers.set(ws, timer);
     ws.on("close", () => {
+      bus.remove(ws);
       const handle = timers.get(ws);
       if (handle) clearInterval(handle);
       timers.delete(ws);

@@ -42,7 +42,9 @@
   Node 建的 `greywork.db` 可被 Rust 直接打开并读回设置。删除 / 改名 / 复制也按 Rust 的
   `movable_source` 规则迁移（不许动授权根、不许移进自身子树、撞名显式失败、跨设备降级为复制+删源）。
   git 只读四条（`status` / `changes` / `diff` / `current_branch`）也已迁移：同一套授权根解析、
-  argv 数组调用、`GIT_TERMINAL_PROMPT=0` 与 30s 超时杀进程组。
+  argv 数组调用、`GIT_TERMINAL_PROMPT=0` 与 30s 超时杀进程组。真 PTY 终端也迁移完成
+  （`node-pty`：输出 base64 原始字节经 `terminal://data` 推送、退出推 `terminal://exit`，
+  会话不因前端断连回收），需要 `allowBuilds` 放开 node-pty 的编译脚本。
   新增 `pnpm host:parity` 双轨对照：同一份环境变量起两个宿主，逐命令比对状态码与响应体，
   迁移的每条命令都以它为准；可信宿主命令名单（`TRUSTED_HOST_ONLY`）也已按 Rust 同口径移植。
   方案、阶段与风险见 [docs/node-backend-migration.md](docs/node-backend-migration.md)；

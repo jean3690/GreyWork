@@ -8,6 +8,9 @@ import WebSocket from "ws";
 
 import { LoginThrottle, SessionStore, passwordChecker } from "../src/auth.js";
 import { Db } from "../src/db.js";
+import { isDenied } from "../src/commands.js";
+import { EventBus } from "../src/events.js";
+import { TerminalHost } from "../src/terminal.js";
 import { loadConfig } from "../src/config.js";
 import { createHostServer } from "../src/server.js";
 import { resolveStaticRoot } from "../src/static-site.js";
@@ -30,6 +33,8 @@ const config = loadConfig({
   GREYWORK_SESSION_TTL: "3600",
   GREYWORK_DATA_DIR: dataDir,
   GREYWORK_WORKSPACE_ROOTS: workspaceDir,
+  // 与桌面端口径一致：可信宿主才放行 terminal_* / shell_run。
+  GREYWORK_TRUSTED_HOST: "1",
 });
 
 const sessions = new SessionStore(passwordChecker(config), config.sessionTtlSecs);
@@ -37,6 +42,8 @@ const throttle = new LoginThrottle();
 const access = new WorkspaceAccess(workspaceDir, path.join(dataDir, "workspace-path-access.json"));
 for (const root of config.workspaceRoots) access.authorizeSelectedPath(root);
 const db = new Db(path.join(dataDir, "greywork.db"));
+const bus = new EventBus();
+const terminal = new TerminalHost(bus, access);
 
 const { server, close } = createHostServer({
   config,
@@ -45,6 +52,8 @@ const { server, close } = createHostServer({
   staticRoot: resolveStaticRoot(config.staticDir),
   access,
   db,
+  bus,
+  terminal,
 });
 
 let base = "";
@@ -68,6 +77,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  terminal.disposeAll();
   await close();
   db.close();
 });
@@ -113,8 +123,8 @@ describe("HTTP 契约", () => {
     expect(list.find((item) => item.name === "reveal_path")?.available).toBe(false);
     // 尚未迁移的普通命令：可用性必须是 false，避免前端「点了才报错」。
     expect(list.find((item) => item.name === "git_stage")?.available).toBe(false);
-    // 可信宿主专属命令在普通部署里也不可用（与 policy.rs 的 TRUSTED_HOST_ONLY 同名单）。
-    expect(list.find((item) => item.name === "terminal_shells")?.available).toBe(false);
+    // 可信宿主下 terminal_shells 已迁移且允许调用。
+    expect(list.find((item) => item.name === "terminal_shells")?.available).toBe(true);
   });
 
   it("已迁移命令走真实实现", async () => {
@@ -149,9 +159,9 @@ describe("HTTP 契约", () => {
     expect(unmigrated.status).toBe(501);
     expect(unmigrated.body.error).toContain("尚未迁移");
 
-    const untrusted = await call("terminal_shells");
-    expect(untrusted.status).toBe(403);
-    expect(untrusted.body.error).toContain("可信宿主");
+    // 非可信宿主只在单测里验策略（主 server 以桌面口径开着可信开关）。
+    expect(isDenied("terminal_shells", false)).toBe(true);
+    expect(isDenied("terminal_shells", true)).toBe(false);
   });
 
   it("fs_list_dir / fs_read_text_file 走授权面", async () => {
@@ -356,6 +366,53 @@ describe("HTTP 契约", () => {
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
     expect(response.headers.get("x-frame-options")).toBe("DENY");
     expect(response.headers.get("content-security-policy")).toContain("default-src 'self'");
+  });
+});
+
+describe("终端（PTY）", () => {
+  it("打开会话 → 写入命令 → 收到 terminal://data → 关闭", async () => {
+    const token = cookie.split("=")[1];
+    const socket = new WebSocket(`${base.replace("http", "ws")}/api/events?token=${token}`);
+    const frames: { event: string; payload: { sessionId?: string; data?: string } }[] = [];
+    socket.on("message", (raw) => frames.push(JSON.parse(String(raw))));
+    await new Promise<void>((resolve, reject) => {
+      socket.once("open", () => resolve());
+      socket.once("error", reject);
+    });
+
+    const call = async (command: string, args: unknown) => {
+      const response = await fetch(`${base}/api/command`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ command, args }),
+      });
+      return { status: response.status, body: await response.json() };
+    };
+
+    const opened = await call("terminal_open", { shell: undefined, cols: 80, rows: 24 });
+    expect(opened.status).toBe(200);
+    const sessionId = (opened.body as { sessionId: string }).sessionId;
+    expect(sessionId).toMatch(/^term-/);
+
+    expect((await call("terminal_write", { sessionId, data: "echo GREYWORK_PTY\r" })).status).toBe(200);
+
+    const deadline = Date.now() + 5000;
+    let text = "";
+    while (Date.now() < deadline && !text.includes("GREYWORK_PTY")) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      for (const frame of frames) {
+        if (frame.event === "terminal://data" && frame.payload.sessionId === sessionId) {
+          text += Buffer.from(frame.payload.data ?? "", "base64").toString("utf8");
+        }
+      }
+    }
+    expect(text).toContain("GREYWORK_PTY");
+
+    expect((await call("terminal_resize", { sessionId, cols: 100, rows: 40 })).status).toBe(200);
+    expect((await call("terminal_close", { sessionId })).status).toBe(200);
+    const listed = await call("terminal_list", {});
+    expect((listed.body as { sessionId: string }[]).some((item) => item.sessionId === sessionId)).toBe(false);
+    socket.close();
   });
 });
 

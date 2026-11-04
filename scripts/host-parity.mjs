@@ -25,6 +25,9 @@ const rustBinary = path.join(root, "target", "debug", "greywork-server");
 const nodeEntry = path.join(root, "apps", "host-node", "dist", "index.js");
 const PASSWORD = "parity-pass";
 
+/** 依赖活会话 / 输出含进程级 id 的命令：不参与逐字节对照。 */
+const STATEFUL_COMMANDS = new Set(["terminal_open", "terminal_write", "terminal_resize", "terminal_close"]);
+
 const args = new Set(process.argv.slice(2));
 const keep = args.has("--keep");
 const explicit = [...args]
@@ -274,7 +277,13 @@ try {
       }).then((response) => response.json()),
     ]);
     const rustAvailable = new Map(rustList.map((item) => [item.name, item.available]));
-    candidates = nodeList.filter((item) => item.available && rustAvailable.get(item.name) === true).map((item) => item.name);
+    candidates = nodeList
+      .filter((item) => item.available && rustAvailable.get(item.name) === true)
+      .map((item) => item.name)
+      // 会话型命令不参与自动对照：terminal_open 的 sessionId 含宿主 pid（必然不同），
+      // 后续 write/resize/close 又依赖一条活的 PTY。它们由 host-node 的端到端用例覆盖
+      // （开 shell → 写命令 → 收 base64 输出 → 关闭），这里只保留无状态的 terminal_list。
+      .filter((name) => !STATEFUL_COMMANDS.has(name));
   }
 
   if (candidates.length === 0) {
