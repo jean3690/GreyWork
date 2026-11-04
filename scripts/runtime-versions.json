@@ -4,15 +4,6 @@
     "win32-x64": {
       "files": [
         {
-          "id": "node",
-          "version": "22.20.0",
-          "url": "https://nodejs.org/dist/v22.20.0/node-v22.20.0-win-x64.zip",
-          "sha256": "bb819d6eb8f5bfda294bbc83a7e4ec6539da67c4233d54b0d655b9248b15e29d",
-          "archive": "zip",
-          "member": "node-v22.20.0-win-x64/node.exe",
-          "dest": "bin/node.exe"
-        },
-        {
           "id": "rg",
           "version": "15.2.0",
           "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-x86_64-pc-windows-msvc.zip",
@@ -62,15 +53,6 @@
     "linux-x64": {
       "files": [
         {
-          "id": "node",
-          "version": "22.20.0",
-          "url": "https://nodejs.org/dist/v22.20.0/node-v22.20.0-linux-x64.tar.gz",
-          "sha256": "eeaccb0378b79406f2208e8b37a62479c70595e20be6b659125eb77dd1ab2a29",
-          "archive": "tar.gz",
-          "member": "node-v22.20.0-linux-x64/bin/node",
-          "dest": "bin/node"
-        },
-        {
           "id": "rg",
           "version": "15.2.0",
           "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-x86_64-unknown-linux-musl.tar.gz",
@@ -110,15 +92,6 @@
     },
     "linux-arm64": {
       "files": [
-        {
-          "id": "node",
-          "version": "22.20.0",
-          "url": "https://nodejs.org/dist/v22.20.0/node-v22.20.0-linux-arm64.tar.gz",
-          "sha256": "4181609e03dcb9880e7e5bf956061ecc0503c77a480c6631d868cb1f65a2c7dd",
-          "archive": "tar.gz",
-          "member": "node-v22.20.0-linux-arm64/bin/node",
-          "dest": "bin/node"
-        },
         {
           "id": "rg",
           "version": "15.2.0",
@@ -160,15 +133,6 @@
     "darwin-x64": {
       "files": [
         {
-          "id": "node",
-          "version": "22.20.0",
-          "url": "https://nodejs.org/dist/v22.20.0/node-v22.20.0-darwin-x64.tar.gz",
-          "sha256": "00df9c5df3e4ec6848c26b70fb47bf96492f342f4bed6b17f12d99b3a45eeecc",
-          "archive": "tar.gz",
-          "member": "node-v22.20.0-darwin-x64/bin/node",
-          "dest": "bin/node"
-        },
-        {
           "id": "rg",
           "version": "15.2.0",
           "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-x86_64-apple-darwin.tar.gz",
@@ -208,15 +172,6 @@
     },
     "darwin-arm64": {
       "files": [
-        {
-          "id": "node",
-          "version": "22.20.0",
-          "url": "https://nodejs.org/dist/v22.20.0/node-v22.20.0-darwin-arm64.tar.gz",
-          "sha256": "cc04a76a09f79290194c0646f48fec40354d88969bec467789a5d55dd097f949",
-          "archive": "tar.gz",
-          "member": "node-v22.20.0-darwin-arm64/bin/node",
-          "dest": "bin/node"
-        },
         {
           "id": "rg",
           "version": "15.2.0",

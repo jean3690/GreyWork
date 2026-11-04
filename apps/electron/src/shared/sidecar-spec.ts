@@ -39,16 +39,13 @@ export function sidecarEnv(input: {
   readonly passwordHash: string;
   /** 随包分发的运行时根目录；缺省 = 没捆绑（宿主不前置任何 PATH 条目）。 */
   readonly runtimeDir?: string;
-  /**
-   * spawn 用的是 Electron 二进制（真 Node ≥22.5 缺失时的兜底）时置 true：
-   * ELECTRON_RUN_AS_NODE 让 execPath 以纯 Node 行为运行。正常路径（真 node 二进制）
-   * 必须不带 —— 否则 node-pty 等原生模块在 RUN_AS_NODE 下行为有差异。
-   */
-  readonly runAsNode?: boolean;
 }): NodeJS.ProcessEnv {
   return {
     ...input.base,
-    ...(input.runAsNode ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
+    // sidecar 用 process.execPath（Electron 二进制）跑 Node 宿主入口：不带这个开关它会把
+    // 宿主当新 GUI 实例启动。Electron ≥35 内置 Node ≥22.14（node:sqlite 的硬要求），
+    // RUN_AS_NODE 下行为等同纯 Node 运行时，且与系统 Node 同主版本时原生模块 ABI 通用。
+    ELECTRON_RUN_AS_NODE: "1",
     PATH: input.shellPath,
     GREYWORK_BIND: `127.0.0.1:${input.port}`,
     GREYWORK_STATIC_DIR: input.staticDir,
