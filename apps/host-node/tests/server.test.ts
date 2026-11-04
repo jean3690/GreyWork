@@ -855,6 +855,57 @@ describe("HTTP 契约", () => {
     socket.close();
   });
 
+  it("worktree_provision / snapshot / restore：git 快照与硬回退", async () => {
+    const call = async (command: string, args: unknown) => {
+      const response = await fetch(`${base}/api/command`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ command, args }),
+      });
+      return { status: response.status, body: await response.json() };
+    };
+    const repo = path.join(workspaceDir, "wt-repo");
+    mkdirSync(repo, { recursive: true });
+    writeFileSync(path.join(repo, "a.txt"), "one\n");
+    const git = (...args: string[]) =>
+      execFileSync("git", args, {
+        cwd: repo,
+        env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.com", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.com" },
+        stdio: "ignore",
+      });
+    git("init", "-q", "-b", "main");
+    git("add", "-A");
+    git("commit", "-qm", "init");
+
+    const provisioned = await call("worktree_provision", { source: repo, prepare: false });
+    expect(provisioned.status).toBe(200);
+    const wt = provisioned.body as { root: string; kind: string };
+    expect(wt.kind).toBe("git");
+    expect(wt.root).toContain("worktrees/");
+
+    // 幂等：同源再 provision 返回同一目录。
+    const again = await call("worktree_provision", { source: repo });
+    expect((again.body as { root: string }).root).toBe(wt.root);
+
+    // 分支进源仓库共享 refs。
+    const branches = execFileSync("git", ["branch", "--format=%(refname:short)"], { cwd: repo }).toString();
+    expect(branches).toContain("greywork/");
+
+    // 快照 → 改文件 → 恢复（严格等于快照）。
+    const snapshotRef = (await call("worktree_snapshot", { root: wt.root })).body as string;
+    expect(snapshotRef).toContain("refs/greywork/snap/");
+    writeFileSync(path.join(wt.root, "marker.txt"), "temp");
+    writeFileSync(path.join(repo, "a.txt"), "changed\n");
+    git("add", "-A");
+    git("commit", "-qm", "upstream move");
+    expect((await call("worktree_restore", { root: wt.root, reference: snapshotRef })).status).toBe(200);
+    // 快照之后新建的文件被 clean 掉（严格等于快照；.gitignore 忽略的产物保留）。
+    expect(existsSync(path.join(wt.root, "marker.txt"))).toBe(false);
+
+    // 清理：release 后快照目录消失（worktree remove 会把目录一并删掉）。
+    expect((await call("worktree_release", { root: wt.root })).status).toBe(200);
+  });
+
   it("db_settings：空库回 null，写入后可读回且类型原样", async () => {
     const call = async (command: string, args: unknown = {}) => {
       const response = await fetch(`${base}/api/command`, {

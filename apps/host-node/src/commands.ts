@@ -18,7 +18,7 @@ import { checkUpdate } from "./update.js";
 import type { AgentProvider, AutomationRunInput, AutomationTask, Db, TeamRun } from "./db.js";
 import { gitChanges, gitCurrentBranch, gitDiff, gitStatus, runGit } from "./git.js";
 import { ragIndexBuild, ragSearch } from "./rag.js";
-import { listWorktrees, releaseWorktree } from "./worktree.js";
+import { listWorktrees, provisionWorktree, releaseWorktree, restoreWorktree, snapshotWorktree } from "./worktree.js";
 import { chatComplete, embed, listModels, transcribe, type LlmChatMessage, type LlmStreamHost } from "./llm.js";
 import type { AcpHost } from "./acp.js";
 import type { EventBus } from "./events.js";
@@ -244,6 +244,25 @@ HANDLERS.set("rag_clear", async (_args, ctx) => {
 });
 
 HANDLERS.set("worktree_list", async (_args, ctx) => listWorktrees(ctx.access));
+HANDLERS.set("worktree_provision", async (args, ctx) => {
+  const value = args as { source?: unknown; prepare?: unknown; skills?: unknown } | null;
+  if (typeof value?.source !== "string") throw new CommandError(400, "缺少参数 source");
+  const skills = Array.isArray(value.skills) ? (value.skills as string[]) : null;
+  return provisionWorktree(ctx.access, value.source, value.prepare === true, skills);
+});
+HANDLERS.set("worktree_snapshot", async (args, ctx) => {
+  const root = (args as { root?: unknown } | null)?.root;
+  if (typeof root !== "string") throw new CommandError(400, "缺少参数 root");
+  return snapshotWorktree(ctx.access, root);
+});
+HANDLERS.set("worktree_restore", async (args, ctx) => {
+  const value = args as { root?: unknown; reference?: unknown } | null;
+  if (typeof value?.root !== "string" || typeof value?.reference !== "string") {
+    throw new CommandError(400, "缺少参数 root / reference");
+  }
+  restoreWorktree(ctx.access, value.root, value.reference);
+  return null;
+});
 HANDLERS.set("worktree_release", async (args, ctx) => {
   const root = (args as { root?: unknown } | null)?.root;
   if (typeof root !== "string") throw new CommandError(400, "缺少参数 root");
