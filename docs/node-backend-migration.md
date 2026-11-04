@@ -1,12 +1,14 @@
 # 后端从 Rust 迁到 Node：方案与进度
 
-> 目标：把 headless 宿主（`apps/server` + `crates/greywork-host`，约 42.5k 行生产代码、189 条命令）
-> 换成 Node 实现（`apps/host-node`），**API 契约不变**，桌面端 / 浏览器端 / Docker 部署零改动。
+> **状态：迁移完成（2026-11-04）。** Rust 宿主（`apps/server` + `crates/greywork-host`）已删除，
+> headless 宿主是 `apps/host-node`：189 条命令全部有 Node 实现，双轨对照（`host:parity`，
+> 已随 Rust 一起退役）删库前最后一跑 117 项逐字节全绿；Electron sidecar 恒 spawn Node 宿主；
+> Docker 镜像改用 node:22 运行时。本文保留为方案记录，第 6 节的 `.xls` 缺口最终用
+> SheetJS 社区维护 fork `@e965/xlsx`（0.20.3，含官方 0.18.5 之后的 CVE 修复）+ 自写 ODS
+> 解析器解决，日期/时长显示口径逐行移植 calamine 0.36.1。
 >
-> 现状：P0 已完成（HTTP + 会话 + 命令分发骨架 + 静态托管 + 事件流，20 条测试）；
-> P1 接近完成——双轨对照脚本已落地，路径授权面、读写面（含二进制 / 媒体 / 文件探测）、删除/改名/复制、会话存储、SQLite 全家（设置 / 自动化 / 编排 / 后端目录）、git 只读四条、真 PTY 终端、LLM（聚合四条 + 流式两条）、RAG 状态/清空、worktree 回收、技能安装/卸载、check_update、web_fetch（SSRF）与 **ACP 会话托管** 已迁移（47 条无状态命令通过对照；
-> SQLite 迁移链与 Rust 逐条一致，Node 建的库可被 Rust 直接打开并读回设置）。
-> Electron 默认仍 spawn Rust 二进制。
+> 目标：把 headless 宿主（原 `apps/server` + `crates/greywork-host`，约 42.5k 行生产代码、189 条命令）
+> 换成 Node 实现（`apps/host-node`），**API 契约不变**，桌面端 / 浏览器端 / Docker 部署零改动。
 
 ---
 

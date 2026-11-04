@@ -1,6 +1,6 @@
 # GreyWork Architecture
 
-GreyWork is a monorepo implementing a desktop-first AI agent application. It uses pnpm workspaces with TypeScript packages in `packages/`, an Electron desktop shell in `apps/electron/`, two renderer frontends (`apps/desktop` and `apps/web`) built from the same `@greywork/workbench` sources, and a headless Rust server (`apps/server/`) backed by shared domain logic in `crates/greywork-host/`. A separate Java control plane (`back/grey`) owns accounts, channels, the model gateway, storage and automations; its admin console is `apps/admin`.
+GreyWork is a monorepo implementing a desktop-first AI agent application. It uses pnpm workspaces with TypeScript packages in `packages/`, an Electron desktop shell in `apps/electron/`, two renderer frontends (`apps/desktop` and `apps/web`) built from the same `@greywork/workbench` sources, and a headless Node host (`apps/host-node/`, the former Rust `apps/server/` + `crates/greywork-host/` — migrated and deleted, see `docs/node-backend-migration.md`). A separate Java control plane (`back/grey`) owns accounts, channels, the model gateway, storage and automations; its admin console is `apps/admin`.
 
 ## Monorepo Layout
 
@@ -126,7 +126,7 @@ plugins     ← core
 workbench   ← agents, editor, llm, acp, shell, plugins, coop, core
 apps/*      ← workbench (desktop / web = frontends; electron = shell; server = Rust host)
 apps/admin  ← 独立依赖（vue / vue-router / pinia / element-plus），刻意不依赖 workbench
-back/grey   ← 独立 JVM 服务，不在 pnpm / cargo 依赖图里
+back/grey   ← 独立 JVM 服务，不在 pnpm 依赖图里
 ```
 
 **Key rules (enforced by ESLint):**
@@ -139,7 +139,7 @@ back/grey   ← 独立 JVM 服务，不在 pnpm / cargo 依赖图里
 | Package                 | Purpose                                                                                                                                                                                                                                                                                         |
 | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `@greywork/core`        | Shared TypeScript types (vectors, bounding boxes, version info) and math utilities (clamp, lerp, vector ops). Leaf-level.                                                                                                                                                                       |
-| `@greywork/editor`      | File system, Git, and CodeMirror abstractions. The memory-backed mocks ship for browser/unit contexts; the real Git service talks to the host's `git_*` commands (implemented in `crates/greywork-host/src/infra/git.rs`), which run the git CLI strictly inside the authorized workspace root. |
+| `@greywork/editor`      | File system, Git, and CodeMirror abstractions. The memory-backed mocks ship for browser/unit contexts; the real Git service talks to the host's `git_*` commands (implemented in `apps/host-node/src/git.ts`), which run the git CLI strictly inside the authorized workspace root. |
 | `@greywork/agents`      | AI agent domain: role definitions, state machine, event model, task orchestration pipeline.                                                                                                                                                                                                     |
 | `@greywork/llm`         | LLM provider clients using OpenAI-compatible streaming protocol. Bridges to the host's `llm_*` commands for the Rust `LlmHost` backend.                                                                                                                                                         |
 | `@greywork/acp`         | Agent Client Protocol client — session transport (host commands and WebSocket), permission mapping, event model.                                                                                                                                                                                |
@@ -219,9 +219,8 @@ The control plane is intentionally a **separate stack** from the desktop product
 - `pnpm build:admin` builds the ops console into the Java backend resources (see above); it is not
   part of `pnpm build` because the control plane ships its own jar.
 - The desktop app packages via electron-builder (`apps/electron/electron-builder.yml`).
-- Domain logic lives in `crates/greywork-host/` (a single Cargo workspace at the repo root, one `Cargo.lock`), shared by both hosts. It is organised into four layers — `core/` (leaf utilities), `infra/` (DB, git, http, workspace FS), `services/` (LLM, ACP, MCP, RAG, office, skills, cron), `channels/` (chat transports) and `app/` (the `commands` face) — with a strict downward dependency direction (L0 ← L1 ← L2 ← L3 ← L4). `lib.rs` re-exports every module back to the crate root, so `greywork_host::<mod>` paths are unchanged. Major domains: `services/llm/` (OpenAI-compatible stream -> events), `services/acp_host/`, `services/mcp*.rs`, `services/host_exec.rs` (automation-queue consumer, **not** process exec — that is `infra/process_guard.rs`), `infra/http.rs` / `services/web_fetch.rs`, `infra/workspace_fs/` (authorized workspace root resolution + file reads) and `infra/git.rs` (git CLI surfaced as `git_*` commands, scoped to the authorized root). The command face has a single source of truth: `commands::COMMANDS` + `commands::dispatch`.
+- The headless host is `apps/host-node/` (Node ≥ 22, ESM): the command face's frozen metadata snapshot lives in `apps/host-node/src/command-manifest.json`, handlers are registered in `src/commands.ts` (`HANDLERS` + `dispatch`), and the domain modules mirror the former Rust layout — `sheet.ts` (legacy `.xls` via `@e965/xlsx` + a dedicated ODS parser), `mcp.ts` (MCP client / plugin proxy / registry), `office.ts` (cloud preview / OAuth / LibreOffice), `llm-agent.ts` (local-model tool rounds), `channels.ts` (chat transports + media), `acp.ts`, `git.ts`, `rag.ts`, `session-store.ts`, `workspace-access.ts` (authorized-root resolution), `terminal.ts` (node-pty).
 - `apps/electron/src/main/` keeps the host-specific modules (window / tray / notify / close-guard / navigation / menu / logger / browser-view / picker / plugin-window / sidecar / auth).
-- `apps/server/` is the headless host (see below).
 - Patches are applied to dependencies via `patches/` directory (e.g., `@univerjs/engine-render`, `exceljs`).
 
 ## Testing
@@ -230,23 +229,15 @@ The control plane is intentionally a **separate stack** from the desktop product
 - `pnpm -r test` runs all tests across packages with coverage enabled where configured.
   `apps/admin` has a small Vitest suite (happy-dom) for pure logic and the trend chart; full-page
   behaviour is covered by manual smoke plus the backend contract tests.
-- Rust tests run via `cargo test --locked` from the **repo root** (single workspace: `greywork-host` + server).
 - The Java control plane runs `./mvnw test`; `ControlPlaneApiTest` uses Testcontainers (MySQL 8.4,
   Redis 7, RustFS) and covers auth, sync, hosts, channels, the LLM gateway, market, storage,
   automations and the admin surface.
 - Coverage thresholds are configured per-package in `vitest.config.ts`.
-- **Cross-language ACP gate**: `pnpm --filter @greywork/acp test:integration` drives the real
-  renderer-side ACP client (`@greywork/acp` → the host-command transport → `POST /api/command` +
-  `WS /api/events`) against a real `greywork-server` and a fake agent, asserting a full
-  `initialize → session/new → prompt → agent_message_chunk → prompt-done` round trip. The two ACP
-  SDKs (TS `@agentclientprotocol/sdk` vs Rust `agent-client-protocol`) are independent release
-  lines, so "each side compiles and unit-tests green" does **not** imply they interoperate. It
-  needs `cargo build -p greywork-server` first (it never builds for you) and is deliberately kept
-  out of `pnpm -r test` so the plain test job needs no compiled artifacts. The Rust-side counterpart
-  (`apps/server/tests/acp_host.rs`) covers the `AcpHost` command surface through `dispatch` on all
-  three platforms.
+- **ACP end-to-end**: `apps/host-node/tests/server.test.ts` drives a full
+  `start → new_session → prompt (permission answer) → stop` round trip against a mock agent over
+  JSON-RPC stdio, covering the host side of the ACP surface on the HTTP command face.
 
-## Headless Server (`apps/server`)
+## Headless Host (`apps/host-node`)
 
 A single-user, self-hosted web host for GreyWork. It reuses **all** of `greywork-host`'s domain
 logic and adds only the host shell: HTTP transport, WebSocket event delivery, built-in login, and
@@ -254,8 +245,9 @@ the server-side security policy. It carries no GUI-toolkit dependency.
 
 ### Reuse boundary
 
-The command face has one source of truth: `greywork_host::commands::COMMANDS` (metadata) and
-`commands::dispatch(name, args, ctx)`; the server routes `POST /api/command` into `dispatch`.
+The command face has one source of truth: `apps/host-node/src/command-manifest.json` (frozen
+metadata snapshot) and `src/commands.ts` `dispatch(name, args, ctx)`; the server routes
+`POST /api/command` into `dispatch`.
 Commands marked `desktop_only` are rejected server-side and are implemented by the Electron main
 process instead — the mirror list in `apps/electron/src/shared/desktop-only.ts` is asserted against
 `/api/commands` so the two sides cannot drift (the Electron shell's own unit tests pin its shape).
@@ -274,12 +266,12 @@ Loaded as `defaults → <data_dir>/server.json → GREYWORK_* env vars` (env win
 Password bootstrap, in priority order:
 
 1. `GREYWORK_PASSWORD_HASH` — an argon2 PHC string.
-2. `<data_dir>/auth.json` — written by `greywork-server set-password` (mode 0600).
+2. `<data_dir>/auth.json` (mode 0600).
 3. `GREYWORK_PASSWORD` — plaintext, hashed in memory at startup (dev convenience).
 4. Otherwise a random password is generated, written to `auth.json` (0600), and printed **once** to
    stderr.
 
-`greywork-server hash-password` prints an argon2 PHC string from stdin.
+`host-node hash-password` prints an argon2 PHC string from stdin.
 
 ### Authentication
 
@@ -379,12 +371,12 @@ process's** environment, so those variables must be injected (e.g. via compose).
 
 ### Deployment (Docker)
 
-The server is packaged as a multi-stage image: `node:22-bookworm-slim` builds the SPA,
-`rust:1-bookworm` compiles `greywork-server`, and a `debian:bookworm-slim` runtime carries the
-binary plus `git`/`ca-certificates`. The runtime image deliberately ships **no** Node/Python
-toolchain — the frozen agent allow-list resolves against whatever the operator installs in a
-derived image and declares via `GREYWORK_AGENT_PROGRAMS`. The binary carries a `healthcheck`
-subcommand so the image needs no `curl`/`wget`.
+The server is packaged as a multi-stage image: `node:22-bookworm-slim` builds the SPA, a second
+Node stage builds `apps/host-node` (incl. the native `node-pty`) and `pnpm deploy`s a standalone
+directory (dist + production deps), and the runtime stage (also `node:22-bookworm-slim`) carries
+the host plus `git`/`ca-certificates`/LibreOffice. The frozen agent allow-list resolves against
+whatever the operator installs in a derived image and declares via `GREYWORK_AGENT_PROGRAMS`.
+The health check probes `/api/health` directly (no `curl`/`wget` in the image).
 
 `docker-compose.yml` publishes `8787`, mounts a named `/data` volume, sets
 `no-new-privileges`, and runs as uid 10001. The server itself does no TLS, so production belongs
@@ -426,17 +418,14 @@ single home.
 2. **Electron Bundle** — three-platform matrix that builds the sidecar binary, the renderer SPA and
    the shell (`pnpm electron:prep`), then packages an unpacked app with electron-builder. Actual
    installers are produced by `release.yml` (see below).
-3. **Cargo Test (workspace)** — from the repo root: `cargo fmt --check`,
-   `cargo clippy --locked --all-targets -- -D warnings`, `cargo test --locked`, plus a guard that
-   `crates/greywork-host/Cargo.toml` declares no `tauri` / `electron` dependency. The pre-push hook
+3. **Host tests** — `pnpm --filter @greywork/host-node test` (52 vitest cases, incl. the ACP
+   end-to-end and the sheet parser against the calamine fixture). The pre-push hook
    runs the same three commands when a push touches Rust files.
-4. **ACP E2E (renderer TS × Rust host)** — builds `greywork-server` and runs the cross-language ACP
-   gate described under Testing. It needs no browser and no renderer bundle (it only talks to
-   `/api`), and it reuses `shared-key: rust` so it does not add a cache entry.
+4. **Electron bundle** — `pnpm electron:prep` (bundled runtimes + desktop SPA + host-node build +
+   shell build) and an unpacked `electron-builder` pass on all three platforms.
 
-Rust dependency caches come from `Swatinem/rust-cache` and are keyed with `shared-key: rust`, so the
-CI packaging job and the release workflow restore the same dependency artifacts (the key still
-includes OS/arch and the rustc hash). Caches are only written on `master` and on tags: GitHub's cache
+Caches: pnpm store via the setup-node composite; bundled runtimes keyed on
+`scripts/runtime-versions.json`.
 budget is 10 GB per repository, and per-PR copies of the ~600 MB dependency cache evict the `master`
 entries, turning the next build into a full dependency recompile. The first run after a change to
 `Cargo.lock`, `RUSTFLAGS`, or a job's cache key is a cold build by design.
@@ -547,7 +536,7 @@ main chunk. A viewer receives only `{ tab }` and reads its own bytes through
 `lib/preview-content.ts` (`usePreviewText` / `usePreviewBinary` / `usePreviewMedia`); tabs
 themselves hold no content.
 
-Two read caps live in the host, not the renderer (`crates/greywork-host/src/infra/workspace_fs/`):
+Two read caps live in the host, not the renderer (`apps/host-node/src/workspace-access.ts`):
 `MAX_BINARY_BYTES` = 20 MB for `fs_read_binary`, and `MAX_MEDIA_BYTES` = 128 MB for
 `fs_read_media`. `fs_read_media` clamps a caller-supplied `maxBytes` to its own ceiling, so the
 renderer can ask for a per-kind budget but can never raise the host's hard cap. Both are **errors**
@@ -585,8 +574,8 @@ whole blob before it starts playing (seeking is effectively broken). The symptom
 no error anywhere.
 
 So both hosts stream: the server exposes `GET /api/media?path=…` with **HTTP Range** support
-(`apps/server/src/routes/media.rs`), serving 1 MB chunks. The slice logic
-(`workspace_fs::fs_media_slice`, which also owns the MIME table) authorizes through
+(served by the host's static/media route), serving 1 MB chunks. The slice logic
+(`readMediaSlice`, which also owns the MIME table) authorizes through
 `WorkspaceFsAccess::resolve_existing` — the _same_ check `fs_read_media` uses, so there is no second
 allow-list to keep in sync. `packages/host-ipc/src/media.ts` returns that same-origin address in
 server mode (which is what the Electron shell runs), so `lib/preview-content.ts`

@@ -10,7 +10,7 @@ A signed updater needs a private key held as a repo secret and a manifest merged
 across parallel release jobs; we opted to keep the release pipeline key-free.
 
 What the titlebar "Check for updates" does instead (`lib/update-backend.ts` + the shared
-`check_update` command in `crates/greywork-host/src/services/update.rs`):
+`check_update` command in `apps/host-node/src/update.ts`):
 
 - Calls the GitHub Releases API (`/releases/latest`) from the **host** (the headless server
   the shell spawned), which compares `tag_name` with the running version and shows the
@@ -71,7 +71,7 @@ Deployment requirements:
 
 - Serve `apps/web/dist` as the site root. The router uses **hash history**, so no rewrite rules are
   needed for client-side routes.
-- Reverse-proxy `/api/*` (including the `/api/events` WebSocket upgrade) to `greywork-server` on the
+- Reverse-proxy `/api/*` (including the `/api/events` WebSocket upgrade) to the Node host on the
   **same origin**. The server does not send CORS headers and the login cookie is scoped to the front
   origin, so a cross-origin split would break authentication.
 - `/pdfjs/*` and `/vscode-icons/*` are absolute runtime paths baked into the workbench sources; the
@@ -85,7 +85,7 @@ degrade with an explicit message rather than failing silently.
 ## Desktop installers (Electron)
 
 The desktop app is an **Electron** app (`apps/electron`). The shell only spawns the headless
-`greywork-server` as a sidecar and loads the **same renderer build** (`apps/desktop/dist`) from
+Node host as a sidecar and loads the **same renderer build** (`apps/desktop/dist`) from
 it — no second copy of the domain logic, no separate frontend build.
 
 The sidecar listens on a **stable loopback port** (persisted in `userData/sidecar-port.json`,
@@ -97,7 +97,7 @@ on every start — the user-visible symptom is "my workspaces/settings disappear
 Build order matters (the root script `pnpm electron:package` chains it all):
 
 ```sh
-cargo build --release -p greywork-server     # sidecar binary      → target/release/
+pnpm --filter @greywork/host-node build     # host dist           → apps/host-node/dist/
 pnpm --filter @greywork/desktop build        # renderer SPA        → apps/desktop/dist/
 pnpm --filter @greywork/electron build       # main + preload      → apps/electron/out/
 pnpm --filter @greywork/electron package     # electron-builder    → apps/electron/release/<version>/
@@ -234,11 +234,12 @@ ships the same Vue renderer as a same-origin SPA behind a password login. A mult
    public npm registry; pass `--build-arg NPM_REGISTRY=https://registry.npmmirror.com` (or your own
    mirror) if you are behind a slow link to npmjs — otherwise pnpm's metadata requests time out
    mid-install.
-2. **server** (`rust:1`) runs `cargo build --release -p greywork-server` — only the server crate and
-   `greywork-host`, so no GUI toolkit deps are pulled. `cmake` is installed for `aws-lc-rs`
-   (rustls); `rusqlite` compiles bundled SQLite with the base image's C toolchain.
-3. **runtime** (`debian:bookworm-slim`) carries just the binary, the built SPA at `/app/web`,
-   `ca-certificates` and `git`. It runs as a non-root user and serves `0.0.0.0:8787`.
+2. **server** (`node:22-bookworm-slim`) runs `pnpm --filter @greywork/host-node build` — the
+   TypeScript host compiles with no GUI toolkit deps. `python3`/`make`/`g++` are installed for the
+   native `node-pty` build, and `pnpm deploy --prod` produces a standalone directory (dist +
+   production deps) so the runtime stage needs no package manager.
+3. **runtime** (`node:22-bookworm-slim`) carries the host at `/app/host`, the built SPA at
+   `/app/web`, `ca-certificates` and `git`. It runs as a non-root user and serves `0.0.0.0:8787`.
    **LibreOffice** (`libreoffice-writer` + `libreoffice-impress`, plus `fonts-noto-cjk` for CJK
    glyphs) is also installed here so the "high-fidelity (PDF)" office preview works out of the box;
    `soffice` is on `PATH`, so no `GREYWORK_SOFFICE_PATH` is needed in the default image.
