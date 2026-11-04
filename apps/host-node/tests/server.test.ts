@@ -10,6 +10,7 @@ import WebSocket from "ws";
 
 import { LoginThrottle, SessionStore, passwordChecker } from "../src/auth.js";
 import { Db } from "../src/db.js";
+import { RagIndexHost } from "../src/rag.js";
 import { isDenied } from "../src/commands.js";
 import { EventBus } from "../src/events.js";
 import { LlmStreamHost } from "../src/llm.js";
@@ -52,8 +53,15 @@ const provider = createHttpServer((request, response) => {
     return;
   }
   if (request.method === "POST" && url.endsWith("/v1/embeddings")) {
-    response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify({ data: [{ embedding: [1, 2, 3] }, { embedding: [0.5, 0.25, 0.125] }] }));
+    // embedding 数量必须与 input 一致（宿主按批校验），按请求体长度返回。
+    let body = "";
+    request.on("data", (chunk: Buffer) => (body += String(chunk)));
+    request.on("end", () => {
+      const input = (JSON.parse(body || "{}") as { input?: unknown[] }).input ?? [];
+      const embeddings = (input as unknown[]).map((_value, index) => [index + 1, 2, 3]);
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ data: embeddings.map((embedding) => ({ embedding })) }));
+    });
     return;
   }
   if (request.method === "POST" && url.endsWith("/v1/chat/completions")) {
@@ -77,6 +85,7 @@ const db = new Db(path.join(dataDir, "greywork.db"));
 const bus = new EventBus();
 const store = new SessionFileStore(access);
 const llm = new LlmStreamHost(bus);
+const rag = new RagIndexHost(db);
 const terminal = new TerminalHost(bus, access);
 
 const { server, close } = createHostServer({
@@ -86,6 +95,7 @@ const { server, close } = createHostServer({
   staticRoot: resolveStaticRoot(config.staticDir),
   access,
   db,
+  rag,
   store,
   llm,
   bus,
@@ -567,7 +577,7 @@ describe("HTTP 契约", () => {
     expect((await call("llm_embed", { baseUrl, model: "bge-m3", input: ["a", "b"] })).body).toEqual({
       embeddings: [
         [1, 2, 3],
-        [0.5, 0.25, 0.125],
+        [2, 2, 3],
       ],
       dim: 3,
       model: "bge-m3",
@@ -705,6 +715,36 @@ describe("HTTP 契约", () => {
     const credentials = await call("http://user:pass@example.com/");
     expect(credentials.status).toBe(400);
     expect(credentials.body.error).toContain("embedded credentials");
+  });
+
+  it("rag_index_build / rag_search：分块 → 向量化 → 余弦检索", async () => {
+    const baseUrl = `http://127.0.0.1:${(provider.address() as NodeAddressInfo).port}`;
+    const call = async (command: string, args: unknown) => {
+      const response = await fetch(`${base}/api/command`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ command, args }),
+      });
+      return { status: response.status, body: await response.json() };
+    };
+
+    const built = await call("rag_index_build", { root: workspaceDir, baseUrl, model: "bge-m3" });
+    expect(built.status).toBe(200);
+    expect(built.body).toEqual({ files: expect.any(Number), chunks: expect.any(Number), skipped: 0 });
+
+    const hits = (await call("rag_search", { query: "hello parity", baseUrl, model: "bge-m3" })).body as {
+      path: string;
+      text: string;
+      score: number;
+    }[];
+    expect(hits.length).toBeGreaterThan(0);
+    // mock 的向量是位置决定的（多个分块可能同分），只断言「hello.txt 出现在命中里、分数非零」。
+    expect(hits.some((hit) => hit.path.includes("hello.txt"))).toBe(true);
+    expect(hits[0].score).toBeGreaterThan(0);
+
+    // 清空后索引归零（status 与 clear 的组合契约）。
+    expect((await call("rag_clear")).status).toBe(200);
+    expect((await call("rag_status")).body).toEqual({ chunks: 0, files: 0, model: null, dim: null });
   });
 
   it("db_settings：空库回 null，写入后可读回且类型原样", async () => {

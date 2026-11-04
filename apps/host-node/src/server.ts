@@ -15,6 +15,7 @@ import { attachEvents, type EventBus } from "./events.js";
 import { serveStatic } from "./static-site.js";
 import type { HostConfig } from "./config.js";
 import type { Db } from "./db.js";
+import type { RagIndexHost } from "./rag.js";
 import type { LlmStreamHost } from "./llm.js";
 import type { SessionFileStore } from "./session-store.js";
 import type { TerminalHost } from "./terminal.js";
@@ -29,9 +30,10 @@ export interface HostServerOptions {
   staticRoot: string | null;
   access: WorkspaceAccess;
   db: Db;
+  rag: RagIndexHost;
+  bus: EventBus;
   store: SessionFileStore;
   llm: LlmStreamHost;
-  bus: EventBus;
   terminal: TerminalHost;
 }
 
@@ -192,6 +194,8 @@ export function createHostServer(options: HostServerOptions): { server: Server; 
           const output = await dispatch(body?.command, body?.args ?? null, {
             access: options.access,
             db: options.db,
+            rag: options.rag,
+            bus: options.bus,
             store: options.store,
             llm: options.llm,
             terminal: options.terminal,

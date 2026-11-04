@@ -16,9 +16,12 @@ import { fetchPage } from "./web-fetch.js";
 import { checkUpdate } from "./update.js";
 import type { AgentProvider, AutomationRunInput, AutomationTask, Db, TeamRun } from "./db.js";
 import { gitChanges, gitCurrentBranch, gitDiff, gitStatus, runGit } from "./git.js";
+import { ragIndexBuild, ragSearch } from "./rag.js";
 import { listWorktrees, releaseWorktree } from "./worktree.js";
 import { chatComplete, embed, listModels, transcribe, type LlmChatMessage, type LlmStreamHost } from "./llm.js";
+import type { EventBus } from "./events.js";
 import type { SessionFileStore, WorkspaceDir } from "./session-store.js";
+import type { RagIndexHost } from "./rag.js";
 import type { TerminalHost } from "./terminal.js";
 import type { WorkspaceAccess } from "./workspace-access.js";
 
@@ -60,7 +63,9 @@ export function isDenied(name: string, trustedHost: boolean): boolean {
 /** 命令实现拿到的宿主上下文（只放已迁移能力，避免半迁移状态下出现半初始化的对象）。 */
 export interface CommandContext {
   access: WorkspaceAccess;
+  bus: EventBus;
   db: Db;
+  rag: RagIndexHost;
   store: SessionFileStore;
   llm: LlmStreamHost;
   terminal: TerminalHost;
@@ -177,6 +182,49 @@ HANDLERS.set("terminal_close", async (args, ctx) => {
   if (typeof value?.sessionId !== "string") throw new CommandError(400, "缺少参数 sessionId");
   ctx.terminal.close(value.sessionId);
   return null;
+});
+
+HANDLERS.set("rag_index_build", async (args, ctx) => {
+  const value = args as {
+    root?: unknown;
+    baseUrl?: unknown;
+    model?: unknown;
+    apiKeyEnv?: unknown;
+    headers?: unknown;
+    force?: unknown;
+  } | null;
+  if (typeof value?.root !== "string" || typeof value?.baseUrl !== "string" || typeof value?.model !== "string") {
+    throw new CommandError(400, "缺少参数 root / baseUrl / model");
+  }
+  return ragIndexBuild(ctx.bus, ctx.access, ctx.db, ctx.rag, {
+    root: value.root,
+    baseUrl: value.baseUrl,
+    model: value.model,
+    apiKeyEnv: typeof value.apiKeyEnv === "string" ? value.apiKeyEnv : null,
+    headers: (value.headers ?? undefined) as Record<string, string> | undefined,
+    force: value.force === true,
+  });
+});
+HANDLERS.set("rag_search", async (args, ctx) => {
+  const value = args as {
+    query?: unknown;
+    baseUrl?: unknown;
+    model?: unknown;
+    apiKeyEnv?: unknown;
+    headers?: unknown;
+    topK?: unknown;
+  } | null;
+  if (typeof value?.query !== "string" || typeof value?.baseUrl !== "string" || typeof value?.model !== "string") {
+    throw new CommandError(400, "缺少参数 query / baseUrl / model");
+  }
+  return ragSearch(ctx.rag, {
+    query: value.query,
+    baseUrl: value.baseUrl,
+    model: value.model,
+    apiKeyEnv: typeof value.apiKeyEnv === "string" ? value.apiKeyEnv : null,
+    headers: (value.headers ?? undefined) as Record<string, string> | undefined,
+    topK: value.topK,
+  });
 });
 
 HANDLERS.set("rag_status", async (_args, ctx) => {

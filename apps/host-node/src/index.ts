@@ -22,6 +22,7 @@ import { resolveStaticRoot } from "./static-site.js";
 import { WorkspaceAccess } from "./workspace-access.js";
 import { EventBus } from "./events.js";
 import { LlmStreamHost } from "./llm.js";
+import { RagIndexHost } from "./rag.js";
 import { SessionFileStore } from "./session-store.js";
 import { TerminalHost } from "./terminal.js";
 
@@ -93,6 +94,7 @@ async function main(): Promise<void> {
   const bus = new EventBus();
   const store = new SessionFileStore(access);
   const llm = new LlmStreamHost(bus);
+  const rag = new RagIndexHost(db);
   const terminal = new TerminalHost(bus, access);
   const { server, close } = createHostServer({
     config,
@@ -101,6 +103,7 @@ async function main(): Promise<void> {
     staticRoot,
     access,
     db,
+    rag,
     store,
     llm,
     bus,

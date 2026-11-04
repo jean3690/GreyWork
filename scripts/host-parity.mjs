@@ -36,8 +36,14 @@ const provider = createHttpServer((request, response) => {
     return;
   }
   if (request.method === "POST" && url.endsWith("/v1/embeddings")) {
-    response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify({ data: [{ embedding: [1, 2, 3] }] }));
+    let body = "";
+    request.on("data", (chunk) => (body += String(chunk)));
+    request.on("end", () => {
+      const input = (JSON.parse(body || "{}").input ?? []).length;
+      const embeddings = Array.from({ length: input }, (_value, index) => [index + 1, 2, 3]);
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ data: embeddings.map((embedding) => ({ embedding })) }));
+    });
     return;
   }
   if (request.method === "POST" && url.endsWith("/v1/chat/completions")) {
@@ -171,6 +177,13 @@ function normalize(value, replace) {
 function normalizeForCommand(command, value) {
   if (command === "fs_list_dir" && Array.isArray(value)) {
     return [...value].sort((left, right) => String(left.path).localeCompare(String(right.path)));
+  }
+  if (command === "rag_search" && Array.isArray(value)) {
+    // 平分（同分块向量）时排序取决于遍历顺序；检索契约是「命中的集合 + 分数」，
+    // 分数按 6 位小数对齐 f32/f64 的累计精度差。
+    return [...value]
+      .map((hit) => ({ ...hit, score: Number(hit.score.toFixed(6)) }))
+      .sort((left, right) => String(left.path).localeCompare(String(right.path)));
   }
   return value;
 }
@@ -306,6 +319,11 @@ function argsFor(command, side) {
     // 环回地址两侧都必须拒绝：这一条对照的是 SSRF 防线本身（错误文案逐字一致）。
     case "web_fetch":
       return { url: "http://127.0.0.1:9/" };
+    case "rag_index_build":
+      return { root: workspaceDir, baseUrl: providerUrl, model: "bge-m3" };
+    case "rag_search":
+      // topK 拉满：mock 的向量按位置生成，平分时 top-K 的截断顺序不构成契约。
+      return { query: "hello parity", baseUrl: providerUrl, model: "bge-m3", topK: 50 };
     case "db_automations_sync":
       return {
         tasks: [

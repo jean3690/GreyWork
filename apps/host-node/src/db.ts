@@ -427,7 +427,74 @@ export class Db {
     }
   }
 
-  /** RAG 统计：分块总数 + 去重文件数（root/path）。 */
+  /** 按根统计每文件最新 mtime/size（增量索引用）。 */
+  ragFileStats(root: string): Map<string, { mtime: number; size: number }> {
+    const rows = this.conn
+      .prepare("SELECT path, MAX(mtime) AS mtime, MAX(size) AS size FROM rag_chunks WHERE root = ?1 GROUP BY path")
+      .all(root) as { path: string; mtime: number; size: number }[];
+    return new Map(rows.map((row) => [row.path, { mtime: Number(row.mtime), size: Number(row.size) }]));
+  }
+
+  /** 替换某文件的分块（事务内先删后插）；空数组 = 该文件没有可索引内容。 */
+  ragReplaceFile(
+    root: string,
+    filePath: string,
+    mtime: number,
+    size: number,
+    chunks: { chunkIndex: number; text: string; vec: Buffer }[],
+  ): void {
+    this.conn.exec("BEGIN");
+    try {
+      this.conn.prepare("DELETE FROM rag_chunks WHERE root = ?1 AND path = ?2").run(root, filePath);
+      const insert = this.conn.prepare(
+        `INSERT INTO rag_chunks (root, path, mtime, size, chunk_index, text, dim, vec)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`,
+      );
+      for (const chunk of chunks) {
+        const dim = chunk.vec.byteLength / 4;
+        insert.run(root, filePath, mtime, size, chunk.chunkIndex, chunk.text, dim, chunk.vec);
+      }
+      this.conn.exec("COMMIT");
+    } catch (error) {
+      this.conn.exec("ROLLBACK");
+      throw new Error(`写入 RAG 分块失败: ${(error as Error).message}`, { cause: error });
+    }
+  }
+
+  /** 清理不在 keep 集合里的路径（文件被删 / 改名）；返回清理条数。 */
+  ragPruneFiles(root: string, keep: string[]): number {
+    const kept = new Set(keep);
+    const rows = this.conn.prepare("SELECT DISTINCT path FROM rag_chunks WHERE root = ?1").all(root) as { path: string }[];
+    const stale = rows.map((row) => row.path).filter((filePath) => !kept.has(filePath));
+    if (stale.length === 0) return 0;
+    this.conn.exec("BEGIN");
+    try {
+      const remove = this.conn.prepare("DELETE FROM rag_chunks WHERE root = ?1 AND path = ?2");
+      for (const filePath of stale) remove.run(root, filePath);
+      this.conn.exec("COMMIT");
+    } catch (error) {
+      this.conn.exec("ROLLBACK");
+      throw new Error(`清理 RAG 过期文件失败: ${(error as Error).message}`, { cause: error });
+    }
+    return stale.length;
+  }
+
+  /** 载入全部块（可选按根过滤），vec 是 float32 小端 BLOB。 */
+  ragLoadChunks(root: string | null): { path: string; chunkIndex: number; text: string; vec: Buffer }[] {
+    const rows = (
+      root !== null
+        ? this.conn.prepare("SELECT path, chunk_index, text, vec FROM rag_chunks WHERE root = ?1").all(root)
+        : this.conn.prepare("SELECT path, chunk_index, text, vec FROM rag_chunks").all()
+    ) as { path: string; chunk_index: number; text: string; vec: Buffer }[];
+    return rows.map((row) => ({ path: row.path, chunkIndex: row.chunk_index, text: row.text, vec: Buffer.from(row.vec) }));
+  }
+
+  ragMetaSet(key: string, value: string): void {
+    this.conn
+      .prepare("INSERT INTO rag_meta (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+      .run(key, value);
+  }
+
   ragStats(): { chunks: number; files: number } {
     const chunks = this.conn.prepare("SELECT COUNT(*) AS n FROM rag_chunks").get() as { n: number };
     const files = this.conn.prepare("SELECT COUNT(DISTINCT root || '/' || path) AS n FROM rag_chunks").get() as { n: number };
