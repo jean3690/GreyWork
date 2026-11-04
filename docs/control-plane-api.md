@@ -123,4 +123,7 @@
 ## 运维面
 
 `/api/admin/**` 全部要求 `ROLE_ADMIN`，唯一的匿名入口是 `POST /api/admin/auth/login`。
-端点表、首次部署、故障排查见 [control-plane-auth.md](control-plane-auth.md)。
+除用户 / 设备 / 入场码 / 通道 / 模型外，还有两块跨用户只读聚合：`GET /api/admin/storage`
+（容量与对象明细）与 `GET /api/admin/automation`（任务、积压与执行失败率），对应用户侧接口
+分别是「对象存储」与「自动化」两节。端点表、首次部署、故障排查见
+[control-plane-auth.md](control-plane-auth.md)。

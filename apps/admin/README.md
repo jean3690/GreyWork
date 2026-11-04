@@ -3,7 +3,7 @@
 控制面（`back/grey`）的管理端 SPA。**不是产品前端**：它不加载 `@greywork/workbench`，
 也不进桌面端 / Web 端的产物，只服务部署者自己。
 
-- 页面：概览、用户与设备、入场码、宿主、通道绑定、模型与用量、审计日志
+- 页面：概览、用户与设备、入场码、宿主、通道绑定、对象存储、自动化任务、模型与用量、审计日志
 - 技术栈：Vue 3 + TypeScript + Vite + Vue Router（hash）+ Pinia + Element Plus（暗色）
 - 后端契约：`/api/admin/**`，详见 [docs/control-plane-auth.md](../../docs/control-plane-auth.md)
 
@@ -46,7 +46,7 @@ src/
 ├── stores/         # Pinia：当前管理员
 ├── styles/         # Element Plus 暗色变量覆盖 + 页内通用布局
 ├── utils/          # 时间/数字/平台/审计动作格式化、复制
-└── views/          # 七个页面
+└── views/          # 九个页面（登录 + 八个运维页）
 ```
 
 ## 约定

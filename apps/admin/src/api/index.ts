@@ -1,6 +1,7 @@
 import { http } from "./http";
 import type {
   AuditLog,
+  AutomationOverview,
   ChannelItem,
   DeviceItem,
   EnrollCodeItem,
@@ -10,6 +11,7 @@ import type {
   LlmUsageOverview,
   Overview,
   Session,
+  StorageOverview,
   UserDetail,
   UserItem,
 } from "../types";
@@ -74,6 +76,12 @@ export const adminApi = {
   },
   setChannelStatus(id: number, status: "active" | "disabled"): Promise<ChannelItem> {
     return http.post<ChannelItem>("/api/admin/channels/" + id + "/status", { status });
+  },
+  storage(): Promise<StorageOverview> {
+    return http.get<StorageOverview>("/api/admin/storage");
+  },
+  automation(): Promise<AutomationOverview> {
+    return http.get<AutomationOverview>("/api/admin/automation");
   },
   llmKeys(): Promise<LlmKeyItem[]> {
     return http.get<LlmKeyItem[]>("/api/admin/llm/keys");

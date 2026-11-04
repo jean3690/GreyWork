@@ -119,6 +119,54 @@ export interface LlmKeyItem {
   createdAt: string;
 }
 
+export interface StorageKindUsage {
+  kind: string;
+  objects: number;
+  bytes: number;
+}
+
+export interface StorageObjectItem {
+  id: number;
+  userId: number;
+  ownerEmail: string;
+  name: string;
+  kind: string;
+  sizeBytes: number;
+  visibility: string;
+  status: string;
+  createdAt: string;
+}
+
+export interface StorageOverview {
+  /** 只算 ready 的对象；pending 单独计数。 */
+  objects: number;
+  bytes: number;
+  pending: number;
+  byKind: StorageKindUsage[];
+  recent: StorageObjectItem[];
+}
+
+export interface AutomationTaskItem {
+  id: string;
+  userId: number;
+  ownerEmail: string;
+  name: string;
+  execution: string;
+  enabled: boolean;
+  nextRunAt: string | null;
+  lastRunAt: string | null;
+}
+
+export interface AutomationOverview {
+  tasks: number;
+  enabled: number;
+  duePending: number;
+  dueOverdue: number;
+  runs7d: number;
+  runsFailed7d: number;
+  recent: AutomationTaskItem[];
+}
+
 export interface LlmUsageOverview {
   requests7d: number;
   tokens7d: number;

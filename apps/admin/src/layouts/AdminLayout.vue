@@ -1,5 +1,18 @@
 <script setup lang="ts">
-import { Connection, Cpu, DataAnalysis, Document, Fold, Lock, Monitor, SwitchButton, Tickets, User } from "@element-plus/icons-vue";
+import {
+  Connection,
+  Cpu,
+  DataAnalysis,
+  Document,
+  Fold,
+  FolderOpened,
+  Lock,
+  Monitor,
+  SwitchButton,
+  Tickets,
+  Timer,
+  User,
+} from "@element-plus/icons-vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
@@ -107,6 +120,14 @@ function navigate(): void {
         <el-menu-item index="/channels">
           <el-icon><Connection /></el-icon>
           <span>通道绑定</span>
+        </el-menu-item>
+        <el-menu-item index="/storage">
+          <el-icon><FolderOpened /></el-icon>
+          <span>对象存储</span>
+        </el-menu-item>
+        <el-menu-item index="/automation">
+          <el-icon><Timer /></el-icon>
+          <span>自动化任务</span>
         </el-menu-item>
         <el-menu-item index="/llm">
           <el-icon><Cpu /></el-icon>

@@ -171,6 +171,9 @@ class ControlPlaneApiTest {
 	ObjectMapper objectMapper;
 
 	@Autowired
+	org.springframework.jdbc.core.JdbcTemplate jdbc;
+
+	@Autowired
 	EnrollmentCodeMapper enrollmentCodeMapper;
 
 	@Autowired
@@ -1553,10 +1556,88 @@ void userCanRevokeOtherSessionsButStaySignedIn() throws Exception {
 	void adminConsoleResourcesAreAdminOnly() throws Exception {
 		JsonNode member = enroll("resource-member@grey.local", "desktop");
 		for (String path : new String[] { "/api/admin/overview", "/api/admin/hosts",
-				"/api/admin/channels", "/api/admin/llm/keys", "/api/admin/llm/usage" }) {
+				"/api/admin/channels", "/api/admin/llm/keys", "/api/admin/llm/usage",
+				"/api/admin/storage", "/api/admin/automation" }) {
 			mockMvc.perform(get(path).header("Authorization", bearerOf(member)))
 					.andExpect(status().isForbidden());
 		}
+	}
+
+	// ---------- 运维台：存储与自动化（跨用户聚合） ----------
+
+	@Test
+	void adminSeesStorageAndAutomationAcrossUsers() throws Exception {
+		JsonNode owner = enroll("platform-owner@grey.local", "desktop");
+		long userId = owner.get("user").get("id").asLong();
+		LocalDateTime now = LocalDateTime.now().withNano(0);
+		// 两条 ready 一条 pending：容量只算 ready，pending 单独计数。
+		insertStorage(9_000_001L, userId, "ops-a.png", "image", 2048L, "ready", now);
+		insertStorage(9_000_002L, userId, "ops-b.txt", "file", 1024L, "ready", now);
+		insertStorage(9_000_003L, userId, "ops-c.txt", "file", 0L, "pending", now);
+		jdbc.update("""
+				INSERT INTO automation_task (id, user_id, name, intent, execution, enabled,
+				    next_run_at, created_at, updated_at)
+				VALUES (?, ?, '运维可见任务', 'do it', 'host', 1, ?, ?, ?)
+				""", "ops-visible-task", userId, now.plusHours(1), now, now);
+		jdbc.update("""
+				INSERT INTO automation_task (id, user_id, name, intent, execution, enabled,
+				    created_at, updated_at)
+				VALUES (?, ?, '运维停用任务', 'do it', 'host', 0, ?, ?)
+				""", "ops-disabled-task", userId, now, now);
+		// 一条早就该触发还没被认领（overdue），一条未来触发（只算 pending 积压）。
+		insertDue(userId, "ops-visible-task", now.minusHours(2), now);
+		insertDue(userId, "ops-visible-task", now.plusHours(3), now);
+		jdbc.update("""
+				INSERT INTO automation_run (user_id, task_id, name, status, mode, created_at)
+				VALUES (?, ?, '运维可见任务', 'failed', 'host', ?)
+				""", userId, "ops-visible-task", now.minusHours(1));
+		jdbc.update("""
+				INSERT INTO automation_run (user_id, task_id, name, status, mode, created_at)
+				VALUES (?, ?, '运维可见任务', 'done', 'host', ?)
+				""", userId, "ops-visible-task", now.minusHours(2));
+
+		String bearer = bearerOf(enroll(ADMIN_EMAIL, "server"));
+
+		JsonNode storage = json(mockMvc.perform(get("/api/admin/storage")
+						.header("Authorization", bearer))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.recent[?(@.name=='ops-a.png')]").isNotEmpty())
+				.andExpect(jsonPath("$.byKind[?(@.kind=='image')]").isNotEmpty())
+				.andReturn());
+		assertThat(storage.get("objects").asLong()).isGreaterThanOrEqualTo(2);
+		assertThat(storage.get("bytes").asLong()).isGreaterThanOrEqualTo(3072);
+		assertThat(storage.get("pending").asLong()).isGreaterThanOrEqualTo(1);
+		// 明细带 owner email，运维台不用再逐个查用户表。
+		assertThat(storage.get("recent").toString()).contains("platform-owner@grey.local");
+
+		JsonNode automation = json(mockMvc.perform(get("/api/admin/automation")
+						.header("Authorization", bearer))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.recent[?(@.id=='ops-visible-task')]").isNotEmpty())
+				.andReturn());
+		assertThat(automation.get("tasks").asLong()).isGreaterThanOrEqualTo(2);
+		assertThat(automation.get("enabled").asLong()).isGreaterThanOrEqualTo(1);
+		assertThat(automation.get("duePending").asLong()).isGreaterThanOrEqualTo(2);
+		assertThat(automation.get("dueOverdue").asLong()).isGreaterThanOrEqualTo(1);
+		assertThat(automation.get("runs7d").asLong()).isGreaterThanOrEqualTo(2);
+		assertThat(automation.get("runsFailed7d").asLong()).isGreaterThanOrEqualTo(1);
+	}
+
+	private void insertStorage(Long id, Long userId, String name, String kind, Long bytes,
+			String status, LocalDateTime at) {
+		jdbc.update("""
+				INSERT INTO storage_object (id, user_id, bucket, object_key, name, content_type,
+				    size_bytes, kind, visibility, status, source, created_at, updated_at)
+				VALUES (?, ?, 'grey', ?, ?, 'text/plain', ?, ?, 'private', ?, 'upload', ?, ?)
+				""", id, userId, "ops/" + name, name, bytes, kind, status, at, at);
+	}
+
+	private void insertDue(Long userId, String taskId, LocalDateTime dueAt, LocalDateTime at) {
+		jdbc.update("""
+				INSERT INTO automation_due (user_id, task_id, name, intent, execution, due_at,
+				    status, created_at)
+				VALUES (?, ?, '运维可见任务', 'do it', 'host', ?, 'pending', ?)
+				""", userId, taskId, dueAt, at);
 	}
 
 	private JsonNode enroll(String email, String platform) throws Exception {

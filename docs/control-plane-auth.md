@@ -169,13 +169,18 @@ GREY_ADMIN_PASSWORD=change-me-please \
 
 ### 资源
 
-| 方法 | 路径                              | 说明                                           |
-| ---- | --------------------------------- | ---------------------------------------------- |
-| GET  | `/api/admin/hosts`                | 跨用户宿主列表（在线状态来自 Redis 心跳）      |
-| GET  | `/api/admin/channels`             | 跨用户通道绑定；`status` 是有效状态（含降级）  |
-| POST | `/api/admin/channels/{id}/status` | `{ "status": "active" \| "disabled" }`，硬开关 |
-| GET  | `/api/admin/llm/keys`             | 密钥元数据（**不含密文**）                     |
-| GET  | `/api/admin/llm/usage`            | 7 天 / 今日请求与 token，按供应商拆分          |
+| 方法 | 路径                              | 说明                                                                          |
+| ---- | --------------------------------- | ----------------------------------------------------------------------------- |
+| GET  | `/api/admin/hosts`                | 跨用户宿主列表（在线状态来自 Redis 心跳）                                     |
+| GET  | `/api/admin/channels`             | 跨用户通道绑定；`status` 是有效状态（含降级）                                 |
+| POST | `/api/admin/channels/{id}/status` | `{ "status": "active" \| "disabled" }`，硬开关                                |
+| GET  | `/api/admin/llm/keys`             | 密钥元数据（**不含密文**）                                                    |
+| GET  | `/api/admin/llm/usage`            | 7 天 / 今日请求与 token，按供应商拆分                                         |
+| GET  | `/api/admin/storage`              | 存储容量（只算 ready）、待确认上传、按种类分布、最近 100 个对象（带归属邮箱） |
+| GET  | `/api/admin/automation`           | 任务数 / 启用数、到期积压与逾期未认领、7 天执行与失败数、最近 100 个任务      |
+
+存储与自动化是**只读**视图：容量口径只含 `status=ready`（pending 是签了票据没回执的空壳，单独计数）；
+逾期未认领 = `status=pending AND due_at < now`，它比 pending 总量更能说明调度是否卡住。
 
 ### 入场码
 

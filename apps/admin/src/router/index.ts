@@ -2,11 +2,13 @@ import { createRouter, createWebHashHistory } from "vue-router";
 import { readToken } from "../api/session";
 import AdminLayout from "../layouts/AdminLayout.vue";
 import AuditView from "../views/AuditView.vue";
+import AutomationView from "../views/AutomationView.vue";
 import ChannelsView from "../views/ChannelsView.vue";
 import EnrollCodesView from "../views/EnrollCodesView.vue";
 import HostsView from "../views/HostsView.vue";
 import LlmView from "../views/LlmView.vue";
 import LoginView from "../views/LoginView.vue";
+import StorageView from "../views/StorageView.vue";
 import OverviewView from "../views/OverviewView.vue";
 import UsersView from "../views/UsersView.vue";
 
@@ -56,6 +58,18 @@ export const router = createRouter({
           name: "channels",
           component: ChannelsView,
           meta: { title: "通道绑定", subtitle: "跨用户的 IM 通道与宿主归属" },
+        },
+        {
+          path: "storage",
+          name: "storage",
+          component: StorageView,
+          meta: { title: "对象存储", subtitle: "跨用户容量与待确认上传" },
+        },
+        {
+          path: "automation",
+          name: "automation",
+          component: AutomationView,
+          meta: { title: "自动化任务", subtitle: "调度积压、失败率与跨用户任务" },
         },
         {
           path: "llm",

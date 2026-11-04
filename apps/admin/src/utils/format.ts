@@ -52,6 +52,21 @@ export function formatTokens(value?: number | null): string {
   return String(total);
 }
 
+/** 字节数压缩：容量卡片上 3,145,728 这种数字没人愿意数位数。 */
+export function formatBytes(value?: number | null): string {
+  const bytes = value ?? 0;
+  if (bytes >= 1024 ** 3) {
+    return (bytes / 1024 ** 3).toFixed(bytes >= 10 * 1024 ** 3 ? 0 : 1) + " GB";
+  }
+  if (bytes >= 1024 ** 2) {
+    return (bytes / 1024 ** 2).toFixed(bytes >= 10 * 1024 ** 2 ? 0 : 1) + " MB";
+  }
+  if (bytes >= 1024) {
+    return (bytes / 1024).toFixed(bytes >= 10 * 1024 ? 0 : 1) + " KB";
+  }
+  return bytes + " B";
+}
+
 export const PLATFORM_LABELS: Record<string, string> = {
   wechat: "微信",
   wecom: "企业微信",

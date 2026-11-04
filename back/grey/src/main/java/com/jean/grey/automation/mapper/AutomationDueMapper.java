@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.jean.grey.automation.entity.AutomationDue;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -67,5 +68,24 @@ public interface AutomationDueMapper extends BaseMapper<AutomationDue> {
 			""")
 	List<AutomationDue> recentForTask(@Param("userId") Long userId,
 			@Param("taskId") String taskId, @Param("limit") int limit);
+
+	/** 运维台：全平台各状态的积压条数（pending / claimed / running / done / failed）。 */
+	@Select("""
+			SELECT status AS status, COUNT(*) AS count
+			FROM automation_due
+			GROUP BY status
+			""")
+	List<java.util.Map<String, Object>> backlog();
+
+	/**
+	 * 已经过了触发时间却还没被认领的条数：pending 且 due_at 早于 now。
+	 * 这个数比 pending 更能说明「调度是不是卡住了」——正常积压应该只差几分钟。
+	 */
+	@Select("""
+			SELECT COUNT(*) AS count
+			FROM automation_due
+			WHERE status = 'pending' AND due_at < #{now}
+			""")
+	long overdueCount(@Param("now") LocalDateTime now);
 
 }
