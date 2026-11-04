@@ -38,6 +38,7 @@ import { listWorktrees, provisionWorktree, releaseWorktree, restoreWorktree, sna
 import { chatComplete, embed, listModels, transcribe, type LlmChatMessage, type LlmStreamHost } from "./llm.js";
 import type { AcpHost } from "./acp.js";
 import { validateDirKey } from "./plugin-market.js";
+import { channelStatus, saveChannelCredentials, clearChannelCredentials } from "./channel-credentials.js";
 import { saveCredentials, telegramSend, telegramStatus } from "./channel-telegram.js";
 import type { EventBus } from "./events.js";
 import type { SessionFileStore, WorkspaceDir } from "./session-store.js";
@@ -627,6 +628,91 @@ HANDLERS.set("telegram_send", async (args, ctx) => {
     throw new CommandError(400, "缺少参数 chatId / text");
   }
   return telegramSend(ctx.dataDir, value.chatId, value.text);
+});
+
+
+HANDLERS.set("telegram_status", async (_args, ctx) => channelStatus(ctx.dataDir, "telegram"));
+HANDLERS.set("telegram_save_credentials", async (args, ctx) => {
+  const value = args as Record<string, unknown> | null;
+  if (!value || typeof value !== "object") throw new CommandError(400, "缺少参数");
+  saveChannelCredentials(ctx.dataDir, "telegram", value);
+  return null;
+});
+HANDLERS.set("telegram_clear_credentials", async (_args, ctx) => {
+  clearChannelCredentials(ctx.dataDir, "telegram");
+  return null;
+});
+
+HANDLERS.set("dingtalk_status", async (_args, ctx) => channelStatus(ctx.dataDir, "dingtalk"));
+HANDLERS.set("dingtalk_save_credentials", async (args, ctx) => {
+  const value = args as Record<string, unknown> | null;
+  if (!value || typeof value !== "object") throw new CommandError(400, "缺少参数");
+  saveChannelCredentials(ctx.dataDir, "dingtalk", value);
+  return null;
+});
+HANDLERS.set("dingtalk_clear_credentials", async (_args, ctx) => {
+  clearChannelCredentials(ctx.dataDir, "dingtalk");
+  return null;
+});
+
+HANDLERS.set("discord_status", async (_args, ctx) => channelStatus(ctx.dataDir, "discord"));
+HANDLERS.set("discord_save_credentials", async (args, ctx) => {
+  const value = args as Record<string, unknown> | null;
+  if (!value || typeof value !== "object") throw new CommandError(400, "缺少参数");
+  saveChannelCredentials(ctx.dataDir, "discord", value);
+  return null;
+});
+HANDLERS.set("discord_clear_credentials", async (_args, ctx) => {
+  clearChannelCredentials(ctx.dataDir, "discord");
+  return null;
+});
+
+HANDLERS.set("feishu_status", async (_args, ctx) => channelStatus(ctx.dataDir, "feishu"));
+HANDLERS.set("feishu_save_credentials", async (args, ctx) => {
+  const value = args as Record<string, unknown> | null;
+  if (!value || typeof value !== "object") throw new CommandError(400, "缺少参数");
+  saveChannelCredentials(ctx.dataDir, "feishu", value);
+  return null;
+});
+HANDLERS.set("feishu_clear_credentials", async (_args, ctx) => {
+  clearChannelCredentials(ctx.dataDir, "feishu");
+  return null;
+});
+
+HANDLERS.set("qq_status", async (_args, ctx) => channelStatus(ctx.dataDir, "qq"));
+HANDLERS.set("qq_save_credentials", async (args, ctx) => {
+  const value = args as Record<string, unknown> | null;
+  if (!value || typeof value !== "object") throw new CommandError(400, "缺少参数");
+  saveChannelCredentials(ctx.dataDir, "qq", value);
+  return null;
+});
+HANDLERS.set("qq_clear_credentials", async (_args, ctx) => {
+  clearChannelCredentials(ctx.dataDir, "qq");
+  return null;
+});
+
+HANDLERS.set("wecom_status", async (_args, ctx) => channelStatus(ctx.dataDir, "wecom"));
+HANDLERS.set("wecom_save_credentials", async (args, ctx) => {
+  const value = args as Record<string, unknown> | null;
+  if (!value || typeof value !== "object") throw new CommandError(400, "缺少参数");
+  saveChannelCredentials(ctx.dataDir, "wecom", value);
+  return null;
+});
+HANDLERS.set("wecom_clear_credentials", async (_args, ctx) => {
+  clearChannelCredentials(ctx.dataDir, "wecom");
+  return null;
+});
+
+HANDLERS.set("wechat_status", async (_args, ctx) => channelStatus(ctx.dataDir, "wechat"));
+HANDLERS.set("wechat_save_credentials", async (args, ctx) => {
+  const value = args as Record<string, unknown> | null;
+  if (!value || typeof value !== "object") throw new CommandError(400, "缺少参数");
+  saveChannelCredentials(ctx.dataDir, "wechat", value);
+  return null;
+});
+HANDLERS.set("wechat_clear_credentials", async (_args, ctx) => {
+  clearChannelCredentials(ctx.dataDir, "wechat");
+  return null;
 });
 
 HANDLERS.set("check_update", async () => checkUpdate());
