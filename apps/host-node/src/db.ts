@@ -427,6 +427,23 @@ export class Db {
     }
   }
 
+  /** RAG 统计：分块总数 + 去重文件数（root/path）。 */
+  ragStats(): { chunks: number; files: number } {
+    const chunks = this.conn.prepare("SELECT COUNT(*) AS n FROM rag_chunks").get() as { n: number };
+    const files = this.conn.prepare("SELECT COUNT(DISTINCT root || '/' || path) AS n FROM rag_chunks").get() as { n: number };
+    return { chunks: Number(chunks.n), files: Number(files.n) };
+  }
+
+  ragMetaGet(key: string): string | null {
+    const row = this.conn.prepare("SELECT value FROM rag_meta WHERE key = ?1").get(key) as { value: string } | undefined;
+    return row ? row.value : null;
+  }
+
+  ragClear(): void {
+    this.conn.prepare("DELETE FROM rag_chunks").run();
+    this.conn.prepare("DELETE FROM rag_meta").run();
+  }
+
   private marker(key: string): boolean {
     const row = this.conn.prepare("SELECT value FROM meta WHERE key = ?1").get(key) as { value?: string } | undefined;
     return row !== undefined;

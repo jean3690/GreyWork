@@ -47,8 +47,9 @@
   会话不因前端断连回收），需要 `allowBuilds` 放开 node-pty 的编译脚本。二进制读取
   （`fs_read_binary`）与文件探测（`fs_probe_file`，UTF-8 / BOM / CRLF / 二进制占比）也已迁移，
   二进制结果按 `application/octet-stream` + `x-greywork-binary: 1` 回原始字节；顺带把未知命令的
-  状态码从 400 修正为 404（与 `apps/server` 的路由层一致）。`fs_read_media`（20MB 缺省、
-  128MB 硬顶，超限报错不截断）与 `fs_write_binary`（base64 解码后 ≤20MB）也一并迁移。
+  状态码从 400 修正为 404（与 `apps/server` 的路由层一致）。 `fs_read_media`（20MB 缺省、128MB 硬顶，超限报错不截断）与 `fs_write_binary`（base64 解码后
+  ≤20MB）也一并迁移。RAG 的状态查询与清空、隔离工作树的列表/回收（只认带 provision 标记的快照、
+  只允许删基目录之下）与 `check_update` 也已迁移。
   会话存储（`store_sessions_load/sync`、`attachments_prune_session`）按文件面迁移：默认
   `~/.greyWork/sessions` + 各工作区 `.greyWork/sessions`、`.ready` 就绪标记、`active.json`、
   「建目录」式跨进程锁（30s 陈旧接管）；写入遵循「内容相同跳过 / 磁盘更新记冲突不覆盖 /

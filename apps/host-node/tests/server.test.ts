@@ -669,6 +669,22 @@ describe("HTTP 契约", () => {
     expect((outside.body as { error: string }).error).toContain("只允许释放");
   });
 
+  it("rag_status / rag_clear：空索引回零值，清空幂等", async () => {
+    const call = async (command: string, args: unknown = {}) => {
+      const response = await fetch(`${base}/api/command`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ command, args }),
+      });
+      return { status: response.status, body: await response.json() };
+    };
+
+    expect((await call("rag_status")).body).toEqual({ chunks: 0, files: 0, model: null, dim: null });
+    expect((await call("rag_clear")).status).toBe(200);
+    // 清空后仍是零值（空索引不是错误）。
+    expect((await call("rag_status")).body).toEqual({ chunks: 0, files: 0, model: null, dim: null });
+  });
+
   it("db_settings：空库回 null，写入后可读回且类型原样", async () => {
     const call = async (command: string, args: unknown = {}) => {
       const response = await fetch(`${base}/api/command`, {

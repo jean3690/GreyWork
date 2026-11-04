@@ -178,6 +178,18 @@ HANDLERS.set("terminal_close", async (args, ctx) => {
   return null;
 });
 
+HANDLERS.set("rag_status", async (_args, ctx) => {
+  const stats = ctx.db.ragStats();
+  const model = ctx.db.ragMetaGet("rag.embedding.model");
+  const dimRaw = ctx.db.ragMetaGet("rag.embedding.dim");
+  const dim = dimRaw !== null && /^\d+$/.test(dimRaw) ? Number(dimRaw) : null;
+  return { chunks: stats.chunks, files: stats.files, model, dim };
+});
+HANDLERS.set("rag_clear", async (_args, ctx) => {
+  ctx.db.ragClear();
+  return null;
+});
+
 HANDLERS.set("worktree_list", async (_args, ctx) => listWorktrees(ctx.access));
 HANDLERS.set("worktree_release", async (args, ctx) => {
   const root = (args as { root?: unknown } | null)?.root;
