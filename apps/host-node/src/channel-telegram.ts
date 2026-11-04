@@ -27,8 +27,10 @@ export function saveCredentials(dataDir: string, botToken: string): void {
 
 export function loadCredentials(dataDir: string): TgCredentials | null {
   try {
-    const raw = JSON.parse(readFileSync(credentialsFile(dataDir), "utf8")) as TgCredentials;
-    return typeof raw.botToken === "string" && raw.botToken !== "" ? raw : null;
+    // Rust 侧落盘形状是 { token }；Node 早期版本是 { botToken }，两者都认。
+    const raw = JSON.parse(readFileSync(credentialsFile(dataDir), "utf8")) as { token?: unknown; botToken?: unknown };
+    const botToken = typeof raw.token === "string" && raw.token !== "" ? raw.token : typeof raw.botToken === "string" ? raw.botToken : null;
+    return botToken !== null ? { botToken } : null;
   } catch { return null; }
 }
 
