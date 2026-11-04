@@ -11,17 +11,18 @@
  * - 这几个扫码注册接口都没有公开文档，是厂商给自家客户端留的内部通道；协议若变更，
  *   这里以 errcode/retcode/解密失败的形式**显式报错**（不静默失败），界面退回手填凭证。
  *
- * 出站媒体的通道覆盖：wechat（官方 SDK）与 telegram（Bot API）全类别落地；
- * feishu / qq / discord / wecom 的上传协议尚未在 Node 宿主实现，按「通道未连接」报错
- * （与 Rust 侧未连接时的错误形态一致，界面退路相同）。
+ * 出站媒体的通道覆盖：全七件套按能力矩阵分发 —— wechat（官方 SDK）、telegram（Bot API）、
+ * feishu（im/v1 images/files）、discord（multipart 附件）、qq（官方分片上传四步）真实落地；
+ * wecom 的出站挂在 WS 长连接发送端上（Node 宿主的长连接未实现，报「通道未连接」与 Rust
+ * 同款）；dingtalk 出站无媒体通道，由能力矩阵在 prepareOutbound 一处拦截。
  */
-import { createDecipheriv, randomBytes } from "node:crypto";
+import { createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { closeSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, statSync, unlinkSync, writeSync } from "node:fs";
 import path from "node:path";
 
 import { getBot, setConnected } from "./wechat-channel.js";
 import { loadCredentials as loadTelegramCredentials } from "./channel-telegram.js";
-import { saveChannelCredentials } from "./channel-credentials.js";
+import { loadChannelCredentials, saveChannelCredentials } from "./channel-credentials.js";
 import type { WorkspaceAccess } from "./workspace-access.js";
 
 /** 入站媒体字节上限（与 fs_read_media 对齐：真实视频普遍超过 20MB）。 */
@@ -375,13 +376,19 @@ export async function sendMediaVia(dataDir: string, channel: string, peerId: str
     case "telegram":
       await sendTelegramMedia(dataDir, peerId, media);
       return;
-    case "dingtalk":
     case "feishu":
-    case "qq":
+      await sendFeishuMedia(dataDir, peerId, media);
+      return;
     case "discord":
+      await sendDiscordMedia(dataDir, peerId, media);
+      return;
+    case "qq":
+      await sendQqMedia(dataDir, peerId, media);
+      return;
     case "wecom":
-      // 这些通道的上传协议尚未在 Node 宿主实现；与未连接同形态报错，界面退路相同。
-      throw new Error(channel + " 通道未连接");
+      // 出站媒体挂在 WebSocket 长连接的发送端上（Rust Inner.outgoing）；Node 宿主的
+      // 企微长连接尚未实现，与 Rust「未连接」同款报错，界面退路相同。
+      throw new Error("通道未连接：先连接企业微信通道再发送");
     default:
       throw new Error("未知通道: " + channel);
   }
@@ -1099,4 +1106,324 @@ export async function wechatSendTyping(dataDir: string, toUserId: string, typing
   if (!typing) return;
   const bot = getBot(path.join(dataDir, "wechat"));
   await bot.sendTyping(toUserId);
+}
+
+/* ===== 通道媒体上传：feishu / discord / qq（各通道 commands.rs 的 send_media 移植） ===== */
+
+const FEISHU_DOMAIN = "https://open.feishu.cn";
+const DISCORD_API = "https://discord.com/api/v10";
+const QQ_API_BASE = "https://api.sgroup.qq.com";
+/** QQ 业务类型：图片只认 png/jpg、视频只认 mp4/mov，其余一律按文件（4）发。 */
+const QQ_FILE_TYPE_IMAGE = 1;
+const QQ_FILE_TYPE_MEDIA = 2;
+const QQ_FILE_TYPE_FILE = 4;
+
+function briefBody(text: string): string {
+  const trimmed = text.trim();
+  const chars = [...trimmed];
+  return chars.length <= 200 ? trimmed : chars.slice(0, 200).join("") + "…";
+}
+
+function feishuCheckCode(body: string, action: string): Record<string, unknown> {
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(body) as Record<string, unknown>;
+  } catch (error) {
+    throw new Error(action + "响应解析失败: " + (error as Error).message);
+  }
+  const code = typeof parsed.code === "number" ? parsed.code : -1;
+  if (code !== 0) {
+    const message = typeof parsed.msg === "string" ? parsed.msg : "";
+    throw new Error(action + "失败 code=" + code + " msg=" + message);
+  }
+  return parsed;
+}
+
+async function feishuToken(dataDir: string): Promise<string> {
+  const creds = loadChannelCredentials(dataDir, "feishu") as { appId?: string; appSecret?: string } | null;
+  if (!creds?.appId || !creds?.appSecret) throw new Error("尚未配置飞书应用凭证");
+  const response = await fetch(FEISHU_DOMAIN + "/open-apis/auth/v3/tenant_access_token/internal", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ app_id: creds.appId, app_secret: creds.appSecret }),
+    signal: AbortSignal.timeout(15_000),
+  }).catch((error: Error) => {
+    throw new Error("换取 token 失败: " + error.message);
+  });
+  const body = await response.text();
+  if (!response.ok) throw new Error("换取 token HTTP " + response.status + ": " + briefBody(body));
+  const parsed = feishuCheckCode(body, "换取 token");
+  const token = parsed.tenant_access_token;
+  if (typeof token !== "string" || token === "") throw new Error("token 响应缺少 tenant_access_token");
+  return token;
+}
+
+function feishuDataField(parsed: Record<string, unknown>, key: string, action: string): string {
+  const data = parsed.data as Record<string, unknown> | undefined;
+  const value = typeof data?.[key] === "string" ? (data[key] as string) : "";
+  if (value === "") throw new Error(action + "响应缺少 " + key);
+  return value;
+}
+
+/** 飞书传图（im/v1/images）→ image_key。 */
+async function feishuUploadImage(token: string, media: OutboundMedia): Promise<string> {
+  const form = new FormData();
+  form.append("image_type", "message");
+  form.append("image", new Blob([new Uint8Array(media.bytes)]), media.name);
+  const response = await fetch(FEISHU_DOMAIN + "/open-apis/im/v1/images", {
+    method: "POST",
+    headers: { authorization: "Bearer " + token },
+    body: form,
+    signal: AbortSignal.timeout(60_000),
+  }).catch((error: Error) => {
+    throw new Error("上传图片失败: " + error.message);
+  });
+  const body = await response.text();
+  if (!response.ok) throw new Error("上传图片 HTTP " + response.status + ": " + briefBody(body));
+  return feishuDataField(feishuCheckCode(body, "上传图片"), "image_key", "上传图片");
+}
+
+/** 飞书传文件（im/v1/files，file_type=stream）→ file_key。 */
+async function feishuUploadFile(token: string, media: OutboundMedia): Promise<string> {
+  const form = new FormData();
+  form.append("file_type", "stream");
+  form.append("file_name", media.name);
+  form.append("file", new Blob([new Uint8Array(media.bytes)]), media.name);
+  const response = await fetch(FEISHU_DOMAIN + "/open-apis/im/v1/files", {
+    method: "POST",
+    headers: { authorization: "Bearer " + token },
+    body: form,
+    signal: AbortSignal.timeout(60_000),
+  }).catch((error: Error) => {
+    throw new Error("上传文件失败: " + error.message);
+  });
+  const body = await response.text();
+  if (!response.ok) throw new Error("上传文件 HTTP " + response.status + ": " + briefBody(body));
+  return feishuDataField(feishuCheckCode(body, "上传文件"), "file_key", "上传文件");
+}
+
+/** 飞书：图片走 im/v1/images，其余降级文件走 im/v1/files，再发一条 media 消息。 */
+async function sendFeishuMedia(dataDir: string, peerId: string, media: OutboundMedia): Promise<void> {
+  const token = await feishuToken(dataDir);
+  let msgType: string;
+  let content: Record<string, string>;
+  if (media.kind === "image") {
+    const imageKey = await feishuUploadImage(token, media);
+    msgType = "image";
+    content = { image_key: imageKey };
+  } else {
+    // 视频 / 语音无原生出站端点（media 需封面、audio 需 opus），共享层已降级为文件。
+    const fileKey = await feishuUploadFile(token, media);
+    msgType = "file";
+    content = { file_key: fileKey };
+  }
+  const response = await fetch(FEISHU_DOMAIN + "/open-apis/im/v1/messages?receive_id_type=chat_id", {
+    method: "POST",
+    headers: { authorization: "Bearer " + token, "content-type": "application/json" },
+    body: JSON.stringify({ receive_id: peerId, msg_type: msgType, content: JSON.stringify(content) }),
+    signal: AbortSignal.timeout(15_000),
+  }).catch((error: Error) => {
+    throw new Error("发送消息失败: " + error.message);
+  });
+  const body = await response.text();
+  if (!response.ok) throw new Error("发送失败 HTTP " + response.status + ": " + briefBody(body));
+  feishuCheckCode(body, "发送");
+}
+
+/** discord：multipart 带 files[0]（payload_json 固定空对象，元信息都在表单里）。 */
+async function sendDiscordMedia(dataDir: string, peerId: string, media: OutboundMedia): Promise<void> {
+  const creds = loadChannelCredentials(dataDir, "discord") as { token?: string } | null;
+  if (!creds?.token) throw new Error("Discord bot token 未配置");
+  const form = new FormData();
+  form.append("payload_json", "{}");
+  form.append("files[0]", new Blob([new Uint8Array(media.bytes)]), media.name);
+  const response = await fetch(DISCORD_API + "/channels/" + peerId + "/messages", {
+    method: "POST",
+    headers: { authorization: "Bot " + creds.token },
+    body: form,
+    signal: AbortSignal.timeout(60_000),
+  }).catch((error: Error) => {
+    throw new Error("发送媒体失败: " + error.message);
+  });
+  const body = await response.text();
+  if (!response.ok) throw new Error("发送媒体返回 " + response.status + ": " + briefBody(body));
+}
+
+/** QQ 的 peer 形态：c2c:<openid> / group:<openid>；无前缀按单聊兜底（Node 旧版形态）。 */
+function decodeQqPeer(peerId: string): { scope: "c2c" | "group"; openid: string } | null {
+  const colon = peerId.indexOf(":");
+  if (colon < 0) return peerId === "" ? null : { scope: "c2c", openid: peerId };
+  const prefix = peerId.slice(0, colon);
+  const openid = peerId.slice(colon + 1).trim();
+  if (prefix !== "c2c" && prefix !== "group") return null;
+  if (openid === "") return null;
+  return { scope: prefix, openid };
+}
+
+function qqMd5(bytes: Buffer): string {
+  return createHash("md5").update(bytes).digest("hex");
+}
+
+function qqSha1(bytes: Buffer): string {
+  return createHash("sha1").update(bytes).digest("hex");
+}
+
+/** QQ 业务类型判定：图片只认 png/jpg、视频只认 mp4/mov，其余一律按文件（4）。 */
+function qqFileType(media: OutboundMedia): number {
+  if (media.kind === "image") {
+    const sniffed = sniffImage(media.bytes);
+    if (sniffed !== null && (sniffed[0] === "image/png" || sniffed[0] === "image/jpeg")) {
+      return QQ_FILE_TYPE_IMAGE;
+    }
+  }
+  if (media.kind === "video" && ["mp4", "mov"].includes(extOf(media.name))) {
+    return QQ_FILE_TYPE_MEDIA;
+  }
+  return QQ_FILE_TYPE_FILE;
+}
+
+/** QQ 的业务错误也走 200 + code：只判 HTTP 状态会把「消息被拒」当成成功。 */
+async function qqPostApi(token: string, url: string, body: unknown, action: string): Promise<Record<string, unknown>> {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { authorization: "QQBot " + token, "content-type": "application/json" },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(30_000),
+  }).catch((error: Error) => {
+    throw new Error(action + "请求失败: " + error.message);
+  });
+  const text = await response.text().catch(() => "");
+  if (!response.ok) throw new Error(action + "返回 " + response.status + ": " + briefBody(text));
+  let parsed: Record<string, unknown> = {};
+  try {
+    parsed = JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    parsed = {};
+  }
+  const code = typeof parsed.code === "number" ? parsed.code : null;
+  if (code !== null && code !== 0) {
+    const message = typeof parsed.message === "string" ? parsed.message : "unknown error";
+    throw new Error("QQ 拒绝了" + action + "（" + code + "）：" + message);
+  }
+  return parsed;
+}
+
+async function qqToken(dataDir: string): Promise<string> {
+  const creds = loadChannelCredentials(dataDir, "qq") as { appId?: string; appSecret?: string } | null;
+  if (!creds?.appId || !creds?.appSecret) throw new Error("尚未配置 QQ 机器人 AppID / AppSecret");
+  const response = await fetch("https://bots.qq.com/app/getAppAccessToken", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ appId: creds.appId, clientSecret: creds.appSecret }),
+    signal: AbortSignal.timeout(15_000),
+  }).catch((error: Error) => {
+    throw new Error("取 access_token 失败: " + error.message);
+  });
+  const body = (await response.json().catch(() => ({}))) as { access_token?: string };
+  if (typeof body.access_token !== "string" || body.access_token === "") {
+    throw new Error("access_token 响应缺少 access_token");
+  }
+  return body.access_token;
+}
+
+function qqSizeOf(value: unknown): number {
+  if (typeof value === "number") return value;
+  if (typeof value === "string") {
+    const parsed = Number.parseInt(value.trim(), 10);
+    return Number.isNaN(parsed) ? 0 : parsed;
+  }
+  return 0;
+}
+
+/**
+ * 把一条本地媒体传到 QQ 并换回 file_info（富媒体消息必填）。
+ * 官方分片上传四步：upload_prepare（带 md5/sha1/前 10MB md5）→ 每片 PUT 到预签名地址
+ * → 每片 upload_part_finish → files 合并换 file_info。
+ */
+async function qqUploadRichMedia(token: string, peer: { scope: "c2c" | "group"; openid: string }, media: OutboundMedia): Promise<string> {
+  if (media.bytes.length === 0) throw new Error("不能发送空文件");
+  const base = (peer.scope === "c2c" ? QQ_API_BASE + "/v2/users/" : QQ_API_BASE + "/v2/groups/") + peer.openid;
+  const fileType = qqFileType(media);
+  const fileSize = media.bytes.length;
+  const headLen = Math.min(fileSize, 10 * 1024 * 1024);
+  const prepared = await qqPostApi(token, base + "/upload_prepare", {
+    file_type: fileType,
+    file_name: media.name,
+    file_size: String(fileSize),
+    md5: qqMd5(media.bytes),
+    sha1: qqSha1(media.bytes),
+    md5_10m: qqMd5(media.bytes.subarray(0, headLen)),
+  }, "申请上传");
+  const uploadId = typeof prepared.upload_id === "string" ? prepared.upload_id.trim() : "";
+  if (uploadId === "") throw new Error("申请上传响应缺少 upload_id");
+  const rawParts = Array.isArray(prepared.parts) ? prepared.parts : [];
+  const parts = rawParts
+    .map((part) => {
+      const record = part as { index?: unknown; presigned_url?: unknown; block_size?: unknown };
+      return {
+        index: typeof record.index === "number" ? record.index : -1,
+        presignedUrl: typeof record.presigned_url === "string" ? record.presigned_url : "",
+        blockSize: record.block_size,
+      };
+    })
+    .filter((part) => part.index >= 0)
+    .sort((a, b) => a.index - b.index);
+  if (parts.length === 0) throw new Error("申请上传响应没有分片信息");
+
+  let offset = 0;
+  for (const part of parts) {
+    // 按服务端下发的片大小切；最后一片可能更小，用 min 收口。
+    const end = Math.min(offset + qqSizeOf(part.blockSize), fileSize);
+    if (end <= offset) throw new Error("分片 " + part.index + " 大小异常");
+    if (part.presignedUrl.trim() === "") throw new Error("分片预签名地址为空");
+    const chunk = media.bytes.subarray(offset, end);
+    const put = await fetch(part.presignedUrl, {
+      method: "PUT",
+      body: new Uint8Array(chunk),
+      signal: AbortSignal.timeout(60_000),
+    }).catch((error: Error) => {
+      throw new Error("上传分片请求失败: " + error.message);
+    });
+    if (!put.ok) {
+      const body = await put.text().catch(() => "");
+      throw new Error("上传分片返回 " + put.status + ": " + briefBody(body));
+    }
+    await qqPostApi(token, base + "/upload_part_finish", {
+      upload_id: uploadId,
+      part_index: part.index,
+      block_size: String(end - offset),
+      md5: qqMd5(chunk),
+    }, "完成分片");
+    offset = end;
+  }
+  if (offset !== fileSize) throw new Error("分片上传未覆盖整个文件");
+
+  const merged = await qqPostApi(token, base + "/files", {
+    file_type: fileType,
+    file_name: media.name,
+    upload_id: uploadId,
+    srv_send_msg: false,
+  }, "合并文件");
+  const fileInfo = typeof merged.file_info === "string" ? merged.file_info : "";
+  if (fileInfo === "") throw new Error("合并文件响应缺少 file_info");
+  return fileInfo;
+}
+
+/**
+ * QQ：先分片上传换 file_info，再发 msg_type=7 富媒体消息。
+ * 注意：Node 宿主尚无入站长连接（没有对端 msg_id 簿），消息体带空 msg_id ——
+ * 与既有 qq_send 的行为一致；带 5 分钟窗口的被动回复语义待入站面补齐后接入。
+ */
+async function sendQqMedia(dataDir: string, peerId: string, media: OutboundMedia): Promise<void> {
+  const peer = decodeQqPeer(peerId);
+  if (peer === null) throw new Error("对端 id 无法解析: " + JSON.stringify(peerId));
+  const token = await qqToken(dataDir);
+  const fileInfo = await qqUploadRichMedia(token, peer, media);
+  const messagesUrl = (peer.scope === "c2c" ? QQ_API_BASE + "/v2/users/" : QQ_API_BASE + "/v2/groups/") + peer.openid + "/messages";
+  await qqPostApi(token, messagesUrl, {
+    msg_type: 7,
+    media: { file_info: fileInfo },
+    msg_id: "",
+    msg_seq: 1,
+  }, "发送媒体");
 }
