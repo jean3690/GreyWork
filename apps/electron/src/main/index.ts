@@ -15,7 +15,7 @@ import { startDevServer, stopDevServer } from "./dev-server";
 import { registerIpc } from "./ipc";
 import { installFileLogging } from "./logger";
 import { installApplicationMenu } from "./menu";
-import { serverBinaryPath } from "./paths";
+import { nodeServerEntryPath } from "./paths";
 import { startServer, stopServer } from "./sidecar";
 import { createTray, type TrayHost } from "./tray";
 import { createMainWindow } from "./window";
@@ -151,7 +151,7 @@ if (!app.requestSingleInstanceLock()) {
       installFileLogging();
       installApplicationMenu({ dev: !app.isPackaged });
 
-      const credentials = loadOrCreateCredentials(serverBinaryPath());
+      const credentials = loadOrCreateCredentials(nodeServerEntryPath());
       const sidecar = await startServer(credentials.hash);
       sidecarPort = sidecar.port;
       sidecarPassword = credentials.password;

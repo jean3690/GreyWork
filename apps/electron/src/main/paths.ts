@@ -28,16 +28,8 @@ function requireRepoRoot(): string {
   return root;
 }
 
-const SERVER_BIN_NAME = process.platform === "win32" ? "greywork-server.exe" : "greywork-server";
-
-/** greywork-server 可执行文件路径。 */
-export function serverBinaryPath(): string {
-  if (app.isPackaged) return path.join(process.resourcesPath, "server", SERVER_BIN_NAME);
-  return path.join(requireRepoRoot(), "target", "debug", SERVER_BIN_NAME);
-}
-
 /**
- * Node 宿主入口（`GREYWORK_HOST_KIND=node` 时 sidecar 改 spawn 它而不是 Rust 二进制）。
+ * Node 宿主入口（sidecar spawn 的就是它）。
  * 开发态：`apps/host-node/dist/index.js`（`pnpm --filter @greywork/host-node build` 产物）。
  */
 export function nodeServerEntryPath(): string {
