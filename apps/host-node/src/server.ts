@@ -14,6 +14,7 @@ import { CommandError, dispatch, listCommands } from "./commands.js";
 import { attachEvents } from "./events.js";
 import { serveStatic } from "./static-site.js";
 import type { HostConfig } from "./config.js";
+import type { WorkspaceAccess } from "./workspace-access.js";
 
 const MAX_BODY_BYTES = 32 * 1024 * 1024;
 
@@ -22,6 +23,7 @@ export interface HostServerOptions {
   sessions: SessionStore;
   throttle: LoginThrottle;
   staticRoot: string | null;
+  access: WorkspaceAccess;
 }
 
 class HttpError extends Error {
@@ -178,7 +180,10 @@ export function createHostServer(options: HostServerOptions): { server: Server; 
       if (pathname === "/api/command" && method === "POST") {
         const body = (await readJson(request)) as { command?: unknown; args?: unknown } | null;
         try {
-          const result = await dispatch(body?.command, body?.args ?? null, config.trustedHost);
+          const result = await dispatch(body?.command, body?.args ?? null, {
+            access: options.access,
+            trustedHost: config.trustedHost,
+          });
           return sendJson(response, 200, result ?? null);
         } catch (error) {
           if (error instanceof CommandError) {

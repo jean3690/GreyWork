@@ -32,8 +32,11 @@
 
 - **Node 宿主骨架 `apps/host-node`（迁移起点）**：把 headless 宿主的 HTTP 面按 Rust 契约重建 ——
   8 条路由、cookie/Bearer 会话、argon2 PHC 校验、登录限流、静态托管缓存头、WS `host://hello`，
-  以及从 Rust 导出的 189 条命令元数据（`available` 标出已迁移项）。P0 只迁了一条叶子命令
-  （`store_default_root`、`terminal_shells`），未迁移命令回明确的 501 而不是假装可用。
+  以及从 Rust 导出的 189 条命令元数据（`available` 标出已迁移项）。已迁移
+  `store_default_root` / `terminal_shells` / `fs_list_dir` / `fs_read_text_file`，
+  未迁移命令回明确的 501 而不是假装可用。
+  路径授权面同步落地（`~/.greyWork` 默认根 + `GREYWORK_WORKSPACE_ROOTS` 预置根 + 0600 账本），
+  越界按路径分量判定。
   新增 `pnpm host:parity` 双轨对照：同一份环境变量起两个宿主，逐命令比对状态码与响应体，
   迁移的每条命令都以它为准；可信宿主命令名单（`TRUSTED_HOST_ONLY`）也已按 Rust 同口径移植。
   方案、阶段与风险见 [docs/node-backend-migration.md](docs/node-backend-migration.md)；

@@ -15,7 +15,7 @@
  */
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -111,6 +111,18 @@ function normalize(value, replace) {
   return value;
 }
 
+/**
+ * 少数命令的返回值是**集合**而非有序序列：`fs_list_dir` 走的是文件系统枚举顺序，
+ * 同一目录在 Rust / Node 下也可能不同（前端 `fileTree` 用 `sortEntries` 统一排，顺序不影响行为）。
+ * 这类命令在这里按稳定键排序后再比，既不放过真正的差异，也不被枚举顺序误报。
+ */
+function normalizeForCommand(command, value) {
+  if (command === "fs_list_dir" && Array.isArray(value)) {
+    return [...value].sort((left, right) => String(left.path).localeCompare(String(right.path)));
+  }
+  return value;
+}
+
 function stableStringify(value) {
   if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
   if (value && typeof value === "object") {
@@ -124,6 +136,26 @@ function stableStringify(value) {
 
 const label = process.env.HOME ? path.basename(process.env.HOME) : "user";
 const dirs = [mkdtempSync(path.join(tmpdir(), "gw-parity-rust-")), mkdtempSync(path.join(tmpdir(), "gw-parity-node-"))];
+// 两边共用的工作区夹具：同一批文件、同一个绝对路径（只靠 GREYWORK_WORKSPACE_ROOTS 授权）。
+const workspaceDir = mkdtempSync(path.join(tmpdir(), "gw-parity-ws-"));
+writeFileSync(path.join(workspaceDir, "hello.txt"), "hello parity\n");
+mkdirSync(path.join(workspaceDir, "sub"), { recursive: true });
+writeFileSync(path.join(workspaceDir, "sub", "nested.txt"), "nested\n");
+
+/**
+ * 逐命令的入参。需要路径的命令在这里给夹具路径 —— 两边拿到的是同一份绝对路径，
+ * 于是差异只可能来自实现，而不是环境。
+ */
+function argsFor(command) {
+  switch (command) {
+    case "fs_list_dir":
+      return { path: workspaceDir };
+    case "fs_read_text_file":
+      return { path: path.join(workspaceDir, "hello.txt") };
+    default:
+      return {};
+  }
+}
 const [rustPort, nodePort] = [await freePort(), await freePort()];
 
 function spawnHost(binary, argv, port, dataDir, name) {
@@ -138,6 +170,7 @@ function spawnHost(binary, argv, port, dataDir, name) {
       // 以「本机桌面端」口径对照：否则 terminal_* / shell_run 这类可信宿主命令两边都不可用，
       // 反而把最值得对照的一批排除掉了。
       GREYWORK_TRUSTED_HOST: "1",
+      GREYWORK_WORKSPACE_ROOTS: workspaceDir,
       // 静态目录两边都不设：对照只关心 API。
     },
   });
@@ -151,7 +184,9 @@ const hosts = [spawnHost(rustBinary, [], rustPort, dirs[0], "rust"), spawnHost(p
 
 function shutdown() {
   for (const host of hosts) host.child.kill("SIGTERM");
-  if (!keep) for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+  if (keep) return;
+  for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+  rmSync(workspaceDir, { recursive: true, force: true });
 }
 
 process.on("SIGINT", () => {
@@ -169,6 +204,9 @@ try {
     [dirs[1], "<DATA>"],
     [String(rustPort), "<PORT>"],
     [String(nodePort), "<PORT>"],
+    [workspaceDir, "<WS>"],
+    [dirs[0], "<DATA>"],
+    [dirs[1], "<DATA>"],
   ];
 
   // 对照集：Node 标 available 的命令（= 已迁移），再与 Rust 的可用性取交集。
@@ -193,22 +231,23 @@ try {
 
   console.log(`[parity] 对照 ${candidates.length} 条命令（执行用户：${label}）`);
   for (const command of candidates) {
-    const commandArgs = {};
+    const commandArgs = argsFor(command);
     const [rust, node] = await Promise.all([
       call(rustPort, rustToken, command, commandArgs),
       call(nodePort, nodeToken, command, commandArgs),
     ]);
-    const left = normalize(rust, replace);
-    const right = normalize(node, replace);
-    const same = left.status === right.status && stableStringify(left.body) === stableStringify(right.body);
+    // 排序只作用于 body（status 是标量），避免把包装对象也交给集合归一化。
+    const left = normalize(normalizeForCommand(command, rust.body), replace);
+    const right = normalize(normalizeForCommand(command, node.body), replace);
+    const same = rust.status === node.status && stableStringify(left) === stableStringify(right);
     if (same) {
-      console.log(`  ✓ ${command}（HTTP ${left.status}）`);
+      console.log(`  ✓ ${command}（HTTP ${rust.status}）`);
       continue;
     }
     failures += 1;
     console.log(`  ✗ ${command}`);
-    console.log(`    rust: ${left.status} ${stableStringify(left.body)}`);
-    console.log(`    node: ${right.status} ${stableStringify(right.body)}`);
+    console.log(`    rust: ${rust.status} ${stableStringify(left)}`);
+    console.log(`    node: ${node.status} ${stableStringify(right)}`);
   }
 
   if (failures > 0) {

@@ -8,13 +8,10 @@
  * P0 只迁了 `store_default_root` 这一条叶子命令，用来打通「HTTP → 分发 → 返回 JSON」的管线。
  * 未迁移的命令在 `/api/commands` 里标 `available: false`，前端据此灰显，避免「点了才报错」。
  */
-import { mkdirSync } from "node:fs";
-import { homedir } from "node:os";
-import path from "node:path";
-
 import manifest from "./command-manifest.json" with { type: "json" };
 
 import { shellCatalog } from "./shell-catalog.js";
+import type { WorkspaceAccess } from "./workspace-access.js";
 
 export interface CommandMeta {
   name: string;
@@ -51,19 +48,30 @@ export function isDenied(name: string, trustedHost: boolean): boolean {
   return !trustedHost && TRUSTED_HOST_ONLY.has(name);
 }
 
-/** 已迁移命令的实现表。键必须是 manifest 里存在的名字（有单测兜住）。 */
-const HANDLERS = new Map<string, (args: unknown) => Promise<unknown>>();
-
-/** `~/.greyWork`：与 Rust `store_fs::store_default_root` 同语义（含自动创建）。 */
-function storeDefaultRoot(): string {
-  const root = path.join(homedir(), ".greyWork");
-  mkdirSync(root, { recursive: true });
-  // Windows 的 \\?\ 前缀不跨进程稳定，与 Rust 侧 strip_verbatim_prefix 一致地去掉。
-  return process.platform === "win32" ? root.replace(/^\\\\\?\\/, "") : root;
+/** 命令实现拿到的宿主上下文（只放已迁移能力，避免半迁移状态下出现半初始化的对象）。 */
+export interface CommandContext {
+  access: WorkspaceAccess;
+  trustedHost: boolean;
 }
 
-HANDLERS.set("store_default_root", async () => storeDefaultRoot());
+type Handler = (args: unknown, ctx: CommandContext) => Promise<unknown>;
+
+/** 已迁移命令的实现表。键必须是 manifest 里存在的名字（有单测兜住）。 */
+const HANDLERS = new Map<string, Handler>();
+
+/** 读入参里的 path：与 Rust 的 `PathArg` 同口径（缺字段直接报错，不做兜底）。 */
+function pathArg(args: unknown): string {
+  const value = (args as { path?: unknown } | null)?.path;
+  if (typeof value !== "string" || value === "") {
+    throw new CommandError(400, "缺少参数 path");
+  }
+  return value;
+}
+
+HANDLERS.set("store_default_root", async (_args, ctx) => ctx.access.root);
 HANDLERS.set("terminal_shells", async () => shellCatalog());
+HANDLERS.set("fs_list_dir", async (args, ctx) => ctx.access.listDir(pathArg(args)));
+HANDLERS.set("fs_read_text_file", async (args, ctx) => ctx.access.readTextFile(pathArg(args)));
 
 export function isMigrated(name: string): boolean {
   return HANDLERS.has(name);
@@ -85,7 +93,7 @@ export class CommandError extends Error {
   }
 }
 
-export async function dispatch(name: unknown, args: unknown, trustedHost: boolean): Promise<unknown> {
+export async function dispatch(name: unknown, args: unknown, ctx: CommandContext): Promise<unknown> {
   if (typeof name !== "string" || name === "") {
     throw new CommandError(400, "缺少命令名");
   }
@@ -97,7 +105,7 @@ export async function dispatch(name: unknown, args: unknown, trustedHost: boolea
   if (meta.desktopOnly) {
     throw new CommandError(403, `命令 ${name} 仅桌面端可用`);
   }
-  if (isDenied(name, trustedHost)) {
+  if (isDenied(name, ctx.trustedHost)) {
     throw new CommandError(403, `命令 ${name} 需要可信宿主（本机桌面端）`);
   }
   const handler = HANDLERS.get(name);
@@ -105,5 +113,11 @@ export async function dispatch(name: unknown, args: unknown, trustedHost: boolea
     // 迁移期的明确信号：不是「命令不存在」，而是「这条还没搬过来」。
     throw new CommandError(501, `命令 ${name} 尚未迁移到 Node 宿主`);
   }
-  return handler(args);
+  try {
+    return await handler(args, ctx);
+  } catch (error) {
+    if (error instanceof CommandError) throw error;
+    // 与 Rust 的 dispatch 同口径：命令实现失败一律 400 + 原文（前端直接展示这句）。
+    throw new CommandError(400, error instanceof Error ? error.message : String(error));
+  }
 }

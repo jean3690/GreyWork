@@ -26,6 +26,8 @@ export interface HostConfig {
   trustedHost: boolean;
   /** 非空时校验非 GET/HEAD 请求的 Origin。 */
   allowedOrigins: string[];
+  /** 预置授权根（headless 没有原生选择器，只能在配置里给）；分隔符与 Rust 同为 : / ;。 */
+  workspaceRoots: string[];
   /** stdin 读到 EOF 即退出（Electron 的「父死子死」）。 */
   exitOnStdinEof: boolean;
   version: string;
@@ -91,6 +93,10 @@ export function loadConfig(envMap: NodeJS.ProcessEnv = process.env): HostConfig 
     secureCookie: truthy(env(envMap, "GREYWORK_SECURE_COOKIE")),
     trustedHost: truthy(env(envMap, "GREYWORK_TRUSTED_HOST")),
     allowedOrigins: splitList(env(envMap, "GREYWORK_ALLOWED_ORIGINS")),
+    workspaceRoots: (env(envMap, "GREYWORK_WORKSPACE_ROOTS") ?? "")
+      .split(process.platform === "win32" ? ";" : ":")
+      .map((item) => item.trim())
+      .filter((item) => item !== ""),
     exitOnStdinEof: truthy(env(envMap, "GREYWORK_EXIT_ON_STDIN_EOF")),
     version: readVersion(),
   };

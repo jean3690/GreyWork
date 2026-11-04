@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -9,6 +9,12 @@ import { LoginThrottle, SessionStore, passwordChecker } from "../src/auth.js";
 import { loadConfig } from "../src/config.js";
 import { createHostServer } from "../src/server.js";
 import { resolveStaticRoot } from "../src/static-site.js";
+import { WorkspaceAccess } from "../src/workspace-access.js";
+
+const dataDir = mkdtempSync(path.join(tmpdir(), "gw-host-node-data-"));
+const workspaceDir = mkdtempSync(path.join(tmpdir(), "gw-host-node-ws-"));
+writeFileSync(path.join(workspaceDir, "hello.txt"), "hello parity\n");
+mkdirSync(path.join(workspaceDir, "sub"), { recursive: true });
 
 const staticDir = mkdtempSync(path.join(tmpdir(), "gw-host-node-"));
 mkdirSync(path.join(staticDir, "assets"), { recursive: true });
@@ -20,15 +26,21 @@ const config = loadConfig({
   GREYWORK_PASSWORD: "test-password",
   GREYWORK_STATIC_DIR: staticDir,
   GREYWORK_SESSION_TTL: "3600",
+  GREYWORK_DATA_DIR: dataDir,
+  GREYWORK_WORKSPACE_ROOTS: workspaceDir,
 });
 
 const sessions = new SessionStore(passwordChecker(config), config.sessionTtlSecs);
 const throttle = new LoginThrottle();
+const access = new WorkspaceAccess(workspaceDir, path.join(dataDir, "workspace-path-access.json"));
+for (const root of config.workspaceRoots) access.authorizeSelectedPath(root);
+
 const { server, close } = createHostServer({
   config,
   sessions,
   throttle,
   staticRoot: resolveStaticRoot(config.staticDir),
+  access,
 });
 
 let base = "";
@@ -108,7 +120,8 @@ describe("HTTP 契约", () => {
     });
     expect(response.status).toBe(200);
     const root = (await response.json()) as string;
-    expect(root).toContain(".greyWork");
+    // 测试把默认根换成临时工作区（生产是 ~/.greyWork）；只校验「回的是授权根本体」。
+    expect(root).toBe(realpathSync(workspaceDir));
   });
 
   it("未知命令 400、桌面专属 403、未迁移 501（错误信封一致）", async () => {
@@ -134,6 +147,38 @@ describe("HTTP 契约", () => {
     const untrusted = await call("terminal_shells");
     expect(untrusted.status).toBe(403);
     expect(untrusted.body.error).toContain("可信宿主");
+  });
+
+  it("fs_list_dir / fs_read_text_file 走授权面", async () => {
+    const call = async (command: string, args: unknown) => {
+      const response = await fetch(`${base}/api/command`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ command, args }),
+      });
+      return { status: response.status, body: await response.json() };
+    };
+
+    const listed = await call("fs_list_dir", { path: workspaceDir });
+    expect(listed.status).toBe(200);
+    const entries = listed.body as { name: string; kind: string; size: number | null }[];
+    expect(entries.map((entry) => entry.name).sort()).toEqual(["hello.txt", "sub"]);
+    expect(entries.find((entry) => entry.name === "sub")).toMatchObject({ kind: "directory", size: null });
+    expect(entries.find((entry) => entry.name === "hello.txt")?.kind).toBe("file");
+
+    const text = await call("fs_read_text_file", { path: path.join(workspaceDir, "hello.txt") });
+    expect(text.status).toBe(200);
+    expect(text.body).toBe("hello parity\n");
+  });
+
+  it("未授权路径的读取被拒（400 + 授权提示）", async () => {
+    const response = await fetch(`${base}/api/command`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ command: "fs_list_dir", args: { path: "/" } }),
+    });
+    expect(response.status).toBe(400);
+    expect(((await response.json()) as { error: string }).error).toContain("未获用户授权");
   });
 
   it("登出清会话与 cookie", async () => {

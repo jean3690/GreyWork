@@ -10,10 +10,15 @@ import { createInterface } from "node:readline";
 
 import { argon2id } from "hash-wasm";
 
+import { mkdirSync } from "node:fs";
+import { homedir } from "node:os";
+import path from "node:path";
+
 import { LoginThrottle, SessionStore, passwordChecker } from "./auth.js";
 import { loadConfig } from "./config.js";
 import { createHostServer } from "./server.js";
 import { resolveStaticRoot } from "./static-site.js";
+import { WorkspaceAccess } from "./workspace-access.js";
 
 /** 与 Rust `config::hash_password` 的 argon2 参数对齐（argon2 crate 默认值）。 */
 async function hashPassword(password: string): Promise<string> {
@@ -72,7 +77,14 @@ async function main(): Promise<void> {
   const staticRoot = resolveStaticRoot(config.staticDir);
   const sessions = new SessionStore(passwordChecker(config), config.sessionTtlSecs);
   const throttle = new LoginThrottle();
-  const { server, close } = createHostServer({ config, sessions, throttle, staticRoot });
+  // 授权面：默认根 ~/.greyWork + 配置预置根；账本放数据目录（与 Rust 同名）。
+  const defaultRoot = path.join(homedir(), ".greyWork");
+  mkdirSync(defaultRoot, { recursive: true });
+  const access = new WorkspaceAccess(defaultRoot, path.join(config.dataDir, "workspace-path-access.json"));
+  for (const root of config.workspaceRoots) {
+    console.log(`[host-node] 预置授权根: ${access.authorizeSelectedPath(root)}`);
+  }
+  const { server, close } = createHostServer({ config, sessions, throttle, staticRoot, access });
 
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
