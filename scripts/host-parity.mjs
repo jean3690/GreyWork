@@ -303,6 +303,9 @@ function argsFor(command, side) {
       return { baseUrl: providerUrl, model: "m", messages: [{ role: "user", content: "hi" }] };
     case "llm_transcribe":
       return { baseUrl: providerUrl, model: "whisper-1", path: path.join(own, "voice.wav") };
+    // 环回地址两侧都必须拒绝：这一条对照的是 SSRF 防线本身（错误文案逐字一致）。
+    case "web_fetch":
+      return { url: "http://127.0.0.1:9/" };
     case "db_automations_sync":
       return {
         tasks: [

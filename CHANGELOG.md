@@ -41,6 +41,8 @@
   WAL / foreign_keys / busy_timeout），`db_settings_load` / `db_settings_sync` 已通过对照，
   Node 建的 `greywork.db` 可被 Rust 直接打开并读回设置。删除 / 改名 / 复制也按 Rust 的
   `movable_source` 规则迁移（不许动授权根、不许移进自身子树、撞名显式失败、跨设备降级为复制+删源）。
+  `web_fetch` 迁移并保留整套 SSRF 加固（DNS 逐个校验 + 钉 IP + 每跳重校验 + 2MB 上限），
+  环回地址的拒绝文案与 Rust 逐字一致。
   git 只读四条（`status` / `changes` / `diff` / `current_branch`）也已迁移：同一套授权根解析、
   argv 数组调用、`GIT_TERMINAL_PROMPT=0` 与 30s 超时杀进程组。真 PTY 终端也迁移完成
   （`node-pty`：输出 base64 原始字节经 `terminal://data` 推送、退出推 `terminal://exit`，

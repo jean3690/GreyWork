@@ -685,6 +685,28 @@ describe("HTTP 契约", () => {
     expect((await call("rag_status")).body).toEqual({ chunks: 0, files: 0, model: null, dim: null });
   });
 
+  it("web_fetch 的 SSRF 防线：环回 / 非法协议在解析阶段就被拒", async () => {
+    const call = async (url: string) => {
+      const response = await fetch(`${base}/api/command`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ command: "web_fetch", args: { url } }),
+      });
+      return { status: response.status, body: (await response.json()) as { error: string } };
+    };
+    const loopback = await call("http://127.0.0.1:9/");
+    expect(loopback.status).toBe(400);
+    expect(loopback.body.error).toBe("web fetch refuses non-public address: 127.0.0.1");
+
+    const ftp = await call("ftp://example.com/file");
+    expect(ftp.status).toBe(400);
+    expect(ftp.body.error).toContain("only allows http/https");
+
+    const credentials = await call("http://user:pass@example.com/");
+    expect(credentials.status).toBe(400);
+    expect(credentials.body.error).toContain("embedded credentials");
+  });
+
   it("db_settings：空库回 null，写入后可读回且类型原样", async () => {
     const call = async (command: string, args: unknown = {}) => {
       const response = await fetch(`${base}/api/command`, {

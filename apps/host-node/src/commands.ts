@@ -12,6 +12,7 @@ import manifest from "./command-manifest.json" with { type: "json" };
 
 import { shellCatalog } from "./shell-catalog.js";
 import { detectPrograms } from "./acp-probe.js";
+import { fetchPage } from "./web-fetch.js";
 import { checkUpdate } from "./update.js";
 import type { AgentProvider, AutomationRunInput, AutomationTask, Db, TeamRun } from "./db.js";
 import { gitChanges, gitCurrentBranch, gitDiff, gitStatus, runGit } from "./git.js";
@@ -197,6 +198,12 @@ HANDLERS.set("worktree_release", async (args, ctx) => {
   await releaseWorktree(ctx.access, root, runGit);
   return null;
 });
+HANDLERS.set("web_fetch", async (args) => {
+  const url = (args as { url?: unknown } | null)?.url;
+  if (typeof url !== "string") throw new CommandError(400, "缺少参数 url");
+  return fetchPage(url);
+});
+
 HANDLERS.set("check_update", async () => checkUpdate());
 
 HANDLERS.set("llm_chat_start", async (args, ctx) => {
