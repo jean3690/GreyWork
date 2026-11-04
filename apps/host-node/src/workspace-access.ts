@@ -13,10 +13,12 @@ import {
   closeSync,
   copyFileSync,
   existsSync,
+  fstatSync,
   fsyncSync,
   lstatSync,
   mkdirSync,
   openSync,
+  readSync,
   readdirSync,
   readFileSync,
   realpathSync,
@@ -35,6 +37,8 @@ const MAX_TEXT_BYTES = 10 * 1024 * 1024;
 const MAX_BINARY_BYTES = 20 * 1024 * 1024;
 /** 媒体专用的硬顶：真实视频与带贴图的模型普遍超过 20MB，按预览口径卡死等于这类文件打不开。 */
 const MAX_MEDIA_BYTES = 128 * 1024 * 1024;
+/** 单次 Range 响应的字节上界（与 Rust fs_media_slice 的 MAX_MEDIA_CHUNK 一致）。 */
+const MAX_MEDIA_CHUNK = 1024 * 1024;
 
 export interface DirEntryInfo {
   name: string;
@@ -94,6 +98,54 @@ export function isSafePathSegment(segment: string): boolean {
 }
 
 /** 分量级前缀：与 Rust 的 `Path::starts_with` 同语义。 */
+/** 扩展名 → MIME。只覆盖媒体；application/octet-stream 在媒体元素上不可靠。 */
+export function mediaMimeOf(target: string): string {
+  const extension = target.includes(".") ? target.slice(target.lastIndexOf(".") + 1).toLowerCase() : "";
+  switch (extension) {
+    case "mp4":
+    case "m4v": return "video/mp4";
+    case "webm": return "video/webm";
+    case "mov": return "video/quicktime";
+    case "mkv": return "video/x-matroska";
+    case "mp3": return "audio/mpeg";
+    case "m4a": return "audio/mp4";
+    case "wav": return "audio/wav";
+    case "ogg":
+    case "oga": return "audio/ogg";
+    case "flac": return "audio/flac";
+    default: return "application/octet-stream";
+  }
+}
+
+export type MediaSlice =
+  | { kind: "full"; bytes: Buffer; mime: string }
+  | { kind: "partial"; bytes: Buffer; mime: string; start: number; end: number; total: number }
+  | { kind: "unsatisfiable"; total: number };
+
+/**
+ * 解析单段 byte-range（Rust 侧用 http_range crate）：bytes=a-b / a- / -suffix。
+ * 多段 range 只服务第一段（媒体元素发的都是单段）；解析失败返回 null = 416。
+ */
+function parseByteRange(header: string, total: number): { start: number; end: number } | null {
+  const match = /^\s*bytes\s*=\s*(\d*)\s*-\s*(\d*)\s*(?:,.*)?$/.exec(header);
+  if (match === null) return null;
+  const [, rawStart, rawEnd] = match;
+  if (rawStart === "" && rawEnd === "") return null;
+  if (rawStart === "") {
+    // 后缀 range：bytes=-N → 最后 N 字节。
+    const suffix = Number(rawEnd);
+    if (suffix === 0 || !Number.isFinite(suffix)) return null;
+    const length = Math.min(suffix, total);
+    if (length === 0) return { start: 0, end: -1 };
+    return { start: total - length, end: total - 1 };
+  }
+  const start = Number(rawStart);
+  if (!Number.isFinite(start) || start >= total) return null;
+  const requestedEnd = rawEnd === "" ? total - 1 : Number(rawEnd);
+  if (!Number.isFinite(requestedEnd) || requestedEnd < start) return null;
+  return { start, end: requestedEnd };
+}
+
 function isWithin(parent: string, child: string): boolean {
   if (child === parent) return true;
   const relative = path.relative(parent, child);
@@ -432,6 +484,44 @@ export class WorkspaceAccess {
       throw new Error(`文件超过 ${Math.floor(limit / (1024 * 1024))}MB 上限`);
     }
     return readFileSync(file);
+  }
+
+  /**
+   * 按 HTTP Range 读一段媒体（Rust workspace_fs::fs_media_slice 同语义）：预览的
+   * <video>/<audio> 把 /api/media 当 src，按需拉片段、按需 seek。授权面与 readMedia
+   * 完全同源（resolveExisting），单次响应恒定有 1MB 上界。
+   */
+  mediaSlice(raw: string, range: string | null): MediaSlice {
+    const file = this.resolveExisting(raw);
+    const mime = mediaMimeOf(file);
+    const fd = openSync(file, "r");
+    try {
+      const total = fstatSync(fd).size;
+      const parsed = range === null ? null : parseByteRange(range, total);
+      if (range !== null && parsed === null) {
+        return { kind: "unsatisfiable", total };
+      }
+      if (parsed === null) {
+        // 不带 Range 的普通 GET：回整份，但仍夹紧到 128MB —— 边角场景也不该吃穿内存。
+        if (total > MAX_MEDIA_BYTES) {
+          throw new Error("文件超过 " + MAX_MEDIA_BYTES / (1024 * 1024) + "MB 上限");
+        }
+        const bytes = Buffer.alloc(total);
+        readSync(fd, bytes, 0, total, 0);
+        return { kind: "full", bytes, mime };
+      }
+      const start = parsed.start;
+      const end = Math.min(parsed.end, total - 1, start + MAX_MEDIA_CHUNK - 1);
+      if (end < start) {
+        return { kind: "unsatisfiable", total };
+      }
+      const count = end - start + 1;
+      const bytes = Buffer.alloc(count);
+      readSync(fd, bytes, 0, count, start);
+      return { kind: "partial", bytes, mime, start, end, total };
+    } finally {
+      closeSync(fd);
+    }
   }
 
   /** 写二进制（base64 载荷，≤20MB）；上限以**解码后**字节数为准。 */

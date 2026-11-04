@@ -190,6 +190,37 @@ export function createHostServer(options: HostServerOptions): { server: Server; 
         });
       }
 
+      if (pathname === "/api/media" && method === "GET") {
+        // 媒体流式路由：鉴权与 /api/command 同源（cookie / bearer）；授权面与 fs_read_media
+        // 同源（WorkspaceAccess.mediaSlice 内部的 resolveExisting）。Range 分片 1MB 上界。
+        const target = new URL(request.url ?? "/", "http://localhost").searchParams.get("path") ?? "";
+        // 与 Rust 的 ApiError::BadRequest 同口径：fs_* 失败一律 400。
+        let slice: ReturnType<WorkspaceAccess["mediaSlice"]>;
+        try {
+          slice = options.access.mediaSlice(target, request.headers.range ?? null);
+        } catch (error) {
+          throw new HttpError(400, error instanceof Error ? error.message : String(error));
+        }
+        if (slice.kind === "unsatisfiable") {
+          return sendJson(response, 416, { error: "请求的 Range 超出文件范围" }, {
+            "content-range": "bytes */" + slice.total,
+            "accept-ranges": "bytes",
+          });
+        }
+        const headers: Record<string, string | number> = {
+          "content-type": slice.mime,
+          "accept-ranges": "bytes",
+        };
+        let status = 200;
+        if (slice.kind === "partial") {
+          status = 206;
+          headers["content-range"] = "bytes " + slice.start + "-" + slice.end + "/" + slice.total;
+        }
+        response.writeHead(status, headers);
+        response.end(slice.bytes);
+        return;
+      }
+
       if (pathname === "/api/commands" && method === "GET") {
         return sendJson(response, 200, listCommands(config.trustedHost));
       }
