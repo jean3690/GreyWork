@@ -674,6 +674,11 @@ HANDLERS.set("acp_detect_programs", async (args) => {
 });
 // 尚无 ACP 会话（acp_start 未迁移）：清单恒为空，形状与 Rust 一致。
 HANDLERS.set("acp_list", async () => []);
+HANDLERS.set("office_host_info", async (args) => {
+  const envNames = ((args as { envNames?: unknown } | null)?.envNames ?? []) as string[];
+  // P0 的 CSP 只覆盖同源资源；frame origins 的完整实现需要读取 GREYWORK_FRAME_ORIGINS 配置。
+  return { embeddableFrameOrigins: [], envPresent: envNames.filter((name: string) => process.env[name]), envMissing: envNames.filter((name: string) => !process.env[name]) };
+});
 
 HANDLERS.set("store_sessions_load", async (args, ctx) => {
   const workspaces = ((args as { workspaces?: unknown } | null)?.workspaces ?? []) as WorkspaceDir[];
