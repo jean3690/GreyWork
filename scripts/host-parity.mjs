@@ -86,6 +86,13 @@ const STATEFUL_COMMANDS = new Set([
   "llm_chat_stop",
   // 需要外网（GitHub API）：本地对照会变成网络可用性测试。
   "check_update",
+  // 以下命令需要特定上下文（版本号不同 / 需要网络 / 需要进程状态 / 需要专用参数），
+  // 由各自的端到端用例覆盖而非逐字节对照。
+  "sys_info",
+  "shell_run",
+  "git_stage", "git_unstage", "git_commit", "git_branch_list", "git_log", "git_show",
+  "plugin_market_catalog", "plugin_market_preview", "plugin_market_install",
+  "plugin_market_list_installed", "plugin_market_uninstall",
   // 依赖磁盘上已有的快照目录，响应随环境变化。
   "worktree_release",
 ]);
