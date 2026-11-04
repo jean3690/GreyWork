@@ -635,6 +635,40 @@ describe("HTTP 契约", () => {
     socket.close();
   });
 
+  it("worktree_list 只认带标记的快照，worktree_release 只删基目录之下", async () => {
+    const call = async (command: string, args: unknown) => {
+      const response = await fetch(`${base}/api/command`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ command, args }),
+      });
+      return { status: response.status, body: await response.json() };
+    };
+
+    const baseDir = path.join(workspaceDir, "worktrees");
+    const snapshot = path.join(baseDir, "demo-abc123");
+    mkdirSync(snapshot, { recursive: true });
+    writeFileSync(path.join(snapshot, "file.txt"), "hello");
+    writeFileSync(path.join(snapshot, ".greywork-worktree.json"), JSON.stringify({ kind: "copy", source: workspaceDir }));
+    // 没有标记的目录不会被列出。
+    mkdirSync(path.join(baseDir, "stray"), { recursive: true });
+
+    const listed = (await call("worktree_list", {})).body as { root: string; kind: string; bytes: number }[];
+    expect(listed).toHaveLength(1);
+    expect(listed[0]).toMatchObject({ root: snapshot, kind: "copy" });
+    // 占用字节含标记文件本身，只断言「统计到了内容」。
+    expect(listed[0].bytes).toBeGreaterThanOrEqual(5);
+
+    expect((await call("worktree_release", { root: snapshot })).status).toBe(200);
+    expect(existsSync(snapshot)).toBe(false);
+    // 目录已不存在：授权面解析失败（400），与 Rust 的 resolve_existing 同口径。
+    expect((await call("worktree_release", { root: snapshot })).status).toBe(400);
+    // 基目录之外一律拒绝。
+    const outside = await call("worktree_release", { root: workspaceDir });
+    expect(outside.status).toBe(400);
+    expect((outside.body as { error: string }).error).toContain("只允许释放");
+  });
+
   it("db_settings：空库回 null，写入后可读回且类型原样", async () => {
     const call = async (command: string, args: unknown = {}) => {
       const response = await fetch(`${base}/api/command`, {

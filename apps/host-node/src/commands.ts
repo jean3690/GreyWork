@@ -14,7 +14,8 @@ import { shellCatalog } from "./shell-catalog.js";
 import { detectPrograms } from "./acp-probe.js";
 import { checkUpdate } from "./update.js";
 import type { AgentProvider, AutomationRunInput, AutomationTask, Db, TeamRun } from "./db.js";
-import { gitChanges, gitCurrentBranch, gitDiff, gitStatus } from "./git.js";
+import { gitChanges, gitCurrentBranch, gitDiff, gitStatus, runGit } from "./git.js";
+import { listWorktrees, releaseWorktree } from "./worktree.js";
 import { chatComplete, embed, listModels, transcribe, type LlmChatMessage, type LlmStreamHost } from "./llm.js";
 import type { SessionFileStore, WorkspaceDir } from "./session-store.js";
 import type { TerminalHost } from "./terminal.js";
@@ -177,6 +178,13 @@ HANDLERS.set("terminal_close", async (args, ctx) => {
   return null;
 });
 
+HANDLERS.set("worktree_list", async (_args, ctx) => listWorktrees(ctx.access));
+HANDLERS.set("worktree_release", async (args, ctx) => {
+  const root = (args as { root?: unknown } | null)?.root;
+  if (typeof root !== "string") throw new CommandError(400, "缺少参数 root");
+  await releaseWorktree(ctx.access, root, runGit);
+  return null;
+});
 HANDLERS.set("check_update", async () => checkUpdate());
 
 HANDLERS.set("llm_chat_start", async (args, ctx) => {

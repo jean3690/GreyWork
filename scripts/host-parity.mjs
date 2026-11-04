@@ -65,6 +65,8 @@ const STATEFUL_COMMANDS = new Set([
   "llm_chat_stop",
   // 需要外网（GitHub API）：本地对照会变成网络可用性测试。
   "check_update",
+  // 依赖磁盘上已有的快照目录，响应随环境变化。
+  "worktree_release",
 ]);
 
 const args = new Set(process.argv.slice(2));
