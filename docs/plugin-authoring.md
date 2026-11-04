@@ -3,6 +3,10 @@
 GreyWork plugins extend the shell without shipping executable code into the renderer. A plugin is a
 JSON package plus, optionally, one pinned ES module that runs in a **Web Worker**.
 
+Type definitions for everything below live in [`@greywork/plugin-types`](../packages/plugin-types/README.md)
+(manifest, the `greywork` worker global, render instructions and capability signatures). The package is
+types-only and has no runtime; it is the fastest way to type-check a plugin before installing it.
+
 Two kinds exist:
 
 | Kind          | Package contents                            | Can execute code | Can call host capabilities |

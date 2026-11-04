@@ -49,6 +49,7 @@
     "@greywork/editor": "workspace:*",
     "@greywork/host-ipc": "workspace:*",
     "@greywork/llm": "workspace:*",
+    "@greywork/plugin-types": "workspace:*",
     "@greywork/plugins": "workspace:*",
     "@greywork/shell": "workspace:*",
     "@internationalized/date": "3.12.4",

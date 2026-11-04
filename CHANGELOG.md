@@ -30,6 +30,10 @@
 - **新对话空态**：`NewChatHero` 提供共享的标题与建议行，`/guid` 与 `/conversation/:id`
   的空对话共用同一形态。
 
+- **插件类型包 `@greywork/plugin-types`**：把插件作者要面对的契约集中成一套零运行时类型——
+  包清单 / 声明式页面 / 贡献面、worker 的 `greywork` 全局（registerAction / registerSchedule /
+  registerPointer / call / setStatus）、渲染指令集与各能力签名。第三方作者可以先用
+  `tsc --noEmit` 把插件写对再安装，而不是靠安装期被拒来试错。
 - **运维台补存储与自动化**：`GET /api/admin/storage`（容量只算 ready、待确认上传单独计数、
   按种类分布、最近 100 个对象带归属邮箱）与 `GET /api/admin/automation`（任务数 / 启用数、
   到期积压、逾期未认领、7 天执行与失败率、最近 100 个任务）。两块都是只读视图——停掉别人的
