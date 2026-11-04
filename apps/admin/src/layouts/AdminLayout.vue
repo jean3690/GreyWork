@@ -180,7 +180,13 @@ function navigate(): void {
       </header>
 
       <main class="body">
-        <router-view />
+        <!-- 页面按路由懒加载：慢链路上切页会有一小段空白，这里给一个占位，避免看起来像卡死。 -->
+        <Suspense>
+          <router-view />
+          <template #fallback>
+            <div class="route-loading" role="status" aria-busy="true">正在加载页面…</div>
+          </template>
+        </Suspense>
       </main>
     </div>
 
@@ -411,6 +417,12 @@ function navigate(): void {
   flex: 1;
   overflow-y: auto;
   padding: 20px 26px 40px;
+}
+
+.route-loading {
+  padding: 18px 4px;
+  color: var(--gw-dim);
+  font-size: 12.5px;
 }
 
 .nav-mask {

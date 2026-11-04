@@ -57,6 +57,9 @@ src/
 - **复制不用 `navigator.clipboard`**：沿用全仓限制（桌面 WebView 会静默失败），走
   `utils/clipboard.ts` 的 textarea + `execCommand`。
 - **中文文案直接写在模板里**：运维台只有中文，不接 i18n。
+- **页面按路由懒加载**：除 `LoginView`（登录页）与 `AdminLayout`（外壳）外，所有视图都用
+  `() => import(...)`；首屏只下外壳与登录页，进入运维台后每个页面切到才拉。`AdminLayout`
+  用 `<Suspense>` 给了加载占位，慢链路上不会看起来像卡死。新页面沿用同一写法。
 - **接口地址一律相对路径**（`/api/...`）：部署时把同源 `/api` 反代到控制面即可，不要写死后端域名；
   本地 dev 由 Vite 代理转发到 8080。
 - **新增页面**：`views/XxxView.vue` → `router/index.ts` 加子路由（`meta.title` /
