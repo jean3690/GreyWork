@@ -38,6 +38,17 @@ export function clearChannelCredentials(dataDir: string, channel: ChannelName): 
   rmSync(credentialsFile(dataDir, channel), { force: true });
 }
 
+const connectedChannels = new Set<string>();
+
+export function setChannelConnected(channel: ChannelName, connected: boolean): void {
+  if (connected) connectedChannels.add(channel);
+  else connectedChannels.delete(channel);
+}
+
+export function isChannelConnected(channel: ChannelName): boolean {
+  return connectedChannels.has(channel);
+}
+
 export function channelStatus(dataDir: string, channel: ChannelName): { configured: boolean } {
   return { configured: loadChannelCredentials(dataDir, channel) !== null };
 }

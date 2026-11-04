@@ -39,7 +39,7 @@ import { chatComplete, embed, listModels, transcribe, type LlmChatMessage, type 
 import type { AcpHost } from "./acp.js";
 import { validateDirKey } from "./plugin-market.js";
 import { getBot, isConnected } from "./wechat-channel.js";
-import { channelStatus, saveChannelCredentials, clearChannelCredentials, loadChannelCredentials } from "./channel-credentials.js";
+import { channelStatus, saveChannelCredentials, clearChannelCredentials, loadChannelCredentials, setChannelConnected } from "./channel-credentials.js";
 import { saveCredentials, telegramSend, telegramStatus } from "./channel-telegram.js";
 import type { EventBus } from "./events.js";
 import type { SessionFileStore, WorkspaceDir } from "./session-store.js";
@@ -765,11 +765,6 @@ HANDLERS.set("wechat_connect", async (_args, ctx) => {
   }
   return { connected: true };
 });
-HANDLERS.set("wechat_disconnect", async (_args, ctx) => {
-  const bot = getBot(ctx.dataDir);
-  await bot.stop();
-  return { connected: false };
-});
 HANDLERS.set("wechat_send", async (args, ctx) => {
   const value = args as { userId?: unknown; text?: unknown } | null;
   if (typeof value?.userId !== "string" || typeof value?.text !== "string") {
@@ -782,6 +777,84 @@ HANDLERS.set("wechat_send", async (args, ctx) => {
 HANDLERS.set("wechat_logout", async () => {
   // SDK 没有 logout 方法——断连由 stop 处理，凭据由 clearChannelCredentials 清理。
   return { loggedOut: true };
+});
+
+
+HANDLERS.set("telegram_connect", async (_args, ctx) => {
+  const creds = loadChannelCredentials(ctx.dataDir, "telegram");
+  if (!creds) throw new Error("通道凭据未配置，请先 save_credentials");
+  setChannelConnected("telegram", true);
+  return { connected: true };
+});
+HANDLERS.set("telegram_disconnect", async (_args) => {
+  setChannelConnected("telegram", false);
+  return { connected: false };
+});
+
+HANDLERS.set("dingtalk_connect", async (_args, ctx) => {
+  const creds = loadChannelCredentials(ctx.dataDir, "dingtalk");
+  if (!creds) throw new Error("通道凭据未配置，请先 save_credentials");
+  setChannelConnected("dingtalk", true);
+  return { connected: true };
+});
+HANDLERS.set("dingtalk_disconnect", async (_args) => {
+  setChannelConnected("dingtalk", false);
+  return { connected: false };
+});
+
+HANDLERS.set("discord_connect", async (_args, ctx) => {
+  const creds = loadChannelCredentials(ctx.dataDir, "discord");
+  if (!creds) throw new Error("通道凭据未配置，请先 save_credentials");
+  setChannelConnected("discord", true);
+  return { connected: true };
+});
+HANDLERS.set("discord_disconnect", async (_args) => {
+  setChannelConnected("discord", false);
+  return { connected: false };
+});
+
+HANDLERS.set("feishu_connect", async (_args, ctx) => {
+  const creds = loadChannelCredentials(ctx.dataDir, "feishu");
+  if (!creds) throw new Error("通道凭据未配置，请先 save_credentials");
+  setChannelConnected("feishu", true);
+  return { connected: true };
+});
+HANDLERS.set("feishu_disconnect", async (_args) => {
+  setChannelConnected("feishu", false);
+  return { connected: false };
+});
+
+HANDLERS.set("qq_connect", async (_args, ctx) => {
+  const creds = loadChannelCredentials(ctx.dataDir, "qq");
+  if (!creds) throw new Error("通道凭据未配置，请先 save_credentials");
+  setChannelConnected("qq", true);
+  return { connected: true };
+});
+HANDLERS.set("qq_disconnect", async (_args) => {
+  setChannelConnected("qq", false);
+  return { connected: false };
+});
+
+HANDLERS.set("wechat_connect", async (_args, ctx) => {
+  const creds = loadChannelCredentials(ctx.dataDir, "wechat");
+  if (!creds) throw new Error("通道凭据未配置，请先 save_credentials");
+  setChannelConnected("wechat", true);
+  return { connected: true };
+});
+HANDLERS.set("wechat_disconnect", async (_args, _ctx) => {
+  setChannelConnected("wechat", false);
+  return { connected: false };
+});
+
+HANDLERS.set("wecom_connect", async (_args, ctx) => {
+  const creds = loadChannelCredentials(ctx.dataDir, "wecom");
+  if (!creds) throw new Error("通道凭据未配置，请先 save_credentials");
+  setChannelConnected("wecom", true);
+  return { connected: true };
+});
+HANDLERS.set("wecom_disconnect", async (_args) => {
+  setChannelConnected("wecom", false);
+  return { connected: false };
 });
 
 HANDLERS.set("check_update", async () => checkUpdate());
