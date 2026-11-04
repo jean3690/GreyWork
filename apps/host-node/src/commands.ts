@@ -20,6 +20,7 @@ import { gitChanges, gitCurrentBranch, gitDiff, gitStatus, runGit } from "./git.
 import { ragIndexBuild, ragSearch } from "./rag.js";
 import { listWorktrees, releaseWorktree } from "./worktree.js";
 import { chatComplete, embed, listModels, transcribe, type LlmChatMessage, type LlmStreamHost } from "./llm.js";
+import type { AcpHost } from "./acp.js";
 import type { EventBus } from "./events.js";
 import type { SessionFileStore, WorkspaceDir } from "./session-store.js";
 import type { RagIndexHost } from "./rag.js";
@@ -65,7 +66,9 @@ export function isDenied(name: string, trustedHost: boolean): boolean {
 export interface CommandContext {
   access: WorkspaceAccess;
   bus: EventBus;
+  extraPrograms(trustedHost: boolean): string[];
   db: Db;
+  acp: AcpHost;
   rag: RagIndexHost;
   store: SessionFileStore;
   llm: LlmStreamHost;
@@ -269,6 +272,81 @@ HANDLERS.set("web_fetch", async (args) => {
   return fetchPage(url);
 });
 
+HANDLERS.set("acp_start", async (args, ctx) => {
+  const value = args as { agentCmd?: unknown; tier?: unknown; env?: unknown } | null;
+  if (typeof value?.agentCmd !== "string") throw new CommandError(400, "缺少参数 agentCmd");
+  const extra = ctx.extraPrograms(ctx.trustedHost);
+  return ctx.acp.start(
+    extra,
+    value.agentCmd,
+    typeof value.tier === "string" ? value.tier : null,
+    (value.env ?? undefined) as Record<string, string> | undefined,
+  );
+});
+HANDLERS.set("acp_new_session", async (args, ctx) => {
+  const value = args as { handle?: unknown; cwd?: unknown } | null;
+  if (typeof value?.handle !== "number" || typeof value?.cwd !== "string") {
+    throw new CommandError(400, "缺少参数 handle / cwd");
+  }
+  return ctx.acp.newSession(value.handle, value.cwd);
+});
+HANDLERS.set("acp_load_session", async (args, ctx) => {
+  const value = args as { handle?: unknown; cwd?: unknown; sessionId?: unknown } | null;
+  if (typeof value?.handle !== "number" || typeof value?.cwd !== "string" || typeof value?.sessionId !== "string") {
+    throw new CommandError(400, "缺少参数 handle / cwd / sessionId");
+  }
+  return ctx.acp.loadSession(value.handle, value.cwd, value.sessionId);
+});
+HANDLERS.set("acp_send", async (args, ctx) => {
+  const value = args as { handle?: unknown; text?: unknown } | null;
+  if (typeof value?.handle !== "number" || typeof value?.text !== "string") {
+    throw new CommandError(400, "缺少参数 handle / text");
+  }
+  return ctx.acp.send(value.handle, value.text);
+});
+HANDLERS.set("acp_stop", async (args, ctx) => {
+  const value = args as { handle?: unknown; turnId?: unknown } | null;
+  if (typeof value?.handle !== "number") throw new CommandError(400, "缺少参数 handle");
+  const turnId = typeof value.turnId === "number" ? value.turnId : null;
+  await ctx.acp.stop(value.handle, turnId);
+  return null;
+});
+HANDLERS.set("acp_cancel_session", async (args, ctx) => {
+  const value = args as { handle?: unknown; sessionId?: unknown } | null;
+  if (typeof value?.handle !== "number" || typeof value?.sessionId !== "string") {
+    throw new CommandError(400, "缺少参数 handle / sessionId");
+  }
+  ctx.acp.cancelSession(value.handle, value.sessionId);
+  return null;
+});
+HANDLERS.set("acp_permission_respond", async (args, ctx) => {
+  const value = args as { requestId?: unknown; optionId?: unknown } | null;
+  if (typeof value?.requestId !== "number") throw new CommandError(400, "缺少参数 requestId");
+  ctx.acp.respondPermission(value.requestId, typeof value.optionId === "string" ? value.optionId : null);
+  return null;
+});
+HANDLERS.set("acp_set_permission_tier", async (args, ctx) => {
+  const value = args as { handle?: unknown; tier?: unknown } | null;
+  if (typeof value?.handle !== "number" || typeof value?.tier !== "string") {
+    throw new CommandError(400, "缺少参数 handle / tier");
+  }
+  ctx.acp.setPermissionTier(value.handle, value.tier);
+  return null;
+});
+HANDLERS.set("acp_set_mode", async (args, ctx) => {
+  const value = args as { handle?: unknown; modeId?: unknown } | null;
+  if (typeof value?.handle !== "number" || typeof value?.modeId !== "string") {
+    throw new CommandError(400, "缺少参数 handle / modeId");
+  }
+  return ctx.acp.setMode(value.handle, value.modeId);
+});
+HANDLERS.set("acp_set_config", async (args, ctx) => {
+  const value = args as { handle?: unknown; configId?: unknown; value?: unknown } | null;
+  if (typeof value?.handle !== "number" || typeof value?.configId !== "string") {
+    throw new CommandError(400, "缺少参数 handle / configId");
+  }
+  return ctx.acp.setConfig(value.handle, value.configId, value.value ?? null);
+});
 HANDLERS.set("check_update", async () => checkUpdate());
 
 HANDLERS.set("llm_chat_start", async (args, ctx) => {

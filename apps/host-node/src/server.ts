@@ -14,6 +14,7 @@ import { CommandError, dispatch, listCommands } from "./commands.js";
 import { attachEvents, type EventBus } from "./events.js";
 import { serveStatic } from "./static-site.js";
 import type { HostConfig } from "./config.js";
+import type { AcpHost } from "./acp.js";
 import type { Db } from "./db.js";
 import type { RagIndexHost } from "./rag.js";
 import type { LlmStreamHost } from "./llm.js";
@@ -29,8 +30,10 @@ export interface HostServerOptions {
   throttle: LoginThrottle;
   staticRoot: string | null;
   access: WorkspaceAccess;
+  acp: AcpHost;
   db: Db;
   rag: RagIndexHost;
+  extraPrograms(trustedHost: boolean): string[];
   bus: EventBus;
   store: SessionFileStore;
   llm: LlmStreamHost;
@@ -193,6 +196,7 @@ export function createHostServer(options: HostServerOptions): { server: Server; 
         try {
           const output = await dispatch(body?.command, body?.args ?? null, {
             access: options.access,
+            acp: options.acp,
             db: options.db,
             rag: options.rag,
             bus: options.bus,
@@ -200,6 +204,7 @@ export function createHostServer(options: HostServerOptions): { server: Server; 
             llm: options.llm,
             terminal: options.terminal,
             trustedHost: config.trustedHost,
+            extraPrograms: options.extraPrograms,
           });
           if (output.kind === "binary") {
             // 与 Rust 的 binary_response 一致：原始字节 + octet-stream，并显式标记

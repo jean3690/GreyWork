@@ -9,6 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 
 import { LoginThrottle, SessionStore, passwordChecker } from "../src/auth.js";
+import { AcpHost } from "../src/acp.js";
 import { Db } from "../src/db.js";
 import { RagIndexHost } from "../src/rag.js";
 import { isDenied } from "../src/commands.js";
@@ -84,6 +85,7 @@ for (const root of config.workspaceRoots) access.authorizeSelectedPath(root);
 const db = new Db(path.join(dataDir, "greywork.db"));
 const bus = new EventBus();
 const store = new SessionFileStore(access);
+const acp = new AcpHost(bus, access);
 const llm = new LlmStreamHost(bus);
 const rag = new RagIndexHost(db);
 const terminal = new TerminalHost(bus, access);
@@ -94,12 +96,14 @@ const { server, close } = createHostServer({
   throttle,
   staticRoot: resolveStaticRoot(config.staticDir),
   access,
+  acp,
   db,
   rag,
   store,
   llm,
   bus,
   terminal,
+  extraPrograms: (trustedHost: boolean) => (trustedHost ? ["mock-agent"] : []),
 });
 
 let base = "";
@@ -786,6 +790,69 @@ describe("HTTP 契约", () => {
     // 清空后索引归零（status 与 clear 的组合契约）。
     expect((await call("rag_clear")).status).toBe(200);
     expect((await call("rag_status")).body).toEqual({ chunks: 0, files: 0, model: null, dim: null });
+  });
+
+  it("ACP 全链路：start → new_session → send（权限应答）→ stop", { timeout: 20_000 }, async () => {
+    const agentPath = path.resolve(__dirname, "../test-fixtures/mock-agent.mjs");
+    const token = cookie.split("=")[1];
+    const socket = new WebSocket(`${base.replace("http", "ws")}/api/events?token=${token}`);
+    const acpEvents: { kind?: string; payload?: Record<string, unknown> }[] = [];
+    socket.on("message", (raw) => {
+      const frame = JSON.parse(String(raw)) as { event?: string; payload?: { kind?: string } & Record<string, unknown> };
+      if (frame.event === "acp://event") acpEvents.push(frame.payload ?? {});
+    });
+    await new Promise<void>((resolve, reject) => {
+      socket.once("open", () => resolve());
+      socket.once("error", reject);
+    });
+    const call = async (command: string, args: unknown) => {
+      const response = await fetch(`${base}/api/command`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ command, args }),
+      });
+      return { status: response.status, body: await response.json() };
+    };
+
+    const started = await call("acp_start", { agentCmd: `node ${agentPath}`, tier: "workspace" });
+    // Rust 的 acp_start 返回裸 handle 数值（不是 {handle} 包装）。
+    expect(typeof started.body).toBe("number");
+    const handle = started.body as number;
+
+    const created = await call("acp_new_session", { handle, cwd: workspaceDir });
+    expect(created.status).toBe(200);
+    expect((created.body as { sessionId: string }).sessionId).toBe("sess-1");
+
+    expect((await call("acp_send", { handle, text: "hello" })).status).toBe(200);
+
+    // 等 agent 的权限请求事件，然后应答。
+    const deadline = Date.now() + 5000;
+    let requestId: number | null = null;
+    while (Date.now() < deadline && requestId === null) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      const request = acpEvents.find((frame) => frame.kind === "permission-request");
+      if (request) requestId = (request.payload as { requestId: number }).requestId;
+    }
+    expect(requestId).not.toBeNull();
+    expect((await call("acp_permission_respond", { requestId, optionId: "allow" })).status).toBe(200);
+
+    // 等 prompt-done（应答权限后 mock 才收尾）。
+    const promptDone = await (async () => {
+      const deadline = Date.now() + 5000;
+      while (Date.now() < deadline) {
+        const frame = acpEvents.find((frame) => frame.kind === "prompt-done");
+        if (frame) return frame.payload as { response?: { stopReason?: string } };
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      return null;
+    })();
+    expect(promptDone?.response?.stopReason).toBe("end_turn");
+    expect(acpEvents.some((frame) => frame.kind === "session-update" && JSON.stringify(frame.payload).includes("echo back: hello"))).toBe(
+      true,
+    );
+
+    expect((await call("acp_stop", { handle })).status).toBe(200);
+    socket.close();
   });
 
   it("db_settings：空库回 null，写入后可读回且类型原样", async () => {
