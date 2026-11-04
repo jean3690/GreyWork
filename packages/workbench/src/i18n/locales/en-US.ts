@@ -223,6 +223,13 @@ export const enUS: MessageSchema = {
     configExpand: "Expand session config",
     configCollapse: "Collapse session config",
     configUnset: "Use CLI model",
+    /** Composer rail: plan-mode toggle and context usage. */
+    planMode: "Plan",
+    planModeHint: "Plan mode: decompose first, confirm, then execute (same as /plan)",
+    contextUsage: "Context {used} / {size} tokens ({percent}%)",
+    /** New-chat empty state (features/guid/NewChatHero). */
+    heroTitle: "What are we building today?",
+    heroHint: "Describe a task, paste code, or drop a file — Enter to send, Shift+Enter for a newline.",
   },
   /** Bottom terminal panel (see features/terminal/TerminalPanel). */
   terminal: {
@@ -654,6 +661,11 @@ export const enUS: MessageSchema = {
     },
   },
   chat: {
+    /** Turn-end changed-files summary (features/conversation/TurnDiffSummary). */
+    turnDiff: {
+      summary: "{count} file changed | {count} files changed",
+      toggle: "Toggle changed files",
+    },
     placeholder: {
       hint: "Enter to send · Shift+Enter for newline",
       input: "Tell GreyWork what to do; type {'@'} to reference a plugin / skill…",
@@ -1057,6 +1069,7 @@ export const enUS: MessageSchema = {
     },
     /** Palette descriptions: keys match THEMES[].value in the store. */
     themes: {
+      codex: "Neutral black-and-white with an inverted primary",
       greywork: "Blue-black industrial",
       nightBlue: "Midnight blue — near-black with a cool blue cast",
       nightGreen: "Deep forest — near-black with a green cast",

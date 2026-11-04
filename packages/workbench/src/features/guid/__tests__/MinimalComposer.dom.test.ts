@@ -6,6 +6,7 @@ import MinimalComposer from "@/features/guid/MinimalComposer.vue";
 import AcpSessionConfig from "@/features/conversation/AcpSessionConfig.vue";
 import { i18n } from "@/i18n";
 import { useAgentStore } from "@/stores/agent";
+import { useSettingsStore } from "@/stores/settings";
 import { useWorkspaceStore } from "@/stores/workspace";
 
 beforeEach(() => {
@@ -39,14 +40,16 @@ function menuItem(testid: string): DOMWrapper<Element> {
 }
 
 describe("MinimalComposer 极简输入卡", () => {
-  it("渲染 chips 行、文本区与动作行（工作区回落「普通对话」）", () => {
+  it("单卡：文本区 + 底排（工作区回落「普通对话」/ 附件 / 后端）", () => {
     const wrapper = mountComposer();
 
-    expect(wrapper.find('[data-testid="minimal-composer-chips"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="minimal-composer-rail"]').exists()).toBe(true);
     expect(wrapper.get('[data-testid="minimal-composer-workspace"]').text()).toContain("普通对话");
     expect(wrapper.get("textarea").attributes("placeholder")).toBe("说出你的想法…");
     expect(wrapper.find('[data-testid="minimal-composer-attach"]').exists()).toBe(true);
     expect(wrapper.find('[data-testid="minimal-composer-agent"]').exists()).toBe(true);
+    // 顶部 chip 行已删除：工作区选择器在底排，不在文本区上方
+    expect(wrapper.find('[data-testid="minimal-composer-chips"]').exists()).toBe(false);
   });
 
   it("输入即上报 update:modelValue，键盘事件原样上报给宿主", async () => {
@@ -78,7 +81,7 @@ describe("MinimalComposer 极简输入卡", () => {
     expect(wrapper.emitted("attach")).toHaveLength(1);
   });
 
-  it("ACP 路由下在发送框下方渲染完整会话配置块（复用 AcpSessionConfig）", async () => {
+  it("ACP 路由下把高频配置放进底排，不再单独成卡", async () => {
     const agent = useAgentStore();
     agent.routeToAcp = true;
 
@@ -86,59 +89,51 @@ describe("MinimalComposer 极简输入卡", () => {
     await flushPromises();
 
     expect(wrapper.findComponent(AcpSessionConfig).exists()).toBe(true);
-    // 独立成块（在输入卡之外），而不是塞进 chips 行
-    expect(wrapper.find('[data-testid="minimal-composer-config"]').exists()).toBe(true);
-    // AgentScopeSelect 的权限胶囊（完整外壳配置簇的一员，早先极简这边漏掉）
-    expect(wrapper.text()).toContain("权限");
-  });
-
-  it("本地路由下不渲染配置块（不留空盒）", async () => {
-    const wrapper = mountComposer();
+    // 旧的「输入卡下方独立配置块」已删除
     expect(wrapper.find('[data-testid="minimal-composer-config"]').exists()).toBe(false);
+    // 权限胶囊与模型选择器都在底排这一行里
+    expect(wrapper.get('[data-testid="minimal-composer-rail"]').text()).toContain("权限");
   });
 
-  it("ACP 配置块默认收起：出折叠头 + 当前模型摘要，点开才铺开配置簇", async () => {
+  it("本地路由下不渲染 ACP 配置（不留空盒）", async () => {
+    const wrapper = mountComposer();
+    expect(wrapper.findComponent(AcpSessionConfig).exists()).toBe(false);
+    expect(wrapper.find('[data-testid="acp-config-more"]').exists()).toBe(false);
+  });
+
+  it("底排只留高频项：布尔配置等低频项收进「…」菜单", async () => {
     const agent = useAgentStore();
     agent.routeToAcp = true;
-    agent.acpConfigOptions = [
-      {
-        id: "model",
-        name: "Model",
-        type: "select",
-        currentValue: "gpt-5",
-        options: [
-          { value: "gpt-5", name: "GPT-5" },
-          { value: "local", name: "Local" },
-        ],
-      },
-    ];
+    agent.acpConnected = true;
+    agent.acpConfigOptions = [{ id: "allow-net", name: "允许网络", type: "boolean", currentValue: false }];
 
     const wrapper = mountComposer();
     await flushPromises();
 
-    const toggle = wrapper.get('[data-testid="minimal-composer-config-toggle"]');
-    // 默认收起：折叠头显示模型摘要，aria-expanded 明示状态
-    expect(toggle.attributes("aria-expanded")).toBe("false");
-    expect(toggle.text()).toContain("GPT-5");
-    // 配置簇保持挂载（v-show）——切换后端 / 重连时能即时反映，不丢焦点
-    expect(wrapper.findComponent(AcpSessionConfig).exists()).toBe(true);
-
-    await toggle.trigger("click");
-    expect(wrapper.get('[data-testid="minimal-composer-config-toggle"]').attributes("aria-expanded")).toBe("true");
-
-    await toggle.trigger("click");
-    expect(wrapper.get('[data-testid="minimal-composer-config-toggle"]').attributes("aria-expanded")).toBe("false");
+    expect(wrapper.find('[data-testid="acp-config-more"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="acp-config-boolean-allow-net"]').exists()).toBe(false);
   });
 
-  it("模型无值时摘要回落「跟随 CLI」占位", async () => {
-    const agent = useAgentStore();
-    agent.routeToAcp = true;
-    agent.acpConfigOptions = [{ id: "model", name: "Model", type: "select", currentValue: null, options: [] }];
+  it("计划开关直接读写 settings.planMode（与 /plan 同一状态）", async () => {
+    const wrapper = mountComposer();
+    const button = wrapper.get('[data-testid="minimal-composer-plan"]');
+    expect(button.attributes("aria-pressed")).toBe("false");
 
+    await button.trigger("click");
+    expect(useSettingsStore().planMode).toBe(true);
+    expect(wrapper.get('[data-testid="minimal-composer-plan"]').attributes("aria-pressed")).toBe("true");
+  });
+
+  it("上下文用量：有值才显示百分比，无值不渲染", async () => {
+    const agent = useAgentStore();
+    const empty = mountComposer();
+    expect(empty.find('[data-testid="context-usage"]').exists()).toBe(false);
+
+    agent.routeToAcp = true;
+    agent.acpUsage = { used: 24000, size: 200000 };
     const wrapper = mountComposer();
     await flushPromises();
-
-    expect(wrapper.get('[data-testid="minimal-composer-config-toggle"]').text()).toContain("跟随 CLI");
+    expect(wrapper.get('[data-testid="context-usage"]').text()).toContain("12%");
   });
 });
 

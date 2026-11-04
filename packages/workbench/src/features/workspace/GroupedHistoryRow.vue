@@ -109,7 +109,7 @@ function fmtTime(ts: number): string {
       <template v-else>
         <button
           class="flex h-[34px] w-full cursor-pointer items-center gap-2 rounded-[calc(8px*var(--gw-radius-scale))] px-2 pr-14 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
-          :class="active ? 'bg-panel text-foreground' : 'text-dim hover:bg-panel hover:text-foreground'"
+          :class="active ? 'bg-panel-2 text-foreground' : 'text-dim hover:bg-panel hover:text-foreground'"
           :aria-current="active ? 'true' : undefined"
           @click="emit('navigate', `/conversation/${session.id}`)"
         >

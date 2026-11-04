@@ -296,7 +296,7 @@ onBeforeUnmount(() => {
       @keydown="onResizeKeydown"
       @dblclick="resetHeight"
     >
-      <span class="pointer-events-none h-0.5 w-full bg-transparent transition-colors group-hover:bg-cyan" />
+      <span class="pointer-events-none h-0.5 w-full bg-transparent transition-colors group-hover:bg-dim2" />
     </div>
     <div class="flex h-full flex-col">
       <!-- 标题条：与活动面板/右栏区段条同一节奏 -->
@@ -394,7 +394,7 @@ onBeforeUnmount(() => {
             <button
               type="button"
               data-testid="terminal-split"
-              :class="[buttonClass, terminal.splitId ? 'text-cyan' : '']"
+              :class="[buttonClass, terminal.splitId ? 'text-foreground' : '']"
               :aria-label="terminal.splitId ? t('terminal.unsplit') : t('terminal.split')"
               :aria-pressed="terminal.splitId ? 'true' : 'false'"
               @click="toggleSplit"
@@ -438,7 +438,7 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- 内容区：收起时 v-show 隐藏但保持挂载，终端滚动历史不丢 -->
-      <div v-show="terminal.open" class="relative min-h-0 flex-1 bg-[#0a111b]">
+      <div v-show="terminal.open" class="relative min-h-0 flex-1 bg-console">
         <!-- 窗格用绝对定位：分屏只改几何，不重挂 xterm（滚动历史与订阅都不受影响） -->
         <div
           v-for="tab in terminal.tabs"

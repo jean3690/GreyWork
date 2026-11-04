@@ -70,53 +70,59 @@ const onlyActiveWorkspace = ref(false);
 
 <template>
   <aside
-    class="flex shrink-0 flex-col overflow-hidden border-r border-line-2 bg-panel-2"
-    :class="props.overlay ? 'absolute inset-y-0 left-0 z-40 w-[232px] shadow-[8px_0_24px_rgba(0,0,0,0.18)]' : 'relative w-[232px]'"
+    class="flex shrink-0 flex-col overflow-hidden border-r border-line bg-side"
+    :class="
+      props.overlay
+        ? 'absolute inset-y-0 left-0 z-40 w-[var(--gw-sidebar-w)] shadow-[8px_0_24px_rgba(0,0,0,0.18)]'
+        : 'relative w-[var(--gw-sidebar-w)]'
+    "
     data-testid="grey-minimal-sider"
   >
     <!-- 品牌行：极简模式无折叠概念，纯品牌标识 -->
-    <div class="flex h-[52px] shrink-0 items-center gap-2 px-3">
+    <div class="flex h-12 shrink-0 items-center gap-2 px-3">
       <img :src="logoUrl" alt="" class="size-6 shrink-0 rounded-[calc(7px*var(--gw-radius-scale))]" width="24" height="24" />
       <span class="truncate font-display text-[14px] font-semibold tracking-tight text-foreground"> GreyWork </span>
     </div>
 
-    <!-- 快捷入口：与完整 Sider 同源，样式保持一致 -->
-    <div class="flex flex-col gap-0.5 px-2">
+    <!-- 新建：整行主入口（Codex 侧栏的第一行就是 New chat） -->
+    <div class="px-2">
       <button
-        v-for="item in navItems"
-        :key="item.path"
-        class="flex h-[34px] cursor-pointer items-center gap-2 rounded-[calc(8px*var(--gw-radius-scale))] px-2 text-[13px] transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
-        :class="route.path === item.path ? 'bg-panel text-foreground' : 'text-dim hover:bg-panel hover:text-foreground'"
-        @click="emit('navigate', item.path)"
+        type="button"
+        data-testid="minimal-new-session"
+        class="flex h-9 w-full cursor-pointer items-center gap-2 rounded-[calc(8px*var(--gw-radius-scale))] border border-line-2 bg-panel px-2.5 text-[13px] text-foreground transition-colors hover:bg-panel-2 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+        @click="emit('newChat')"
       >
-        <span class="grid size-5 place-items-center rounded-[calc(5px*var(--gw-radius-scale))] bg-panel text-dim">
-          <Icon :name="item.icon" :size="14" />
-        </span>
-        {{ item.label }}
+        <Icon name="plus" :size="13" class="text-dim" />
+        {{ t("minimal.newSession") }}
+        <kbd class="ml-auto font-mono text-[10px] text-dim2">{{ modKey }}+N</kbd>
       </button>
     </div>
 
-    <!-- 「会话」段头：新建 + 排序（排序为延迟占位，见 Hint 与 aria-disabled） -->
-    <div class="flex h-8 shrink-0 items-center gap-1 px-2 pt-3">
+    <!-- 快捷入口：与完整 Sider 同源，平铺行、图标不再套色块 -->
+    <div class="mt-1 flex flex-col gap-px px-2">
+      <button
+        v-for="item in navItems"
+        :key="item.path"
+        class="flex h-8 cursor-pointer items-center gap-2 rounded-[calc(7px*var(--gw-radius-scale))] px-2 text-[12.5px] transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+        :class="route.path === item.path ? 'bg-panel text-foreground' : 'text-dim hover:bg-panel hover:text-foreground'"
+        @click="emit('navigate', item.path)"
+      >
+        <Icon :name="item.icon" :size="14" class="shrink-0 text-dim2" />
+        <span class="truncate">{{ item.label }}</span>
+      </button>
+    </div>
+
+    <!-- 「会话」段头：只有标签与排序（新建已上移到侧栏首行） -->
+    <div class="flex h-7 shrink-0 items-center gap-1 px-3 pt-3">
       <span class="text-[10.5px] font-medium tracking-wide text-dim2 uppercase">{{ t("minimal.sessions") }}</span>
       <div class="ml-auto flex items-center gap-1">
-        <button
-          type="button"
-          data-testid="minimal-new-session"
-          class="flex h-[26px] cursor-pointer items-center gap-1 rounded-[calc(7px*var(--gw-radius-scale))] border border-line-2 bg-panel px-2 text-[11.5px] text-dim transition-colors hover:border-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
-          @click="emit('newChat')"
-        >
-          <Icon name="plus" :size="12" />
-          {{ t("minimal.newSession") }}
-          <kbd class="ml-0.5 font-mono text-[10px] text-dim2">{{ modKey }}+N</kbd>
-        </button>
         <!-- 排序 / 筛选：排序档 + 「只看当前工作区」，状态转发给 GroupedHistory -->
         <DropdownMenu>
           <DropdownMenuTrigger as-child>
             <button
               type="button"
               data-testid="minimal-session-sort"
-              class="grid size-[26px] shrink-0 cursor-pointer place-items-center rounded-[calc(7px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+              class="grid size-6 shrink-0 cursor-pointer place-items-center rounded-[calc(6px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
               :aria-label="t('minimal.sortLabel')"
             >
               <Icon name="more" :size="13" />

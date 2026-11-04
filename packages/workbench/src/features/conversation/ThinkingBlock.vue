@@ -45,18 +45,14 @@ const seconds = computed(() =>
 </script>
 
 <template>
-  <section
-    class="think my-[6px] mb-[2px] overflow-hidden rounded-[calc(10px*var(--gw-radius-scale))] border border-line bg-[image:var(--thought-gradient)]"
-    data-testid="thinking-block"
-    :data-open="open"
-  >
+  <section class="think my-0.5 overflow-hidden" data-testid="thinking-block" :data-open="open">
     <button
       type="button"
-      class="think__head flex w-full cursor-pointer items-center gap-1.5 px-2.5 py-1.5 text-left text-[12px] text-dim hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan [font-family:inherit]"
+      class="think__head flex w-full cursor-pointer items-center gap-1.5 px-1 py-1 text-left text-[12px] text-dim2 transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan [font-family:inherit]"
       :aria-expanded="open"
       @click="open = !open"
     >
-      <Brain class="think__icon size-[14px] flex-none text-dim2" />
+      <Brain class="think__icon size-[13px] flex-none text-dim2" />
       <span class="think__label font-medium">{{ live ? t("chatView.thinking") : t("chatView.thought") }}</span>
       <span class="think__dur ml-auto font-mono text-[11px] text-dim2" data-testid="thinking-duration">{{ seconds }}</span>
       <ChevronDown
@@ -66,7 +62,7 @@ const seconds = computed(() =>
     </button>
     <p
       v-if="open"
-      class="think__body m-0 whitespace-pre-wrap border-t border-line px-3 pb-2.5 pt-0.5 font-mono text-[12px] leading-[1.7] text-dim"
+      class="think__body m-0 ml-[6px] whitespace-pre-wrap border-l border-line py-1 pl-3 pr-1 font-mono text-[12px] leading-[1.7] text-dim"
     >
       {{ segment.text }}
     </p>

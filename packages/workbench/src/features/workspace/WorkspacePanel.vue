@@ -73,7 +73,7 @@ function onResizeKeydown(event: KeyboardEvent): void {
     >
       <span
         class="pointer-events-none block h-full w-0.5 rounded-full transition-all duration-150"
-        :class="dragging ? 'w-1 bg-cyan' : 'bg-line-2 group-hover:w-1 group-hover:bg-cyan'"
+        :class="dragging ? 'w-1 bg-dim2' : 'bg-line-2 group-hover:w-1 group-hover:bg-dim2'"
       />
     </div>
 

@@ -356,6 +356,7 @@ export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi 
         state.acpConfigOptions.value = [];
         state.acpModes.value = null;
         state.acpImageSupport.value = null;
+        state.acpUsage.value = null;
         state.acpBusy.value = false;
         state.chat.runningSessionId = null;
         subagents.reset(); // 会话回收：子代理树一并作废（关闭父会话即结束其后代工作）
@@ -370,6 +371,8 @@ export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi 
   /** 采纳 session/new 的结果（两条建会话路径共用，避免字段回填漂移）。 */
   function adoptOpenedSession(opened: AcpSessionOpened, threadId: string | null): void {
     state.acpSessionId.value = opened.sessionId;
+    // 换会话 = 旧会话的上下文用量作废：不复位的话底排指示会一直显示上一个会话的数字。
+    state.acpUsage.value = null;
     // 新会话 / 恢复会话都会换掉会话身份：旧的子代理树随旧会话作废
     // （RFD：重连后子代理的 live 状态与授权一律先失效，等新的 subagent_update 重建）。
     subagents.reset();
@@ -410,6 +413,7 @@ export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi 
     state.acpConfigOptions.value = [];
     state.acpModes.value = null;
     state.acpImageSupport.value = null;
+    state.acpUsage.value = null;
     state.acpStreamId.value = null;
     state.acpStatus.value = "disconnected";
     return CONNECT_ABORTED;
@@ -515,6 +519,7 @@ export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi 
         state.acpHandle.value = null;
         state.acpConfigOptions.value = [];
         state.acpModes.value = null;
+        state.acpUsage.value = null;
       }
       const detail = String(error);
       const missing = looksLikeMissingBinary(detail);
@@ -645,6 +650,7 @@ export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi 
     locals.acpSessionThreadId = null;
     state.acpConfigOptions.value = [];
     state.acpModes.value = null;
+    state.acpUsage.value = null;
     gate.dismiss();
     state.acpStreamId.value = null;
     state.chat.runningSessionId = null;

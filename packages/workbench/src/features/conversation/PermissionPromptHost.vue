@@ -23,7 +23,7 @@ const agent = useAgentStore();
   <div
     v-if="agent.pendingPermission"
     data-testid="permission-prompt-host"
-    class="pointer-events-none fixed top-[52px] left-1/2 z-[95] w-[680px] max-w-[calc(100vw-24px)] -translate-x-1/2"
+    class="pointer-events-none fixed top-[calc(var(--gw-topbar-h)+8px)] left-1/2 z-[95] w-[680px] max-w-[calc(100vw-24px)] -translate-x-1/2"
   >
     <div class="pointer-events-auto">
       <PermissionCard />

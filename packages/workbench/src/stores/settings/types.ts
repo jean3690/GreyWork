@@ -27,7 +27,7 @@ export const PERM_LABELS: Record<PermTier, string> = {
 export const MAX_PARALLEL_RANGE = { min: 1, max: 8 } as const;
 
 export type RunMode = "local" | "worktree" | "cloud";
-export type ThemeId = "greywork" | "night-blue" | "night-green" | "github" | "fox" | "liquid-glass";
+export type ThemeId = "codex" | "greywork" | "night-blue" | "night-green" | "github" | "fox" | "liquid-glass";
 export type ColorMode = "dark" | "light" | "system";
 export type FontSize = "small" | "medium" | "large";
 /** 界面圆角档位：none / small（= 改造前的原值）/ large。 */
@@ -35,6 +35,7 @@ export type Radius = "none" | "small" | "large";
 
 /** label 是专有名词（不翻译），description 是 i18n key（settings.themes.*，与 value 对齐）。 */
 export const THEMES: readonly { value: ThemeId; label: string; description: string; colors: readonly [string, string, string] }[] = [
+  { value: "codex", label: "Codex", description: "settings.themes.codex", colors: ["#0d0d0d", "#f2f2f2", "#9a9a9a"] },
   { value: "greywork", label: "GreyWork", description: "settings.themes.greywork", colors: ["#000000", "#4d9fff", "#a1aacb"] },
   { value: "night-blue", label: "Night Blue", description: "settings.themes.nightBlue", colors: ["#050a12", "#4d9fff", "#8fb3d9"] },
   { value: "night-green", label: "Night Green", description: "settings.themes.nightGreen", colors: ["#040d07", "#2fbf71", "#7db894"] },
@@ -218,6 +219,11 @@ export type ChannelId = "wechat" | "dingtalk" | "feishu" | "telegram" | "qq" | "
 export interface SavedSettings {
   /** 主题配色；旧快照可能是 dark/light/system，applySaved 会迁移到 colorMode。 */
   theme?: ThemeId | ColorMode;
+  /**
+   * 配色迁移标记（当前只服务 codex 那次）：值为 `codex-v1` 表示已把旧默认 greywork
+   * 迁到 codex，之后用户再手动切回 greywork 也不会被再次迁移。
+   */
+  themeMigrated?: "codex-v1";
   colorMode?: ColorMode;
   fontSize?: FontSize;
   /** 界面圆角档位；缺失（旧快照）回落 small = 改造前的原值。 */

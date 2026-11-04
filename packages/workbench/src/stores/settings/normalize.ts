@@ -192,6 +192,7 @@ export function normalizeAcpConfigValues(raw: unknown): Record<string, string> {
 /* ===== 枚举合法值查表（applySaved 迁移时用） ===== */
 
 export const THEME_VALUES: Record<ThemeId, true> = {
+  codex: true,
   greywork: true,
   "night-blue": true,
   "night-green": true,

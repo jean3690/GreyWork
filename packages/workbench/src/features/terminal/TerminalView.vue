@@ -141,30 +141,30 @@ function clearSpinner(): void {
 
 /**
  * xterm 主题。xterm 只认**字面颜色值**（不解析 CSS 变量），所以这里硬编码一组与
- * `--console`（#0a111b，终端固定深底）配套的配色；改终端配色只能改这里。
+ * `--console`（#0f0f0f，终端固定深底）配套的中性深灰；改终端配色只能改这里。
  */
 const THEME = {
-  background: "#0a111b",
-  foreground: "#c0caf5",
-  cursor: "#7aa2f7",
-  cursorAccent: "#0a111b",
-  selectionBackground: "#28344a",
-  black: "#1a2233",
-  red: "#f7768e",
-  green: "#9ece6a",
-  yellow: "#e0af68",
+  background: "#0f0f0f",
+  foreground: "#d6d6d6",
+  cursor: "#f0f0f0",
+  cursorAccent: "#0f0f0f",
+  selectionBackground: "#333333",
+  black: "#1c1c1c",
+  red: "#f07178",
+  green: "#8fd18f",
+  yellow: "#e0c07a",
   blue: "#7aa2f7",
-  magenta: "#bb9af7",
+  magenta: "#c0a0f0",
   cyan: "#7dcfff",
-  white: "#a9b1d6",
-  brightBlack: "#414868",
-  brightRed: "#ff7a93",
-  brightGreen: "#b9f27c",
-  brightYellow: "#ff9e64",
-  brightBlue: "#7da6ff",
-  brightMagenta: "#bb9af7",
-  brightCyan: "#0db9d7",
-  brightWhite: "#c0caf5",
+  white: "#d0d0d0",
+  brightBlack: "#5c5c5c",
+  brightRed: "#ff8a8a",
+  brightGreen: "#a8e6a8",
+  brightYellow: "#f0d090",
+  brightBlue: "#9db8ff",
+  brightMagenta: "#d0b0ff",
+  brightCyan: "#a0e0ff",
+  brightWhite: "#f2f2f2",
 } as const;
 
 /** `terminal://data` 的载荷。 */

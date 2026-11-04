@@ -5,9 +5,9 @@ This document defines the visual design language for GreyWork. The canonical imp
 ## Design Philosophy
 
 - **Dark-first**: Dark mode is the default appearance. The shell writes `data-theme="dark"` on first frame to prevent flash.
-- **Near-black canvas**: OLED-friendly pure black (`#000000`) base with 5-level grayscale layering (`bg-base → bg-1 → bg-2 → border`). Cards and surfaces gain depth through elevation, not borders.
-- **Blue-primary, violet-brand**: Primary actions use blue (`#4d9fff` dark / `#165dff` light). The GreyWork brand color is violet (`#a1aacb` dark / `#7583b2` light) — used only for brand elements, not primary actions.
-- **Color restraint in chat**: Chat surfaces (bubbles, tips panels, thought panels) are all neutral black-gray. Color appears only in Agent identity avatars (`--grey-*`), status signals, and semantic tokens.
+- **Monochrome by default (Codex)**: The default palette is `codex` — neutral grays with an **inverted primary** (`--accent` is near-black in light mode and near-white in dark mode, with `--accent-ink` flipped). Color is reserved for status signals, links, and diff add/remove.
+- **Legacy palettes keep their accent**: `greywork` and the other five palettes still use their own primary colors. Only the default look is monochrome.
+- **Color restraint in chat**: Chat surfaces (bubbles, tips panels, thought panels) are all neutral gray. Color appears only in Agent identity avatars (`--grey-*`), status signals, and semantic tokens.
 
 ## Theme Structure
 
@@ -27,16 +27,19 @@ Tokens are grouped into semantic categories (mirrored in `token-contract.ts`):
 
 ### Available Palettes
 
-Six palettes are defined:
+Seven palettes are defined:
 
-1. **`greywork`** (default) — Dark-first, near-black, blue primary, violet brand
-2. **`github`** — GitHub-inspired code workbench, green primary
-3. **`fox`** — Warm terracotta, orange primary
-4. **`night-blue`** — Blue-tinted dark, blue primary
-5. **`night-green`** — Green-tinted dark, green primary
-6. **`liquid-glass`** — Translucent frosted-glass surfaces, blue primary
+1. **`codex`** (default) — Neutral black/white/gray, inverted primary, no colored accent
+2. **`greywork`** — Dark-first, near-black, blue primary, violet brand
+3. **`github`** — GitHub-inspired code workbench, green primary
+4. **`fox`** — Warm terracotta, orange primary
+5. **`night-blue`** — Blue-tinted dark, blue primary
+6. **`night-green`** — Green-tinted dark, green primary
+7. **`liquid-glass`** — Translucent frosted-glass surfaces, blue primary
 
-Each palette has `light` and `dark` variants.
+Each palette has `light` and `dark` variants. Snapshots still carrying the old
+`greywork` default are migrated to `codex` once (`SavedSettings.themeMigrated`), so switching
+back to `greywork` afterwards sticks.
 
 ### Token Scoping
 
@@ -48,7 +51,7 @@ Each palette has `light` and `dark` variants.
 
 ```
 --gw-sidebar-w: 260px      /* Left navigation rail */
---gw-topbar-h: 56px        /* Top app bar */
+--gw-topbar-h: 44px        /* Top app bar */
 --gw-side-w: 420px         /* Right property panel (520px on ≥1600px) */
 --gw-statusbar-h: 24px     /* Bottom status bar */
 ```
@@ -57,23 +60,33 @@ Each palette has `light` and `dark` variants.
 
 There is exactly one shell — no mode toggle, no full-shell alternative. The chrome is fixed:
 
-- **Sidebar** — `features/shell/MinimalSider.vue`: a slim sidebar with quick entries
-  (`lib/nav-items.ts`) and the session history. It deliberately omits the full `Sider`'s collapse
-  rail, brand toggle, `SiderRegions` (plugin sidebar groups) and `CoworkSiderSection` (cowork run
-  nesting). Collapse/expand lives in the titlebar's left toggle; on narrow viewports the sidebar
-  starts collapsed and opens as an overlay drawer.
-- **Titlebar** — `features/shell/Titlebar.vue`: one unconditional cluster on the left (sidebar
-  toggle / search / GitHub / update) and one panel cluster on the right (preview / workspace /
-  terminal), plus the workspace pill and the window controls. Panel toggles use **panel glyphs**
-  (`sidebar` / `sidebar-right` / `terminal` from `lib/icons.ts`), never arrows — the state is
-  carried by the aria-label. The sidebar toggle is gated by the front's `shell.panels.sider`
-  declaration; each panel toggle by its store's `available`.
-- **Composer** — on `/guid` **and** on `/conversation/:id` the composer is the streamlined
-  `features/guid/MinimalComposer.vue` card (workspace chips + textarea + action row, plus a
-  separate `AcpSessionConfig` block under it when routed to ACP), driven by each view's existing
-  dispatch pipeline.
+- **Sidebar** — `features/shell/MinimalSider.vue`: 260px, flat rows on the sidebar surface.
+  A full-width **New chat** row sits directly under the brand, followed by the quick entries
+  (`lib/nav-items.ts`) and the grouped session history. It deliberately omits the full `Sider`'s
+  collapse rail, brand toggle, `SiderRegions` (plugin sidebar groups) and `CoworkSiderSection`
+  (cowork run nesting). Collapse/expand lives in the titlebar's left toggle; on narrow viewports
+  the sidebar starts collapsed and opens as an overlay drawer.
+- **Titlebar** — `features/shell/Titlebar.vue`: 44px, canvas-colored with a hairline bottom
+  border. Left cluster = sidebar toggle / search / plain-text workspace breadcrumb; right cluster
+  = GitHub / update / divider / panel toggles, plus the window controls. Panel toggles use
+  **panel glyphs** (`sidebar` / `sidebar-right` / `terminal` from `lib/icons.ts`), never arrows —
+  the state is carried by the aria-label. The sidebar toggle is gated by the front's
+  `shell.panels.sider` declaration; each panel toggle by its store's `available`.
+- **Composer** — on `/guid` **and** on `/conversation/:id` the composer is one
+  `features/guid/MinimalComposer.vue` card: textarea on top, a single bottom rail carrying
+  attach / workspace / backend (left) and ACP scope+model+effort / plan toggle / context usage /
+  send (right). ACP low-frequency options live in the rail's `…` menu — there is no second
+  config card. Both views keep their own dispatch pipeline.
+- **New-chat state** — `features/guid/NewChatHero.vue` renders the shared heading + suggestion
+  rows; `GuidView` puts the composer inside it, `ConversationView` keeps the composer docked in
+  the footer and renders the same hero in the empty transcript.
 - **Panels** — preview / workspace / terminal are retained, each with its own titlebar toggle.
   The activity band is not rendered: the plugin `activityPanel` regions have no host.
+- **Transcript** — flat and full-width: the user prompt is a soft `--bubble` block spanning the
+  column (no right-aligned bubble); assistant output is an open column. Thinking and tool calls
+  are quiet disclosure rows with a left rule instead of cards. Each finished turn ends with
+  `features/conversation/TurnDiffSummary.vue` — "N files changed +X −Y", expandable, and each
+  file opens in the preview panel.
 
 The center stays the router view. All four panel shortcuts (`Ctrl/Cmd+B` / `E` / `\` / `` ` ``)
 work unconditionally; the layout-mode shortcuts (`Ctrl/Cmd+1..4`) still drive the two panel
@@ -104,7 +117,7 @@ Font size: 15px base.
   图标包**不再需要改写**：仓库从 2026-09-29 起直接用 `@lucide/vue`（上游的 `lucide-vue-next`
   已 deprecated 并指向它），与 shadcn 的产出一致，所以规则表里的那条改写已删除。
 
-- **`--accent` means GreyWork blue, not a hover surface.** `tokens.css` defines `--accent` as the
+- **`--accent` means the palette's primary action color, not a hover surface.** `tokens.css` defines `--accent` as the
   brand action color (~110 call sites). shadcn uses `accent` for hover/selected states, so vendored
   components are rewritten to use `--secondary` (= `--panel-2`), which is the correct hover-surface
   token here. Do not introduce `bg-accent`/`text-accent` into `components/ui/`.

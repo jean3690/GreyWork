@@ -172,15 +172,10 @@ watch(lastSettled, (activity) => {
 </script>
 
 <template>
-  <section
-    class="overflow-hidden rounded-[calc(10px*var(--gw-radius-scale))] border border-line bg-panel-2"
-    data-testid="tool-timeline"
-    :data-open="open"
-    :data-lifecycle="lifecycle"
-  >
+  <section class="overflow-hidden" data-testid="tool-timeline" :data-open="open" :data-lifecycle="lifecycle">
     <button
       type="button"
-      class="flex w-full cursor-pointer items-center gap-1.5 px-2.5 py-1.5 text-left text-[12px] text-dim hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan [font-family:inherit]"
+      class="flex w-full cursor-pointer items-center gap-1.5 px-1 py-1 text-left text-[12px] text-dim2 transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan [font-family:inherit]"
       :aria-expanded="open"
       :aria-label="t('chatView.tools.toggle')"
       @click="open = !open"
@@ -198,7 +193,7 @@ watch(lastSettled, (activity) => {
       <span
         v-for="server in mcpServers"
         :key="server"
-        class="flex h-4 flex-none items-center gap-1 rounded-full bg-cyan/10 px-1.5 text-[10px] text-cyan"
+        class="flex h-4 flex-none items-center gap-1 rounded-full bg-panel-2 px-1.5 text-[10px] text-dim"
         data-testid="tool-mcp-badge"
       >
         <Icon name="earth" :size="9" />{{ t("chatView.tools.mcp") }} · {{ server }}
@@ -229,7 +224,7 @@ watch(lastSettled, (activity) => {
     <div v-if="lifecycle === 'running' && progress" class="h-0.5 w-full bg-amber/20" data-testid="tool-progressbar">
       <div class="h-full bg-amber transition-[width] duration-300" :style="{ width: `${progressPct}%` }" />
     </div>
-    <ul v-if="open" class="m-0 flex list-none flex-col gap-1 border-t border-line px-2.5 py-1.5">
+    <ul v-if="open" class="m-0 ml-[6px] flex list-none flex-col gap-1 border-l border-line py-1 pl-3 pr-1">
       <li
         v-for="row in displayRows"
         :key="row.activity.toolCallId"
@@ -257,7 +252,7 @@ watch(lastSettled, (activity) => {
             :class="[rowTone(row.activity), row.activity.status === 'in_progress' ? 'animate-pulse' : '']"
           />
           <span class="flex-none text-dim2">{{ activityRowVerb(row.activity) }}</span>
-          <span v-if="row.activity.mcpServer" class="flex-none rounded-full bg-cyan/10 px-1.5 text-[10px] text-cyan">
+          <span v-if="row.activity.mcpServer" class="flex-none rounded-full bg-panel-2 px-1.5 text-[10px] text-dim">
             {{ row.activity.mcpServer }}
           </span>
           <span class="truncate font-mono text-dim [overflow-wrap:anywhere]">{{ activityRowLabel(row.activity) }}</span>

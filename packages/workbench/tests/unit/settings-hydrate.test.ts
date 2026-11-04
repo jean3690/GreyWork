@@ -58,7 +58,7 @@ describe("settings store 桌面接管（SQLite 真源）", () => {
     await settings.hydrated;
 
     expect(invokeMock).toHaveBeenCalledWith("db_settings_load");
-    expect(settings.theme).toBe("greywork");
+    expect(settings.theme).toBe("codex");
     expect(settings.colorMode).toBe("light");
     expect(settings.locale).toBe("en-US");
     expect(settings.selectedModelProviderId).toBe("opencode");
@@ -66,7 +66,7 @@ describe("settings store 桌面接管（SQLite 真源）", () => {
     // 幂等回写（本地缓存与真源对齐，同时升级为新设置结构）
     expect(invokeMock).toHaveBeenCalledWith(
       "db_settings_sync",
-      expect.objectContaining({ settings: expect.objectContaining({ theme: "greywork", colorMode: "light", fontSize: "medium" }) }),
+      expect.objectContaining({ settings: expect.objectContaining({ theme: "codex", colorMode: "light", fontSize: "medium" }) }),
     );
   });
 
@@ -75,11 +75,11 @@ describe("settings store 桌面接管（SQLite 真源）", () => {
     const settings = useSettingsStore();
     await settings.hydrated;
 
-    expect(settings.theme).toBe("greywork");
+    expect(settings.theme).toBe("codex");
     expect(settings.colorMode).toBe("dark");
     expect(invokeMock).toHaveBeenCalledWith(
       "db_settings_sync",
-      expect.objectContaining({ settings: expect.objectContaining({ theme: "greywork", colorMode: "dark", fontSize: "medium" }) }),
+      expect.objectContaining({ settings: expect.objectContaining({ theme: "codex", colorMode: "dark", fontSize: "medium" }) }),
     );
   });
 
@@ -89,7 +89,7 @@ describe("settings store 桌面接管（SQLite 真源）", () => {
     const settings = useSettingsStore();
     await settings.hydrated;
 
-    expect(settings.theme).toBe("greywork");
+    expect(settings.theme).toBe("codex");
     expect(settings.colorMode).toBe("dark");
     expect(consoleError).toHaveBeenCalled();
     consoleError.mockRestore();

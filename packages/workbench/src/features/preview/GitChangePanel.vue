@@ -279,7 +279,7 @@ const rowButtonClass =
         <button
           type="button"
           data-testid="git-retry"
-          class="self-start cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] px-2 py-1 text-[11px] text-cyan transition-colors hover:bg-panel"
+          class="self-start cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] px-2 py-1 text-[11px] text-dim transition-colors hover:bg-panel hover:text-foreground"
           @click="git.refresh()"
         >
           {{ t("common.retry") }}
@@ -363,7 +363,7 @@ const rowButtonClass =
 
                 <div
                   v-if="git.isSelected(slot.row.entry.path, slot.row.side === 'index')"
-                  class="border-l-2 border-cyan bg-panel-2"
+                  class="border-l-2 border-line-2 bg-panel-2"
                   data-testid="git-entry-diff"
                 >
                   <p v-if="git.diffLoading" class="px-3 py-2 text-[11px] text-dim2">{{ t("preview.git.diffLoading") }}</p>
@@ -390,7 +390,7 @@ const rowButtonClass =
               id="git-commit-input"
               v-model="git.commitMessage"
               type="text"
-              class="min-w-0 flex-1 rounded-[calc(6px*var(--gw-radius-scale))] border border-line bg-panel px-2 py-1 text-[11.5px] text-foreground placeholder:text-dim2 focus:border-cyan focus:outline-none"
+              class="min-w-0 flex-1 rounded-[calc(6px*var(--gw-radius-scale))] border border-line bg-panel px-2 py-1 text-[11.5px] text-foreground placeholder:text-dim2 focus:border-dim2 focus:outline-none"
               :placeholder="t('preview.git.commitPlaceholder')"
               maxlength="200"
             />
@@ -398,7 +398,7 @@ const rowButtonClass =
               type="submit"
               data-testid="git-commit-submit"
               class="grid size-7 shrink-0 cursor-pointer place-items-center rounded-[calc(6px*var(--gw-radius-scale))] transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40"
-              :class="canCommitStaged ? 'bg-cyan text-white hover:bg-cyan/90' : 'bg-panel text-dim2'"
+              :class="canCommitStaged ? 'bg-accent text-accent-ink hover:opacity-90' : 'bg-panel text-dim2'"
               :disabled="!canCommitStaged"
               :aria-label="t('preview.git.commitStaged')"
             >
@@ -435,7 +435,7 @@ const rowButtonClass =
         <button
           type="button"
           data-testid="git-history-retry"
-          class="self-start cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] px-2 py-1 text-[11px] text-cyan transition-colors hover:bg-panel"
+          class="self-start cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] px-2 py-1 text-[11px] text-dim transition-colors hover:bg-panel hover:text-foreground"
           @click="git.loadHistory(true)"
         >
           {{ t("common.retry") }}
@@ -456,7 +456,7 @@ const rowButtonClass =
               :aria-expanded="git.historySelected === commit.hash ? 'true' : 'false'"
               @click="toggleCommit(commit.hash)"
             >
-              <span class="mt-0.5 shrink-0 font-mono text-[10.5px] text-cyan">{{ commit.shortHash }}</span>
+              <span class="mt-0.5 shrink-0 font-mono text-[10.5px] text-dim">{{ commit.shortHash }}</span>
               <span class="min-w-0 flex-1">
                 <span class="block truncate text-[11.5px] text-foreground">
                   {{ commit.subject || t("preview.git.history.noSubject") }}
@@ -474,7 +474,7 @@ const rowButtonClass =
               </span>
             </button>
 
-            <div v-if="git.historySelected === commit.hash" class="border-l-2 border-cyan bg-panel-2" data-testid="git-commit-diff">
+            <div v-if="git.historySelected === commit.hash" class="border-l-2 border-line-2 bg-panel-2" data-testid="git-commit-diff">
               <p v-if="git.historyDiffLoading" class="px-3 py-2 text-[11px] text-dim2">{{ t("preview.git.diffLoading") }}</p>
               <p v-else-if="git.historyDiffError" class="break-all px-3 py-2 text-[11px] text-orange">{{ git.historyDiffError }}</p>
               <p v-else-if="historyDiffEmpty" class="px-3 py-2 text-[11px] text-dim2">{{ t("preview.git.diffEmpty") }}</p>
@@ -487,7 +487,7 @@ const rowButtonClass =
           v-if="git.historyHasMore"
           type="button"
           data-testid="git-history-more"
-          class="mx-3 my-1.5 cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] px-2 py-1 text-[11px] text-cyan transition-colors hover:bg-panel focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40"
+          class="mx-3 my-1.5 cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] px-2 py-1 text-[11px] text-dim transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40"
           :disabled="git.historyLoading"
           @click="git.loadHistory()"
         >

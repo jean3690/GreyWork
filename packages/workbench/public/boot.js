@@ -16,7 +16,11 @@
 (function () {
   try {
     var saved = JSON.parse(localStorage.getItem("greywork.settings") || "{}");
-    var palette = ["greywork", "night-blue", "night-green", "github", "fox"].indexOf(saved.theme) >= 0 ? saved.theme : "greywork";
+    var savedPalette =
+      ["codex", "greywork", "night-blue", "night-green", "github", "fox", "liquid-glass"].indexOf(saved.theme) >= 0 ? saved.theme : "codex";
+    // 与 stores/settings 的 applySaved 同口径：旧默认 greywork 一次性迁到 codex。
+    // 这里只读不写，标记由 store 的 persist 落库。
+    var palette = savedPalette === "greywork" && saved.themeMigrated !== "codex-v1" ? "codex" : savedPalette;
     // v0.1 兼容：旧快照把明暗存在 theme 上，口径与 stores/settings.ts 的 applySaved 一致。
     var mode =
       ["dark", "light", "system"].indexOf(saved.colorMode) >= 0

@@ -220,6 +220,13 @@ export const zhCN = {
     configExpand: "展开会话配置",
     configCollapse: "收起会话配置",
     configUnset: "跟随 CLI",
+    /** 输入卡底排：计划模式开关与上下文占用。 */
+    planMode: "计划",
+    planModeHint: "计划模式：先拆解任务给出方案，确认后再执行（同 /plan）",
+    contextUsage: "上下文 {used} / {size} tokens（{percent}%）",
+    /** 新对话空态（features/guid/NewChatHero）。 */
+    heroTitle: "今天想做什么？",
+    heroHint: "描述任务、贴代码或拖入文件；回车发送，Shift+Enter 换行。",
   },
   /** 底部终端面板（见 features/terminal/TerminalPanel）。 */
   terminal: {
@@ -650,6 +657,11 @@ export const zhCN = {
     },
   },
   chat: {
+    /** 回合结束的改动摘要（features/conversation/TurnDiffSummary）。 */
+    turnDiff: {
+      summary: "改动了 {count} 个文件",
+      toggle: "展开或收起改动文件",
+    },
     placeholder: {
       hint: "Enter 发送 · Shift+Enter 换行",
       input: "给 GreyWork 下达任务，输入 {'@'} 引用插件 / 技能…",
@@ -1040,6 +1052,7 @@ export const zhCN = {
     },
     /** 配色说明：键与 store 的 THEMES[].value 对齐。 */
     themes: {
+      codex: "黑白灰中性色，反色主按钮",
       greywork: "蓝黑工业风格",
       nightBlue: "子夜蓝：近黑底子带一层冷蓝",
       nightGreen: "深林绿：近黑底子带一层墨绿",

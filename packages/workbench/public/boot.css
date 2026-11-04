@@ -16,3 +16,7 @@ html {
 html[data-theme="light"] {
   background-color: #ffffff;
 }
+/* Codex 深色画布比纯黑亮一档（#0d0d0d），首帧别用 #000000 垫底。 */
+html[data-palette="codex"][data-theme="dark"] {
+  background-color: #0d0d0d;
+}

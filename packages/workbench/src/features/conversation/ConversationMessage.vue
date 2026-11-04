@@ -13,6 +13,7 @@ import ArtifactCards from "@/features/activity/ArtifactCards.vue";
 import StreamText from "@/features/conversation/StreamText.vue";
 import ThinkingBlock from "@/features/conversation/ThinkingBlock.vue";
 import ToolTimeline from "@/features/conversation/ToolTimeline.vue";
+import TurnDiffSummary from "@/features/conversation/TurnDiffSummary.vue";
 import PlanCard from "@/features/conversation/PlanCard.vue";
 import AskQuestionCard from "@/features/conversation/AskQuestionCard.vue";
 import AutomationConfirmCard from "@/features/conversation/AutomationConfirmCard.vue";
@@ -196,10 +197,7 @@ const showActions = computed(() => message.value.content.length > 0 || canEdit.v
       >
       <span class="text-[11px] font-medium text-dim">{{ author.name }}</span>
     </button>
-    <div
-      v-if="message.role === 'user'"
-      class="msg__bubble ml-auto max-w-[78%] rounded-tl-[calc(16px*var(--gw-radius-scale))] rounded-tr-[calc(16px*var(--gw-radius-scale))] rounded-br-[calc(4px*var(--gw-radius-scale))] rounded-bl-[calc(16px*var(--gw-radius-scale))] bg-bubble px-4 py-3"
-    >
+    <div v-if="message.role === 'user'" class="msg__bubble w-full rounded-[calc(12px*var(--gw-radius-scale))] bg-bubble px-3.5 py-3">
       <div class="flex flex-col gap-2">
         <div v-if="attachmentList.length" data-testid="message-attachments" class="flex flex-wrap items-center gap-2">
           <template v-for="item in attachmentList" :key="item.id">
@@ -272,20 +270,18 @@ const showActions = computed(() => message.value.content.length > 0 || canEdit.v
         </div>
       </div>
       <!-- user 侧时间戳：与 assistant 末行同一格式同一字号，读起来不必切换坐标系 -->
-      <span class="mr-1 mt-0.5 text-right text-[10px] text-dim2">{{ timeLabel(message.ts) }}</span>
+      <span class="mt-1 block pr-1 text-right text-[10px] text-dim2">{{ timeLabel(message.ts) }}</span>
     </div>
-    <div v-else class="flex max-w-[92%] flex-col gap-2.5">
+    <div v-else class="flex w-full flex-col gap-2.5">
       <PlanCard v-if="message.planPending" :thread-id="threadId || chat.activeThreadId" :message="message" />
       <AskQuestionCard v-if="message.ask" :thread-id="threadId || chat.activeThreadId" :message="message" />
       <AutomationConfirmCard v-if="message.scheduleDraft" :thread-id="threadId || chat.activeThreadId" :message="message" />
-      <div
-        v-if="awaitingOutput"
-        class="flex h-9 items-center gap-2.5 rounded-[calc(12px*var(--gw-radius-scale))] border border-line bg-panel-2 px-3.5 text-[12px] text-dim"
-      >
+      <!-- 生成中的状态行：Codex 用一行安静的文字，而不是带框的「气泡提示」。 -->
+      <div v-if="awaitingOutput" class="flex items-center gap-2 py-0.5 text-[12px] text-dim2">
         <span class="flex items-center gap-1">
-          <span class="size-1.5 animate-bounce rounded-full bg-cyan/70 [animation-delay:0ms]" />
-          <span class="size-1.5 animate-bounce rounded-full bg-cyan/70 [animation-delay:150ms]" />
-          <span class="size-1.5 animate-bounce rounded-full bg-cyan/70 [animation-delay:300ms]" />
+          <span class="size-1 animate-bounce rounded-full bg-dim2/70 [animation-delay:0ms]" />
+          <span class="size-1 animate-bounce rounded-full bg-dim2/70 [animation-delay:150ms]" />
+          <span class="size-1 animate-bounce rounded-full bg-dim2/70 [animation-delay:300ms]" />
         </span>
         {{ isStreaming && agent.acpStreamId === message.id ? "正在思考…" : "正在生成…" }}
       </div>
@@ -300,6 +296,8 @@ const showActions = computed(() => message.value.content.length > 0 || canEdit.v
         <MarkdownText v-else :content="textOf(segment)" />
       </template>
       <ArtifactCards v-if="message.artifacts?.length" :ids="message.artifacts" />
+      <!-- 回合改动摘要：整条助手消息的工具并集，流式中不显示（数字还在变）。 -->
+      <TurnDiffSummary :activities="message.tools ?? []" :streaming="isStreaming" />
       <!-- 权限裁决留痕：活跃卡片在输入框上方（那里才是「等你点」的位置），
            裁决后卡片消失，但记录留在消息流里，回看能知道当时批了什么。 -->
       <PermissionCard v-for="trace in message.permissions ?? []" :key="trace.toolCallId" :trace="trace" />

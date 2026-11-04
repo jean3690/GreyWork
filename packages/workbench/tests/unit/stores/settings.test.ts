@@ -63,12 +63,26 @@ describe("settings 持久化", () => {
     expect(useSettingsStore().radius).toBe("none");
   });
 
-  it("旧 theme 明暗字段迁移到 colorMode，主题回落 GreyWork", () => {
+  it("旧 theme 明暗字段迁移到 colorMode，配色回落默认 Codex", () => {
     storage.set("greywork.settings", JSON.stringify({ theme: "system" }));
     setActivePinia(createPinia());
     const settings = useSettingsStore();
-    expect(settings.theme).toBe("greywork");
+    expect(settings.theme).toBe("codex");
     expect(settings.colorMode).toBe("system");
+  });
+
+  it("旧默认 greywork 一次性迁到 codex；带迁移标记后切回 greywork 不再被迁走", () => {
+    storage.set("greywork.settings", JSON.stringify({ theme: "greywork" }));
+    setActivePinia(createPinia());
+    expect(useSettingsStore().theme).toBe("codex");
+
+    const settings = useSettingsStore();
+    settings.theme = "greywork";
+    settings.persist();
+
+    setActivePinia(createPinia());
+    const reloaded = useSettingsStore();
+    expect(reloaded.theme).toBe("greywork");
   });
 
   it("loadPersisted 对非法 reasoningEffort 回退 auto", () => {

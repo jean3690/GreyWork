@@ -109,7 +109,7 @@ describe("Shell", () => {
     // 开合键恒在：极简侧栏没有品牌开合键，标题栏这颗是唯一入口（由前端的 panels.sider 决定）
     expect(wrapper.get('[data-testid="titlebar"]').attributes("data-sider-toggle")).toBe("true");
     expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
-    expect(document.documentElement.getAttribute("data-palette")).toBe("greywork");
+    expect(document.documentElement.getAttribute("data-palette")).toBe("codex");
     expect(h.bootPlugins).toHaveBeenCalledTimes(1);
     expect(h.remoteInit).toHaveBeenCalledTimes(1);
   });

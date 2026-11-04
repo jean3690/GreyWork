@@ -309,7 +309,7 @@ const sectionClass = (active: boolean): string =>
   [
     "h-6 shrink-0 cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] px-2 text-[11.5px] transition-colors",
     "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan",
-    active ? "bg-panel text-foreground" : "text-dim hover:text-foreground",
+    active ? "bg-panel-2 text-foreground" : "text-dim hover:text-foreground",
   ].join(" ");
 </script>
 
@@ -339,7 +339,7 @@ const sectionClass = (active: boolean): string =>
     >
       <span
         class="pointer-events-none block h-full w-0.5 rounded-full transition-all duration-150"
-        :class="dragging ? 'w-1 bg-cyan' : 'bg-line-2 group-hover:w-1 group-hover:bg-cyan'"
+        :class="dragging ? 'w-1 bg-dim2' : 'bg-line-2 group-hover:w-1 group-hover:bg-dim2'"
       />
     </div>
 
@@ -379,7 +379,7 @@ const sectionClass = (active: boolean): string =>
           type="button"
           data-testid="preview-save"
           :aria-disabled="saving || undefined"
-          class="grid size-6 cursor-pointer place-items-center rounded-[calc(6px*var(--gw-radius-scale))] text-cyan transition-colors hover:bg-panel focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan aria-disabled:cursor-not-allowed aria-disabled:text-dim2"
+          class="grid size-6 cursor-pointer place-items-center rounded-[calc(6px*var(--gw-radius-scale))] text-foreground transition-colors hover:bg-panel-2 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan aria-disabled:cursor-not-allowed aria-disabled:text-dim2"
           :aria-label="t('preview.sider.saveCurrent')"
           @click="saveActive()"
         >

@@ -230,7 +230,7 @@ onMounted(() => {
         <!-- 工作区行：caret 只管展开，行体管切换（两个独立按钮，避免按钮套按钮） -->
         <div
           class="group/ws flex h-[34px] shrink-0 items-center gap-1 rounded-[calc(8px*var(--gw-radius-scale))] pr-1.5 transition-colors"
-          :class="isActiveRow(group) ? 'bg-cyan/10' : 'hover:bg-panel'"
+          :class="isActiveRow(group) ? 'bg-panel-2' : 'hover:bg-panel'"
         >
           <Hint :text="filtering ? '搜索中：命中会话已全部展开' : isExpanded(group) ? '收起' : '展开'">
             <button
@@ -255,9 +255,9 @@ onMounted(() => {
               :aria-current="isActiveRow(group) ? 'true' : undefined"
               @click="selectRow(group)"
             >
-              <Icon :name="iconOf(group)" :size="12" class="shrink-0" :class="isActiveRow(group) ? 'text-cyan' : 'text-dim2'" />
+              <Icon :name="iconOf(group)" :size="12" class="shrink-0" :class="isActiveRow(group) ? 'text-foreground' : 'text-dim2'" />
               <span class="min-w-0 flex-1 truncate text-[12.5px] font-medium">{{ group.name }}</span>
-              <Icon v-if="workspaceStore.defaultWorkspaceId === group.id" name="pin" :size="10" class="shrink-0 text-cyan" />
+              <Icon v-if="workspaceStore.defaultWorkspaceId === group.id" name="pin" :size="10" class="shrink-0 text-dim" />
               <span class="shrink-0 text-[10px] text-dim2 tabular-nums">{{ group.sessions.length }}</span>
             </button>
           </Hint>

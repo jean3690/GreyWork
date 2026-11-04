@@ -33,7 +33,7 @@ const TONE_BY_KIND: Record<NoticeKind, string> = {
 
 <template>
   <div
-    class="pointer-events-none fixed top-[52px] right-3 z-[90] flex w-[320px] max-w-[calc(100vw-24px)] flex-col gap-2"
+    class="pointer-events-none fixed top-[calc(var(--gw-topbar-h)+8px)] right-3 z-[90] flex w-[320px] max-w-[calc(100vw-24px)] flex-col gap-2"
     data-testid="notice-host"
   >
     <div

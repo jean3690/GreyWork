@@ -107,10 +107,10 @@ const controlButton =
  * 窗口三键刻意不并进来：它仿系统 chrome，是吃满高度的方块，见上面的 controlButton。
  */
 const iconButton =
-  "grid size-7 shrink-0 cursor-pointer place-items-center rounded-[calc(6px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan";
+  "grid size-7 shrink-0 cursor-pointer place-items-center rounded-[calc(6px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan";
 
-/** 组间竖分隔线：1px 宽，`self-center` + h-4 让它在 42px 高的标题栏里居中。 */
-const groupDivider = "mx-1 h-4 w-px shrink-0 self-center bg-line-2";
+/** 组间竖分隔线：1px 宽，`self-center` + h-4 让它在标题栏里居中。 */
+const groupDivider = "mx-1 h-4 w-px shrink-0 self-center bg-line";
 
 async function syncMaximized(): Promise<void> {
   const win = hostWindow();
@@ -217,7 +217,7 @@ onBeforeUnmount(() => {
 <template>
   <ContextMenuRegion :build="buildMenu">
     <header
-      class="relative z-30 flex h-[42px] shrink-0 items-center gap-1 border-b border-line-2 bg-panel-2 px-2 select-none"
+      class="relative z-30 flex h-[var(--gw-topbar-h)] shrink-0 items-center gap-1 border-b border-line bg-ink px-2 select-none"
       data-tauri-drag-region
       data-testid="grey-titlebar"
     >
@@ -272,34 +272,36 @@ onBeforeUnmount(() => {
         <SearchPanel v-if="searchOpen" @close="searchOpen = false" />
       </Popover>
 
-      <!-- GitHub 仓库：官方 mark 需要填充，故不走描边式的 Icon 组件，内联 SVG（fill=currentColor）。 -->
-      <Hint :text="t('titlebar.github')">
-        <button :class="iconButton" :aria-label="t('titlebar.github')" data-testid="titlebar-github" @click="openRepo">
-          <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" focusable="false">
-            <path
-              d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"
-            />
-          </svg>
-        </button>
-      </Hint>
-
-      <!-- 检查更新：refresh 图标语义即「查一遍」。点击打开对话框（打开时才发起 GitHub 查询）。 -->
-      <Hint :text="t('titlebar.update')">
-        <button :class="iconButton" :aria-label="t('titlebar.update')" data-testid="titlebar-update" @click="updateOpen = true">
-          <Icon name="refresh" :size="16" />
-        </button>
-      </Hint>
-
-      <!-- 状态区：ml-auto 把它连同后面的控制簇一起推到右侧。
-         pill 自带边框，与相邻的控制簇天然分得开，不再另加分隔线。 -->
-      <div
-        class="ml-auto flex items-center gap-1.5 rounded-[calc(6px*var(--gw-radius-scale))] border border-line-2 bg-panel px-2 py-1 text-[12px] text-dim"
-      >
-        <span class="size-1.5 rounded-full" :class="activeWorkspace ? 'bg-mint' : 'bg-dim2'" />
-        <span class="max-w-[200px] truncate">{{ activeWorkspace?.name ?? t("titlebar.noWorkspace") }}</span>
+      <!-- 当前工作区：纯文本面包屑（画布色标题栏上不再套胶囊边框） -->
+      <div class="ml-1 flex min-w-0 items-center gap-1.5 text-[12px] text-dim" data-testid="titlebar-workspace">
+        <Icon name="folder" :size="12" class="shrink-0 text-dim2" />
+        <span class="max-w-[200px] truncate">{{ activeWorkspace?.name ?? t("minimal.workspaceFallback") }}</span>
       </div>
 
-      <!-- 面板开关组：三个开关都改窗口内布局，单独成组（组内 gap-0.5 比 header 的 gap-1 更紧，
+      <!-- 右簇：全局入口（GitHub / 更新）+ 面板开关。`ml-auto` 把整簇推到右侧，
+           左侧只留「导航 / 搜索 / 当前工作区」，与 Codex 的顶栏密度一致。 -->
+      <div class="ml-auto flex items-center gap-0.5" data-testid="titlebar-actions">
+        <!-- GitHub 仓库：官方 mark 需要填充，故不走描边式的 Icon 组件，内联 SVG（fill=currentColor）。 -->
+        <Hint :text="t('titlebar.github')">
+          <button :class="iconButton" :aria-label="t('titlebar.github')" data-testid="titlebar-github" @click="openRepo">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" focusable="false">
+              <path
+                d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"
+              />
+            </svg>
+          </button>
+        </Hint>
+
+        <!-- 检查更新：refresh 图标语义即「查一遍」。点击打开对话框（打开时才发起 GitHub 查询）。 -->
+        <Hint :text="t('titlebar.update')">
+          <button :class="iconButton" :aria-label="t('titlebar.update')" data-testid="titlebar-update" @click="updateOpen = true">
+            <Icon name="refresh" :size="16" />
+          </button>
+        </Hint>
+
+        <span :class="groupDivider" aria-hidden="true" />
+
+        <!-- 面板开关组：三个开关都改窗口内布局，单独成组（组内 gap-0.5 比 header 的 gap-1 更紧，
            一眼看出是一簇）。三个的显隐都读各自 store 的 available（Shell 按 768px 回灌），
            不在这里另写断点 —— 两个阈值各写一处就会漂移，之前 `sm:`(640px) 与 Shell 的 768px
            不一致，导致 640–768px 之间按钮可见但面板根本没渲染，点了没反应。
@@ -308,36 +310,37 @@ onBeforeUnmount(() => {
            工作区开关：三栏 会话|预览|工作区 的最右栏，默认折叠（回到旧单右栏布局）；
              图标固定用文件夹 —— 它就是文件工作区，开合状态靠 aria-label 表达。
            终端开关：底部终端面板。 -->
-      <div class="ml-1 flex items-center gap-0.5" data-testid="titlebar-panels">
-        <button
-          v-if="preview.available"
-          :class="iconButton"
-          :aria-label="preview.collapsed ? t('titlebar.expandPreview') : t('titlebar.collapsePreview')"
-          data-testid="titlebar-preview-toggle"
-          @click="preview.toggle()"
-        >
-          <Icon name="sidebar-right" :size="16" />
-        </button>
+        <div class="ml-1 flex items-center gap-0.5" data-testid="titlebar-panels">
+          <button
+            v-if="preview.available"
+            :class="iconButton"
+            :aria-label="preview.collapsed ? t('titlebar.expandPreview') : t('titlebar.collapsePreview')"
+            data-testid="titlebar-preview-toggle"
+            @click="preview.toggle()"
+          >
+            <Icon name="sidebar-right" :size="16" />
+          </button>
 
-        <button
-          v-if="workspace.available"
-          :class="iconButton"
-          :aria-label="workspace.collapsed ? t('titlebar.expandWorkspace') : t('titlebar.collapseWorkspace')"
-          data-testid="titlebar-workspace-toggle"
-          @click="workspace.toggle()"
-        >
-          <Icon name="folder" :size="16" />
-        </button>
+          <button
+            v-if="workspace.available"
+            :class="iconButton"
+            :aria-label="workspace.collapsed ? t('titlebar.expandWorkspace') : t('titlebar.collapseWorkspace')"
+            data-testid="titlebar-workspace-toggle"
+            @click="workspace.toggle()"
+          >
+            <Icon name="folder" :size="16" />
+          </button>
 
-        <button
-          v-if="terminal.available"
-          :class="iconButton"
-          :aria-label="terminal.open ? t('titlebar.collapseTerminal') : t('titlebar.expandTerminal')"
-          data-testid="titlebar-terminal-toggle"
-          @click="terminal.toggle()"
-        >
-          <Icon name="terminal" :size="16" />
-        </button>
+          <button
+            v-if="terminal.available"
+            :class="iconButton"
+            :aria-label="terminal.open ? t('titlebar.collapseTerminal') : t('titlebar.expandTerminal')"
+            data-testid="titlebar-terminal-toggle"
+            @click="terminal.toggle()"
+          >
+            <Icon name="terminal" :size="16" />
+          </button>
+        </div>
       </div>
 
       <!-- 更新对话框：与入口区并列，点击顶栏的检查更新键才挂载。 -->

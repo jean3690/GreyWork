@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, nextTick, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 import { useAgentStore } from "@/stores/agent";
@@ -9,6 +9,7 @@ import { useWorkspaceStore } from "@/stores/workspace";
 import AttachmentTray from "@/features/conversation/AttachmentTray.vue";
 import SlashCommandMenu from "@/features/conversation/SlashCommandMenu.vue";
 import MinimalComposer from "@/features/guid/MinimalComposer.vue";
+import NewChatHero from "@/features/guid/NewChatHero.vue";
 import Icon from "@/features/shared/Icon.vue";
 import ContextMenuRegion from "@/features/shared/ContextMenuRegion.vue";
 import { buildComposerItems, type ComposerMenuActions, type ContextMenuItem, type ContextTarget } from "@/lib/context-menu";
@@ -35,6 +36,16 @@ const workspaceStore = useWorkspaceStore();
 const draft = ref("");
 /** 选区评论草稿（预览划词 → 评论）：随首条消息挂上，发后清空。 */
 const comments = ref<MessageComment[]>([]);
+/** 引导页建议：与对话页空态同一套文案，点击只填入草稿（不发送），保留改写余地。 */
+const heroSuggestions = computed(() => [
+  { icon: "search", label: t("chat.composer.suggest.explore"), value: t("chat.composer.suggest.exploreText") },
+  { icon: "calendar", label: t("chat.composer.suggest.plan"), value: t("chat.composer.suggest.planText") },
+  { icon: "file", label: t("chat.composer.suggest.review"), value: t("chat.composer.suggest.reviewText") },
+]);
+function pickSuggestion(value: string): void {
+  draft.value = value;
+  void nextTick(() => composerRef.value?.textareaEl?.focus());
+}
 
 /** 图片可用性：本地 LLM 无能力声明（交给供应商报错），ACP 以 agent 声明为准。 */
 const imagesAllowed = computed(() => !agent.routeToAcp || agent.acpImageSupport !== false);
@@ -145,63 +156,65 @@ function buildMenu(target: ContextTarget | null): ContextMenuItem[] {
 
 <template>
   <ContextMenuRegion :build="buildMenu">
-    <section class="flex min-h-full w-full flex-col items-center justify-start px-4 pb-8 pt-16 sm:justify-center sm:py-8">
-      <div class="flex w-full flex-col items-center gap-4 max-w-[760px]">
-        <div class="flex w-full flex-col gap-2.5">
-          <!-- 选区评论草稿：挂在本条消息上的批注（展示被引用的原文片段）。 -->
-          <div v-if="comments.length" data-testid="comment-draft" class="flex flex-col gap-1.5">
-            <div
-              v-for="comment in comments"
-              :key="comment.id"
-              data-testid="comment-draft-item"
-              class="flex items-start gap-2 rounded-[calc(10px*var(--gw-radius-scale))] border border-line bg-panel px-3 py-2"
-            >
-              <Icon name="message" :size="12" class="mt-0.5 shrink-0 text-dim2" />
-              <span class="min-w-0 flex-1 truncate text-[12px] text-dim" :title="comment.quote">{{ quoteSummary(comment.quote) }}</span>
-              <button
-                type="button"
-                data-testid="comment-draft-remove"
-                class="grid size-5 shrink-0 place-items-center rounded-[calc(6px*var(--gw-radius-scale))] text-dim2 transition-colors hover:text-destructive"
-                :aria-label="t('chat.comment.remove')"
-                @click="removeComment(comment.id)"
+    <section class="flex min-h-full w-full flex-col items-center px-4 pb-10 pt-20 sm:justify-center sm:py-10">
+      <div class="flex w-full max-w-[780px] flex-col items-center gap-2.5">
+        <NewChatHero :title="t('minimal.heroTitle')" :hint="t('minimal.heroHint')" :suggestions="heroSuggestions" @pick="pickSuggestion">
+          <div class="flex w-full flex-col gap-2.5">
+            <!-- 选区评论草稿：挂在本条消息上的批注（展示被引用的原文片段）。 -->
+            <div v-if="comments.length" data-testid="comment-draft" class="flex flex-col gap-1.5">
+              <div
+                v-for="comment in comments"
+                :key="comment.id"
+                data-testid="comment-draft-item"
+                class="flex items-start gap-2 rounded-[calc(10px*var(--gw-radius-scale))] border border-line bg-panel px-3 py-2"
               >
-                <Icon name="close" :size="12" />
-              </button>
+                <Icon name="message" :size="12" class="mt-0.5 shrink-0 text-dim2" />
+                <span class="min-w-0 flex-1 truncate text-[12px] text-dim" :title="comment.quote">{{ quoteSummary(comment.quote) }}</span>
+                <button
+                  type="button"
+                  data-testid="comment-draft-remove"
+                  class="grid size-5 shrink-0 place-items-center rounded-[calc(6px*var(--gw-radius-scale))] text-dim2 transition-colors hover:text-destructive"
+                  :aria-label="t('chat.comment.remove')"
+                  @click="removeComment(comment.id)"
+                >
+                  <Icon name="close" :size="12" />
+                </button>
+              </div>
             </div>
-          </div>
-          <!-- 输入卡：管线仍归本页（run / onSubmit / 附件 / 斜杠 / 评论），经 props + 具名
+            <!-- 输入卡：管线仍归本页（run / onSubmit / 附件 / 斜杠 / 评论），经 props + 具名
                slot 注入。拖放命中靠 data-attachment-dropzone 落到根元素（Vue 把属性与未声明
                的监听透传到单根），复用同一套 onComposerDrag* 处理器。 -->
-          <MinimalComposer
-            ref="composerRef"
-            v-model="draft"
-            :busy="turnActive"
-            :can-send="!!draft.trim() || attachmentItems.length > 0"
-            :placeholder="t('chat.composer.placeholderPitch')"
-            data-attachment-dropzone
-            @submit="onSubmit"
-            @attach="pickAttachmentFiles"
-            @keydown="onKeydown"
-            @paste="onComposerPaste"
-            @blur="dismissSlashMenu"
-            @dragover="onComposerDragOver"
-            @dragleave="onComposerDragLeave"
-            @drop="onComposerDrop"
-          >
-            <template #tray>
-              <AttachmentTray :items="attachmentItems" @remove="removeAttachment" />
-            </template>
-            <template #menu>
-              <SlashCommandMenu
-                v-if="slashOpen"
-                :items="slashItems"
-                :active-index="slashActiveIndex"
-                @select="selectSlashCommand"
-                @update:active-index="slashActiveIndex = $event"
-              />
-            </template>
-          </MinimalComposer>
-        </div>
+            <MinimalComposer
+              ref="composerRef"
+              v-model="draft"
+              :busy="turnActive"
+              :can-send="!!draft.trim() || attachmentItems.length > 0"
+              :placeholder="t('chat.composer.placeholderPitch')"
+              data-attachment-dropzone
+              @submit="onSubmit"
+              @attach="pickAttachmentFiles"
+              @keydown="onKeydown"
+              @paste="onComposerPaste"
+              @blur="dismissSlashMenu"
+              @dragover="onComposerDragOver"
+              @dragleave="onComposerDragLeave"
+              @drop="onComposerDrop"
+            >
+              <template #tray>
+                <AttachmentTray :items="attachmentItems" @remove="removeAttachment" />
+              </template>
+              <template #menu>
+                <SlashCommandMenu
+                  v-if="slashOpen"
+                  :items="slashItems"
+                  :active-index="slashActiveIndex"
+                  @select="selectSlashCommand"
+                  @update:active-index="slashActiveIndex = $event"
+                />
+              </template>
+            </MinimalComposer>
+          </div>
+        </NewChatHero>
       </div>
     </section>
   </ContextMenuRegion>

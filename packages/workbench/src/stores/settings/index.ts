@@ -88,7 +88,7 @@ export const useSettingsStore = defineStore("settings", () => {
   const workspaceDir = ref("");
   const planMode = ref(false);
   /** 主题配色与明暗模式正交：同一主题都提供浅色和深色。 */
-  const theme = ref<ThemeId>("greywork");
+  const theme = ref<ThemeId>("codex");
   const colorMode = ref<ColorMode>("dark");
   /** 界面字号以整体 UI 缩放实现，固定像素字号与控件命中区一起保持比例。 */
   const fontSize = ref<FontSize>("medium");
@@ -204,7 +204,12 @@ export const useSettingsStore = defineStore("settings", () => {
     }
     // 缺字段（旧快照）保持默认「关闭到托盘」；只有显式 false 才改成关闭即退出。
     if (typeof saved.closeToTray === "boolean") closeToTray.value = saved.closeToTray;
-    if (saved.theme && THEME_VALUES[saved.theme as ThemeId]) theme.value = saved.theme as ThemeId;
+    // 配色迁移：旧默认 greywork 一次性换成 codex（见 SavedSettings.themeMigrated）。
+    // 用户之后手动切回 greywork 时，快照里已带标记，下次启动不会再被迁走。
+    const savedPalette = saved.theme as ThemeId;
+    const migrateToCodex = savedPalette === "greywork" && saved.themeMigrated !== "codex-v1";
+    if (migrateToCodex) theme.value = "codex";
+    else if (saved.theme && THEME_VALUES[savedPalette]) theme.value = savedPalette;
     if (saved.colorMode && COLOR_MODE_VALUES[saved.colorMode]) colorMode.value = saved.colorMode;
     // v0.1 兼容：旧 theme 字段承载明暗模式；读入后下一次 persist 会写成新结构。
     else if (saved.theme && COLOR_MODE_VALUES[saved.theme as ColorMode]) colorMode.value = saved.theme as ColorMode;
@@ -292,6 +297,8 @@ export const useSettingsStore = defineStore("settings", () => {
   function persist(): void {
     const snapshot: SavedSettings = {
       theme: theme.value,
+      // 恒写标记：任何一次 persist 之后都不再触发 greywork → codex 的一次性迁移。
+      themeMigrated: "codex-v1",
       colorMode: colorMode.value,
       fontSize: fontSize.value,
       radius: radius.value,

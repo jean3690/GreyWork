@@ -13,6 +13,7 @@ import { useWorkspaceStore } from "@/stores/workspace";
 import { useNoticeStore } from "@/stores/notice";
 import type { Attachment, MessageComment, ThreadMessage } from "@/types";
 import MinimalComposer from "@/features/guid/MinimalComposer.vue";
+import NewChatHero from "@/features/guid/NewChatHero.vue";
 import Icon from "@/features/shared/Icon.vue";
 import Hint from "@/features/shared/Hint.vue";
 import { useCapabilityLoader } from "@/plugins/current";
@@ -313,8 +314,18 @@ const SUGGESTIONS = [
   { key: "docs", icon: "file", label: "chat.composer.suggest.docs", text: "chat.composer.suggest.docsText" },
 ] as const;
 
-function applySuggestion(suggestion: (typeof SUGGESTIONS)[number]): void {
-  draft.value = t(suggestion.text);
+/** 空态交给共享 hero：文案在这里解析好再传，组件不碰 i18n key。 */
+const heroSuggestions = computed(() =>
+  SUGGESTIONS.map((suggestion) => ({
+    icon: suggestion.icon,
+    label: t(suggestion.label),
+    description: t(suggestion.text),
+    value: t(suggestion.text),
+  })),
+);
+
+function pickSuggestion(value: string): void {
+  draft.value = value;
   void nextTick(() => textareaEl.value?.focus());
 }
 
@@ -479,7 +490,7 @@ function buildMenuBase(target: ContextTarget | null): ContextMenuItem[] {
 <template>
   <ContextMenuRegion :build="buildMenu">
     <section class="flex h-full min-h-0 flex-col">
-      <div class="flex h-[46px] shrink-0 items-center gap-2 border-b border-line-2 bg-panel px-3">
+      <div class="flex h-[46px] shrink-0 items-center gap-2 border-b border-line bg-panel px-3">
         <button
           class="grid size-7 cursor-pointer place-items-center rounded-[calc(6px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
           aria-label="返回"
@@ -560,7 +571,7 @@ function buildMenuBase(target: ContextTarget | null): ContextMenuItem[] {
       <!-- aria-busy：流式期间告诉辅助技术「这片区域在持续更新」，别急着朗读中间态 -->
       <div ref="scrollEl" class="min-h-0 flex-1 overflow-y-auto" :aria-busy="turnActive" @scroll.passive="onScroll">
         <!-- 短会话：普通整列渲染 -->
-        <div v-if="messages.length && !useVirtual" class="mx-auto flex w-full max-w-[860px] flex-col gap-4 px-4 py-6 sm:px-6">
+        <div v-if="messages.length && !useVirtual" class="mx-auto flex w-full max-w-[780px] flex-col gap-4 px-4 py-6 sm:px-6">
           <ConversationMessage
             v-for="(message, index) in messages"
             :key="message.id"
@@ -576,7 +587,7 @@ function buildMenuBase(target: ContextTarget | null): ContextMenuItem[] {
         <!-- 长会话：虚拟窗口渲染（动态测量高度，钉底跟流） -->
         <div
           v-else-if="messages.length"
-          class="relative mx-auto w-full max-w-[860px] px-4 sm:px-6"
+          class="relative mx-auto w-full max-w-[780px] px-4 sm:px-6"
           :style="{ height: `${virtualTotalHeight}px` }"
         >
           <div
@@ -598,32 +609,14 @@ function buildMenuBase(target: ContextTarget | null): ContextMenuItem[] {
             />
           </div>
         </div>
-        <!-- 空会话引导：标题 + 建议卡（点击填入草稿，不直接发送）。 -->
-        <div
-          v-else
-          class="mx-auto flex h-full w-full max-w-[860px] flex-col items-center justify-center gap-2 px-4 py-16 text-center sm:px-6"
-        >
-          <span class="grid size-10 place-items-center rounded-[calc(12px*var(--gw-radius-scale))] bg-panel-2 text-dim">
-            <Icon name="message" :size="18" />
-          </span>
-          <p class="text-[13px] font-medium text-foreground">{{ t("chat.composer.emptyTitle") }}</p>
-          <p class="text-[12px] text-dim2">{{ t("chat.composer.emptyHint") }}</p>
-          <div class="mt-4 grid w-full max-w-[640px] grid-cols-1 gap-2 text-left sm:grid-cols-2">
-            <button
-              v-for="suggestion in SUGGESTIONS"
-              :key="suggestion.key"
-              type="button"
-              data-testid="composer-suggestion"
-              class="group/s flex cursor-pointer items-start gap-2 rounded-[calc(10px*var(--gw-radius-scale))] border border-line bg-panel px-3 py-2.5 transition-colors hover:border-line-2 hover:bg-panel-2 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
-              @click="applySuggestion(suggestion)"
-            >
-              <Icon :name="suggestion.icon" :size="13" class="mt-0.5 shrink-0 text-dim2 transition-colors group-hover/s:text-cyan" />
-              <span class="min-w-0 flex-1">
-                <span class="block text-[12px] font-medium text-foreground">{{ t(suggestion.label) }}</span>
-                <span class="mt-0.5 block truncate text-[11px] text-dim2">{{ t(suggestion.text) }}</span>
-              </span>
-            </button>
-          </div>
+        <!-- 空会话引导：与引导页共用同一套 hero 排版（输入卡常驻页脚，不放进这里）。 -->
+        <div v-else class="mx-auto flex h-full w-full max-w-[780px] items-center justify-center px-4 py-16 sm:px-6">
+          <NewChatHero
+            :title="t('minimal.heroTitle')"
+            :hint="t('minimal.heroHint')"
+            :suggestions="heroSuggestions"
+            @pick="pickSuggestion"
+          />
         </div>
       </div>
 
@@ -631,8 +624,8 @@ function buildMenuBase(target: ContextTarget | null): ContextMenuItem[] {
       <p class="sr-only" role="status">{{ turnAnnouncement }}</p>
 
       <!-- 顶部一条极淡的上投影替代分隔线：让输入卡从消息流里"浮"起来，而不是靠硬线切开。 -->
-      <div class="shrink-0 bg-panel px-4 py-3 shadow-[0_-8px_24px_-12px_rgba(0,0,0,0.18)] sm:px-6">
-        <div class="mx-auto flex w-full max-w-[860px] flex-col gap-2.5">
+      <div class="shrink-0 bg-panel px-4 py-3 sm:px-6">
+        <div class="mx-auto flex w-full max-w-[780px] flex-col gap-2.5">
           <!-- 选区评论草稿：挂在本条消息上的批注（展示被引用的原文片段），发送后渲染为注解。 -->
           <div v-if="comments.length" data-testid="comment-draft" class="flex flex-col gap-1.5">
             <div class="flex items-center gap-2 text-[10px] text-dim2">

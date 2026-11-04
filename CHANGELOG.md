@@ -19,6 +19,22 @@
 - **控制面聚合接口**：`GET /api/admin/overview`、`/api/admin/hosts`、`/api/admin/channels`
   （含 `POST /api/admin/channels/{id}/status` 硬停用）、`/api/admin/llm/keys`、
   `/api/admin/llm/usage`；运维动作与管理员登录写入 `audit_log`。
+- **默认配色 Codex**：新增 `codex` 单色配色并设为默认——中性黑白灰、反色主按钮（浅色近黑 /
+  深色近白），彩色只留给状态、链接与 diff 增删。旧快照里作为默认的 `greywork` 一次性迁移到
+  `codex`（`SavedSettings.themeMigrated`），用户此后手动切回 `greywork` 不会再被迁走。
+- **输入卡底排**：attach / workspace / backend 在左，ACP 范围、模型、推理强度、计划开关、
+  上下文占用环、发送在右；低频 ACP 选项收进 `…` 菜单，不再有第二张配置卡。上下文占用读 ACP
+  `usage` 事件，无值时不渲染假 0%。
+- **回合改动摘要**：回答末尾一行「改动了 N 个文件 +X −Y」，展开是文件清单，点文件进预览面板。
+  同一路径多次写入用首末文本做一次 LCS，避免把中间态重复计进增删。
+- **新对话空态**：`NewChatHero` 提供共享的标题与建议行，`/guid` 与 `/conversation/:id`
+  的空对话共用同一形态。
+
+### 变更
+
+- **外壳与对话流改扁平**：标题栏 44px + 发丝下边框、workspace 面包屑改纯文本；侧栏 260px，
+  品牌下直接是整行「新对话」；用户提示不再是右对齐气泡而是整行 soft block；思考与工具调用改
+  静默披露行（左侧竖线）而不是卡片。
 
 ### 修正
 
