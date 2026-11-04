@@ -72,6 +72,24 @@ HANDLERS.set("store_default_root", async (_args, ctx) => ctx.access.root);
 HANDLERS.set("terminal_shells", async () => shellCatalog());
 HANDLERS.set("fs_list_dir", async (args, ctx) => ctx.access.listDir(pathArg(args)));
 HANDLERS.set("fs_read_text_file", async (args, ctx) => ctx.access.readTextFile(pathArg(args)));
+HANDLERS.set("fs_write_text_file", async (args, ctx) => {
+  const content = (args as { content?: unknown } | null)?.content;
+  if (typeof content !== "string") throw new CommandError(400, "缺少参数 content");
+  ctx.access.writeTextFile(pathArg(args), content);
+  return null;
+});
+HANDLERS.set("fs_ensure_dir", async (args, ctx) => {
+  ctx.access.ensureDir(pathArg(args));
+  return null;
+});
+HANDLERS.set("fs_create_file", async (args, ctx) => {
+  ctx.access.createFile(pathArg(args));
+  return null;
+});
+HANDLERS.set("fs_create_dir", async (args, ctx) => {
+  ctx.access.createDir(pathArg(args));
+  return null;
+});
 
 export function isMigrated(name: string): boolean {
   return HANDLERS.has(name);

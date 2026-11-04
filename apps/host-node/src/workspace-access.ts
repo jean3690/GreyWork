@@ -11,6 +11,7 @@
  */
 import {
   closeSync,
+  existsSync,
   fsyncSync,
   lstatSync,
   mkdirSync,
@@ -21,6 +22,7 @@ import {
   renameSync,
   statSync,
   unlinkSync,
+  writeFileSync,
   writeSync,
 } from "node:fs";
 import path from "node:path";
@@ -57,6 +59,26 @@ function canonicalExisting(raw: string): string {
   } catch (error) {
     throw new Error(`路径不可访问: ${(error as Error).message}`, { cause: error });
   }
+}
+
+/**
+ * 新建条目的名字安全：与 `core/path_safety.rs::is_safe_path_segment` 同一套规则 ——
+ * 拒绝结尾的 `.` / 空格（Windows 会静默剥掉，导致两个名字落到同一个文件）、控制字符、
+ * 分隔符与通配符，以及 Windows 设备名（CON / PRN / AUX / NUL / COM1-9 / LPT1-9，带扩展名也算）。
+ */
+function isSafePathSegment(segment: string): boolean {
+  if (segment === "" || segment === "." || segment === "..") return false;
+  if (/[. ]$/.test(segment)) return false;
+  // 控制字符（NUL / DEL / C1）逐码点判断：正则字面量写控制字符会被 lint 判为可疑模式。
+  for (const ch of segment) {
+    const code = ch.codePointAt(0) ?? 0;
+    if (code < 0x20 || (code >= 0x7f && code <= 0x9f)) return false;
+  }
+  if (/[/\\<>"|?*:]/.test(segment)) return false;
+  const base = segment.split(".")[0]?.toUpperCase() ?? "";
+  if (["CON", "PRN", "AUX", "NUL"].includes(base)) return false;
+  const match = /^(?:COM|LPT)(\d)$/.exec(base);
+  return match === null;
 }
 
 /** 分量级前缀：与 Rust 的 `Path::starts_with` 同语义。 */
@@ -110,6 +132,85 @@ export class WorkspaceAccess {
       throw new Error(`路径未获用户授权: ${canonical}`);
     }
     return canonical;
+  }
+
+  /**
+   * 写路径解析：已存在 → 按读规则；不存在 → 找最近的已存在祖先，canonicalize 后要求它
+   * 在授权根内，再把剩余后缀拼回去（与 Rust 的 `resolve_write` 同一套规则）。
+   */
+  resolveWrite(raw: string): string {
+    const requested = validateAbsolute(raw);
+    if (existsSync(requested)) return this.resolveExisting(raw);
+    let ancestor = path.dirname(requested);
+    for (;;) {
+      if (existsSync(ancestor)) break;
+      const parent = path.dirname(ancestor);
+      if (parent === ancestor) throw new Error("写入路径没有可访问的父目录");
+      ancestor = parent;
+    }
+    const canonicalAncestor = canonicalExisting(ancestor);
+    if (!this.roots.some((root) => isWithin(root, canonicalAncestor))) {
+      throw new Error(`写入目录未获用户授权: ${canonicalAncestor}`);
+    }
+    return path.join(canonicalAncestor, path.relative(ancestor, requested));
+  }
+
+  /** 新建条目的公共前置：绝对路径、名字安全、父目录存在且在授权根内。 */
+  resolveNewEntry(raw: string): string {
+    const requested = validateAbsolute(raw);
+    const name = path.basename(requested);
+    if (!isSafePathSegment(name)) throw new Error(`名称不可用: ${name}`);
+    const parent = path.dirname(requested);
+    if (!existsSync(parent)) throw new Error("父目录不存在");
+    const canonicalParent = canonicalExisting(parent);
+    if (!this.roots.some((root) => isWithin(root, canonicalParent))) {
+      throw new Error(`写入目录未获用户授权: ${canonicalParent}`);
+    }
+    if (!statSync(canonicalParent).isDirectory()) throw new Error("父目录不是文件夹");
+    return path.join(canonicalParent, name);
+  }
+
+  /** 写文本（单次 ≤10MB）。 */
+  writeTextFile(raw: string, content: string): void {
+    if (Buffer.byteLength(content, "utf8") > MAX_TEXT_BYTES) {
+      throw new Error("文件超过 10MB 上限");
+    }
+    const target = this.resolveWrite(raw);
+    try {
+      writeFileSync(target, content);
+    } catch (error) {
+      throw new Error(`写入文件失败: ${(error as Error).message}`, { cause: error });
+    }
+  }
+
+  /** 确保目录存在（产物目录等工作区落盘前置）。 */
+  ensureDir(raw: string): void {
+    const target = this.resolveWrite(raw);
+    try {
+      mkdirSync(target, { recursive: true });
+    } catch (error) {
+      throw new Error(`创建目录失败: ${(error as Error).message}`, { cause: error });
+    }
+  }
+
+  /** 新建空文件：O_EXCL 语义，撞名失败而不是覆盖。 */
+  createFile(raw: string): void {
+    const target = this.resolveNewEntry(raw);
+    try {
+      writeFileSync(target, "", { flag: "wx" });
+    } catch (error) {
+      throw new Error(`新建文件失败: ${(error as Error).message}`, { cause: error });
+    }
+  }
+
+  /** 新建文件夹（父目录必须已存在）。 */
+  createDir(raw: string): void {
+    const target = this.resolveNewEntry(raw);
+    try {
+      mkdirSync(target);
+    } catch (error) {
+      throw new Error(`新建文件夹失败: ${(error as Error).message}`, { cause: error });
+    }
   }
 
   /** 浅层列目录：越界或断链的符号链接项直接不出现（与 Rust 一致）。 */

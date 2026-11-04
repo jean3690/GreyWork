@@ -171,6 +171,34 @@ describe("HTTP 契约", () => {
     expect(text.body).toBe("hello parity\n");
   });
 
+  it("写面：写文本 / 建目录 / 建文件 / 撞名拒绝", async () => {
+    const call = async (command: string, args: unknown) => {
+      const response = await fetch(`${base}/api/command`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ command, args }),
+      });
+      return { status: response.status, body: await response.json() };
+    };
+    const target = path.join(workspaceDir, "written.txt");
+    expect((await call("fs_write_text_file", { path: target, content: "written\n" })).status).toBe(200);
+    expect((await call("fs_read_text_file", { path: target })).body).toBe("written\n");
+
+    expect((await call("fs_ensure_dir", { path: path.join(workspaceDir, "made", "deep") })).status).toBe(200);
+    expect((await call("fs_create_dir", { path: path.join(workspaceDir, "fresh") })).status).toBe(200);
+    expect((await call("fs_create_file", { path: path.join(workspaceDir, "fresh", "a.txt") })).status).toBe(200);
+
+    // 撞名必须失败（create_new / mkdir 语义），不能静默覆盖。
+    const collision = await call("fs_create_file", { path: path.join(workspaceDir, "fresh", "a.txt") });
+    expect(collision.status).toBe(400);
+    expect((collision.body as { error: string }).error).toContain("新建文件失败");
+
+    // 越界写：授权面之外一律 400。
+    const outside = await call("fs_write_text_file", { path: "/tmp/gw-should-not-exist.txt", content: "x" });
+    expect(outside.status).toBe(400);
+    expect((outside.body as { error: string }).error).toContain("未获用户授权");
+  });
+
   it("未授权路径的读取被拒（400 + 授权提示）", async () => {
     const response = await fetch(`${base}/api/command`, {
       method: "POST",

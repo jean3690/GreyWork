@@ -15,7 +15,7 @@
  */
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -141,17 +141,30 @@ const workspaceDir = mkdtempSync(path.join(tmpdir(), "gw-parity-ws-"));
 writeFileSync(path.join(workspaceDir, "hello.txt"), "hello parity\n");
 mkdirSync(path.join(workspaceDir, "sub"), { recursive: true });
 writeFileSync(path.join(workspaceDir, "sub", "nested.txt"), "nested\n");
+// 写面各自一个子目录：两边不能互相踩（同一个路径写两次，第二次的 EEXIST 会变成假差异）。
+for (const side of ["rust", "node"]) {
+  mkdirSync(path.join(workspaceDir, side, "created"), { recursive: true });
+}
 
 /**
  * 逐命令的入参。需要路径的命令在这里给夹具路径 —— 两边拿到的是同一份绝对路径，
  * 于是差异只可能来自实现，而不是环境。
  */
-function argsFor(command) {
+function argsFor(command, side) {
+  const own = path.join(workspaceDir, side);
   switch (command) {
     case "fs_list_dir":
       return { path: workspaceDir };
     case "fs_read_text_file":
       return { path: path.join(workspaceDir, "hello.txt") };
+    case "fs_write_text_file":
+      return { path: path.join(own, "written.txt"), content: "parity write\n" };
+    case "fs_ensure_dir":
+      return { path: path.join(own, "made", "deep") };
+    case "fs_create_dir":
+      return { path: path.join(own, "fresh") };
+    case "fs_create_file":
+      return { path: path.join(own, "created", "new.txt") };
     default:
       return {};
   }
@@ -204,6 +217,8 @@ try {
     [dirs[1], "<DATA>"],
     [String(rustPort), "<PORT>"],
     [String(nodePort), "<PORT>"],
+    [path.join(workspaceDir, "rust"), "<WS>/<HOST>"],
+    [path.join(workspaceDir, "node"), "<WS>/<HOST>"],
     [workspaceDir, "<WS>"],
     [dirs[0], "<DATA>"],
     [dirs[1], "<DATA>"],
@@ -231,10 +246,9 @@ try {
 
   console.log(`[parity] 对照 ${candidates.length} 条命令（执行用户：${label}）`);
   for (const command of candidates) {
-    const commandArgs = argsFor(command);
     const [rust, node] = await Promise.all([
-      call(rustPort, rustToken, command, commandArgs),
-      call(nodePort, nodeToken, command, commandArgs),
+      call(rustPort, rustToken, command, argsFor(command, "rust")),
+      call(nodePort, nodeToken, command, argsFor(command, "node")),
     ]);
     // 排序只作用于 body（status 是标量），避免把包装对象也交给集合归一化。
     const left = normalize(normalizeForCommand(command, rust.body), replace);
@@ -248,6 +262,18 @@ try {
     console.log(`  ✗ ${command}`);
     console.log(`    rust: ${rust.status} ${stableStringify(left)}`);
     console.log(`    node: ${node.status} ${stableStringify(right)}`);
+  }
+
+  // 写面光比响应不够（两边都回 null）；落盘结果也必须一致。
+  try {
+    const [rustWritten, nodeWritten] = ["rust", "node"].map((side) => readFileSync(path.join(workspaceDir, side, "written.txt"), "utf8"));
+    if (rustWritten !== nodeWritten) {
+      failures += 1;
+      console.log(`  ✗ 写面副作用不一致：rust=${JSON.stringify(rustWritten)} node=${JSON.stringify(nodeWritten)}`);
+    }
+  } catch (error) {
+    failures += 1;
+    console.log(`  ✗ 写面产物缺失：${error.message}`);
   }
 
   if (failures > 0) {
