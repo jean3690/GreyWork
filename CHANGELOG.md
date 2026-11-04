@@ -8,6 +8,24 @@
 
 ## [未发布]
 
+## [0.11.0] - 2026-11-04
+
+### 变更
+
+- **后端从 Rust 全量迁到 Node 并删除 Rust 宿主**：189 条命令全部由 `apps/host-node` 承接
+  （原 `apps/server` + `crates/greywork-host` + Cargo 工作区已删除），删库前双轨对照 117 项
+  逐字节全绿；Electron sidecar 恒 spawn Node 宿主，Docker 镜像与 CI 全量切到 Node。
+  命令契约元数据冻结在 `apps/host-node/src/command-manifest.json`。
+- **Electron 升级到 45.2.2**（内置 Node 24.22 / Chrome 156）：宿主的 `node:sqlite` 由内置
+  Node 直接满足；剪贴板图片读取迁移到 Electron 45 的异步 `clipboard.read()` API。
+- **出站媒体补齐**：feishu（images/files）、discord（multipart 附件）、qq（官方分片上传四步）
+  与 wechat、telegram 统一走 `channel_media_capabilities` 能力矩阵；新增 `GET /api/media`
+  Range 分片，预览大视频不再全量读进内存。
+- **表格解析**：`fs_read_sheet` 改用 `@e965/xlsx` + 自写 ODS 解析器，日期/时长显示口径
+  与 calamine 对齐。
+- **本机模型 agent 回合、MCP 客户端、office 云端预览/OAuth/LibreOffice 转 PDF** 等剩余命令面
+  全部在 Node 宿主落地。
+
 ### 新增
 
 - **运维台（`apps/admin`）**：Vue 3 + Vite + Element Plus 独立 SPA，构建产物写进
