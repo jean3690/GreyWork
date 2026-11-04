@@ -67,6 +67,8 @@ function truncate(text: string, max: number): string {
   return text.length <= max ? text : text.slice(0, max);
 }
 
+export { authHeaders, truncate };
+
 async function readJson(response: Response): Promise<unknown> {
   const text = await response.text();
   try {
