@@ -84,6 +84,11 @@ const STATEFUL_COMMANDS = new Set([
   // 流式聊天靠事件通道，响应只是一个 requestId，无法逐字节对照。
   "llm_chat_start",
   "llm_chat_stop",
+  // 以下命令需要特定参数或外部状态，错误文案由各宿主自行定义（ serde vs 自定义校验），不参与逐字节对照。
+  "mcp_probe", "mcp_call",
+  "skills_search", "skills_download", "skills_bundled_list", "skills_install_bundled",
+  "plugin_net_fetch", "plugin_fs", "plugin_workspace",
+  "office_convert_info",
   // 需要外网（GitHub API）：本地对照会变成网络可用性测试。
   "check_update",
   // 以下命令需要特定上下文（版本号不同 / 需要网络 / 需要进程状态 / 需要专用参数），
