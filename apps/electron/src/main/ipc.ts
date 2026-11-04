@@ -101,9 +101,14 @@ export function registerIpc(host: IpcHost): void {
   /* ===== 剪贴板：走主进程 electron.clipboard（Chromium 下可靠，不触发 Web 权限提示）===== */
   on(IPC.clipboard.writeText, (text) => clipboard.writeText(asString(text)));
   on(IPC.clipboard.readText, () => clipboard.readText());
-  on(IPC.clipboard.readImagePng, () => {
-    const image = clipboard.readImage();
-    return image.isEmpty() ? null : image.toPNG();
+  // Electron 45 起剪贴板换异步 API（clipboard.read() → ClipboardItem[]）；
+  // 图片按 image/png MIME 取 Blob 转 Buffer，剪贴板没有图时回 null。
+  on(IPC.clipboard.readImagePng, async () => {
+    const items = await clipboard.read();
+    const item = items.find((entry) => entry.types.includes("image/png"));
+    if (!item) return null;
+    const blob = await item.getType("image/png");
+    return Buffer.from(await blob.arrayBuffer());
   });
 
   /* ===== 应用信息 / 外部打开 ===== */
