@@ -12,6 +12,7 @@ import manifest from "./command-manifest.json" with { type: "json" };
 
 import { shellCatalog } from "./shell-catalog.js";
 import { detectPrograms } from "./acp-probe.js";
+import { checkUpdate } from "./update.js";
 import type { AgentProvider, AutomationRunInput, AutomationTask, Db, TeamRun } from "./db.js";
 import { gitChanges, gitCurrentBranch, gitDiff, gitStatus } from "./git.js";
 import { chatComplete, embed, listModels, transcribe, type LlmChatMessage, type LlmStreamHost } from "./llm.js";
@@ -175,6 +176,8 @@ HANDLERS.set("terminal_close", async (args, ctx) => {
   ctx.terminal.close(value.sessionId);
   return null;
 });
+
+HANDLERS.set("check_update", async () => checkUpdate());
 
 HANDLERS.set("llm_chat_start", async (args, ctx) => {
   const value = args as {

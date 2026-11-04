@@ -63,6 +63,8 @@ const STATEFUL_COMMANDS = new Set([
   // 流式聊天靠事件通道，响应只是一个 requestId，无法逐字节对照。
   "llm_chat_start",
   "llm_chat_stop",
+  // 需要外网（GitHub API）：本地对照会变成网络可用性测试。
+  "check_update",
 ]);
 
 const args = new Set(process.argv.slice(2));
