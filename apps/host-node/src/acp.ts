@@ -56,7 +56,7 @@ export function parseTier(tier: string | null | undefined): PermissionTier {
 /** spawn 面的命令校验：首 token 必须在白名单（basename），禁止 shell 元字符。 */
 export function validateSpawnCommand(agentCmd: string, extra: string[]): string {
   const trimmed = agentCmd.trim();
-  const banned = /[`;&|<>\$(){}\[\]]/.test(trimmed);
+  const banned = /[`;&|<>$(){}[\]]/.test(trimmed);
   const program = trimmed.split(/\s+/)[0] ?? "";
   const base = path.basename(program).toLowerCase();
   if (banned || base === "" || (!ALLOWED_AGENT_PROGRAMS.has(base) && !extra.map((item) => item.toLowerCase()).includes(base))) {

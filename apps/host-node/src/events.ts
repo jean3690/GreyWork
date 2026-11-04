@@ -91,7 +91,7 @@ export function attachEvents(server: Server, sessions: SessionStore, bus: EventB
     server.off("upgrade", onUpgrade);
     for (const handle of timers.values()) clearInterval(handle);
     // 先断开所有客户端再关服务：测试环境里 keep-alive 的 WS 会让 close 回调迟迟不来。
-    wss.closeAllConnections?.();
+    (wss as unknown as { closeAllConnections?: () => void }).closeAllConnections?.();
     wss.close();
   };
 }
