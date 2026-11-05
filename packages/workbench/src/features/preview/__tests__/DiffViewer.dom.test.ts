@@ -73,6 +73,18 @@ describe("DiffViewer", () => {
     expect(bodyText).toContain("-const c = 3;");
   });
 
+  it("代码行做语法着色（const 关键字 → text-violet）", async () => {
+    const wrapper = mount(DiffViewer, { props: { tab: tab() } });
+    await flushPromises();
+    const section = wrapper.findAll('[data-testid="diff-file"]')[0];
+    // 语言包是按扩展名动态 import 的，等它加载完成再断言。
+    await vi.waitFor(() => {
+      expect(section.html()).toContain('class="text-violet"');
+    });
+    // 行内容不受 token 拆分影响：文本仍完整拼接
+    expect(section.text()).toContain("const b = 2;");
+  });
+
   it("超长文件段：只铺前 5000 行并给出截断提示", async () => {
     const big = [
       "--- a/src/big.ts",

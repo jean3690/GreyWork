@@ -8,6 +8,7 @@
  * 只负责「有内容时怎么画」；空/加载/错误态由调用方决定（它们要放在各自的外层容器里）。
  */
 import { computed } from "vue";
+import { useDiffHighlights } from "@/lib/diff-highlight";
 import { parseUnifiedDiff } from "@/lib/unified-diff";
 import { i18n } from "@/i18n";
 
@@ -29,10 +30,16 @@ const LINE_CLASS: Record<string, string> = {
 const MARKER: Record<string, string> = { add: "+", del: "-", context: " ", meta: "", header: "", hunk: "" };
 
 const files = computed(() => parseUnifiedDiff(props.diff));
+/** 逐行语法高亮 HTML；语言包加载完成前为空，模板退回纯文本。 */
+const highlights = useDiffHighlights(files);
+
+function highlightAt(fileIndex: number, lineIndex: number): string | null {
+  return highlights.value[fileIndex]?.[lineIndex] ?? null;
+}
 </script>
 
 <template>
-  <section v-for="file in files" :key="file.path" class="py-1">
+  <section v-for="(file, fileIndex) in files" :key="file.path" class="py-1">
     <header class="flex items-center gap-2 border-y border-line px-3 py-1 text-[10.5px]">
       <span class="min-w-0 flex-1 truncate text-dim">{{ file.path }}</span>
       <span class="shrink-0 text-mint">+{{ file.added }}</span>
@@ -43,7 +50,12 @@ const files = computed(() => parseUnifiedDiff(props.diff));
         <span class="w-9 shrink-0 select-none px-1 text-right tabular-nums text-dim2">{{ line.oldNo ?? "" }}</span>
         <span class="w-9 shrink-0 select-none px-1 text-right tabular-nums text-dim2">{{ line.newNo ?? "" }}</span>
         <span class="w-3 shrink-0 select-none text-center">{{ MARKER[line.kind] }}</span>
-        <span class="min-w-0 flex-1 whitespace-pre-wrap break-all pe-2">{{ line.text }}</span>
+        <span
+          v-if="highlightAt(fileIndex, index)"
+          class="min-w-0 flex-1 whitespace-pre-wrap break-all pe-2"
+          v-html="highlightAt(fileIndex, index)"
+        />
+        <span v-else class="min-w-0 flex-1 whitespace-pre-wrap break-all pe-2">{{ line.text }}</span>
       </div>
     </div>
     <p v-if="file.lines.length > LINE_LIMIT" class="px-3 py-1 text-[10.5px] text-dim2">

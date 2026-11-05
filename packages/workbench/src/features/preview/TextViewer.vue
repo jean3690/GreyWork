@@ -20,7 +20,7 @@
  */
 import { computed, onUnmounted, ref, toRef, watch } from "vue";
 import { usePreviewLoader, readPreviewText } from "@/lib/preview-content";
-import { codeLanguageOfPath, type CodeLanguage } from "@/lib/viewer";
+import { loadCodeLanguage } from "@/lib/code-language";
 import { probeWorkspaceFile, type FileProbeInfo } from "@/state/workspaceFiles";
 import { registerPreviewSaver, unregisterPreviewSaver, writePreviewText } from "@/lib/preview-save";
 import PreviewExternalButton from "@/features/preview/PreviewExternalButton.vue";
@@ -112,36 +112,6 @@ async function save(): Promise<void> {
   dirty.value = false;
 }
 
-async function languageExtension(language: CodeLanguage | null): Promise<unknown[]> {
-  // tsx/jsx 同走一个分支：jsx: true 让 JSX 语法也被识别，否则 .tsx 只按 TS 高亮
-  if (language === "javascript") return [(await import("@codemirror/lang-javascript")).javascript({ typescript: true, jsx: true })];
-  if (language === "vue") return [(await import("@codemirror/lang-vue")).vue()];
-  if (language === "json") return [(await import("@codemirror/lang-json")).json()];
-  if (language === "markdown") return [(await import("@codemirror/lang-markdown")).markdown()];
-  if (language === "html") return [(await import("@codemirror/lang-html")).html()];
-  if (language === "python") return [(await import("@codemirror/lang-python")).python()];
-  if (language === "rust") return [(await import("@codemirror/lang-rust")).rust()];
-  if (language === "go") return [(await import("@codemirror/lang-go")).go()];
-  if (language === "java") return [(await import("@codemirror/lang-java")).java()];
-  if (language === "cpp") return [(await import("@codemirror/lang-cpp")).cpp()];
-  if (language === "css") return [(await import("@codemirror/lang-css")).css()];
-  if (language === "sass") return [(await import("@codemirror/lang-sass")).sass()];
-  if (language === "less") return [(await import("@codemirror/lang-less")).less()];
-  if (language === "yaml") return [(await import("@codemirror/lang-yaml")).yaml()];
-  if (language === "sql") return [(await import("@codemirror/lang-sql")).sql()];
-  if (language === "xml") return [(await import("@codemirror/lang-xml")).xml()];
-  // toml / shell 没有官方 lang 包，用 legacy-modes 的 StreamLanguage 适配器桥接
-  if (language === "toml") {
-    const { StreamLanguage } = await import("@codemirror/language");
-    return [StreamLanguage.define((await import("@codemirror/legacy-modes/mode/toml")).toml)];
-  }
-  if (language === "shell") {
-    const { StreamLanguage } = await import("@codemirror/language");
-    return [StreamLanguage.define((await import("@codemirror/legacy-modes/mode/shell")).shell)];
-  }
-  return [];
-}
-
 /**
  * 语法高亮配色：全部指向主题令牌变量，不落具体色值。
  *
@@ -180,7 +150,7 @@ async function mountEditor(doc: string): Promise<void> {
     const [{ EditorState }, viewModule, langExtensions, highlight] = await Promise.all([
       import("@codemirror/state"),
       import("@codemirror/view"),
-      languageExtension(codeLanguageOfPath(props.tab.path)),
+      loadCodeLanguage(props.tab.path).then((loaded) => (loaded ? [loaded.support] : [])),
       buildHighlightStyle(),
     ]);
     const { EditorView, lineNumbers, highlightSpecialChars, keymap } = viewModule;

@@ -11,7 +11,8 @@
  */
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { diffTexts, type DiffLine } from "@/lib/unified-diff";
+import { useDiffHighlights } from "@/lib/diff-highlight";
+import { diffTexts, type DiffFile, type DiffLine } from "@/lib/unified-diff";
 import type { ToolDetail } from "@/types";
 
 const props = withDefaults(defineProps<{ detail: ToolDetail; maxLines?: number }>(), { maxLines: 12 });
@@ -28,6 +29,16 @@ const diff = computed(() => {
 });
 
 const diffLines = computed<DiffLine[]>(() => diff.value?.lines ?? []);
+/** 语法高亮按「整份 diff」算；工具调用只有一份，fileIndex 恒为 0。 */
+const diffFile = computed<DiffFile | null>(() =>
+  diff.value ? { path: diff.value.path, lines: diff.value.lines, added: diff.value.added, removed: diff.value.removed } : null,
+);
+const diffFiles = computed<DiffFile[]>(() => (diffFile.value ? [diffFile.value] : []));
+const diffHighlights = useDiffHighlights(diffFiles);
+
+function highlightAt(lineIndex: number): string | null {
+  return diffHighlights.value[0]?.[lineIndex] ?? null;
+}
 // 按 `\r\n|\n|\r` 拆行：Windows 上工具输出常是 CRLF，只按 `\n` 拆会在每行尾留一个 `\r`
 // （渲染上看不见，但复制出去就是脏字符）。
 const textLines = computed(() => (props.detail.text ? props.detail.text.split(/\r\n|\n|\r/) : []));
@@ -79,7 +90,12 @@ const LINE_CLASS: Record<string, string> = {
         <span class="w-8 shrink-0 select-none px-1 text-right tabular-nums text-dim2">{{ row.oldNo ?? "" }}</span>
         <span class="w-8 shrink-0 select-none px-1 text-right tabular-nums text-dim2">{{ row.newNo ?? "" }}</span>
         <span class="w-3 shrink-0 select-none text-center">{{ MARKER[row.kind] ?? "" }}</span>
-        <span class="min-w-0 flex-1 whitespace-pre-wrap pe-1 [overflow-wrap:anywhere]">{{ row.text }}</span>
+        <span
+          v-if="highlightAt(index)"
+          class="min-w-0 flex-1 whitespace-pre-wrap pe-1 [overflow-wrap:anywhere]"
+          v-html="highlightAt(index)"
+        />
+        <span v-else class="min-w-0 flex-1 whitespace-pre-wrap pe-1 [overflow-wrap:anywhere]">{{ row.text }}</span>
       </div>
     </div>
 

@@ -4,6 +4,7 @@
  * 解析在 `lib/unified-diff.ts`（含「为什么不用 @codemirror/merge」的理由）。
  */
 import { computed, toRef } from "vue";
+import { useDiffHighlights } from "@/lib/diff-highlight";
 import { parseUnifiedDiff, type DiffLineKind } from "@/lib/unified-diff";
 import { usePreviewText } from "@/lib/preview-content";
 import { i18n } from "@/i18n";
@@ -20,6 +21,12 @@ const t = i18n.global.t;
 const { data, loading, error } = usePreviewText(toRef(props, "tab"));
 
 const files = computed(() => parseUnifiedDiff(data.value ?? ""));
+/** 逐行语法高亮 HTML；语言包加载完成前为空，模板退回纯文本。 */
+const highlights = useDiffHighlights(files);
+
+function highlightAt(fileIndex: number, lineIndex: number): string | null {
+  return highlights.value[fileIndex]?.[lineIndex] ?? null;
+}
 
 const LINE_CLASS: Record<DiffLineKind, string> = {
   header: "bg-panel text-dim2",
@@ -49,7 +56,7 @@ const MARKER: Record<DiffLineKind, string> = {
     </p>
     <p v-else-if="files.length === 0" class="px-4 py-3 text-dim2">{{ t("preview.viewer.diff.empty") }}</p>
     <template v-else>
-      <section v-for="file in files" :key="file.path" data-testid="diff-file" class="mb-2">
+      <section v-for="(file, fileIndex) in files" :key="file.path" data-testid="diff-file" class="mb-2">
         <header class="sticky top-0 z-10 flex items-center gap-2 border-y border-line bg-panel-2 px-3 py-1.5 text-[11.5px]">
           <span class="min-w-0 flex-1 truncate text-foreground">{{ file.path }}</span>
           <span class="shrink-0 text-mint">+{{ file.added }}</span>
@@ -64,7 +71,12 @@ const MARKER: Record<DiffLineKind, string> = {
             line.newNo ?? ""
           }}</span>
           <span data-selection-exclude class="w-3 shrink-0 select-none text-center">{{ MARKER[line.kind] }}</span>
-          <span class="min-w-0 flex-1 whitespace-pre-wrap break-all pe-3">{{ line.text }}</span>
+          <span
+            v-if="highlightAt(fileIndex, index)"
+            class="min-w-0 flex-1 whitespace-pre-wrap break-all pe-3"
+            v-html="highlightAt(fileIndex, index)"
+          />
+          <span v-else class="min-w-0 flex-1 whitespace-pre-wrap break-all pe-3">{{ line.text }}</span>
         </div>
         <p v-if="file.lines.length > LINE_LIMIT" class="px-3 py-1.5 text-[11px] text-dim2">
           {{ t("preview.viewer.diff.lineLimit", { limit: LINE_LIMIT, total: file.lines.length }) }}
