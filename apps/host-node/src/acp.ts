@@ -18,6 +18,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import path from "node:path";
 
+import { scanTurnArtifacts } from "./acp-artifacts.js";
 import type { EventBus } from "./events.js";
 import type { WorkspaceAccess } from "./workspace-access.js";
 
@@ -349,7 +350,7 @@ export class AcpHost {
     return session.request!("session/load", { sessionId, ...params });
   }
 
-  /** 发送回合：注册 turnId，响应到达后广播 prompt-done（成功附带产物扫描，见 Rust）。 */
+  /** 发送回合：注册 turnId，响应到达后广播 prompt-done（成功回合附带产物扫描）。 */
   async send(handle: number, text: string): Promise<{ turnId: number }> {
     const session = this.require(handle);
     if (!session.sessionId) throw new Error("session not created; call acp_new_session first");
@@ -374,11 +375,20 @@ export class AcpHost {
       }) + "\n",
     );
     void promise
-      .then((response) => {
+      .then(async (response) => {
         turns.delete(turnId);
-        this.emit("prompt-done", { handle, turnId, response, files: [] });
-        void workspaceRoot;
-        void startedMs;
+        // 只对成功回合扫产物：失败 / 被取消的回合不弹（与前端「失败不假装完成」同语义）。
+        // mtime 是秒级粒度：回合首秒内写的文件其秒值可能早于 startedMs 的毫秒值，
+        // 下界放宽 2s 兜住粒度差。扫描失败退化为不弹，绝不把成功回合演成错误。
+        let files: string[] = [];
+        if (workspaceRoot) {
+          try {
+            files = await scanTurnArtifacts(workspaceRoot, Math.max(0, startedMs - 2_000));
+          } catch {
+            files = [];
+          }
+        }
+        this.emit("prompt-done", { handle, turnId, response, files });
       })
       .catch((error) => {
         turns.delete(turnId);

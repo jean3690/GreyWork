@@ -1,7 +1,12 @@
 #!/usr/bin/env node
 // 测试用 mock ACP agent：行分隔 JSON-RPC，覆盖 initialize / session/new / session/prompt /
 // session/request_permission / session/cancel。仅用于测试与本地联调。
+import { mkdirSync, writeFileSync } from "node:fs";
+import path from "node:path";
+
 let buffer = "";
+/** 会话 cwd（由 session/new 下发）；产物按它落盘，不依赖 agent 进程 cwd。 */
+let sessionCwd = process.cwd();
 const pending = new Map();
 
 const reply = (id, result) => process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\n");
@@ -31,11 +36,17 @@ process.stdin.on("data", (chunk) => {
       continue;
     }
     if (message.method === "session/new") {
+      if (typeof message.params.cwd === "string") sessionCwd = message.params.cwd;
       reply(message.id, { sessionId: "sess-1", modes: { availableModes: [{ id: "build", name: "Build" }] } });
       continue;
     }
     if (message.method === "session/prompt") {
       const text = message.params.prompt.map((block) => block.text ?? "").join("");
+      // 模拟 agent 落盘交付物：按 session/new 下发的 cwd 写，供 prompt-done 的
+      // files 产物扫描断言（见 tests/server.test.ts）。不依赖 agent 进程 cwd。
+      const reportPath = path.join(sessionCwd, "reports", "report.md");
+      mkdirSync(path.dirname(reportPath), { recursive: true });
+      writeFileSync(reportPath, "# report\n");
       notify("session/update", {
         sessionId: "sess-1",
         update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "echo back: " + text } },

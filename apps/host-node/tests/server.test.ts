@@ -840,12 +840,15 @@ describe("HTTP 契约", () => {
       const deadline = Date.now() + 5000;
       while (Date.now() < deadline) {
         const frame = acpEvents.find((frame) => frame.kind === "prompt-done");
-        if (frame) return frame.payload as { response?: { stopReason?: string } };
+        if (frame) return frame.payload as { response?: { stopReason?: string }; files?: string[] };
         await new Promise((resolve) => setTimeout(resolve, 20));
       }
       return null;
     })();
     expect(promptDone?.response?.stopReason).toBe("end_turn");
+    // 回合产物扫描：mock agent 在 cwd（workspaceRoot）落盘 reports/report.md，
+    // prompt-done 的 files 必须带出它，前端据此自动开预览。
+    expect(promptDone?.files ?? []).toContain(path.join(realpathSync(workspaceDir), "reports", "report.md"));
     expect(acpEvents.some((frame) => frame.kind === "session-update" && JSON.stringify(frame.payload).includes("echo back: hello"))).toBe(
       true,
     );
