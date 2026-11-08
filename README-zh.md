@@ -113,13 +113,12 @@ greyWork/
 ```bash
 # 前置
 #   Node >= 20，pnpm >= 9（建议 corepack）
-#   Rust stable（编译 headless 服务端 sidecar）
 
 git clone https://github.com/jean3690/GreyWork.git
 cd GreyWork
 pnpm install
-pnpm electron:dev:all   # 编译 Rust sidecar 再起桌面应用（首次 / 改过 Rust 代码用这个）
-pnpm electron:dev       # 只起 Electron：直接用已有的 target/debug/greywork-server
+pnpm electron:dev:all   # 编译 Node 宿主再起桌面端（首次 / 改过宿主代码用这个）
+pnpm electron:dev       # 只起 Electron：直接用已有的 apps/host-node/dist
 ```
 
 纯浏览器预览（无宿主）用 `pnpm dev` 起桌面端渲染层的 Vite 开发服务器；`pnpm dev:web` 起浏览器
