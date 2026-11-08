@@ -8,6 +8,25 @@
 
 ## [未发布]
 
+## [0.13.0] - 2026-11-08
+
+### 修复
+
+- **Windows 打包版双击图标没反应**：打包态的 sidecar 入口仍走 `requireRepoRoot()`，而安装目录里
+  没有 `pnpm-workspace.yaml` → 启动链第一步就抛错，错误只写进 `logs/main.log`，窗口根本没建。
+  现在打包态指向 `<resources>/host/dist/index.js`，且启动链失败会弹 `dialog.showErrorBox`。
+- **首次启动生成凭据必定失败**：`hash-password` 原先把宿主入口 `.js` 当可执行文件 `execFile`，
+  Windows 上直接 `ENOEXEC`。改为 `process.execPath` + `ELECTRON_RUN_AS_NODE`，与 sidecar 同一套拉法。
+
+### 变更
+
+- **安装包内置 Node 宿主**：新增 `scripts/electron-host-bundle.mjs`，用 `pnpm deploy --prod --legacy`
+  把 `apps/host-node` 摊成「`dist` + 生产依赖」（含预编译 node-pty）落到 `resources/host/`；
+  `electron-builder.yml` 同时移除指向已删除的 Rust 二进制的三处 `extraResources`。
+  **0.12.0 的 Windows 安装包是坏的，请改用本版。**
+- **`pnpm electron:dev:all` 恢复可用**：删 Rust 宿主时连带删了 `scripts/electron-dev.mjs`，根脚本
+  一直是悬空引用。现按 Node 宿主重写（编译宿主 → 起 Electron，`--watch` 监听宿主的 .ts / .json）。
+
 ## [0.12.0] - 2026-11-05
 
 ### 新增
