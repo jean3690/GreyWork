@@ -48,3 +48,5 @@ plugin-market/.signing-key.pem
 # 单个平台上百 MB，绝不入库。清单与摘要见 scripts/runtime-versions.json。
 /apps/electron/runtime/
 /apps/electron/.runtime-tmp/
+# 宿主打包中间产物（scripts/electron-host-bundle.mjs 生成，进安装包不进仓库）
+/apps/electron/build/

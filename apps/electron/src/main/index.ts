@@ -5,7 +5,7 @@
  * 注册 IPC → 建无边框主窗（自动登录）→ 建托盘。sidecar 意外退出即随主进程退出，避免留下
  * 「壳还在、后端没了」的半死状态。应用退出时收掉 sidecar。
  */
-import { app, type BrowserWindow } from "electron";
+import { app, dialog, type BrowserWindow } from "electron";
 
 import { isDevServerEnabled, sidecarOrigin } from "../shared/dev-server-spec";
 import { loadOrCreateCredentials } from "./auth";
@@ -183,6 +183,13 @@ if (!app.requestSingleInstanceLock()) {
     })
     .catch((error: unknown) => {
       console.error("[electron] 启动失败：", error);
+      // 打包版没有终端：只写 console 的话用户看到的就是「双击图标毫无反应」。
+      // 启动链上的失败（宿主入口找不到 / sidecar 起不来 / 窗口建不出）都必须有个能看见的框。
+      const reason = error instanceof Error ? (error.stack ?? error.message) : String(error);
+      dialog.showErrorBox(
+        "GreyWork 启动失败",
+        `${reason}\n\n详细日志：${app.getPath("userData")}/logs/main.log`,
+      );
       app.quit();
     });
 }

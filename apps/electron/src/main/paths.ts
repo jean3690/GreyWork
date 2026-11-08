@@ -1,9 +1,9 @@
 /**
  * 资源解析：开发态与打包态的落点不同，收敛在这里。
  *
- * - **开发态**（`electron .` 跑在仓库里）：sidecar 二进制取 `target/debug/greywork-server`，
+ * - **开发态**（`electron .` 跑在仓库里）：sidecar 入口取 `apps/host-node/dist/index.js`，
  *   渲染层 SPA 取 `apps/desktop/dist`。仓库根靠向上找 `pnpm-workspace.yaml` 定位，不写死层级。
- * - **打包态**：sidecar / SPA / 图标经 electron-builder `extraResources` 落到
+ * - **打包态**：host 宿主 / SPA / 图标经 electron-builder `extraResources` 落到
  *   `process.resourcesPath` 下（asar 之外，可被 spawn / 读取）。
  */
 import { existsSync } from "node:fs";
@@ -30,9 +30,16 @@ function requireRepoRoot(): string {
 
 /**
  * Node 宿主入口（sidecar spawn 的就是它）。
- * 开发态：`apps/host-node/dist/index.js`（`pnpm --filter @greywork/host-node build` 产物）。
+ *
+ * - 开发态：`apps/host-node/dist/index.js`（`pnpm --filter @greywork/host-node build` 产物）；
+ * - 打包态：`<resources>/host/dist/index.js`（`scripts/electron-host-bundle.mjs` 用
+ *   `pnpm deploy --prod` 摊出的独立目录，electron-builder 原样拷进 extraResources）。
+ *
+ * **打包态绝不能走 `requireRepoRoot()`**：安装目录里没有 `pnpm-workspace.yaml`，它会直接抛
+ * 「无法定位仓库根」——而这一步在 `openMainWindow()` 之前，用户看到的就是双击图标毫无反应。
  */
 export function nodeServerEntryPath(): string {
+  if (app.isPackaged) return path.join(process.resourcesPath, "host", "dist", "index.js");
   return path.join(requireRepoRoot(), "apps", "host-node", "dist", "index.js");
 }
 

@@ -26,14 +26,21 @@ export interface Credentials {
 const encryptedFile = (): string => path.join(app.getPath("userData"), "credentials.bin");
 const plainFile = (): string => path.join(app.getPath("userData"), "credentials.json");
 
-/** 调 sidecar 的 `hash-password` 子命令把明文转 PHC。该子命令把提示语也打在 stdout 上。 */
-function hashPassword(serverBin: string, password: string): string {
-  const out = execFileSync(serverBin, ["hash-password"], {
+/**
+ * 调宿主的 `hash-password` 子命令把明文转 PHC。该子命令把提示语也打在 stdout 上。
+ *
+ * 宿主入口是 **`.js`（ESM，没有 shebang / 执行位）**，不能直接 `execFile` —— 用 Electron 自带
+ * 的 Node（`process.execPath` + `ELECTRON_RUN_AS_NODE`）来跑，与 sidecar 的拉法一致；少这个开关
+ * 被 exec 的就是 GUI 版 Electron，会当新实例启动。
+ */
+function hashPassword(entry: string, password: string): string {
+  const out = execFileSync(process.execPath, [entry, "hash-password"], {
     input: `${password}\n${password}\n`,
     encoding: "utf8",
     stdio: ["pipe", "pipe", "ignore"],
-    // Windows：server 是 console 子系统程序，打包版主进程没有控制台 —— 不抑制就会为这次
-    // 首启哈希闪一个控制台窗口（与 sidecar spawn 同一类问题，见 shared/sidecar-spec）。
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+    // Windows：打包版主进程是 GUI 子系统程序（没有控制台）—— 不抑制就会为这次首启哈希
+    // 闪一个控制台窗口（与 sidecar spawn 同一类问题，见 shared/sidecar-spec）。
     windowsHide: true,
   });
   const match = /\$argon2[^\s]+/.exec(out);
@@ -82,12 +89,12 @@ function persist(credentials: Credentials): void {
   }
 }
 
-/** 读出已持久化的凭据；无则生成一套并落盘。 */
-export function loadOrCreateCredentials(serverBin: string): Credentials {
+/** 读出已持久化的凭据；无则生成一套并落盘（`entry` 为宿主入口路径，见 paths.ts）。 */
+export function loadOrCreateCredentials(entry: string): Credentials {
   const existing = readExisting();
   if (existing) return existing;
   const password = randomBytes(24).toString("base64url");
-  const credentials: Credentials = { password, hash: hashPassword(serverBin, password) };
+  const credentials: Credentials = { password, hash: hashPassword(entry, password) };
   persist(credentials);
   return credentials;
 }

@@ -98,19 +98,27 @@ Build order matters (the root script `pnpm electron:package` chains it all):
 
 ```sh
 pnpm --filter @greywork/host-node build     # host dist           → apps/host-node/dist/
+node scripts/electron-host-bundle.mjs       # deploy dist + prod deps → apps/electron/build/host/
 pnpm --filter @greywork/desktop build        # renderer SPA        → apps/desktop/dist/
 pnpm --filter @greywork/electron build       # main + preload      → apps/electron/out/
 pnpm --filter @greywork/electron package     # electron-builder    → apps/electron/release/<version>/
 ```
 
+The host bundle step is not optional: the sidecar is run by **Electron's own Node**
+(`process.execPath` + `ELECTRON_RUN_AS_NODE`), so the installer needs `dist` **and** the
+production `node_modules` (including the prebuilt `node-pty`) as a flat directory — the
+workspace's symlinked `node_modules` cannot be shipped as-is. `electron-host-bundle.mjs`
+runs `pnpm deploy --prod --legacy`; native modules are compiled for the **build machine**, so
+build the Windows installer on Windows (same rule as `runtime:fetch`).
+
 `apps/electron/electron-builder.yml` decides what lands where:
 
-| Location               | Contents                                       | Why                                         |
-| ---------------------- | ---------------------------------------------- | ------------------------------------------- |
-| asar (`files: out/**`) | main process + preload only                    | the real SPA is served by the sidecar       |
-| `resources/static/`    | the renderer SPA (`apps/desktop/dist`)         | becomes the sidecar's `GREYWORK_STATIC_DIR` |
-| `resources/server/`    | the `greywork-server` binary for that platform | spawned as a sidecar on launch              |
-| `resources/icons/`     | tray icon + installer icons                    | runtime + per-platform installer icons      |
+| Location               | Contents                                        | Why                                                                        |
+| ---------------------- | ----------------------------------------------- | -------------------------------------------------------------------------- |
+| asar (`files: out/**`) | main process + preload only                     | the real SPA is served by the sidecar                                      |
+| `resources/static/`    | the renderer SPA (`apps/desktop/dist`)          | becomes the sidecar's `GREYWORK_STATIC_DIR`                                |
+| `resources/host/`      | Node host: `dist/` + production `node_modules/` | spawned as a sidecar on launch (Electron's Node runs `host/dist/index.js`) |
+| `resources/icons/`     | tray icon + installer icons                     | runtime + per-platform installer icons                                     |
 
 ### Built-in runtime (bundled tools)
 

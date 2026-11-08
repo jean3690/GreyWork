@@ -1,13 +1,15 @@
 # GreyWork Electron 壳的打包配置（@see https://www.electron.build/configuration）
 #
-# 路径一律相对**本文件所在目录**（apps/electron），故渲染层/sidecar 都要往上跳。
+# 路径一律相对**本文件所在目录**（apps/electron），故渲染层/宿主都要往上跳。
 #
 # 构建前置（顺序不能反）：
-#   1. cargo build --release -p greywork-server     # sidecar 二进制
+#   1. pnpm run runtime:fetch                       # 内置运行时（按目标平台拉）
 #   2. pnpm --filter @greywork/desktop build        # 渲染层 SPA（apps/desktop/dist）
-#   3. pnpm --filter @greywork/electron build       # 主进程 / preload（apps/electron/out）
-#   4. electron-builder
-# 根脚本 `pnpm electron:package` 把四步串起来。
+#   3. pnpm --filter @greywork/host-node build      # Node 宿主（apps/host-node/dist）
+#   4. node scripts/electron-host-bundle.mjs        # 摊出 build/host（dist + 生产依赖）
+#   5. pnpm --filter @greywork/electron build       # 主进程 / preload（apps/electron/out）
+#   6. electron-builder
+# 根脚本 `pnpm electron:prep` / `pnpm electron:package` 把前五步串起来。
 appId: com.greywork.desktop
 productName: GreyWork
 # 显式指定可执行名：默认会从包名 `@greywork/electron` 推出 `@greyworkelectron` 这种垃圾名，
@@ -25,14 +27,19 @@ files:
 # asar 外资源（落到 process.resourcesPath，供 spawn / 读取）：
 # - static：已构建的渲染层 SPA，sidecar 的 GREYWORK_STATIC_DIR 指向它；
 # - icons：托盘图标（主进程 tray.ts 读）；
+# - host：Node 宿主（dist + 生产依赖），由 scripts/electron-host-bundle.mjs 用
+#   `pnpm deploy --prod` 摊平；sidecar 用 Electron 内置 Node 跑 <resources>/host/dist/index.js
+#   （见 main/paths.ts 的 nodeServerEntryPath）；
 # - runtime：内置运行时（git / opencode / rg / fd / jq），由 `pnpm run runtime:fetch`
-#   按当前目标平台拉取；缺失时目录为空，应用退化为「只探测系统 PATH」；
-# - server：sidecar 二进制，按平台在各段里加（扩展名不同）。
+#   按当前目标平台拉取；缺失时目录为空，应用退化为「只探测系统 PATH」。
 extraResources:
   - from: ../desktop/dist
     to: static
   - from: resources/icons/32x32.png
     to: icons/32x32.png
+  # 宿主三平台同一份路径（产物按构建机平台编译，与 runtime:fetch 口径一致）。
+  - from: build/host
+    to: host
   # 目录不存在会让 electron-builder 直接报错，故用通配把「没取包」当作合法状态。
   - from: runtime
     to: runtime
@@ -44,9 +51,6 @@ mac:
   target:
     - dmg
   artifactName: ${productName}-Mac-${version}.${ext}
-  extraResources:
-    - from: ../../target/release/greywork-server
-      to: server/greywork-server
 
 win:
   icon: resources/icons/icon.ico
@@ -55,9 +59,6 @@ win:
       arch:
         - x64
   artifactName: ${productName}-Windows-${version}-Setup.${ext}
-  extraResources:
-    - from: ../../target/release/greywork-server.exe
-      to: server/greywork-server.exe
 
 nsis:
   oneClick: false
@@ -72,6 +73,3 @@ linux:
   target:
     - AppImage
   artifactName: ${productName}-Linux-${version}.${ext}
-  extraResources:
-    - from: ../../target/release/greywork-server
-      to: server/greywork-server
