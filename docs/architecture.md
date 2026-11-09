@@ -23,11 +23,10 @@ greyWork/
 │   ├── llm/                  # LLM provider clients (OpenAI-compatible stream → IPC)
 │   ├── acp/                  # Agent Client Protocol client (host commands + WebSocket)
 │   ├── shell/                # Provider registry & transport data plane
-│   ├── plugins/              # Plugin market source adapters + types
+│   ├── plugins/              # Skill source adapters + plugin package types
 │   ├── cowork/               # Co-operative workspace engine
 │   ├── vite-config/          # Shared Vite config factory (base / pdf.js assets / dev proxy)
 │   └── workbench/            # Shared UI package: shell, views, plugin runtime, front contract
-├── plugin-market/            # Plugin registry source + signing
 └── .agents/skills/           # Installed agent skills (read natively by the ACP agent)
 ```
 
@@ -230,7 +229,7 @@ The control plane is intentionally a **separate stack** from the desktop product
   `apps/admin` has a small Vitest suite (happy-dom) for pure logic and the trend chart; full-page
   behaviour is covered by manual smoke plus the backend contract tests.
 - The Java control plane runs `./mvnw test`; `ControlPlaneApiTest` uses Testcontainers (MySQL 8.4,
-  Redis 7, RustFS) and covers auth, sync, hosts, channels, the LLM gateway, market, storage,
+  Redis 7, RustFS) and covers auth, sync, hosts, channels, the LLM gateway, storage,
   automations and the admin surface.
 - Coverage thresholds are configured per-package in `vitest.config.ts`.
 - **ACP end-to-end**: `apps/host-node/tests/server.test.ts` drives a full
