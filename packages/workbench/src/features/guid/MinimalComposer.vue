@@ -74,7 +74,7 @@ const activeProvider = computed(() =>
 );
 const agentLabel = computed(() => (agent.routeToAcp ? (activeProvider.value?.name ?? t("minimal.agent")) : "Local"));
 
-/** 只列已启用的后端（与 AgentProviderBar 同一显隐语义：未启用的要先到设置里启用）。 */
+/** 只列已启用的后端（与设置页的 ACP 后端列表同一显隐语义：未启用的要先到设置里启用）。 */
 const enabledProviders = computed(() => agent.agentProviders.filter((provider) => provider.enabled));
 
 /* ===== ACP 会话配置块：输入卡下方，默认收起 =====
@@ -242,7 +242,7 @@ function onTextareaInput(el: HTMLTextAreaElement): void {
             </DropdownMenuContent>
           </DropdownMenu>
 
-          <!-- Agent 后端切换器：只列各 ACP 后端（与完整外壳的 AgentProviderBar 同一套选择语义） -->
+          <!-- Agent 后端切换器：只列各 ACP 后端（与设置页的 ACP 后端列表同一套选择语义） -->
           <DropdownMenu>
             <DropdownMenuTrigger as-child>
               <button type="button" data-testid="minimal-composer-agent" :class="railButton">

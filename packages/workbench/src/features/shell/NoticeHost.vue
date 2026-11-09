@@ -82,7 +82,7 @@ const TONE_BY_KIND: Record<NoticeKind, string> = {
 </template>
 
 <style scoped>
-/* 只做进场：退场直接卸载元素（同 AgentProviderBar 的取舍 —— 留退场会让 DOM 多挂一帧）。
+/* 只做进场：退场直接卸载元素（留退场会让 DOM 多挂一帧）。
  * 减少动效偏好由 packages/workbench/src/tailwind.css 的全局 media query 统一关掉。 */
 @keyframes gw-notice-in {
   from {

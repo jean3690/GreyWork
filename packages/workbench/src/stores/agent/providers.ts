@@ -340,7 +340,7 @@ export function createProvidersSlice({ state, getRuntime }: ProvidersDeps): Prov
     if (state.workspace.activeWorkspaceId) state.workspace.setAgentConfig(state.workspace.activeWorkspaceId, { providerId: id });
     // 选中即建会话：configOptions（模型 / 思考强度）只有 session/new 之后才有值，
     // 否则选择器要等到首次发送才出现。连接失败不阻塞选择（发送时会重试并落文案）；
-    // 失败文案原样返回，调用方（AgentProviderBar）就地展示而非静默吞掉。
+    // 失败文案原样返回，调用方就地展示而非静默吞掉。
     return await runtime().connectAcp();
   }
 
