@@ -119,14 +119,13 @@ the full doc index is [docs/README.md](docs/README.md).
 
 ```bash
 # Prerequisites
-#   Node >= 20, pnpm >= 9 (corepack recommended)
-#   Rust stable (builds the headless server sidecar)
+#   Node >= 22.22.1, pnpm >= 9 (corepack recommended)
 
 git clone https://github.com/jean3690/GreyWork.git
 cd GreyWork
 pnpm install
-pnpm electron:dev:all   # build the Rust sidecar, then launch the desktop app
-pnpm electron:dev       # Electron only: reuses target/debug/greywork-server as-is
+pnpm electron:dev:all   # compile the Node host, then launch the desktop app
+pnpm electron:dev       # Electron only: reuses the existing apps/host-node/dist build
 ```
 
 For a plain browser preview (no host), `pnpm dev` starts the desktop renderer's Vite dev server;
@@ -139,24 +138,25 @@ and open `http://localhost:8080/admin`. Admin credentials come from `GREY_ADMIN_
 
 ## Common Commands
 
-| Command                 | Description                                                      |
-| ----------------------- | ---------------------------------------------------------------- |
-| `pnpm dev`              | Desktop renderer Vite dev server (preview mode)                  |
-| `pnpm dev:web`          | Browser front Vite dev server (`apps/web`)                       |
-| `pnpm dev:admin`        | Admin console Vite dev server (`apps/admin`, 5174)               |
-| `pnpm electron:dev`     | Desktop app, no Rust build (uses the debug binary)               |
-| `pnpm electron:dev:all` | `cargo build` then desktop app; `--watch` rebuilds on Rust edits |
-| `pnpm lint`             | ESLint across the repo + the radius guard                        |
-| `pnpm format`           | Format with Prettier (`format:check` to verify)                  |
-| `pnpm typecheck`        | TypeScript check across all workspace packages                   |
-| `pnpm test`             | Vitest across all packages                                       |
-| `pnpm build`            | Build both fronts (`build:desktop` / `build:web`)                |
-| `pnpm build:admin`      | Build admin console into the backend resources                   |
-| `pnpm electron:package` | Build desktop installers (AppImage / NSIS / dmg)                 |
-| `pnpm check`            | `typecheck` + `build`                                            |
+| Command                 | Description                                                                       |
+| ----------------------- | --------------------------------------------------------------------------------- |
+| `pnpm dev`              | Desktop renderer Vite dev server (preview mode)                                   |
+| `pnpm dev:web`          | Browser front Vite dev server (`apps/web`)                                        |
+| `pnpm dev:admin`        | Admin console Vite dev server (`apps/admin`, 5174)                                |
+| `pnpm electron:dev`     | Desktop app, reuses the existing host build                                       |
+| `pnpm electron:dev:all` | Compile `apps/host-node`, then desktop app; `--watch` also rebuilds on host edits |
+| `pnpm lint`             | ESLint across the repo + the radius guard                                         |
+| `pnpm format`           | Format with Prettier (`format:check` to verify)                                   |
+| `pnpm typecheck`        | TypeScript check across all workspace packages                                    |
+| `pnpm test`             | Vitest across all packages                                                        |
+| `pnpm build`            | Build both fronts (`build:desktop` / `build:web`)                                 |
+| `pnpm build:admin`      | Build admin console into the backend resources                                    |
+| `pnpm electron:package` | Build desktop installers (AppImage / NSIS / dmg)                                  |
+| `pnpm check`            | `typecheck` + `build`                                                             |
 
-Rust side (from the repo root — single workspace manifest): `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
-`cargo test` — `--all-targets` so `tests/` and `examples/` are linted too.
+The headless host lives in `apps/host-node` (TypeScript, ESM). `pnpm --filter @greywork/host-node
+typecheck` / `test` scope checks to it, and `pnpm electron:dev:all --watch` rebuilds it and restarts
+Electron whenever host sources change.
 
 Which bundle each platform produces, what the Windows installer does about WebView2, and what code
 signing still needs: [docs/packaging.md](docs/packaging.md).
@@ -168,24 +168,16 @@ signing still needs: [docs/packaging.md](docs/packaging.md).
 - The Java control plane uses `./mvnw test`; `ControlPlaneApiTest` boots MySQL / Redis / RustFS via
   Testcontainers and covers auth, channels, the LLM gateway, storage, automations and the admin
   surface (first run pulls the images).
-- `.github/workflows/ci.yml` mirrors the local hooks but runs the web checks as four parallel jobs —
-  lint (ESLint + the radius guard, then Prettier), typecheck, vitest, renderer build — so the wall clock
-  is the slowest job instead of their sum, plus a Rust job (`cargo fmt` → `cargo clippy --locked` →
-  `cargo test --locked`),
-  a Windows job (`cargo test --locked` + vitest — the only place `#[cfg(windows)]` code is compiled
-  and run), a macOS job (`cargo clippy --locked` → `cargo test --locked` + vitest — the only place
-  `#[cfg(target_os = "macos")]` code is compiled and run) and a three-platform Electron packaging job
-  (AppImage / NSIS / dmg).
-- Tagging `v*` runs `.github/workflows/release.yml`, which builds the Electron installers for all
-  three platforms and opens a draft GitHub Release. The release body is taken from the matching entry
-  in [CHANGELOG.md](CHANGELOG.md); un-draft it once all three platforms are green. Packaging shares the
-  same Rust cache key with CI, so a tag build reuses the dependency artifacts warmed on `master`
-  instead of recompiling the whole dependency tree.
-- Hooks keep CI from being the first place a problem shows up: pre-commit runs `cargo fmt --check`
-  whenever `.rs` files are staged, and pre-push runs `pnpm lint && pnpm -r test` plus — when the push
-  touches the Rust workspace (`crates/`, `apps/server`) — the three Cargo Test commands in order: `cargo fmt --check` →
-  `cargo clippy --locked --all-targets -- -D warnings` → `cargo test --locked`. Pushes that stay on
-  the renderer skip the cargo half, so they don't wait on a compile.
+- `.github/workflows/ci.yml` mirrors the local hooks but splits the web checks into four parallel
+  jobs — lint (ESLint + the radius guard, then Prettier), typecheck, vitest, renderer build (plus the
+  front-bundle guard) — so the wall clock is the slowest job instead of their sum. Two more jobs:
+  a headless-Chromium smoke run of the web and desktop preview chains, and a three-platform Electron
+  packaging job (shell unit tests → `electron:prep` → `package:dir`).
+- Tagging `v*` runs `.github/workflows/release.yml`: it builds the Electron installers on all three
+  platforms and opens a draft GitHub Release whose body comes from the matching entry in
+  [CHANGELOG.md](CHANGELOG.md); un-draft it once all three platforms are green.
+- Hooks keep CI from being the first place a problem shows up: pre-commit runs `lint-staged`, and
+  pre-push runs `pnpm lint && pnpm -r test`.
 
 ## Security Model
 

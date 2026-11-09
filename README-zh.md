@@ -111,7 +111,7 @@ greyWork/
 
 ```bash
 # 前置
-#   Node >= 20，pnpm >= 9（建议 corepack）
+#   Node >= 22.22.1，pnpm >= 9（建议 corepack）
 
 git clone https://github.com/jean3690/GreyWork.git
 cd GreyWork
@@ -130,24 +130,25 @@ pnpm electron:dev       # 只起 Electron：直接用已有的 apps/host-node/di
 
 ## 常用命令
 
-| 命令                    | 说明                                                          |
-| ----------------------- | ------------------------------------------------------------- |
-| `pnpm dev`              | 桌面端渲染层 Vite 开发服务器（预览态）                        |
-| `pnpm dev:web`          | 浏览器前端 Vite 开发服务器（`apps/web`）                      |
-| `pnpm dev:admin`        | 运维台 Vite 开发服务器（`apps/admin`，5174）                  |
-| `pnpm electron:dev`     | 桌面应用（不编译 Rust，用已有 debug 二进制）                  |
-| `pnpm electron:dev:all` | 先 `cargo build` 再起桌面应用；`--watch` 改 Rust 自动重编重启 |
-| `pnpm lint`             | 全仓 ESLint                                                   |
-| `pnpm format`           | Prettier 写入（`format:check` 仅校验）                        |
-| `pnpm typecheck`        | 全 workspace TypeScript 检查                                  |
-| `pnpm test`             | 各 package 跑 Vitest                                          |
-| `pnpm build`            | 构建两个前端（`build:desktop` / `build:web`）                 |
-| `pnpm build:admin`      | 运维台产物写入后端 resources（随 jar 发布）                   |
-| `pnpm electron:package` | 构建桌面安装包（AppImage / NSIS / dmg）                       |
-| `pnpm check`            | `typecheck` + `build`                                         |
+| 命令                    | 说明                                                                   |
+| ----------------------- | ---------------------------------------------------------------------- |
+| `pnpm dev`              | 桌面端渲染层 Vite 开发服务器（预览态）                                 |
+| `pnpm dev:web`          | 浏览器前端 Vite 开发服务器（`apps/web`）                               |
+| `pnpm dev:admin`        | 运维台 Vite 开发服务器（`apps/admin`，5174）                           |
+| `pnpm electron:dev`     | 桌面应用（复用已有的宿主构建产物）                                     |
+| `pnpm electron:dev:all` | 先编译 `apps/host-node` 再起桌面应用；`--watch` 改宿主代码自动重编重启 |
+| `pnpm lint`             | 全仓 ESLint                                                            |
+| `pnpm format`           | Prettier 写入（`format:check` 仅校验）                                 |
+| `pnpm typecheck`        | 全 workspace TypeScript 检查                                           |
+| `pnpm test`             | 各 package 跑 Vitest                                                   |
+| `pnpm build`            | 构建两个前端（`build:desktop` / `build:web`）                          |
+| `pnpm build:admin`      | 运维台产物写入后端 resources（随 jar 发布）                            |
+| `pnpm electron:package` | 构建桌面安装包（AppImage / NSIS / dmg）                                |
+| `pnpm check`            | `typecheck` + `build`                                                  |
 
-Rust 侧（仓库根执行，workspace 单一 manifest）：`cargo fmt`、`cargo clippy --all-targets -- -D warnings`、
-`cargo test` —— 带 `--all-targets` 才会连 `tests/`、`examples/` 一起 lint。
+无头宿主在 `apps/host-node`（TypeScript / ESM）：单包校验用
+`pnpm --filter @greywork/host-node typecheck` / `test`；开发时 `pnpm electron:dev:all --watch`
+会在宿主源码变动后重编并重启 Electron。
 
 各平台出什么包、Windows 安装包怎么处理 WebView2、代码签名还差什么，见
 [docs/packaging.md](docs/packaging.md)。
@@ -155,22 +156,17 @@ Rust 侧（仓库根执行，workspace 单一 manifest）：`cargo fmt`、`cargo
 ## 测试与 CI
 
 - Vitest 分 `node`（纯逻辑）与 `dom`（组件行为）两个 project，覆盖率阈值按包配置。
-- `.github/workflows/ci.yml` 与本地钩子同构，但 web 侧的检查拆成 4 个并行 job（lint / typecheck /
-  测试 / 渲染层构建），墙钟取最慢的一个而不是各步之和；另有 Rust job（`cargo fmt` →
-  `cargo clippy --locked` → `cargo test --locked`）、Windows job（`cargo test --locked` + vitest，
-  唯一会编译并运行 `#[cfg(windows)]` 代码的地方）、macOS job（`cargo clippy --locked` →
-  `cargo test --locked` + vitest，唯一会编译并运行 `#[cfg(target_os = "macos")]` 代码的地方）
-  和三平台打包矩阵（deb / NSIS / dmg）。
-- 打 `v*` 标签触发 `.github/workflows/release.yml`，三平台出 Electron 安装包（AppImage / NSIS / dmg）
-  并开一个 draft Release。Release 正文自动取自 [CHANGELOG.md](CHANGELOG.md) 里该版本的条目，
-  三个平台都成功后取消 draft 即发布。打包与 CI 共用同一份 Rust 缓存键，因此 tag 构建直接
-  复用 master 上已编译好的依赖产物。
+- `.github/workflows/ci.yml` 与本地钩子同构，web 侧检查拆成 4 个并行 job（lint / typecheck / 测试 /
+  渲染层构建 + 前端包体守卫），墙钟取最慢的一个而不是各步之和；另有 web 与 desktop 前端预览链的
+  headless Chromium 冒烟 job，以及三平台 Electron 打包矩阵（壳单测 → `electron:prep` →
+  `package:dir`）。
+- 打 `v*` 标签触发 `.github/workflows/release.yml`：三平台出 Electron 安装包（AppImage / NSIS / dmg）
+  并开一个 draft Release，正文自动取自 [CHANGELOG.md](CHANGELOG.md) 里该版本的条目；
+  三个平台都成功后取消 draft 即发布。
 - 控制面（`back/grey`）用 `./mvnw test`：`ControlPlaneApiTest` 通过 Testcontainers 起
   MySQL / Redis / RustFS，盖到认证、通道、模型网关、存储、自动化与运维面；首次运行需要拉镜像。
-- 钩子让 CI 不是第一个发现问题的地方：pre-commit 在暂存区含 `.rs` 时跑 `cargo fmt --check`；
-  pre-push 跑 `pnpm lint && pnpm -r test`，本轮推送触及 Rust workspace（`crates/`、`apps/server`）时再按 CI 的顺序补
-  `cargo fmt --check` → `cargo clippy --locked --all-targets -- -D warnings` → `cargo test --locked`
-  （纯前端 / 文档推送跳过，不必等一次 cargo 编译）。
+- 钩子让 CI 不是第一个发现问题的地方：pre-commit 跑 `lint-staged`，pre-push 跑
+  `pnpm lint && pnpm -r test`。
 
 ## 安全模型
 
