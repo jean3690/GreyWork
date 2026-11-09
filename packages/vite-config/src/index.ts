@@ -201,7 +201,7 @@ export function defineFrontConfig(options: FrontConfigOptions = {}): UserConfig 
           ws: true,
         },
         // /market-api/skills/* → https://www.skills.sh/*；/market-api/mcp/* → https://registry.modelcontextprotocol.io/*
-        // 仅 Web 预览使用；桌面端仍走 Rust 宿主代理。
+        // 仅 Web 预览使用；桌面端仍走宿主代理。远端插件市场已下线，不再有 /market-api/plugins。
         "/market-api/skills": {
           target: "https://www.skills.sh",
           changeOrigin: true,
@@ -211,11 +211,6 @@ export function defineFrontConfig(options: FrontConfigOptions = {}): UserConfig 
           target: "https://registry.modelcontextprotocol.io",
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/market-api\/mcp/, ""),
-        },
-        "/market-api/plugins": {
-          target: "https://raw.githubusercontent.com",
-          changeOrigin: true,
-          rewrite: (path) => path.replace(/^\/market-api\/plugins/, "/jean3690/greywork-plugin-market/main"),
         },
       },
       watch: {

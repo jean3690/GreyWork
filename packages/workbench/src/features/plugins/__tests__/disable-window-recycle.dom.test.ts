@@ -3,10 +3,10 @@ import { createPinia, setActivePinia } from "pinia";
 import type * as GreyworkCore from "@greywork/core";
 
 /**
- * 卸载与悬浮窗回收：
- * - uninstallMarketPlugin：停用 → 关窗 → 宿主删盘 → 注销清单 → 释放 worker → 清状态；
- * - 停用任一插件都会回收其悬浮窗（窗口里跑的是该插件的 render worker）。
- * IPC 层 mock：invoke 按 command 表分发，记录调用序列。
+ * 停用插件时的悬浮窗回收：窗口里跑的是该插件的 render worker，停用必须一并关窗。
+ *
+ * 远端插件市场已下线，这里只用宿主扫描出的「已安装包」（plugin_market_list_installed）
+ * 构造启停场景；IPC 层 mock：invoke 按 command 表分发，记录调用序列。
  */
 
 const invokeHandlers: Record<string, (args: Record<string, unknown>) => unknown> = {};
@@ -31,10 +31,6 @@ vi.mock("@greywork/core", async (importOriginal) => {
   return { ...actual, isTauriRuntime: () => true };
 });
 
-function injectStorage(): void {
-  window.localStorage.clear();
-}
-
 function installedPackage(id: string, version: string): Record<string, unknown> {
   return {
     schemaVersion: 1,
@@ -54,7 +50,7 @@ function installedPackage(id: string, version: string): Record<string, unknown> 
 }
 
 beforeEach(async () => {
-  injectStorage();
+  window.localStorage.clear();
   // 桌面态 = 宿主托管：bootInstalledMarketPlugins 的闸门是 hasHostCommands()。
   (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = "server";
   // 悬浮窗回收走 bridge.plugins（Electron 主进程托管窗口）——桩方法路由回 invoke 记录。
@@ -67,8 +63,8 @@ beforeEach(async () => {
     },
   };
   setActivePinia(createPinia());
-  const market = await import("@/plugins/market");
-  market.setCodePluginRuntimeFactoryForTest(() => ({
+  const installed = await import("@/plugins/market");
+  installed.setCodePluginRuntimeFactoryForTest(() => ({
     invoke: () => Promise.resolve(undefined),
     invokeRaw: () => Promise.resolve([]),
     dispatchPointer: () => Promise.resolve(undefined),
@@ -80,16 +76,16 @@ beforeEach(async () => {
 
 afterEach(() => {
   vi.clearAllMocks();
-  void import("@/plugins/market").then((market) => market.setCodePluginRuntimeFactoryForTest(null));
+  void import("@/plugins/market").then((installed) => installed.setCodePluginRuntimeFactoryForTest(null));
 });
 
-describe("插件卸载与悬浮窗回收", () => {
+describe("插件停用与悬浮窗回收", () => {
   it("停用插件会调用 plugin_window_close 回收悬浮窗", async () => {
     invokeHandlers["plugin_market_list_installed"] = () => [installedPackage("demo.pet", "1.0.0")];
     invokeHandlers["plugin_window_close"] = () => undefined;
-    const market = await import("@/plugins/market");
+    const installed = await import("@/plugins/market");
     const runtime = await import("@/plugins/runtime");
-    await market.bootInstalledMarketPlugins();
+    await installed.bootInstalledMarketPlugins();
     await runtime.bootPlugins();
 
     await runtime.setPluginEnabled("demo.pet", true);
@@ -98,33 +94,5 @@ describe("插件卸载与悬浮窗回收", () => {
 
     expect(invokeCalls).toContain("plugin_window_close");
     expect(runtime.isPluginEnabled("demo.pet")).toBe(false);
-  });
-
-  it("uninstallMarketPlugin：停用 → 关窗 → 宿主删盘 → 注销清单 → 清状态", async () => {
-    invokeHandlers["plugin_market_list_installed"] = () => [installedPackage("demo.pet", "1.0.0")];
-    invokeHandlers["plugin_market_uninstall"] = () => undefined;
-    invokeHandlers["plugin_window_close"] = () => undefined;
-    const market = await import("@/plugins/market");
-    const runtime = await import("@/plugins/runtime");
-    await market.bootInstalledMarketPlugins();
-    await runtime.bootPlugins();
-    await runtime.setPluginEnabled("demo.pet", true);
-
-    // 预置该插件的声明式状态与一项授权，验证卸载会一并清理。
-    window.localStorage.setItem("greywork.plugins.declarativeState", JSON.stringify({ "demo.pet/demo-mode": { count: 3 } }));
-    runtime.grantPluginCapability("demo.pet", "net.fetch");
-    expect(runtime.isPluginCapabilityGranted("demo.pet", "net.fetch")).toBe(true);
-
-    invokeCalls.length = 0;
-    await market.uninstallMarketPlugin("demo.pet");
-
-    expect(invokeCalls).toContain("plugin_market_uninstall");
-    expect(invokeCalls).toContain("plugin_window_close");
-    expect(runtime.pluginManifests.value.some((manifest) => manifest.id === "demo.pet")).toBe(false);
-    expect(market.installedMarketPlugins.value.some((item) => item.manifest.id === "demo.pet")).toBe(false);
-    // 授权随卸载清空：重装同 id 的其它包不会继承旧授权。
-    expect(runtime.isPluginCapabilityGranted("demo.pet", "net.fetch")).toBe(false);
-    // 卸载后同 id 可重新安装（清单已从 loader 注销）。
-    expect(() => runtime.registerPlugin({ id: "demo.pet", name: "重装", version: "2.0.0" })).not.toThrow();
   });
 });

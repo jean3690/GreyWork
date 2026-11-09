@@ -1,34 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, ref } from "vue";
 import { i18n } from "@/i18n";
-import Icon from "@/features/shared/Icon.vue";
 import Hint from "@/features/shared/Hint.vue";
 import StatusChip from "@/features/shared/StatusChip.vue";
-import ConfirmDialog from "@/features/settings/ConfirmDialog.vue";
-import {
-  CAPABILITY_REGISTRY,
-  capabilityAuditLog,
-  capabilityTitle,
-  normalizeGrantSpec,
-  resetCapabilityAuditForTest,
-  type CapabilityAuditEntry,
-} from "@/plugins/capabilities";
-import {
-  installMarketPlugin,
-  installedMarketIds,
-  marketBusyId,
-  marketCatalog,
-  marketError,
-  marketLoading,
-  outdatedPlugins,
-  pluginMarketHostAvailable,
-  pluginRegistryUrl,
-  previewMarketPlugin,
-  refreshPluginCatalog,
-  setPluginRegistryUrl,
-  uninstallMarketPlugin,
-  upgradeMarketPlugin,
-} from "@/plugins/market";
+import { capabilityAuditLog, capabilityTitle, resetCapabilityAuditForTest, type CapabilityAuditEntry } from "@/plugins/capabilities";
 import {
   grantPluginCapability,
   isPluginCapabilityGranted,
@@ -44,7 +19,6 @@ import { useSettingsStore } from "@/stores/settings";
 import { useSkillsStore } from "@/stores/skills";
 import McpMarketSection from "@/features/plugins/McpMarketSection.vue";
 import SkillsMarketSection from "@/features/plugins/SkillsMarketSection.vue";
-import { Skeleton } from "@/components/ui/skeleton";
 
 /**
  * 插件中心（本身是内置插件 core.plugins 贡献的模式页）。
@@ -73,36 +47,11 @@ const busyId = ref<string | null>(null);
 /** 停用 core.plugins（自身）前的两步确认。 */
 const confirmDisableId = ref<string | null>(null);
 const notice = ref<{ kind: "ok" | "error"; text: string } | null>(null);
-const registryDraft = ref(pluginRegistryUrl.value);
-const activeSection = ref<"discover" | "mcp" | "skills" | "installed" | "audit">("discover");
-const searchQuery = ref("");
-const registryOpen = ref(false);
-const uninstallTarget = ref<{ id: string; name: string } | null>(null);
-const installPreviewLoading = ref<string | null>(null);
-
-/** 安装/升级确认弹窗：preview 已校验的 manifest + 来源目录项。 */
-const installTarget = ref<{
-  entryId: string;
-  name: string;
-  manifest: {
-    id: string;
-    name: string;
-    version: string;
-    description?: string;
-    kind?: string;
-    requires: Array<{
-      capability: string;
-      hosts?: string[];
-      servers?: Array<{ name: string; tools: string[] }>;
-    }>;
-  };
-} | null>(null);
-/** 升级请求标志：确认弹窗的「确认」按此分流到 install 或 upgrade。 */
-const isUpgradeRequest = ref(false);
+const activeSection = ref<"mcp" | "skills" | "installed" | "audit">("installed");
 
 /**
- * 能力参数的短摘要（chip / 安装弹窗共用）：net.fetch 是域名白名单，mcp.connect 是
- * 「服务器(工具/工具)」。空摘要 = 该能力没有可展示的参数。
+ * 能力参数的短摘要：net.fetch 是域名白名单，mcp.connect 是「服务器(工具/工具)」。
+ * 空摘要 = 该能力没有可展示的参数。
  */
 function capabilityParams(params: { hosts?: string[]; servers?: Array<{ name: string; tools: string[] }> }): string {
   if (params.hosts?.length) return params.hosts.join("、");
@@ -110,95 +59,6 @@ function capabilityParams(params: { hosts?: string[]; servers?: Array<{ name: st
   return "";
 }
 
-const installRequirements = computed(() =>
-  (installTarget.value?.manifest.requires ?? []).map((grant) => ({
-    capability: grant.capability,
-    hosts: grant.hosts,
-    servers: grant.servers,
-    title: capabilityTitle(grant.capability),
-    danger: CAPABILITY_REGISTRY[grant.capability]?.danger ?? "high",
-    description: CAPABILITY_REGISTRY[grant.capability]?.description ?? "未知能力（宿主未登记）",
-  })),
-);
-
-/** 安装后待授权引导的插件 id：高亮其卡片与未授权 chip。 */
-const pendingGrantId = ref<string | null>(null);
-
-/** 升级入口：与安装同一确认标准 —— 新版可能新增 requires，能力语义变化必须重新知情。 */
-async function requestUpgrade(entryId: string, name: string): Promise<void> {
-  isUpgradeRequest.value = true;
-  await requestInstall(entryId, name);
-}
-/** 目录项安装入口：先 preview（下载 + 全量校验不落盘），确认后真正安装。 */
-async function requestInstall(entryId: string, name: string): Promise<void> {
-  notice.value = null;
-  installPreviewLoading.value = entryId;
-  try {
-    const manifest = await previewMarketPlugin(entryId);
-    installTarget.value = {
-      entryId,
-      name,
-      manifest: {
-        id: manifest.id,
-        name: manifest.name,
-        version: manifest.version,
-        description: manifest.description,
-        kind: manifest.kind,
-        requires: manifest.requires.map((spec) => normalizeGrantSpec(spec)),
-      },
-    };
-  } catch (error) {
-    notice.value = { kind: "error", text: String(error) };
-  } finally {
-    installPreviewLoading.value = null;
-  }
-}
-
-onMounted(() => {
-  if (import.meta.env.MODE !== "test" && marketCatalog.value.length === 0) void refreshPluginCatalog();
-});
-
-async function confirmInstall(): Promise<void> {
-  if (!installTarget.value) return;
-  const target = installTarget.value;
-  const upgrading = isUpgradeRequest.value;
-  installTarget.value = null;
-  isUpgradeRequest.value = false;
-  notice.value = null;
-  try {
-    if (upgrading) {
-      await upgradeMarketPlugin(target.entryId);
-      notice.value = { kind: "ok", text: `已升级 ${target.entryId} 至 v${target.manifest.version}` };
-      return;
-    }
-    await installMarketPlugin(target.entryId);
-    const missing = target.manifest.requires
-      .filter((grant) => !isPluginCapabilityGranted(target.manifest.id, grant.capability))
-      .map((grant) => grant.capability);
-    if (missing.length) {
-      // 引导授权：跳到已装页签 + 提示哪些能力还没授权（chip 在已装卡片上可点）。
-      activeSection.value = "installed";
-      pendingGrantId.value = target.manifest.id;
-      notice.value = {
-        kind: "ok",
-        text: `${t("market.pluginInstalled", { id: target.entryId })}——还需授权：${missing.map((capability) => capabilityTitle(capability)).join("、")}`,
-      };
-    } else {
-      notice.value = { kind: "ok", text: t("market.pluginInstalled", { id: target.entryId }) };
-    }
-  } catch (error) {
-    notice.value = { kind: "error", text: String(error) };
-  }
-}
-
-const filteredCatalog = computed(() => {
-  const query = searchQuery.value.trim().toLocaleLowerCase();
-  if (!query) return marketCatalog.value;
-  return marketCatalog.value.filter((entry) =>
-    [entry.name, entry.id, entry.description ?? "", entry.author ?? ""].some((value) => value.toLocaleLowerCase().includes(query)),
-  );
-});
-const catalogInstalledCount = computed(() => marketCatalog.value.filter((entry) => installedMarketIds.value.has(entry.id)).length);
 /** manifest.requires（可能为对象形态）归一化为 chip 列表。 */
 const requiredCapabilitiesByPlugin = computed(() =>
   Object.fromEntries(
@@ -252,10 +112,9 @@ function confirmSelfDisable(): void {
   void toggle(id, false);
 }
 
-/** 能力授权 chip 的态色：未授权但正处在安装引导（pendingGrantId）时高亮闪烁。 */
+/** 能力授权 chip 的态色：已授权走薄荷、未授权走琥珀。 */
 function grantChipClass(manifestId: string, capability: string): string {
   if (isPluginCapabilityGranted(manifestId, capability)) return "border-mint/30 bg-mint/10 text-mint";
-  if (pendingGrantId.value === manifestId) return "animate-pulse border-amber/60 bg-amber/20 text-amber";
   return "border-amber/30 bg-amber/10 text-amber";
 }
 
@@ -270,37 +129,23 @@ function auditChipTone(outcome: CapabilityAuditEntry["outcome"]): "ok" | "warn" 
   return "warn";
 }
 
-/** 能力危险级别 chip 的语义态。 */
-function dangerChipTone(danger: string): "high" | "medium" | "low" {
-  if (danger === "high") return "high";
-  if (danger === "medium") return "medium";
-  return "low";
-}
-
-function dangerLabel(danger: string): string {
-  if (danger === "high") return "高危";
-  if (danger === "medium") return "中危";
-  return "低危";
-}
-
 function toggleLabel(manifestId: string): string {
   if (busyId.value === manifestId) return "…";
   return isPluginEnabled(manifestId) ? t("market.disable") : t("market.enable");
 }
 
-type MarketSection = "discover" | "mcp" | "skills" | "installed" | "audit";
+type MarketSection = "mcp" | "skills" | "installed" | "audit";
 
 /**
- * 页签定义：插件 / MCP / 技能 / 已装 / 能力审计，各自带计数。
+ * 页签定义：MCP / 技能 / 已装 / 能力审计，各自带计数。
  *
- * 三个市场页签是三种不同形态的「安装」：插件是声明式包落盘，MCP 是登记服务器声明，
- * 技能是往工作区写技能目录——所以各给一个专区，而不是塞进同一张卡片网格。
+ * 三种形态的「安装」各给一个专区：MCP 是登记服务器声明，技能是往工作区写技能目录，
+ * 已装页只做启停与能力授权——不塞进同一张卡片网格。
  */
 const sectionTabs = computed(() => [
-  { key: "discover" as const, label: t("market.discoverPlugins"), count: marketCatalog.value.length },
   { key: "mcp" as const, label: t("market.tabMcp"), count: settings.mcpServers.length },
   { key: "skills" as const, label: t("market.tabSkills"), count: skills.installed.length },
-  { key: "installed" as const, label: t("market.installedPlugins"), count: installedMarketIds.value.size },
+  { key: "installed" as const, label: t("market.installedPlugins"), count: pluginManifests.value.length },
   { key: "audit" as const, label: t("market.tabAudit"), count: auditEntries.value.length },
 ]);
 
@@ -320,41 +165,12 @@ function toggleGrant(manifestId: string, capability: string): void {
   grantPluginCapability(manifestId, capability);
   notice.value = { kind: "ok", text: t("market.capabilityGranted", { capability: capabilityTitle(capability) }) };
 }
-
-function saveRegistry(): void {
-  setPluginRegistryUrl(registryDraft.value);
-  void refreshPluginCatalog();
-}
-
-async function installFromMarket(id: string): Promise<void> {
-  // 宿主不可用时按钮只标 aria-disabled（保持可聚焦，"仅桌面端可安装"的提示才弹得出来），
-  // 点击真正的兜底在这里 —— 否则会走到 requestInstall 再报错。
-  if (!pluginMarketHostAvailable()) return;
-  notice.value = null;
-  try {
-    await requestInstall(id, marketCatalog.value.find((entry) => entry.id === id)?.name ?? id);
-  } catch (error) {
-    notice.value = { kind: "error", text: String(error) };
-  }
-}
-async function confirmUninstall(): Promise<void> {
-  if (!uninstallTarget.value) return;
-  const target = uninstallTarget.value;
-  uninstallTarget.value = null;
-  notice.value = null;
-  try {
-    await uninstallMarketPlugin(target.id);
-    notice.value = { kind: "ok", text: t("market.pluginUninstalled", { id: target.id }) };
-  } catch (error) {
-    notice.value = { kind: "error", text: String(error) };
-  }
-}
 </script>
 
 <template>
   <div
     class="mx-auto flex h-full min-h-0 w-full max-w-[1120px] flex-col overflow-y-auto px-4 py-4 sm:px-6 sm:py-6"
-    data-testid="plugin-market"
+    data-testid="plugin-center"
   >
     <p
       v-if="notice"
@@ -381,170 +197,9 @@ async function confirmUninstall(): Promise<void> {
         </span>
         <i v-if="activeSection === section.key" class="absolute inset-x-2 bottom-[-1px] h-0.5 rounded-full bg-accent"></i>
       </button>
-      <div class="ml-auto flex items-center gap-1.5 pb-1">
-        <Hint :text="t('market.refreshCatalog')">
-          <button
-            type="button"
-            class="grid size-8 cursor-pointer place-items-center rounded-[calc(8px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground disabled:opacity-40"
-            :disabled="marketLoading"
-            :aria-label="t('market.refreshCatalog')"
-            data-testid="plugin-market-refresh"
-            @click="refreshPluginCatalog()"
-          >
-            <Icon name="refresh" :size="14" :class="marketLoading ? 'animate-spin' : ''" />
-          </button>
-        </Hint>
-        <Hint :text="t('market.registrySettings')">
-          <button
-            type="button"
-            class="grid size-8 cursor-pointer place-items-center rounded-[calc(8px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground"
-            :aria-label="t('market.registrySettings')"
-            :aria-expanded="registryOpen"
-            data-testid="plugin-registry-toggle"
-            @click="registryOpen = !registryOpen"
-          >
-            <Icon name="setting" :size="14" />
-          </button>
-        </Hint>
-      </div>
     </nav>
 
-    <section
-      v-if="registryOpen"
-      class="mt-3 rounded-[calc(12px*var(--gw-radius-scale))] border border-line bg-panel p-3"
-      data-testid="plugin-registry-settings"
-    >
-      <label for="plugin-registry-url" class="text-[11px] font-medium text-foreground">{{ t("market.registrySource") }}</label>
-      <div class="mt-2 flex flex-col gap-2 sm:flex-row">
-        <input
-          id="plugin-registry-url"
-          v-model="registryDraft"
-          type="url"
-          class="h-9 min-w-0 flex-1 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-ink px-3 font-mono text-[11px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
-          :placeholder="t('market.registryUrlPlaceholder')"
-          data-testid="plugin-registry-url"
-          @keydown.enter="saveRegistry"
-        />
-        <button
-          type="button"
-          class="h-9 cursor-pointer rounded-[calc(8px*var(--gw-radius-scale))] bg-accent px-4 text-[11.5px] font-medium text-accent-ink transition-colors hover:bg-accent-hi disabled:opacity-50"
-          :disabled="marketLoading"
-          @click="saveRegistry"
-        >
-          {{ marketLoading ? t("market.loadingCatalog") : t("market.saveAndReload") }}
-        </button>
-      </div>
-    </section>
-
-    <p
-      v-if="marketError"
-      class="mt-3 rounded-[calc(10px*var(--gw-radius-scale))] border border-orange/30 bg-orange/10 px-3 py-2 text-[11.5px] text-orange"
-      role="alert"
-    >
-      {{ marketError }}
-    </p>
-
-    <section v-if="activeSection === 'discover'" class="mt-4">
-      <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
-        <div class="relative min-w-0 flex-1">
-          <Icon name="search" :size="13" class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-dim2" />
-          <input
-            v-model="searchQuery"
-            type="search"
-            class="h-10 w-full rounded-[calc(10px*var(--gw-radius-scale))] border border-line bg-panel pl-9 pr-3 text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
-            :placeholder="t('market.searchMarketplace')"
-            data-testid="plugin-market-search"
-          />
-        </div>
-        <span class="shrink-0 text-[10.5px] text-dim2"
-          >{{ catalogInstalledCount }}/{{ marketCatalog.length }} {{ t("market.alreadyInstalled") }}</span
-        >
-      </div>
-
-      <!-- 原先挂在页头的那段说明与信任标记：挪到真正发生安装的地方 -->
-      <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] text-dim2">
-        <span class="rounded-full border border-mint/30 px-2 py-0.5 text-[10px] text-mint">{{ t("market.declarativeOnly") }}</span>
-        <span class="min-w-0 flex-1">{{ t("market.pluginMarketHint") }}</span>
-        <span class="inline-flex items-center gap-1.5 font-mono"><i class="size-1.5 rounded-full bg-mint"></i> SHA-256</span>
-        <span class="inline-flex items-center gap-1.5 font-mono"><i class="size-1.5 rounded-full bg-accent"></i> GitHub HTTPS</span>
-      </div>
-
-      <div v-if="marketLoading && marketCatalog.length === 0" class="mt-3 grid gap-3 md:grid-cols-2">
-        <Skeleton v-for="index in 4" :key="index" class="h-40 rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel" />
-      </div>
-
-      <div v-else-if="filteredCatalog.length" class="mt-3 grid gap-3 md:grid-cols-2">
-        <article
-          v-for="entry in filteredCatalog"
-          :key="entry.id"
-          class="group flex min-h-40 flex-col rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-4 transition-colors hover:border-line-2"
-          :data-testid="`market-plugin-${entry.id}`"
-        >
-          <div class="flex items-start gap-3">
-            <span
-              class="grid size-10 shrink-0 place-items-center rounded-[calc(11px*var(--gw-radius-scale))] border border-brand-hover/25 bg-brand-light/50 text-brand"
-            >
-              <Icon name="lightning" :size="17" />
-            </span>
-            <div class="min-w-0 flex-1">
-              <div class="flex items-center gap-2">
-                <h2 class="truncate text-[13px] font-semibold text-foreground">{{ entry.name }}</h2>
-                <span
-                  v-if="installedMarketIds.has(entry.id)"
-                  class="shrink-0 rounded-full bg-mint/10 px-1.5 py-0.5 text-[9.5px] font-medium text-mint"
-                >
-                  {{ t("market.installed") }}
-                </span>
-              </div>
-              <p class="mt-0.5 truncate font-mono text-[9.5px] text-dim2">{{ entry.id }} · v{{ entry.version }}</p>
-            </div>
-          </div>
-          <p class="mt-3 line-clamp-3 flex-1 text-[11.5px] leading-[1.55] text-dim">{{ entry.description || t("market.noDescription") }}</p>
-          <footer class="mt-4 flex items-center justify-between gap-3 border-t border-line pt-3">
-            <span class="truncate text-[10.5px] text-dim2">{{ entry.author || t("market.communityAuthor") }}</span>
-            <button
-              v-if="installedMarketIds.has(entry.id)"
-              type="button"
-              class="h-7 shrink-0 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] border border-line px-2.5 text-[11px] text-dim transition-colors hover:border-orange/40 hover:text-orange disabled:opacity-40"
-              :disabled="!pluginMarketHostAvailable() || marketBusyId === entry.id"
-              :data-testid="`market-uninstall-${entry.id}`"
-              @click="uninstallTarget = { id: entry.id, name: entry.name }"
-            >
-              {{ marketBusyId === entry.id ? "…" : t("market.uninstall") }}
-            </button>
-            <Hint v-else :text="!pluginMarketHostAvailable() ? t('market.desktopInstallOnly') : null" multiline>
-              <button
-                type="button"
-                class="h-7 shrink-0 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] bg-accent px-3 text-[11px] font-medium text-accent-ink transition-colors hover:bg-accent-hi disabled:cursor-not-allowed disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
-                :disabled="marketBusyId !== null"
-                :aria-disabled="!pluginMarketHostAvailable() || undefined"
-                :data-testid="`market-install-${entry.id}`"
-                @click="installFromMarket(entry.id)"
-              >
-                {{ installPreviewLoading === entry.id || marketBusyId === entry.id ? t("market.installingPlugin") : t("market.install") }}
-              </button>
-            </Hint>
-          </footer>
-        </article>
-      </div>
-
-      <div
-        v-else
-        class="mt-3 grid min-h-52 place-items-center rounded-[calc(14px*var(--gw-radius-scale))] border border-dashed border-line-2 bg-panel/50 px-6 text-center"
-      >
-        <div>
-          <span class="mx-auto grid size-10 place-items-center rounded-[calc(11px*var(--gw-radius-scale))] bg-panel-2 text-dim2"
-            ><Icon name="search" :size="16"
-          /></span>
-          <p class="mt-3 text-[12px] font-medium text-foreground">{{ t("market.noPluginsFound") }}</p>
-          <p class="mt-1 text-[10.5px] text-dim2">{{ t("market.noPluginsHint") }}</p>
-        </div>
-      </div>
-
-      <p v-if="!pluginMarketHostAvailable()" class="mt-3 text-center text-[10.5px] text-dim2">{{ t("market.desktopInstallOnly") }}</p>
-    </section>
-
-    <section v-else-if="activeSection === 'mcp'" class="mt-4">
+    <section v-if="activeSection === 'mcp'" class="mt-4">
       <McpMarketSection />
     </section>
 
@@ -567,8 +222,7 @@ async function confirmUninstall(): Promise<void> {
         <article
           v-for="manifest in pluginManifests"
           :key="manifest.id"
-          class="rounded-[calc(12px*var(--gw-radius-scale))] border bg-panel px-3.5 py-3 transition-colors"
-          :class="pendingGrantId === manifest.id ? 'border-amber/50' : 'border-line'"
+          class="rounded-[calc(12px*var(--gw-radius-scale))] border border-line bg-panel px-3.5 py-3 transition-colors"
           :data-testid="`plugin-card-${manifest.id}`"
         >
           <div class="flex items-start gap-3">
@@ -585,22 +239,6 @@ async function confirmUninstall(): Promise<void> {
                   manifest.id
                 }}</code>
                 <span class="font-mono text-[9.5px] text-dim2">v{{ manifest.version }}</span>
-                <span
-                  v-if="outdatedPlugins[manifest.id]"
-                  class="rounded-full border border-amber/40 bg-amber/10 px-1.5 py-0.5 text-[9px] text-amber"
-                  :data-testid="`plugin-upgrade-badge-${manifest.id}`"
-                >
-                  可升级 → v{{ outdatedPlugins[manifest.id] }}
-                </span>
-                <span
-                  v-if="installedMarketIds.has(manifest.id)"
-                  class="rounded-full border border-accent/25 px-1.5 py-0.5 text-[9px] text-accent"
-                >
-                  {{ t("market.fromMarketplace") }}
-                </span>
-                <span v-else class="rounded-full border border-line px-1.5 py-0.5 text-[9px] text-dim2">{{
-                  t("market.builtinPlugin")
-                }}</span>
               </div>
               <p v-if="manifest.description" class="mt-1 text-[11px] leading-relaxed text-dim">{{ manifest.description }}</p>
               <p v-if="manifest.dependsOn?.length" class="mt-1 font-mono text-[9.5px] text-dim2">
@@ -619,10 +257,7 @@ async function confirmUninstall(): Promise<void> {
                     :class="grantChipClass(manifest.id, required.capability)"
                     :aria-pressed="isPluginCapabilityGranted(manifest.id, required.capability)"
                     :data-testid="`plugin-capability-${manifest.id}-${required.capability}`"
-                    @click="
-                      pendingGrantId = null;
-                      toggleGrant(manifest.id, required.capability);
-                    "
+                    @click="toggleGrant(manifest.id, required.capability)"
                   >
                     {{ capabilityTitle(required.capability) }}{{ capabilityParams(required) ? ` · ${capabilityParams(required)}` : "" }} ·
                     {{ grantLabel(manifest.id, required.capability) }}
@@ -653,17 +288,6 @@ async function confirmUninstall(): Promise<void> {
               </div>
             </div>
             <button
-              v-if="outdatedPlugins[manifest.id]"
-              type="button"
-              class="h-7 shrink-0 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] bg-amber px-2.5 text-[11px] font-medium text-amber-ink transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-              :disabled="marketBusyId !== null"
-              :data-testid="`plugin-upgrade-${manifest.id}`"
-              @click="requestUpgrade(manifest.id, manifest.name)"
-            >
-              {{ marketBusyId === manifest.id ? "…" : t("market.upgrade") }}
-            </button>
-            <button
-              v-else
               type="button"
               class="h-7 w-14 shrink-0 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] text-[11px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent"
               :class="isPluginEnabled(manifest.id) ? 'border border-line bg-panel-2 text-dim' : 'bg-accent text-accent-ink'"
@@ -751,53 +375,5 @@ async function confirmUninstall(): Promise<void> {
         {{ command.title }}
       </span>
     </div>
-
-    <ConfirmDialog
-      v-if="uninstallTarget"
-      :title="t('market.uninstallPluginTitle', { name: uninstallTarget.name })"
-      :message="t('market.uninstallPluginMessage', { name: uninstallTarget.name })"
-      :confirm-label="t('market.uninstall')"
-      @confirm="confirmUninstall"
-      @cancel="uninstallTarget = null"
-    />
-
-    <ConfirmDialog
-      v-if="installTarget"
-      :title="
-        isUpgradeRequest
-          ? `升级 ${installTarget.manifest.name} 至 v${installTarget.manifest.version}`
-          : `安装 ${installTarget.manifest.name} v${installTarget.manifest.version}`
-      "
-      :message="installTarget.manifest.description"
-      :confirm-label="isUpgradeRequest ? '升级' : t('market.install')"
-      @confirm="confirmInstall"
-      @cancel="
-        installTarget = null;
-        isUpgradeRequest = false;
-      "
-    >
-      <div class="mt-2 flex flex-col gap-2" data-testid="install-capability-list">
-        <p class="text-[11px] text-dim">
-          该插件请求以下能力{{ installTarget.manifest.kind === "worker" ? "，并在隔离 Worker 中执行代码" : "" }}：
-        </p>
-        <div
-          v-for="required in installRequirements"
-          :key="required.capability"
-          class="rounded-[calc(10px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2.5 py-2"
-          :data-testid="`install-capability-${required.capability}`"
-        >
-          <div class="flex items-center gap-1.5">
-            <StatusChip :tone="dangerChipTone(required.danger)">{{ dangerLabel(required.danger) }}</StatusChip>
-            <span class="text-[12px] font-medium text-foreground">{{ required.title }}</span>
-            <code class="font-mono text-[9.5px] text-dim2">{{ required.capability }}</code>
-          </div>
-          <p class="mt-1 text-[11px] leading-relaxed text-dim">{{ required.description }}</p>
-          <p v-if="capabilityParams(required)" class="mt-1 font-mono text-[10px] text-dim2">
-            {{ required.hosts?.length ? "域名白名单" : "MCP 服务器与工具" }}：{{ capabilityParams(required) }}
-          </p>
-        </div>
-        <p v-if="!installRequirements.length" class="text-[11px] text-dim2">无能力请求（纯声明式插件）。</p>
-      </div>
-    </ConfirmDialog>
   </div>
 </template>

@@ -1,20 +1,5 @@
 import type { CapabilityGrantSpec } from "./capabilities";
 
-export interface PluginRegistry {
-  schemaVersion: 1;
-  plugins: PluginRegistryEntry[];
-}
-
-export interface PluginRegistryEntry {
-  id: string;
-  name: string;
-  version: string;
-  description?: string;
-  author?: string;
-  downloadUrl: string;
-  sha256: string;
-}
-
 export interface PluginPackage {
   schemaVersion: 1;
   manifest: MarketPluginManifest;
@@ -183,10 +168,4 @@ export interface DeclarativePage {
   fields?: DeclarativeField[];
   outputs?: DeclarativeOutput[];
   actions?: DeclarativeAction[];
-}
-
-export interface PluginInstallReport {
-  id: string;
-  version: string;
-  path: string;
 }

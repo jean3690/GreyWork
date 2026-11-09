@@ -13,10 +13,9 @@
  *   架构判断，别在这里替产品拍板。
  *
  * `plugins` 是**显式取用**的（对标 vscode.dev 的浏览器端插件体验）：插件运行时是纯前端的
- *（Cordis loader + Web Worker 沙箱 + localStorage 存档），`plugin_market_*` 五条宿主命令全部
- * `desktop:false`，浏览器连 headless 服务端时目录/预览/安装/卸载通道原生可用。无宿主的
- * 纯浏览器预览态按既有约定降级：可浏览目录、不可安装；notify / window.floating 无桌面壳
- * 即不可用（见 plugins/plugin-window.ts 与 capabilities.ts 的传输注入条件）。
+ *（Cordis loader + Web Worker 沙箱 + localStorage 存档）。远端插件市场已下线，宿主侧只保留
+ * `plugin_market_list_installed` 一条读取命令（扫描已落盘的包）；notify / window.floating
+ * 无桌面壳即不可用（见 plugins/plugin-window.ts 与 capabilities.ts 的传输注入条件）。
  *
  * 外壳接线只留 `queueBridge` 与 `hostNotifications`：托盘与关窗守卫是桌面壳独有的宿主集成
  *（Web 端既没有托盘，也没有「点 X 关窗」这个动作，见 features/shell/wiring.ts）。注意去掉它们

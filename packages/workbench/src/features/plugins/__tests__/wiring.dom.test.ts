@@ -54,21 +54,21 @@ describe("PluginsView（插件中心自身）", () => {
     await bootWithFreshLoader();
     const wrapper = mount(PluginsView);
 
-    // 页头说明已移除：页面身份由页签行承担（发现 / MCP / 技能 / 已安装 / 能力审计）
-    const market = wrapper.get('[data-testid="plugin-market"]');
-    expect(market.find('[data-testid="market-tab-discover"]').exists()).toBe(true);
-    expect(market.find('[data-testid="market-tab-mcp"]').exists()).toBe(true);
-    expect(market.find('[data-testid="market-tab-skills"]').exists()).toBe(true);
-    expect(wrapper.get('[data-testid="market-tab-discover"]').attributes("aria-pressed")).toBe("true");
+    // 页头说明已移除：页面身份由页签行承担（MCP / 技能 / 已安装 / 能力审计）
+    expect(wrapper.find('[data-testid="plugin-center"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="market-tab-discover"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="market-tab-mcp"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="market-tab-skills"]').exists()).toBe(true);
+    // 插件市场已下线：默认落在「已安装」
+    expect(wrapper.get('[data-testid="market-tab-installed"]').attributes("aria-pressed")).toBe("true");
+    expect(wrapper.find('[data-testid="plugin-card-core.plugins"]').exists()).toBe(true);
 
-    await wrapper.get('[data-testid="market-tab-installed"]').trigger("click");
     expect(wrapper.get('[data-testid="plugin-card-core.plugins"]').text()).toContain("core.plugins");
     const toggle = wrapper.get('[data-testid="plugin-toggle-core.plugins"]');
     expect(toggle.text()).toBe("停用");
     expect(toggle.attributes("aria-pressed")).toBe("true");
-    expect(wrapper.get('[data-testid="mode-chip-plugins"]').text()).toBe("市场");
+    expect(wrapper.get('[data-testid="mode-chip-plugins"]').text()).toBe("插件");
     expect(wrapper.get('[data-testid="market-tab-installed"]').attributes("aria-pressed")).toBe("true");
-    expect(wrapper.get('[data-testid="plugin-card-core.plugins"]').text()).toContain("内置");
   });
 
   it("停用自身需两步确认：确认后模式页从 seam 快照消失，按钮翻转为「启用」", async () => {
@@ -110,19 +110,6 @@ describe("PluginsView（插件中心自身）", () => {
     await flushPromises();
     expect(wrapper.get('[data-testid="plugin-toggle-ext.secure"]').attributes("aria-pressed")).toBe("true");
   });
-
-  it("注册表设置默认收起，可展开编辑；发现页支持客户端筛选", async () => {
-    await bootWithFreshLoader();
-    const wrapper = mount(PluginsView);
-
-    expect(wrapper.find('[data-testid="plugin-registry-settings"]').exists()).toBe(false);
-    await wrapper.get('[data-testid="plugin-registry-toggle"]').trigger("click");
-    expect(wrapper.get('[data-testid="plugin-registry-settings"]').isVisible()).toBe(true);
-    expect((wrapper.get('[data-testid="plugin-registry-url"]').element as HTMLInputElement).value).toContain("githubusercontent.com");
-
-    await wrapper.get('[data-testid="plugin-market-search"]').setValue("does-not-exist");
-    expect((wrapper.get('[data-testid="plugin-market-search"]').element as HTMLInputElement).value).toBe("does-not-exist");
-  });
 });
 
 describe("PluginView（/plugin/:id 宿主）", () => {
@@ -134,7 +121,7 @@ describe("PluginView（/plugin/:id 宿主）", () => {
     await router.isReady();
     await flushPromises();
     await flushPromises();
-    expect(wrapper.find('[data-testid="plugin-market"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="plugin-center"]').exists()).toBe(true);
 
     await router.push("/plugin/does-not-exist");
     await flushPromises();
@@ -218,14 +205,14 @@ describe("Sider 快捷入口", () => {
       global: { plugins: [router, i18n] },
     });
 
-    const pluginButtons = wrapper.findAll("button").filter((button) => button.text().trim() === "市场");
+    const pluginButtons = wrapper.findAll("button").filter((button) => button.text().trim() === "插件");
     expect(pluginButtons.length).toBe(1);
 
     // 停用内置插件 → seam modes 清空 → 入口消失
     const { setPluginEnabled } = await import("@/plugins/runtime");
     await setPluginEnabled("core.plugins", false);
     await flushPromises();
-    const after = wrapper.findAll("button").filter((button) => button.text().trim() === "市场");
+    const after = wrapper.findAll("button").filter((button) => button.text().trim() === "插件");
     expect(after.length).toBe(0);
   });
 });
@@ -236,7 +223,7 @@ describe("PluginsView 已贡献面板 chips", () => {
     const wrapper = mount(PluginsView);
 
     // core.artifacts 默认激活 → chip 出现（region 原文 + 产物标题）
-    expect(wrapper.find('[data-testid="plugin-market"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="plugin-center"]').exists()).toBe(true);
     const chip = wrapper.get('[data-testid="region-chip-activityPanel-activity.artifacts"]');
     expect(chip.text()).toBe("activityPanel · 产物");
 
