@@ -17,6 +17,11 @@ When an item here is implemented, its decision should be folded into
 [`ui-design.md`](./ui-design.md) (renderer side), which remain the canonical design
 docs. This file is the proposal and the record of what we deliberately rejected.
 
+> **Note (2026-11):** the host-side touch points below were written against the Rust host
+> (`crates/greywork-host/`, `apps/server/`), which has since been deleted. The implementation
+> now lives in `apps/host-node/src/` — worktree provisioning in `worktree.ts`, git capture in
+> `git.ts`, policy in `server.ts` / `acp.ts`. Treat the Rust paths as historical pointers.
+
 ## Why Delta is relevant
 
 Delta and GreyWork are in the same product category: a workspace where an agent works
