@@ -158,8 +158,8 @@ The headless host lives in `apps/host-node` (TypeScript, ESM). `pnpm --filter @g
 typecheck` / `test` scope checks to it, and `pnpm electron:dev:all --watch` rebuilds it and restarts
 Electron whenever host sources change.
 
-Which bundle each platform produces, what the Windows installer does about WebView2, and what code
-signing still needs: [docs/packaging.md](docs/packaging.md).
+Which bundle each platform produces and what code signing still needs:
+[docs/packaging.md](docs/packaging.md).
 
 ## Testing & CI
 

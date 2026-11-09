@@ -150,7 +150,7 @@ pnpm electron:dev       # 只起 Electron：直接用已有的 apps/host-node/di
 `pnpm --filter @greywork/host-node typecheck` / `test`；开发时 `pnpm electron:dev:all --watch`
 会在宿主源码变动后重编并重启 Electron。
 
-各平台出什么包、Windows 安装包怎么处理 WebView2、代码签名还差什么，见
+各平台出什么包、代码签名还差什么，见
 [docs/packaging.md](docs/packaging.md)。
 
 ## 测试与 CI

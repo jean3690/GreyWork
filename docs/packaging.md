@@ -191,19 +191,17 @@ app name comes from the package name, in packaged builds from `productName` (`Gr
 
 ## Windows development prerequisites
 
-- Rust with the **MSVC** toolchain (`stable-x86_64-pc-windows-msvc`), Node 20+ and
-  pnpm.
-- **MSVC Build Tools with "Desktop development with C++"** are required even though
-  this is a Rust project: `rusqlite` is pulled in with the `bundled` feature, so
-  `libsqlite3-sys` compiles SQLite from C source through the `cc` crate. A fresh
-  clone without the C++ workload fails in `libsqlite3-sys`'s build script.
-- No OpenSSL needed: `reqwest` and `tokio-tungstenite` are both configured with
-  rustls (`rustls-tls` / `rustls-tls-webpki-roots`), which vendors its own crypto.
-- WebView2 ships with Windows 10+; on older images install the Evergreen Runtime.
+- Node >= 22.22.1 and pnpm.
+- **Visual Studio Build Tools with "Desktop development with C++"** (plus Python) are needed when
+  `node-pty` has to compile through `node-gyp` — a fresh clone without the C++ workload fails in
+  its build step if no prebuilt binary matches your Node/Electron ABI. The Docker build installs
+  `python3` / `make` / `g++` for the same reason.
+- Native modules are compiled for the **build machine**, so build the Windows installer on Windows
+  (same rule as `runtime:fetch`).
 
 ## Java control plane (`back/grey`)
 
-The control plane is a separate deployment from the Rust host; it owns accounts, channels, the model
+The control plane is a separate deployment from the Node host; it owns accounts, channels, the model
 gateway, storage and automations, and ships its own admin console.
 
 ```bash
@@ -233,7 +231,7 @@ java -jar target/grey-0.0.1-SNAPSHOT.jar
 
 ## Self-hosting the web server (Docker)
 
-The headless server (`apps/server`, see [architecture.md](architecture.md#headless-server-appsserver))
+The headless host (`apps/host-node`, see [architecture.md](architecture.md#headless-host-appshost-node))
 ships the same Vue renderer as a same-origin SPA behind a password login. A multi-stage
 [`Dockerfile`](../Dockerfile) at the repo root builds it:
 
