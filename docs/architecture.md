@@ -52,7 +52,8 @@ source — only contains **committed** files, so uncommitted `.agents/skills` wo
 agent. `worktree_provision` therefore carries the source's `.agents/skills` into the snapshot
 (`apps/host-node/src/worktree.ts`): each entry is symlinked (a directory the agent reads, not code the
 host runs), guarded like `.agents/linked` — the entry must be a safe relative path and, in a git
-source, git-ignored (so the link does not pollute the agent's change view). The renderer passes an
+source, git-ignored (so the link does not pollute the agent's change view). When `.claude/skills` is
+git-ignored as well, the snapshot also gets the Claude compatibility link. The renderer passes an
 optional `skills` filter so a cowork run can bring only the teammates-selected subset (`None` =
 all, `[]` = none); the filter only bites in `worktree` mode, since every other mode uses the source
 directory as the workspace and the skills are visible as-is.
@@ -64,8 +65,8 @@ to `acp_new_session` / `acp_load_session`; both transports map them into the ACP
 shape — `packages/acp/src/client.ts` for the direct WebSocket path, `apps/host-node/src/acp.ts`
 for the host-managed path (stdio → `command`/`args`/`env`, http/sse → `type`/`url`/`headers`).
 The agent connects to them and merges their tools; the host never proxies tool calls.
-Capability-based skipping / `skippedMcpServers` reporting is not implemented — every declared
-server is forwarded.
+Servers whose transport the agent did not advertise in `mcpCapabilities` (or that lack `command` /
+`url`) are skipped and reported back as `skippedMcpServers`.
 
 ## ACP session lifecycle
 

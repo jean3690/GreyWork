@@ -847,6 +847,9 @@ describe("HTTP 契约", () => {
         headers: [{ name: "Authorization", value: "Bearer t" }],
       },
     ]);
+    // 回包里带上「实际声明了哪些服务器」与跳过原因（AcpSessionOpened 契约）。
+    expect((created.body as { mcpServers?: string[] }).mcpServers).toEqual(["stdio-echo", "http-docs"]);
+    expect((created.body as { skippedMcpServers?: unknown }).skippedMcpServers).toEqual([]);
 
     expect((await call("acp_send", { handle, text: "hello" })).status).toBe(200);
 
@@ -880,6 +883,30 @@ describe("HTTP 契约", () => {
     );
 
     expect((await call("acp_stop", { handle })).status).toBe(200);
+
+    // 能力筛选：未声明 http 的 agent 只收到 stdio，http 条目带原因进 skippedMcpServers。
+    const limited = await call("acp_start", {
+      agentCmd: `node ${agentPath}`,
+      tier: "workspace",
+      env: { MOCK_MCP_HTTP: "0" },
+    });
+    const limitedHandle = limited.body as number;
+    const filtered = await call("acp_new_session", {
+      handle: limitedHandle,
+      cwd: workspaceDir,
+      mcpServers: [
+        { name: "stdio-only", transport: "stdio", command: "/usr/bin/true" },
+        { name: "http-skip", transport: "http", url: "https://example.com/mcp" },
+      ],
+    });
+    expect((filtered.body as { mcpServers?: string[] }).mcpServers).toEqual(["stdio-only"]);
+    expect((filtered.body as { skippedMcpServers?: unknown }).skippedMcpServers).toEqual([
+      { name: "http-skip", reason: "http_unsupported" },
+    ]);
+    expect((filtered.body as { mcpServersEcho?: unknown }).mcpServersEcho).toEqual([
+      { name: "stdio-only", command: "/usr/bin/true", args: [], env: [] },
+    ]);
+    expect((await call("acp_stop", { handle: limitedHandle })).status).toBe(200);
     socket.close();
   });
 
@@ -907,6 +934,10 @@ describe("HTTP 契约", () => {
         },
         stdio: "ignore",
       });
+    // 被 git 忽略的技能目录：worktree 应把它以软链带入，并同步建 .claude/skills 兼容链接。
+    mkdirSync(path.join(repo, ".agents", "skills", "demo"), { recursive: true });
+    writeFileSync(path.join(repo, ".agents", "skills", "demo", "SKILL.md"), "# demo\n");
+    writeFileSync(path.join(repo, ".gitignore"), ".agents/\n.claude/\n");
     git("init", "-q", "-b", "main");
     git("add", "-A");
     git("commit", "-qm", "init");
@@ -924,6 +955,12 @@ describe("HTTP 契约", () => {
     // 分支进源仓库共享 refs。
     const branches = execFileSync("git", ["branch", "--format=%(refname:short)"], { cwd: repo }).toString();
     expect(branches).toContain("greywork/");
+
+    // 技能带入：.agents/skills 软链 + Claude 兼容链接，且兼容目录不出现在 git status 里。
+    expect(readFileSync(path.join(wt.root, ".agents", "skills", "demo", "SKILL.md"), "utf8")).toBe("# demo\n");
+    expect(readFileSync(path.join(wt.root, ".claude", "skills", "demo", "SKILL.md"), "utf8")).toBe("# demo\n");
+    const status = execFileSync("git", ["status", "--porcelain"], { cwd: wt.root }).toString();
+    expect(status).not.toContain(".claude");
 
     // 快照 → 改文件 → 恢复（严格等于快照）。
     const snapshotRef = (await call("worktree_snapshot", { root: wt.root })).body as string;

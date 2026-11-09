@@ -120,6 +120,8 @@ export async function releaseWorktree(
 /* ==================== provision / snapshot / restore ==================== */
 
 const AGENTS_DIR = ".agents";
+/** Claude Code 只读自己的技能目录；安装/带入时在它下面建指向 .agents/skills 的链接。 */
+const CLAUDE_DIR = ".claude";
 const SNAPSHOT_REF_PREFIX = "refs/greywork/snap";
 let snapshotSeq = 0;
 
@@ -249,6 +251,27 @@ function applySkills(source: string, target: string, sourceIsGit: boolean, selec
       symlinkSync(path.join(sourceSkills, name), dst);
     } catch (error) {
       console.warn(`[host-node] .agents/skills 创建符号链接失败 ${name}: ${(error as Error).message}`);
+      continue;
+    }
+    // Claude Code 只读 .claude/skills：也在工作树里建一条相对链接。它同样会出现在变更视图里，
+    // 所以只在该路径已被 git 忽略时创建（与 .agents/skills 的守卫同一目的）；否则跳过并告警。
+    const compatRel = `${CLAUDE_DIR}/skills/${name}`;
+    if (sourceIsGit) {
+      try {
+        execFileSync("git", ["check-ignore", "-q", "--", compatRel], { cwd: target, stdio: "ignore" });
+      } catch {
+        console.warn(`[host-node] .claude/skills 未被 git 忽略，跳过 Claude 兼容链接: ${name}`);
+        continue;
+      }
+    }
+    const compatDst = path.join(target, compatRel);
+    try {
+      mkdirSync(path.dirname(compatDst), { recursive: true });
+      if (!existsSync(compatDst)) {
+        symlinkSync(path.join("..", "..", AGENTS_DIR, "skills", name), compatDst);
+      }
+    } catch (error) {
+      console.warn(`[host-node] 创建 .claude/skills 兼容链接失败 ${name}: ${(error as Error).message}`);
     }
   }
 }

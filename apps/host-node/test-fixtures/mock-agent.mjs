@@ -32,7 +32,13 @@ process.stdin.on("data", (chunk) => {
       continue;
     }
     if (message.method === "initialize") {
-      reply(message.id, { protocolVersion: 1, agentCapabilities: { loadSession: true }, promptCapabilities: { image: true } });
+      // MCP 能力面：默认声明支持 http / sse；MOCK_MCP_HTTP=0 时模拟只支持 stdio 的 agent。
+      const mcpHttp = process.env.MOCK_MCP_HTTP !== "0";
+      reply(message.id, {
+        protocolVersion: 1,
+        agentCapabilities: { loadSession: true, mcpCapabilities: { http: mcpHttp, sse: mcpHttp } },
+        promptCapabilities: { image: true },
+      });
       continue;
     }
     if (message.method === "session/new") {

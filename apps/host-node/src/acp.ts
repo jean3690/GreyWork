@@ -74,10 +74,17 @@ function handshakeTimeoutSecs(command: string): number {
 /**
  * 渲染端下发的 MCP 服务器声明 → ACP `session/new` 的 McpServer 形态。
  *
- * stdio 走 { name, command, args, env }；http / sse 走 { type, name, url, headers }。
- * 未知传输 / 缺 name 的条目直接丢弃（与渲染端 client.ts 的映射保持一致）。
+ * stdio → { name, command, args, env }；http / sse → { type, name, url, headers }。
+ * 只转发 agent 在 initialize 里声明支持的传输（与 Rust 版同语义）；缺参数或能力不匹配的
+ * 条目记进 `skipped`，由调用方带回 `skippedMcpServers` 供 UI 解释。
  */
-function toAcpMcpServers(raw: unknown): Record<string, unknown>[] {
+interface McpDeclaration {
+  servers: Record<string, unknown>[];
+  declared: string[];
+  skipped: { name: string; reason: string }[];
+}
+
+function toAcpMcpServers(raw: unknown, caps: { http: boolean; sse: boolean }): McpDeclaration {
   const pairs = (value: unknown): { name: string; value: string }[] => {
     if (Array.isArray(value)) {
       return value.flatMap((entry) => {
@@ -95,30 +102,48 @@ function toAcpMcpServers(raw: unknown): Record<string, unknown>[] {
     return [];
   };
 
-  if (!Array.isArray(raw)) return [];
-  const servers: Record<string, unknown>[] = [];
+  const result: McpDeclaration = { servers: [], declared: [], skipped: [] };
+  if (!Array.isArray(raw)) return result;
   for (const entry of raw) {
     const server = entry as Record<string, unknown> | null;
     if (!server || typeof server.name !== "string" || server.name.trim() === "") continue;
+    const name = server.name;
     if (server.transport === "stdio") {
-      servers.push({
-        name: server.name,
-        command: typeof server.command === "string" ? server.command : "",
+      if (typeof server.command !== "string" || server.command.trim() === "") {
+        result.skipped.push({ name, reason: "missing_command" });
+        continue;
+      }
+      result.servers.push({
+        name,
+        command: server.command,
         args: Array.isArray(server.args) ? server.args.filter((arg): arg is string => typeof arg === "string") : [],
         env: pairs(server.env),
       });
+      result.declared.push(name);
       continue;
     }
     if (server.transport === "http" || server.transport === "sse") {
-      servers.push({
+      if (typeof server.url !== "string" || server.url.trim() === "") {
+        result.skipped.push({ name, reason: "missing_url" });
+        continue;
+      }
+      const supported = server.transport === "http" ? caps.http : caps.sse;
+      if (!supported) {
+        result.skipped.push({ name, reason: `${server.transport}_unsupported` });
+        continue;
+      }
+      result.servers.push({
         type: server.transport,
-        name: server.name,
-        url: typeof server.url === "string" ? server.url : "",
+        name,
+        url: server.url,
         headers: pairs(server.headers),
       });
+      result.declared.push(name);
+      continue;
     }
+    result.skipped.push({ name, reason: `unknown_transport:${String(server.transport)}` });
   }
-  return servers;
+  return result;
 }
 
 export interface OpenArgs {
@@ -145,6 +170,9 @@ interface AcpSession {
   resumeSession: boolean;
   closeSession: boolean;
   imagePrompts: boolean;
+  /** initialize 里声明支持的 MCP 传输（未声明视为不支持，与 Rust 版同语义）。 */
+  mcpHttp: boolean;
+  mcpSse: boolean;
   modes: unknown | null;
   exited: boolean;
   stderrTail: string[];
@@ -209,6 +237,8 @@ export class AcpHost {
       resumeSession: false,
       closeSession: false,
       imagePrompts: false,
+      mcpHttp: false,
+      mcpSse: false,
       modes: null,
       exited: false,
       stderrTail,
@@ -231,7 +261,11 @@ export class AcpHost {
     ]);
     // 握手回包：能力面
     const version2 = version as {
-      agentCapabilities?: { loadSession?: boolean; sessionCapabilities?: { resume?: boolean; close?: boolean } };
+      agentCapabilities?: {
+        loadSession?: boolean;
+        sessionCapabilities?: { resume?: boolean; close?: boolean };
+        mcpCapabilities?: { http?: boolean; sse?: boolean };
+      };
       promptCapabilities?: { image?: boolean };
     };
     const capabilities = version2.agentCapabilities ?? {};
@@ -239,6 +273,8 @@ export class AcpHost {
     session.resumeSession = capabilities.sessionCapabilities?.resume === true;
     session.closeSession = capabilities.sessionCapabilities?.close === true;
     session.imagePrompts = version2.promptCapabilities?.image === true;
+    session.mcpHttp = capabilities.mcpCapabilities?.http === true;
+    session.mcpSse = capabilities.mcpCapabilities?.sse === true;
     return handle;
   }
 
@@ -373,14 +409,15 @@ export class AcpHost {
     const resolved = this.access.resolveExisting(cwd);
     const session = this.require(handle);
     session.workspaceRoot = resolved;
+    const mcp = toAcpMcpServers(mcpServers, { http: session.mcpHttp, sse: session.mcpSse });
     const response = await session.request!("session/new", {
       cwd: resolved,
-      mcpServers: toAcpMcpServers(mcpServers),
+      mcpServers: mcp.servers,
     });
     const value = response as { sessionId?: unknown; modes?: unknown; configOptions?: unknown };
     session.sessionId = String(value.sessionId ?? "");
     session.modes = value.modes ?? null;
-    return response;
+    return { ...(response as Record<string, unknown>), mcpServers: mcp.declared, skippedMcpServers: mcp.skipped };
   }
 
   /** 恢复 / 加载会话：优先 resume，失败回落 load。 */
@@ -391,16 +428,21 @@ export class AcpHost {
     if (!session.loadSession && !session.resumeSession) {
       throw new Error("agent does not support session/load or session/resume");
     }
-    const params = { cwd: resolved, mcpServers: toAcpMcpServers(mcpServers) };
+    const mcp = toAcpMcpServers(mcpServers, { http: session.mcpHttp, sse: session.mcpSse });
+    const params = { cwd: resolved, mcpServers: mcp.servers };
+    const decorate = (response: unknown) => ({
+      ...(response as Record<string, unknown>),
+      mcpServers: mcp.declared,
+      skippedMcpServers: mcp.skipped,
+    });
     if (session.resumeSession) {
       try {
-        const response = await session.request!("session/resume", { sessionId, ...params });
-        return response;
+        return decorate(await session.request!("session/resume", { sessionId, ...params }));
       } catch {
         // 回落到 load。
       }
     }
-    return session.request!("session/load", { sessionId, ...params });
+    return decorate(await session.request!("session/load", { sessionId, ...params }));
   }
 
   /** 发送回合：注册 turnId，响应到达后广播 prompt-done（成功回合附带产物扫描）。 */
