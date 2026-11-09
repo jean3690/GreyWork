@@ -10,9 +10,12 @@
  * 支持 Esc 关闭与点击外部关闭。
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import { usePanelPlacement } from "@/lib/panel-placement";
 import { useAgentStore } from "@/stores/agent";
 import Icon from "@/features/shared/Icon.vue";
+
+const { t } = useI18n();
 
 const props = defineProps<{
   /** config option id，如 "model" / "thought_level"；缺省渲染第一个 select 型 */
@@ -173,8 +176,8 @@ function toggle(): void {
           v-model="query"
           type="text"
           class="min-w-0 flex-1 bg-transparent text-[12px] text-foreground outline-none placeholder:text-dim2"
-          placeholder="搜索模型…"
-          :aria-label="'搜索' + (option?.name ?? '选项')"
+          :placeholder="t('chat.acp.searchModels')"
+          :aria-label="t('chat.acp.searchOption', { name: option?.name ?? t('chat.acp.option') })"
         />
         <span v-if="query" class="shrink-0 font-mono text-[10.5px] text-dim2"> {{ visibleChoices.length }}/{{ choices.length }} </span>
       </div>
@@ -198,7 +201,7 @@ function toggle(): void {
           />
           <span class="truncate">{{ choice.name ?? String(choice.value) }}</span>
         </button>
-        <p v-if="visibleChoices.length === 0" class="px-2 py-3 text-center text-[11.5px] text-dim2">无匹配选项</p>
+        <p v-if="visibleChoices.length === 0" class="px-2 py-3 text-center text-[11.5px] text-dim2">{{ t("chat.acp.noMatches") }}</p>
       </div>
     </div>
   </div>

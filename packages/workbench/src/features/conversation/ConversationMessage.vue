@@ -283,7 +283,7 @@ const showActions = computed(() => message.value.content.length > 0 || canEdit.v
           <span class="size-1 animate-bounce rounded-full bg-dim2/70 [animation-delay:150ms]" />
           <span class="size-1 animate-bounce rounded-full bg-dim2/70 [animation-delay:300ms]" />
         </span>
-        {{ isStreaming && agent.acpStreamId === message.id ? "正在思考…" : "正在生成…" }}
+        {{ isStreaming && agent.acpStreamId === message.id ? t("chat.thinkingNow") : t("chat.generatingNow") }}
       </div>
       <template v-for="segment in segments" :key="segment.id">
         <ThinkingBlock

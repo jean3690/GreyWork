@@ -87,7 +87,7 @@ function confirmFull(): void {
           class="flex h-6 cursor-pointer items-center gap-1 rounded-full border border-line bg-panel-2 px-2.5 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
         >
           <Icon name="shield" :size="11" class="text-dim" />
-          <span class="max-w-[140px] truncate whitespace-nowrap">权限 · {{ currentLabel }}</span>
+          <span class="max-w-[140px] truncate whitespace-nowrap">{{ t("chat.acp.scopeChip", { label: currentLabel }) }}</span>
           <Icon name="down" :size="10" class="text-dim2" />
         </button>
       </DropdownMenuTrigger>

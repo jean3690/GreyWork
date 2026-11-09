@@ -8,6 +8,7 @@
 import { computed, ref } from "vue";
 import { useAgentStore } from "@/stores/agent";
 import { useSettingsStore, type McpServerEntry } from "@/stores/settings";
+import { useI18n } from "vue-i18n";
 import { MCP_TRANSPORT_LABELS, mcpSkipReasonLabel } from "@/lib/mcp-labels";
 import { registryEntryToDraft, type McpRegistryEntry } from "@/lib/mcp-registry";
 import ConfirmDialog from "@/features/settings/ConfirmDialog.vue";
@@ -18,6 +19,8 @@ import Hint from "@/features/shared/Hint.vue";
 
 const settings = useSettingsStore();
 const agent = useAgentStore();
+
+const { t } = useI18n();
 
 /** 每台服务器最近一次「测试连接」的结果（成功列工具，失败给原因）。 */
 const mcpProbes = ref<Record<string, { server?: string; tools?: string[]; durationMs?: number; error?: string }>>({});
@@ -264,10 +267,12 @@ function confirmReset(): void {
       v-if="agent.acpMcpServers.length > 0 || agent.acpMcpSkipped.length > 0"
       class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-4"
     >
-      <div class="mb-2 text-[13px] font-medium text-foreground">上次建会话的声明结果</div>
-      <p v-if="agent.acpMcpServers.length > 0" class="text-[11px] text-dim">已声明：{{ agent.acpMcpServers.join("、") }}</p>
+      <div class="mb-2 text-[13px] font-medium text-foreground">{{ t("chat.mcp.lastResult") }}</div>
+      <p v-if="agent.acpMcpServers.length > 0" class="text-[11px] text-dim">
+        {{ t("chat.mcp.declaredList", { names: agent.acpMcpServers.join("、") }) }}
+      </p>
       <p v-for="skip in agent.acpMcpSkipped" :key="skip.name" class="text-[11px] text-destructive">
-        已跳过 {{ skip.name }}：{{ mcpSkipReasonLabel(skip.reason) }}
+        {{ t("chat.mcp.skippedItem", { name: skip.name, reason: mcpSkipReasonLabel(skip.reason) }) }}
       </p>
     </div>
 

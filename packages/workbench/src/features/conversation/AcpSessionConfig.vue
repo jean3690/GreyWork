@@ -11,6 +11,7 @@
  *  - 未连接 / 本地 LLM 路由 → 不渲染。
  */
 import { computed } from "vue";
+import { useI18n } from "vue-i18n";
 import { useAgentStore } from "@/stores/agent";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { acpDefaultConfigValues, clearAcpDefaultConfig, setAcpDefaultConfig } from "@/stores/agent/shared";
@@ -20,6 +21,7 @@ import AcpModelSelector from "@/features/conversation/AcpModelSelector.vue";
 import AgentScopeSelect from "@/features/conversation/AgentScopeSelect.vue";
 import Icon from "@/features/shared/Icon.vue";
 import Hint from "@/features/shared/Hint.vue";
+const { t } = useI18n();
 const agent = useAgentStore();
 const workspaceStore = useWorkspaceStore();
 
@@ -82,12 +84,22 @@ function saveGlobalDefault(): void {
   }
   if (Object.keys(values).length === 0) return;
   setAcpDefaultConfig(values);
-  notify({ kind: "success", key: "acp-default-set", title: "已设为全局默认", detail: "新工作区或无工作区记忆的会话将以此兜底" });
+  notify({
+    kind: "success",
+    key: "acp-default-set",
+    title: t("chat.acp.defaultSetTitle"),
+    detail: t("chat.acp.defaultSetDetail"),
+  });
 }
 
 function removeGlobalDefault(): void {
   clearAcpDefaultConfig();
-  notify({ kind: "success", key: "acp-default-cleared", title: "已清除全局默认", detail: "回到完全跟随后端出厂值" });
+  notify({
+    kind: "success",
+    key: "acp-default-cleared",
+    title: t("chat.acp.defaultClearedTitle"),
+    detail: t("chat.acp.defaultClearedDetail"),
+  });
 }
 
 const connecting = computed(() => agent.acpConnecting || agent.acpStatus === "connecting");
@@ -100,11 +112,11 @@ const connecting = computed(() => agent.acpConnecting || agent.acpStatus === "co
       class="flex h-6 shrink-0 items-center gap-1.5 rounded-full border border-line bg-panel-2 px-2.5 text-[11px] text-dim"
     >
       <span class="size-2.5 animate-spin rounded-full border border-cyan border-t-transparent" />
-      连接中…
+      {{ t("chat.acp.connecting") }}
     </span>
     <template v-else>
       <AgentScopeSelect />
-      <AcpModelSelector option-id="model" placeholder="使用 CLI 模型" icon="magic" />
+      <AcpModelSelector option-id="model" :placeholder="t('chat.acp.useCliModel')" icon="magic" />
       <AcpModelSelector
         v-for="extra in extraOptions"
         :key="extra.entry.id"
@@ -113,7 +125,11 @@ const connecting = computed(() => agent.acpConnecting || agent.acpStatus === "co
         icon="setting"
         show-name
       />
-      <Hint v-for="option in booleanOptions" :key="option.entry.id" :text="`${option.label}：${option.enabled ? '开' : '关'}`">
+      <Hint
+        v-for="option in booleanOptions"
+        :key="option.entry.id"
+        :text="t('chat.acp.toggleHint', { label: option.label, state: option.enabled ? t('chat.acp.on') : t('chat.acp.off') })"
+      >
         <button
           type="button"
           class="flex h-6 shrink-0 cursor-pointer items-center gap-1 rounded-full border px-2.5 text-[11px] transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
@@ -128,50 +144,46 @@ const connecting = computed(() => agent.acpConnecting || agent.acpStatus === "co
         >
           <Icon name="setting" :size="11" class="text-dim2" />
           {{ option.label }}
-          <span class="text-dim2">{{ option.enabled ? "开" : "关" }}</span>
+          <span class="text-dim2">{{ option.enabled ? t("chat.acp.on") : t("chat.acp.off") }}</span>
         </button>
       </Hint>
-      <Hint
-        v-if="showEffortUnavailable"
-        text="当前模型不支持思考强度；切换到支持该能力的模型（如 opencode/gpt-5-codex）后会出现选择器"
-        multiline
-      >
+      <Hint v-if="showEffortUnavailable" :text="t('chat.acp.effortUnsupportedHint')" multiline>
         <span
           class="flex h-6 shrink-0 cursor-default items-center gap-1 rounded-full border border-line bg-panel-2 px-2.5 text-[11px] text-dim2"
         >
           <Icon name="setting" :size="11" class="text-dim2" />
-          思考强度 · 模型不支持
+          {{ t("chat.acp.effortUnsupported") }}
         </span>
       </Hint>
-      <Hint v-if="remembered" text="模型 / 思考强度等会话级配置已按当前工作区记住，切回该工作区会自动恢复">
+      <Hint v-if="remembered" :text="t('chat.acp.rememberedHint')">
         <span
           class="flex h-6 shrink-0 cursor-default items-center gap-1 rounded-full border border-line bg-panel-2 px-2.5 text-[11px] text-dim2"
         >
           <Icon name="pin" :size="11" class="text-dim2" />
-          按工作区记忆
+          {{ t("chat.acp.remembered") }}
         </span>
       </Hint>
-      <Hint v-if="agent.acpConnected" text="把当前模型 / 思考强度等配置固化为全局默认：新工作区或无工作区记忆时以此兜底">
+      <Hint v-if="agent.acpConnected" :text="t('chat.acp.setDefaultHint')">
         <button
           type="button"
           data-testid="acp-default-set"
           class="grid h-6 shrink-0 cursor-pointer place-items-center rounded-full border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
           @click="saveGlobalDefault"
         >
-          设为全局默认
+          {{ t("chat.acp.setDefault") }}
         </button>
       </Hint>
-      <Hint v-if="hasGlobalDefault" text="清除后回到完全跟随后端出厂值">
+      <Hint v-if="hasGlobalDefault" :text="t('chat.acp.clearDefaultHint')">
         <button
           type="button"
           data-testid="acp-default-clear"
           class="grid h-6 shrink-0 cursor-pointer place-items-center rounded-full border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
           @click="removeGlobalDefault"
         >
-          清除全局默认
+          {{ t("chat.acp.clearDefault") }}
         </button>
       </Hint>
-      <Hint v-if="agent.acpConnected" text="重启 ACP runtime（重新探测模型与配置）">
+      <Hint v-if="agent.acpConnected" :text="t('chat.acp.restartHint')">
         <button
           type="button"
           class="grid size-6 shrink-0 cursor-pointer place-items-center rounded-full border border-line bg-panel-2 text-dim transition-colors hover:border-line-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40"

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import AcpModelSelector from "@/features/conversation/AcpModelSelector.vue";
+import { i18n } from "@/i18n";
 import { useAgentStore } from "@/stores/agent";
 import { useSettingsStore } from "@/stores/settings";
 
@@ -69,7 +70,7 @@ async function activateWith(options: { value: string; name: string }[]) {
   await agentStore.activateAcpProvider("opencode");
   const wrapper = mount(AcpModelSelector, {
     props: { optionId: "model", placeholder: "Use CLI model", icon: "magic" },
-    global: { plugins: [pinia] },
+    global: { plugins: [pinia, i18n] },
   });
   return { agentStore, wrapper };
 }
