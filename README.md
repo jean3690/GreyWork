@@ -11,7 +11,7 @@ A desktop-first AI agent workspace for developers who think in code, diagrams, a
 
 GreyWork puts external coding agents (via the **Agent Client Protocol**) and local OpenAI-compatible
 models behind one workbench: conversations with tool timelines and permission gates, an authorized
-workspace with file preview and Git, a plugin / MCP / skills market, scheduled tasks, and seven
+workspace with file preview and Git, a plugin center plus MCP / skill sources, scheduled tasks, and seven
 messaging channels so you can drive the machine from your phone.
 
 ## Features
@@ -43,10 +43,11 @@ messaging channels so you can drive the machine from your phone.
 
 - Plugin runtime on a Cordis micro-kernel with **per-plugin** capability grants; declarative plugins
   are restricted JSON and never execute remote JavaScript.
-- Authoring guide: [docs/plugin-authoring.md](docs/plugin-authoring.md); market publishing:
-  [plugin-market/README.md](plugin-market/README.md).
-- **Market** in one place: the official plugin registry (signed, so a compromised GitHub account
-  cannot poison the catalog), the MCP registry, and skill sources such as skills.sh.
+- Authoring guide: [docs/plugin-authoring.md](docs/plugin-authoring.md); reference worker code lives in
+  `packages/workbench/tests/unit/plugins/fixtures/`.
+- The remote plugin market has been retired (no registry URL, no online install); plugins ship built in
+  or are loaded from packages already present in the host data directory. The MCP registry and skill
+  sources such as skills.sh remain.
 - Agent skills installed under `.agents/skills/`, read natively by the ACP agent at its next session.
 
 **Beyond the conversation**
@@ -60,25 +61,25 @@ messaging channels so you can drive the machine from your phone.
 
 **Platform**
 
-- Electron desktop shell (Linux / macOS / Windows) driving a headless Rust server sidecar, Vue 3 renderer.
+- Electron desktop shell (Linux / macOS / Windows) driving a headless Node host sidecar, Vue 3 renderer.
 - **Two frontends, one backend**: besides the desktop SPA, `apps/web` is a browser front that declares a
   narrower feature set through the `FrontSpec` contract (no tray, no channel listeners). Both consume
   the same `@greywork/workbench` sources and the same server API.
 - **Separate Java control plane** (`back/grey`): accounts and devices, channel bindings, model
-  gateway, object storage, automations and the plugin market, with its own admin console
+  gateway, object storage and automations, with its own admin console
   (`apps/admin`, Vue 3 + Element Plus) protected by admin-only password login and audit logging.
 - Bilingual UI (zh-CN / en-US); host capabilities degrade gracefully when the UI runs in a browser.
 
 ## Tech Stack
 
-| Layer   | Choices                                                                                                 |
-| ------- | ------------------------------------------------------------------------------------------------------- |
-| Desktop | Electron shell + headless Rust server (axum sidecar), rusqlite, tokio, reqwest, `agent-client-protocol` |
-| UI      | Vue 3, Vite, Pinia, vue-router, vue-i18n, Tailwind, shadcn-vue (reka-ui)                                |
-| Editing | CodeMirror 6, Univer (spreadsheets / docs)                                                              |
-| Plugins | Cordis micro-kernel                                                                                     |
-| Control | Spring Boot 4, MyBatis-Plus, MySQL, Redis, Flyway; admin console in Vue 3 + Vite + Element Plus         |
-| Tooling | pnpm workspaces, TypeScript, Vitest (node + dom projects), ESLint, Prettier                             |
+| Layer   | Choices                                                                                         |
+| ------- | ----------------------------------------------------------------------------------------------- |
+| Desktop | Electron shell + headless Node host (`apps/host-node` sidecar; `node:sqlite`, `ws`, `node-pty`) |
+| UI      | Vue 3, Vite, Pinia, vue-router, vue-i18n, Tailwind, shadcn-vue (reka-ui)                        |
+| Editing | CodeMirror 6, Univer (spreadsheets / docs)                                                      |
+| Plugins | Cordis micro-kernel                                                                             |
+| Control | Spring Boot 4, MyBatis-Plus, MySQL, Redis, Flyway; admin console in Vue 3 + Vite + Element Plus |
+| Tooling | pnpm workspaces, TypeScript, Vitest (node + dom projects), ESLint, Prettier                     |
 
 ## Project Structure
 
@@ -88,12 +89,10 @@ greyWork/
 │   ├── desktop/              # Desktop renderer SPA (Vite + Vue; Electron shell & server hosting)
 │   ├── web/                  # Browser front (same workbench, narrower FrontSpec)
 │   ├── electron/             # Electron shell: main process + preload + sidecar orchestration
-│   ├── server/               # Headless server (axum): command surface / WS events / static hosting
+│   ├── host-node/            # Headless Node host (sidecar): command surface / WS events / static hosting
 │   └── admin/                # Control-plane admin SPA (Vue 3 + Element Plus; standalone)
 ├── back/
 │   └── grey/                 # Java control plane: auth / channels / LLM gateway / storage / automations
-├── crates/
-│   └── greywork-host/        # Domain layer: command registry, ACP host, plugin market, channels
 ├── packages/
 │   ├── core/                 # Shared types & math (no deps)
 │   ├── editor/               # File system, Git, CodeMirror abstractions
@@ -101,11 +100,12 @@ greyWork/
 │   ├── llm/                  # LLM provider clients (OpenAI-compatible stream → IPC)
 │   ├── acp/                  # Agent Client Protocol client (host commands + WebSocket)
 │   ├── shell/                # Provider registry & transport data plane
-│   ├── plugins/              # Plugin market adapters & types
+│   ├── host-ipc/             # Host command bridge (invoke / clipboard / window façade)
+│   ├── plugin-types/         # Author-facing plugin typings (manifest / worker / render)
+│   ├── plugins/              # Skill source adapters & plugin types
 │   ├── cowork/               # Co-operative workspace engine
 │   ├── vite-config/          # Shared Vite config factory (base / assets / dev proxy)
 │   └── workbench/            # Unified UI package (shell, views, plugin runtime)
-├── plugin-market/            # Plugin registry source + signing
 └── .agents/skills/           # Installed agent skills (read natively by the ACP agent)
 ```
 

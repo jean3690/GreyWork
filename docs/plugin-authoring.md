@@ -56,11 +56,12 @@ A package file is a `PluginPackage`:
 }
 ```
 
-Validation lives in `crates/greywork-host/src/services/plugin_market/package.rs` (`validate_package`); a package that
-fails it is rejected before it touches disk. Key bounds: `entry` must be an allowed GitHub HTTPS host,
-`sha256` lowercase hex, render `fps` 1-60, canvas 1-512 px, window size 1-512 px, window title
-≤64 chars (no control characters), window opacity 0.2-1, `uiRegions` titles 1-80 chars, region
-action labels ≤20 chars, mode titles ≤120, headings ≤160, eyebrow ≤120, body ≤16 KiB.
+There is no install-time validator any more: the remote market (and with it the host-side
+`validate_package` pass) is gone. Packages are read from `<dataDir>/plugins/<id>/plugin.json` — the
+host only checks `schemaVersion` and that `manifest.id` matches the directory name — and the renderer
+adapts them at load time. Bounds are enforced where they are used: render commands go through
+`render-commands.ts` (closed command set, bounded numbers, ≤64-char strings), and every capability
+call is checked against the manifest declaration.
 
 ### Modes
 

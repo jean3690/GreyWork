@@ -55,7 +55,7 @@ GreyWork 把外部编码智能体（走 **Agent Client Protocol**）与本机 Op
 
 **平台**
 
-- Electron 桌面外壳（Linux / macOS / Windows）+ headless Rust 服务端 + Vue 3 渲染层。
+- Electron 桌面外壳（Linux / macOS / Windows）+ headless Node 宿主（`apps/host-node`）+ Vue 3 渲染层。
 - **一个后端、多个前端**：除桌面端 SPA 外，`apps/web` 是浏览器前端，通过 `FrontSpec` 契约声明
   更窄的特性集（不装托盘、不注册通道监听）；两端消费同一份 `@greywork/workbench` 源码与同一套服务端 API。
 - **独立的 Java 控制面**（`back/grey`）：账号与设备、通道绑定、模型网关、对象存储、自动化；
@@ -64,14 +64,14 @@ GreyWork 把外部编码智能体（走 **Agent Client Protocol**）与本机 Op
 
 ## 技术栈
 
-| 层次   | 选型                                                                                                  |
-| ------ | ----------------------------------------------------------------------------------------------------- |
-| 桌面端 | Electron 壳 + headless Rust 服务端（axum sidecar）、rusqlite、tokio、reqwest、`agent-client-protocol` |
-| 界面   | Vue 3、Vite、Pinia、vue-router、vue-i18n、Tailwind、shadcn-vue（reka-ui）                             |
-| 编辑   | CodeMirror 6、Univer（表格 / 文档）                                                                   |
-| 插件   | Cordis 微内核                                                                                         |
-| 控制面 | Spring Boot 4、MyBatis-Plus、MySQL、Redis、Flyway；运维台 Vue 3 + Vite + Element Plus                 |
-| 工程   | pnpm workspace、TypeScript、Vitest（node + dom 两个 project）、ESLint、Prettier                       |
+| 层次   | 选型                                                                                          |
+| ------ | --------------------------------------------------------------------------------------------- |
+| 桌面端 | Electron 壳 + headless Node 宿主（`apps/host-node` sidecar；`node:sqlite`、`ws`、`node-pty`） |
+| 界面   | Vue 3、Vite、Pinia、vue-router、vue-i18n、Tailwind、shadcn-vue（reka-ui）                     |
+| 编辑   | CodeMirror 6、Univer（表格 / 文档）                                                           |
+| 插件   | Cordis 微内核                                                                                 |
+| 控制面 | Spring Boot 4、MyBatis-Plus、MySQL、Redis、Flyway；运维台 Vue 3 + Vite + Element Plus         |
+| 工程   | pnpm workspace、TypeScript、Vitest（node + dom 两个 project）、ESLint、Prettier               |
 
 ## 目录结构
 
@@ -81,12 +81,10 @@ greyWork/
 │   ├── desktop/              # 桌面端渲染层 SPA（Vite + Vue；Electron 壳与服务端静态托管共用）
 │   ├── web/                  # 浏览器前端（同一份 workbench，更窄的 FrontSpec）
 │   ├── electron/             # Electron 壳：主进程 + preload + sidecar 编排
-│   ├── server/               # headless 服务端（axum）：命令面 / WS 事件 / 静态托管
+│   ├── host-node/            # headless Node 宿主（sidecar）：命令面 / WS 事件 / 静态托管
 │   └── admin/                # 控制面运维台 SPA（Vue 3 + Element Plus；独立于 workbench）
 ├── back/
 │   └── grey/                 # Java 控制面：认证 / 通道 / 模型网关 / 存储 / 自动化 / 运维台后端
-├── crates/
-│   └── greywork-host/        # 领域层：命令面真源、ACP 托管、插件市场、消息通道
 ├── packages/
 │   ├── core/                 # 共享类型与数学工具（零依赖）
 │   ├── editor/               # 文件系统、Git、CodeMirror 抽象
@@ -94,6 +92,8 @@ greyWork/
 │   ├── llm/                  # LLM 供应商客户端（OpenAI 兼容流 → IPC；含本机 agent 回合）
 │   ├── acp/                  # Agent Client Protocol 客户端（宿主命令 + WebSocket）
 │   ├── shell/                # 供应商注册表与传输数据面
+│   ├── host-ipc/             # 宿主命令桥（invoke / 剪贴板 / 窗口门面）
+│   ├── plugin-types/         # 面向作者的插件类型（manifest / worker / render）
 │   ├── plugins/              # 技能源适配器与插件类型
 │   ├── cowork/               # 协作工作区引擎
 │   ├── vite-config/          # 共享 Vite 配置工厂（base / 资源 / dev 代理）

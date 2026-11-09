@@ -25,9 +25,9 @@ greywork.registerAction("draw", (): RenderFrame => [{ kind: "rect", x: 0, y: 0, 
 
 ## 边界
 
-- 类型只是**提示**，真正的门禁在宿主：清单在安装期由
-  `crates/greywork-host/src/services/plugin_market/package.rs` 校验，能力调用在运行期由前端
-  broker + Rust 代理双重校验（声明之外的 host / 方法 / 路径一律拒绝）。
+- 类型只是**提示**，真正的门禁在运行期：包从宿主数据目录读出（只校验 `schemaVersion` 与
+  `manifest.id` 是否等于目录名），渲染端加载时接入 loader；能力调用由前端 broker 逐次校验
+  （声明之外的 host / 方法 / 路径一律拒绝）。
 - 与宿主 `packages/workbench/src/plugins/market-types.ts` 的漂移由
   `packages/workbench/tests/types/plugin-manifest-parity.ts` 在 `pnpm typecheck` 时兜住：
   字段名不一致或标量类型变化会直接编译失败。

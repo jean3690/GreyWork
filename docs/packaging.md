@@ -79,8 +79,8 @@ Deployment requirements:
   those assets must still be reachable at the root.
 
 Against a headless server the browser front is a full client for conversations, automation and the
-plugin market. Capabilities that need a local host (installing skills, native dialogs, system tray)
-degrade with an explicit message rather than failing silently.
+MCP / skill sources. Capabilities that need a local host (installing skills, native dialogs, system
+tray) degrade with an explicit message rather than failing silently.
 
 ## Desktop installers (Electron)
 
