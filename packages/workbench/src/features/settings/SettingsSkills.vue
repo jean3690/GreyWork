@@ -3,9 +3,9 @@
  * 设置页「技能」面板：自定义市场源 + 已安装（工作区 .agents/skills 磁盘扫描）+
  * 内置技能（随宿主二进制发布）+ 发现（跨所有启用源搜索）。
  *
- * 安装目标 .agents/skills/&lt;skillId&gt;/ 是外部 ACP agent（opencode /
- * claude-code / codex 等）的原生技能目录——装完新建/重启 agent 会话即被识别，
- * 宿主不注入会话上下文。
+ * 安装目标 .agents/skills/&lt;skillId&gt;/ 被 opencode 等 agent 原生识别；同时建
+ * .claude/skills/&lt;skillId&gt; 链接供 claude-code 使用。宿主不注入会话上下文，
+ * 装完新建/重启 agent 会话生效（codex 没有技能目录机制，不受影响）。
  */
 import { onMounted, ref } from "vue";
 import { joinPath } from "@greywork/core";

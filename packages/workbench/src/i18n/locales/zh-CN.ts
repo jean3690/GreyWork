@@ -1441,7 +1441,7 @@ export const zhCN = {
       mcpDesc: "勾选哪些 MCP 服务器随 ACP 会话声明给 agent（由 agent 自己连接）。",
       mcpBadge: "{enabled}/{total} 已启用",
       skillsName: "技能",
-      skillsDesc: "工作区 .agents/skills 下已装的技能，ACP agent 新开会话即识别。",
+      skillsDesc: "工作区 .agents/skills 下已装的技能（同时链接到 .claude/skills），agent 新开会话即识别。",
       skillsBadge: "{count} 个已安装",
       workspaceName: "工作区文件夹",
       workspaceDesc: "远程会话共用的工作区，可自定义文件夹位置。",

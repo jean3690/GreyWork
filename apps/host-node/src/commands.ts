@@ -616,18 +616,18 @@ HANDLERS.set("acp_start", async (args, ctx) => {
   );
 });
 HANDLERS.set("acp_new_session", async (args, ctx) => {
-  const value = args as { handle?: unknown; cwd?: unknown } | null;
+  const value = args as { handle?: unknown; cwd?: unknown; mcpServers?: unknown } | null;
   if (typeof value?.handle !== "number" || typeof value?.cwd !== "string") {
     throw new CommandError(400, "缺少参数 handle / cwd");
   }
-  return ctx.acp.newSession(value.handle, value.cwd);
+  return ctx.acp.newSession(value.handle, value.cwd, value.mcpServers);
 });
 HANDLERS.set("acp_load_session", async (args, ctx) => {
-  const value = args as { handle?: unknown; cwd?: unknown; sessionId?: unknown } | null;
+  const value = args as { handle?: unknown; cwd?: unknown; sessionId?: unknown; mcpServers?: unknown } | null;
   if (typeof value?.handle !== "number" || typeof value?.cwd !== "string" || typeof value?.sessionId !== "string") {
     throw new CommandError(400, "缺少参数 handle / cwd / sessionId");
   }
-  return ctx.acp.loadSession(value.handle, value.cwd, value.sessionId);
+  return ctx.acp.loadSession(value.handle, value.cwd, value.sessionId, value.mcpServers);
 });
 HANDLERS.set("acp_send", async (args, ctx) => {
   const value = args as { handle?: unknown; text?: unknown } | null;

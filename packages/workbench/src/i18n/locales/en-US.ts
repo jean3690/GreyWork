@@ -1483,7 +1483,8 @@ export const enUS: MessageSchema = {
       mcpDesc: "Choose which MCP servers get declared to the agent for each ACP session (the agent connects them).",
       mcpBadge: "{enabled}/{total} enabled",
       skillsName: "Skills",
-      skillsDesc: "Skills installed under .agents/skills in the workspace — ACP agents pick them up on new sessions.",
+      skillsDesc:
+        "Skills installed under .agents/skills in the workspace (also linked into .claude/skills) — agents pick them up on new sessions.",
       skillsBadge: "{count} installed",
       workspaceName: "Workspace folder",
       workspaceDesc: "Shared folder for remote sessions; choose where it lives.",

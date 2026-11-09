@@ -37,7 +37,12 @@ process.stdin.on("data", (chunk) => {
     }
     if (message.method === "session/new") {
       if (typeof message.params.cwd === "string") sessionCwd = message.params.cwd;
-      reply(message.id, { sessionId: "sess-1", modes: { availableModes: [{ id: "build", name: "Build" }] } });
+      // 回带收到的 mcpServers：宿主 → agent 的透传由 tests/server.test.ts 断言。
+      reply(message.id, {
+        sessionId: "sess-1",
+        modes: { availableModes: [{ id: "build", name: "Build" }] },
+        mcpServersEcho: message.params.mcpServers ?? [],
+      });
       continue;
     }
     if (message.method === "session/prompt") {

@@ -32,8 +32,9 @@ greyWork/
 
 There is no lockfile for skills: the host is only an installer. `apps/host-node/src/skills.ts` writes
 each skill into `<workspace>/.agents/skills/<id>/` (two-phase: validate the whole snapshot, then
-commit) and the ACP agent picks the directory up at its next session. Installed records are tracked
-renderer-side in `localStorage`.
+commit) and links it into `.claude/skills/<id>` so Claude Code — which only reads its own directory —
+sees the same skill; opencode reads `.agents/skills` directly, codex has no skill directory at all.
+Installed records are tracked renderer-side in `localStorage`.
 
 Skills come from a registry and from files the renderer already holds:
 
@@ -59,12 +60,12 @@ directory as the workspace and the skills are visible as-is.
 ## MCP servers
 
 MCP servers are declared per session: the renderer passes the enabled set (or a run-level subset)
-to `acp_new_session` / `acp_load_session`; on the direct ACP transport they go straight into
-`session/new.mcp_servers` (`packages/acp/src/client.ts`). The host-managed path
-(`apps/host-node/src/acp.ts`) still opens sessions with an empty list — the Rust-era capability
-filtering (`mcpCapabilities`) and `skippedMcpServers` reporting were not ported, so an agent driven
-through the host sees no declared MCP servers yet. The agent connects to whatever it receives and
-merges the tools; the host never proxies tool calls.
+to `acp_new_session` / `acp_load_session`; both transports map them into the ACP `McpServer`
+shape — `packages/acp/src/client.ts` for the direct WebSocket path, `apps/host-node/src/acp.ts`
+for the host-managed path (stdio → `command`/`args`/`env`, http/sse → `type`/`url`/`headers`).
+The agent connects to them and merges their tools; the host never proxies tool calls.
+Capability-based skipping / `skippedMcpServers` reporting is not implemented — every declared
+server is forwarded.
 
 ## ACP session lifecycle
 

@@ -730,9 +730,12 @@ describe("HTTP 契约", () => {
     expect(ok.status).toBe(200);
     expect((ok.body as { filesWritten: number }).filesWritten).toBe(2);
     expect(readFileSync(path.join(workspaceDir, ".agents", "skills", "demo-skill", "SKILL.md"), "utf8")).toBe("# demo\n");
+    // 兼容链接：Claude Code 只读 .claude/skills/<id>，安装时建一条指向 .agents/skills/<id> 的软链。
+    expect(readFileSync(path.join(workspaceDir, ".claude", "skills", "demo-skill", "SKILL.md"), "utf8")).toBe("# demo\n");
 
     expect((await call("skills_uninstall", { workspaceRoot: workspaceDir, skillId: "demo-skill" })).status).toBe(200);
     expect(existsSync(path.join(workspaceDir, ".agents", "skills", "demo-skill"))).toBe(false);
+    expect(existsSync(path.join(workspaceDir, ".claude", "skills", "demo-skill"))).toBe(false);
 
     // 非法 id（大写 / 空格）必须拒绝。
     const badId = await call("skills_uninstall", { workspaceRoot: workspaceDir, skillId: "Bad Id" });
@@ -818,9 +821,32 @@ describe("HTTP 契约", () => {
     expect(typeof started.body).toBe("number");
     const handle = started.body as number;
 
-    const created = await call("acp_new_session", { handle, cwd: workspaceDir });
+    const created = await call("acp_new_session", {
+      handle,
+      cwd: workspaceDir,
+      mcpServers: [
+        { name: "stdio-echo", transport: "stdio", command: "/usr/bin/true", args: ["--flag"], env: { TOKEN: "1" } },
+        {
+          name: "http-docs",
+          transport: "http",
+          url: "https://example.com/mcp",
+          headers: [{ name: "Authorization", value: "Bearer t" }],
+        },
+      ],
+    });
     expect(created.status).toBe(200);
     expect((created.body as { sessionId: string }).sessionId).toBe("sess-1");
+    // MCP 透传：渲染端声明的服务器按 ACP 形态原样进 session/new（stdio → command/args/env，
+    // http → type/url/headers），不再是空列表。
+    expect((created.body as { mcpServersEcho: unknown }).mcpServersEcho).toEqual([
+      { name: "stdio-echo", command: "/usr/bin/true", args: ["--flag"], env: [{ name: "TOKEN", value: "1" }] },
+      {
+        type: "http",
+        name: "http-docs",
+        url: "https://example.com/mcp",
+        headers: [{ name: "Authorization", value: "Bearer t" }],
+      },
+    ]);
 
     expect((await call("acp_send", { handle, text: "hello" })).status).toBe(200);
 

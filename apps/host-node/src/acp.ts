@@ -71,6 +71,56 @@ function handshakeTimeoutSecs(command: string): number {
   return ["npx", "npm", "yarn", "pnpm", "deno", "bunx"].includes(program) ? 120 : 10;
 }
 
+/**
+ * 渲染端下发的 MCP 服务器声明 → ACP `session/new` 的 McpServer 形态。
+ *
+ * stdio 走 { name, command, args, env }；http / sse 走 { type, name, url, headers }。
+ * 未知传输 / 缺 name 的条目直接丢弃（与渲染端 client.ts 的映射保持一致）。
+ */
+function toAcpMcpServers(raw: unknown): Record<string, unknown>[] {
+  const pairs = (value: unknown): { name: string; value: string }[] => {
+    if (Array.isArray(value)) {
+      return value.flatMap((entry) => {
+        const item = entry as { name?: unknown; value?: unknown } | null;
+        return typeof item?.name === "string" && typeof item.value === "string"
+          ? [{ name: item.name, value: item.value }]
+          : [];
+      });
+    }
+    if (value !== null && typeof value === "object") {
+      return Object.entries(value as Record<string, unknown>).flatMap(([name, item]) =>
+        typeof item === "string" ? [{ name, value: item }] : [],
+      );
+    }
+    return [];
+  };
+
+  if (!Array.isArray(raw)) return [];
+  const servers: Record<string, unknown>[] = [];
+  for (const entry of raw) {
+    const server = entry as Record<string, unknown> | null;
+    if (!server || typeof server.name !== "string" || server.name.trim() === "") continue;
+    if (server.transport === "stdio") {
+      servers.push({
+        name: server.name,
+        command: typeof server.command === "string" ? server.command : "",
+        args: Array.isArray(server.args) ? server.args.filter((arg): arg is string => typeof arg === "string") : [],
+        env: pairs(server.env),
+      });
+      continue;
+    }
+    if (server.transport === "http" || server.transport === "sse") {
+      servers.push({
+        type: server.transport,
+        name: server.name,
+        url: typeof server.url === "string" ? server.url : "",
+        headers: pairs(server.headers),
+      });
+    }
+  }
+  return servers;
+}
+
 export interface OpenArgs {
   sessionId?: unknown;
   cwd?: unknown;
@@ -318,12 +368,15 @@ export class AcpHost {
     }
   }
 
-  /** 新会话：cwd 必须在授权根内。 */
-  async newSession(handle: number, cwd: string): Promise<unknown> {
+  /** 新会话：cwd 必须在授权根内；MCP 服务器声明随 session/new 交给 agent 连接。 */
+  async newSession(handle: number, cwd: string, mcpServers?: unknown): Promise<unknown> {
     const resolved = this.access.resolveExisting(cwd);
     const session = this.require(handle);
     session.workspaceRoot = resolved;
-    const response = await session.request!("session/new", { cwd: resolved, mcpServers: [] });
+    const response = await session.request!("session/new", {
+      cwd: resolved,
+      mcpServers: toAcpMcpServers(mcpServers),
+    });
     const value = response as { sessionId?: unknown; modes?: unknown; configOptions?: unknown };
     session.sessionId = String(value.sessionId ?? "");
     session.modes = value.modes ?? null;
@@ -331,14 +384,14 @@ export class AcpHost {
   }
 
   /** 恢复 / 加载会话：优先 resume，失败回落 load。 */
-  async loadSession(handle: number, cwd: string, sessionId: string): Promise<unknown> {
+  async loadSession(handle: number, cwd: string, sessionId: string, mcpServers?: unknown): Promise<unknown> {
     const resolved = this.access.resolveExisting(cwd);
     const session = this.require(handle);
     session.workspaceRoot = resolved;
     if (!session.loadSession && !session.resumeSession) {
       throw new Error("agent does not support session/load or session/resume");
     }
-    const params = { cwd: resolved, mcpServers: [] };
+    const params = { cwd: resolved, mcpServers: toAcpMcpServers(mcpServers) };
     if (session.resumeSession) {
       try {
         const response = await session.request!("session/resume", { sessionId, ...params });
