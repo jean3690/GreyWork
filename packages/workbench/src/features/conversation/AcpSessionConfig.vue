@@ -20,22 +20,6 @@ import AcpModelSelector from "@/features/conversation/AcpModelSelector.vue";
 import AgentScopeSelect from "@/features/conversation/AgentScopeSelect.vue";
 import Icon from "@/features/shared/Icon.vue";
 import Hint from "@/features/shared/Hint.vue";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-
-/**
- * `full`：完整配置簇（默认，旧调用与测试的口径）。
- * `rail`：只留作用域 / 模型 / 思考强度这类高频胶囊，低频项（布尔配置、按工作区记忆、
- *         全局默认、重启 runtime）收进 `…` 菜单 —— 输入卡底排只有一行的高度预算。
- */
-const props = withDefaults(defineProps<{ variant?: "full" | "rail" }>(), { variant: "full" });
-
 const agent = useAgentStore();
 const workspaceStore = useWorkspaceStore();
 
@@ -129,136 +113,74 @@ const connecting = computed(() => agent.acpConnecting || agent.acpStatus === "co
         icon="setting"
         show-name
       />
-      <template v-if="props.variant === 'full'">
-        <Hint v-for="option in booleanOptions" :key="option.entry.id" :text="`${option.label}：${option.enabled ? '开' : '关'}`">
-          <button
-            type="button"
-            class="flex h-6 shrink-0 cursor-pointer items-center gap-1 rounded-full border px-2.5 text-[11px] transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
-            :class="
-              option.enabled
-                ? 'border-accent/50 bg-panel-2 text-foreground'
-                : 'border-line bg-panel-2 text-dim hover:border-line-2 hover:text-foreground'
-            "
-            :aria-pressed="option.enabled"
-            :data-testid="`acp-config-boolean-${option.entry.id}`"
-            @click="void toggleBoolean(option.entry.id, !option.enabled)"
-          >
-            <Icon name="setting" :size="11" class="text-dim2" />
-            {{ option.label }}
-            <span class="text-dim2">{{ option.enabled ? "开" : "关" }}</span>
-          </button>
-        </Hint>
-        <Hint
-          v-if="showEffortUnavailable"
-          text="当前模型不支持思考强度；切换到支持该能力的模型（如 opencode/gpt-5-codex）后会出现选择器"
-          multiline
+      <Hint v-for="option in booleanOptions" :key="option.entry.id" :text="`${option.label}：${option.enabled ? '开' : '关'}`">
+        <button
+          type="button"
+          class="flex h-6 shrink-0 cursor-pointer items-center gap-1 rounded-full border px-2.5 text-[11px] transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          :class="
+            option.enabled
+              ? 'border-accent/50 bg-panel-2 text-foreground'
+              : 'border-line bg-panel-2 text-dim hover:border-line-2 hover:text-foreground'
+          "
+          :aria-pressed="option.enabled"
+          :data-testid="`acp-config-boolean-${option.entry.id}`"
+          @click="void toggleBoolean(option.entry.id, !option.enabled)"
         >
-          <span
-            class="flex h-6 shrink-0 cursor-default items-center gap-1 rounded-full border border-line bg-panel-2 px-2.5 text-[11px] text-dim2"
-          >
-            <Icon name="setting" :size="11" class="text-dim2" />
-            思考强度 · 模型不支持
-          </span>
-        </Hint>
-        <Hint v-if="remembered" text="模型 / 思考强度等会话级配置已按当前工作区记住，切回该工作区会自动恢复">
-          <span
-            class="flex h-6 shrink-0 cursor-default items-center gap-1 rounded-full border border-line bg-panel-2 px-2.5 text-[11px] text-dim2"
-          >
-            <Icon name="pin" :size="11" class="text-dim2" />
-            按工作区记忆
-          </span>
-        </Hint>
-        <Hint v-if="agent.acpConnected" text="把当前模型 / 思考强度等配置固化为全局默认：新工作区或无工作区记忆时以此兜底">
-          <button
-            type="button"
-            data-testid="acp-default-set"
-            class="grid h-6 shrink-0 cursor-pointer place-items-center rounded-full border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
-            @click="saveGlobalDefault"
-          >
-            设为全局默认
-          </button>
-        </Hint>
-        <Hint v-if="hasGlobalDefault" text="清除后回到完全跟随后端出厂值">
-          <button
-            type="button"
-            data-testid="acp-default-clear"
-            class="grid h-6 shrink-0 cursor-pointer place-items-center rounded-full border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
-            @click="removeGlobalDefault"
-          >
-            清除全局默认
-          </button>
-        </Hint>
-        <Hint v-if="agent.acpConnected" text="重启 ACP runtime（重新探测模型与配置）">
-          <button
-            type="button"
-            class="grid size-6 shrink-0 cursor-pointer place-items-center rounded-full border border-line bg-panel-2 text-dim transition-colors hover:border-line-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40"
-            :disabled="agent.acpBusy"
-            @click="agent.restartAcpRuntime()"
-          >
-            <Icon name="refresh" :size="12" />
-          </button>
-        </Hint>
-      </template>
-      <!-- rail 变体：低频项收进溢出菜单，底排只保留高频胶囊 -->
-      <DropdownMenu v-else>
-        <DropdownMenuTrigger as-child>
-          <button
-            type="button"
-            data-testid="acp-config-more"
-            class="grid size-6 shrink-0 cursor-pointer place-items-center rounded-full border border-line bg-panel-2 text-dim transition-colors hover:border-line-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
-            aria-label="更多会话配置"
-          >
-            <Icon name="more" :size="12" />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent side="top" align="end" class="w-[240px] border-line">
-          <DropdownMenuLabel class="px-2 py-1 text-[10.5px] font-medium tracking-wide text-dim2 uppercase"> 会话配置 </DropdownMenuLabel>
-          <DropdownMenuItem
-            v-for="option in booleanOptions"
-            :key="option.entry.id"
-            :data-testid="`acp-config-boolean-${option.entry.id}`"
-            class="cursor-pointer gap-2 rounded-[calc(6px*var(--gw-radius-scale))] py-1.5 text-[12px] text-dim"
-            @select="void toggleBoolean(option.entry.id, !option.enabled)"
-          >
-            <Icon :name="option.enabled ? 'check-one' : 'setting'" :size="12" class="shrink-0 text-dim2" />
-            <span class="min-w-0 flex-1 truncate">{{ option.label }}</span>
-            <span class="text-dim2">{{ option.enabled ? "开" : "关" }}</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem v-if="showEffortUnavailable" disabled class="gap-2 py-1.5 text-[12px] text-dim2">
-            <Icon name="setting" :size="12" class="shrink-0" />
-            思考强度 · 模型不支持
-          </DropdownMenuItem>
-          <DropdownMenuItem v-if="remembered" disabled class="gap-2 py-1.5 text-[12px] text-dim2">
-            <Icon name="pin" :size="12" class="shrink-0" />
-            按工作区记忆
-          </DropdownMenuItem>
-          <DropdownMenuSeparator class="bg-line" />
-          <DropdownMenuItem
-            v-if="agent.acpConnected"
-            data-testid="acp-default-set"
-            class="cursor-pointer gap-2 py-1.5 text-[12px] text-dim"
-            @select="saveGlobalDefault"
-          >
-            设为全局默认
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            v-if="hasGlobalDefault"
-            data-testid="acp-default-clear"
-            class="cursor-pointer gap-2 py-1.5 text-[12px] text-dim"
-            @select="removeGlobalDefault"
-          >
-            清除全局默认
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            v-if="agent.acpConnected"
-            :disabled="agent.acpBusy"
-            class="cursor-pointer gap-2 py-1.5 text-[12px] text-dim"
-            @select="agent.restartAcpRuntime()"
-          >
-            重启 runtime
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+          <Icon name="setting" :size="11" class="text-dim2" />
+          {{ option.label }}
+          <span class="text-dim2">{{ option.enabled ? "开" : "关" }}</span>
+        </button>
+      </Hint>
+      <Hint
+        v-if="showEffortUnavailable"
+        text="当前模型不支持思考强度；切换到支持该能力的模型（如 opencode/gpt-5-codex）后会出现选择器"
+        multiline
+      >
+        <span
+          class="flex h-6 shrink-0 cursor-default items-center gap-1 rounded-full border border-line bg-panel-2 px-2.5 text-[11px] text-dim2"
+        >
+          <Icon name="setting" :size="11" class="text-dim2" />
+          思考强度 · 模型不支持
+        </span>
+      </Hint>
+      <Hint v-if="remembered" text="模型 / 思考强度等会话级配置已按当前工作区记住，切回该工作区会自动恢复">
+        <span
+          class="flex h-6 shrink-0 cursor-default items-center gap-1 rounded-full border border-line bg-panel-2 px-2.5 text-[11px] text-dim2"
+        >
+          <Icon name="pin" :size="11" class="text-dim2" />
+          按工作区记忆
+        </span>
+      </Hint>
+      <Hint v-if="agent.acpConnected" text="把当前模型 / 思考强度等配置固化为全局默认：新工作区或无工作区记忆时以此兜底">
+        <button
+          type="button"
+          data-testid="acp-default-set"
+          class="grid h-6 shrink-0 cursor-pointer place-items-center rounded-full border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          @click="saveGlobalDefault"
+        >
+          设为全局默认
+        </button>
+      </Hint>
+      <Hint v-if="hasGlobalDefault" text="清除后回到完全跟随后端出厂值">
+        <button
+          type="button"
+          data-testid="acp-default-clear"
+          class="grid h-6 shrink-0 cursor-pointer place-items-center rounded-full border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          @click="removeGlobalDefault"
+        >
+          清除全局默认
+        </button>
+      </Hint>
+      <Hint v-if="agent.acpConnected" text="重启 ACP runtime（重新探测模型与配置）">
+        <button
+          type="button"
+          class="grid size-6 shrink-0 cursor-pointer place-items-center rounded-full border border-line bg-panel-2 text-dim transition-colors hover:border-line-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan disabled:cursor-not-allowed disabled:opacity-40"
+          :disabled="agent.acpBusy"
+          @click="agent.restartAcpRuntime()"
+        >
+          <Icon name="refresh" :size="12" />
+        </button>
+      </Hint>
     </template>
   </template>
 </template>

@@ -81,7 +81,7 @@ describe("MinimalComposer 极简输入卡", () => {
     expect(wrapper.emitted("attach")).toHaveLength(1);
   });
 
-  it("ACP 路由下把高频配置放进底排，不再单独成卡", async () => {
+  it("ACP 路由下把会话配置放在输入卡下方，不挤底排", async () => {
     const agent = useAgentStore();
     agent.routeToAcp = true;
 
@@ -89,19 +89,24 @@ describe("MinimalComposer 极简输入卡", () => {
     await flushPromises();
 
     expect(wrapper.findComponent(AcpSessionConfig).exists()).toBe(true);
-    // 旧的「输入卡下方独立配置块」已删除
-    expect(wrapper.find('[data-testid="minimal-composer-config"]').exists()).toBe(false);
-    // 权限胶囊与模型选择器都在底排这一行里
-    expect(wrapper.get('[data-testid="minimal-composer-rail"]').text()).toContain("权限");
+    // 配置簇在卡下方独立成块；底排只留工作区 / 后端 / 计划 / 上下文 / 发送
+    expect(wrapper.find('[data-testid="minimal-composer-config"]').exists()).toBe(true);
+    expect(wrapper.get('[data-testid="minimal-composer-rail"]').text()).not.toContain("权限");
+    // 默认收起，点开才铺开完整配置簇
+    const toggle = wrapper.get('[data-testid="minimal-composer-config-toggle"]');
+    expect(toggle.attributes("aria-expanded")).toBe("false");
+    await toggle.trigger("click");
+    expect(wrapper.get('[data-testid="minimal-composer-config-toggle"]').attributes("aria-expanded")).toBe("true");
+    expect(wrapper.get('[data-testid="minimal-composer-config"]').text()).toContain("权限");
   });
 
   it("本地路由下不渲染 ACP 配置（不留空盒）", async () => {
     const wrapper = mountComposer();
     expect(wrapper.findComponent(AcpSessionConfig).exists()).toBe(false);
-    expect(wrapper.find('[data-testid="acp-config-more"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="minimal-composer-config"]').exists()).toBe(false);
   });
 
-  it("底排只留高频项：布尔配置等低频项收进「…」菜单", async () => {
+  it("布尔型配置在展开的配置块里直接可点，不再藏进「…」菜单", async () => {
     const agent = useAgentStore();
     agent.routeToAcp = true;
     agent.acpConnected = true;
@@ -110,8 +115,8 @@ describe("MinimalComposer 极简输入卡", () => {
     const wrapper = mountComposer();
     await flushPromises();
 
-    expect(wrapper.find('[data-testid="acp-config-more"]').exists()).toBe(true);
-    expect(wrapper.find('[data-testid="acp-config-boolean-allow-net"]').exists()).toBe(false);
+    await wrapper.get('[data-testid="minimal-composer-config-toggle"]').trigger("click");
+    expect(wrapper.find('[data-testid="acp-config-boolean-allow-net"]').exists()).toBe(true);
   });
 
   it("计划开关直接读写 settings.planMode（与 /plan 同一状态）", async () => {

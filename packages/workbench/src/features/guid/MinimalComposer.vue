@@ -26,9 +26,9 @@ import {
  * props + 具名 slot 注入 —— 「新建会话 → 分流 → 派发」这条链只有一份实现（`GuidView.run`），
  * 不会因为多出一个输入卡而漂移。本组件只负责**就地可用的配置**：
  *
- * - 卡内：文本区 + 底排（附件 / 工作区 / 后端 / ACP 模型与权限 / 计划 / 上下文占用 / 发送）。
- * - ACP 配置不再单独成卡：高频胶囊直接进底排（`AcpSessionConfig variant="rail"`），
- *   低频项收进它的 `…` 菜单。
+ * - 卡内：文本区 + 底排（附件 / 工作区 / 后端 / 计划 / 上下文占用 / 发送）。
+ * - ACP 会话配置（作用域 / 模型 / 思考强度 / 开关 / 重启）放在**卡下方**单独一块：
+ *   留在底排会把这排挤爆、把发送键顶出卡外，也让高频控件跟配置项混在一起。
  * - slots：`#tray`（附件 / 评论草稿托盘）、`#menu`（斜杠菜单）由宿主注入。
  */
 const props = defineProps<{
@@ -77,10 +77,26 @@ const agentLabel = computed(() => (agent.routeToAcp ? (activeProvider.value?.nam
 /** 只列已启用的后端（与 AgentProviderBar 同一显隐语义：未启用的要先到设置里启用）。 */
 const enabledProviders = computed(() => agent.agentProviders.filter((provider) => provider.enabled));
 
-/* ===== ACP 高频配置直接进底排 =====
- * 作用域 / 模型 / 思考强度这组胶囊是每次派发前最常改的，单独成卡纯属遮挡视线；低频项
- * （布尔配置 / 按工作区记忆 / 全局默认 / 重启）由 AcpSessionConfig 的 rail 变体收进 `…` 菜单。
- * 组件本身按 routeToAcp 自守：本地路由时整组不渲染。 */
+/* ===== ACP 会话配置块：输入卡下方，默认收起 =====
+ * 配置簇（作用域 / 模型 / 思考强度 / 开关 / 设默认 / 重启）完整铺开时块很高，会把输入卡
+ * 顶得离消息流很远；塞进底排又会把发送键挤出卡外。所以整块落到卡下方，默认收成一行摘要
+ * （当前模型名），要调才展开。
+ * 收起态仍渲染 AcpSessionConfig（v-show 不卸载）：切换后端 / 重连时配置项变化要能即时反映，
+ * 卸载重挂会丢掉展开态与面板焦点。 */
+const configOpen = ref(false);
+
+/** 收起态摘要：当前模型名（无值时回落到「跟随 CLI」占位），与 AcpModelSelector 同一取值口径。 */
+const configSummary = computed(() => {
+  const model = agent.acpConfigOptions.find((entry) => entry.id === "model" && entry.type === "select");
+  const value = model?.currentValue;
+  if (value === null || value === undefined || value === "") return t("minimal.configUnset");
+  const choice = model?.options?.find((candidate) => String(candidate.value) === String(value));
+  return choice?.name ?? String(value);
+});
+
+function toggleConfig(): void {
+  configOpen.value = !configOpen.value;
+}
 
 function pickWorkspace(value: string): void {
   workspaceStore.setActiveWorkspace(value === GENERAL_WORKSPACE ? null : value);
@@ -140,7 +156,7 @@ function onTextareaInput(el: HTMLTextAreaElement): void {
 
 <template>
   <!-- 单卡：拖放属性 / 未声明监听透传到这一层。 -->
-  <div data-testid="minimal-composer" class="flex w-full max-w-[780px] flex-col">
+  <div data-testid="minimal-composer" class="flex w-full max-w-[780px] flex-col gap-2">
     <div
       class="relative w-full rounded-[calc(18px*var(--gw-radius-scale))] border border-line-2 bg-panel shadow-[0_1px_2px_rgba(0,0,0,0.06)] transition-colors focus-within:border-dim2"
     >
@@ -260,9 +276,6 @@ function onTextareaInput(el: HTMLTextAreaElement): void {
         </div>
 
         <div class="ml-auto flex min-w-0 items-center gap-0.5">
-          <!-- ACP 高频配置（作用域 / 模型 / 思考强度）：本地路由时组件自身不渲染 -->
-          <AcpSessionConfig v-if="agent.routeToAcp" variant="rail" />
-
           <Hint :text="t('minimal.planModeHint')">
             <button
               type="button"
@@ -299,6 +312,34 @@ function onTextareaInput(el: HTMLTextAreaElement): void {
 
       <!-- 斜杠菜单（由宿主注入，绝对定位在卡片内） -->
       <slot name="menu" />
+    </div>
+
+    <!-- ACP 会话配置：放在发送框**下方**，独立成块。默认收起成一行摘要（当前模型），
+         点开才铺开完整配置簇 —— 配置项多时整块很高，常驻铺开会把输入卡顶离消息流。
+         复用 `AcpSessionConfig`（作用域 / 模型 / 思考强度 / 会话模式 / 开关型配置 / 重启），
+         它内部已按 routeToAcp 自守 —— 本地路由时整块不渲染，不留空盒。
+         展开态用 v-show 而非 v-if：配置簇保持挂载，切换后端 / 重连时能即时反映，不会丢焦点。 -->
+    <div
+      v-if="agent.routeToAcp"
+      data-testid="minimal-composer-config"
+      class="min-w-0 rounded-[calc(12px*var(--gw-radius-scale))] border border-line-2 bg-panel shadow-[0_6px_18px_rgba(0,0,0,0.12)]"
+    >
+      <button
+        type="button"
+        data-testid="minimal-composer-config-toggle"
+        class="flex w-full min-w-0 cursor-pointer items-center gap-1.5 px-3 py-1.5 text-left transition-colors hover:bg-panel-2 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-cyan"
+        :aria-expanded="configOpen"
+        :aria-label="configOpen ? t('minimal.configCollapse') : t('minimal.configExpand')"
+        @click="toggleConfig"
+      >
+        <Icon name="setting" :size="11" class="shrink-0 text-dim2" />
+        <span class="shrink-0 text-[11px] text-dim">{{ t("minimal.configLabel") }}</span>
+        <span class="min-w-0 flex-1 truncate text-[11px] text-dim2">{{ configSummary }}</span>
+        <Icon name="down" :size="10" class="shrink-0 text-dim2 transition-transform" :class="configOpen ? 'rotate-180' : ''" />
+      </button>
+      <div v-show="configOpen" class="flex min-w-0 flex-wrap items-center gap-1.5 border-t border-line/70 px-3 py-2">
+        <AcpSessionConfig />
+      </div>
     </div>
   </div>
 </template>
