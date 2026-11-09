@@ -4,14 +4,14 @@ import { readFileSync } from "node:fs";
 import { workerPrelude, isPatch } from "@/plugins/code-runtime";
 
 /**
- * demo.brief worker 单测：直接加载仓库里的真实插件代码（不复制一份），
+ * demo.brief worker 单测：加载 fixtures 里的真实插件代码（示例包已从仓库移除，这份是唯一入口），
  * 用真实 prelude 跑在模拟 worker 作用域里，宿主侧用假能力表记录调用。
  *
  * 覆盖：四能力全链路（顺序 + 参数 + 返回字段）、显式路径跳过 roots、
  * 无授权根提前收尾、读/摘要/复制各步失败时的降级行为、长文件摘录截断、copy 动作。
  */
 
-const BRIEF_CODE = readFileSync(fileURLToPath(new URL("../../../../../plugin-market/packages/demo.brief.js", import.meta.url)), "utf8");
+const BRIEF_CODE = readFileSync(fileURLToPath(new URL("./fixtures/demo.brief.js", import.meta.url)), "utf8");
 
 const EMPTY_STATE = { path: "", summary: "", artifact: "", steps: "", status: "尚未运行" };
 

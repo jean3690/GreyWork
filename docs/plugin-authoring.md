@@ -337,7 +337,8 @@ const { text, truncated } = await greywork.call("clipboard", { op: "read" });
 ### Chaining capabilities
 
 One action can call several capabilities in sequence; each call is authorized on its own, so a missing
-grant fails that step only. `plugin-market/packages/demo.brief.{json,js}` is the reference chain:
+grant fails that step only. `packages/workbench/tests/unit/plugins/fixtures/demo.brief.js` is the
+reference chain:
 `workspace.read` (the README of an authorized root) → `llm.chat` (three-line summary) →
 `artifacts.publish` (Markdown artifact) → `clipboard` (the summary).
 
@@ -566,22 +567,19 @@ greywork.registerPointer((event, state) => {
 - Pointer events are **gated by the declaration only**: they carry input, not host resources, so no
   capability grant is involved. `render.pointer` defaults to `false` (existing packages unaffected).
 
-## Publishing to the market
+## Shipping a plugin
 
-1. Add `packages/<id>.json` (and, for worker plugins, `<id>.js`).
-2. Add a registry entry to `plugin-market/registry.json` with the GitHub `downloadUrl` and the
-   package's `sha256` (`sha256sum packages/<id>.json`).
-3. Sign the registry: `python3 plugin-market/sign_registry.py` (then `--verify` to double-check).
-   The signature is mandatory for the official registry — see `plugin-market/README.md`.
-4. Commit and push. The desktop app fetches the registry, verifies the signature, and verifies each
-   package's SHA-256 on download.
+The in-app remote plugin market has been retired — there is no registry URL, catalog browsing, or
+install/uninstall UI any more. Plugins reach the shell in one of two ways:
 
-Worker `runtime.entry` must point at a **pinned commit** (not a branch) so the SHA-256 stays stable.
+1. **Built-in** — registered from `packages/workbench/src/plugins/builtin.ts`; trusted, their
+   `requires` are auto-satisfied.
+2. **Already installed** — the host scans `<dataDir>/plugins/<id>/plugin.json` at boot and registers
+   whatever it finds. Deploy packages there out-of-band (for example with your own installer).
 
-## Local development
+The reference worker implementations live in `packages/workbench/tests/unit/plugins/fixtures/`
+(`demo.brief.js`, `demo.wallpaper.js`); there is no longer a sample package tree or registry
+signing script in this repo.
 
-- Built-in plugins live in `packages/workbench/src/plugins/builtin.ts` and are trusted (their
-  `requires` are auto-satisfied).
-- Install-time validation is covered by `shipped_market_packages_pass_validation` in
-  `plugin_market.rs`, so a bad package fails `cargo test` before release.
-- Templates to copy from: `plugin-market/templates/`.
+Worker `runtime.entry` should still point at a **pinned commit** (not a branch) so the SHA-256 stays
+stable.

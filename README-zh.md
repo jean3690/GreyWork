@@ -39,10 +39,10 @@ GreyWork 把外部编码智能体（走 **Agent Client Protocol**）与本机 Op
 **可扩展性**
 
 - 插件运行时基于 Cordis 微内核，能力**按插件**显式授权；声明式插件包只含受限 JSON，不执行远端 JavaScript。
-- 插件作者指南见 [docs/plugin-authoring.md](docs/plugin-authoring.md)，市场发布流程见
-  [plugin-market/README.md](plugin-market/README.md)。
-- **市场**收在一处：官方插件注册表（带签名 —— GitHub 账号失陷也无法投毒目录）、MCP Registry
-  与 skills.sh 等技能源。
+- 插件作者指南见 [docs/plugin-authoring.md](docs/plugin-authoring.md)，参考实现（worker 代码）在
+  `packages/workbench/tests/unit/plugins/fixtures/`。
+- 远端插件市场已下线（无注册表地址、无在线安装）；插件随应用内置，或由宿主数据目录里已有的包加载。
+  MCP Registry 与 skills.sh 两个安装源仍保留。
 - Agent 技能装在 `.agents/skills/`，由 ACP agent 在下次会话原生读取。
 
 **对话之外**
@@ -58,7 +58,7 @@ GreyWork 把外部编码智能体（走 **Agent Client Protocol**）与本机 Op
 - Electron 桌面外壳（Linux / macOS / Windows）+ headless Rust 服务端 + Vue 3 渲染层。
 - **一个后端、多个前端**：除桌面端 SPA 外，`apps/web` 是浏览器前端，通过 `FrontSpec` 契约声明
   更窄的特性集（不装托盘、不注册通道监听）；两端消费同一份 `@greywork/workbench` 源码与同一套服务端 API。
-- **独立的 Java 控制面**（`back/grey`）：账号与设备、通道绑定、模型网关、对象存储、自动化、插件市场；
+- **独立的 Java 控制面**（`back/grey`）：账号与设备、通道绑定、模型网关、对象存储、自动化；
   自带运维台（`apps/admin`，Vue 3 + Element Plus），账号密码登录，所有运维动作留审计。
 - 中英双语界面（zh-CN / en-US）；界面跑在浏览器里时，宿主能力自动降级为只读提示。
 
@@ -94,11 +94,10 @@ greyWork/
 │   ├── llm/                  # LLM 供应商客户端（OpenAI 兼容流 → IPC；含本机 agent 回合）
 │   ├── acp/                  # Agent Client Protocol 客户端（宿主命令 + WebSocket）
 │   ├── shell/                # 供应商注册表与传输数据面
-│   ├── plugins/              # 插件市场适配器与类型
+│   ├── plugins/              # 技能源适配器与插件类型
 │   ├── cowork/               # 协作工作区引擎
 │   ├── vite-config/          # 共享 Vite 配置工厂（base / 资源 / dev 代理）
 │   └── workbench/            # 统一 UI 包（外壳、视图、插件运行时）
-├── plugin-market/            # 插件注册表源与签名
 └── .agents/skills/           # 已安装的 agent 技能（由 ACP agent 原生读取）
 ```
 

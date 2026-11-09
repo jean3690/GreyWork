@@ -50,9 +50,9 @@ export default defineConfigWithVueTs(
       "apps/server/tests/mock-acp-agent.mjs",
       "**/vitest.config.ts",
       "eslint.config.js",
-      // 插件市场源仓库（发布产物 JSON + worker JS），运行时经 registry URL 拉取，
-      // 不参与本仓 tsconfig project service
-      "plugin-market/**",
+      // 插件 worker 测试夹具（演示包目录移除后留下的两份真实 worker 代码），
+      // 不是本仓源码、也不在 tsconfig project service 里
+      "packages/workbench/tests/unit/plugins/fixtures/**",
       // 运维台构建产物：由 apps/admin 的 vite build 写进后端 resources（随源码入库，
       // mvn package 即自带前端）。压缩后的 JS/CSS 不属于任何 tsconfig，lint 只会报解析错。
       "back/grey/src/main/resources/static/admin/**",

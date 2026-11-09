@@ -3,7 +3,7 @@ import { workerPrelude, isPatch } from "@/plugins/code-runtime";
 import { validateRenderCommands } from "@/plugins/render-commands";
 
 /**
- * demo.pet worker 状态机单测：真实插件代码（plugin-market/packages/demo.pet.js）
+ * demo.pet worker 状态机单测：真实插件代码（内联在下方，示例包已从仓库移除）
  * + 真实 prelude，跑在模拟 worker 作用域里。宿主只看 patch —— 与生产链路一致。
  *
  * 覆盖：时间衰减（分钟级/离线封顶/饿到 0 的心情倍率）、三个交互动作、

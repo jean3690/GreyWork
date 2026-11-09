@@ -11,12 +11,7 @@
 //   - artifacts.publish：只给展示名与内容，路径由宿主净化并限定在 plugins/<id>/，单份 ≤ 256 KiB；
 //   - clipboard：这里只声明了 write（读需要显式 ops: ["read"]，本插件用不上）。
 //
-// 发布三步（与 demo.llm 同流程，见 plugin-market/README.md）：
-//   1. 把 demo.brief.json / demo.brief.js 推送到 plugin-market 所在仓库（可先发 PR）；
-//   2. `sha256sum packages/demo.brief.json`，把 runtime.entry 钉到推送后的提交 SHA，
-//      并把 hash 填进 runtime.sha256（entry 必须 pin commit，不能是分支）；
-//   3. registry.json 增加条目 → `python3 sign_registry.py --verify`
-//      → `cargo test -p greywork-host plugin_market`。
+// 这份代码现在是测试夹具（示例包目录已从仓库移除），宿主侧只按 runtime.sha256 校验。
 
 /** 摘要字段只放前 800 字：声明式页面是单行文本。 */
 const SUMMARY_CHARS = 800;

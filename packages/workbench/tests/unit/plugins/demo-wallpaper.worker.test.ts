@@ -5,17 +5,14 @@ import { workerPrelude, isPatch } from "@/plugins/code-runtime";
 import { validateRenderCommands } from "@/plugins/render-commands";
 
 /**
- * demo.wallpaper worker 单测：直接加载仓库里的真实插件代码（不复制一份），
+ * demo.wallpaper worker 单测：加载 fixtures 里的真实插件代码（示例包已从仓库移除，这份是唯一入口），
  * 用真实 prelude 跑在模拟 worker 作用域里，帧过宿主白名单校验。
  *
  * 覆盖：四套主题都能出合法帧、暂停冻结相位、播放随时间推进、
  * 主题循环（含回绕）、暂停/继续的相位连续性、指针点击切主题。
  */
 
-const WALLPAPER_CODE = readFileSync(
-  fileURLToPath(new URL("../../../../../plugin-market/packages/demo.wallpaper.js", import.meta.url)),
-  "utf8",
-);
+const WALLPAPER_CODE = readFileSync(fileURLToPath(new URL("./fixtures/demo.wallpaper.js", import.meta.url)), "utf8");
 
 const THEMES = ["starfield", "aurora", "sunset", "rain"];
 // 用本地时间构造：插件里的时钟按 getHours()/getMinutes() 渲染，这样断言在任何时区都是 09:30。
