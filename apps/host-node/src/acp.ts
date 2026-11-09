@@ -15,7 +15,7 @@
  * 已知差异（后续补齐）：权限档位的自动放行/越界拦截比 Rust 的 policy.rs 简化
  * （tier=full 自动放行含 Allow 的请求；read-only 对非读取类自动拒绝）。
  */
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import path from "node:path";
 
 import { scanTurnArtifacts } from "./acp-artifacts.js";
@@ -44,6 +44,20 @@ export const ALLOWED_AGENT_PROGRAMS = new Set([
   "bunx",
   "deno",
 ]);
+
+/** 回收 agent 进程树：Windows 上命令可能经 cmd.exe 包装，必须 /T 连子进程一起杀。 */
+function killAgentTree(proc: ChildProcess): void {
+  if (!proc.pid) return;
+  if (process.platform === "win32") {
+    spawnSync("taskkill", ["/pid", String(proc.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
+    return;
+  }
+  try {
+    process.kill(-proc.pid, "SIGKILL");
+  } catch {
+    // 已退出。
+  }
+}
 
 export type PermissionTier = "read-only" | "workspace" | "full";
 
@@ -213,11 +227,16 @@ export class AcpHost {
     const timeoutMs = handshakeTimeoutSecs(command) * 1000;
     const handle = this.nextId++;
     const parts = command.split(/\s+/);
-    const proc = spawn(parts[0], parts.slice(1), {
+    // Windows 上 npm 全局命令（npx / opencode / claude …）是 .cmd 包装，spawn 直接执行会 ENOENT；
+    // 交给 shell 解析才能命中 PATHEXT。命令本身已过白名单与 shell 元字符校验。
+    const useShell = process.platform === "win32";
+    const proc = spawn(useShell ? command : parts[0], useShell ? [] : parts.slice(1), {
       cwd: process.cwd(),
       env: { ...process.env, ...envVars },
       stdio: ["pipe", "pipe", "pipe"],
       detached: process.platform !== "win32",
+      windowsHide: true,
+      shell: useShell,
     });
     const stderrTail: string[] = [];
     proc.stderr?.on("data", (chunk: Buffer) => {
@@ -245,9 +264,22 @@ export class AcpHost {
     };
     this.sessions.set(handle, session);
 
+    // spawn 失败（ENOENT / EACCES…）以 'error' 事件抛出：不接住就是未捕获异常，
+    // 在 sidecar 里等于整个宿主进程退出（Electron 见 sidecar 退出会直接 quit）。
+    const spawnFailure = new Promise<never>((_, reject) => {
+      proc.once("error", (error) => {
+        this.sessions.delete(handle);
+        const hint =
+          process.platform === "win32"
+            ? "（Windows 上 npm 全局命令需要 .cmd 包装；宿主已改用 shell 启动，若仍失败请确认命令在 PATH 里）"
+            : "";
+        reject(new Error(`agent 启动失败：${command}${hint} — ${error.message}`));
+      });
+    });
     const ready = this.attach(session, proc);
     const version = await Promise.race([
       ready,
+      spawnFailure,
       new Promise<never>((_, reject) =>
         setTimeout(() => {
           const hint = stderrTail.length > 0 ? `\nstderr 尾部: ${stderrTail.join("").slice(-400)}` : "";
@@ -527,12 +559,7 @@ export class AcpHost {
       );
     }
     setTimeout(() => {
-      try {
-        if (process.platform === "win32") session.proc.kill();
-        else process.kill(-session.proc.pid!, "SIGKILL");
-      } catch {
-        // 已退出。
-      }
+      killAgentTree(session.proc);
     }, 300);
     this.emit("stopped", { handle });
   }
@@ -608,12 +635,7 @@ export class AcpHost {
   disposeAll(): void {
     for (const [handle, session] of [...this.sessions.entries()]) {
       session.exited = true;
-      try {
-        if (process.platform === "win32") session.proc.kill();
-        else process.kill(-session.proc.pid!, "SIGKILL");
-      } catch {
-        // 已退出。
-      }
+      killAgentTree(session.proc);
       this.sessions.delete(handle);
       void handle;
     }
