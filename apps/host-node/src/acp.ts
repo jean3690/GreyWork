@@ -417,7 +417,12 @@ export class AcpHost {
     const value = response as { sessionId?: unknown; modes?: unknown; configOptions?: unknown };
     session.sessionId = String(value.sessionId ?? "");
     session.modes = value.modes ?? null;
-    return { ...(response as Record<string, unknown>), mcpServers: mcp.declared, skippedMcpServers: mcp.skipped };
+    return {
+      ...(response as Record<string, unknown>),
+      mcpServers: mcp.declared,
+      skippedMcpServers: mcp.skipped,
+      imagePrompts: session.imagePrompts,
+    };
   }
 
   /** 恢复 / 加载会话：优先 resume，失败回落 load。 */
@@ -430,14 +435,19 @@ export class AcpHost {
     }
     const mcp = toAcpMcpServers(mcpServers, { http: session.mcpHttp, sse: session.mcpSse });
     const params = { cwd: resolved, mcpServers: mcp.servers };
+    let resumed = false;
     const decorate = (response: unknown) => ({
       ...(response as Record<string, unknown>),
       mcpServers: mcp.declared,
       skippedMcpServers: mcp.skipped,
+      imagePrompts: session.imagePrompts,
+      resumed,
     });
     if (session.resumeSession) {
       try {
-        return decorate(await session.request!("session/resume", { sessionId, ...params }));
+        const response = await session.request!("session/resume", { sessionId, ...params });
+        resumed = true;
+        return decorate(response);
       } catch {
         // 回落到 load。
       }

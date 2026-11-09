@@ -1,7 +1,7 @@
 /**
  * MCP 展示文案：传输名与「跳过原因」的人话映射。
  *
- * 宿主（Rust `mcp::plan_servers`）回的是 `http_unsupported` 这类稳定标识，翻译只发生在展示层；
+ * 宿主（`apps/host-node/src/acp.ts` 的 MCP 声明筛选）回的是 `http_unsupported` 这类稳定标识，翻译只发生在展示层；
  * 设置页与对话页头部胶囊共用同一份，避免两处各写一套说法。
  */
 

@@ -850,6 +850,8 @@ describe("HTTP 契约", () => {
     // 回包里带上「实际声明了哪些服务器」与跳过原因（AcpSessionOpened 契约）。
     expect((created.body as { mcpServers?: string[] }).mcpServers).toEqual(["stdio-echo", "http-docs"]);
     expect((created.body as { skippedMcpServers?: unknown }).skippedMcpServers).toEqual([]);
+    // 图片能力随会话回包下发：渲染端据此决定附件能不能转成 image block。
+    expect((created.body as { imagePrompts?: boolean }).imagePrompts).toBe(true);
 
     expect((await call("acp_send", { handle, text: "hello" })).status).toBe(200);
 
