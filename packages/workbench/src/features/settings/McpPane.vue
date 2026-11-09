@@ -8,7 +8,7 @@
 import { computed, ref } from "vue";
 import { useAgentStore } from "@/stores/agent";
 import { useSettingsStore, type McpServerEntry } from "@/stores/settings";
-import { MCP_SKIP_REASONS, MCP_TRANSPORT_LABELS } from "@/lib/mcp-labels";
+import { MCP_TRANSPORT_LABELS, mcpSkipReasonLabel } from "@/lib/mcp-labels";
 import { registryEntryToDraft, type McpRegistryEntry } from "@/lib/mcp-registry";
 import ConfirmDialog from "@/features/settings/ConfirmDialog.vue";
 import McpFormDialog, { type McpDraftPayload, type McpFormPreset } from "@/features/settings/McpFormDialog.vue";
@@ -267,7 +267,7 @@ function confirmReset(): void {
       <div class="mb-2 text-[13px] font-medium text-foreground">上次建会话的声明结果</div>
       <p v-if="agent.acpMcpServers.length > 0" class="text-[11px] text-dim">已声明：{{ agent.acpMcpServers.join("、") }}</p>
       <p v-for="skip in agent.acpMcpSkipped" :key="skip.name" class="text-[11px] text-destructive">
-        已跳过 {{ skip.name }}：{{ MCP_SKIP_REASONS[skip.reason] ?? skip.reason }}
+        已跳过 {{ skip.name }}：{{ mcpSkipReasonLabel(skip.reason) }}
       </p>
     </div>
 

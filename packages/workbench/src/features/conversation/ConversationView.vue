@@ -3,7 +3,7 @@ import { computed, nextTick, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
 import { useVirtualizer } from "@tanstack/vue-virtual";
-import { MCP_SKIP_REASONS } from "@/lib/mcp-labels";
+import { mcpSkipReasonLabel } from "@/lib/mcp-labels";
 import { deviceTier } from "@/lib/device-tier";
 import { useAgentStore } from "@/stores/agent";
 import { useChatStore } from "@/stores/chat";
@@ -62,8 +62,10 @@ const draft = ref("");
 /** 选区评论草稿（预览划词 → 评论）：发送时挂到消息上，发后清空。 */
 const comments = ref<MessageComment[]>([]);
 const scrollEl = ref<HTMLElement | null>(null);
-/** 钉底锚定（虚拟列表用）：默认底部；syncActive 切会话时重置为 true。 */
+/** 钉底锚定（虚拟 / 普通列表通用）：默认底部；syncActive 切会话 / 主动发送时重置为 true。 */
 const pinnedToBottom = ref(true);
+/** 上翻离开底部后又有新内容：底部队徽标亮一个点，避免用户错过流式输出。 */
+const hasNewWhileAway = ref(false);
 /** 会话回退目标：非 null 时挂确认弹层（见 performRewind）。 */
 const rewindTarget = ref<ThreadMessage | null>(null);
 /** 正在编辑的用户消息（编辑后重发）：非 null 时输入卡进编辑态，发送走重发链。 */
@@ -101,16 +103,20 @@ function stop(): void {
 
 const workspaceName = computed(() => {
   const workspace = workspaceStore.workspaces.find((workspace) => workspace.id === session.value?.workspaceId);
-  return workspace?.name ?? "普通对话";
+  return workspace?.name ?? t("minimal.workspaceFallback");
 });
 
 /** 头部 MCP 胶囊：本会话建立时实际声明成功的服务器数（0 且有跳过项时提示被跳过）。 */
 const mcpChipLabel = computed(() =>
-  agent.acpMcpServers.length > 0 ? `MCP · ${agent.acpMcpServers.join(" · ")}` : `MCP 未生效（${agent.acpMcpSkipped.length}）`,
+  agent.acpMcpServers.length > 0
+    ? `MCP · ${agent.acpMcpServers.join(" · ")}`
+    : t("chat.mcp.skippedCount", { count: agent.acpMcpSkipped.length }),
 );
 const mcpChipTitle = computed(() => {
-  const lines = agent.acpMcpServers.length > 0 ? [`已声明给 agent：${agent.acpMcpServers.join("、")}`] : [];
-  for (const skip of agent.acpMcpSkipped) lines.push(`已跳过 ${skip.name}：${MCP_SKIP_REASONS[skip.reason] ?? skip.reason}`);
+  const lines = agent.acpMcpServers.length > 0 ? [t("chat.mcp.declaredHint", { names: agent.acpMcpServers.join("、") })] : [];
+  for (const skip of agent.acpMcpSkipped) {
+    lines.push(t("chat.mcp.skippedHint", { name: skip.name, reason: mcpSkipReasonLabel(skip.reason) }));
+  }
   return lines.join("\n");
 });
 
@@ -128,6 +134,8 @@ function syncActive(): void {
 watch(sessionId, syncActive, { immediate: true });
 
 function scrollToBottom(): void {
+  pinnedToBottom.value = true;
+  hasNewWhileAway.value = false;
   void nextTick(() => scrollEl.value?.scrollTo({ top: scrollEl.value.scrollHeight }));
 }
 
@@ -162,14 +170,15 @@ function measureRow(element: unknown): void {
 }
 
 function onScroll(): void {
-  if (!useVirtual.value) return;
   const el = scrollEl.value;
   if (!el) return;
-  // 距底 < 48px 视为「钉底」；上翻即解除，直到再次滚回底部
-  pinnedToBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+  // 距底 < 48px 视为「钉底」；上翻即解除，直到再次滚回底部（虚拟 / 普通列表同一套判定）。
+  const pinned = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+  pinnedToBottom.value = pinned;
+  if (pinned) hasNewWhileAway.value = false;
 }
 
-/** 滚动触发：新增消息 / 末条正文或末段思考在长 / 虚拟行尺寸刷新。普通列表维持历史「恒滚底」行为。 */
+/** 滚动触发：新增消息 / 末条正文或末段思考在长 / 虚拟行尺寸刷新；只在钉底时跟随。 */
 const lastMessageSig = computed(() => {
   const last = messages.value[messages.value.length - 1];
   if (!last) return "";
@@ -179,11 +188,9 @@ const lastMessageSig = computed(() => {
 watch(
   [() => messages.value.length, lastMessageSig, () => virtualizerRef.value.getTotalSize()],
   () => {
-    if (useVirtual.value) {
-      if (pinnedToBottom.value) scrollToBottom();
-    } else {
-      scrollToBottom();
-    }
+    // 用户上翻阅读时不要抢滚动：只在钉底状态下跟随新内容，否则亮「有新消息」。
+    if (pinnedToBottom.value) scrollToBottom();
+    else hasNewWhileAway.value = true;
   },
   { flush: "post" },
 );
@@ -347,15 +354,16 @@ const composerPlaceholder = computed(() => {
   return turnActive.value ? t("chat.composer.placeholderQueued") : t("chat.composer.placeholderThread");
 });
 
-/** 权限档位胶囊文案（grey 外壳字面量，不走 i18n）。 */
-const PERM_TIER_LABELS: Record<PermTier, string> = {
-  "read-only": "只读",
-  workspace: "工作区",
-  full: "完全访问",
-};
-const permissionTierLabel = computed(() => PERM_TIER_LABELS[settings.permissionTier] ?? settings.permissionTier);
-/** 窄屏「会话信息」下拉的触发器文案（同样走 grey 外壳字面量，不走 i18n）。 */
-const PERM_SESSION_INFO_LABEL = "会话信息";
+/** 权限档位胶囊文案：复用设置页的档位命名，随界面语言切换。 */
+const permissionTierLabel = computed(() => {
+  const labels: Record<PermTier, string> = {
+    "read-only": t("settings.permissions.readOnly.label"),
+    workspace: t("settings.permissions.workspace.label"),
+    full: t("settings.permissions.full.label"),
+  };
+  return labels[settings.permissionTier] ?? settings.permissionTier;
+});
+const sessionInfoLabel = computed(() => t("chat.sessionInfo"));
 
 /* ===== 右键菜单 =====
  * 整页只挂一个 root（<section> 没有 ref，可安全当 trigger）：
@@ -493,13 +501,13 @@ function buildMenuBase(target: ContextTarget | null): ContextMenuItem[] {
       <div class="flex h-[46px] shrink-0 items-center gap-2 border-b border-line bg-panel px-3">
         <button
           class="grid size-7 cursor-pointer place-items-center rounded-[calc(6px*var(--gw-radius-scale))] text-dim2 transition-colors hover:bg-panel-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
-          aria-label="返回"
+          :aria-label="t('common.back')"
           @click="goBack"
         >
           <Icon name="arrow-left" :size="16" />
         </button>
         <div class="min-w-0 flex-1">
-          <div class="truncate text-[13px] font-medium text-foreground">{{ session?.title ?? "新对话" }}</div>
+          <div class="truncate text-[13px] font-medium text-foreground">{{ session?.title ?? t("chat.untitled") }}</div>
           <div class="truncate text-[10px] text-dim2">{{ workspaceName }}</div>
         </div>
         <div class="flex shrink-0 items-center gap-1.5">
@@ -533,19 +541,23 @@ function buildMenuBase(target: ContextTarget | null): ContextMenuItem[] {
                 type="button"
                 data-testid="session-info"
                 class="flex h-5 cursor-pointer items-center gap-1 rounded-full border border-line bg-panel-2 px-2 text-[10.5px] text-dim transition-colors hover:border-line-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan lg:hidden"
-                :aria-label="PERM_SESSION_INFO_LABEL"
+                :aria-label="sessionInfoLabel"
               >
                 <Icon name="setting" :size="10" />
-                {{ PERM_SESSION_INFO_LABEL }}
+                {{ sessionInfoLabel }}
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent side="bottom" align="end" class="w-[240px] border-line px-2 py-1.5">
               <div class="flex items-center justify-between gap-3 py-1">
-                <span class="flex shrink-0 items-center gap-1 text-[11px] text-dim2"><Icon name="robot" :size="10" />运行后端</span>
+                <span class="flex shrink-0 items-center gap-1 text-[11px] text-dim2"
+                  ><Icon name="robot" :size="10" />{{ t("chat.backend") }}</span
+                >
                 <span class="truncate text-[11.5px] text-foreground">{{ backendLabel }}</span>
               </div>
               <div class="flex items-center justify-between gap-3 py-1">
-                <span class="flex shrink-0 items-center gap-1 text-[11px] text-dim2"><Icon name="shield" :size="10" />权限档位</span>
+                <span class="flex shrink-0 items-center gap-1 text-[11px] text-dim2"
+                  ><Icon name="shield" :size="10" />{{ t("chat.shield") }}</span
+                >
                 <span class="truncate text-[11.5px] text-foreground">{{ permissionTierLabel }}</span>
               </div>
               <div v-if="agent.acpMcpServers.length || agent.acpMcpSkipped.length" class="flex items-start justify-between gap-3 py-1">
@@ -563,65 +575,88 @@ function buildMenuBase(target: ContextTarget | null): ContextMenuItem[] {
             @click="stop"
           >
             <Icon name="close-one" :size="11" />
-            停止
+            {{ t("chat.stopShort") }}
           </button>
         </div>
       </div>
 
       <!-- aria-busy：流式期间告诉辅助技术「这片区域在持续更新」，别急着朗读中间态 -->
-      <div ref="scrollEl" class="min-h-0 flex-1 overflow-y-auto" :aria-busy="turnActive" @scroll.passive="onScroll">
-        <!-- 短会话：普通整列渲染 -->
-        <div v-if="messages.length && !useVirtual" class="mx-auto flex w-full max-w-[780px] flex-col gap-4 px-4 py-6 sm:px-6">
-          <ConversationMessage
-            v-for="(message, index) in messages"
-            :key="message.id"
-            :message="message"
-            :thread-id="sessionId"
-            :is-last="index === messages.length - 1"
-            @rewind="rewindTarget = $event"
-            @edit="startEdit"
-            @regenerate="regenerate"
-            @delete="deleteTarget = $event"
-          />
-        </div>
-        <!-- 长会话：虚拟窗口渲染（动态测量高度，钉底跟流） -->
+      <div class="relative min-h-0 flex-1">
         <div
-          v-else-if="messages.length"
-          class="relative mx-auto w-full max-w-[780px] px-4 sm:px-6"
-          :style="{ height: `${virtualTotalHeight}px` }"
+          ref="scrollEl"
+          data-testid="conversation-scroll"
+          class="h-full overflow-y-auto"
+          :aria-busy="turnActive"
+          @scroll.passive="onScroll"
         >
-          <div
-            v-for="row in virtualizerRef.getVirtualItems()"
-            :key="String(row.key)"
-            :ref="measureRow"
-            :data-index="row.index"
-            class="absolute left-0 top-0 w-full pb-4"
-            :style="{ transform: `translateY(${row.start + V_PAD_TOP}px)` }"
-          >
+          <!-- 短会话：普通整列渲染 -->
+          <div v-if="messages.length && !useVirtual" class="mx-auto flex w-full max-w-[780px] flex-col gap-4 px-4 py-6 sm:px-6">
             <ConversationMessage
-              :message="messages[row.index]"
+              v-for="(message, index) in messages"
+              :key="message.id"
+              :message="message"
               :thread-id="sessionId"
-              :is-last="row.index === messages.length - 1"
+              :is-last="index === messages.length - 1"
               @rewind="rewindTarget = $event"
               @edit="startEdit"
               @regenerate="regenerate"
               @delete="deleteTarget = $event"
             />
           </div>
+          <!-- 长会话：虚拟窗口渲染（动态测量高度，钉底跟流） -->
+          <div
+            v-else-if="messages.length"
+            class="relative mx-auto w-full max-w-[780px] px-4 sm:px-6"
+            :style="{ height: `${virtualTotalHeight}px` }"
+          >
+            <div
+              v-for="row in virtualizerRef.getVirtualItems()"
+              :key="String(row.key)"
+              :ref="measureRow"
+              :data-index="row.index"
+              class="absolute left-0 top-0 w-full pb-4"
+              :style="{ transform: `translateY(${row.start + V_PAD_TOP}px)` }"
+            >
+              <ConversationMessage
+                :message="messages[row.index]"
+                :thread-id="sessionId"
+                :is-last="row.index === messages.length - 1"
+                @rewind="rewindTarget = $event"
+                @edit="startEdit"
+                @regenerate="regenerate"
+                @delete="deleteTarget = $event"
+              />
+            </div>
+          </div>
+          <!-- 空会话引导：与引导页共用同一套 hero 排版（输入卡常驻页脚，不放进这里）。 -->
+          <div v-else class="mx-auto flex h-full w-full max-w-[780px] items-center justify-center px-4 py-16 sm:px-6">
+            <NewChatHero
+              :title="t('minimal.heroTitle')"
+              :hint="t('minimal.heroHint')"
+              :suggestions="heroSuggestions"
+              @pick="pickSuggestion"
+            />
+          </div>
         </div>
-        <!-- 空会话引导：与引导页共用同一套 hero 排版（输入卡常驻页脚，不放进这里）。 -->
-        <div v-else class="mx-auto flex h-full w-full max-w-[780px] items-center justify-center px-4 py-16 sm:px-6">
-          <NewChatHero
-            :title="t('minimal.heroTitle')"
-            :hint="t('minimal.heroHint')"
-            :suggestions="heroSuggestions"
-            @pick="pickSuggestion"
-          />
-        </div>
-      </div>
 
-      <!-- 回合级播报（读屏专用，常驻空区）：内容只在起止时更换 -->
-      <p class="sr-only" role="status">{{ turnAnnouncement }}</p>
+        <!-- 上翻阅读时不抢滚动：底部浮出「回到底部」，有新内容时亮一点。 -->
+        <button
+          v-if="!pinnedToBottom"
+          type="button"
+          data-testid="scroll-to-bottom"
+          class="absolute bottom-3 left-1/2 z-10 flex h-8 -translate-x-1/2 cursor-pointer items-center gap-1.5 rounded-full border border-line bg-panel px-3 text-[11.5px] text-dim shadow-[0_4px_14px_rgba(0,0,0,0.12)] transition-colors hover:border-line-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
+          :aria-label="t('chat.scrollToBottom')"
+          :title="t('chat.scrollToBottom')"
+          @click="scrollToBottom"
+        >
+          <Icon name="down" :size="12" />
+          <span class="hidden sm:inline">{{ t("chat.scrollToBottom") }}</span>
+          <span v-if="hasNewWhileAway" class="size-1.5 shrink-0 rounded-full bg-cyan" :aria-label="t('chat.newMessagesWhileAway')" />
+        </button>
+
+        <!-- 回合级播报（读屏专用，常驻空区）：内容只在起止时更换 -->
+        <p class="sr-only" role="status">{{ turnAnnouncement }}</p>
+      </div>
 
       <!-- 顶部一条极淡的上投影替代分隔线：让输入卡从消息流里"浮"起来，而不是靠硬线切开。 -->
       <div class="shrink-0 bg-panel px-4 py-3 sm:px-6">
