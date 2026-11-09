@@ -14,7 +14,6 @@ import { shellCatalog } from "./shell-catalog.js";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { detectPrograms } from "./acp-probe.js";
-import { marketInstall, marketPreview } from "./plugin-market.js";
 import { skillsInstall, skillsUninstall } from "./skills.js";
 import { fetchPage } from "./web-fetch.js";
 import { checkUpdate } from "./update.js";
@@ -399,38 +398,10 @@ HANDLERS.set("plugin_notify", async (args, ctx) => {
   return { sent: true, title: value.title, body: value.body };
 });
 
-HANDLERS.set("plugin_market_catalog", async (args) => {
-  const registryUrl = (args as { registryUrl?: unknown } | null)?.registryUrl;
-  if (typeof registryUrl !== "string") throw new CommandError(400, "缺少参数 registryUrl");
-  const { fetchCatalog } = await import("./plugin-market.js");
-  return fetchCatalog(registryUrl);
-});
-HANDLERS.set("plugin_market_preview", async (args) => {
-  const value = args as { registryUrl?: unknown; pluginId?: unknown } | null;
-  if (typeof value?.registryUrl !== "string" || typeof value?.pluginId !== "string") {
-    throw new CommandError(400, "缺少参数 registryUrl / pluginId");
-  }
-  return marketPreview(value.registryUrl, value.pluginId);
-});
-HANDLERS.set("plugin_market_install", async (args, ctx) => {
-  const value = args as { registryUrl?: unknown; pluginId?: unknown } | null;
-  if (typeof value?.registryUrl !== "string" || typeof value?.pluginId !== "string") {
-    throw new CommandError(400, "缺少参数 registryUrl / pluginId");
-  }
-  return marketInstall({ dataDir: ctx.dataDir }, value.registryUrl, value.pluginId);
-});
 HANDLERS.set("plugin_market_list_installed", async (_args, ctx) => {
   const { listInstalledAt } = await import("./plugin-market.js");
   return listInstalledAt(path.join(ctx.dataDir, "plugins"));
 });
-HANDLERS.set("plugin_market_uninstall", async (args, ctx) => {
-  const pluginId = (args as { pluginId?: unknown } | null)?.pluginId;
-  if (typeof pluginId !== "string") throw new CommandError(400, "缺少参数 pluginId");
-  const { marketUninstall } = await import("./plugin-market.js");
-  marketUninstall(ctx.dataDir, pluginId);
-  return null;
-});
-
 HANDLERS.set("office_convert_info", async () => {
   // soffice 解析顺序：显式配置 → PATH → macOS 应用包（启动后缓存）。
   return discoverSoffice().info();

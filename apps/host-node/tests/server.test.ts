@@ -168,10 +168,10 @@ describe("HTTP 契约", () => {
     expect(response.headers.get("set-cookie")).toBeNull();
   });
 
-  it("/api/commands 返回 189 条，只有已迁移的命令标 available", async () => {
+  it("/api/commands 返回 185 条，只有已迁移的命令标 available", async () => {
     const response = await fetch(`${base}/api/commands`, { headers: { cookie } });
     const list = (await response.json()) as { name: string; available: boolean; desktopOnly: boolean }[];
-    expect(list).toHaveLength(189);
+    expect(list).toHaveLength(185);
     const defaultRoot = list.find((item) => item.name === "store_default_root");
     expect(defaultRoot?.available).toBe(true);
     // 桌面专属命令任何宿主都不可调用。
@@ -914,7 +914,7 @@ describe("HTTP 契约", () => {
     expect((await call("worktree_release", { root: wt.root })).status).toBe(200);
   });
 
-  it("plugin_market_list_installed / uninstall", async () => {
+  it("plugin_market_list_installed：读取插件目录里的已装包", async () => {
     const call = async (command: string, args: unknown) => {
       const response = await fetch(`${base}/api/command`, {
         method: "POST",
@@ -936,11 +936,7 @@ describe("HTTP 契约", () => {
     );
 
     const installed = (await call("plugin_market_list_installed", {})).body as { manifest: { id: string } }[];
-    console.log("PLUGIN_LIST_DEBUG:", JSON.stringify(installed));
     expect(installed.some((pkg) => pkg.manifest.id === "demo.test")).toBe(true);
-
-    expect((await call("plugin_market_uninstall", { pluginId: "demo.test" })).status).toBe(200);
-    expect((await call("plugin_market_list_installed", {})).body).not.toContain(expect.objectContaining({ manifest: { id: "demo.test" } }));
   });
 
   it("db_settings：空库回 null，写入后可读回且类型原样", async () => {

@@ -11,7 +11,7 @@ P0 只做「换后端不换契约」的地基：HTTP 路由、会话/登录、�
 | ----------------------------------------------------------- | ---------------------------------------------------------------------------------- |
 | `GET /api/health`                                           | 已实现，与 Rust 同字段                                                             |
 | `POST /api/login` / `POST /api/logout` / `GET /api/session` | 已实现：cookie + Bearer、argon2 PHC 校验、失败限流 5 次/60s                        |
-| `GET /api/commands`                                         | 已实现：189 条元数据（Rust 导出快照），`available` 标出是否已迁移                  |
+| `GET /api/commands`                                         | 已实现：185 条元数据（Rust 导出快照），`available` 标出是否已迁移                  |
 | `POST /api/command`                                         | 部分：仅 `store_default_root` 已实现；未迁移命令回 501，桌面专属 403，未知命令 400 |
 | `GET /api/events` (WS)                                      | 已实现：`host://hello` + 30s ping                                                  |
 | 静态 SPA                                                    | 已实现：入口 no-cache、`/assets/*` 一年 immutable、越界路径回落入口                |

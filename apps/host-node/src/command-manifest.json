@@ -330,25 +330,7 @@
     "binary": false
   },
   {
-    "name": "plugin_market_catalog",
-    "auth": "required",
-    "desktopOnly": false,
-    "binary": false
-  },
-  {
-    "name": "plugin_market_install",
-    "auth": "required",
-    "desktopOnly": false,
-    "binary": false
-  },
-  {
     "name": "plugin_market_list_installed",
-    "auth": "required",
-    "desktopOnly": false,
-    "binary": false
-  },
-  {
-    "name": "plugin_market_uninstall",
     "auth": "required",
     "desktopOnly": false,
     "binary": false
@@ -381,12 +363,6 @@
     "name": "plugin_notify",
     "auth": "required",
     "desktopOnly": true,
-    "binary": false
-  },
-  {
-    "name": "plugin_market_preview",
-    "auth": "required",
-    "desktopOnly": false,
     "binary": false
   },
   {
