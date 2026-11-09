@@ -63,17 +63,6 @@ class ControlPlaneApiTest {
 			.withEnv("RUSTFS_SECRET_KEY", "greytest-secret")
 			.withExposedPorts(9000);
 
-	static final java.security.KeyPair MARKET_KEYS = generateMarketKeys();
-
-	private static java.security.KeyPair generateMarketKeys() {
-		try {
-			return java.security.KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
-		}
-		catch (Exception ex) {
-			throw new IllegalStateException(ex);
-		}
-	}
-
 	static final com.sun.net.httpserver.HttpServer IDP = startIdp();
 
 	private static com.sun.net.httpserver.HttpServer startIdp() {
@@ -140,12 +129,6 @@ class ControlPlaneApiTest {
 		registry.add("grey.oidc.providers.stub.userinfo-url", () -> idpBase() + "/userinfo");
 		registry.add("grey.oidc.providers.stub.email-field", () -> "email");
 		registry.add("grey.oidc.providers.stub.name-field", () -> "name");
-	}
-
-	@DynamicPropertySource
-	static void marketProperties(DynamicPropertyRegistry registry) {
-		registry.add("grey.market.signing-key", () -> java.util.Base64.getEncoder()
-				.encodeToString(MARKET_KEYS.getPrivate().getEncoded()));
 	}
 
 	@DynamicPropertySource
@@ -643,133 +626,6 @@ class ControlPlaneApiTest {
 		finally {
 			upstream.stop(0);
 		}
-	}
-
-	@Test
-	void marketPublishesSignedRegistryWithRollout() throws Exception {
-		String bearer = "Bearer " + enroll("market@grey.local", "desktop").get("token").asString();
-		String sha = "a".repeat(64);
-		String downloadUrl = "https://github.com/jean3690/greywork-plugin-market/releases/download/v1/demo.zip";
-
-		mockMvc.perform(post("/api/market/packages")
-						.header("Authorization", bearer)
-						.contentType(MediaType.APPLICATION_JSON)
-						.content("""
-								{"slug":"demo.market","name":"Demo Market","author":"jean",
-								 "summary":"演示插件","category":"demo","tags":["a","b"]}
-								"""))
-				.andExpect(status().isCreated())
-				.andExpect(jsonPath("$.status").value("draft"))
-				.andExpect(jsonPath("$.tags.length()").value(2));
-
-		// 宿主侧会拒绝的版本 / 地址：这里也必须拒绝
-		mockMvc.perform(post("/api/market/packages/demo.market/versions")
-						.header("Authorization", bearer)
-						.contentType(MediaType.APPLICATION_JSON)
-						.content("""
-								{"version":"1.0","downloadUrl":"%s","sha256":"%s"}
-								""".formatted(downloadUrl, sha)))
-				.andExpect(status().isBadRequest())
-				.andExpect(jsonPath("$.code").value("market_version_invalid"));
-		mockMvc.perform(post("/api/market/packages/demo.market/versions")
-						.header("Authorization", bearer)
-						.contentType(MediaType.APPLICATION_JSON)
-						.content("""
-								{"version":"1.0.0","downloadUrl":"https://example.com/p.zip","sha256":"%s"}
-								""".formatted(sha)))
-				.andExpect(status().isBadRequest())
-				.andExpect(jsonPath("$.code").value("market_url_host_rejected"));
-
-		mockMvc.perform(post("/api/market/packages/demo.market/versions")
-						.header("Authorization", bearer)
-						.contentType(MediaType.APPLICATION_JSON)
-						.content("""
-								{"version":"1.0.0","downloadUrl":"%s","sha256":"%s","rolloutPercent":100}
-								""".formatted(downloadUrl, sha)))
-				.andExpect(status().isCreated());
-		mockMvc.perform(post("/api/market/packages/demo.market/versions")
-						.header("Authorization", bearer)
-						.contentType(MediaType.APPLICATION_JSON)
-						.content("""
-								{"version":"1.1.0","downloadUrl":"%s","sha256":"%s","rolloutPercent":50}
-								""".formatted(downloadUrl, sha)))
-				.andExpect(status().isCreated())
-				.andExpect(jsonPath("$.channel").value("stable"));
-
-		// 非发布者不能动别人的包
-		mockMvc.perform(post("/api/market/packages/demo.market/versions")
-						.header("Authorization", "Bearer "
-								+ enroll("intruder@grey.local", "desktop").get("token").asString())
-						.contentType(MediaType.APPLICATION_JSON)
-						.content("""
-								{"version":"2.0.0","downloadUrl":"%s","sha256":"%s"}
-								""".formatted(downloadUrl, sha)))
-				.andExpect(status().isForbidden());
-
-		// draft 不上架，搜索不到
-		mockMvc.perform(get("/api/market/packages").param("q", "Demo"))
-				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.total").value(0));
-
-		mockMvc.perform(post("/api/market/packages/demo.market/status")
-						.header("Authorization", bearer)
-						.contentType(MediaType.APPLICATION_JSON)
-						.content("""
-								{"status":"published"}
-								"""))
-				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.status").value("published"));
-
-		mockMvc.perform(get("/api/market/packages").param("q", "Demo"))
-				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.total").value(1))
-				.andExpect(jsonPath("$.items[0].slug").value("demo.market"));
-
-		// 灰度：bucket 0 拿到 1.1.0，bucket 90 退回 1.0.0
-		MvcResult full = mockMvc.perform(get("/api/market/registry.json").param("bucket", "0"))
-				.andExpect(status().isOk())
-				.andExpect(result -> org.assertj.core.api.Assertions
-						.assertThat(result.getResponse().getContentType())
-						.contains("application/json"))
-				.andReturn();
-		String body = full.getResponse().getContentAsString();
-		// signature 是最后一个字段，被签的消息还要带上根对象的右花括号
-		String unsigned = body.substring(0, body.indexOf(",\"signature\":\"")) + "}";
-		assertThat(unsigned).isEqualTo("{\"schemaVersion\":1,\"plugins\":[{\"id\":\"demo.market\","
-				+ "\"name\":\"Demo Market\",\"version\":\"1.1.0\","
-				+ "\"description\":\"演示插件\",\"author\":\"jean\","
-				+ "\"downloadUrl\":\"" + downloadUrl + "\",\"sha256\":\"" + sha + "\"}]}");
-
-		// 签名必须能用公钥验过（等价于宿主侧 ed25519 校验）
-		String signature = body.substring(body.indexOf(",\"signature\":\"")
-				+ ",\"signature\":\"".length(), body.length() - 2);
-		java.security.Signature verifier = java.security.Signature.getInstance("Ed25519");
-		verifier.initVerify(MARKET_KEYS.getPublic());
-		verifier.update(unsigned.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-		assertThat(verifier.verify(java.util.Base64.getDecoder().decode(signature))).isTrue();
-
-		mockMvc.perform(get("/api/market/registry.json").param("bucket", "90"))
-				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.plugins[0].version").value("1.0.0"));
-
-		// ETag 命中返回 304
-		String etag = full.getResponse().getHeader("ETag");
-		mockMvc.perform(get("/api/market/registry.json").param("bucket", "0")
-						.header("If-None-Match", etag))
-				.andExpect(status().isNotModified());
-		mockMvc.perform(get("/api/market/registry.json").param("bucket", "90"))
-				.andExpect(result -> org.assertj.core.api.Assertions.assertThat(result.getResponse().getHeader("ETag"))
-						.isNotEqualTo(etag));
-
-		// 下载走 302 并计数
-		mockMvc.perform(get("/api/market/download/demo.market/1.0.0"))
-				.andExpect(status().isFound())
-				.andExpect(result -> org.assertj.core.api.Assertions.assertThat(
-						result.getResponse().getHeader("Location")).isEqualTo(downloadUrl));
-		mockMvc.perform(get("/api/market/packages/demo.market"))
-				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.versions[?(@.version=='1.0.0')].downloads").value(
-						org.hamcrest.Matchers.contains(1)));
 	}
 
 	@Test

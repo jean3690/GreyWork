@@ -7,7 +7,7 @@ Spring Boot 4 + MyBatis-Plus + MySQL + Redis 的**单用户自托管控制面**�
 | --------------- | ---------- | -------------------------------------------------------------------------- |
 | `apps/electron` | TypeScript | 桌面壳                                                                     |
 | `apps/server`   | Rust       | 本地 / headless 宿主（命令面、ACP、工作区）                                |
-| `back/grey`     | Java       | **控制面**：账号与设备、通道绑定、模型网关、存储、自动化、插件市场、运维台 |
+| `back/grey`     | Java       | **控制面**：账号与设备、通道绑定、模型网关、存储、自动化、运维台           |
 
 ## 快速开始
 
@@ -66,7 +66,7 @@ java -jar target/grey-0.0.1-SNAPSHOT.jar
 ```
 
 - `ControlPlaneApiTest` 用 Testcontainers 起 MySQL 8.4 / Redis 7 / RustFS，覆盖认证、同步、
-  宿主、通道、模型网关、市场、存储、自动化、运维面（含密码登录、概览、资源门禁）。
+  宿主、通道、模型网关、存储、自动化、运维面（含密码登录、概览、资源门禁）。
   首次运行需要拉镜像，之后走本地缓存。
 - `Cron5Test` 是纯单元测试。
 - 只想跑运维面相关：`./mvnw -Dtest=ControlPlaneApiTest test`。
@@ -101,7 +101,7 @@ Flyway，脚本在 `src/main/resources/db/migration/V1 ... V11`，启动时自�
 - 认证：`Authorization: Bearer <token>`；`/api/admin/**` 需要 `ROLE_ADMIN`。
 - 错误统一为 `{ "code": "snake_case", "message": "中文说明" }`，校验失败额外带 `fields`。
 - 时间字段是服务端时区的 ISO-8601（`LocalDateTime`），前端只负责格式化。
-- 模块：`auth` / `account` / `host` / `channel` / `llm` / `market` / `automation` / `storage` / `sync` / `admin`。
+- 模块：`auth` / `account` / `host` / `channel` / `llm` / `automation` / `storage` / `sync` / `admin`。
 - 按模块的路径与参数速查：[docs/control-plane-api.md](../../docs/control-plane-api.md)。
 
 ## 目录
@@ -114,7 +114,6 @@ src/main/java/com/jean/grey/
 ├── host/          # 宿主注册与心跳
 ├── channel/       # IM 通道绑定与 webhook 入站
 ├── llm/           # 供应商 key、网关、用量与配额
-├── market/        # 插件市场包 / 版本 / 下载
 ├── automation/    # cron 任务、队列、运行记录
 ├── storage/       # S3 预签名上传下载
 ├── sync/          # 多端增量同步

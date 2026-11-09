@@ -12,8 +12,7 @@
 - 错误体：`{ "code": "snake_case", "message": "中文说明" }`；参数校验失败额外带 `fields`。
 - 时间字段：服务端时区的 ISO-8601（`LocalDateTime`），不做 UTC 标记。
 - 匿名可访问：`POST /api/auth/enroll`、`/api/auth/oidc/**`、`POST /api/channels/webhook/*`、
-  `GET /api/market/packages|packages/{slug}|registry.json|download/**`、`/actuator/health`、
-  `POST /api/admin/auth/login`、`/admin/**`（页面本身）。
+  `/actuator/health`、`POST /api/admin/auth/login`、`/admin/**`（页面本身）。
 
 ## 认证与设备
 
@@ -76,21 +75,6 @@
 
 供应商枚举：`openai / anthropic / deepseek / moonshot / qwen / zhipu / ollama / custom`。
 未配置 `GREY_MASTER_KEY` 时存取 key 的接口回 `503 master_key_missing`。
-
-## 插件市场
-
-| 方法 | 路径                                               | 认证 | 说明                                       |
-| ---- | -------------------------------------------------- | ---- | ------------------------------------------ |
-| GET  | `/api/market/packages?q=&category=&page=&size=`    | 匿名 | 搜索已发布包                               |
-| GET  | `/api/market/packages/{slug}`                      | 匿名 | 包详情 + 版本列表                          |
-| POST | `/api/market/packages`                             | 是   | 建包（`slug/name/author/summary/...`）     |
-| POST | `/api/market/packages/{slug}/versions`             | 是   | 发布版本（version/downloadUrl/sha256/...） |
-| POST | `/api/market/packages/{slug}/versions/{v}/rollout` | 是   | `{ percent }` 灰度                         |
-| POST | `/api/market/packages/{slug}/status`               | 是   | `{ status }` 上下架                        |
-| GET  | `/api/market/registry.json?bucket=&channel=`       | 匿名 | 宿主消费的注册表（ETag / 304）             |
-| GET  | `/api/market/download/{slug}/{version}`            | 匿名 | 302 到下载地址                             |
-
-写入端点只允许包的所有者（`owner_user_id`）操作。
 
 ## 自动化
 
