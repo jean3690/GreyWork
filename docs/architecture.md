@@ -7,15 +7,13 @@ GreyWork is a monorepo implementing a desktop-first AI agent application. It use
 ```
 greyWork/
 ├── apps/
-│   ├── desktop/              # Desktop renderer SPA (Vite + Vue), served by the Electron shell / server
+│   ├── desktop/              # Desktop renderer SPA (Vite + Vue), served by the Electron shell / host
 │   ├── web/                  # Browser front: same workbench, narrower FrontSpec
 │   ├── electron/             # Electron shell: main process + preload + sidecar orchestration
-│   ├── server/               # Headless axum server: HTTP command endpoint + WS events + login
+│   ├── host-node/            # Headless Node host: HTTP command endpoint + WS events + login
 │   └── admin/                # Admin console SPA for the Java control plane (standalone, no workbench)
 ├── back/
 │   └── grey/                 # Java control plane (Spring Boot 4 + MyBatis-Plus + MySQL + Redis)
-├── crates/
-│   └── greywork-host/        # Shared domain logic (host-transport-free) used by every host
 ├── packages/
 │   ├── core/                 # Shared types & math (no deps)
 │   ├── editor/               # File system, Git, CodeMirror abstractions
@@ -23,6 +21,8 @@ greyWork/
 │   ├── llm/                  # LLM provider clients (OpenAI-compatible stream → IPC)
 │   ├── acp/                  # Agent Client Protocol client (host commands + WebSocket)
 │   ├── shell/                # Provider registry & transport data plane
+│   ├── host-ipc/             # Host command bridge (invoke / clipboard / window façade)
+│   ├── plugin-types/         # Author-facing plugin typings (manifest / worker / render)
 │   ├── plugins/              # Skill source adapters + plugin package types
 │   ├── cowork/               # Co-operative workspace engine
 │   ├── vite-config/          # Shared Vite config factory (base / pdf.js assets / dev proxy)
@@ -30,27 +30,26 @@ greyWork/
 └── .agents/skills/           # Installed agent skills (read natively by the ACP agent)
 ```
 
-There is no lockfile for skills: the host is only an installer (`services/skills_market.rs` writes a
-snapshot into `<workspace>/.agents/skills/<id>/`), and the ACP agent picks the directory up at its
-next session. Installed-from-market records are tracked renderer-side in `localStorage`.
+There is no lockfile for skills: the host is only an installer. `apps/host-node/src/skills.ts` writes
+each skill into `<workspace>/.agents/skills/<id>/` (two-phase: validate the whole snapshot, then
+commit) and the ACP agent picks the directory up at its next session. Installed records are tracked
+renderer-side in `localStorage`.
 
-Skills come from two places, both landing in the same directory:
+Skills come from a registry and from files the renderer already holds:
 
-- **Market** (`services/skills_market.rs`) — search/download from skills.sh through the host (the renderer
-  never reaches the market directly).
-- **Bundled** (`services/bundled_skills.rs`) — content compiled into the host binary with `include_str!`, so
-  installing one needs no network and no configured source. `skills_bundled_list` serves the
-  catalogue, `skills_install_bundled` resolves the files by id.
+- **Registry** — `skills_search` / `skills_download` (handlers in `apps/host-node/src/commands.ts`)
+  query the skills service (`https://greywork-skills.pages.dev` by default, overridable per call);
+  the renderer never reaches it directly.
+- **Local install** — the renderer hands files to `skills_install`, which applies the snapshot rules
+  in `skills.ts`: path sanitising, file-count and per-file size caps.
 
-Both write through `skills_market::write_skill_snapshot`, which is the single place that decides
-what a skill directory may contain (path sanitising, file-count and per-file size caps). The first
-bundled skill is `ffmpeg-media`, a driver for the `ffmpeg` CLI: the host ships the instructions, the
-agent runs the tool, and the artefacts land in the workspace where the preview viewers pick them up.
+`skills_bundled_list` currently returns an empty catalogue and `skills_install_bundled` throws: the
+Rust host's compiled-in bundle (the `ffmpeg-media` driver) was not ported.
 
 **Skills in isolated runs.** A `worktree` run provisions an isolated snapshot, which — for a git
 source — only contains **committed** files, so uncommitted `.agents/skills` would not reach the
 agent. `worktree_provision` therefore carries the source's `.agents/skills` into the snapshot
-(`infra/worktree/skills.rs`): each entry is symlinked (a directory the agent reads, not code the
+(`apps/host-node/src/worktree.ts`): each entry is symlinked (a directory the agent reads, not code the
 host runs), guarded like `.agents/linked` — the entry must be a safe relative path and, in a git
 source, git-ignored (so the link does not pollute the agent's change view). The renderer passes an
 optional `skills` filter so a cowork run can bring only the teammates-selected subset (`None` =
@@ -60,11 +59,12 @@ directory as the workspace and the skills are visible as-is.
 ## MCP servers
 
 MCP servers are declared per session: the renderer passes the enabled set (or a run-level subset)
-to `acp_new_session` / `acp_load_session`, and the host filters it by the agent's declared
-`mcpCapabilities` (`services/acp_host/session.rs`) before forwarding it in `session/new.mcp_servers`.
-The agent connects to them and merges their tools — the host never proxies tool calls. Skipped
-servers (e.g. an `http` server on an agent that only supports `stdio`) come back as
-`skippedMcpServers` so the UI can say why.
+to `acp_new_session` / `acp_load_session`; on the direct ACP transport they go straight into
+`session/new.mcp_servers` (`packages/acp/src/client.ts`). The host-managed path
+(`apps/host-node/src/acp.ts`) still opens sessions with an empty list — the Rust-era capability
+filtering (`mcpCapabilities`) and `skippedMcpServers` reporting were not ported, so an agent driven
+through the host sees no declared MCP servers yet. The agent connects to whatever it receives and
+merges the tools; the host never proxies tool calls.
 
 ## ACP session lifecycle
 
@@ -103,11 +103,11 @@ bounded fallback (size cap + 2s timer) that hands orphaned traffic back to the m
 never silently dropped.
 
 Cancelling one child reuses ACP `session/cancel` targeted at the child's session id — a new host
-command `acp_cancel_session` (it does not reap the process). Note the pinned Rust SDK
-(`agent-client-protocol-schema` 1.9.1) does not yet model the draft subagent variants, so the
-host currently drops `subagent_update` (non-fatally — the connection and turn survive, and
-child-session chunks still arrive); the renderer path is forward-compatible and activates once the
-SDK carries the variants.
+command `acp_cancel_session` (it does not reap the process). Note the host's agent→host router
+(`apps/host-node/src/acp.ts::onAgentMessage`) only classifies `session/update` and
+`session/request_permission`, so a standalone `subagent_update` notification is dropped
+(non-fatally — the connection and turn survive, and child-session chunks still arrive); the renderer
+path is forward-compatible and activates once the host forwards the method.
 
 ## Dependency Direction
 
@@ -123,7 +123,7 @@ acp         ← core
 cowork      ← core
 plugins     ← core
 workbench   ← agents, editor, llm, acp, shell, plugins, coop, core
-apps/*      ← workbench (desktop / web = frontends; electron = shell; server = Rust host)
+apps/*      ← workbench (desktop / web = frontends; electron = shell; host-node = Node host)
 apps/admin  ← 独立依赖（vue / vue-router / pinia / element-plus），刻意不依赖 workbench
 back/grey   ← 独立 JVM 服务，不在 pnpm 依赖图里
 ```
@@ -135,18 +135,18 @@ back/grey   ← 独立 JVM 服务，不在 pnpm 依赖图里
 
 ### Package Descriptions
 
-| Package                 | Purpose                                                                                                                                                                                                                                                                                         |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@greywork/core`        | Shared TypeScript types (vectors, bounding boxes, version info) and math utilities (clamp, lerp, vector ops). Leaf-level.                                                                                                                                                                       |
+| Package                 | Purpose                                                                                                                                                                                                                                                                             |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@greywork/core`        | Shared TypeScript types (vectors, bounding boxes, version info) and math utilities (clamp, lerp, vector ops). Leaf-level.                                                                                                                                                           |
 | `@greywork/editor`      | File system, Git, and CodeMirror abstractions. The memory-backed mocks ship for browser/unit contexts; the real Git service talks to the host's `git_*` commands (implemented in `apps/host-node/src/git.ts`), which run the git CLI strictly inside the authorized workspace root. |
-| `@greywork/agents`      | AI agent domain: role definitions, state machine, event model, task orchestration pipeline.                                                                                                                                                                                                     |
-| `@greywork/llm`         | LLM provider clients using OpenAI-compatible streaming protocol. Bridges to the host's `llm_*` commands for the Rust `LlmHost` backend.                                                                                                                                                         |
-| `@greywork/acp`         | Agent Client Protocol client — session transport (host commands and WebSocket), permission mapping, event model.                                                                                                                                                                                |
-| `@greywork/shell`       | Provider registry and desktop communication data plane. Contains ACP agent backend presets and model provider enums.                                                                                                                                                                            |
-| `@greywork/plugins`     | Plugin market source adapters (skills.sh registry search/download) and AI command strategy types.                                                                                                                                                                                               |
-| `@greywork/cowork`      | Co-operative workspace engine for collaborative sessions.                                                                                                                                                                                                                                       |
-| `@greywork/workbench`   | Complete shared UI package used by every frontend. Exports the `FrontSpec` contract, router factory, stores, i18n, theme, plugin runtime (Cordis micro-kernel) and all views.                                                                                                                   |
-| `@greywork/vite-config` | Single Vite config factory for all frontends: rxjs entry alias, pdf.js runtime assets, syntax floor, dev proxy and the shared `public/` directory. Apps only declare `base`, `outDir`, `devPort` and whether they emit root-level shared assets.                                                |
+| `@greywork/agents`      | AI agent domain: role definitions, state machine, event model, task orchestration pipeline.                                                                                                                                                                                         |
+| `@greywork/llm`         | LLM provider clients using OpenAI-compatible streaming protocol. Bridges to the host's `llm_*` commands (`apps/host-node/src/llm.ts` / `llm-agent.ts`).                                                                                                                             |
+| `@greywork/acp`         | Agent Client Protocol client — session transport (host commands and WebSocket), permission mapping, event model.                                                                                                                                                                    |
+| `@greywork/shell`       | Provider registry and desktop communication data plane. Contains ACP agent backend presets and model provider enums.                                                                                                                                                                |
+| `@greywork/plugins`     | Skill source adapters (registry search/download) and AI command strategy types.                                                                                                                                                                                                     |
+| `@greywork/cowork`      | Co-operative workspace engine for collaborative sessions.                                                                                                                                                                                                                           |
+| `@greywork/workbench`   | Complete shared UI package used by every frontend. Exports the `FrontSpec` contract, router factory, stores, i18n, theme, plugin runtime (Cordis micro-kernel) and all views.                                                                                                       |
+| `@greywork/vite-config` | Single Vite config factory for all frontends: rxjs entry alias, pdf.js runtime assets, syntax floor, dev proxy and the shared `public/` directory. Apps only declare `base`, `outDir`, `devPort` and whether they emit root-level shared assets.                                    |
 
 ## Frontends (`apps/desktop` / `apps/web`)
 
@@ -204,7 +204,7 @@ The control plane is intentionally a **separate stack** from the desktop product
 - **Separate auth surface.** The console logs in with an admin-only email + password
   (`app_user.password_hash`, bcrypt); normal clients still use one-time enrollment codes or OIDC.
   All data endpoints stay behind `ROLE_ADMIN` and mutations are written to `audit_log`.
-- **Deployment shape.** Java service (JRE 25 + MySQL + Redis) next to — not inside — the Rust host.
+- **Deployment shape.** Java service (JRE 25 + MySQL + Redis) next to — not inside — the Node host.
   Env vars, endpoints and troubleshooting live in
   [control-plane-auth.md](control-plane-auth.md); frontend conventions in
   [apps/admin/README.md](../apps/admin/README.md).
@@ -238,9 +238,10 @@ The control plane is intentionally a **separate stack** from the desktop product
 
 ## Headless Host (`apps/host-node`)
 
-A single-user, self-hosted web host for GreyWork. It reuses **all** of `greywork-host`'s domain
-logic and adds only the host shell: HTTP transport, WebSocket event delivery, built-in login, and
-the server-side security policy. It carries no GUI-toolkit dependency.
+A single-user, self-hosted web host for GreyWork, and the only host implementation — the former Rust
+`greywork-host` domain logic was ported module by module (see `docs/node-backend-migration.md`). The
+Node host adds the HTTP/WS shell, built-in login and the server-side security policy; it carries no
+GUI-toolkit dependency.
 
 ### Reuse boundary
 
@@ -253,22 +254,19 @@ process instead — the mirror list in `apps/electron/src/shared/desktop-only.ts
 
 ### Configuration
 
-Loaded as `defaults → <data_dir>/server.json → GREYWORK_* env vars` (env wins). Fields: `bind`,
-`data_dir`, `home_dir`, `session_ttl_secs`, `password_hash` / `password`, `agent_programs`,
-`workspace_roots`, `tier`, `secure_cookie`, `allowed_origins`,
-`frame_origins` (`GREYWORK_FRAME_ORIGINS`, see [Security headers](#security-headers)),
-`automation_host_primary` (`GREYWORK_AUTOMATION_HOST_PRIMARY`, see
-[Automations](#automations)), `static_dir` (`GREYWORK_STATIC_DIR`, see
-[Static hosting](#static-hosting-spa)), `soffice_path` (`GREYWORK_SOFFICE_PATH`, see
-[Office preview](#office-preview-native-vs-high-fidelity-libreoffice)).
+Loaded from defaults plus `GREYWORK_*` env vars — there is no config file. Fields (`HostConfig` in
+`apps/host-node/src/config.ts`): `GREYWORK_BIND` (`host:port`), `GREYWORK_DATA_DIR`,
+`GREYWORK_STATIC_DIR` (see [Static hosting](#static-hosting-spa)), password hash / password, session
+TTL, `GREYWORK_SECURE_COOKIE`, `GREYWORK_TRUSTED_HOST`, `GREYWORK_ALLOWED_ORIGINS`,
+`GREYWORK_WORKSPACE_ROOTS`, `GREYWORK_AGENT_PROGRAMS` and `GREYWORK_EXIT_ON_STDIN_EOF`.
 
 Password bootstrap, in priority order:
 
 1. `GREYWORK_PASSWORD_HASH` — an argon2 PHC string.
-2. `<data_dir>/auth.json` (mode 0600).
-3. `GREYWORK_PASSWORD` — plaintext, hashed in memory at startup (dev convenience).
-4. Otherwise a random password is generated, written to `auth.json` (0600), and printed **once** to
-   stderr.
+2. `GREYWORK_PASSWORD` — plaintext, hashed in memory at startup (dev convenience).
+3. Otherwise login is fail-closed: every attempt is rejected and the host prints a warning at
+   startup. (The Rust host generated and persisted a random password in `auth.json`; the Node host
+   deliberately does not.)
 
 `host-node hash-password` prints an argon2 PHC string from stdin.
 
@@ -297,7 +295,7 @@ cooldown → `429`). CSRF rests on `SameSite=Strict` plus an optional `allowed_o
 Successful `/api/command` responses carry the command's return value directly (JSON, or raw bytes
 for the two `binary` commands with `Content-Type: application/octet-stream`). Failures are a
 non-2xx status plus `{"error": "..."}`. Request bodies are capped at 32 MB (session snapshots and
-base64 attachments exceed axum's 2 MB default). The WebSocket carries the same event names the
+base64 attachments exceed the 2 MB default most body parsers apply). The WebSocket carries the same event names the
 desktop renderer listens for (`acp://event`, `llm://event`, `automation://due`,
 `<channel>://state` / `<channel>://inbound`, …); `notify` becomes a `host://notify` event. Events
 are best-effort — a lagging subscriber skips old events, never replays them.
@@ -322,34 +320,32 @@ Design notes:
 - **No SPA catch-all.** The frontend uses hash routing (`createWebHashHistory`), so deep links
   resolve client-side and `/` is the only HTML route the server must serve. A catch-all would turn
   mistyped asset paths into `200` + `index.html`, polluting caches and hiding errors.
-- **Static routes are unauthenticated by construction** — auth is a per-handler extractor and the
-  static routes don't use it (the login page must load before login).
-- **Compression only on the static sub-router** (`tower_http::CompressionLayer`, gzip/brotli).
-  API responses — including 32 MB binary reads — are never compressed. This is why `tower-http`
-  entered the dependency tree; CORS is still deliberately absent (same-origin deployment).
-- **Cache-Control interaction.** The global `security_headers` middleware applies its `no-store`
-  default via `or_insert`, so the per-path static cache policies above survive; `/api/*` responses
-  set no cache header of their own and still get `no-store` — command results may contain file
-  contents and credentials.
+- **Static routes are unauthenticated by construction** — auth is checked per API handler, and the
+  static routes never call it (the login page must load before login).
+- **No static compression.** The Node host streams files as-is — there is no gzip / brotli layer, so
+  hashed bundles ship uncompressed. API responses (including 32 MB binary reads) are never
+  compressed either, and CORS stays deliberately absent (same-origin deployment).
+- **Cache-Control interaction.** Static responses set their own per-path policy (`static-site.ts`);
+  API responses always send `no-store` — command results may contain file contents and credentials.
 
 ### Security headers
 
-Every response (API and static alike) carries a fixed set of headers from `middleware::security_headers`.
-The CSP is computed once at router-assembly time from the config, not per response:
+Every response (API and static alike) carries a fixed set of headers from `securityHeaders()` in
+`apps/host-node/src/server.ts`, computed once from the config at startup:
 
-| Header                      | Value                                                               | Why                                                                                                                                             |
-| --------------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Content-Security-Policy`   | a strict same-origin policy (see the directives in `middleware.rs`) | the desktop shell loads the same served SPA and inherits this policy — there is deliberately no second, shell-specific CSP                      |
-| `X-Frame-Options`           | `DENY`                                                              | clickjacking guard for older browsers (`frame-ancestors 'none'` covers modern ones)                                                             |
-| `Referrer-Policy`           | `no-referrer`                                                       | never leak the self-hosted URL/paths to outbound links                                                                                          |
-| `Permissions-Policy`        | `camera=(), microphone=(), …` (omits `clipboard-*`)                 | the UI uses `navigator.clipboard` for its copy buttons, so `clipboard-*` is deliberately left unset; everything else is unused and denied       |
-| `X-Content-Type-Options`    | `nosniff`                                                           | don't let the browser sniff JSON/binary into an executable type                                                                                 |
-| `Strict-Transport-Security` | `max-age=31536000; includeSubDomains`                               | **only when `secure_cookie` is set** — that flag is the "behind a TLS proxy" signal; over plain HTTP HSTS is meaningless and can lock users out |
+| Header                      | Value                                                                 | Why                                                                                                                                             |
+| --------------------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Content-Security-Policy`   | a strict same-origin policy (the fixed directive list in `server.ts`) | the desktop shell loads the same served SPA and inherits this policy — there is deliberately no second, shell-specific CSP                      |
+| `X-Frame-Options`           | `DENY`                                                                | clickjacking guard for older browsers (`frame-ancestors 'none'` covers modern ones)                                                             |
+| `Referrer-Policy`           | `no-referrer`                                                         | never leak the self-hosted URL/paths to outbound links                                                                                          |
+| `Permissions-Policy`        | `camera=(), microphone=(), geolocation=()` (omits `clipboard-*`)      | the UI uses `navigator.clipboard` for its copy buttons, so `clipboard-*` is deliberately left unset; everything else is unused and denied       |
+| `X-Content-Type-Options`    | `nosniff`                                                             | don't let the browser sniff JSON/binary into an executable type                                                                                 |
+| `Strict-Transport-Security` | `max-age=31536000`                                                    | **only when `secure_cookie` is set** — that flag is the "behind a TLS proxy" signal; over plain HTTP HSTS is meaningless and can lock users out |
 
-`GREYWORK_FRAME_ORIGINS` appends a `frame-src` allow-list for cloud Office viewers. Origins are
-normalized by the shared `greywork_host::csp::normalize_frame_origin` (both the server policy and
-the host-fact query need the same form); anything that could rewrite the policy (whitespace,
-quotes, semicolons) is dropped and named in the startup log.
+There is no `GREYWORK_FRAME_ORIGINS` knob in the Node host: its CSP is same-origin only. Cloud Office
+viewers are embedded by the desktop shell, whose static CSP allow-lists the vendor document domains
+(`apps/host-node/src/office.ts`); extending the headless policy is tracked by the CSP TODO in
+`server.ts`.
 
 The server does **not** add request timeouts or concurrency limits: `acp_start`, LLM streaming,
 large `web_fetch`, and 32 MB binary reads legitimately run for minutes, and long-lived WebSockets
@@ -388,10 +384,12 @@ deployment guide, volume layout, password strategies, and the full capability tr
 The **authentication boundary is the security boundary**: a valid session can spawn agent
 processes, so the controls below limit what the _web UI_ can be tricked into doing.
 
-- **Frozen agent allow-list.** `acp_start` resolves its extra allowed programs from the server
-  config (`agent_programs`), never from `db.enabled_agent_programs()` — that table is client-writable
-  and would otherwise let a request widen the spawn surface. `db_agents_sync` is rejected outright
-  (`403`).
+- **Frozen agent allow-list.** On a network-exposed (untrusted) host, `acp_start` resolves its
+  extra allowed programs only from the server config (`GREYWORK_AGENT_PROGRAMS`), never from
+  `db.enabled_agent_programs()` — that table is client-writable and would otherwise let a request
+  widen the spawn surface. `db_agents_sync` is rejected outright (`403`). A trusted local host
+  (`GREYWORK_TRUSTED_HOST=1`, i.e. the Electron sidecar) additionally merges the enabled agent
+  provider programs from the DB, since the UI there is the operator's own desktop.
 - **Tier clamping.** The server overwrites the caller-supplied `tier` argument on `acp_start`
   (and pins it on `acp_set_permission_tier`) with the configured value, so a remote caller cannot
   request `tier="full"`. The default tier is `read-only` (fail-closed).
@@ -405,29 +403,25 @@ executors, and `acp_start`'s `env` argument is caller-controlled.
 
 ## CI/CD
 
-GitHub Actions workflows live in `.github/workflows/` and share two composite actions
-(`.github/actions/setup-node`, `.github/actions/setup-rust`) so the toolchain/cache policy has a
-single home.
+GitHub Actions workflows live in `.github/workflows/` and share one composite action
+(`.github/actions/setup-node`) so the Node/pnpm/cache policy has a single home.
 
 `ci.yml` runs on push to `master`/`main` and on every PR:
 
-1. **Lint / Typecheck / Test / Build (renderer)** — four parallel jobs. They mirror the pre-push
-   hook; running them concurrently keeps the wall clock at the slowest job instead of the sum. Each
-   job installs the pnpm store from cache (~20-40s).
-2. **Electron Bundle** — three-platform matrix that builds the sidecar binary, the renderer SPA and
-   the shell (`pnpm electron:prep`), then packages an unpacked app with electron-builder. Actual
-   installers are produced by `release.yml` (see below).
-3. **Host tests** — `pnpm --filter @greywork/host-node test` (52 vitest cases, incl. the ACP
-   end-to-end and the sheet parser against the calamine fixture). The pre-push hook
-   runs the same three commands when a push touches Rust files.
-4. **Electron bundle** — `pnpm electron:prep` (bundled runtimes + desktop SPA + host-node build +
-   shell build) and an unpacked `electron-builder` pass on all three platforms.
+1. **Lint / Typecheck / Test / Build (renderer)** — four parallel jobs mirroring the pre-push hook;
+   running them concurrently keeps the wall clock at the slowest job instead of the sum. The build
+   job also runs `scripts/front-bundle-guard.mjs` against the emitted bundles.
+2. **Renderer smoke (e2e)** — installs headless Chromium and drives the web and desktop preview
+   chains (`pnpm --filter @greywork/web e2e`, `pnpm --filter @greywork/desktop e2e`).
+3. **Electron Bundle** — three-platform matrix that builds the bundled runtimes, the host, the
+   renderer SPA and the shell (`pnpm electron:prep`), runs the shell unit tests, then packages an
+   unpacked app with electron-builder. Actual installers are produced by `release.yml` (see below).
 
-Caches: pnpm store via the setup-node composite; bundled runtimes keyed on
+Host tests run inside `pnpm -r test` (including the ACP round trip and the sheet parser against a
+legacy `.xls` fixture).
+
+Caches: pnpm store via the `setup-node` composite; bundled runtimes keyed on
 `scripts/runtime-versions.json`.
-budget is 10 GB per repository, and per-PR copies of the ~600 MB dependency cache evict the `master`
-entries, turning the next build into a full dependency recompile. The first run after a change to
-`Cargo.lock`, `RUSTFLAGS`, or a job's cache key is a cold build by design.
 
 `release.yml` runs on `v*` tags: a first job extracts the release notes from `CHANGELOG.md` and
 creates a draft Release, then a three-platform matrix builds the Electron installers (AppImage /
@@ -440,33 +434,33 @@ files, server/host/renderer sources, lockfiles) so it neither runs on unrelated 
 starts it with a known password, polls `/api/health`, and asserts that `/` really serves the SPA
 (`<div id="app">`) and that the CSP header is present — a plain health check would pass on an image
 whose UI 404s. It does **not** use BuildKit's `type=gha` cache: the repository's 10 GB cache budget is
-already saturated by the Rust dependency caches.
+shared with the Electron / bundled-runtime caches.
 
-## Native model agent loop (`services::llm::agent`)
+## Native model agent loop (`apps/host-node/src/llm-agent.ts`)
 
-Three conversation paths share one OpenAI-compatible transport (`services::llm::transport`) and
+Three conversation paths share one OpenAI-compatible transport (`apps/host-node/src/llm.ts`) and
 differ only in what they declare to the model:
 
-| Path             | Entry             | Tools                                | Where the loop lives                  |
-| ---------------- | ----------------- | ------------------------------------ | ------------------------------------- |
-| Single-turn chat | `llm_chat_start`  | none                                 | one request                           |
-| **Native agent** | `llm_agent_start` | `read_file` / `list_dir` / `git_log` | host (`services::llm::agent::runner`) |
-| ACP agent        | `acp_send`        | whatever the external agent declares | external process                      |
+| Path             | Entry             | Tools                                | Where the loop lives                     |
+| ---------------- | ----------------- | ------------------------------------ | ---------------------------------------- |
+| Single-turn chat | `llm_chat_start`  | none                                 | one request                              |
+| **Native agent** | `llm_agent_start` | `read_file` / `list_dir` / `git_log` | host (`apps/host-node/src/llm-agent.ts`) |
+| ACP agent        | `acp_send`        | whatever the external agent declares | external process                         |
 
 ### Why the loop runs in the host
 
 The tool surface is read-only, so every call is auto-approved under all three permission tiers —
 no interactive confirmation branch exists. That is what lets the loop live in the host: the
-renderer, the remote-assistant pipeline (`stores/remote-assistant/pipeline.ts`) and the automation
-queue's host fallback (`services/host_exec.rs`) all reuse one implementation, and aborting is
-`JoinHandle::abort()` exactly as in `llm_chat_stop`.
+renderer and the remote-assistant pipeline (`stores/remote-assistant/pipeline.ts`) drive the same
+`llm_agent_start` command, and aborting is `AbortController.abort()` exactly as in `llm_chat_stop`.
 
 ### Trust boundary
 
 Tools execute **inside GreyWork, inside its own authorization surface** — `read_file` /
-`list_dir` call the same `workspace_fs` functions as the `fs_read_text_file` / `fs_list_dir`
-commands, and `git_log` calls the same `git_log`. There is deliberately **no second allow-list**:
-a path outside the authorized roots fails in `resolve_existing`, which canonicalizes _before_
+`list_dir` go through the same `workspace-access.ts` resolution as the `fs_read_text_file` /
+`fs_list_dir` commands, and `git_log` calls the same `git_log`. There is deliberately **no second
+allow-list**:
+a path outside the authorized roots fails in `resolveExisting`, which canonicalizes _before_
 checking, so `../` escapes and symlinks are rejected too.
 
 This is a different trust relationship than "mounting these capabilities as MCP tools for an
@@ -551,7 +545,7 @@ Office documents have **two** rendering paths, chosen per tab by a viewer-level 
   in-house OOXML parsers. They re-flow to panel width and support in-place text editing, but have
   known fidelity gaps (headers/footers, columns, page breaks, footnotes, fields, floating objects).
 - **High-fidelity (PDF)**: the host runs LibreOffice headless (`soffice --convert-to pdf`, service in
-  `crates/greywork-host/src/services/office/convert.rs`) and the renderer feeds the bytes to the
+  `apps/host-node/src/office.ts`) and the renderer feeds the bytes to the
   existing `PdfViewer`. This closes the fidelity gaps but is read-only.
 
 **Priority** in `PreviewSurface.vue`: a configured cloud Office provider wins (user opted into a
@@ -575,11 +569,12 @@ no error anywhere.
 So both hosts stream: the server exposes `GET /api/media?path=…` with **HTTP Range** support
 (served by the host's static/media route), serving 1 MB chunks. The slice logic
 (`readMediaSlice`, which also owns the MIME table) authorizes through
-`WorkspaceFsAccess::resolve_existing` — the _same_ check `fs_read_media` uses, so there is no second
+`WorkspaceAccess.resolveExisting` (`apps/host-node/src/workspace-access.ts`) — the _same_ check
+`fs_read_media` uses, so there is no second
 allow-list to keep in sync. `packages/host-ipc/src/media.ts` returns that same-origin address in
 server mode (which is what the Electron shell runs), so `lib/preview-content.ts`
 (`resolvePreviewMedia`) gets a stream everywhere a host exists and only browser-preview mode falls
-back to bytes. The server CSP already allows `media-src 'self'`.
+back to bytes. Same-origin media is covered by `default-src 'self'` in the host CSP.
 
 ### 3D and GIS: container before content
 
@@ -620,7 +615,7 @@ to `raw`: binary decoded as UTF-8 is mojibake with no error.
 
 ## Design Principles
 
-- **Thin Rust, Fat TypeScript**: UI and orchestration logic live in TS; Rust provides the command surface, process hosting, and system access. Agents keep their own permission models — the host no longer sandboxes them at the OS level.
+- **Thin host, Fat TypeScript**: UI and orchestration logic live in TS; the Node host provides the command surface, process hosting, and system access. Agents keep their own permission models — the host no longer sandboxes them at the OS level.
 - **Shared Workbench**: Desktop and web share a single UI package to maximize code reuse.
 - **Plugin System**: Uses Cordis micro-kernel for plugin lifecycle; skills are vendored in `.agents/skills/`.
 - **Clipboard goes through the host**: the facade exposes `hostClipboard()` (Electron main-process `clipboard` / browser Web API), because some renderers silently resolved the Web Clipboard API without writing (see ESLint rule in `eslint.config.js`).
