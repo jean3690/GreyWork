@@ -720,6 +720,8 @@ export const zhCN = {
       skippedHint: "已跳过 {name}：{reason}",
       skippedCount: "MCP 未生效（{count}）",
     },
+    attachmentTruncated: "已截断",
+    subagentToolCount: "{count} × 工具",
     thinkingNow: "正在思考…",
     generatingNow: "正在生成…",
     acp: {

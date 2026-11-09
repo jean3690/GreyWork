@@ -103,7 +103,7 @@ async function cancel(child: SubagentState): Promise<void> {
             {{ child.description }}
           </div>
           <div class="flex items-center gap-2 pl-3 text-[10px] text-dim2">
-            <span v-if="child.toolCount > 0">{{ child.toolCount }} × 工具</span>
+            <span v-if="child.toolCount > 0">{{ t("chat.subagentToolCount", { count: child.toolCount }) }}</span>
             <span v-if="child.lastText" class="min-w-0 flex-1 truncate">{{ child.lastText }}</span>
           </div>
           <div v-if="child.capabilities?.cancel" class="pl-3">

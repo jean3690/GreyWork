@@ -62,7 +62,9 @@ const thumbs = useAttachmentThumbs(() => props.items);
         <Icon name="file" :size="13" class="text-dim" />
         <span class="min-w-0">
           <span class="block truncate text-[11.5px] text-foreground">{{ item.name }}</span>
-          <span class="block text-[10px] text-dim2">{{ formatBytes(item.size) }}{{ item.truncated ? " · 已截断" : "" }}</span>
+          <span class="block text-[10px] text-dim2"
+            >{{ formatBytes(item.size) }}{{ item.truncated ? ` · ${t("chat.attachmentTruncated")}` : "" }}</span
+          >
         </span>
       </span>
       <Hint :text="t('chat.attachRemove', { name: item.name })" multiline>

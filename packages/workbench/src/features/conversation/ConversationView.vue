@@ -113,7 +113,8 @@ const mcpChipLabel = computed(() =>
     : t("chat.mcp.skippedCount", { count: agent.acpMcpSkipped.length }),
 );
 const mcpChipTitle = computed(() => {
-  const lines = agent.acpMcpServers.length > 0 ? [t("chat.mcp.declaredHint", { names: agent.acpMcpServers.join("、") })] : [];
+  const lines =
+    agent.acpMcpServers.length > 0 ? [t("chat.mcp.declaredHint", { names: agent.acpMcpServers.join(t("common.listSeparator")) })] : [];
   for (const skip of agent.acpMcpSkipped) {
     lines.push(t("chat.mcp.skippedHint", { name: skip.name, reason: mcpSkipReasonLabel(skip.reason) }));
   }

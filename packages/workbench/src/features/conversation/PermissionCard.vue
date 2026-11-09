@@ -136,7 +136,7 @@ const traceIcon = computed(() => {
 const traceDetail = computed(() => {
   const trace = props.trace;
   if (!trace) return "";
-  const detail = trace.command ?? trace.paths.join("、");
+  const detail = trace.command ?? trace.paths.join(t("common.listSeparator"));
   return detail ? clipPermissionDetail(detail) : "";
 });
 </script>

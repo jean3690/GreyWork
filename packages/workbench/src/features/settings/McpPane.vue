@@ -269,7 +269,7 @@ function confirmReset(): void {
     >
       <div class="mb-2 text-[13px] font-medium text-foreground">{{ t("chat.mcp.lastResult") }}</div>
       <p v-if="agent.acpMcpServers.length > 0" class="text-[11px] text-dim">
-        {{ t("chat.mcp.declaredList", { names: agent.acpMcpServers.join("、") }) }}
+        {{ t("chat.mcp.declaredList", { names: agent.acpMcpServers.join(t("common.listSeparator")) }) }}
       </p>
       <p v-for="skip in agent.acpMcpSkipped" :key="skip.name" class="text-[11px] text-destructive">
         {{ t("chat.mcp.skippedItem", { name: skip.name, reason: mcpSkipReasonLabel(skip.reason) }) }}

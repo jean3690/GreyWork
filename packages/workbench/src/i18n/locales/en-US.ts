@@ -724,6 +724,8 @@ export const enUS: MessageSchema = {
       skippedHint: "Skipped {name}: {reason}",
       skippedCount: "MCP inactive ({count})",
     },
+    attachmentTruncated: "truncated",
+    subagentToolCount: "{count} × tools",
     thinkingNow: "Thinking…",
     generatingNow: "Generating…",
     acp: {
