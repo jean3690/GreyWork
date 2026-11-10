@@ -8,6 +8,19 @@
 
 ## [未发布]
 
+## [0.14.1] - 2026-11-10
+
+### 修复
+
+- **Docker 镜像构建**：`web` 阶段补 `python3 make g++`（根 install 会编译 `node-pty`），
+  `pnpm deploy` 补 `--legacy`（pnpm v10 起要求 `inject-workspace-packages`）。
+
+### 工程
+
+- **Lint / Prettier 门禁恢复**：`scripts/` 改用独立 tsconfig，不再挤占 `allowDefaultProject`
+  的 8 文件配额；ESLint 10 的 `preserve-caught-error` / `prefer-const` /
+  `no-useless-assignment` 报错清零；顺带把格式漂移的 14 个文件按 prettier 归一。
+
 ## [0.14.0] - 2026-11-10
 
 ### 新增
