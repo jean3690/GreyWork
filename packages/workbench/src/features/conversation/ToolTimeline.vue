@@ -282,6 +282,9 @@ watch(lastSettled, (activity) => {
         <ToolCallDetail
           v-if="row.activity.detail && openRows.includes(row.activity.toolCallId)"
           :detail="row.activity.detail"
+          :kind="row.activity.kind"
+          :path="row.activity.path"
+          :command="row.activity.command"
           class="ml-[18px] mt-0.5"
         />
       </li>

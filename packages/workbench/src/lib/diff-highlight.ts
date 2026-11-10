@@ -11,58 +11,9 @@
  */
 import { ref, watch, type Ref } from "vue";
 import type { Language } from "@codemirror/language";
-import { highlightCode, tagHighlighter, tags } from "@lezer/highlight";
+import { MAX_HIGHLIGHT_LINES, highlightTextLines } from "./code-highlight";
 import { loadCodeLanguage } from "./code-language";
 import type { DiffFile } from "./unified-diff";
-
-/** 与 TextViewer.buildHighlightStyle 同一套语义色（tailwind.css 的 --color-* 工具类）。 */
-const HIGHLIGHTER = tagHighlighter([
-  { tag: [tags.comment, tags.lineComment, tags.blockComment, tags.docComment], class: "text-dim2 italic" },
-  {
-    tag: [tags.keyword, tags.controlKeyword, tags.operatorKeyword, tags.definitionKeyword, tags.moduleKeyword, tags.modifier],
-    class: "text-violet",
-  },
-  { tag: [tags.string, tags.special(tags.string), tags.regexp, tags.character], class: "text-mint" },
-  { tag: [tags.number, tags.bool, tags.null, tags.atom, tags.unit], class: "text-amber" },
-  { tag: [tags.variableName, tags.propertyName, tags.attributeName], class: "text-cyan" },
-  { tag: [tags.function(tags.variableName), tags.function(tags.propertyName)], class: "text-accent" },
-  { tag: [tags.typeName, tags.className, tags.namespace, tags.self], class: "text-cyan" },
-  { tag: [tags.tagName, tags.angleBracket], class: "text-orange" },
-  { tag: [tags.heading, tags.strong], class: "text-foreground font-semibold" },
-  { tag: [tags.link, tags.url], class: "text-accent underline" },
-  { tag: [tags.operator, tags.punctuation, tags.separator, tags.bracket, tags.meta], class: "text-dim" },
-  { tag: tags.invalid, class: "text-orange" },
-]);
-
-/** 着色行数上限：超大 diff 不做 lezer 解析（错误恢复可能很慢），退回纯文本 + 增删底色。 */
-const MAX_HIGHLIGHT_LINES = 2_000;
-
-function escapeHtml(text: string): string {
-  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-/** 把整段文本着色，按行返回 HTML（与输入行一一对应，不含换行）。 */
-function highlightText(text: string, language: Language): string[] {
-  if (text === "") return [];
-  try {
-    const tree = language.parser.parse(text);
-    const lines: string[] = [""];
-    highlightCode(
-      text,
-      tree,
-      HIGHLIGHTER,
-      (chunk, classes) => {
-        if (chunk === "") return;
-        lines[lines.length - 1] += classes ? `<span class="${classes}">${escapeHtml(chunk)}</span>` : escapeHtml(chunk);
-      },
-      () => lines.push(""),
-    );
-    return lines;
-  } catch {
-    // 语法树解析失败（极端输入 / StreamLanguage 异常）就退回纯文本，绝不让预览挂掉。
-    return [];
-  }
-}
 
 /**
  * 单份 diff 的逐行 HTML。header / hunk / meta 行不做语法着色（返回 null）。
@@ -94,8 +45,8 @@ export function highlightDiffLines(file: DiffFile, language: Language): Array<st
     return file.lines.map(() => null);
   }
 
-  const oldHtml = highlightText(oldText.join("\n"), language);
-  const newHtml = highlightText(newText.join("\n"), language);
+  const oldHtml = highlightTextLines(oldText.join("\n"), language);
+  const newHtml = highlightTextLines(newText.join("\n"), language);
   return plan.map(({ side, index }) => {
     if (side === null) return null;
     return (side === "new" ? newHtml[index] : oldHtml[index]) ?? null;

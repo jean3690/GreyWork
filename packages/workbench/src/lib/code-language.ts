@@ -20,6 +20,11 @@ export async function loadCodeLanguage(path: string): Promise<LoadedCodeLanguage
   return kind ? loadByKind(kind) : null;
 }
 
+/** 按已判定的语言加载（工具输出 / 命令这类没有路径、但知道语言形态的片段用）。 */
+export async function loadCodeLanguageByKind(kind: CodeLanguage): Promise<LoadedCodeLanguage> {
+  return loadByKind(kind);
+}
+
 async function loadByKind(kind: CodeLanguage): Promise<LoadedCodeLanguage> {
   switch (kind) {
     case "javascript": {
