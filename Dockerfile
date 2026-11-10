@@ -6,6 +6,11 @@ ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH
 RUN corepack enable
 WORKDIR /src
 COPY . .
+# 根 pnpm install 会把整个 workspace 装进来，其中 apps/host-node 的 node-pty 是原生模块：
+# 没有预编译二进制时 node-gyp 会现场编译（python3 + make + g++）。这里只用于构建前端，
+# 但不装工具链就会在起 vite 之前先炸在 node-pty 上（见 2026-11 Docker 构建失败）。
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*
 # 可选：构建期换 registry（内网镜像 / 私有源 / 慢网环境的加速镜像）：
 #   docker build --build-arg NPM_REGISTRY=https://registry.npmmirror.com .
 # 不传就用 pnpm 的默认（registry.npmjs.org）。容器里读不到宿主 ~/.npmrc，
