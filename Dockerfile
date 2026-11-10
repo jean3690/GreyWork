@@ -34,8 +34,10 @@ COPY . .
 RUN --mount=type=cache,id=gw-pnpm,target=/pnpm/store \
     pnpm install --frozen-lockfile && pnpm --filter @greywork/host-node build
 # deploy 产出独立目录：dist + 生产依赖（node-pty 已编译好），运行时零构建工具。
+# pnpm v10 起 deploy 要求工作区开 inject-workspace-packages，本仓没开 —— 显式 --legacy
+#（与 scripts/electron-host-bundle.mjs 同一条路径）。
 RUN --mount=type=cache,id=gw-pnpm,target=/pnpm/store \
-    pnpm --filter @greywork/host-node deploy --prod /out
+    pnpm --filter @greywork/host-node deploy --prod --legacy /out
 
 ########## 3) 运行时（node:22-slim：宿主是 Node 程序；apt 只装 CLI 依赖） ##########
 FROM node:22-bookworm-slim AS runtime
