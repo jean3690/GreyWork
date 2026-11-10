@@ -13,6 +13,7 @@
     "dev:desktop": "pnpm --filter @greywork/desktop dev",
     "dev:web": "pnpm --filter @greywork/web dev",
     "dev:admin": "pnpm --filter @greywork/admin dev",
+    "dev:desktop-admin": "node scripts/dev-desktop-admin.mjs",
     "build": "pnpm run build:web && pnpm run build:desktop",
     "build:web": "pnpm --filter @greywork/web build",
     "build:admin": "pnpm --filter @greywork/admin build",
