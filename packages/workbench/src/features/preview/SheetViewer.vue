@@ -185,11 +185,17 @@ const { loading, error, bootError } = useUniverHost(host, toRef(props, "tab"), a
 
   // 选区走 OPERATION（表格是 canvas 渲染，选区只在 Univer 的模型里）—— 所以刷新必须
   // 在这一层单独接，不能顺手塞进脏标记那条分支里（没有脏标记了，那条分支也不存在）。
-  const subscription = injector.get(ICommandService).onCommandExecuted((info) => {
+  const subscription = injector.get(ICommandService).onCommandExecuted((info, options) => {
     if (info.id === SetSelectionsOperation.id) refreshSelectionLabel();
     else if (info.id === SetWorksheetActiveOperation.id) syncActiveSheet();
     // 真正改数据的命令都是 MUTATION（改值 / 数字格式 / 插行）；选区与切表是 OPERATION，不算脏。
-    if (info.type === CommandType.MUTATION) dirty.value = true;
+    if (info.type !== CommandType.MUTATION) return;
+    // **本地派生 / 协同回放 / 快照载入产生的 mutation 不是用户改动**（判据见 IExecutionOptions）：
+    // 打开工作簿会自动跑一轮公式计算，即使表里没有公式也会发出带 `onlyLocal` 的
+    // 计算通知 mutation；把它当脏会让刚打开的文件立刻显示「有未保存改动」，
+    // 切走时还会被守卫自动保存、弹一条「已保存」。公式结果写回同理。
+    if (options?.onlyLocal || options?.fromCollab || options?.fromChangeset || options?.syncOnly) return;
+    dirty.value = true;
   });
 
   syncActiveSheet();
