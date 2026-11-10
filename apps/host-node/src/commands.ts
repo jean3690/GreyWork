@@ -38,14 +38,8 @@ import { chatComplete, embed, listModels, transcribe, type LlmChatMessage, type 
 import type { AgentStartArgs, LlmAgentHost } from "./llm-agent.js";
 import type { AcpHost } from "./acp.js";
 import { validateDirKey } from "./plugin-market.js";
-import { getBot, isConnected } from "./wechat-channel.js";
-import {
-  saveChannelCredentials,
-  clearChannelCredentials,
-  loadChannelCredentials,
-  setChannelConnected,
-  type ChannelName,
-} from "./channel-credentials.js";
+import { getBot } from "./wechat-channel.js";
+import { saveChannelCredentials, loadChannelCredentials } from "./channel-credentials.js";
 import { telegramSend } from "./channel-telegram.js";
 import { readSheet, type ReadSheetArgs } from "./sheet.js";
 import { mcpCall, mcpProbe, mcpSearch, pluginMcpCall } from "./mcp.js";
@@ -82,6 +76,7 @@ import {
   wechatSendTyping,
 } from "./channels.js";
 import type { EventBus } from "./events.js";
+import type { ChannelRuntime } from "./channel-runtime.js";
 import type { SessionFileStore, WorkspaceDir } from "./session-store.js";
 import type { RagIndexHost } from "./rag.js";
 import type { TerminalHost } from "./terminal.js";
@@ -135,6 +130,8 @@ export interface CommandContext {
   llm: LlmStreamHost;
   llmAgent: LlmAgentHost;
   terminal: TerminalHost;
+  /** 七条消息通道的连接状态机与生命周期。 */
+  channels: ChannelRuntime;
   trustedHost: boolean;
 }
 
@@ -158,33 +155,6 @@ function pathArg(args: unknown): string {
  */
 function missingField(name: string): CommandError {
   return new CommandError(400, "命令参数解析失败: missing field `" + name + "`");
-}
-
-/**
- * 通道状态 DTO：与 Rust 各 StatusDto 同形状（未连接态由凭证文件推导）。
- * Node 宿主的长连接与联系人档案尚未实现，state/peerCount 恒为初值。
- */
-function channelStatusDto(dataDir: string, channel: string, _kind?: string): Record<string, unknown> {
-  const creds = loadChannelCredentials(dataDir, channel as ChannelName) as Record<string, unknown> | null;
-  const configured = creds !== null;
-  if (channel === "wechat") {
-    // WechatStatusDto：logged_in 与凭据文件对应；长轮询未跑时 pendingLogin 恒 false。
-    return { loggedIn: configured, userId: null, botId: null, state: "stopped", detail: null, lastMessageAt: null, pendingLogin: false };
-  }
-  const base = { configured, state: "stopped", detail: null, lastMessageAt: null, peerCount: 0 };
-  switch (channel) {
-    case "dingtalk":
-      return { ...base, clientId: typeof creds?.clientId === "string" ? creds.clientId : null };
-    case "feishu":
-    case "qq":
-      return { ...base, appId: typeof creds?.appId === "string" ? creds.appId : null };
-    case "discord":
-      return { ...base, botUsername: typeof creds?.botUsername === "string" ? creds.botUsername : null };
-    case "wecom":
-      return { ...base, botId: typeof creds?.botId === "string" ? creds.botId : null };
-    default:
-      return base;
-  }
 }
 
 HANDLERS.set("store_default_root", async (_args, ctx) => ctx.access.root);
@@ -824,88 +794,76 @@ HANDLERS.set("telegram_send", async (args, ctx) => {
   return telegramSend(ctx.dataDir, value.peerId, value.text);
 });
 
-HANDLERS.set("telegram_status", async (_args, ctx) => channelStatusDto(ctx.dataDir, "telegram"));
+HANDLERS.set("telegram_status", async (_args, ctx) => ctx.channels.status("telegram"));
 HANDLERS.set("telegram_save_credentials", async (args, ctx) => {
   const value = args as { token?: unknown } | null;
   if (typeof value?.token !== "string") throw missingField("token");
   saveChannelCredentials(ctx.dataDir, "telegram", value);
-  return channelStatusDto(ctx.dataDir, "telegram");
+  return ctx.channels.status("telegram");
 });
 HANDLERS.set("telegram_clear_credentials", async (_args, ctx) => {
-  clearChannelCredentials(ctx.dataDir, "telegram");
-  return channelStatusDto(ctx.dataDir, "telegram");
+  ctx.channels.logout("telegram");
+  return ctx.channels.status("telegram");
 });
 
-HANDLERS.set("dingtalk_status", async (_args, ctx) => channelStatusDto(ctx.dataDir, "dingtalk"));
+HANDLERS.set("dingtalk_status", async (_args, ctx) => ctx.channels.status("dingtalk"));
 HANDLERS.set("dingtalk_save_credentials", async (args, ctx) => {
   const value = args as { clientId?: unknown } | null;
   if (typeof value?.clientId !== "string") throw missingField("clientId");
   saveChannelCredentials(ctx.dataDir, "dingtalk", value);
-  return channelStatusDto(ctx.dataDir, "dingtalk");
+  return ctx.channels.status("dingtalk");
 });
 HANDLERS.set("dingtalk_clear_credentials", async (_args, ctx) => {
-  clearChannelCredentials(ctx.dataDir, "dingtalk");
-  return channelStatusDto(ctx.dataDir, "dingtalk");
+  ctx.channels.logout("dingtalk");
+  return ctx.channels.status("dingtalk");
 });
 
-HANDLERS.set("discord_status", async (_args, ctx) => channelStatusDto(ctx.dataDir, "discord"));
+HANDLERS.set("discord_status", async (_args, ctx) => ctx.channels.status("discord"));
 HANDLERS.set("discord_save_credentials", async (args, ctx) => {
   const value = args as { token?: unknown } | null;
   if (typeof value?.token !== "string") throw missingField("token");
   saveChannelCredentials(ctx.dataDir, "discord", value);
-  return channelStatusDto(ctx.dataDir, "discord");
+  return ctx.channels.status("discord");
 });
 HANDLERS.set("discord_clear_credentials", async (_args, ctx) => {
-  clearChannelCredentials(ctx.dataDir, "discord");
-  return channelStatusDto(ctx.dataDir, "discord");
+  ctx.channels.logout("discord");
+  return ctx.channels.status("discord");
 });
 
-HANDLERS.set("feishu_status", async (_args, ctx) => channelStatusDto(ctx.dataDir, "feishu"));
+HANDLERS.set("feishu_status", async (_args, ctx) => ctx.channels.status("feishu"));
 HANDLERS.set("feishu_save_credentials", async (args, ctx) => {
   const value = args as { appId?: unknown } | null;
   if (typeof value?.appId !== "string") throw missingField("appId");
   saveChannelCredentials(ctx.dataDir, "feishu", value);
-  return channelStatusDto(ctx.dataDir, "feishu");
+  return ctx.channels.status("feishu");
 });
 HANDLERS.set("feishu_clear_credentials", async (_args, ctx) => {
-  clearChannelCredentials(ctx.dataDir, "feishu");
-  return channelStatusDto(ctx.dataDir, "feishu");
+  ctx.channels.logout("feishu");
+  return ctx.channels.status("feishu");
 });
 
-HANDLERS.set("qq_status", async (_args, ctx) => channelStatusDto(ctx.dataDir, "qq"));
+HANDLERS.set("qq_status", async (_args, ctx) => ctx.channels.status("qq"));
 HANDLERS.set("qq_save_credentials", async (args, ctx) => {
   const value = args as { appId?: unknown } | null;
   if (typeof value?.appId !== "string") throw missingField("appId");
   saveChannelCredentials(ctx.dataDir, "qq", value);
-  return channelStatusDto(ctx.dataDir, "qq");
+  return ctx.channels.status("qq");
 });
 HANDLERS.set("qq_clear_credentials", async (_args, ctx) => {
-  clearChannelCredentials(ctx.dataDir, "qq");
-  return channelStatusDto(ctx.dataDir, "qq");
+  ctx.channels.logout("qq");
+  return ctx.channels.status("qq");
 });
 
-HANDLERS.set("wecom_status", async (_args, ctx) => channelStatusDto(ctx.dataDir, "wecom"));
+HANDLERS.set("wecom_status", async (_args, ctx) => ctx.channels.status("wecom"));
 HANDLERS.set("wecom_save_credentials", async (args, ctx) => {
   const value = args as { botId?: unknown } | null;
   if (typeof value?.botId !== "string") throw missingField("botId");
   saveChannelCredentials(ctx.dataDir, "wecom", value);
-  return channelStatusDto(ctx.dataDir, "wecom");
+  return ctx.channels.status("wecom");
 });
 HANDLERS.set("wecom_clear_credentials", async (_args, ctx) => {
-  clearChannelCredentials(ctx.dataDir, "wecom");
-  return channelStatusDto(ctx.dataDir, "wecom");
-});
-
-HANDLERS.set("wechat_status", async (_args, ctx) => channelStatusDto(ctx.dataDir, "wechat"));
-HANDLERS.set("wechat_save_credentials", async (args, ctx) => {
-  const value = args as Record<string, unknown> | null;
-  if (!value || typeof value !== "object") throw new CommandError(400, "缺少参数");
-  saveChannelCredentials(ctx.dataDir, "wechat", value);
-  return null;
-});
-HANDLERS.set("wechat_clear_credentials", async (_args, ctx) => {
-  clearChannelCredentials(ctx.dataDir, "wechat");
-  return null;
+  ctx.channels.logout("wecom");
+  return ctx.channels.status("wecom");
 });
 
 HANDLERS.set("feishu_send", async (args, ctx) => {
@@ -930,16 +888,7 @@ HANDLERS.set("feishu_send", async (args, ctx) => {
   return { ok: true };
 });
 
-HANDLERS.set("wechat_status", async (_args, ctx) => channelStatusDto(ctx.dataDir, "wechat"));
-HANDLERS.set("wechat_connect", async (args, ctx) => {
-  const value = args as { allowOtherSenders?: unknown } | null;
-  if (typeof value?.allowOtherSenders !== "boolean") throw missingField("allowOtherSenders");
-  const bot = getBot(ctx.dataDir);
-  if (!isConnected()) {
-    await bot.start();
-  }
-  return null;
-});
+HANDLERS.set("wechat_status", async (_args, ctx) => ctx.channels.status("wechat"));
 HANDLERS.set("wechat_send", async (args, ctx) => {
   const value = args as { toUserId?: unknown; contextToken?: unknown; text?: unknown } | null;
   if (typeof value?.toUserId !== "string") throw missingField("toUserId");
@@ -948,8 +897,8 @@ HANDLERS.set("wechat_send", async (args, ctx) => {
   await bot.send(value.toUserId, value.text);
   return null;
 });
-HANDLERS.set("wechat_logout", async () => {
-  // SDK 没有 logout 方法——断连由 stop 处理，凭据由 clearChannelCredentials 清理。
+HANDLERS.set("wechat_logout", async (_args, ctx) => {
+  ctx.channels.logout("wechat");
   return null;
 });
 HANDLERS.set("wechat_login_qr", async (_args, ctx) => {
@@ -1040,92 +989,77 @@ HANDLERS.set("telegram_bot_link", async (_args, ctx) => {
 HANDLERS.set("telegram_connect", async (args, ctx) => {
   const value = args as { allowOtherSenders?: unknown } | null;
   if (typeof value?.allowOtherSenders !== "boolean") throw missingField("allowOtherSenders");
-  const creds = loadChannelCredentials(ctx.dataDir, "telegram");
-  if (!creds) throw new Error("通道凭据未配置，请先 save_credentials");
-  setChannelConnected("telegram", true);
+  ctx.channels.connect("telegram", value.allowOtherSenders);
   return null;
 });
-HANDLERS.set("telegram_disconnect", async (_args) => {
-  setChannelConnected("telegram", false);
+HANDLERS.set("telegram_disconnect", async (_args, ctx) => {
+  ctx.channels.disconnect("telegram");
   return null;
 });
 
 HANDLERS.set("dingtalk_connect", async (args, ctx) => {
   const value = args as { allowOtherSenders?: unknown } | null;
   if (typeof value?.allowOtherSenders !== "boolean") throw missingField("allowOtherSenders");
-  const creds = loadChannelCredentials(ctx.dataDir, "dingtalk");
-  if (!creds) throw new Error("通道凭据未配置，请先 save_credentials");
-  setChannelConnected("dingtalk", true);
+  ctx.channels.connect("dingtalk", value.allowOtherSenders);
   return null;
 });
-HANDLERS.set("dingtalk_disconnect", async (_args) => {
-  setChannelConnected("dingtalk", false);
+HANDLERS.set("dingtalk_disconnect", async (_args, ctx) => {
+  ctx.channels.disconnect("dingtalk");
   return null;
 });
 
 HANDLERS.set("discord_connect", async (args, ctx) => {
   const value = args as { allowOtherSenders?: unknown } | null;
   if (typeof value?.allowOtherSenders !== "boolean") throw missingField("allowOtherSenders");
-  const creds = loadChannelCredentials(ctx.dataDir, "discord");
-  if (!creds) throw new Error("通道凭据未配置，请先 save_credentials");
-  setChannelConnected("discord", true);
+  ctx.channels.connect("discord", value.allowOtherSenders);
   return null;
 });
-HANDLERS.set("discord_disconnect", async (_args) => {
-  setChannelConnected("discord", false);
+HANDLERS.set("discord_disconnect", async (_args, ctx) => {
+  ctx.channels.disconnect("discord");
   return null;
 });
 
 HANDLERS.set("feishu_connect", async (args, ctx) => {
   const value = args as { allowOtherSenders?: unknown } | null;
   if (typeof value?.allowOtherSenders !== "boolean") throw missingField("allowOtherSenders");
-  const creds = loadChannelCredentials(ctx.dataDir, "feishu");
-  if (!creds) throw new Error("通道凭据未配置，请先 save_credentials");
-  setChannelConnected("feishu", true);
+  ctx.channels.connect("feishu", value.allowOtherSenders);
   return null;
 });
-HANDLERS.set("feishu_disconnect", async (_args) => {
-  setChannelConnected("feishu", false);
+HANDLERS.set("feishu_disconnect", async (_args, ctx) => {
+  ctx.channels.disconnect("feishu");
   return null;
 });
 
 HANDLERS.set("qq_connect", async (args, ctx) => {
   const value = args as { allowOtherSenders?: unknown } | null;
   if (typeof value?.allowOtherSenders !== "boolean") throw missingField("allowOtherSenders");
-  const creds = loadChannelCredentials(ctx.dataDir, "qq");
-  if (!creds) throw new Error("通道凭据未配置，请先 save_credentials");
-  setChannelConnected("qq", true);
+  ctx.channels.connect("qq", value.allowOtherSenders);
   return null;
 });
-HANDLERS.set("qq_disconnect", async (_args) => {
-  setChannelConnected("qq", false);
+HANDLERS.set("qq_disconnect", async (_args, ctx) => {
+  ctx.channels.disconnect("qq");
   return null;
 });
 
 HANDLERS.set("wechat_connect", async (args, ctx) => {
   const value = args as { allowOtherSenders?: unknown } | null;
   if (typeof value?.allowOtherSenders !== "boolean") throw missingField("allowOtherSenders");
-  const bot = getBot(ctx.dataDir);
-  if (!isConnected()) {
-    await bot.start();
-  }
+  ctx.channels.connect("wechat", value.allowOtherSenders);
   return null;
 });
-HANDLERS.set("wechat_disconnect", async (_args, _ctx) => {
-  setChannelConnected("wechat", false);
+HANDLERS.set("wechat_disconnect", async (_args, ctx) => {
+  ctx.channels.disconnect("wechat");
   return null;
 });
 
 HANDLERS.set("wecom_connect", async (args, ctx) => {
   const value = args as { allowOtherSenders?: unknown } | null;
   if (typeof value?.allowOtherSenders !== "boolean") throw missingField("allowOtherSenders");
-  const creds = loadChannelCredentials(ctx.dataDir, "wecom");
-  if (!creds) throw new Error("通道凭据未配置，请先 save_credentials");
-  setChannelConnected("wecom", true);
+  ctx.channels.connect("wecom", value.allowOtherSenders);
   return null;
 });
-HANDLERS.set("wecom_disconnect", async (_args) => {
-  setChannelConnected("wecom", false);
+HANDLERS.set("wecom_disconnect", async (_args, ctx) => {
+  ctx.channels.disconnect("wecom");
   return null;
 });
 

@@ -12,14 +12,15 @@
  *
  * 出站媒体的通道覆盖：全七件套按能力矩阵分发 —— wechat（官方 SDK）、telegram（Bot API）、
  * feishu（im/v1 images/files）、discord（multipart 附件）、qq（官方分片上传四步）真实落地；
- * wecom 的出站挂在 WS 长连接发送端上（Node 宿主的长连接未实现，报「通道未连接」与 Rust
- * 同款）；dingtalk 出站无媒体通道，由能力矩阵在 prepareOutbound 一处拦截。
+ * wecom 的出站媒体挂在 WS 长连接发送端上（req_id 上传三步），Node 宿主已实现入站长连接、
+ * 出站媒体暂未接线，故报「通道未连接」与 Rust 同款；dingtalk 出站无媒体通道，由能力矩阵
+ * 在 prepareOutbound 一处拦截。
  */
 import { createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { closeSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, statSync, unlinkSync, writeSync } from "node:fs";
 import path from "node:path";
 
-import { getBot, setConnected } from "./wechat-channel.js";
+import { getBot } from "./wechat-channel.js";
 import { loadCredentials as loadTelegramCredentials } from "./channel-telegram.js";
 import { loadChannelCredentials, saveChannelCredentials } from "./channel-credentials.js";
 import type { WorkspaceAccess } from "./workspace-access.js";
@@ -417,8 +418,8 @@ export async function sendMediaVia(
       await sendQqMedia(dataDir, peerId, media);
       return;
     case "wecom":
-      // 出站媒体挂在 WebSocket 长连接的发送端上（Rust Inner.outgoing）；Node 宿主的
-      // 企微长连接尚未实现，与 Rust「未连接」同款报错，界面退路相同。
+      // 出站媒体要经长连接发送端（upload init/分片/finish + req_id 回执）；入站长连接
+      // 已实现，出战媒体暂未接线，与 Rust「未连接」同款报错，界面退路相同。
       throw new Error("通道未连接：先连接企业微信通道再发送");
     default:
       throw new Error("未知通道: " + channel);
@@ -427,7 +428,7 @@ export async function sendMediaVia(
 
 /** 微信：交给 SDK 加密上传并发送（send() 内部按对端 context_token 复用）。 */
 async function sendWechatMedia(dataDir: string, userId: string, media: OutboundMedia): Promise<void> {
-  const bot = getBot(path.join(dataDir, "wechat"));
+  const bot = getBot(dataDir);
   switch (media.kind) {
     case "image":
       await bot.send(userId, { image: media.bytes });
@@ -989,8 +990,8 @@ function trustedApiBase(raw: string): string {
 let loginTask: Promise<void> | null = null;
 
 /** 后台跑 SDK 的 login：它阻塞到确认 / 放弃，宿主只把结果镜像进 wechatLogin。 */
-function runLogin(dataDir: string, generation: number): Promise<void> {
-  const bot = getBot(path.join(dataDir, "wechat"));
+function runLogin(dataDir: string): Promise<void> {
+  const bot = getBot(dataDir);
   // force：显式扫码要求换新凭证；本地已有可用凭证时 SDK 自己会直接复用。
   const task = bot
     .login({
@@ -1029,10 +1030,7 @@ function runLogin(dataDir: string, generation: number): Promise<void> {
       wechatLogin.outcome = { kind: "failed", detail: error.message };
     })
     .finally(() => {
-      if (wechatLogin.generation === generation) {
-        // 凭据可能刚落地：连接态回到「已登录、未连接」，渲染端确认后自己会去 connect。
-        setConnected(false);
-      }
+      // 凭据可能刚落地：连接态由 runtime 管理，渲染端确认扫码后自己会去 connect。
       if (loginTask === task) loginTask = null;
     });
   return task;
@@ -1064,7 +1062,7 @@ export async function wechatLoginQr(dataDir: string): Promise<{ content: string 
   wechatLogin.outcome = null;
   const generation = wechatLogin.generation;
 
-  loginTask = runLogin(dataDir, generation);
+  loginTask = runLogin(dataDir);
 
   const deadline = Date.now() + LOGIN_QR_TIMEOUT_MS;
   for (;;) {
@@ -1120,6 +1118,11 @@ export async function wechatLoginPoll(): Promise<WechatLoginPollDto> {
   }
 }
 
+/** 是否有进行中的扫码会话（WechatStatusDto.pendingLogin）。 */
+export function wechatLoginPending(): boolean {
+  return wechatLogin.explicit && wechatLogin.outcome === null;
+}
+
 /**
  * 取消进行中的扫码会话（关闭二维码视图时调用）。
  * SDK 的登录一旦开始就无法从外部中止，这里只作废宿主侧的会话与界面状态；
@@ -1140,7 +1143,7 @@ export function wechatLoginCancel(): void {
  */
 export async function wechatSendTyping(dataDir: string, toUserId: string, typing: boolean): Promise<void> {
   if (!typing) return;
-  const bot = getBot(path.join(dataDir, "wechat"));
+  const bot = getBot(dataDir);
   await bot.sendTyping(toUserId);
 }
 
@@ -1462,8 +1465,8 @@ async function qqUploadRichMedia(token: string, peer: { scope: "c2c" | "group"; 
 
 /**
  * QQ：先分片上传换 file_info，再发 msg_type=7 富媒体消息。
- * 注意：Node 宿主尚无入站长连接（没有对端 msg_id 簿），消息体带空 msg_id ——
- * 与既有 qq_send 的行为一致；带 5 分钟窗口的被动回复语义待入站面补齐后接入。
+ * 入站长连接已实现，但宿主尚未按对端保存入站 msg_id 簿，消息体仍带空 msg_id ——
+ * 与既有 qq_send 的行为一致；带 5 分钟窗口的被动回复语义待 msg_id 簿补齐后接入。
  */
 async function sendQqMedia(dataDir: string, peerId: string, media: OutboundMedia): Promise<void> {
   const peer = decodeQqPeer(peerId);

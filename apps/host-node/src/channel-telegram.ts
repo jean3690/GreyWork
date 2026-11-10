@@ -1,7 +1,6 @@
 /**
- * Telegram 通道：Bot API（HTTPS + JSON），长轮询收信、Bot API 发信。
- * 移植 `channels/telegram/` 的核心语义：凭据落盘 0600、connect/disconnect/send/status。
- * 完整的事件分类（文本 / 图片 / 文件 / 回调按钮）与媒体收发在后续批次补齐。
+ * Telegram 通道：Bot API（HTTPS + JSON），凭据落盘 0600 与发信。
+ * 长轮询收信与入站事件在 channel-connectors.ts，连接态在 channel-runtime.ts。
  */
 import { mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import path from "node:path";
@@ -42,16 +41,7 @@ export function clearCredentials(dataDir: string): void {
 
 /* ===== 通道命令 ===== */
 
-/** 已配置的 bot token（credentials 存在且非空）。 */
-export function telegramStatus(dataDir: string): { configured: boolean; connected: boolean } {
-  return { configured: loadCredentials(dataDir) !== null, connected: false };
-}
-
-/**
- * 发消息：调 Telegram Bot API `sendMessage`。
- * Rust 侧的 send 还会触发 `telegram://message` 事件（入站消息由长轮询产生）；
- * Node 宿主的完整长轮询收信在下一批补齐。
- */
+/** 发消息：调 Telegram Bot API `sendMessage`。 */
 export async function telegramSend(dataDir: string, chatId: string, text: string): Promise<{ ok: boolean }> {
   const creds = loadCredentials(dataDir);
   if (!creds) throw new Error("Telegram bot token 未配置");

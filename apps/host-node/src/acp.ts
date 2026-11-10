@@ -74,7 +74,9 @@ export function validateSpawnCommand(agentCmd: string, extra: string[]): string 
   const banned = /[`;&|<>$(){}[\]]/.test(trimmed);
   const program = trimmed.split(/\s+/)[0] ?? "";
   const base = path.basename(program).toLowerCase();
-  if (banned || base === "" || (!ALLOWED_AGENT_PROGRAMS.has(base) && !extra.map((item) => item.toLowerCase()).includes(base))) {
+  // extra 可能是配置里的绝对路径或带大小写的程序名，按与 base 同一口径归一。
+  const allowed = new Set(extra.map((item) => path.basename(item.trim()).toLowerCase()));
+  if (banned || base === "" || (!ALLOWED_AGENT_PROGRAMS.has(base) && !allowed.has(base))) {
     throw new Error(`agent program not allowed: ${program}`);
   }
   return trimmed;
@@ -229,7 +231,12 @@ export class AcpHost {
     // 交给 shell 解析才能命中 PATHEXT。命令本身已过白名单与 shell 元字符校验。
     const useShell = process.platform === "win32";
     const proc = spawn(useShell ? command : parts[0], useShell ? [] : parts.slice(1), {
-      cwd: process.cwd(),
+      // 不能继承宿主的 process.cwd()：Electron 开发态从 apps/electron 起 sidecar，agent 的
+      // 进程 cwd 会变成仓库里的某个包目录，用它跑 shell / 写相对路径会把文件落到工作区之外
+      // （authorization 面只有 ~/.greyWork 与用户选过的目录，发文件时因此被拒）。
+      // 会话真正的 workspace 由 acp_new_session 的 cwd 下发；这里给授权根做兜底，
+      // 保证即使 agent 忽略 session cwd，相对路径也落在可发送的授权面内。
+      cwd: this.access.root,
       env: { ...process.env, ...envVars },
       stdio: ["pipe", "pipe", "pipe"],
       detached: process.platform !== "win32",

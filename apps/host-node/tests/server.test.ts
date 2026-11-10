@@ -8,7 +8,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 
 import { LoginThrottle, SessionStore, passwordChecker } from "../src/auth.js";
-import { AcpHost } from "../src/acp.js";
+import { AcpHost, validateSpawnCommand } from "../src/acp.js";
+import { ChannelRuntime } from "../src/channel-runtime.js";
 import { Db } from "../src/db.js";
 import { RagIndexHost } from "../src/rag.js";
 import { isDenied } from "../src/commands.js";
@@ -86,6 +87,7 @@ const db = new Db(path.join(dataDir, "greywork.db"));
 const bus = new EventBus();
 const store = new SessionFileStore(access);
 const acp = new AcpHost(bus, access);
+const channels = new ChannelRuntime(bus, dataDir);
 const llm = new LlmStreamHost(bus);
 const llmAgent = new LlmAgentHost(bus, access);
 const rag = new RagIndexHost(db);
@@ -98,6 +100,7 @@ const { server, close } = createHostServer({
   staticRoot: resolveStaticRoot(config.staticDir),
   access,
   acp,
+  channels,
   db,
   dataDir: dataDir,
   rag,
@@ -852,6 +855,9 @@ describe("HTTP 契约", () => {
     expect((created.body as { skippedMcpServers?: unknown }).skippedMcpServers).toEqual([]);
     // 图片能力随会话回包下发：渲染端据此决定附件能不能转成 image block。
     expect((created.body as { imagePrompts?: boolean }).imagePrompts).toBe(true);
+    // 回归：agent 进程必须起在授权根里，而不是从宿主继承的 process.cwd()（Electron 开发态
+    // 会是 apps/electron）。否则它写出的相对路径落在授权面外，channel_send_media 会拒发。
+    expect((created.body as { cwd?: string }).cwd).toBe(realpathSync(workspaceDir));
 
     expect((await call("acp_send", { handle, text: "hello" })).status).toBe(200);
 
@@ -1135,5 +1141,39 @@ describe("WebSocket 事件流", () => {
       setTimeout(() => resolve(0), 3000);
     });
     expect([401, -1]).toContain(status);
+  });
+});
+
+describe("agent 程序放行面", () => {
+  it("GREYWORK_AGENT_PROGRAMS 按逗号拆进配置（headless 冻结面）", () => {
+    const parsed = loadConfig({ GREYWORK_AGENT_PROGRAMS: "codebuddy, /usr/bin/MyAgent , ,  opencode" });
+    expect(parsed.agentPrograms).toEqual(["codebuddy", "/usr/bin/MyAgent", "opencode"]);
+    expect(loadConfig({}).agentPrograms).toEqual([]);
+  });
+
+  it("enabledAgentPrograms 只取「已启用」后端的命令首 token basename", () => {
+    const file = path.join(mkdtempSync(path.join(tmpdir(), "gw-allowlist-")), "greywork.db");
+    const local = new Db(file);
+    try {
+      expect(local.enabledAgentPrograms()).toEqual([]); // 目录未接管
+      local.syncAgentProviders([
+        { id: "cb", name: "CodeBuddy", kind: "acp", command: "codebuddy --acp", enabled: true },
+        { id: "abs", name: "Abs", kind: "acp", command: "/usr/local/bin/MyAgent serve", enabled: true },
+        { id: "off", name: "Off", kind: "acp", command: "disabled-agent", enabled: false },
+      ]);
+      expect(local.enabledAgentPrograms()).toEqual(["codebuddy", "MyAgent"]);
+    } finally {
+      local.close();
+    }
+  });
+
+  it("validateSpawnCommand：无放行面拒绝自配程序，有放行面按 basename 归一后放行", () => {
+    expect(() => validateSpawnCommand("codebuddy --acp", [])).toThrow("agent program not allowed: codebuddy");
+    expect(validateSpawnCommand("codebuddy --acp", ["codebuddy"])).toBe("codebuddy --acp");
+    // 配置里写绝对路径 / 大小写不一，也与命令首 token 同一口径归一。
+    expect(validateSpawnCommand("/usr/bin/MyAgent serve", ["/usr/bin/myagent"])).toBe("/usr/bin/MyAgent serve");
+    expect(validateSpawnCommand("opencode acp", [])).toBe("opencode acp");
+    // 放行面不削弱 shell 元字符拒绝。
+    expect(() => validateSpawnCommand("codebuddy; rm -rf /", ["codebuddy"])).toThrow("agent program not allowed");
   });
 });

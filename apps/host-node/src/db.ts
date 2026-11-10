@@ -227,6 +227,27 @@ export class Db {
     }));
   }
 
+  /**
+   * 已启用 ACP 后端的启动程序名（spawn 白名单扩展面）。
+   *
+   * 取每条启用后端命令首 token 的 basename（`npx -y pkg` → `npx`，`/usr/bin/x --acp` → `x`），
+   * 供 `acp_start` 在内置白名单之外放行用户自配的 agent。未接管目录 / 无启用项 → 空数组。
+   * 与 Rust `infra/db/agents.rs::enabled_agent_programs` 同语义：只收敛「能被启动的程序面」，
+   * shell 元字符拒绝仍由 validateSpawnCommand 生效。
+   */
+  enabledAgentPrograms(): string[] {
+    const providers = this.loadAgentProviders();
+    if (!providers) return [];
+    const programs: string[] = [];
+    for (const provider of providers) {
+      if (!provider.enabled) continue;
+      const program = provider.command.trim().split(/\s+/)[0] ?? "";
+      const base = path.basename(program);
+      if (base !== "") programs.push(base);
+    }
+    return programs;
+  }
+
   /** 全量替换 ACP 后端目录（事务；首次写接管标记）。 */
   syncAgentProviders(providers: AgentProvider[]): void {
     this.conn.exec("BEGIN");

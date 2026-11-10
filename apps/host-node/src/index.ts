@@ -22,6 +22,7 @@ import { resolveStaticRoot } from "./static-site.js";
 import { WorkspaceAccess } from "./workspace-access.js";
 import { EventBus } from "./events.js";
 import { AcpHost } from "./acp.js";
+import { ChannelRuntime } from "./channel-runtime.js";
 import { LlmStreamHost } from "./llm.js";
 import { LlmAgentHost } from "./llm-agent.js";
 import { RagIndexHost } from "./rag.js";
@@ -96,6 +97,7 @@ async function main(): Promise<void> {
   const bus = new EventBus();
   const store = new SessionFileStore(access);
   const acp = new AcpHost(bus, access);
+  const channels = new ChannelRuntime(bus, config.dataDir);
   const llm = new LlmStreamHost(bus);
   const llmAgent = new LlmAgentHost(bus, access);
   const rag = new RagIndexHost(db);
@@ -107,9 +109,13 @@ async function main(): Promise<void> {
     staticRoot,
     access,
     acp,
+    channels,
     db,
     dataDir: config.dataDir,
-    extraPrograms: () => [],
+    // 白名单扩展面：headless 冻结列表来自配置（GREYWORK_AGENT_PROGRAMS，DB 是客户端可写的，
+    // 不能作为网络暴露部署的放行依据）；可信本机宿主再并上 DB 里启用的自配后端目录。
+    // 现查而非缓存：用户在设置里增删后端后，下一次 acp_start 立刻按新目录判定。
+    extraPrograms: (trustedHost) => [...config.agentPrograms, ...acp.extraPrograms(trustedHost, db)],
     rag,
     store,
     llm,
@@ -133,6 +139,7 @@ async function main(): Promise<void> {
     stopping = true;
     console.log(`[host-node] 关闭（${reason}）`);
     terminal.disposeAll();
+    channels.stopAll();
     await close();
     db.close();
     process.exit(0);

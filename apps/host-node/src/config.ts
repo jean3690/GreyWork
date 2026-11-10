@@ -28,6 +28,8 @@ export interface HostConfig {
   allowedOrigins: string[];
   /** 预置授权根（headless 没有原生选择器，只能在配置里给）；分隔符与 Rust 同为 : / ;。 */
   workspaceRoots: string[];
+  /** acp_start 内置白名单之外的额外放行程序（headless 冻结面，逗号分隔）。 */
+  agentPrograms: string[];
   /** stdin 读到 EOF 即退出（Electron 的「父死子死」）。 */
   exitOnStdinEof: boolean;
   version: string;
@@ -97,6 +99,7 @@ export function loadConfig(envMap: NodeJS.ProcessEnv = process.env): HostConfig 
       .split(process.platform === "win32" ? ";" : ":")
       .map((item) => item.trim())
       .filter((item) => item !== ""),
+    agentPrograms: splitList(env(envMap, "GREYWORK_AGENT_PROGRAMS")),
     exitOnStdinEof: truthy(env(envMap, "GREYWORK_EXIT_ON_STDIN_EOF")),
     version: readVersion(),
   };

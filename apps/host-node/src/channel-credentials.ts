@@ -3,7 +3,7 @@
  *
  * 每个通道的凭据形状不同（bot token / client_id+secret / app_id+app_secret / bot_id+secret），
  * 但都落在 `<dataDir>/<channel>/credentials.json`（0600），都通过 `save/load/clear` 三个操作管理。
- * Node 宿主只需要实现「凭据是否存在」与「读写」——连接管理（WebSocket / 长轮询）留给后续批次。
+ * 连接状态机与生命周期在 channel-runtime.ts，不在这里。
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -40,19 +40,4 @@ export function loadChannelCredentials(dataDir: string, channel: ChannelName): R
 
 export function clearChannelCredentials(dataDir: string, channel: ChannelName): void {
   rmSync(credentialsFile(dataDir, channel), { force: true });
-}
-
-const connectedChannels = new Set<string>();
-
-export function setChannelConnected(channel: ChannelName, connected: boolean): void {
-  if (connected) connectedChannels.add(channel);
-  else connectedChannels.delete(channel);
-}
-
-export function isChannelConnected(channel: ChannelName): boolean {
-  return connectedChannels.has(channel);
-}
-
-export function channelStatus(dataDir: string, channel: ChannelName): { configured: boolean } {
-  return { configured: loadChannelCredentials(dataDir, channel) !== null };
 }

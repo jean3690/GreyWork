@@ -34,8 +34,13 @@ pnpm --filter @greywork/host-node typecheck
 ```
 
 环境变量与 `apps/server` 逐字一致（`GREYWORK_BIND` / `GREYWORK_DATA_DIR` / `GREYWORK_PASSWORD_HASH` /
-`GREYWORK_STATIC_DIR` / `GREYWORK_TRUSTED_HOST` / `GREYWORK_ALLOWED_ORIGINS` / `GREYWORK_EXIT_ON_STDIN_EOF` …），
-所以 Electron 换后端只需要改「spawn 哪个可执行文件」。
+`GREYWORK_STATIC_DIR` / `GREYWORK_TRUSTED_HOST` / `GREYWORK_ALLOWED_ORIGINS` / `GREYWORK_EXIT_ON_STDIN_EOF` /
+`GREYWORK_AGENT_PROGRAMS` …），所以 Electron 换后端只需要改「spawn 哪个可执行文件」。
+
+`GREYWORK_AGENT_PROGRAMS` 是 `acp_start` 内置白名单之外的冻结放行面（逗号分隔，如
+`GREYWORK_AGENT_PROGRAMS=codebuddy,my-agent`）：headless 服务端只认这份配置，不读 DB（DB 可经
+`db_agents_sync` 被客户端改写）。可信本机宿主（`GREYWORK_TRUSTED_HOST=1`）会把设置里已启用的自配后端
+目录一并放行，所以桌面端在「设置 → Agent」新增后端即可，无需改环境变量。
 
 ## 命令清单从哪来
 

@@ -43,9 +43,11 @@ process.stdin.on("data", (chunk) => {
     }
     if (message.method === "session/new") {
       if (typeof message.params.cwd === "string") sessionCwd = message.params.cwd;
+      // 回带进程 cwd：宿主据此断言 agent 没被起在仓库目录里（见 tests/server.test.ts）。
       // 回带收到的 mcpServers：宿主 → agent 的透传由 tests/server.test.ts 断言。
       reply(message.id, {
         sessionId: "sess-1",
+        cwd: process.cwd(),
         modes: { availableModes: [{ id: "build", name: "Build" }] },
         mcpServersEcho: message.params.mcpServers ?? [],
       });
