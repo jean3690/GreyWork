@@ -31,7 +31,9 @@ export function loadCredentials(dataDir: string): TgCredentials | null {
     const raw = JSON.parse(readFileSync(credentialsFile(dataDir), "utf8")) as { token?: unknown; botToken?: unknown };
     const botToken = typeof raw.token === "string" && raw.token !== "" ? raw.token : typeof raw.botToken === "string" ? raw.botToken : null;
     return botToken !== null ? { botToken } : null;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 export function clearCredentials(dataDir: string): void {
@@ -50,9 +52,7 @@ export function telegramStatus(dataDir: string): { configured: boolean; connecte
  * Rust 侧的 send 还会触发 `telegram://message` 事件（入站消息由长轮询产生）；
  * Node 宿主的完整长轮询收信在下一批补齐。
  */
-export async function telegramSend(
-  dataDir: string, chatId: string, text: string,
-): Promise<{ ok: boolean }> {
+export async function telegramSend(dataDir: string, chatId: string, text: string): Promise<{ ok: boolean }> {
   const creds = loadCredentials(dataDir);
   if (!creds) throw new Error("Telegram bot token 未配置");
   const response = await fetch(`${TG_API}/${creds.botToken}/sendMessage`, {
@@ -86,4 +86,3 @@ export function telegramBotLink(botToken: string): string {
   const botId = botToken.split(":")[0] ?? "";
   return botId !== "" ? `https://t.me/${botId}` : "";
 }
-

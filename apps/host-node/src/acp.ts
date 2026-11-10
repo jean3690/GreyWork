@@ -103,9 +103,7 @@ function toAcpMcpServers(raw: unknown, caps: { http: boolean; sse: boolean }): M
     if (Array.isArray(value)) {
       return value.flatMap((entry) => {
         const item = entry as { name?: unknown; value?: unknown } | null;
-        return typeof item?.name === "string" && typeof item.value === "string"
-          ? [{ name: item.name, value: item.value }]
-          : [];
+        return typeof item?.name === "string" && typeof item.value === "string" ? [{ name: item.name, value: item.value }] : [];
       });
     }
     if (value !== null && typeof value === "object") {

@@ -202,10 +202,15 @@ export function createHostServer(options: HostServerOptions): { server: Server; 
           throw new HttpError(400, error instanceof Error ? error.message : String(error));
         }
         if (slice.kind === "unsatisfiable") {
-          return sendJson(response, 416, { error: "请求的 Range 超出文件范围" }, {
-            "content-range": "bytes */" + slice.total,
-            "accept-ranges": "bytes",
-          });
+          return sendJson(
+            response,
+            416,
+            { error: "请求的 Range 超出文件范围" },
+            {
+              "content-range": "bytes */" + slice.total,
+              "accept-ranges": "bytes",
+            },
+          );
         }
         const headers: Record<string, string | number> = {
           "content-type": slice.mime,

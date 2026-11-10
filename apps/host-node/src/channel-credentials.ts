@@ -31,7 +31,11 @@ export function saveChannelCredentials(dataDir: string, channel: ChannelName, cr
 export function loadChannelCredentials(dataDir: string, channel: ChannelName): Record<string, unknown> | null {
   const file = credentialsFile(dataDir, channel);
   if (!existsSync(file)) return null;
-  try { return JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>; } catch { return null; }
+  try {
+    return JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
 }
 
 export function clearChannelCredentials(dataDir: string, channel: ChannelName): void {

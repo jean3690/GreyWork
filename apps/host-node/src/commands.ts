@@ -39,11 +39,28 @@ import type { AgentStartArgs, LlmAgentHost } from "./llm-agent.js";
 import type { AcpHost } from "./acp.js";
 import { validateDirKey } from "./plugin-market.js";
 import { getBot, isConnected } from "./wechat-channel.js";
-import { saveChannelCredentials, clearChannelCredentials, loadChannelCredentials, setChannelConnected, type ChannelName } from "./channel-credentials.js";
+import {
+  saveChannelCredentials,
+  clearChannelCredentials,
+  loadChannelCredentials,
+  setChannelConnected,
+  type ChannelName,
+} from "./channel-credentials.js";
 import { telegramSend } from "./channel-telegram.js";
 import { readSheet, type ReadSheetArgs } from "./sheet.js";
 import { mcpCall, mcpProbe, mcpSearch, pluginMcpCall } from "./mcp.js";
-import { convertToPdf, discoverSoffice, hostInfo, oauthBegin, oauthLogout, oauthStatus, oauthSubmit, openPreview, type OAuthClientArgs, type OfficeRecipe } from "./office.js";
+import {
+  convertToPdf,
+  discoverSoffice,
+  hostInfo,
+  oauthBegin,
+  oauthLogout,
+  oauthStatus,
+  oauthSubmit,
+  openPreview,
+  type OAuthClientArgs,
+  type OfficeRecipe,
+} from "./office.js";
 import {
   channelMediaCapabilities,
   channelTakeMedia,
@@ -156,12 +173,17 @@ function channelStatusDto(dataDir: string, channel: string, _kind?: string): Rec
   }
   const base = { configured, state: "stopped", detail: null, lastMessageAt: null, peerCount: 0 };
   switch (channel) {
-    case "dingtalk": return { ...base, clientId: typeof creds?.clientId === "string" ? creds.clientId : null };
+    case "dingtalk":
+      return { ...base, clientId: typeof creds?.clientId === "string" ? creds.clientId : null };
     case "feishu":
-    case "qq": return { ...base, appId: typeof creds?.appId === "string" ? creds.appId : null };
-    case "discord": return { ...base, botUsername: typeof creds?.botUsername === "string" ? creds.botUsername : null };
-    case "wecom": return { ...base, botId: typeof creds?.botId === "string" ? creds.botId : null };
-    default: return base;
+    case "qq":
+      return { ...base, appId: typeof creds?.appId === "string" ? creds.appId : null };
+    case "discord":
+      return { ...base, botUsername: typeof creds?.botUsername === "string" ? creds.botUsername : null };
+    case "wecom":
+      return { ...base, botId: typeof creds?.botId === "string" ? creds.botId : null };
+    default:
+      return base;
   }
 }
 
@@ -375,10 +397,16 @@ HANDLERS.set("plugin_fs", async (args, ctx) => {
   }
   mkdirSync(pluginRoot, { recursive: true });
   switch (value.op) {
-    case "read": return readFileSync(target, "utf8");
-    case "write": writeFileSync(target, String(value.data ?? ""), "utf8"); return { ok: true };
-    case "remove": rmSync(target); return { ok: true };
-    default: throw new Error(`unknown plugin_fs op: ${value.op}`);
+    case "read":
+      return readFileSync(target, "utf8");
+    case "write":
+      writeFileSync(target, String(value.data ?? ""), "utf8");
+      return { ok: true };
+    case "remove":
+      rmSync(target);
+      return { ok: true };
+    default:
+      throw new Error(`unknown plugin_fs op: ${value.op}`);
   }
 });
 // plugin_workspace：只做形态校验，返回授权根清单。
@@ -412,7 +440,12 @@ HANDLERS.set("office_preview_open", async (args, ctx) => {
   if (!value || typeof value.path !== "string") throw missingField("path");
   if (value.recipe === null || typeof value.recipe !== "object") throw missingField("recipe");
   const recipe = value.recipe as Partial<OfficeRecipe>;
-  if (typeof recipe.method !== "string" || typeof recipe.url !== "string" || typeof recipe.body !== "string" || typeof recipe.viewUrlPointer !== "string") {
+  if (
+    typeof recipe.method !== "string" ||
+    typeof recipe.url !== "string" ||
+    typeof recipe.body !== "string" ||
+    typeof recipe.viewUrlPointer !== "string"
+  ) {
     throw new CommandError(400, "缺少参数 recipe.method / url / body / viewUrlPointer");
   }
   return openPreview(ctx.dataDir, ctx.access, {
@@ -478,8 +511,13 @@ HANDLERS.set("plugin_window_close", async () => {
 HANDLERS.set("mcp_probe", async (args) => {
   // MCP 服务器探活：stdio 就地 spawn 一次并回收；http 走 Streamable HTTP；sse 不代验。
   const value = args as {
-    transport?: unknown; url?: unknown; command?: unknown; args?: unknown;
-    env?: unknown; headers?: unknown; timeoutSecs?: unknown;
+    transport?: unknown;
+    url?: unknown;
+    command?: unknown;
+    args?: unknown;
+    env?: unknown;
+    headers?: unknown;
+    timeoutSecs?: unknown;
   } | null;
   if (!value || typeof value.transport !== "string") throw new CommandError(400, "缺少参数 transport");
   return mcpProbe({
@@ -495,8 +533,15 @@ HANDLERS.set("mcp_probe", async (args) => {
 HANDLERS.set("mcp_call", async (args) => {
   // `tools/call`：握手后调一个工具（transport: http / stdio）。
   const value = args as {
-    transport?: unknown; url?: unknown; command?: unknown; args?: unknown; env?: unknown;
-    headers?: unknown; tool?: unknown; arguments?: unknown; timeoutSecs?: unknown;
+    transport?: unknown;
+    url?: unknown;
+    command?: unknown;
+    args?: unknown;
+    env?: unknown;
+    headers?: unknown;
+    tool?: unknown;
+    arguments?: unknown;
+    timeoutSecs?: unknown;
   } | null;
   if (!value || typeof value.transport !== "string") throw missingField("transport");
   if (typeof value.tool !== "string") throw missingField("tool");
@@ -515,17 +560,23 @@ HANDLERS.set("mcp_call", async (args) => {
 HANDLERS.set("mcp_search", async (args) => {
   // 官方注册表（registry.modelcontextprotocol.io）只读代理。
   const value = args as { search?: unknown; limit?: unknown } | null;
-  return mcpSearch(
-    typeof value?.search === "string" ? value.search : null,
-    typeof value?.limit === "number" ? value.limit : null,
-  );
+  return mcpSearch(typeof value?.search === "string" ? value.search : null, typeof value?.limit === "number" ? value.limit : null);
 });
 HANDLERS.set("plugin_mcp_call", async (args) => {
   // 插件 mcp.connect 代理：白名单复核 + 配额 + 插件档位超时。
   const value = args as {
-    pluginId?: unknown; server?: unknown; transport?: unknown; url?: unknown; command?: unknown;
-    args?: unknown; env?: unknown; headers?: unknown; tool?: unknown; arguments?: unknown;
-    allowedTools?: unknown; timeoutSecs?: unknown;
+    pluginId?: unknown;
+    server?: unknown;
+    transport?: unknown;
+    url?: unknown;
+    command?: unknown;
+    args?: unknown;
+    env?: unknown;
+    headers?: unknown;
+    tool?: unknown;
+    arguments?: unknown;
+    allowedTools?: unknown;
+    timeoutSecs?: unknown;
   } | null;
   if (!value || typeof value.pluginId !== "string") throw missingField("pluginId");
   if (typeof value.server !== "string") throw missingField("server");
@@ -578,8 +629,11 @@ HANDLERS.set("skills_install_bundled", async (args) => {
 // 插件 net.fetch：域白名单 + 方法 + 路径模板 + 字节上限（与 Rust 双重校验一致）。
 HANDLERS.set("plugin_net_fetch", async (args) => {
   const value = args as {
-    pluginId?: unknown; url?: unknown; method?: unknown;
-    headers?: Record<string, unknown>; body?: unknown;
+    pluginId?: unknown;
+    url?: unknown;
+    method?: unknown;
+    headers?: Record<string, unknown>;
+    body?: unknown;
   } | null;
   if (typeof value?.url !== "string") throw new CommandError(400, "缺少参数 url");
   const method = value.method ?? "GET";
@@ -755,7 +809,7 @@ HANDLERS.set("discord_send", async (args, ctx) => {
   if (!creds?.token) throw new Error("Discord bot token 未配置");
   const response = await fetch(`https://discord.com/api/v10/channels/${v.peerId}/messages`, {
     method: "POST",
-    headers: { "authorization": `Bot ${creds.token}`, "content-type": "application/json" },
+    headers: { authorization: `Bot ${creds.token}`, "content-type": "application/json" },
     body: JSON.stringify({ content: v.text }),
     signal: AbortSignal.timeout(15_000),
   });
@@ -769,7 +823,6 @@ HANDLERS.set("telegram_send", async (args, ctx) => {
   if (typeof value?.text !== "string") throw missingField("text");
   return telegramSend(ctx.dataDir, value.peerId, value.text);
 });
-
 
 HANDLERS.set("telegram_status", async (_args, ctx) => channelStatusDto(ctx.dataDir, "telegram"));
 HANDLERS.set("telegram_save_credentials", async (args, ctx) => {
@@ -866,11 +919,11 @@ HANDLERS.set("feishu_send", async (args, ctx) => {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ app_id: creds.appId, app_secret: creds.appSecret }),
   });
-  const tokenBody = await tokenRes.json() as { tenant_access_token?: string };
+  const tokenBody = (await tokenRes.json()) as { tenant_access_token?: string };
   if (!tokenBody.tenant_access_token) throw new Error("飞书 token 获取失败");
   const response = await fetch("https://open.feishu.cn/open-apis/im/v1/messages", {
     method: "POST",
-    headers: { "authorization": `Bearer ${tokenBody.tenant_access_token}`, "content-type": "application/json" },
+    headers: { authorization: `Bearer ${tokenBody.tenant_access_token}`, "content-type": "application/json" },
     body: JSON.stringify({ receive_id_type: "chat_id", msg_type: "text", content: JSON.stringify({ text: v.text }) }),
   });
   if (!response.ok) throw new Error(`飞书 send returned ${response.status}`);
@@ -984,7 +1037,6 @@ HANDLERS.set("telegram_bot_link", async (_args, ctx) => {
   return telegramBotLink(ctx.dataDir);
 });
 
-
 HANDLERS.set("telegram_connect", async (args, ctx) => {
   const value = args as { allowOtherSenders?: unknown } | null;
   if (typeof value?.allowOtherSenders !== "boolean") throw missingField("allowOtherSenders");
@@ -1085,14 +1137,20 @@ HANDLERS.set("dingtalk_send", async (args, ctx) => {
   const creds = loadChannelCredentials(ctx.dataDir, "dingtalk") as { clientId?: string; clientSecret?: string } | null;
   if (!creds?.clientId || !creds?.clientSecret) throw new Error("钉钉凭证未配置");
   const tokenRes = await fetch("https://api.dingtalk.com/v1.0/oauth2/accessToken", {
-    method: "POST", headers: { "content-type": "application/json" },
+    method: "POST",
+    headers: { "content-type": "application/json" },
     body: JSON.stringify({ appKey: creds.clientId, appSecret: creds.clientSecret }),
   });
-  const { accessToken } = await tokenRes.json() as { accessToken: string };
+  const { accessToken } = (await tokenRes.json()) as { accessToken: string };
   const response = await fetch(`https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend`, {
     method: "POST",
     headers: { "x-acs-dingtalk-access-token": accessToken, "content-type": "application/json" },
-    body: JSON.stringify({ robotCode: creds.clientId, userIds: [v.peerId], msgKey: "sampleText", msgParam: JSON.stringify({ content: v.text }) }),
+    body: JSON.stringify({
+      robotCode: creds.clientId,
+      userIds: [v.peerId],
+      msgKey: "sampleText",
+      msgParam: JSON.stringify({ content: v.text }),
+    }),
   });
   if (!response.ok) throw new Error(`钉钉 send returned ${response.status}`);
   return { ok: true };
@@ -1106,13 +1164,14 @@ HANDLERS.set("qq_send", async (args, ctx) => {
   const creds = loadChannelCredentials(ctx.dataDir, "qq") as { appId?: string; appSecret?: string } | null;
   if (!creds?.appId || !creds?.appSecret) throw new Error("QQ 凭证未配置");
   const tokenRes = await fetch("https://bots.qq.com/app/getAppAccessToken", {
-    method: "POST", headers: { "content-type": "application/json" },
+    method: "POST",
+    headers: { "content-type": "application/json" },
     body: JSON.stringify({ appId: creds.appId, clientSecret: creds.appSecret }),
   });
-  const { access_token } = await tokenRes.json() as { access_token: string };
+  const { access_token } = (await tokenRes.json()) as { access_token: string };
   const response = await fetch(`https://api.sgroup.qq.com/v2/users/${v.peerId}/messages`, {
     method: "POST",
-    headers: { "authorization": `QQBot ${access_token}`, "content-type": "application/json" },
+    headers: { authorization: `QQBot ${access_token}`, "content-type": "application/json" },
     body: JSON.stringify({ content: v.text, msg_type: 0, msg_id: "" }),
   });
   if (!response.ok) throw new Error(`QQ send returned ${response.status}`);
@@ -1127,7 +1186,8 @@ HANDLERS.set("wecom_send", async (args, ctx) => {
   const creds = loadChannelCredentials(ctx.dataDir, "wecom") as { botId?: string; secret?: string } | null;
   if (!creds?.botId) throw new Error("企微凭证未配置");
   const response = await fetch(`https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=${creds.botId}`, {
-    method: "POST", headers: { "content-type": "application/json" },
+    method: "POST",
+    headers: { "content-type": "application/json" },
     body: JSON.stringify({ msgtype: "text", text: { content: v.text } }),
   });
   if (!response.ok) throw new Error(`企微 send returned ${response.status}`);
