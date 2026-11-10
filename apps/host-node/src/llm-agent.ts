@@ -124,7 +124,14 @@ function toolSchemas(): Record<string, unknown>[] {
 function clampOutput(value: string): string {
   const chars = [...value];
   if (chars.length <= MAX_TOOL_OUTPUT_CHARS) return value;
-  return chars.slice(0, MAX_TOOL_OUTPUT_CHARS).join("") + "\n\n[已截断：共 " + chars.length + " 字符，只保留前 " + MAX_TOOL_OUTPUT_CHARS + " 字符。需要更多内容请用更小的范围重读]";
+  return (
+    chars.slice(0, MAX_TOOL_OUTPUT_CHARS).join("") +
+    "\n\n[已截断：共 " +
+    chars.length +
+    " 字符，只保留前 " +
+    MAX_TOOL_OUTPUT_CHARS +
+    " 字符。需要更多内容请用更小的范围重读]"
+  );
 }
 
 function failed(error: string, path: string | null): ToolOutput {
@@ -279,7 +286,7 @@ class ToolCallAccumulator {
     for (const index of indexes) {
       const call = this.calls.get(index)!;
       this.calls.delete(index);
-      const id = call.id ?? "call_synth_" + index + "_" + (++this.synthSeq);
+      const id = call.id ?? "call_synth_" + index + "_" + ++this.synthSeq;
       out.push({ id, name: call.name ?? "", arguments: call.arguments });
     }
     return out;
@@ -431,7 +438,9 @@ export class LlmAgentHost {
       });
       if (!response.ok) {
         const text = await response.text().catch(() => "");
-        throw new Error("llm endpoint returned " + response.status + ": " + truncate(text, 200) + "（检查 Base URL 是否正确、本地服务是否在运行）");
+        throw new Error(
+          "llm endpoint returned " + response.status + ": " + truncate(text, 200) + "（检查 Base URL 是否正确、本地服务是否在运行）",
+        );
       }
       const outcome = await this.drainRound(response, turn, controller, accumulator);
 
@@ -600,9 +609,7 @@ function parseArguments(raw: string): Record<string, unknown> {
   if (trimmed === "") return {};
   try {
     const parsed = JSON.parse(trimmed) as unknown;
-    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : {};
+    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
   } catch {
     return {};
   }

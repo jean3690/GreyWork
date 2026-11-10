@@ -1,4 +1,3 @@
-
 /**
  * 聊天通道命令的共享实现：媒体收发（能力矩阵 / inbox / 出站降级）、
  * 扫码创建应用（dingtalk / feishu / qq 三条注册协议）、telegram 机器人链接、
@@ -45,19 +44,26 @@ export function capabilityOf(channel: string): ChannelMediaCapability {
   const caps = (inbound: MediaKind[], outbound: MediaKind[]): ChannelMediaCapability => ({ inbound, outbound });
   switch (channel) {
     // 双向收发图片 / 视频 / 文件；SDK 没有语音发送端点，音频降级为文件。
-    case "wechat": return caps(["image", "video", "audio", "file"], ["image", "video", "file"]);
+    case "wechat":
+      return caps(["image", "video", "audio", "file"], ["image", "video", "file"]);
     // 全类别原生双向。
     case "telegram":
-    case "discord": return caps(["image", "video", "audio", "file"], ["image", "video", "audio", "file"]);
+    case "discord":
+      return caps(["image", "video", "audio", "file"], ["image", "video", "audio", "file"]);
     // 出站 media 需封面 image_key、audio 需 opus，原生只到图片与文件。
-    case "feishu": return caps(["image", "video", "audio", "file"], ["image", "file"]);
+    case "feishu":
+      return caps(["image", "video", "audio", "file"], ["image", "file"]);
     // 语音端点要 SILK 编码，原生只到图片与视频。
-    case "qq": return caps(["image", "video", "audio", "file"], ["image", "video", "file"]);
+    case "qq":
+      return caps(["image", "video", "audio", "file"], ["image", "video", "file"]);
     // 被动回复只能把图片塞进 stream 图文混排，没有文件出口。
-    case "wecom": return caps(["image", "video", "file"], ["image"]);
+    case "wecom":
+      return caps(["image", "video", "file"], ["image"]);
     // sessionWebhook 只认 text/markdown/link/actionCard/feedCard，出站没有任何媒体通道。
-    case "dingtalk": return caps(["image", "video", "audio", "file"], []);
-    default: return caps([], []);
+    case "dingtalk":
+      return caps(["image", "video", "audio", "file"], []);
+    default:
+      return caps([], []);
   }
 }
 
@@ -90,8 +96,10 @@ function startsWithBytes(bytes: Buffer, signature: number[], offset = 0): boolea
 export function sniffImage(bytes: Buffer): [string, string] | null {
   if (startsWithBytes(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return ["image/png", "png"];
   if (startsWithBytes(bytes, [0xff, 0xd8, 0xff])) return ["image/jpeg", "jpg"];
-  if (bytes.subarray(0, 6).toString("latin1") === "GIF87a" || bytes.subarray(0, 6).toString("latin1") === "GIF89a") return ["image/gif", "gif"];
-  if (bytes.length >= 12 && bytes.subarray(0, 4).toString("latin1") === "RIFF" && bytes.subarray(8, 12).toString("latin1") === "WEBP") return ["image/webp", "webp"];
+  if (bytes.subarray(0, 6).toString("latin1") === "GIF87a" || bytes.subarray(0, 6).toString("latin1") === "GIF89a")
+    return ["image/gif", "gif"];
+  if (bytes.length >= 12 && bytes.subarray(0, 4).toString("latin1") === "RIFF" && bytes.subarray(8, 12).toString("latin1") === "WEBP")
+    return ["image/webp", "webp"];
   if (bytes.subarray(0, 2).toString("latin1") === "BM") return ["image/bmp", "bmp"];
   return null;
 }
@@ -105,17 +113,26 @@ export function sniffVideo(bytes: Buffer): [string, string] | null {
     return brand === "qt  " ? ["video/quicktime", "mov"] : ["video/mp4", "mp4"];
   }
   if (startsWithBytes(bytes, [0x1a, 0x45, 0xdf, 0xa3])) return ["video/webm", "webm"];
-  if (bytes.length >= 12 && bytes.subarray(0, 4).toString("latin1") === "RIFF" && bytes.subarray(8, 12).toString("latin1") === "AVI ") return ["video/x-msvideo", "avi"];
+  if (bytes.length >= 12 && bytes.subarray(0, 4).toString("latin1") === "RIFF" && bytes.subarray(8, 12).toString("latin1") === "AVI ")
+    return ["video/x-msvideo", "avi"];
   if (startsWithBytes(bytes, [0x00, 0x00, 0x01, 0xba]) || startsWithBytes(bytes, [0x00, 0x00, 0x01, 0xb3])) return ["video/mpeg", "mpg"];
   return null;
 }
 
 /** 按魔数嗅探音频。 */
 export function sniffAudio(bytes: Buffer): [string, string] | null {
-  if (bytes.length >= 12 && bytes.subarray(4, 8).toString("latin1") === "ftyp" && bytes.subarray(8, 10).toString("latin1") === "M4A") return ["audio/mp4", "m4a"];
+  if (bytes.length >= 12 && bytes.subarray(4, 8).toString("latin1") === "ftyp" && bytes.subarray(8, 10).toString("latin1") === "M4A")
+    return ["audio/mp4", "m4a"];
   if (bytes.subarray(0, 4).toString("latin1") === "OggS") return ["audio/ogg", "ogg"];
-  if (bytes.subarray(0, 3).toString("latin1") === "ID3" || startsWithBytes(bytes, [0xff, 0xfb]) || startsWithBytes(bytes, [0xff, 0xf3]) || startsWithBytes(bytes, [0xff, 0xf2])) return ["audio/mpeg", "mp3"];
-  if (bytes.length >= 12 && bytes.subarray(0, 4).toString("latin1") === "RIFF" && bytes.subarray(8, 12).toString("latin1") === "WAVE") return ["audio/wav", "wav"];
+  if (
+    bytes.subarray(0, 3).toString("latin1") === "ID3" ||
+    startsWithBytes(bytes, [0xff, 0xfb]) ||
+    startsWithBytes(bytes, [0xff, 0xf3]) ||
+    startsWithBytes(bytes, [0xff, 0xf2])
+  )
+    return ["audio/mpeg", "mp3"];
+  if (bytes.length >= 12 && bytes.subarray(0, 4).toString("latin1") === "RIFF" && bytes.subarray(8, 12).toString("latin1") === "WAVE")
+    return ["audio/wav", "wav"];
   if (bytes.subarray(0, 4).toString("latin1") === "fLaC") return ["audio/flac", "flac"];
   if (bytes.subarray(0, 5).toString("latin1") === "#!AMR") return ["audio/amr", "amr"];
   if (bytes.subarray(0, 6).toString("latin1") === "#!SILK") return ["audio/silk", "silk"];
@@ -126,7 +143,11 @@ export function sniffAudio(bytes: Buffer): [string, string] | null {
 export function extOf(name: string): string {
   const dot = name.lastIndexOf(".");
   const raw = dot >= 0 ? name.slice(dot + 1) : "";
-  const cleaned = [...raw].filter((ch) => /[A-Za-z0-9]/.test(ch)).slice(0, 8).join("").toLowerCase();
+  const cleaned = [...raw]
+    .filter((ch) => /[A-Za-z0-9]/.test(ch))
+    .slice(0, 8)
+    .join("")
+    .toLowerCase();
   return cleaned;
 }
 
@@ -136,7 +157,10 @@ export function sanitizeDisplayName(raw: string): string {
     .filter((ch) => ch.charCodeAt(0) > 0x1f && ch.charCodeAt(0) !== 0x7f)
     .map((ch) => (ch === "/" || ch === "\\" || ch === ":" ? "_" : ch))
     .join("");
-  const trimmed = cleaned.trim().replace(/^\.+|\.+$/g, "").trim();
+  const trimmed = cleaned
+    .trim()
+    .replace(/^\.+|\.+$/g, "")
+    .trim();
   if (trimmed === "") return "attachment";
   return [...trimmed].slice(0, 120).join("");
 }
@@ -263,7 +287,7 @@ export function channelTakeMedia(dataDir: string, channel: string, rawPath: stri
     canonical = path.resolve(rawPath);
     canonicalInbox = path.resolve(inbox);
   } catch (error) {
-    throw new Error("媒体路径不可访问: " + (error as Error).message);
+    throw new Error("媒体路径不可访问: " + (error as Error).message, { cause: error });
   }
   if (canonical !== canonicalInbox && !canonical.startsWith(canonicalInbox + path.sep)) {
     throw new Error("媒体路径不在收件目录内");
@@ -272,7 +296,7 @@ export function channelTakeMedia(dataDir: string, channel: string, rawPath: stri
   try {
     stat = statSync(canonical);
   } catch (error) {
-    throw new Error("读取媒体元数据失败: " + (error as Error).message);
+    throw new Error("读取媒体元数据失败: " + (error as Error).message, { cause: error });
   }
   if (!stat.isFile()) throw new Error("媒体路径不是文件");
   if (stat.size > MAX_MEDIA_BYTES) throw new Error("媒体超过 " + MAX_MEDIA_BYTES + " 字节上限");
@@ -280,7 +304,7 @@ export function channelTakeMedia(dataDir: string, channel: string, rawPath: stri
   try {
     bytes = readFileSync(canonical);
   } catch (error) {
-    throw new Error("读取媒体失败: " + (error as Error).message);
+    throw new Error("读取媒体失败: " + (error as Error).message, { cause: error });
   }
   try {
     unlinkSync(canonical);
@@ -289,7 +313,6 @@ export function channelTakeMedia(dataDir: string, channel: string, rawPath: stri
   }
   return bytes;
 }
-
 
 /* ===== 出站媒体：授权校验、读取与降级改写（outbound.rs 移植） ===== */
 
@@ -302,19 +325,21 @@ export interface OutboundMedia {
 
 function kindLabel(kind: MediaKind): string {
   switch (kind) {
-    case "image": return "图片";
-    case "video": return "视频";
-    case "audio": return "语音";
-    case "file": return "文件";
+    case "image":
+      return "图片";
+    case "video":
+      return "视频";
+    case "audio":
+      return "语音";
+    case "file":
+      return "文件";
   }
 }
 
 /** 能力不允许时的说明文案（宿主侧兜底；渲染端另有一份 i18n 提示）。 */
 function capabilityError(channel: string, cap: ChannelMediaCapability, kind: MediaKind): string {
   if (cap.outbound.length === 0) {
-    return cap.inbound.length === 0
-      ? channel + " 不支持发送文件"
-      : channel + " 只能接收消息，无法向外发送";
+    return cap.inbound.length === 0 ? channel + " 不支持发送文件" : channel + " 只能接收消息，无法向外发送";
   }
   return channel + " 不支持发送" + kindLabel(kind);
 }
@@ -331,7 +356,7 @@ export function prepareOutbound(access: WorkspaceAccess, channel: string, rawPat
   try {
     stat = statSync(real);
   } catch (error) {
-    throw new Error("读取文件元数据失败: " + (error as Error).message);
+    throw new Error("读取文件元数据失败: " + (error as Error).message, { cause: error });
   }
   if (!stat.isFile()) throw new Error("只能发送文件");
   if (stat.size > MAX_MEDIA_BYTES) {
@@ -341,10 +366,10 @@ export function prepareOutbound(access: WorkspaceAccess, channel: string, rawPat
   try {
     bytes = readFileSync(real);
   } catch (error) {
-    throw new Error("读取文件失败: " + (error as Error).message);
+    throw new Error("读取文件失败: " + (error as Error).message, { cause: error });
   }
   const name = path.basename(real) || "attachment";
-  let media: OutboundMedia = { bytes, name, kind: resolveMediaKindNamed(null, name, bytes) };
+  const media: OutboundMedia = { bytes, name, kind: resolveMediaKindNamed(null, name, bytes) };
   if (kind !== null) media.kind = resolveMediaKindNamed(kind, media.name, media.bytes);
   const effective = effectiveKind(cap, media.kind);
   if (effective === null) throw new Error(capabilityError(channel, cap, media.kind));
@@ -368,7 +393,13 @@ function resolveMediaKindNamed(explicit: string | null, name: string, bytes: Buf
 }
 
 /** 按通道名把媒体交给对应出口上传（dispatch.rs 移植）。 */
-export async function sendMediaVia(dataDir: string, channel: string, peerId: string, _contextToken: string | null, media: OutboundMedia): Promise<void> {
+export async function sendMediaVia(
+  dataDir: string,
+  channel: string,
+  peerId: string,
+  _contextToken: string | null,
+  media: OutboundMedia,
+): Promise<void> {
   switch (channel) {
     case "wechat":
       await sendWechatMedia(dataDir, peerId, media);
@@ -414,10 +445,7 @@ async function sendTelegramMedia(dataDir: string, chatId: string, media: Outboun
   const creds = loadTelegramCredentials(dataDir);
   if (creds === null) throw new Error("Telegram bot token 未配置");
   const method =
-    media.kind === "image" ? "sendPhoto"
-    : media.kind === "video" ? "sendVideo"
-    : media.kind === "audio" ? "sendVoice"
-    : "sendDocument";
+    media.kind === "image" ? "sendPhoto" : media.kind === "video" ? "sendVideo" : media.kind === "audio" ? "sendVoice" : "sendDocument";
   const fieldName = media.kind === "image" ? "photo" : media.kind === "video" ? "video" : media.kind === "audio" ? "voice" : "document";
   const form = new FormData();
   form.append("chat_id", chatId);
@@ -430,7 +458,7 @@ async function sendTelegramMedia(dataDir: string, chatId: string, media: Outboun
       signal: AbortSignal.timeout(60_000),
     });
   } catch (error) {
-    throw new Error("Telegram 上传失败（网络层）: " + (error as Error).message);
+    throw new Error("Telegram 上传失败（网络层）: " + (error as Error).message, { cause: error });
   }
   const text = await response.text();
   let parsed: { ok?: unknown; description?: unknown } = {};
@@ -440,7 +468,9 @@ async function sendTelegramMedia(dataDir: string, chatId: string, media: Outboun
     // 非 JSON 回包按 HTTP 状态处理。
   }
   if (parsed.ok !== true) {
-    throw new Error("Telegram 上传失败 (" + response.status + ")：" + (typeof parsed.description === "string" ? parsed.description : text.slice(0, 200)));
+    throw new Error(
+      "Telegram 上传失败 (" + response.status + ")：" + (typeof parsed.description === "string" ? parsed.description : text.slice(0, 200)),
+    );
   }
 }
 
@@ -462,7 +492,7 @@ export async function telegramBotLink(dataDir: string): Promise<TelegramBotLinkD
       signal: AbortSignal.timeout(15_000),
     });
   } catch (error) {
-    throw new Error("getMe 请求失败: " + (error as Error).message);
+    throw new Error("getMe 请求失败: " + (error as Error).message, { cause: error });
   }
   const body = await response.text();
   if (!response.ok) throw new Error("getMe 返回 " + response.status + ": " + body.slice(0, 200));
@@ -470,7 +500,7 @@ export async function telegramBotLink(dataDir: string): Promise<TelegramBotLinkD
   try {
     parsed = JSON.parse(body) as typeof parsed;
   } catch (error) {
-    throw new Error("getMe 响应解析失败: " + (error as Error).message);
+    throw new Error("getMe 响应解析失败: " + (error as Error).message, { cause: error });
   }
   if (parsed.ok !== true) {
     throw new Error("Telegram 拒绝了 getMe：" + (typeof parsed.description === "string" ? parsed.description : "unknown error"));
@@ -483,7 +513,6 @@ export async function telegramBotLink(dataDir: string): Promise<TelegramBotLinkD
   }
   return { url: "https://t.me/" + username, name: typeof result.first_name === "string" ? result.first_name : "", username };
 }
-
 
 /* ===== 扫码创建应用：dingtalk（OAPI 内部通道） ===== */
 
@@ -522,7 +551,7 @@ async function postJson(url: string, body: unknown, action: string): Promise<{ s
       signal: AbortSignal.timeout(15_000),
     });
   } catch (error) {
-    throw new Error(action + "请求失败: " + (error as Error).message);
+    throw new Error(action + "请求失败: " + (error as Error).message, { cause: error });
   }
   return { status: response.status, text: await response.text() };
 }
@@ -533,12 +562,16 @@ function dingtalkEnvelope(text: string, status: number, action: string): Record<
   try {
     parsed = JSON.parse(text) as Record<string, unknown>;
   } catch (error) {
-    throw new Error(action + "响应解析失败: " + (error as Error).message + "（HTTP " + status + ": " + text.slice(0, 120) + "）");
+    throw new Error(action + "响应解析失败: " + (error as Error).message + "（HTTP " + status + ": " + text.slice(0, 120) + "）", {
+      cause: error,
+    });
   }
   const errcode = typeof parsed.errcode === "number" ? parsed.errcode : -1;
   if (errcode !== 0) {
     const detail = typeof parsed.errmsg === "string" ? parsed.errmsg.trim() : "";
-    throw new Error(detail === "" ? action + "失败（errcode=" + errcode + "）" : action + "失败：" + detail + "（errcode=" + errcode + "）");
+    throw new Error(
+      detail === "" ? action + "失败（errcode=" + errcode + "）" : action + "失败：" + detail + "（errcode=" + errcode + "）",
+    );
   }
   return parsed;
 }
@@ -573,11 +606,7 @@ export async function dingtalkRegisterBegin(): Promise<RegisterStartDto> {
   const nonce = strField(init, "nonce");
   if (nonce === "") throw new Error("扫码注册响应缺少 nonce");
 
-  const begin = dingtalkEnvelope(
-    (await postJson(base + "/app/registration/begin", { nonce }, "发起扫码")).text,
-    200,
-    "发起扫码",
-  );
+  const begin = dingtalkEnvelope((await postJson(base + "/app/registration/begin", { nonce }, "发起扫码")).text, 200, "发起扫码");
   const deviceCode = strField(begin, "device_code");
   const qrUrl = strField(begin, "verification_uri_complete");
   if (deviceCode === "" || qrUrl === "") throw new Error("扫码注册响应缺少 device_code / 扫码链接");
@@ -667,7 +696,7 @@ async function postForm(url: string, pairs: [string, string][], action: string):
       signal: AbortSignal.timeout(15_000),
     });
   } catch (error) {
-    throw new Error(action + "请求失败: " + (error as Error).message);
+    throw new Error(action + "请求失败: " + (error as Error).message, { cause: error });
   }
   const body = await response.text();
   // 这个接口把「等待中」也表达成 HTTP 400 + JSON 体，所以状态码不能当失败判据。
@@ -704,7 +733,7 @@ export async function feishuRegisterBegin(): Promise<RegisterStartDto> {
   try {
     parsed = JSON.parse(body) as Record<string, unknown>;
   } catch (error) {
-    throw new Error("扫码注册响应解析失败: " + (error as Error).message);
+    throw new Error("扫码注册响应解析失败: " + (error as Error).message, { cause: error });
   }
   const deviceCode = strField(parsed, "device_code");
   const verificationUri = strField(parsed, "verification_uri_complete");
@@ -724,7 +753,7 @@ export async function feishuRegisterBegin(): Promise<RegisterStartDto> {
 
 /** feishu_register_poll：pending 期间间隔由服务端给（slow_down 会变大）；国际版租户切域（只切一次）。 */
 export async function feishuRegisterPoll(dataDir: string): Promise<RegisterPollDto & { appId: string | null; intervalMs: number | null }> {
-  let session = takeSession<FeishuSession>("feishu");
+  const session = takeSession<FeishuSession>("feishu");
   const sameDevice = (): boolean => registrationSessions.get("feishu") === session;
   if (Date.now() >= session.expiresAt) {
     if (sameDevice()) registrationSessions.delete("feishu");
@@ -732,14 +761,17 @@ export async function feishuRegisterPoll(dataDir: string): Promise<RegisterPollD
   }
   const body = await postForm(
     session.domain + FEISHU_REGISTRATION_PATH,
-    [["action", "poll"], ["device_code", session.deviceCode]],
+    [
+      ["action", "poll"],
+      ["device_code", session.deviceCode],
+    ],
     "扫码轮询",
   );
   let parsed: Record<string, unknown>;
   try {
     parsed = JSON.parse(body) as Record<string, unknown>;
   } catch (error) {
-    throw new Error("扫码轮询响应解析失败: " + (error as Error).message);
+    throw new Error("扫码轮询响应解析失败: " + (error as Error).message, { cause: error });
   }
   const described = (): string => {
     const detail = typeof parsed.error_description === "string" ? parsed.error_description.trim() : "";
@@ -840,17 +872,25 @@ export function decryptQqSecret(encrypted: string, bindKey: string): string {
 }
 
 async function qqPostBind(payload: Record<string, unknown>, action: string): Promise<Record<string, unknown>> {
-  const { status, text } = await postJson(QQ_BIND_HOST + (action === "发起扫码" ? "/lite/create_bind_task" : "/lite/poll_bind_result"), payload, action);
+  const { status, text } = await postJson(
+    QQ_BIND_HOST + (action === "发起扫码" ? "/lite/create_bind_task" : "/lite/poll_bind_result"),
+    payload,
+    action,
+  );
   let parsed: Record<string, unknown>;
   try {
     parsed = JSON.parse(text) as Record<string, unknown>;
   } catch (error) {
-    throw new Error(action + "响应解析失败: " + (error as Error).message + "（HTTP " + status + ": " + text.slice(0, 120) + "）");
+    throw new Error(action + "响应解析失败: " + (error as Error).message + "（HTTP " + status + ": " + text.slice(0, 120) + "）", {
+      cause: error,
+    });
   }
   const retcode = typeof parsed.retcode === "number" ? parsed.retcode : null;
   if (retcode !== null && retcode !== 0) {
     const detail = (typeof parsed.msg === "string" ? parsed.msg : typeof parsed.message === "string" ? parsed.message : "").trim();
-    throw new Error(detail === "" ? action + "失败（retcode=" + retcode + "）" : action + "失败：" + detail + "（retcode=" + retcode + "）");
+    throw new Error(
+      detail === "" ? action + "失败（retcode=" + retcode + "）" : action + "失败：" + detail + "（retcode=" + retcode + "）",
+    );
   }
   const data = parsed.data;
   return data !== null && data !== undefined && typeof data === "object" && !Array.isArray(data) ? (data as Record<string, unknown>) : {};
@@ -882,7 +922,8 @@ export async function qqRegisterPoll(dataDir: string): Promise<RegisterPollDto &
   const data = await qqPostBind({ task_id: session.taskId }, "轮询扫码");
   const status = typeof data.status === "number" ? data.status : 0;
   if (status === 2) {
-    const appId = typeof data.bot_appid === "string" ? data.bot_appid.trim() : typeof data.bot_appid === "number" ? String(data.bot_appid) : "";
+    const appId =
+      typeof data.bot_appid === "string" ? data.bot_appid.trim() : typeof data.bot_appid === "number" ? String(data.bot_appid) : "";
     const encrypted = typeof data.bot_encrypt_secret === "string" ? data.bot_encrypt_secret.trim() : "";
     if (appId === "" || encrypted === "") throw new Error("扫码成功但未返回完整 QQ 机器人凭证");
     const appSecret = decryptQqSecret(encrypted, session.bindKey);
@@ -902,7 +943,6 @@ export async function qqRegisterPoll(dataDir: string): Promise<RegisterPollDto &
 export function qqRegisterCancel(): void {
   registrationSessions.delete("qq");
 }
-
 
 /* ===== 微信扫码登录（官方 SDK）与「正在输入」 ===== */
 
@@ -936,7 +976,7 @@ function trustedApiBase(raw: string): string {
   try {
     parsed = new URL(raw.trim());
   } catch (error) {
-    throw new Error("登录下发的地址非法: " + (error as Error).message);
+    throw new Error("登录下发的地址非法: " + (error as Error).message, { cause: error });
   }
   if (parsed.protocol !== "https:") throw new Error("登录下发的地址必须是 https：" + raw);
   const host = parsed.hostname;
@@ -1033,11 +1073,7 @@ export async function wechatLoginQr(dataDir: string): Promise<{ content: string 
       if (qr !== null) return { content: qr };
       const current = loginState().outcome;
       if (current !== null) {
-        throw new Error(
-          current.kind === "failed"
-            ? current.detail
-            : "该账号已登录（bot=" + current.botId + "），无需重新扫码",
-        );
+        throw new Error(current.kind === "failed" ? current.detail : "该账号已登录（bot=" + current.botId + "），无需重新扫码");
       }
     }
     if (Date.now() >= deadline) throw new Error("等待二维码超时");
@@ -1129,7 +1165,7 @@ function feishuCheckCode(body: string, action: string): Record<string, unknown> 
   try {
     parsed = JSON.parse(body) as Record<string, unknown>;
   } catch (error) {
-    throw new Error(action + "响应解析失败: " + (error as Error).message);
+    throw new Error(action + "响应解析失败: " + (error as Error).message, { cause: error });
   }
   const code = typeof parsed.code === "number" ? parsed.code : -1;
   if (code !== 0) {
@@ -1294,7 +1330,7 @@ async function qqPostApi(token: string, url: string, body: unknown, action: stri
   });
   const text = await response.text().catch(() => "");
   if (!response.ok) throw new Error(action + "返回 " + response.status + ": " + briefBody(text));
-  let parsed: Record<string, unknown> = {};
+  let parsed: Record<string, unknown>;
   try {
     parsed = JSON.parse(text) as Record<string, unknown>;
   } catch {
@@ -1346,14 +1382,19 @@ async function qqUploadRichMedia(token: string, peer: { scope: "c2c" | "group"; 
   const fileType = qqFileType(media);
   const fileSize = media.bytes.length;
   const headLen = Math.min(fileSize, 10 * 1024 * 1024);
-  const prepared = await qqPostApi(token, base + "/upload_prepare", {
-    file_type: fileType,
-    file_name: media.name,
-    file_size: String(fileSize),
-    md5: qqMd5(media.bytes),
-    sha1: qqSha1(media.bytes),
-    md5_10m: qqMd5(media.bytes.subarray(0, headLen)),
-  }, "申请上传");
+  const prepared = await qqPostApi(
+    token,
+    base + "/upload_prepare",
+    {
+      file_type: fileType,
+      file_name: media.name,
+      file_size: String(fileSize),
+      md5: qqMd5(media.bytes),
+      sha1: qqSha1(media.bytes),
+      md5_10m: qqMd5(media.bytes.subarray(0, headLen)),
+    },
+    "申请上传",
+  );
   const uploadId = typeof prepared.upload_id === "string" ? prepared.upload_id.trim() : "";
   if (uploadId === "") throw new Error("申请上传响应缺少 upload_id");
   const rawParts = Array.isArray(prepared.parts) ? prepared.parts : [];
@@ -1388,22 +1429,32 @@ async function qqUploadRichMedia(token: string, peer: { scope: "c2c" | "group"; 
       const body = await put.text().catch(() => "");
       throw new Error("上传分片返回 " + put.status + ": " + briefBody(body));
     }
-    await qqPostApi(token, base + "/upload_part_finish", {
-      upload_id: uploadId,
-      part_index: part.index,
-      block_size: String(end - offset),
-      md5: qqMd5(chunk),
-    }, "完成分片");
+    await qqPostApi(
+      token,
+      base + "/upload_part_finish",
+      {
+        upload_id: uploadId,
+        part_index: part.index,
+        block_size: String(end - offset),
+        md5: qqMd5(chunk),
+      },
+      "完成分片",
+    );
     offset = end;
   }
   if (offset !== fileSize) throw new Error("分片上传未覆盖整个文件");
 
-  const merged = await qqPostApi(token, base + "/files", {
-    file_type: fileType,
-    file_name: media.name,
-    upload_id: uploadId,
-    srv_send_msg: false,
-  }, "合并文件");
+  const merged = await qqPostApi(
+    token,
+    base + "/files",
+    {
+      file_type: fileType,
+      file_name: media.name,
+      upload_id: uploadId,
+      srv_send_msg: false,
+    },
+    "合并文件",
+  );
   const fileInfo = typeof merged.file_info === "string" ? merged.file_info : "";
   if (fileInfo === "") throw new Error("合并文件响应缺少 file_info");
   return fileInfo;
@@ -1420,10 +1471,15 @@ async function sendQqMedia(dataDir: string, peerId: string, media: OutboundMedia
   const token = await qqToken(dataDir);
   const fileInfo = await qqUploadRichMedia(token, peer, media);
   const messagesUrl = (peer.scope === "c2c" ? QQ_API_BASE + "/v2/users/" : QQ_API_BASE + "/v2/groups/") + peer.openid + "/messages";
-  await qqPostApi(token, messagesUrl, {
-    msg_type: 7,
-    media: { file_info: fileInfo },
-    msg_id: "",
-    msg_seq: 1,
-  }, "发送媒体");
+  await qqPostApi(
+    token,
+    messagesUrl,
+    {
+      msg_type: 7,
+      media: { file_info: fileInfo },
+      msg_id: "",
+      msg_seq: 1,
+    },
+    "发送媒体",
+  );
 }

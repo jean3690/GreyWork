@@ -103,17 +103,27 @@ export function mediaMimeOf(target: string): string {
   const extension = target.includes(".") ? target.slice(target.lastIndexOf(".") + 1).toLowerCase() : "";
   switch (extension) {
     case "mp4":
-    case "m4v": return "video/mp4";
-    case "webm": return "video/webm";
-    case "mov": return "video/quicktime";
-    case "mkv": return "video/x-matroska";
-    case "mp3": return "audio/mpeg";
-    case "m4a": return "audio/mp4";
-    case "wav": return "audio/wav";
+    case "m4v":
+      return "video/mp4";
+    case "webm":
+      return "video/webm";
+    case "mov":
+      return "video/quicktime";
+    case "mkv":
+      return "video/x-matroska";
+    case "mp3":
+      return "audio/mpeg";
+    case "m4a":
+      return "audio/mp4";
+    case "wav":
+      return "audio/wav";
     case "ogg":
-    case "oga": return "audio/ogg";
-    case "flac": return "audio/flac";
-    default: return "application/octet-stream";
+    case "oga":
+      return "audio/ogg";
+    case "flac":
+      return "audio/flac";
+    default:
+      return "application/octet-stream";
   }
 }
 

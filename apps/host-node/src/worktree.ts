@@ -136,7 +136,9 @@ function gitRun(cwd: string, args: string[], envs: Record<string, string> = {}):
     const err = error as { stderr?: Buffer | string; stdout?: Buffer | string; message?: string };
     const stderr = typeof err.stderr === "string" ? err.stderr : Buffer.from(err.stderr ?? "").toString();
     const stdout = typeof err.stdout === "string" ? err.stdout : Buffer.from(err.stdout ?? "").toString();
-    throw new Error(stderr.trim() === "" ? (stdout.trim() === "" ? (err.message ?? "git failed") : stdout.trimEnd()) : stderr.trimEnd());
+    throw new Error(stderr.trim() === "" ? (stdout.trim() === "" ? (err.message ?? "git failed") : stdout.trimEnd()) : stderr.trimEnd(), {
+      cause: error,
+    });
   }
 }
 

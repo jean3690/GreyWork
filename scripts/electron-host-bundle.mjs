@@ -96,6 +96,4 @@ if (leftovers.length > 0) {
 const virtualStore = path.join(outDir, "node_modules", ".pnpm");
 if (existsSync(virtualStore)) rmSync(virtualStore, { recursive: true, force: true });
 
-console.log(
-  `[host-bundle] 已生成 ${path.relative(repoRoot, outDir)}（解引用 ${stats.replaced} 个链接，清除悬空 ${stats.dropped} 个）`,
-);
+console.log(`[host-bundle] 已生成 ${path.relative(repoRoot, outDir)}（解引用 ${stats.replaced} 个链接，清除悬空 ${stats.dropped} 个）`);

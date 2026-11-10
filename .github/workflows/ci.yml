@@ -125,4 +125,3 @@ jobs:
       # （AppImage 拉 linuxdeploy 之类），CI 里不稳定；真正出安装包在 release.yml。
       - name: Package (unpacked)
         run: pnpm --filter @greywork/electron package:dir
-

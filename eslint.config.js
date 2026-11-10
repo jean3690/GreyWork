@@ -89,8 +89,10 @@ export default defineConfigWithVueTs(
   {
     languageOptions: {
       parserOptions: {
-        // 这两个 glob 下的文件不属于任何包的 tsconfig，但仍是本仓代码，要走 lint 而不是 ignore。
-        projectService: { allowDefaultProject: ["packages/*/vitest.config.ts", "scripts/*.mjs", "apps/host-node/test-fixtures/*.mjs"] },
+        // 这些 glob 下的文件不属于任何包的 tsconfig，但仍是本仓代码，要走 lint 而不是 ignore。
+        // scripts/ 有自己的 tsconfig（scripts/tsconfig.json），不能留在这里：默认项目的配额
+        // 只有 8 个文件，脚本数量一多就整体报 "Too many files"。
+        projectService: { allowDefaultProject: ["packages/*/vitest.config.ts", "apps/host-node/test-fixtures/*.mjs"] },
       },
     },
   },

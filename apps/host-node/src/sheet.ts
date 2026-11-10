@@ -179,11 +179,10 @@ export function excelToStandardDatetime(excelDatetime: number, is1904: boolean):
   const day = days;
 
   const time = excelDatetime % 1;
-  let milli = Math.round((time * DAY_SECONDS) % 1 * 1000);
+  const milli = Math.round(((time * DAY_SECONDS) % 1) * 1000);
   let dayAsSeconds = Math.trunc(time * DAY_SECONDS);
   if (milli === 1000) {
     dayAsSeconds += 1;
-    milli = 0;
   }
 
   const hour = Math.floor(dayAsSeconds / HOUR_SECONDS);
@@ -496,10 +495,7 @@ export function readSheetFromBytes(bytes: Buffer, sheet: string | null | undefin
 }
 
 /** 读取表格文件（`.xls` 等老格式），返回归一化后的字符串网格。走与 `fs_read_binary` 同一套路径授权。 */
-export function readSheet(
-  resolveExisting: (raw: string) => string,
-  args: ReadSheetArgs,
-): SheetTable {
+export function readSheet(resolveExisting: (raw: string) => string, args: ReadSheetArgs): SheetTable {
   const path = resolveExisting(args.path);
   let size: number;
   let bytes: Buffer;

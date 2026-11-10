@@ -78,15 +78,24 @@ export function renderUrl(template: string, filename: string): string {
 export function contentTypeFor(filename: string): string {
   const extension = filename.includes(".") ? filename.slice(filename.lastIndexOf(".") + 1).toLowerCase() : "";
   switch (extension) {
-    case "doc": return "application/msword";
-    case "docx": return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-    case "xls": return "application/vnd.ms-excel";
-    case "xlsx": return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-    case "ppt": return "application/vnd.ms-powerpoint";
-    case "pptx": return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
-    case "pdf": return "application/pdf";
-    case "csv": return "text/csv";
-    default: return "application/octet-stream";
+    case "doc":
+      return "application/msword";
+    case "docx":
+      return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    case "xls":
+      return "application/vnd.ms-excel";
+    case "xlsx":
+      return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    case "ppt":
+      return "application/vnd.ms-powerpoint";
+    case "pptx":
+      return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+    case "pdf":
+      return "application/pdf";
+    case "csv":
+      return "text/csv";
+    default:
+      return "application/octet-stream";
   }
 }
 
@@ -113,7 +122,11 @@ export function extractViewUrl(body: unknown, pointer: string): string {
   const found = pointerGet(body, pointer);
   const url = typeof found === "string" ? found.trim() : "";
   if (url === "") {
-    throw new Error("响应里取不到文档地址：JSON 指针 " + normalizePointer(pointer) + " 未命中，或命中的不是非空字符串（请对照厂商文档核对 viewUrlPointer）");
+    throw new Error(
+      "响应里取不到文档地址：JSON 指针 " +
+        normalizePointer(pointer) +
+        " 未命中，或命中的不是非空字符串（请对照厂商文档核对 viewUrlPointer）",
+    );
   }
   return url;
 }
@@ -160,8 +173,7 @@ function ensureCredential(credentialEnv: string | null | undefined): void {
   if (name === "") return; // 本地 / 无鉴权服务
   if ((process.env[name] ?? "") === "") {
     throw new Error(
-      "未设置云端 Office 凭证：先在本机终端执行 " + envSetHint(name) +
-      "，再从同一终端启动 GreyWork（设置页 → 服务 可查看/修改变量名）",
+      "未设置云端 Office 凭证：先在本机终端执行 " + envSetHint(name) + "，再从同一终端启动 GreyWork（设置页 → 服务 可查看/修改变量名）",
     );
   }
 }
@@ -242,8 +254,7 @@ function clientSecret(args: OAuthClientArgs): string {
   const value = process.env[name] ?? "";
   if (value.trim() === "") {
     throw new Error(
-      "未设置云端 Office 应用密钥：先在本机终端执行 " + envSetHint(name) +
-      "，再从同一终端启动 GreyWork（设置页 → 服务 可查看/修改变量名）",
+      "未设置云端 Office 应用密钥：先在本机终端执行 " + envSetHint(name) + "，再从同一终端启动 GreyWork（设置页 → 服务 可查看/修改变量名）",
     );
   }
   return value;
@@ -259,9 +270,7 @@ export interface TokenSet {
   clientId?: string | null;
 }
 
-export type CallbackOutcome =
-  | { kind: "code"; code: string; state: string }
-  | { kind: "denied"; error: string; description: string | null };
+export type CallbackOutcome = { kind: "code"; code: string; state: string } | { kind: "denied"; error: string; description: string | null };
 
 /** 查询参数值编码（RFC 3986）：空格 → %20（不用表单编码的 +）。 */
 function encodeQuery(value: string): string {
@@ -385,7 +394,10 @@ async function fetchToken(cfg: OAuthClientConfig, url: string): Promise<TokenSet
     response = await fetch(url, { signal: AbortSignal.timeout(15_000) });
   } catch (caught) {
     // 剥掉 URL：fetch 错误消息可能带完整地址。
-    throw new Error("请求 token 端点失败: " + truncateChars(String((caught as Error).message).replaceAll(url, "<token-url>"), ERROR_BODY_CHARS));
+    throw new Error(
+      "请求 token 端点失败: " + truncateChars(String((caught as Error).message).replaceAll(url, "<token-url>"), ERROR_BODY_CHARS),
+      { cause: caught },
+    );
   }
   const status = response.status;
   const text = await response.text();
@@ -396,7 +408,9 @@ async function fetchToken(cfg: OAuthClientConfig, url: string): Promise<TokenSet
   try {
     json = JSON.parse(text) as Record<string, unknown>;
   } catch (error) {
-    throw new Error("token 响应不是 JSON: " + (error as Error).message + "（响应体：" + truncateChars(text, ERROR_BODY_CHARS) + "）");
+    throw new Error("token 响应不是 JSON: " + (error as Error).message + "（响应体：" + truncateChars(text, ERROR_BODY_CHARS) + "）", {
+      cause: error,
+    });
   }
   return tokenJsonToSet(json, nowMs(), cfg.clientId);
 }
@@ -464,7 +478,7 @@ export function clearToken(dataDir: string, clientId: string): void {
       rmSync(target);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-        throw new Error("删除 " + target + " 失败: " + (error as Error).message);
+        throw new Error("删除 " + target + " 失败: " + (error as Error).message, { cause: error });
       }
     }
     return;
@@ -487,7 +501,7 @@ export async function resolveAccessToken(dataDir: string, cfg: OAuthClientConfig
   try {
     refreshed = await refresh(cfg, secret, refreshToken);
   } catch (error) {
-    throw new Error("刷新授权失败（请重新扫码授权）：" + (error as Error).message);
+    throw new Error("刷新授权失败（请重新扫码授权）：" + (error as Error).message, { cause: error });
   }
   // 刷新响应可能不回 refresh_token —— 保留旧的，否则下次再过期就没得刷了。
   const merged: TokenSet = { ...refreshed, refreshToken: refreshed.refreshToken ?? stored.refreshToken ?? null };
@@ -534,15 +548,17 @@ export function oauthBegin(args: { client: OAuthClientArgs }): OAuthBeginResult 
 }
 
 /** 交回调换 token 并落盘。先解析回调、再取密钥、最后才发请求（拒绝时报「授权被拒绝」）。 */
-export async function oauthSubmit(dataDir: string, args: { client: OAuthClientArgs; callback: string; expectedState?: string | null }): Promise<OAuthStatus> {
+export async function oauthSubmit(
+  dataDir: string,
+  args: { client: OAuthClientArgs; callback: string; expectedState?: string | null },
+): Promise<OAuthStatus> {
   const cfg = clientConfig(args.client);
   const outcome = parseCallback(args.callback);
-  let code: string;
   if (outcome.kind === "denied") {
     const detail = (outcome.description ?? "").trim();
     throw new Error(detail === "" ? "授权被拒绝：" + outcome.error : "授权被拒绝：" + outcome.error + "（" + detail + "）");
   }
-  code = outcome.code;
+  const code = outcome.code;
   const expected = (args.expectedState ?? "").trim();
   if (expected !== "" && outcome.state !== expected) {
     throw new Error("回调里的 state 与本次授权不一致：可能粘贴了别的会话的回调地址，请重新授权");
@@ -611,7 +627,10 @@ function probeProgram(program: string): string | null {
   // 绝对路径直接探测；裸名按 PATH 解析（纯文件系统命中，不起进程）。
   const candidates = path.isAbsolute(program)
     ? [program]
-    : (process.env.PATH ?? "").split(path.delimiter).filter((entry) => entry !== "").map((entry) => path.join(entry, program));
+    : (process.env.PATH ?? "")
+        .split(path.delimiter)
+        .filter((entry) => entry !== "")
+        .map((entry) => path.join(entry, program));
   for (const candidate of candidates) {
     try {
       const stat = statSync(candidate);
@@ -784,12 +803,7 @@ function diagnostics(stdout: string, stderr: string): string {
 }
 
 /** 把一份**已授权**的 Office 文件转成 PDF，返回字节。 */
-export async function convertToPdf(
-  dataDir: string,
-  access: WorkspaceAccess,
-  tool: SofficeTool,
-  args: { path: string },
-): Promise<Buffer> {
+export async function convertToPdf(dataDir: string, access: WorkspaceAccess, tool: SofficeTool, args: { path: string }): Promise<Buffer> {
   const program = tool.info().path;
   if (program === null) throw new Error(missingSofficeMessage(tool));
 
@@ -833,7 +847,11 @@ export async function openPreview(dataDir: string, access: WorkspaceAccess, args
   let oauthToken: string | null = null;
   if (usesOauthToken(args)) {
     if (args.oauth === undefined || args.oauth === null) {
-      throw new Error("配方使用了 " + OAUTH_TOKEN_PLACEHOLDER + "，但调用未提供 oauth 配置（请在服务配置里填好 clientId / clientSecretEnv / redirectUri）");
+      throw new Error(
+        "配方使用了 " +
+          OAUTH_TOKEN_PLACEHOLDER +
+          "，但调用未提供 oauth 配置（请在服务配置里填好 clientId / clientSecretEnv / redirectUri）",
+      );
     }
     const secret = clientSecret(args.oauth);
     oauthToken = await resolveAccessToken(dataDir, clientConfig(args.oauth), secret);
@@ -845,9 +863,7 @@ export async function openPreview(dataDir: string, access: WorkspaceAccess, args
   const filename = filenameOf(args.path);
   const url = renderUrl(args.recipe.url.trim(), filename);
 
-  const contentType =
-    nonBlank(args.recipe.contentType) ??
-    contentTypeFor(filename);
+  const contentType = nonBlank(args.recipe.contentType) ?? contentTypeFor(filename);
 
   const method = args.recipe.method.trim().toUpperCase() === "PUT" ? "PUT" : "POST";
   const headers: Record<string, string> = {};
@@ -877,7 +893,7 @@ export async function openPreview(dataDir: string, access: WorkspaceAccess, args
   try {
     response = await fetch(url, { method, headers, body, signal: AbortSignal.timeout(60_000) });
   } catch (error) {
-    throw new Error("云端 Office 上传失败（网络层）: " + (error as Error).message);
+    throw new Error("云端 Office 上传失败（网络层）: " + (error as Error).message, { cause: error });
   }
   const text = await response.text();
   if (!response.ok) {
@@ -887,7 +903,12 @@ export async function openPreview(dataDir: string, access: WorkspaceAccess, args
   try {
     parsed = JSON.parse(text);
   } catch (error) {
-    throw new Error("云端 Office 响应不是 JSON: " + (error as Error).message + "（响应体：" + truncateChars(text, ERROR_BODY_CHARS) + "）");
+    throw new Error(
+      "云端 Office 响应不是 JSON: " + (error as Error).message + "（响应体：" + truncateChars(text, ERROR_BODY_CHARS) + "）",
+      {
+        cause: error,
+      },
+    );
   }
   return { url: extractViewUrl(parsed, args.recipe.viewUrlPointer), filename };
 }
@@ -914,7 +935,11 @@ function resolveHeaderPlaceholders(value: string): string {
     const resolved = process.env[name] ?? "";
     if (resolved === "") {
       throw new Error(
-        "未设置环境变量 " + name + "：请求头占位符 {{" + name + "}} 无法解析，请先 export 后从同一终端启动 GreyWork（或到设置页修改该请求头）",
+        "未设置环境变量 " +
+          name +
+          "：请求头占位符 {{" +
+          name +
+          "}} 无法解析，请先 export 后从同一终端启动 GreyWork（或到设置页修改该请求头）",
       );
     }
     out += resolved;
@@ -926,11 +951,7 @@ function resolveHeaderPlaceholders(value: string): string {
 /* ===== 宿主侧事实查询 ===== */
 
 /** 桌面壳静态 CSP 里放行的 frame-src 来源（三个预设厂商的文档域名）。 */
-export const EMBEDDABLE_FRAME_ORIGINS = [
-  "https://www.kdocs.cn",
-  "https://docs.qq.com",
-  "https://view.officeapps.live.com",
-];
+export const EMBEDDABLE_FRAME_ORIGINS = ["https://www.kdocs.cn", "https://docs.qq.com", "https://view.officeapps.live.com"];
 
 /** 查询宿主侧事实：回「变量名是否已设置」，不是值 —— 密钥永不回渲染端。 */
 export function hostInfo(
