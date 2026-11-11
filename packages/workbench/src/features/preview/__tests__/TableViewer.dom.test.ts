@@ -5,6 +5,7 @@
  * 截断是这份组件防卡死的核心约束，必须显式守；模式切换则要守住「分析模式不渲染表格」——
  * 否则 Univer / 大表格与面板会同时挂在 DOM 上。
  */
+/* eslint-disable vue/one-component-per-file -- 下面两个 defineComponent 是 vi.mock 的内联桩，不是本仓组件 */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";

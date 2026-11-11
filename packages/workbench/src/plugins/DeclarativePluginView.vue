@@ -99,8 +99,8 @@ function applyPointerPatch(patch: Record<string, DeclarativeValue>): void {
       :height="props.render.height"
       :state="() => ({ ...state })"
       :pointer="props.render.pointer === true"
-      :pointerChannel="props.dispatchPointer"
-      :onPointerPatch="applyPointerPatch"
+      :pointer-channel="props.dispatchPointer"
+      :on-pointer-patch="applyPointerPatch"
       data-testid="declarative-plugin-render"
     />
 

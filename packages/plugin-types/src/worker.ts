@@ -122,6 +122,5 @@ export interface GreyworkGlobal {
 }
 
 declare global {
-  // eslint-disable-next-line no-var
   var greywork: GreyworkGlobal;
 }

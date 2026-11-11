@@ -15,7 +15,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits);
 
 <template>
   <SliderRoot
-    v-slot="{ modelValue }"
+    v-slot="{ modelValue: thumbValues }"
     data-slot="slider"
     :class="
       cn(
@@ -36,7 +36,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits);
     </SliderTrack>
 
     <SliderThumb
-      v-for="(_, key) in modelValue"
+      v-for="(_, key) in thumbValues"
       :key="key"
       data-slot="slider-thumb"
       class="bg-white border-primary ring-ring/50 block size-4 shrink-0 rounded-full border shadow-sm transition-[color,box-shadow] hover:ring-4 focus-visible:ring-4 focus-visible:outline-hidden disabled:pointer-events-none disabled:opacity-50"
