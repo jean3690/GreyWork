@@ -186,10 +186,7 @@ if (!app.requestSingleInstanceLock()) {
       // 打包版没有终端：只写 console 的话用户看到的就是「双击图标毫无反应」。
       // 启动链上的失败（宿主入口找不到 / sidecar 起不来 / 窗口建不出）都必须有个能看见的框。
       const reason = error instanceof Error ? (error.stack ?? error.message) : String(error);
-      dialog.showErrorBox(
-        "GreyWork 启动失败",
-        `${reason}\n\n详细日志：${app.getPath("userData")}/logs/main.log`,
-      );
+      dialog.showErrorBox("GreyWork 启动失败", `${reason}\n\n详细日志：${app.getPath("userData")}/logs/main.log`);
       app.quit();
     });
 }

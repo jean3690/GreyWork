@@ -45,9 +45,6 @@ export default defineConfigWithVueTs(
       // 位置在 workbench 包下：这批资源由**所有前端共享**（各 app 的 publicDir 都指过去，
       // 见 packages/vite-config 的默认值），不再属于某一个前端。
       "packages/workbench/public/**",
-      // ACP 集成测试的 mock agent：夹具 .mjs，不属于任何 tsconfig project service
-      //（与 allowDefaultProject 不能加通配条目的约束一致，见 2026-09 的 eslint 调优）。
-      "apps/server/tests/mock-acp-agent.mjs",
       "**/vitest.config.ts",
       "eslint.config.js",
       // 插件 worker 测试夹具（演示包目录移除后留下的两份真实 worker 代码），
@@ -56,11 +53,11 @@ export default defineConfigWithVueTs(
       // 运维台构建产物：由 apps/admin 的 vite build 写进后端 resources（随源码入库，
       // mvn package 即自带前端）。压缩后的 JS/CSS 不属于任何 tsconfig，lint 只会报解析错。
       "back/grey/src/main/resources/static/admin/**",
-      // 待删的 Electron 迁移 PoC（游离于 workspace 之外的独立项目，无 tsconfig）。
-      // 新壳落在 apps/electron（apps/* 已纳入 workspace 与 lint）。
-      "electron/**",
-      // Electron 壳的构建产物（tsc 输出到 out/）与打包产物：不是源码，不在任何 tsconfig 里。
+      // Electron 壳的构建产物（tsc 输出到 out/、host-bundle 输出到 build/）与打包产物：
+      // 不是源码，不在任何 tsconfig 里。build/ 尤其要点名 —— 它是 pnpm deploy 摊出来的
+      // host-node 过期副本，lint 会拿新规则卡旧代码，报一堆假错。
       "apps/electron/out/**",
+      "apps/electron/build/**",
       "apps/electron/release/**",
       // vendored 的 agent skills（markdown 文档 + 自带配置），不是本仓代码，
       // 也不在 tsconfig 的 project service 里 —— 交给 eslint 解析只会报 parsing error
@@ -153,7 +150,7 @@ export default defineConfigWithVueTs(
     files: ["packages/*/src/**"],
     // __tests__ 例外：组件测试要 mock Tauri 传输层（`vi.mock("@tauri-apps/api/core")`），
     // 断言必须落在真实边界上；生产代码没有这个豁免。
-    ignores: ["packages/{agents,gis}/src/**", "packages/host-ipc/src/**", "**/__tests__/**"],
+    ignores: ["packages/agents/src/**", "packages/host-ipc/src/**", "**/__tests__/**"],
     rules: {
       "no-restricted-imports": [
         "error",

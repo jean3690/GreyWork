@@ -118,8 +118,6 @@ async function waitHealth(port: number, child: ChildProcess, timeoutMs = 20_000)
   }
 }
 
-
-
 /** 拉起 sidecar 并等它健康；返回端口与子进程句柄。 */
 export async function startServer(passwordHash: string): Promise<Sidecar> {
   // 固定端口（跨启动稳定）：优先复用上次落盘的端口，被占用才顺延并重新落盘。

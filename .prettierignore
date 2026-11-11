@@ -21,12 +21,11 @@ logs
 pnpm-lock.yaml
 # vendored 的 agent skills（markdown + 自带配置），不是本仓代码
 .agents
-# 待删的 Electron 迁移 PoC（游离于 workspace 之外的独立项目）
-electron
 # 运维台构建产物（apps/admin 的 vite build 输出，见 docs/control-plane-auth.md）
 back/grey/src/main/resources/static/admin
-# Electron 壳的构建产物（tsc 输出到 out/）与打包产物
+# Electron 壳的构建产物（tsc 输出到 out/、host-bundle 输出到 build/）与打包产物。
+# 注意别写裸 `electron`：gitignore 语义下它会把 apps/electron/ 整棵源码一起排除，
+# 让 `prettier --check .` 悄悄漏掉 Electron 主进程源码。
 apps/electron/out
+apps/electron/build
 apps/electron/release
-# ACP 集成测试的 mock agent（夹具，按协议可读性排版，不追 prettier 风格）
-apps/server/tests/mock-acp-agent.mjs

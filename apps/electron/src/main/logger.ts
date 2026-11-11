@@ -67,9 +67,7 @@ export function installFileLogging(): void {
       console.error("[main] unhandledRejection", reason);
     });
 
-    console.log(
-      `[main] 日志落盘：${file}（GreyWork ${app.getVersion()} / Electron ${process.versions.electron} / ${process.platform}）`,
-    );
+    console.log(`[main] 日志落盘：${file}（GreyWork ${app.getVersion()} / Electron ${process.versions.electron} / ${process.platform}）`);
   } catch (error) {
     // 无法建目录：保持原样，只打终端。
     console.warn("[main] 文件日志不可用：", error);

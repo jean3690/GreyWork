@@ -12,22 +12,15 @@ import { dialog } from "electron";
 import type { BrowserWindow, OpenDialogOptions } from "electron";
 
 /** 打开文件选择器；取消返回空数组。`purpose` 只做枚举校验（与 Tauri 一致：不设扩展名过滤）。 */
-export async function openFiles(
-  options: { purpose: string; multiple: boolean },
-  win: BrowserWindow | null,
-): Promise<string[]> {
+export async function openFiles(options: { purpose: string; multiple: boolean }, win: BrowserWindow | null): Promise<string[]> {
   // `media` 是对话附件通道：不限扩展名 —— 通用文件（PDF / 压缩包 / Office 文档）也要能选，
   // 类型判定与限额由渲染端 `lib/attachments.ts` 统一把关。
   if (options.purpose !== "media" && options.purpose !== "workspace") {
     throw new Error(`未知文件选择用途: ${options.purpose}`);
   }
-  const properties: OpenDialogOptions["properties"] = options.multiple
-    ? ["openFile", "multiSelections"]
-    : ["openFile"];
+  const properties: OpenDialogOptions["properties"] = options.multiple ? ["openFile", "multiSelections"] : ["openFile"];
   const dialogOptions: OpenDialogOptions = { title: "选择文件", properties };
-  const result = win
-    ? await dialog.showOpenDialog(win, dialogOptions)
-    : await dialog.showOpenDialog(dialogOptions);
+  const result = win ? await dialog.showOpenDialog(win, dialogOptions) : await dialog.showOpenDialog(dialogOptions);
   return result.canceled ? [] : result.filePaths;
 }
 
@@ -39,9 +32,7 @@ export async function openDirectory(win: BrowserWindow | null): Promise<string |
     // 交给系统记住上次位置。
     properties: ["openDirectory", "createDirectory"],
   };
-  const result = win
-    ? await dialog.showOpenDialog(win, dialogOptions)
-    : await dialog.showOpenDialog(dialogOptions);
+  const result = win ? await dialog.showOpenDialog(win, dialogOptions) : await dialog.showOpenDialog(dialogOptions);
   if (result.canceled) return null;
   return result.filePaths[0] ?? null;
 }

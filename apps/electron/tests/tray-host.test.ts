@@ -7,7 +7,7 @@ describe("trayHostPresentIn", () => {
     const busctl = "org.freedesktop.DBus\norg.kde.StatusNotifierWatcher\n:1.42";
     expect(trayHostPresentIn([busctl])).toBe(true);
     // busctl 缺失（null）但 dbus-send 探到了。
-    expect(trayHostPresentIn([null, "string \"org.kde.StatusNotifierWatcher\"\n"])).toBe(true);
+    expect(trayHostPresentIn([null, 'string "org.kde.StatusNotifierWatcher"\n'])).toBe(true);
   });
 
   it("两个探针都没探到 → 判不可用（避免窗口藏进看不见的托盘）", () => {

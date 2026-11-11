@@ -77,22 +77,17 @@ function compose(shellPath: string | null, base: string, home: string): string {
  */
 function probeShell(shell: string, timeoutMs: number): Promise<string | null> {
   const { promise, resolve } = Promise.withResolvers<string | null>();
-  execFile(
-    shell,
-    ["-lc", 'printf %s "$PATH"'],
-    { timeout: timeoutMs, encoding: "utf8", windowsHide: true },
-    (error, stdout) => {
-      if (error) {
-        resolve(null);
-        return;
-      }
-      const lines = stdout
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter(Boolean);
-      resolve(lines.at(-1) ?? null);
-    },
-  );
+  execFile(shell, ["-lc", 'printf %s "$PATH"'], { timeout: timeoutMs, encoding: "utf8", windowsHide: true }, (error, stdout) => {
+    if (error) {
+      resolve(null);
+      return;
+    }
+    const lines = stdout
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    resolve(lines.at(-1) ?? null);
+  });
   return promise;
 }
 

@@ -75,9 +75,7 @@ export function trayIconPath(): string {
  * 目录不存在就返回 `undefined`——开发机没取过包时行为与内置之前完全一致。
  */
 export function runtimeDir(): string | undefined {
-  const dir = app.isPackaged
-    ? path.join(process.resourcesPath, "runtime")
-    : path.join(__dirname, "..", "..", "runtime");
+  const dir = app.isPackaged ? path.join(process.resourcesPath, "runtime") : path.join(__dirname, "..", "..", "runtime");
   return existsSync(path.join(dir, "bin")) ? dir : undefined;
 }
 

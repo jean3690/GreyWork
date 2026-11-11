@@ -1,11 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  MAX_PLUGIN_WINDOW_INSTANCES,
-  parsePluginWindowLabel,
-  pluginWindowLabel,
-  pluginWindowOptions,
-} from "../src/shared/plugin-window";
+import { MAX_PLUGIN_WINDOW_INSTANCES, parsePluginWindowLabel, pluginWindowLabel, pluginWindowOptions } from "../src/shared/plugin-window";
 
 /**
  * 悬浮窗标签与形态（v2）：
@@ -59,7 +54,10 @@ describe("pluginWindowOptions", () => {
 
   it("声明里的形态字段生效", () => {
     expect(
-      pluginWindowOptions(pluginPackage({ width: 160, height: 140, title: "  桌面宠物 ", alwaysOnTop: false, opacity: 0.6, multiple: true }), "demo.pet"),
+      pluginWindowOptions(
+        pluginPackage({ width: 160, height: 140, title: "  桌面宠物 ", alwaysOnTop: false, opacity: 0.6, multiple: true }),
+        "demo.pet",
+      ),
     ).toEqual({ title: "桌面宠物", alwaysOnTop: false, opacity: 0.6, multiple: true });
   });
 

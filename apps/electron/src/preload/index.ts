@@ -100,8 +100,7 @@ contextBridge.exposeInMainWorld("__GREYWORK_SHELL__", {
   // 够不着，所以由渲染端拿到路径后调 `fs_authorize_picked_paths` 声明 —— `host-ipc` 的
   // `hostPicker()` 已把这一步包进返回值，调用方仍是「选完就能用」。
   picker: {
-    openFiles: (options: { purpose: "media" | "workspace"; multiple: boolean }) =>
-      ipcRenderer.invoke(IPC.picker.openFiles, options),
+    openFiles: (options: { purpose: "media" | "workspace"; multiple: boolean }) => ipcRenderer.invoke(IPC.picker.openFiles, options),
     openDirectory: () => ipcRenderer.invoke(IPC.picker.openDirectory),
   },
 });

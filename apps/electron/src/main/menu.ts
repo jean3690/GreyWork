@@ -35,7 +35,5 @@ export function installApplicationMenu(options: MenuOptions): void {
     ],
   };
 
-  Menu.setApplicationMenu(
-    Menu.buildFromTemplate([{ role: "appMenu" }, { role: "editMenu" }, view, { role: "windowMenu" }]),
-  );
+  Menu.setApplicationMenu(Menu.buildFromTemplate([{ role: "appMenu" }, { role: "editMenu" }, view, { role: "windowMenu" }]));
 }
