@@ -10,6 +10,7 @@
  *   node scripts/disks-reclaim.mjs              # 只报数（dry-run，默认）
  *   node scripts/disks-reclaim.mjs --apply      # 真删
  *   node scripts/disks-reclaim.mjs cargo --apply # 只跑某一项
+ *   node scripts/disks-reclaim.mjs electron --apply # 只清旧版安装包
  *
  *   --days <n>    cargo 增量目录的保留天数，默认 1（0 = 全删，最激进）
  *   --volumes     连 docker 悬空卷一起清（--apply 时才生效，见下方警告）
@@ -182,9 +183,65 @@ function reclaimPnpm() {
   log(res.ok ? `  prune 后 ${fmt(dirSize(store))}` : `  失败：${res.out.trim()}`);
 }
 
+// ── electron：release/ 下的旧版本安装包 ────────────────────────────────
+/** 按数字段比较 x.y.z，非数字段按 0 处理。 */
+function compareVersion(a, b) {
+  const pa = a.split(".").map(Number);
+  const pb = b.split(".").map(Number);
+  for (let i = 0; i < 3; i++) {
+    const diff = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (diff) return diff;
+  }
+  return 0;
+}
+
+/**
+ * release/<版本>/ 是 electron-builder 打出来的完整安装包，单个版本就有几百 MB，
+ * 且**不会被任何构建自动回收**。只保留版本号最新的一个，其余全部可删 —— 旧包
+ * 既发不出去了，也不参与当前构建（electron-builder 用的是 apps/electron/out）。
+ */
+function reclaimElectron() {
+  const release = path.join(ROOT, "apps/electron/release");
+  let versions;
+  try {
+    versions = readdirSync(release, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && /^\d+\.\d+\.\d+/.test(e.name))
+      .map((e) => e.name)
+      .sort(compareVersion);
+  } catch {
+    log("\nelectron — 无 release/ 目录，跳过");
+    return;
+  }
+  const stale = versions.slice(0, Math.max(0, versions.length - 1));
+  const staleDirs = stale.map((v) => path.join(release, v));
+  const bytes = [...duBytes(staleDirs).values()].reduce((a, b) => a + b, 0);
+  log(`\nelectron — release/ 共 ${versions.length} 个版本，保留最新 ${versions.at(-1) ?? "—"}，可清理 ${stale.length} 个 = ${fmt(bytes)}`);
+  for (const v of stale) log(`  ${v}`);
+  if (!stale.length) {
+    log("  无可清理项");
+    return;
+  }
+  if (!APPLY) {
+    log("  (dry-run，加 --apply 执行)");
+    return;
+  }
+  for (const dir of staleDirs) rmSync(dir, { recursive: true, force: true });
+  log(`  已删除 ${stale.length} 个旧版本，回收 ${fmt(bytes)}`);
+}
+
 // ── 报告 ────────────────────────────────────────────────────────────────
 function report() {
-  const rels = ["target/debug/incremental", "target/debug/deps", "target/debug/build", "target/release", "node_modules", "coverage"];
+  const rels = [
+    "target/debug/incremental",
+    "target/debug/deps",
+    "target/debug/build",
+    "target/release",
+    "node_modules",
+    "coverage",
+    "apps/electron/release",
+    "apps/electron/runtime",
+    "apps/electron/build",
+  ];
   const sizes = duBytes(rels.map((rel) => path.join(ROOT, rel)));
   log("仓库内产物（dev 构建是大头）");
   for (const rel of rels) {
@@ -199,4 +256,5 @@ if (wanted("report")) report();
 if (wanted("cargo")) reclaimCargo();
 if (wanted("docker")) reclaimDocker();
 if (wanted("pnpm")) reclaimPnpm();
+if (wanted("electron")) reclaimElectron();
 if (!APPLY) log("\n（以上未删任何东西；加 --apply 执行）");
