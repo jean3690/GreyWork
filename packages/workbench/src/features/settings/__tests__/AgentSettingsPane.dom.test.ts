@@ -23,6 +23,7 @@ vi.mock("@greywork/host-ipc", async (importOriginal) => ({
 
 import AgentSettingsPane from "@/features/settings/AgentSettingsPane.vue";
 import { i18n } from "@/i18n";
+import { useAgentStore } from "@/stores/agent";
 import { useSettingsStore } from "@/stores/settings";
 
 const mounted: VueWrapper[] = [];
@@ -45,6 +46,7 @@ beforeEach(() => {
 afterEach(() => {
   while (mounted.length) mounted.pop()?.unmount();
   document.body.innerHTML = "";
+  delete (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__;
 });
 
 describe("AgentSettingsPane · agent 目录只读门", () => {
@@ -134,6 +136,29 @@ describe("AgentSettingsPane · 按需下载安装按钮", () => {
     const wrapper = await mountPane();
     await vi.waitFor(() => expect(wrapper.find('[data-testid="agent-install-codebuddy"]').exists()).toBe(true));
     expect(wrapper.find('[data-testid="agent-install-opencode"]').exists()).toBe(false);
+  });
+
+  it("装完后 CodeBuddy 行出现「登录」按钮（装前不出现）", async () => {
+    h.runtimeMode.mockReturnValue("server");
+    h.loadCommandCatalog.mockResolvedValue(trustedCatalog);
+    // hasHostCommands() 读的是 window.__GREYWORK_RUNTIME__（不是被 mock 的 runtimeMode 函数），
+    // 不设这个键探测命令根本发不出去，agentDetection 会一直是空表。
+    (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = "server";
+    h.invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "acp_detect_programs") return [{ program: "codebuddy", installed: true, path: "/x/codebuddy" }];
+      return null;
+    });
+    const wrapper = await mountPane();
+    // 装前：探测表为空，登录按钮不出现（安装按钮在）。
+    expect(wrapper.find('[data-testid="agent-login-codebuddy"]').exists()).toBe(false);
+
+    await useAgentStore().refreshAgentDetection();
+    await nextTick();
+    const login = wrapper.get('[data-testid="agent-login-codebuddy"]');
+    expect(login.text()).toContain("登录");
+    expect(wrapper.find('[data-testid="agent-install-codebuddy"]').exists()).toBe(false);
+    // 还原默认实现，避免泄漏到后续用例。
+    h.invoke.mockImplementation(async () => null);
   });
 });
 

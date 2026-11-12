@@ -218,8 +218,14 @@ export const DEFAULT_AGENT_PROVIDERS: AgentProviderConfig[] = [
     enabled: false,
     detect: ["codebuddy"],
     installable: true,
-    installHint:
-      "按需下载：点「安装」把固定版本的 CodeBuddy CLI 装到 ~/.greyWork/agents（需本机 Node 22+ / npm 与联网）；首次使用需配置 CODEBUDDY_API_KEY 或在终端完成登录。",
+    installHint: "按需下载：点「安装」把固定版本的 CodeBuddy CLI 装到 ~/.greyWork/agents（需本机 Node 22+ / npm 与联网）。",
+    // CLI 没有 login/auth 子命令，只有 TUI 内的 `/login` 斜杠命令（未认证时 CLI 自己会提示）。
+    // 与 opencode 同款 —— 命令送进内置 PTY，凭据由 agent 自己落到用户目录，宿主不代存。
+    // 内置终端 cwd 是授权根（~/.greyWork），首次还会先弹「信任文件夹」确认，hint 里一并说清。
+    login: {
+      command: "codebuddy",
+      hint: "在内置终端里启动 CodeBuddy：先按提示确认信任当前目录，再输入 /login 并在浏览器完成登录（或改用 CODEBUDDY_API_KEY）；登录后关掉这个终端标签即可。",
+    },
   },
 ];
 

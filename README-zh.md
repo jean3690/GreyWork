@@ -27,7 +27,8 @@ GreyWork 把外部编码智能体（走 **Agent Client Protocol**）与本机 Op
   由宿主前置进 PATH，从没配过开发机的电脑也能直接起 agent。这类后端在设置页标「内置」，
   自身的交互式登录（`opencode auth login`）从设置行一键送进真 PTY。
 - **按需下载**：不随安装包分发的后端（如 CodeBuddy）在设置页标「可安装」，点一下把固定版本
-  装进 `~/.greyWork/agents`（需本机 Node 22+ / npm 与联网），之后由宿主前置进 PATH 即可启用。
+  装进 `~/.greyWork/agents`（需本机 Node 22+ / npm 与联网），之后由宿主前置进 PATH 即可启用；
+  装完会出现「登录」按钮，把 agent 送进内置终端，在其中用 `/login` 完成认证。
 
 **工作区**
 
