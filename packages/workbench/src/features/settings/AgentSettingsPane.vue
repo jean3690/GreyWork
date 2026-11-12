@@ -591,6 +591,23 @@ async function removeAgentDraft(): Promise<void> {
                 {{ agent.providerInstallLabel(provider) }}
               </span>
             </Hint>
+            <!-- 按需下载：装之前显示「可安装」，装完探测命中「已安装」后按钮自动收起。
+                 服务端只读态 / agent_install 被明确禁用时不给点（能力表 unknown 放行）。 -->
+            <button
+              v-if="
+                provider.installable &&
+                agent.providerInstalled(provider) !== true &&
+                !agentCatalogReadOnly &&
+                capabilities.available('agent_install') !== false
+              "
+              type="button"
+              :disabled="agent.installingId !== null"
+              :data-testid="`agent-install-${provider.id}`"
+              class="shrink-0 cursor-pointer rounded-[calc(6px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-0.5 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+              @click.stop="void agent.installAgentProvider(provider.id)"
+            >
+              {{ agent.installingId === provider.id ? "安装中…" : "安装" }}
+            </button>
             <!-- 登录：只有「本机能跑起来」的后端才给入口（装都没装时先让他看到未安装）。
                  命令送进内置终端，agent 自己的交互式登录（选供应商 / 贴 key）照常进行。 -->
             <Hint
@@ -633,7 +650,8 @@ async function removeAgentDraft(): Promise<void> {
       </div>
       <p class="mt-2 text-[11px] text-dim2">
         勾选即启用：只有已启用的后端才会出现在发送条上方的 ACP 选择条里，未启用的会从选择条隐藏。停用当前后端会自动切回
-        Local。标「首次启动下载」的后端由 npx 按需拉取，无需预装。＋ 新增后端可填任意 ACP 启动命令（如
+        Local。标「首次启动下载」的后端由 npx 按需拉取；标「可安装」的点「安装」把固定版本下载到
+        <code class="font-mono">~/.greyWork/agents</code>，二者都无需预装。＋ 新增后端可填任意 ACP 启动命令（如
         <code class="font-mono">my-agent acp</code>
         ）；自配后端仅限本机已安装的程序，含 shell 元字符的命令会被宿主拒绝。每行的图标可随时点开更换（预设后端也可换），图标只影响展示。
       </p>

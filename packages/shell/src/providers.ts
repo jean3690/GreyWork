@@ -13,6 +13,12 @@ export interface AgentProviderConfig {
   /** 未安装时的安装提示（设置页展示）。 */
   installHint?: string;
   /**
+   * 是否支持「按需下载」：设置页给一行「安装」按钮，宿主把固定版本装进
+   * `~/.greyWork/agents`（不随安装包分发）。仅前端预设元数据，不落库。
+   * 与 `command` 走 `npx -y` 的「首次启动下载」是两条不同的路径。
+   */
+  installable?: boolean;
+  /**
    * 该后端自己的登录命令（在**内置终端**里跑，需要 TTY 的交互式登录）。
    *
    * 为什么不由我们代管凭据：这些 agent 各自有登录流程与凭据落点（如 opencode 写
@@ -203,6 +209,17 @@ export const DEFAULT_AGENT_PROVIDERS: AgentProviderConfig[] = [
     enabled: false,
     detect: ["amp-acp", "amp"],
     installHint: "npm i -g amp-acp",
+  },
+  {
+    id: "codebuddy",
+    name: "CodeBuddy",
+    kind: "acp",
+    command: "codebuddy --acp",
+    enabled: false,
+    detect: ["codebuddy"],
+    installable: true,
+    installHint:
+      "按需下载：点「安装」把固定版本的 CodeBuddy CLI 装到 ~/.greyWork/agents（需本机 Node 22+ / npm 与联网）；首次使用需配置 CODEBUDDY_API_KEY 或在终端完成登录。",
   },
 ];
 

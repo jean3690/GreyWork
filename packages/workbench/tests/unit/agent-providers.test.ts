@@ -272,6 +272,111 @@ describe("agent 后端目录（桌面态：SQLite 真源）", () => {
   });
 });
 
+/** 按需下载（agent_install）：状态文案 + 安装动作 + 能力表门。 */
+describe("agent 后端目录（按需下载）", () => {
+  beforeEach(async () => {
+    installLocalStorage();
+    vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "server" });
+    installServerFetch(true);
+    invokeMock.mockReset();
+    setActivePinia(createPinia());
+    h.isAvailable.mockImplementation(() => true);
+    h.listener = null;
+    await useCommandCapabilitiesStore().ensureCatalog();
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete storageHolder.localStorage;
+    vi.clearAllMocks();
+  });
+
+  it("未探测 / 未安装时按需预设都显示「可安装」", async () => {
+    installInvoke(dbProviders);
+    const agentStore = useAgentStore();
+    await agentStore.providersHydrated;
+    await settleSync();
+    const codebuddy = agentStore.agentProviders.find((p) => p.id === "codebuddy")!;
+    expect(codebuddy.installable).toBe(true);
+    expect(agentStore.providerInstalled(codebuddy)).toBeNull();
+    expect(agentStore.providerInstallLabel(codebuddy)).toBe("可安装");
+
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "db_agents_load") return Promise.resolve(dbProviders);
+      if (cmd === "acp_detect_programs") return Promise.resolve([{ program: "codebuddy", installed: false, path: null }]);
+      return Promise.resolve(undefined);
+    });
+    await agentStore.refreshAgentDetection();
+    expect(agentStore.providerInstallLabel(codebuddy)).toBe("可安装");
+  });
+
+  it("installAgentProvider：调 agent_install → 刷新探测 → 变「已安装」，busy 复位", async () => {
+    installInvoke(dbProviders);
+    invokeMock.mockImplementation((cmd: string) => {
+      switch (cmd) {
+        case "db_agents_load":
+          return Promise.resolve(dbProviders);
+        case "agent_install":
+          return Promise.resolve({ id: "codebuddy", version: "2.183.0", bin: "/x/codebuddy" });
+        case "acp_detect_programs":
+          return Promise.resolve([{ program: "codebuddy", installed: true, path: "/x/codebuddy" }]);
+        default:
+          return Promise.resolve(undefined);
+      }
+    });
+    const agentStore = useAgentStore();
+    await agentStore.providersHydrated;
+    await settleSync();
+
+    await agentStore.installAgentProvider("codebuddy");
+    expect(invokeMock).toHaveBeenCalledWith("agent_install", { id: "codebuddy" });
+    expect(invokeMock).toHaveBeenCalledWith("acp_detect_programs", { programs: expect.any(Array) });
+    expect(agentStore.installingId).toBeNull();
+    const codebuddy = agentStore.agentProviders.find((p) => p.id === "codebuddy")!;
+    expect(agentStore.providerInstalled(codebuddy)).toBe(true);
+    expect(agentStore.providerInstallLabel(codebuddy)).toBe("已安装");
+  });
+
+  it("非 installable 的 id 直接忽略，不发安装命令", async () => {
+    installInvoke(dbProviders);
+    const agentStore = useAgentStore();
+    await agentStore.providersHydrated;
+    await settleSync();
+    await agentStore.installAgentProvider("opencode");
+    expect(invokeMock.mock.calls.filter(([cmd]) => cmd === "agent_install")).toHaveLength(0);
+  });
+
+  it("能力表明确禁用 agent_install：不发命令、busy 保持空闲", async () => {
+    // 换一份含 agent_install:false 的能力表 + 新 pinia，让 ensureCatalog 重新拉一次。
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/api/commands")) {
+          return new Response(
+            JSON.stringify([
+              { name: "db_agents_sync", auth: "required", desktopOnly: false, binary: false, available: true },
+              { name: "agent_install", auth: "required", desktopOnly: false, binary: false, available: false },
+            ]),
+            { status: 200 },
+          );
+        }
+        if (url.endsWith("/api/command")) return new Response(JSON.stringify(null), { status: 200 });
+        return new Response(JSON.stringify({ error: "unexpected" }), { status: 404 });
+      }),
+    );
+    setActivePinia(createPinia());
+    installInvoke(dbProviders);
+    await useCommandCapabilitiesStore().ensureCatalog();
+    const agentStore = useAgentStore();
+    await agentStore.providersHydrated;
+    await settleSync();
+
+    await agentStore.installAgentProvider("codebuddy");
+    expect(invokeMock.mock.calls.filter(([cmd]) => cmd === "agent_install")).toHaveLength(0);
+    expect(agentStore.installingId).toBeNull();
+  });
+});
+
 /**
  * 服务端态：agent 目录只读（db_agents_sync 被服务端禁用）。
  *

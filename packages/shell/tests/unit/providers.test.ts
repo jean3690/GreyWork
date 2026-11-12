@@ -96,8 +96,27 @@ describe("DEFAULT_AGENT_PROVIDERS 结构不变量", () => {
     }
   });
 
-  it("12 个预设齐全且型号齐全（识别图标表与设置页展示用）", () => {
-    expect(DEFAULT_AGENT_PROVIDERS).toHaveLength(12);
+  it("13 个预设齐全且型号齐全（识别图标表与设置页展示用）", () => {
+    expect(DEFAULT_AGENT_PROVIDERS).toHaveLength(13);
+  });
+
+  it("按需下载预设（codebuddy）形状固定：裸命令 + detect + installable，无一键登录", () => {
+    const codebuddy = DEFAULT_AGENT_PROVIDERS.find((provider) => provider.id === "codebuddy");
+    expect(codebuddy).toMatchObject({
+      kind: "acp",
+      command: "codebuddy --acp",
+      enabled: false,
+      detect: ["codebuddy"],
+      installable: true,
+    });
+    // CLI 无 login 子命令，认证靠 CODEBUDDY_API_KEY / 首次交互登录，不能塞假登录命令。
+    expect(codebuddy?.login).toBeUndefined();
+    expect(codebuddy?.installHint).toContain("CODEBUDDY_API_KEY");
+  });
+
+  it("installable 只给按需下载预设，普通预设不带这个标记", () => {
+    const installable = DEFAULT_AGENT_PROVIDERS.filter((provider) => provider.installable);
+    expect(installable.map((provider) => provider.id)).toEqual(["codebuddy"]);
   });
 });
 

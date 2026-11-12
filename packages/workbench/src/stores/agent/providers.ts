@@ -36,6 +36,7 @@ export interface ProvidersApi {
   refreshAgentDetection(): Promise<void>;
   providerInstalled(provider: AgentProviderConfig): boolean | null;
   providerInstallLabel(provider: AgentProviderConfig): string;
+  installAgentProvider(id: string): Promise<void>;
   setAgentProviderEnabled(id: string, enabled: boolean): Promise<void>;
   setAgentProviderIcon(id: string, icon: string | null): void;
   addAgentProvider(name: string, command: string, icon?: string, env?: Record<string, string>): string | null;
@@ -119,10 +120,12 @@ export function createProvidersSlice({ state, getRuntime }: ProvidersDeps): Prov
   /** 恢复上次选择：偏好 ACP agent → 预选但不连接（发送时才起 runtime）；Local → 默认。 */
   state.routeToAcp.value = Boolean(savedProvider?.enabled);
 
-  /** detect/installHint/login 属于前端预设、不落库；从 SQLite 读回时按 id 补回。 */
+  /** detect/installHint/login/installable 属于前端预设、不落库；从 SQLite 读回时按 id 补回。 */
   function withPresetMeta(provider: AgentProviderConfig): AgentProviderConfig {
     const preset = state.registry.get(provider.id);
-    return preset ? { ...provider, detect: preset.detect, installHint: preset.installHint, login: preset.login } : provider;
+    return preset
+      ? { ...provider, detect: preset.detect, installHint: preset.installHint, login: preset.login, installable: preset.installable }
+      : provider;
   }
 
   /**
@@ -187,13 +190,39 @@ export function createProvidersSlice({ state, getRuntime }: ProvidersDeps): Prov
     return programs.some((program) => agentDetection.value[program]?.bundled === true);
   }
 
-  /** 设置页状态文案：内置 > 已安装；未装且命令走 npx → 首次启动按需下载，否则直说未安装。 */
+  /** 设置页状态文案：内置 > 已安装；可按需下载但未装（含未探测）→ 可安装；npx 型 → 首次启动下载。 */
   function providerInstallLabel(provider: AgentProviderConfig): string {
     if (providerBundled(provider)) return "内置";
     const installed = providerInstalled(provider);
+    if (provider.installable && installed !== true) return "可安装";
     if (installed === null) return "";
     if (installed) return "已安装";
     return provider.command.startsWith("npx") ? "首次启动下载" : "未安装";
+  }
+
+  /**
+   * 按需下载 ACP agent（agent_install）：装完刷新 PATH 探测，状态从「可安装」变「已安装」。
+   * 能力表 unknown 放行（fail-open，见 command-capabilities 模块注释），只有明确 `available:false`
+   * 才拦 —— 服务端不暴露这条命令时按钮本就不该出现，这里是第二道保险。
+   */
+  async function installAgentProvider(id: string): Promise<void> {
+    const provider = state.agentProviders.value.find((candidate) => candidate.id === id);
+    if (!provider?.installable || state.installingId.value !== null) return;
+    const capabilities = useCommandCapabilitiesStore();
+    await capabilities.ensureCatalog();
+    if (capabilities.available("agent_install") === false) {
+      notify({ kind: "error", key: "agent-install", title: "无法安装", detail: "当前宿主不允许按需下载 agent（agent_install 不可用）" });
+      return;
+    }
+    state.installingId.value = id;
+    try {
+      await agentsBackend.install(id);
+      await refreshAgentDetection();
+    } catch (error: unknown) {
+      notify({ kind: "error", key: "agent-install", title: "安装失败", detail: String(error) });
+    } finally {
+      state.installingId.value = null;
+    }
   }
 
   /** 桌面态启动接管：库目录 → 覆盖（真源）；未接管 → 内置缺省/缓存首落库。 */
@@ -426,6 +455,7 @@ export function createProvidersSlice({ state, getRuntime }: ProvidersDeps): Prov
     refreshAgentDetection,
     providerInstalled,
     providerInstallLabel,
+    installAgentProvider,
     setAgentProviderEnabled,
     setAgentProviderIcon,
     addAgentProvider,

@@ -112,6 +112,8 @@ export interface AgentStoreState {
   selectedProviderId: Ref<string>;
   routeToAcp: Ref<boolean>;
   agentDetection: Ref<Record<string, AgentProgramProbe>>;
+  /** 正在按需下载的后端 id（null = 空闲）；设置页据此禁用安装按钮并显示「安装中…」。 */
+  installingId: Ref<string | null>;
   providersHydrated: Promise<void> | null;
   /* ===== ACP 运行态 ===== */
   acpBusy: Ref<boolean>;
@@ -174,6 +176,7 @@ export function createAgentStoreState(): AgentStoreState {
     selectedProviderId: ref(""),
     routeToAcp: ref(false),
     agentDetection: ref<Record<string, AgentProgramProbe>>({}),
+    installingId: ref<string | null>(null),
     providersHydrated: null,
     acpBusy: ref(false),
     acpConnecting: ref(false),

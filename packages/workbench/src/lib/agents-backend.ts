@@ -59,4 +59,14 @@ export const agentsBackend = {
     const probes = await invoke<AgentProgramProbe[]>("acp_detect_programs", { programs });
     return Array.isArray(probes) ? probes : null;
   },
+
+  /**
+   * 按需下载 ACP agent：宿主把固定版本装进 `~/.greyWork/agents`（不随安装包分发）。
+   * 只传 id，包名 / 版本由宿主白名单决定；命令本身受 TRUSTED_HOST_ONLY 保护，
+   * 调用方应先问命令能力表（unknown 放行，明确禁用则不发）。
+   */
+  async install(id: string): Promise<{ id: string; version: string; bin: string }> {
+    if (!hasHostCommands()) throw new Error("当前为浏览器预览态，没有宿主，无法安装 agent");
+    return await invoke<{ id: string; version: string; bin: string }>("agent_install", { id });
+  },
 };

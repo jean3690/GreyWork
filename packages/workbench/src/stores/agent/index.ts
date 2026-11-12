@@ -71,9 +71,12 @@ export const useAgentStore = defineStore("agent", () => {
     /** 后端目录启动接管完成信号（null = 浏览器态无后端）。 */
     providersHydrated: state.providersHydrated,
     agentDetection: state.agentDetection,
+    /** 正在按需下载的后端（null = 空闲）。 */
+    installingId: state.installingId,
     refreshAgentDetection: providers.refreshAgentDetection,
     providerInstalled: providers.providerInstalled,
     providerInstallLabel: providers.providerInstallLabel,
+    installAgentProvider: providers.installAgentProvider,
     setAgentProviderEnabled: providers.setAgentProviderEnabled,
     isCustomAgentProvider,
     addAgentProvider: providers.addAgentProvider,

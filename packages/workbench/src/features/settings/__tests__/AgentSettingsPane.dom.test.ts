@@ -93,6 +93,50 @@ describe("AgentSettingsPane · agent 目录只读门", () => {
   });
 });
 
+describe("AgentSettingsPane · 按需下载安装按钮", () => {
+  const trustedCatalog = [
+    { name: "db_agents_sync", auth: "required", desktopOnly: false, binary: false, available: true },
+    { name: "agent_install", auth: "required", desktopOnly: false, binary: false, available: true },
+  ];
+
+  it("可信宿主：可安装的预设显示「安装」按钮且可点", async () => {
+    h.runtimeMode.mockReturnValue("server");
+    h.loadCommandCatalog.mockResolvedValue(trustedCatalog);
+    const wrapper = await mountPane();
+    await vi.waitFor(() => expect(wrapper.find('[data-testid="agent-install-codebuddy"]').exists()).toBe(true));
+    const button = wrapper.get('[data-testid="agent-install-codebuddy"]');
+    expect(button.text()).toContain("安装");
+    expect(button.attributes("disabled")).toBeUndefined();
+  });
+
+  it("服务端 agent 目录只读：不显示安装按钮", async () => {
+    h.runtimeMode.mockReturnValue("server");
+    h.loadCommandCatalog.mockResolvedValue([
+      { name: "db_agents_sync", auth: "required", desktopOnly: false, binary: false, available: false },
+    ]);
+    const wrapper = await mountPane();
+    expect(wrapper.find('[data-testid="agent-install-codebuddy"]').exists()).toBe(false);
+  });
+
+  it("agent_install 被明确禁用：不显示安装按钮", async () => {
+    h.runtimeMode.mockReturnValue("server");
+    h.loadCommandCatalog.mockResolvedValue([
+      ...trustedCatalog.slice(0, 1),
+      { name: "agent_install", auth: "required", desktopOnly: false, binary: false, available: false },
+    ]);
+    const wrapper = await mountPane();
+    expect(wrapper.find('[data-testid="agent-install-codebuddy"]').exists()).toBe(false);
+  });
+
+  it("普通预设不带安装按钮", async () => {
+    h.runtimeMode.mockReturnValue("server");
+    h.loadCommandCatalog.mockResolvedValue(trustedCatalog);
+    const wrapper = await mountPane();
+    await vi.waitFor(() => expect(wrapper.find('[data-testid="agent-install-codebuddy"]').exists()).toBe(true));
+    expect(wrapper.find('[data-testid="agent-install-opencode"]').exists()).toBe(false);
+  });
+});
+
 describe("AgentSettingsPane · 模型供应商的 agent 模式开关", () => {
   it("默认关闭；勾选即时落盘并展开轮数上限，关掉后收起", async () => {
     const wrapper = await mountPane(false);
