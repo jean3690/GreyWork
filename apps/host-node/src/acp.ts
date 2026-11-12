@@ -38,6 +38,8 @@ export const ALLOWED_AGENT_PROGRAMS = new Set([
   "copilot",
   "cursor-agent",
   "aider",
+  // 按需下载到 <授权根>/agents 的后端（见 agent-install.ts），装完由 host 前置进 PATH。
+  "codebuddy",
   "node",
   "npx",
   "bun",
@@ -84,7 +86,8 @@ export function validateSpawnCommand(agentCmd: string, extra: string[]): string 
 
 function handshakeTimeoutSecs(command: string): number {
   const program = command.split(/\s+/)[0] ?? "";
-  return ["npx", "npm", "yarn", "pnpm", "deno", "bunx"].includes(program) ? 120 : 10;
+  // codebuddy 是数百 MB 的 Node 包，首次 initialize 要加载整棵依赖树，10s 冷启动不够。
+  return ["npx", "npm", "yarn", "pnpm", "deno", "bunx", "codebuddy"].includes(program) ? 120 : 10;
 }
 
 /**

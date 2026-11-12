@@ -12,7 +12,7 @@ import { AcpHost, validateSpawnCommand } from "../src/acp.js";
 import { ChannelRuntime } from "../src/channel-runtime.js";
 import { Db } from "../src/db.js";
 import { RagIndexHost } from "../src/rag.js";
-import { isDenied } from "../src/commands.js";
+import { isDenied, listCommands } from "../src/commands.js";
 import { EventBus } from "../src/events.js";
 import { LlmStreamHost } from "../src/llm.js";
 import { LlmAgentHost } from "../src/llm-agent.js";
@@ -171,10 +171,10 @@ describe("HTTP 契约", () => {
     expect(response.headers.get("set-cookie")).toBeNull();
   });
 
-  it("/api/commands 返回 185 条，只有已迁移的命令标 available", async () => {
+  it("/api/commands 返回 186 条，只有已迁移的命令标 available", async () => {
     const response = await fetch(`${base}/api/commands`, { headers: { cookie } });
     const list = (await response.json()) as { name: string; available: boolean; desktopOnly: boolean }[];
-    expect(list).toHaveLength(185);
+    expect(list).toHaveLength(186);
     const defaultRoot = list.find((item) => item.name === "store_default_root");
     expect(defaultRoot?.available).toBe(true);
     // 桌面专属命令任何宿主都不可调用。
@@ -183,6 +183,10 @@ describe("HTTP 契约", () => {
     expect(list.find((item) => item.name === "channel_send_media")?.available).toBe(true);
     // 可信宿主下 terminal_shells 已迁移且允许调用。
     expect(list.find((item) => item.name === "terminal_shells")?.available).toBe(true);
+    // 按需下载是桌面专属能力：可信宿主 available，desktopOnly 必须为 false（否则 dispatch 无条件 403）。
+    const install = list.find((item) => item.name === "agent_install");
+    expect(install?.available).toBe(true);
+    expect(install?.desktopOnly).toBe(false);
   });
 
   it("已迁移命令走真实实现", async () => {
@@ -216,6 +220,26 @@ describe("HTTP 契约", () => {
     // 非可信宿主只在单测里验策略（主 server 以桌面口径开着可信开关）。
     expect(isDenied("terminal_shells", false)).toBe(true);
     expect(isDenied("terminal_shells", true)).toBe(false);
+    // 按需下载在服务端不暴露：策略拒绝，能力表也标不可用。
+    expect(isDenied("agent_install", false)).toBe(true);
+    expect(isDenied("agent_install", true)).toBe(false);
+    expect(listCommands(false).find((item) => item.name === "agent_install")?.available).toBe(false);
+  });
+
+  it("agent_install 缺 id / 白名单外 id 都回 400，且不会触发下载", async () => {
+    const call = async (args: unknown) => {
+      const response = await fetch(`${base}/api/command`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ command: "agent_install", args }),
+      });
+      return { status: response.status, body: (await response.json()) as { error: string } };
+    };
+    expect((await call({})).status).toBe(400);
+    expect((await call({})).body.error).toContain("缺少参数 id");
+    const bad = await call({ id: "not-allowed" });
+    expect(bad.status).toBe(400);
+    expect(bad.body.error).toContain("unknown installable agent");
   });
 
   it("fs_list_dir / fs_read_text_file 走授权面", async () => {
@@ -1168,8 +1192,10 @@ describe("agent 程序放行面", () => {
   });
 
   it("validateSpawnCommand：无放行面拒绝自配程序，有放行面按 basename 归一后放行", () => {
-    expect(() => validateSpawnCommand("codebuddy --acp", [])).toThrow("agent program not allowed: codebuddy");
-    expect(validateSpawnCommand("codebuddy --acp", ["codebuddy"])).toBe("codebuddy --acp");
+    expect(() => validateSpawnCommand("my-agent --acp", [])).toThrow("agent program not allowed: my-agent");
+    expect(validateSpawnCommand("my-agent --acp", ["my-agent"])).toBe("my-agent --acp");
+    // 按需下载的 codebuddy 已进内置白名单（见 agent-install.ts），无需额外放行面。
+    expect(validateSpawnCommand("codebuddy --acp", [])).toBe("codebuddy --acp");
     // 配置里写绝对路径 / 大小写不一，也与命令首 token 同一口径归一。
     expect(validateSpawnCommand("/usr/bin/MyAgent serve", ["/usr/bin/myagent"])).toBe("/usr/bin/MyAgent serve");
     expect(validateSpawnCommand("opencode acp", [])).toBe("opencode acp");

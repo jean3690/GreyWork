@@ -1,15 +1,14 @@
 /**
- * 命令面：元数据来自 Rust 侧导出的快照（`command-manifest.json`），实现按领域逐步迁移。
+ * 命令面：元数据在 `command-manifest.json`，实现在下方 `HANDLERS`。
  *
- * **契约以 Rust 为真源**：命令名、auth、desktopOnly、binary 由
- * `crates/greywork-host/examples/dump_commands.rs` 导出，Node 侧不手抄；
- * 快照过期时跑 `pnpm --filter @greywork/host-node manifest` 重新生成。
- *
+ * Rust 宿主删除后这份清单是静态手工维护的：新增命令要**同时**在 manifest 加条目、在
+ * `HANDLERS` 注册实现，否则 `/api/commands` 不暴露（404 / available:false）。
  * P0 只迁了 `store_default_root` 这一条叶子命令，用来打通「HTTP → 分发 → 返回 JSON」的管线。
  * 未迁移的命令在 `/api/commands` 里标 `available: false`，前端据此灰显，避免「点了才报错」。
  */
 import manifest from "./command-manifest.json" with { type: "json" };
 
+import { installAgent } from "./agent-install.js";
 import { shellCatalog } from "./shell-catalog.js";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -101,6 +100,7 @@ export const COMMANDS: readonly CommandMeta[] = manifest as CommandMeta[];
  * 这些是「只要能开终端就等于拿到本机任意代码执行」的面，网络暴露部署必须关掉。
  */
 const TRUSTED_HOST_ONLY = new Set([
+  "agent_install", // 下载并执行 npm 包，与「能开终端」同一量级，服务端不暴露
   "db_agents_sync",
   "fs_authorize_drop_paths",
   "fs_authorize_picked_paths",
@@ -638,6 +638,14 @@ HANDLERS.set("acp_start", async (args, ctx) => {
     typeof value.tier === "string" ? value.tier : null,
     (value.env ?? undefined) as Record<string, string> | undefined,
   );
+});
+/** 按需下载 ACP agent（可信宿主专属）：只接受白名单 id，不接受包名 / 版本 / 命令。 */
+HANDLERS.set("agent_install", async (args, ctx) => {
+  const value = args as { id?: unknown } | null;
+  if (typeof value?.id !== "string" || value.id.trim() === "") {
+    throw new CommandError(400, "缺少参数 id");
+  }
+  return installAgent(ctx.access.root, value.id.trim());
 });
 HANDLERS.set("acp_new_session", async (args, ctx) => {
   const value = args as { handle?: unknown; cwd?: unknown; mcpServers?: unknown } | null;

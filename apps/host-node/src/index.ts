@@ -15,6 +15,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 
 import { LoginThrottle, SessionStore, passwordChecker } from "./auth.js";
+import { agentBinDir } from "./agent-install.js";
 import { Db } from "./db.js";
 import { loadConfig } from "./config.js";
 import { createHostServer } from "./server.js";
@@ -89,6 +90,10 @@ async function main(): Promise<void> {
   // 授权面：默认根 ~/.greyWork + 配置预置根；账本放数据目录（与 Rust 同名）。
   const defaultRoot = path.join(homedir(), ".greyWork");
   mkdirSync(defaultRoot, { recursive: true });
+  // 按需安装的 agent（agent_install）落在 <授权根>/agents/node_modules/.bin：前置进 PATH，
+  // 让 acp_detect_programs 的纯 stat 探测与 AcpHost.start 的 spawn 走同一条路径。
+  // （Rust 时代 <runtime>/bin 的前置已随删库消失，这里是 Node 宿主唯一的前置点。）
+  process.env.PATH = [agentBinDir(defaultRoot), process.env.PATH ?? ""].filter(Boolean).join(path.delimiter);
   const access = new WorkspaceAccess(defaultRoot, path.join(config.dataDir, "workspace-path-access.json"));
   for (const root of config.workspaceRoots) {
     console.log(`[host-node] 预置授权根: ${access.authorizeSelectedPath(root)}`);

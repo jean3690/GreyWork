@@ -1108,5 +1108,11 @@
     "auth": "required",
     "desktopOnly": true,
     "binary": false
+  },
+  {
+    "name": "agent_install",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
   }
 ]
