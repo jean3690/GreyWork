@@ -6,7 +6,33 @@
 发版流程：新增条目补进对应版本标题下 → 打 `v*` 标签 → `.github/workflows/release.yml` 会自动从本文件
 抽取该版本条目作为 Release 说明。**不要手改 Release 正文**，改这里。
 
-## [未发布]
+## [0.15.0] - 2026-11-12
+
+### 新增
+
+- **CodeBuddy 按需下载后端**：不随安装包分发，设置页标「可安装」，点「安装」把固定版本
+  （2.183.0）装进 `~/.greyWork/agents`，由宿主前置进 PATH 后按 `codebuddy --acp` 启动。
+  新增宿主 `agent_install` 命令（服务端白名单 + 版本标记自动重装、并发去重、失败清理，
+  仅可信本机宿主可调用）、`codebuddy` 内置白名单与 120s 冷启动握手档；装完行内出现
+  「登录」按钮，把 CLI 送进内置 PTY 走它自己的 `/login` 认证流程。
+- **消息通道运行时**：Rust 宿主删除后七条通道只剩内存桩（`*_status` 恒报 stopped、无
+  `://state` / `://inbound` 事件、登出空实现），这次收拢进 `ChannelRuntime`（每通道
+  AbortController、状态现算、归属人与联系人、登出清理），各协议拆成连接器（telegram
+  长轮询、discord/qq Gateway、dingtalk Stream、feishu protobuf WS、wecom 订阅、
+  wechat SDK 入站归一）。顺带补自配 ACP 后端的放行面：headless 用
+  `GREYWORK_AGENT_PROGRAMS`（不读 DB）、可信宿主并上 DB 启用目录，agent 进程 cwd 改为授权根。
+- **`dev:desktop-admin` 一键开发脚本**：同时起桌面端与运维台。
+
+### 修复
+
+- **Java 控制面**：排除 Spring Boot 默认的随机开发账号自动配置。
+- **表格预览**：打开表格不再误标「未保存」。
+- **Electron 构建产物**：从格式检查里排除 `build/` 产物，同时恢复源码的格式检查。
+
+### 工程
+
+- 清理 6 处 eslint warning；`disks-reclaim` 纳入旧版 Electron 安装包回收；
+  删除 README-zh 重复的权限模型段落。
 
 ## [0.14.1] - 2026-11-10
 
