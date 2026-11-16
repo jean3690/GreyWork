@@ -2,6 +2,8 @@ import { http } from "./http";
 import type {
   AuditLog,
   AutomationOverview,
+  CatalogDetail,
+  CatalogItemView,
   ChannelItem,
   DeviceItem,
   EnrollCodeItem,
@@ -42,19 +44,19 @@ export const adminApi = {
     const suffix = params.toString() ? "?" + params.toString() : "";
     return http.get<UserItem[]>("/api/admin/users" + suffix);
   },
-  userDetail(id: number): Promise<UserDetail> {
+  userDetail(id: string): Promise<UserDetail> {
     return http.get<UserDetail>("/api/admin/users/" + id + "/detail");
   },
-  userDevices(id: number): Promise<DeviceItem[]> {
+  userDevices(id: string): Promise<DeviceItem[]> {
     return http.get<DeviceItem[]>("/api/admin/users/" + id + "/devices");
   },
-  updateUser(id: number, patch: { status?: string; role?: string }): Promise<UserItem> {
+  updateUser(id: string, patch: { status?: string; role?: string }): Promise<UserItem> {
     return http.patch<UserItem>("/api/admin/users/" + id, patch);
   },
-  revokeSessions(id: number): Promise<{ devices: number }> {
+  revokeSessions(id: string): Promise<{ devices: number }> {
     return http.delete<{ devices: number }>("/api/admin/users/" + id + "/sessions");
   },
-  revokeDevice(id: number, deviceId: number): Promise<void> {
+  revokeDevice(id: string, deviceId: string): Promise<void> {
     return http.delete<void>("/api/admin/users/" + id + "/devices/" + deviceId);
   },
 
@@ -64,7 +66,7 @@ export const adminApi = {
   issueEnrollCode(expiresInHours: number): Promise<IssuedCode> {
     return http.post<IssuedCode>("/api/admin/enroll-codes", { expiresInHours });
   },
-  revokeEnrollCode(id: number): Promise<void> {
+  revokeEnrollCode(id: string): Promise<void> {
     return http.delete<void>("/api/admin/enroll-codes/" + id);
   },
 
@@ -74,7 +76,7 @@ export const adminApi = {
   channels(): Promise<ChannelItem[]> {
     return http.get<ChannelItem[]>("/api/admin/channels");
   },
-  setChannelStatus(id: number, status: "active" | "disabled"): Promise<ChannelItem> {
+  setChannelStatus(id: string, status: "active" | "disabled"): Promise<ChannelItem> {
     return http.post<ChannelItem>("/api/admin/channels/" + id + "/status", { status });
   },
   storage(): Promise<StorageOverview> {
@@ -101,5 +103,30 @@ export const adminApi = {
     search.set("limit", String(params.limit ?? 50));
     search.set("offset", String(params.offset ?? 0));
     return http.get<AuditLog[]>("/api/admin/audit?" + search.toString());
+  },
+
+  catalog(kind?: string): Promise<CatalogItemView[]> {
+    return http.get<CatalogItemView[]>("/api/admin/catalog?kind=" + (kind ?? "all"));
+  },
+  catalogDetail(id: string): Promise<CatalogDetail> {
+    return http.get<CatalogDetail>("/api/admin/catalog/" + id);
+  },
+  createCatalogSkill(payload: Record<string, unknown>): Promise<CatalogItemView> {
+    return http.post<CatalogItemView>("/api/admin/catalog/skill", payload);
+  },
+  updateCatalogSkill(id: string, payload: Record<string, unknown>): Promise<CatalogItemView> {
+    return http.put<CatalogItemView>("/api/admin/catalog/skill/" + id, payload);
+  },
+  createCatalogMcp(payload: Record<string, unknown>): Promise<CatalogItemView> {
+    return http.post<CatalogItemView>("/api/admin/catalog/mcp", payload);
+  },
+  updateCatalogMcp(id: string, payload: Record<string, unknown>): Promise<CatalogItemView> {
+    return http.put<CatalogItemView>("/api/admin/catalog/mcp/" + id, payload);
+  },
+  setCatalogEnabled(id: string, enabled: boolean): Promise<CatalogItemView> {
+    return http.post<CatalogItemView>("/api/admin/catalog/" + id + "/enabled", { enabled });
+  },
+  deleteCatalog(id: string): Promise<void> {
+    return http.delete<void>("/api/admin/catalog/" + id);
   },
 };

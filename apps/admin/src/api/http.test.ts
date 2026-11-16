@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, http } from "./http";
 import { clearSession, readToken, writeSession } from "./session";
 
-const admin = { id: 1, email: "admin@grey.local", displayName: "Admin", role: "admin" };
+const admin = { id: "1", email: "admin@grey.local", displayName: "Admin", role: "admin" };
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {

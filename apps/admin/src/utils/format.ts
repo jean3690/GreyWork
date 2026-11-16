@@ -104,6 +104,9 @@ export const ACTION_META: Record<string, ActionMeta> = {
   channel_status: { label: "通道启停", tone: "warning" },
   admin_password_change: { label: "修改密码", tone: "info" },
   admin_login: { label: "运维台登录", tone: "primary" },
+  catalog_upsert: { label: "维护目录条目", tone: "primary" },
+  catalog_status: { label: "目录条目启停", tone: "warning" },
+  catalog_delete: { label: "删除目录条目", tone: "danger" },
 };
 
 export function actionMeta(action: string): ActionMeta {

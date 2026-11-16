@@ -23,7 +23,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Service;import tools.jackson.databind.annotation.JsonSerialize;
+import tools.jackson.databind.ser.std.ToStringSerializer;
 
 /**
  * 运维台的跨用户只读视图：宿主、通道、模型密钥与用量。
@@ -68,7 +69,7 @@ public class AdminResourceService {
 			boolean alive, long bindings, LocalDateTime createdAt) {
 	}
 
-	public record ChannelItem(Long id, Long userId, String ownerEmail, String platform,
+	public record ChannelItem(@JsonSerialize(using = ToStringSerializer.class) Long id, Long userId, String ownerEmail, String platform,
 			String accountRef, String status, String storedStatus, Long hostDeviceId, String hostName,
 			LocalDateTime createdAt) {
 	}

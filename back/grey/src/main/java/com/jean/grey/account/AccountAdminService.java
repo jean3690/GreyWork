@@ -16,7 +16,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.stream.Collectors;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Service;import tools.jackson.databind.annotation.JsonSerialize;
+import tools.jackson.databind.ser.std.ToStringSerializer;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -49,16 +50,16 @@ public class AccountAdminService {
 		this.auditService = auditService;
 	}
 
-	public record UserItem(Long id, String email, String displayName, String role, String status,
+	public record UserItem(@JsonSerialize(using = ToStringSerializer.class) Long id, String email, String displayName, String role, String status,
 			LocalDateTime createdAt) {
 	}
 
 	/** 用户详情：基础信息 + 设备数 + 最近活跃 + 注册来源（身份提供方）。 */
-	public record UserDetail(Long id, String email, String displayName, String role, String status,
+	public record UserDetail(@JsonSerialize(using = ToStringSerializer.class) Long id, String email, String displayName, String role, String status,
 			LocalDateTime createdAt, int deviceCount, LocalDateTime lastActiveAt, List<String> providers) {
 	}
 
-	public record DeviceItem(Long id, String name, String platform, LocalDateTime lastSeenAt,
+	public record DeviceItem(@JsonSerialize(using = ToStringSerializer.class) Long id, String name, String platform, LocalDateTime lastSeenAt,
 			LocalDateTime createdAt) {
 	}
 

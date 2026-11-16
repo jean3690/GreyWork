@@ -7,7 +7,8 @@ import com.jean.grey.common.ApiException;
 import com.jean.grey.common.Hashes;
 import java.time.LocalDateTime;
 import java.util.List;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Service;import tools.jackson.databind.annotation.JsonSerialize;
+import tools.jackson.databind.ser.std.ToStringSerializer;
 
 /**
  * 运维面的入场码管理。
@@ -26,7 +27,7 @@ public class EnrollmentCodeAdminService {
 		this.enrollmentCodeMapper = enrollmentCodeMapper;
 	}
 
-	public record CodeItem(Long id, String hashPrefix, LocalDateTime expiresAt,
+	public record CodeItem(@JsonSerialize(using = ToStringSerializer.class) Long id, String hashPrefix, LocalDateTime expiresAt,
 			LocalDateTime usedAt, LocalDateTime createdAt, String status) {
 	}
 

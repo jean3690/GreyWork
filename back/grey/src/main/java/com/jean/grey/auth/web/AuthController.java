@@ -23,7 +23,8 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMapping;import tools.jackson.databind.annotation.JsonSerialize;
+import tools.jackson.databind.ser.std.ToStringSerializer;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -55,7 +56,8 @@ public class AuthController {
 			@NotBlank @Size(max = 32) String platform) {
 	}
 
-	public record UserView(Long id, String email, String displayName, String role) {
+	public record UserView(@JsonSerialize(using = ToStringSerializer.class) Long id, String email,
+			String displayName, String role) {
 	}
 
 	public record DeviceView(Long id, String name, String platform) {

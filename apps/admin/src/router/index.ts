@@ -63,6 +63,12 @@ export const router = createRouter({
           meta: { title: "自动化任务", subtitle: "调度积压、失败率与跨用户任务" },
         },
         {
+          path: "catalog",
+          name: "catalog",
+          component: () => import("../views/CatalogView.vue"),
+          meta: { title: "能力目录", subtitle: "技能与 MCP 预设：桌面端按这里安装" },
+        },
+        {
           path: "llm",
           name: "llm",
           component: () => import("../views/LlmView.vue"),

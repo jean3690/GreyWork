@@ -19,7 +19,7 @@ const drawer = ref(false);
 const detailLoading = ref(false);
 const detail = ref<UserDetail | null>(null);
 const devices = ref<DeviceItem[]>([]);
-const currentId = ref<number | null>(null);
+const currentId = ref<string | null>(null);
 
 function messageOf(err: unknown, fallback: string): string {
   return err instanceof ApiError ? err.message : fallback;
@@ -37,7 +37,7 @@ async function load(): Promise<void> {
   }
 }
 
-async function loadDetail(id: number): Promise<void> {
+async function loadDetail(id: string): Promise<void> {
   detailLoading.value = true;
   try {
     const [info, list] = await Promise.all([adminApi.userDetail(id), adminApi.userDevices(id)]);

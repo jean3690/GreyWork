@@ -4,6 +4,7 @@ import {
   Cpu,
   DataAnalysis,
   Document,
+  Files,
   Fold,
   FolderOpened,
   Lock,
@@ -128,6 +129,10 @@ function navigate(): void {
         <el-menu-item index="/automation">
           <el-icon><Timer /></el-icon>
           <span>自动化任务</span>
+        </el-menu-item>
+        <el-menu-item index="/catalog">
+          <el-icon><Files /></el-icon>
+          <span>能力目录</span>
         </el-menu-item>
         <el-menu-item index="/llm">
           <el-icon><Cpu /></el-icon>

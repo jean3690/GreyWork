@@ -1,7 +1,8 @@
 /** 与 back/grey 的 admin DTO 一一对应；字段变化时两边一起改。 */
 
 export interface UserSummary {
-  id: number;
+  /** 雪花 id：后端按字符串下发（超过 2^53，number 会被 JSON.parse 截断）。 */
+  id: string;
   email: string;
   displayName: string;
   role: "admin" | "user" | string;
@@ -31,7 +32,7 @@ export interface UserDetail extends UserItem {
 }
 
 export interface DeviceItem {
-  id: number;
+  id: string;
   name: string;
   platform: string;
   lastSeenAt: string | null;
@@ -39,7 +40,7 @@ export interface DeviceItem {
 }
 
 export interface EnrollCodeItem {
-  id: number;
+  id: string;
   hashPrefix: string;
   expiresAt: string;
   usedAt: string | null;
@@ -95,7 +96,7 @@ export interface HostItem {
 }
 
 export interface ChannelItem {
-  id: number;
+  id: string;
   userId: number;
   ownerEmail: string;
   platform: string;
@@ -173,4 +174,46 @@ export interface LlmUsageOverview {
   requestsToday: number;
   tokensToday: number;
   byProvider: { provider: string; requests: number; tokens: number }[];
+}
+
+/** 能力目录条目（技能 / MCP 预设），运维台维护、桌面端拉取。 */
+export interface CatalogItemView {
+  /** 雪花 id 以字符串下发：超过 2^53，number 会被 JSON.parse 截断。 */
+  id: string;
+  kind: "skill" | "mcp";
+  ref: string;
+  slug: string;
+  name: string;
+  title: string | null;
+  description: string | null;
+  installs: number;
+  enabled: boolean;
+  fileCount: number;
+  packageLabel: string | null;
+  updatedAt: string | null;
+}
+
+export interface CatalogSkillFile {
+  path: string;
+  contents: string;
+}
+
+export interface CatalogMcpPackage {
+  registryType: string;
+  identifier: string;
+  version: string | null;
+  environmentVariables: { name: string }[] | null;
+}
+
+export interface CatalogMcpPayload {
+  version: string | null;
+  repository: { url: string } | null;
+  packages: CatalogMcpPackage[];
+  remotes: { type: string; url: string }[];
+}
+
+export interface CatalogDetail {
+  item: CatalogItemView;
+  files: CatalogSkillFile[] | null;
+  mcp: CatalogMcpPayload | null;
 }
