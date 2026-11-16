@@ -111,3 +111,69 @@
 （容量与对象明细）与 `GET /api/admin/automation`（任务、积压与执行失败率），对应用户侧接口
 分别是「对象存储」与「自动化」两节。端点表、首次部署、故障排查见
 [control-plane-auth.md](control-plane-auth.md)。
+
+## 桌面端接入（宿主侧客户端）
+
+桌面端与 headless 宿主共用 `apps/host-node/src/control-plane.ts`，控制面只负责「注册 / 心跳 /
+排队 / 记录」，出站调用仍归宿主：
+
+| 命令                       | 用途                                                                                     |
+| -------------------------- | ---------------------------------------------------------------------------------------- |
+| `control_plane_status`     | 当前是否配置、是否已注册、上次心跳/认领、最近结果与错误（不含 token）                    |
+| `control_plane_connect`    | `{ baseUrl, token }` 或 `{ baseUrl, email, code }`（入场码换 token）；保存后立刻注册一次 |
+| `control_plane_run_once`   | 手动跑一轮：注册 → 认领 → 执行 → 回执                                                    |
+| `control_plane_disconnect` | 删除本地接入配置并停掉定时链                                                             |
+
+- 配置优先级：`GREYWORK_CONTROL_URL` + `GREYWORK_CONTROL_TOKEN`（同时给出才生效）>
+  `<dataDir>/control-plane.json`（0600，由设置里的「控制面」分区写入）。
+- 节奏：心跳与认领各一条 30s 定时链；单条任务执行上限 25min，租约 30min。
+- 执行语义：**本机默认模型供应商的单轮直连**（OpenAI 兼容端点），不调 ACP、不给工具；
+  绑定 `acpProviderId` 的任务直接回执 `failed`，留待应用内执行。没配模型供应商时同样回执失败，
+  不会卡住认领链。
+- 渲染端入口：设置 → 控制面（`ControlPlaneSettingsPane.vue`），支持入场码接入、状态查看、
+  立即同步与断开；浏览器预览态如实置灰。
+
+## 能力目录（技能 / MCP 预设）
+
+控制面随版本发布一份只读目录，桌面端「从服务器装技能 / 浏览 MCP 预设」就是读它。
+目录是公开内容（无用户数据），三个端点**匿名可读**；JSON 源在
+`back/grey/src/main/resources/catalog/{skills,mcp}.json`，改内容随发版生效。
+
+| 方法 | 路径                                        | 形状                                                                                  |
+| ---- | ------------------------------------------- | ------------------------------------------------------------------------------------- |
+| GET  | `/api/skills?q=`                            | **数组**：`[{ref, skill_id, name, installs, source, downloadable}]`（skills.sh 协议） |
+| GET  | `/api/download/{owner}/{repo}/{skill}`      | `{files:[{path,contents}], hash}`                                                     |
+| GET  | `/api/market/mcp/v0/servers?search=&limit=` | 官方 registry 同形：`{servers:[{server:{…}, _meta:{…}}]}`                             |
+
+客户端接入方式（不需要改代码）：
+
+- **技能**：控制面接入后（设置 → 控制面 → 入场码），技能面板的「发现」里会自动多一条
+  **本控制面** 源——地址取自宿主 `control_plane_status`，token 不出宿主，无需手填。
+  也可手动加自定义源（类型 `api`、地址填控制面根），或用 `GREYWORK_SKILLS_ORIGIN` 改默认源。
+  搜索/下载经宿主转发（`skills_search` / `skills_download`），安装仍走两阶段落盘校验。
+- **MCP**：MCP Registry 弹窗顶部新增 **Registry 地址**（跟随设置持久化，留空 = 官方向）；
+  填 `http://<控制面>:8080/api/market/mcp` 即可浏览控制面预设。宿主侧同样可用
+  `GREYWORK_MCP_REGISTRY_URL` 定默认值。登记仍只写本机服务器列表（MCP 进程由本机 npx/uvx 拉起）。
+
+已验证的链路：搜索 → 下载快照（2 个文件，sha256 64 位）→ `skills_install` 落到
+`<workspace>/.agents/skills/<id>` 并建 `.claude/skills` 兼容链接；MCP 目录返回可登记的 npm/pypi 条目。
+
+### 运维台维护（/api/admin/catalog）
+
+目录以库为准（`catalog_item`，V13）：首次启动从 `resources/catalog/*.json` **播种**，
+之后只读写数据库 —— 改了、删了都不会被资源文件覆盖回去，也不需要重启或重新构建后端。
+
+| 方法       | 路径                                      | 说明                                                               |
+| ---------- | ----------------------------------------- | ------------------------------------------------------------------ |
+| GET        | `/api/admin/catalog?kind=all\|skill\|mcp` | 列表（不含正文）                                                   |
+| GET        | `/api/admin/catalog/{id}`                 | 详情（技能的 files / MCP 的 packages）                             |
+| POST / PUT | `/api/admin/catalog/skill[/{id}]`         | 新建 / 编辑技能                                                    |
+| POST / PUT | `/api/admin/catalog/mcp[/{id}]`           | 新建 / 编辑 MCP 预设                                               |
+| POST       | `/api/admin/catalog/{id}/enabled`         | 上下架（下架后公开端点搜不到、下载 404；已装到用户机器的不受影响） |
+| DELETE     | `/api/admin/catalog/{id}`                 | 删除                                                               |
+
+- 校验与宿主落盘规则同口径：skillId 小写 slug、ref 必须是 `owner/repo/skill` 且第三段等于 skillId、
+  文件为相对路径、单文件 ≤256KB、≤128 个文件、必须有 `SKILL.md`；MCP 只接受 npm / pypi。
+- **管理端 id 一律以字符串下发**：雪花 id 超过 2^53，浏览器 `JSON.parse` 会把它四舍五入，
+  拿着截断后的 id 点编辑/删除必然 404。用户 / 设备 / 入场码 / 通道这几个视图同样按字符串下发。
+- 每次增删改都写审计（`catalog_upsert` / `catalog_status` / `catalog_delete`，target = `catalog`）。
