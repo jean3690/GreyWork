@@ -25,6 +25,7 @@ import { EventBus } from "./events.js";
 import { AcpHost } from "./acp.js";
 import { ChannelRuntime } from "./channel-runtime.js";
 import { ControlPlaneRuntime } from "./control-plane.js";
+import { configureSecretStore } from "./llm-secrets.js";
 import { LlmStreamHost } from "./llm.js";
 import { LlmAgentHost } from "./llm-agent.js";
 import { RagIndexHost } from "./rag.js";
@@ -99,6 +100,8 @@ async function main(): Promise<void> {
   for (const root of config.workspaceRoots) {
     console.log(`[host-node] 预置授权根: ${access.authorizeSelectedPath(root)}`);
   }
+  // 供应商密钥（设置里直接填的 key）：落在 <dataDir>/llm-secrets.json（0600），只在宿主内解析。
+  configureSecretStore(config.dataDir);
   const db = new Db(path.join(config.dataDir, "greywork.db"));
   const bus = new EventBus();
   const store = new SessionFileStore(access);

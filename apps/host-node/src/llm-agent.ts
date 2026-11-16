@@ -1249,7 +1249,7 @@ export class LlmAgentHost {
           method: "POST",
           headers: {
             "content-type": "application/json",
-            ...authHeaders(resolveApiKey(turn.apiKeyEnv), turn.headers),
+            ...authHeaders(resolveApiKey(turn.apiKeyEnv, turn.baseUrl), turn.headers),
           },
           body: JSON.stringify(body),
           signal: controller.signal,

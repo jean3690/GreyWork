@@ -3,7 +3,7 @@
  * 设置 · agent 分区：默认模型供应商 + ACP 后端列表与编辑。
  * 字段直接写 settings/agent store，变更即持久化。
  */
-import { computed, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { agentProviderIcon, agentProviderLobeIcon, REASONING_EFFORTS, type AgentProviderConfig } from "@greywork/shell";
 import { createLlmClient } from "@greywork/llm";
 import AgentProviderIcon from "@/features/conversation/AgentProviderIcon.vue";
@@ -16,7 +16,7 @@ import { useAgentStore } from "@/stores/agent";
 import { useCommandCapabilitiesStore } from "@/stores/command-capabilities";
 import { AGENT_CONTEXT_TOKENS_RANGE, useSettingsStore } from "@/stores/settings";
 import { useTerminalStore } from "@/stores/terminal";
-import { runtimeMode } from "@greywork/host-ipc";
+import { hasHostCommands, invoke, runtimeMode } from "@greywork/host-ipc";
 import { i18n } from "@/i18n";
 
 const t = i18n.global.t;
@@ -27,6 +27,86 @@ const terminal = useTerminalStore();
 
 /** Agent 回合的全局策略（对所有开了 Agent 模式的供应商生效）。 */
 const contextRange = AGENT_CONTEXT_TOKENS_RANGE;
+
+/* ===== 供应商密钥：直接填 key（存宿主，不回显） ===== */
+
+const hostAvailable = hasHostCommands();
+/** baseUrl（归一化）→ 是否已存密钥 + 掩码。渲染端只能看到掩码。 */
+const secretMap = ref<Record<string, { saved: boolean; masked: string | null }>>({});
+const secretDraft = ref("");
+const secretBusy = ref(false);
+const secretHint = ref("");
+
+function normalizeUrl(value: string): string {
+  return value.trim().replace(/\/+$/, "");
+}
+
+function secretOf(baseUrl: string | null | undefined): { saved: boolean; masked: string | null } | null {
+  const key = normalizeUrl(baseUrl ?? "");
+  if (key === "") return null;
+  return secretMap.value[key] ?? null;
+}
+
+const draftSecret = computed(() => secretOf(providerDraft.value.baseUrl));
+
+async function refreshSecrets(): Promise<void> {
+  if (!hostAvailable) return;
+  try {
+    const result = await invoke<{ items: { baseUrl: string; masked: string }[] }>("llm_secret_status");
+    const next: Record<string, { saved: boolean; masked: string | null }> = {};
+    for (const item of result.items ?? []) {
+      next[normalizeUrl(item.baseUrl)] = { saved: true, masked: item.masked };
+    }
+    secretMap.value = next;
+  } catch {
+    // 老宿主没有这条命令：按「都没存」处理，界面上仍可用环境变量。
+  }
+}
+
+async function saveSecret(): Promise<void> {
+  const baseUrl = normalizeUrl(providerDraft.value.baseUrl);
+  const apiKey = secretDraft.value.trim();
+  if (baseUrl === "") {
+    secretHint.value = "先填 Base URL：密钥按地址归属";
+    return;
+  }
+  if (apiKey === "") {
+    secretHint.value = "API Key 不能为空";
+    return;
+  }
+  secretBusy.value = true;
+  secretHint.value = "";
+  try {
+    const result = await invoke<{ masked: string }>("llm_secret_set", { baseUrl, apiKey });
+    secretDraft.value = "";
+    secretHint.value = "已保存到宿主：" + result.masked;
+    await refreshSecrets();
+  } catch (error) {
+    secretHint.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    secretBusy.value = false;
+  }
+}
+
+async function clearSecret(): Promise<void> {
+  const baseUrl = normalizeUrl(providerDraft.value.baseUrl);
+  if (baseUrl === "") return;
+  secretBusy.value = true;
+  secretHint.value = "";
+  try {
+    await invoke("llm_secret_clear", { baseUrl });
+    secretHint.value = "已清除：该供应商回到环境变量 / 匿名";
+    await refreshSecrets();
+  } catch (error) {
+    secretHint.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    secretBusy.value = false;
+  }
+}
+
+onMounted(() => {
+  void refreshSecrets();
+});
 
 function commitContextTokens(raw: string): void {
   const value = Number(raw.trim());
@@ -349,6 +429,12 @@ async function removeAgentDraft(): Promise<void> {
           >
             <span class="min-w-0 flex-1 truncate text-[13px] text-foreground">{{ provider.name }}</span>
             <span class="font-mono text-[11px] text-dim2">{{ provider.model }}</span>
+            <span
+              v-if="secretOf(provider.baseUrl)?.saved"
+              class="shrink-0 rounded-full border border-mint/40 px-1.5 text-[10px] text-mint"
+              data-testid="provider-secret-badge"
+              >已存密钥</span
+            >
           </button>
         </div>
       </div>
@@ -456,9 +542,49 @@ async function removeAgentDraft(): Promise<void> {
           />
         </label>
         <p class="text-[10.5px] leading-relaxed text-dim2">
-          Key 在桌面端从启动应用的 shell 环境变量读取：先
-          <code class="font-mono">export {{ providerDraft.apiKeyEnv || "OPENAI_API_KEY" }}=…</code> 再从同一终端启动
-          GreyWork。浏览器/演示模式不读环境变量。
+          二选一：直接填下面的 API Key（存宿主数据目录，0600，不回显），或先
+          <code class="font-mono">export {{ providerDraft.apiKeyEnv || "OPENAI_API_KEY" }}=…</code> 再从同一终端启动 GreyWork。直填的 key
+          优先于环境变量；浏览器/演示模式只认直填。
+        </p>
+        <label class="flex items-center gap-2">
+          <span class="w-20 shrink-0 text-[11.5px] text-dim2">API Key</span>
+          <input
+            v-model="secretDraft"
+            type="password"
+            autocomplete="off"
+            class="min-w-0 flex-1 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-1.5 font-mono text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-line-2 disabled:opacity-60"
+            placeholder="sk-…（粘贴后点右侧保存）"
+            :disabled="!hostAvailable || secretBusy"
+            data-testid="provider-secret-input"
+            @keydown.enter.prevent="saveSecret"
+          />
+          <button
+            type="button"
+            class="h-7 shrink-0 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] bg-accent px-2.5 text-[11px] font-medium text-accent-ink transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            :disabled="!hostAvailable || secretBusy"
+            data-testid="provider-secret-save"
+            @click="saveSecret"
+          >
+            保存
+          </button>
+          <button
+            v-if="draftSecret?.saved"
+            type="button"
+            class="h-7 shrink-0 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground disabled:opacity-50"
+            :disabled="secretBusy"
+            data-testid="provider-secret-clear"
+            @click="clearSecret"
+          >
+            清除
+          </button>
+        </label>
+        <p class="text-[10.5px] leading-relaxed text-dim2" data-testid="provider-secret-status">
+          <template v-if="draftSecret?.saved">
+            当前已存密钥：<code class="font-mono">{{ draftSecret.masked }}</code
+            >（存在宿主，界面不回显明文）
+          </template>
+          <template v-else>未存密钥：将回退到环境变量或匿名请求。</template>
+          <span v-if="secretHint" class="ml-1 text-foreground">{{ secretHint }}</span>
         </p>
         <label class="flex gap-2">
           <span class="w-20 shrink-0 pt-1.5 text-[11.5px] text-dim2">自定义 Headers</span>

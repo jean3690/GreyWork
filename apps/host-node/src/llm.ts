@@ -9,6 +9,8 @@
 import { statSync } from "node:fs";
 import { basename } from "node:path";
 
+import { secretFor } from "./llm-secrets.js";
+
 import type { EventBus } from "./events.js";
 import type { WorkspaceAccess } from "./workspace-access.js";
 
@@ -41,15 +43,20 @@ function resolvePlaceholders(value: string): string {
   });
 }
 
-/** API Key：变量名为空表示匿名（本地服务）；声明了却未设置 → 指路用户去补。 */
-export function resolveApiKey(apiKeyEnv: string | null | undefined): string {
+/**
+ * API Key 解析，优先级：
+ * 1. 设置页直接填的 key（按 baseUrl 存在宿主数据目录，0600）；
+ * 2. 环境变量（apiKeyEnv）：变量名为空表示匿名（本地服务）；
+ * 3. 都没有 → 报错并指出两条补法。
+ */
+export function resolveApiKey(apiKeyEnv: string | null | undefined, baseUrl?: string | null): string {
+  const stored = secretFor(baseUrl);
+  if (stored !== null && stored !== "") return stored;
   const name = (apiKeyEnv ?? "").trim();
   if (name === "") return "";
   const value = process.env[name];
   if (!value) {
-    throw new Error(
-      `未设置 API Key：先在本机终端执行 export ${name}=…，再从同一终端启动 GreyWork（设置页 → Agent → 模型供应商可查看/修改变量名）`,
-    );
+    throw new Error(`未设置 API Key：在 设置 → Agent → 编辑供应商 里直接填 key，或先 export ${name}=… 再从同一终端启动 GreyWork`);
   }
   return value;
 }
@@ -86,7 +93,7 @@ export async function listModels(args: {
 }): Promise<string[]> {
   const baseUrl = args.baseUrl.trim();
   if (baseUrl === "") throw new Error("base_url is required");
-  const apiKey = resolveApiKey(args.apiKeyEnv);
+  const apiKey = resolveApiKey(args.apiKeyEnv, baseUrl);
   const response = await fetch(endpointUrl(baseUrl, "models"), {
     headers: authHeaders(apiKey, args.headers),
   });
@@ -118,7 +125,7 @@ export async function embed(args: {
   const model = args.model.trim();
   if (baseUrl === "" || model === "") throw new Error("base_url and model are required");
   if (args.input.length === 0) return { embeddings: [], dim: 0, model };
-  const apiKey = resolveApiKey(args.apiKeyEnv);
+  const apiKey = resolveApiKey(args.apiKeyEnv, baseUrl);
   const response = await fetch(endpointUrl(baseUrl, "embeddings"), {
     method: "POST",
     headers: { "content-type": "application/json", ...authHeaders(apiKey, args.headers) },
@@ -162,7 +169,7 @@ export async function chatComplete(args: {
 }): Promise<string> {
   const baseUrl = args.baseUrl.trim();
   if (baseUrl === "") throw new Error("base_url is required");
-  const apiKey = resolveApiKey(args.apiKeyEnv);
+  const apiKey = resolveApiKey(args.apiKeyEnv, baseUrl);
   const body: Record<string, unknown> = {
     model: args.model,
     stream: true,
@@ -252,7 +259,7 @@ export class LlmStreamHost {
   }): Promise<number> {
     const baseUrl = args.baseUrl.trim();
     if (baseUrl === "" || args.model.trim() === "") throw new Error("base_url and model are required");
-    const apiKey = resolveApiKey(args.apiKeyEnv);
+    const apiKey = resolveApiKey(args.apiKeyEnv, baseUrl);
     const body: Record<string, unknown> = {
       model: args.model,
       stream: true,
@@ -411,7 +418,7 @@ export async function transcribe(
   if (size > TRANSCRIBE_MAX_BYTES) {
     throw new Error(`音频超过上限 ${TRANSCRIBE_MAX_BYTES / 1024 / 1024} MB，无法转写`);
   }
-  const apiKey = resolveApiKey(args.apiKeyEnv);
+  const apiKey = resolveApiKey(args.apiKeyEnv, args.baseUrl.trim());
   const bytes = access.readBinary(file);
   const form = new FormData();
   form.append("file", new Blob([bytes], { type: "application/octet-stream" }), basename(file));

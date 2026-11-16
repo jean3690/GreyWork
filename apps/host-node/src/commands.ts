@@ -43,6 +43,7 @@ import { saveChannelCredentials, loadChannelCredentials } from "./channel-creden
 import { telegramSend } from "./channel-telegram.js";
 import { readSheet, type ReadSheetArgs } from "./sheet.js";
 import { mcpCall, mcpProbe, mcpSearch, pluginMcpCall } from "./mcp.js";
+import { clearSecret, listSecrets, setSecret } from "./llm-secrets.js";
 import {
   convertToPdf,
   discoverSoffice,
@@ -1369,6 +1370,26 @@ HANDLERS.set("acp_close_session", async (args, ctx) => {
   const sessionId = typeof value.sessionId === "string" ? value.sessionId : null;
   return ctx.acp.closeSession(value.handle, sessionId);
 });
+/* ===== 供应商密钥（第三方模型直接填 key） ===== */
+
+HANDLERS.set("llm_secret_set", async (args) => {
+  const value = args as { baseUrl?: unknown; apiKey?: unknown } | null;
+  if (typeof value?.baseUrl !== "string" || value.baseUrl.trim() === "") throw missingField("baseUrl");
+  if (typeof value.apiKey !== "string" || value.apiKey.trim() === "") throw missingField("apiKey");
+  return setSecret(value.baseUrl, value.apiKey);
+});
+
+HANDLERS.set("llm_secret_clear", async (args) => {
+  const value = args as { baseUrl?: unknown } | null;
+  if (typeof value?.baseUrl !== "string" || value.baseUrl.trim() === "") throw missingField("baseUrl");
+  return { cleared: clearSecret(value.baseUrl) };
+});
+
+HANDLERS.set("llm_secret_status", async () => {
+  // 只回显掩码：渲染端永远拿不到明文。
+  return { items: listSecrets() };
+});
+
 HANDLERS.set("llm_agent_start", async (args, ctx) => {
   // 发起一个本机模型 agent 回合；返回请求 id（用于 llm_agent_stop）。
   const value = args as Partial<AgentStartArgs> | null;
