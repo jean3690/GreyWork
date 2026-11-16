@@ -77,6 +77,38 @@ const MAX_SEARCH_MATCHES = 80;
 /** 跳过超大文件（生成的 JSON / 压缩包对定位没帮助）。 */
 const MAX_SEARCH_FILE_BYTES = 512 * 1024;
 
+/** 一个可尝试的供应商（多供应商配置里的单个元素）。 */
+export interface AgentProviderTarget {
+  baseUrl: string;
+  model: string;
+  apiKeyEnv?: string | null;
+  headers?: Record<string, string> | null;
+  temperature?: number | null;
+  maxTokens?: number | null;
+  reasoningEffort?: string | null;
+}
+
+/** 内部用的归一化供应商（字段都已落成非空/显式 null）。 */
+interface ProviderTarget {
+  baseUrl: string;
+  model: string;
+  apiKeyEnv: string;
+  headers: Record<string, string>;
+  temperature: number | null;
+  maxTokens: number | null;
+  reasoningEffort: string;
+}
+
+/**
+ * 这些失败值得换供应商再试一次：网络错误、鉴权（可能只有主供应商的 key 过期）、
+ * 限流、5xx。400（请求体不合法，常见是端点不支持 tool calling）不切换 —— 换一家
+ * 只会用同样的 payload 再撞一次。
+ */
+export function canFailover(status: number): boolean {
+  if (status === 0) return true;
+  return status === 401 || status === 403 || status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
 export interface AgentStartArgs {
   baseUrl: string;
   model: string;
@@ -102,6 +134,11 @@ export interface AgentStartArgs {
   mcpServers?: AgentMcpServer[] | null;
   /** 上下文预算（tokens）；缺省 32000，低于 4000 按 4000 兜底。 */
   contextTokens?: number | null;
+  /**
+   * 多供应商：按顺序尝试，主供应商失败（网络/401/429/5xx）时自动切下一个。
+   * 给了就以它为准（第一项视为主供应商）；没给则退化成单供应商（baseUrl/model 那套字段）。
+   */
+  providers?: AgentProviderTarget[] | null;
 }
 
 interface AgentTurn {
@@ -124,6 +161,9 @@ interface AgentTurn {
   mcpTools: McpToolBinding[];
   /** 本回合的上下文预算（tokens）。 */
   contextTokens: number;
+  /** 本回合可尝试的供应商（有序），以及当前正在用的下标。 */
+  providers: ProviderTarget[];
+  activeProvider: number;
   /** 本回合还没裁决的写请求，回合中止时统一按拒绝收场。 */
   pendingPermissions: Set<number>;
 }
@@ -510,6 +550,55 @@ function anchorToRoot(cwd: string, raw: string): string {
  * 解析本轮工作区根：给了就必须是**已授权且存在**的目录（listDir 走 resolveExisting，
  * 越界或不存在直接抛错）；没给回落到授权面默认根。
  */
+/** 归一化供应商列表：给了 providers 就用它，否则退化成单供应商。 */
+function normalizeProviders(args: AgentStartArgs): ProviderTarget[] {
+  const raw = (args.providers ?? []).filter(
+    (item) =>
+      item !== null &&
+      typeof item === "object" &&
+      typeof item.baseUrl === "string" &&
+      item.baseUrl.trim() !== "" &&
+      typeof item.model === "string" &&
+      item.model.trim() !== "",
+  );
+  const source: AgentProviderTarget[] =
+    raw.length > 0
+      ? raw
+      : [
+          {
+            baseUrl: args.baseUrl,
+            model: args.model,
+            apiKeyEnv: args.apiKeyEnv,
+            headers: args.headers,
+            temperature: args.temperature,
+            maxTokens: args.maxTokens,
+            reasoningEffort: args.reasoningEffort,
+          },
+        ];
+  return source.map((item) => ({
+    baseUrl: item.baseUrl.trim(),
+    model: item.model.trim(),
+    apiKeyEnv: item.apiKeyEnv ?? "",
+    headers: item.headers ?? {},
+    temperature: typeof item.temperature === "number" ? item.temperature : null,
+    maxTokens: typeof item.maxTokens === "number" ? item.maxTokens : null,
+    reasoningEffort: item.reasoningEffort ?? "",
+  }));
+}
+
+/** 把第 index 个供应商的字段摊到 turn 上（后续请求体/鉴权都读这些字段）。 */
+function applyProvider(turn: AgentTurn, index: number): void {
+  const target = turn.providers[index];
+  turn.activeProvider = index;
+  turn.baseUrl = target.baseUrl;
+  turn.model = target.model;
+  turn.apiKeyEnv = target.apiKeyEnv;
+  turn.headers = target.headers;
+  turn.temperature = target.temperature;
+  turn.maxTokens = target.maxTokens;
+  turn.reasoningEffort = target.reasoningEffort;
+}
+
 function resolveCwd(access: WorkspaceAccess, raw: string | null | undefined): string {
   const candidate = (raw ?? "").trim();
   if (candidate === "") return access.root;
@@ -1040,6 +1129,8 @@ export class LlmAgentHost {
       pendingPermissions: new Set<number>(),
       mcpServers: args.mcpServers ?? [],
       mcpTools: [],
+      providers: normalizeProviders(args),
+      activeProvider: 0,
       contextTokens: Math.max(
         typeof args.contextTokens === "number" && Number.isFinite(args.contextTokens)
           ? Math.floor(args.contextTokens)
@@ -1055,6 +1146,8 @@ export class LlmAgentHost {
         confirm: (request) => this.confirmPermission(turn, request),
       },
     };
+    // 先把主供应商的字段摊到 turn 上；失败切换时再换。
+    applyProvider(turn, 0);
     const controller = new AbortController();
     this.tasks.set(requestId, controller);
     void this.run(turn, controller).finally(() => {
@@ -1140,13 +1233,59 @@ export class LlmAgentHost {
     if (!controller.signal.aborted) this.emit(turn.clientToken, "llm-done", {});
   }
 
+  /**
+   * 发一轮请求，失败时按供应商列表顺序切换重试。
+   *
+   * 只对「换一家可能就好」的失败切换（见 canFailover）：400 一般是 payload 问题，
+   * 换一家会用同样的 body 再撞一次。切换是**粘性**的：本回合后续轮次继续用新供应商。
+   */
+  private async sendRound(turn: AgentTurn, controller: AbortController, buildBody: () => Record<string, unknown>): Promise<Response> {
+    let lastError = "";
+    while (true) {
+      const body = buildBody();
+      let response: Response | null = null;
+      try {
+        response = await fetch(endpointUrl(turn.baseUrl, "chat/completions"), {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...authHeaders(resolveApiKey(turn.apiKeyEnv), turn.headers),
+          },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        });
+      } catch (error) {
+        if (controller.signal.aborted) throw error;
+        lastError = "llm request failed: " + (error as Error).message;
+      }
+      if (response !== null) {
+        if (response.ok) return response;
+        const text = await response.text().catch(() => "");
+        lastError =
+          "llm endpoint returned " + response.status + ": " + truncate(text, 200) + "（检查 Base URL 是否正确、本地服务是否在运行）";
+        if (!canFailover(response.status)) throw new Error(lastError);
+      }
+      const next = turn.activeProvider + 1;
+      if (next >= turn.providers.length) {
+        throw new Error(turn.providers.length > 1 ? lastError + "（已尝试完 " + turn.providers.length + " 个供应商）" : lastError);
+      }
+      const from = turn.model;
+      applyProvider(turn, next);
+      console.log("[agent] 供应商 " + from + " 调用失败，切到 " + turn.model + "：" + lastError);
+      this.emit(turn.clientToken, "llm-provider-switch", {
+        from,
+        to: turn.model,
+        reason: truncate(lastError, 200),
+      });
+    }
+  }
+
   private async drive(turn: AgentTurn, controller: AbortController): Promise<void> {
     // MCP 工具要探一次 tools/list（stdio 服务器冷启动会拉起 npx/uvx），结果按配置缓存 10 分钟。
     turn.mcpTools = turn.policy.mcp === "deny" ? [] : await resolveMcpTools(turn.mcpServers);
     const schemas = toolSchemas(turn.policy.write !== "deny", turn.policy.shell !== "deny", mcpToolSchemas(turn.mcpTools));
     const history: Record<string, unknown>[] = [...turn.messages];
     const accumulator = new ToolCallAccumulator();
-    const apiKey = resolveApiKey(turn.apiKeyEnv);
 
     // round < maxRounds 是工具回合；最后一轮是收尾回合（tool_choice: none）。
     for (let round = 0; round <= turn.maxRounds; round += 1) {
@@ -1155,32 +1294,23 @@ export class LlmAgentHost {
       if (folded > 0) {
         console.log(`[agent] 上下文超预算，折叠了 ${folded} 条较早的工具结果`);
       }
-      const body: Record<string, unknown> = {
-        model: turn.model,
-        stream: true,
-        messages: history,
+      // 请求体随「当前供应商」变化：失败切换后要按新供应商的模型/参数重建。
+      const buildBody = (): Record<string, unknown> => {
+        const body: Record<string, unknown> = {
+          model: turn.model,
+          stream: true,
+          messages: history,
+        };
+        const effort = reasoningEffort(turn.reasoningEffort);
+        if (effort !== null) body.reasoning_effort = effort;
+        if (turn.temperature !== null) body.temperature = turn.temperature;
+        if (turn.maxTokens !== null) body.max_tokens = turn.maxTokens;
+        body.tools = schemas;
+        body.tool_choice = round < turn.maxRounds ? "auto" : "none";
+        return body;
       };
-      const effort = reasoningEffort(turn.reasoningEffort);
-      if (effort !== null) body.reasoning_effort = effort;
-      if (turn.temperature !== null) body.temperature = turn.temperature;
-      if (turn.maxTokens !== null) body.max_tokens = turn.maxTokens;
-      body.tools = schemas;
-      body.tool_choice = round < turn.maxRounds ? "auto" : "none";
 
-      const response = await fetch(endpointUrl(turn.baseUrl, "chat/completions"), {
-        method: "POST",
-        headers: { "content-type": "application/json", ...authHeaders(apiKey, turn.headers) },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      }).catch((error: Error) => {
-        throw new Error("llm request failed: " + error.message);
-      });
-      if (!response.ok) {
-        const text = await response.text().catch(() => "");
-        throw new Error(
-          "llm endpoint returned " + response.status + ": " + truncate(text, 200) + "（检查 Base URL 是否正确、本地服务是否在运行）",
-        );
-      }
+      const response = await this.sendRound(turn, controller, buildBody);
       const outcome = await this.drainRound(response, turn, controller, accumulator);
 
       // 没有工具调用 = 模型给出了最终答复，收尾。

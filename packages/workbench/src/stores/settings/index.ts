@@ -19,6 +19,7 @@ import {
   DEFAULT_MCP_SERVERS,
   DEFAULT_REMOTE_ASSIST,
   DEFAULT_SKILL_SOURCES,
+  AGENT_CONTEXT_TOKENS_RANGE,
   MAX_PARALLEL_RANGE,
   type ChannelId,
   type ChannelPrefs,
@@ -68,6 +69,10 @@ export const useSettingsStore = defineStore("settings", () => {
   /**
   /** 多智能体编排并发度（同时跑的回合上限）。默认 2，与既有并行编排一致。 */
   const maxParallel = ref(2);
+  /** Agent 回合的上下文预算（tokens）：小的模型窗口要调低，否则宿主折叠得太晚。 */
+  const agentContextTokens = ref<number>(AGENT_CONTEXT_TOKENS_RANGE.default);
+  /** 主供应商调用失败（网络/限流/5xx）时，是否自动切到其它已开启 Agent 模式的供应商。 */
+  const agentFallback = ref(true);
   /** 关闭到托盘（默认开）：点关闭按钮只隐藏窗口，托盘「退出应用」才真正退出。 */
   const closeToTray = ref(true);
   /**
@@ -203,6 +208,13 @@ export const useSettingsStore = defineStore("settings", () => {
     runMode.value = saved.runMode && RUN_MODE_VALUES[saved.runMode] ? saved.runMode : "local";
     if (typeof saved.workspaceDir === "string") workspaceDir.value = saved.workspaceDir;
     // 并发度：仅整数且落在区间内才接受；越界 / 非法值静默回落默认 2（不写通知）。
+    if (Number.isFinite(saved.agentContextTokens)) {
+      const tokens = Number(saved.agentContextTokens);
+      if (tokens >= AGENT_CONTEXT_TOKENS_RANGE.min && tokens <= AGENT_CONTEXT_TOKENS_RANGE.max) {
+        agentContextTokens.value = Math.floor(tokens);
+      }
+    }
+    if (typeof saved.agentFallback === "boolean") agentFallback.value = saved.agentFallback;
     if (Number.isInteger(saved.maxParallel)) {
       const n = saved.maxParallel as number;
       maxParallel.value = n >= MAX_PARALLEL_RANGE.min && n <= MAX_PARALLEL_RANGE.max ? n : 2;
@@ -323,6 +335,8 @@ export const useSettingsStore = defineStore("settings", () => {
       selectedOfficeProviderId: selectedOfficeProviderId.value,
       localAi: { rag: { ...localAi.value.rag }, stt: { ...localAi.value.stt } },
       maxParallel: maxParallel.value,
+      agentContextTokens: agentContextTokens.value,
+      agentFallback: agentFallback.value,
       closeToTray: closeToTray.value,
       remoteAssist: {
         replyMode: remoteAssist.value.replyMode,
@@ -475,6 +489,19 @@ export const useSettingsStore = defineStore("settings", () => {
     persist();
   }
 
+  /** 上下文预算：夹到 [4k, 200k] 后落盘（宿主侧还有一层下限兜底）。 */
+  function setAgentContextTokens(value: number): void {
+    if (!Number.isFinite(value)) return;
+    const tokens = Math.floor(value);
+    agentContextTokens.value = Math.min(Math.max(tokens, AGENT_CONTEXT_TOKENS_RANGE.min), AGENT_CONTEXT_TOKENS_RANGE.max);
+    persist();
+  }
+
+  function setAgentFallback(value: boolean): void {
+    agentFallback.value = value;
+    persist();
+  }
+
   /** 恢复出厂默认 MCP 服务器（误删/改坏后的逃生门）。 */
   function resetMcpServers(): void {
     mcpServers.value = DEFAULT_MCP_SERVERS.map((server) => ({ ...server }));
@@ -554,6 +581,10 @@ export const useSettingsStore = defineStore("settings", () => {
   return {
     permissionTier,
     maxParallel,
+    agentContextTokens,
+    agentFallback,
+    setAgentContextTokens,
+    setAgentFallback,
     closeToTray,
     setCloseToTray,
     tempReadOnly,

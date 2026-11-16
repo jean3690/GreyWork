@@ -155,6 +155,8 @@ describe("HostLlmTransport", () => {
       cwd: "/work/project",
       permissionTier: null,
       mcpServers: null,
+      providers: null,
+      contextTokens: null,
     });
     vi.unstubAllGlobals();
   });

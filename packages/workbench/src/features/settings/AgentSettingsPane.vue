@@ -14,7 +14,7 @@ import ModelProviderFormDialog, { type ModelProviderDraftPayload } from "@/featu
 import { formatHeaderText, parseHeaderText } from "@/stores/agent/shared";
 import { useAgentStore } from "@/stores/agent";
 import { useCommandCapabilitiesStore } from "@/stores/command-capabilities";
-import { useSettingsStore } from "@/stores/settings";
+import { AGENT_CONTEXT_TOKENS_RANGE, useSettingsStore } from "@/stores/settings";
 import { useTerminalStore } from "@/stores/terminal";
 import { runtimeMode } from "@greywork/host-ipc";
 import { i18n } from "@/i18n";
@@ -24,6 +24,15 @@ const t = i18n.global.t;
 const settings = useSettingsStore();
 const agent = useAgentStore();
 const terminal = useTerminalStore();
+
+/** Agent 回合的全局策略（对所有开了 Agent 模式的供应商生效）。 */
+const contextRange = AGENT_CONTEXT_TOKENS_RANGE;
+
+function commitContextTokens(raw: string): void {
+  const value = Number(raw.trim());
+  if (!Number.isFinite(value) || value <= 0) return;
+  settings.setAgentContextTokens(value);
+}
 
 /** 设置弹窗关掉自己：登录要落到身后的终端面板，弹窗留在上面会挡住交互式提示。 */
 const emit = defineEmits<{ close: [] }>();
@@ -342,6 +351,45 @@ async function removeAgentDraft(): Promise<void> {
             <span class="font-mono text-[11px] text-dim2">{{ provider.model }}</span>
           </button>
         </div>
+      </div>
+    </div>
+    <!-- Agent 回合的全局策略：上下文预算 + 多供应商回退 -->
+    <div class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-4">
+      <div class="mb-3 flex items-center justify-between gap-2">
+        <span class="text-[13px] font-medium text-foreground">Agent 回合</span>
+        <span class="text-[10.5px] text-dim2">对所有开了 Agent 模式的供应商生效</span>
+      </div>
+      <div class="flex flex-col gap-2.5">
+        <label class="flex items-center gap-2">
+          <span class="w-24 shrink-0 text-[11.5px] text-dim2">上下文预算</span>
+          <input
+            :value="String(settings.agentContextTokens)"
+            inputmode="numeric"
+            data-testid="agent-context-tokens"
+            class="min-w-0 flex-1 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-1.5 font-mono text-[12px] text-foreground outline-none focus:border-line-2"
+            @change="commitContextTokens(($event.target as HTMLInputElement).value)"
+          />
+          <span class="shrink-0 text-[10.5px] text-dim2"> tokens（{{ contextRange.min }}–{{ contextRange.max }}） </span>
+        </label>
+        <p class="text-[10.5px] leading-relaxed text-dim2">
+          超出预算时宿主会折叠较早的工具结果（保留最近两条）。模型窗口小（8k 级）就调到 8k 左右， 调太高只会在最后一轮撞端点上限。
+        </p>
+        <label class="flex items-start gap-2.5">
+          <input
+            type="checkbox"
+            class="mt-0.5 size-4 shrink-0 cursor-pointer accent-[var(--accent)]"
+            :checked="settings.agentFallback"
+            data-testid="agent-fallback"
+            @change="settings.setAgentFallback(($event.target as HTMLInputElement).checked)"
+          />
+          <span class="min-w-0">
+            <span class="block text-[11.5px] text-foreground">失败时切换其它供应商</span>
+            <span class="block text-[10.5px] leading-relaxed text-dim2">
+              主供应商网络错误 / 401 / 429 / 5xx 时，按上方列表顺序尝试其它<strong>已开启 Agent 模式</strong>的供应商； 400（端点不支持 tool
+              calling）不切换 —— 换一家只会拿同样的 body 再撞一次。
+            </span>
+          </span>
+        </label>
       </div>
     </div>
     <!-- 供应商编辑表单：API key 来自宿主进程环境变量，改完需重启应用生效 -->

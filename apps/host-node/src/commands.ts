@@ -34,7 +34,7 @@ import os from "node:os";
 import { ragIndexBuild, ragSearch } from "./rag.js";
 import { listWorktrees, provisionWorktree, releaseWorktree, restoreWorktree, snapshotWorktree } from "./worktree.js";
 import { chatComplete, embed, listModels, transcribe, type LlmChatMessage, type LlmStreamHost } from "./llm.js";
-import type { AgentStartArgs, LlmAgentHost } from "./llm-agent.js";
+import type { AgentProviderTarget, AgentStartArgs, LlmAgentHost } from "./llm-agent.js";
 import type { AgentMcpServer } from "./agent-mcp.js";
 import type { AcpHost } from "./acp.js";
 import { validateDirKey } from "./plugin-market.js";
@@ -1394,6 +1394,8 @@ HANDLERS.set("llm_agent_start", async (args, ctx) => {
     mcpServers: Array.isArray(value.mcpServers) ? (value.mcpServers as AgentMcpServer[]) : null,
     // 上下文预算：渲染端可给（模型窗口小的端点），缺省由宿主取 32k。
     contextTokens: typeof value.contextTokens === "number" ? value.contextTokens : null,
+    // 多供应商：主供应商失败时按顺序切换（渲染端已经把「可回退的」排好序）。
+    providers: Array.isArray(value.providers) ? (value.providers as AgentProviderTarget[]) : null,
   });
 });
 HANDLERS.set("llm_agent_permission_respond", async (args, ctx) => {

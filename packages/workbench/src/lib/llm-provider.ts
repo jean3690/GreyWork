@@ -13,3 +13,17 @@ export function selectLlmProvider(providers: ModelProviderConfig[], preferredId?
   const available = providers.filter((provider) => provider.enabled && !!provider.baseUrl?.trim() && !!provider.model.trim());
   return available.find((provider) => provider.id === preferredId) ?? available[0] ?? null;
 }
+
+/**
+ * Agent 回合的供应商链：主供应商 + 其它「同样开了 Agent 模式」的启用项。
+ *
+ * 只把 agentMode=true 的作为回退：工具调用是端点/模型能力，没开这一项的端点
+ * 大概率不支持 tools，切过去只会拿 400 再挂一次（400 本身不触发回退）。
+ */
+export function buildAgentProviderChain(providers: ModelProviderConfig[], selectedId?: string | null): ModelProviderConfig[] {
+  const available = providers.filter((provider) => provider.enabled && !!provider.baseUrl?.trim() && !!provider.model.trim());
+  const primary = available.find((provider) => provider.id === selectedId) ?? available[0];
+  if (!primary) return [];
+  const backups = available.filter((provider) => provider.id !== primary.id && provider.agentMode === true);
+  return [primary, ...backups];
+}

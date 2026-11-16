@@ -139,9 +139,9 @@ describe("searchMcpRegistry", () => {
   it("forwards trimmed query and limit to the mcp_search host command", async () => {
     invokeMock.mockResolvedValue([]);
     await searchMcpRegistry("  notes  ", 25);
-    expect(invokeMock).toHaveBeenCalledWith("mcp_search", { search: "notes", limit: 25 });
+    expect(invokeMock).toHaveBeenCalledWith("mcp_search", { search: "notes", limit: 25, origin: null });
 
     await searchMcpRegistry("");
-    expect(invokeMock).toHaveBeenCalledWith("mcp_search", { search: null, limit: 40 });
+    expect(invokeMock).toHaveBeenCalledWith("mcp_search", { search: null, limit: 40, origin: null });
   });
 });

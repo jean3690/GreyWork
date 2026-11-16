@@ -26,6 +26,9 @@ export const PERM_LABELS: Record<PermTier, string> = {
 /** 编排并发度合法区间（含端点）。 */
 export const MAX_PARALLEL_RANGE = { min: 1, max: 8 } as const;
 
+/** Agent 回合上下文预算（tokens）：低于 4k 会把工具结果折没了，高于 200k 只会浪费钱。 */
+export const AGENT_CONTEXT_TOKENS_RANGE = { min: 4_000, max: 200_000, default: 32_000 } as const;
+
 export type RunMode = "local" | "worktree" | "cloud";
 export type ThemeId = "codex" | "greywork" | "night-blue" | "night-green" | "github" | "fox" | "liquid-glass";
 export type ColorMode = "dark" | "light" | "system";
@@ -242,6 +245,10 @@ export interface SavedSettings {
   skillSources?: SkillSourceEntry[];
   /** 多智能体编排并发度（同时跑的回合上限）；1-8，越界静默回落 2。 */
   maxParallel?: number;
+  /** Agent 回合的上下文预算（tokens）；缺省 32000。 */
+  agentContextTokens?: number;
+  /** 主供应商失败时是否自动切到其它已开启 Agent 模式的供应商；缺省 true。 */
+  agentFallback?: boolean;
   /** 关闭窗口时是否只隐藏到系统托盘（默认 true）；宿主据此决定拦不拦 CloseRequested。 */
   closeToTray?: boolean;
   /** 远程助手 · 通道与回复偏好（旧快照缺失 = 默认值）。 */

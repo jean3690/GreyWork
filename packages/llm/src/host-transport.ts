@@ -54,6 +54,8 @@ export class HostLlmTransport implements LlmClient {
       cwd: params.cwd ?? null,
       permissionTier: params.permissionTier ?? null,
       mcpServers: params.mcpServers ?? null,
+      providers: params.providers ?? null,
+      contextTokens: params.contextTokens ?? null,
     });
   }
 

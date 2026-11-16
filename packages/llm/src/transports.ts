@@ -90,6 +90,13 @@ export interface LlmAgentParams extends LlmChatParams {
   permissionTier?: string | null;
   /** 已启用的 MCP 服务器：宿主会探测其工具并注册成模型可调函数。 */
   mcpServers?: unknown[] | null;
+  /**
+   * 多供应商回退链（第一项为主）。宿主在「网络 / 401 / 429 / 5xx」时按顺序切换；
+   * 400 不切换（多半是 payload 与端点能力不匹配，换一家也一样）。
+   */
+  providers?: unknown[] | null;
+  /** 上下文预算（tokens）；缺省由宿主取 32k。 */
+  contextTokens?: number | null;
 }
 
 /** 连接参数：模型发现 / 向量 / 语音转写共用（都是打同一个 OpenAI 兼容端点）。 */

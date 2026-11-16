@@ -13,7 +13,7 @@
  * 缓冲）是本切片的闭包私有，不入 state（与 runtime 切片的策略一致）。
  */
 import { buildLlmHistory, localReasoningOverride, resolveLocalEffort } from "../chat-llm";
-import { selectLlmProvider } from "../../lib/llm-provider";
+import { buildAgentProviderChain, selectLlmProvider } from "../../lib/llm-provider";
 import { retrieveContext, transcribeAttachment, type LocalAiDeps } from "../../lib/local-ai";
 import { resolveWorkspaceRoot } from "../../lib/workspace-dir";
 import { isAskSettled } from "../../lib/ask-question";
@@ -236,6 +236,17 @@ export function createStreamSlice({ state, getSession, getDemo }: StreamDeps): S
         maxTokens: provider.maxTokens,
         clientToken: activeTurnToken,
       };
+      // 多供应商回退链：主供应商 + 其它开了 Agent 模式的启用项（回退关闭时只发主供应商）。
+      const chain = settingsStore.agentFallback ? buildAgentProviderChain(settingsStore.modelProviders, provider.id) : [provider];
+      const agentProviders = (chain.length > 0 ? chain : [provider]).map((item) => ({
+        baseUrl: item.baseUrl ?? "",
+        model: item.model,
+        apiKeyEnv: item.apiKeyEnv ?? "",
+        headers: item.headers,
+        temperature: item.temperature ?? null,
+        maxTokens: item.maxTokens ?? null,
+        reasoningEffort: resolveLocalEffort(localReasoningOverride.value, item),
+      }));
       llmRequestId = activeTurnIsAgent
         ? await llm.agentRun({
             ...request,
@@ -245,6 +256,8 @@ export function createStreamSlice({ state, getSession, getDemo }: StreamDeps): S
             permissionTier: settingsStore.permissionTier,
             // MCP：与 ACP 会话用同一份「已启用服务器」清单，由宿主探测工具并注入。
             mcpServers: settingsStore.enabledMcpServers,
+            providers: agentProviders,
+            contextTokens: settingsStore.agentContextTokens,
           })
         : await llm.chat(request);
     } catch (error) {
