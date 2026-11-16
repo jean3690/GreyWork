@@ -10,6 +10,7 @@ import WebSocket from "ws";
 import { LoginThrottle, SessionStore, passwordChecker } from "../src/auth.js";
 import { AcpHost, validateSpawnCommand } from "../src/acp.js";
 import { ChannelRuntime } from "../src/channel-runtime.js";
+import { ControlPlaneRuntime } from "../src/control-plane.js";
 import { Db } from "../src/db.js";
 import { RagIndexHost } from "../src/rag.js";
 import { isDenied, listCommands } from "../src/commands.js";
@@ -92,6 +93,8 @@ const llm = new LlmStreamHost(bus);
 const llmAgent = new LlmAgentHost(bus, access);
 const rag = new RagIndexHost(db);
 const terminal = new TerminalHost(bus, access);
+// 这些用例不打控制面：只构造运行时，不调用 start()（因此不会起定时链）。
+const controlPlane = new ControlPlaneRuntime({ dataDir, version: config.version, db });
 
 const { server, close } = createHostServer({
   config,
@@ -101,6 +104,7 @@ const { server, close } = createHostServer({
   access,
   acp,
   channels,
+  controlPlane,
   db,
   dataDir: dataDir,
   rag,
@@ -171,10 +175,10 @@ describe("HTTP 契约", () => {
     expect(response.headers.get("set-cookie")).toBeNull();
   });
 
-  it("/api/commands 返回 186 条，只有已迁移的命令标 available", async () => {
+  it("/api/commands 返回 190 条，只有已迁移的命令标 available", async () => {
     const response = await fetch(`${base}/api/commands`, { headers: { cookie } });
     const list = (await response.json()) as { name: string; available: boolean; desktopOnly: boolean }[];
-    expect(list).toHaveLength(186);
+    expect(list).toHaveLength(190);
     const defaultRoot = list.find((item) => item.name === "store_default_root");
     expect(defaultRoot?.available).toBe(true);
     // 桌面专属命令任何宿主都不可调用。

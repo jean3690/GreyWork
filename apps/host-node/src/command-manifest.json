@@ -1114,5 +1114,29 @@
     "auth": "required",
     "desktopOnly": false,
     "binary": false
+  },
+  {
+    "name": "control_plane_status",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "control_plane_connect",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "control_plane_disconnect",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "control_plane_run_once",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
   }
 ]

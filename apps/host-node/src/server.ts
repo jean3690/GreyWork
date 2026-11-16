@@ -22,6 +22,7 @@ import type { LlmAgentHost } from "./llm-agent.js";
 import type { SessionFileStore } from "./session-store.js";
 import type { TerminalHost } from "./terminal.js";
 import type { ChannelRuntime } from "./channel-runtime.js";
+import type { ControlPlaneRuntime } from "./control-plane.js";
 import type { WorkspaceAccess } from "./workspace-access.js";
 
 const MAX_BODY_BYTES = 32 * 1024 * 1024;
@@ -34,6 +35,7 @@ export interface HostServerOptions {
   access: WorkspaceAccess;
   acp: AcpHost;
   channels: ChannelRuntime;
+  controlPlane: ControlPlaneRuntime;
   db: Db;
   rag: RagIndexHost;
   extraPrograms(trustedHost: boolean): string[];
@@ -239,6 +241,7 @@ export function createHostServer(options: HostServerOptions): { server: Server; 
             access: options.access,
             acp: options.acp,
             channels: options.channels,
+            controlPlane: options.controlPlane,
             db: options.db,
             rag: options.rag,
             bus: options.bus,

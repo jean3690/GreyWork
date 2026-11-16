@@ -76,6 +76,7 @@ import {
 } from "./channels.js";
 import type { EventBus } from "./events.js";
 import type { ChannelRuntime } from "./channel-runtime.js";
+import { ControlPlaneError, type ControlPlaneRuntime } from "./control-plane.js";
 import type { SessionFileStore, WorkspaceDir } from "./session-store.js";
 import type { RagIndexHost } from "./rag.js";
 import type { TerminalHost } from "./terminal.js";
@@ -132,6 +133,8 @@ export interface CommandContext {
   terminal: TerminalHost;
   /** 七条消息通道的连接状态机与生命周期。 */
   channels: ChannelRuntime;
+  /** 控制面接入（桌面端 ↔ back/grey）：状态、配置、手动跑一轮。 */
+  controlPlane: ControlPlaneRuntime;
   trustedHost: boolean;
 }
 
@@ -528,9 +531,14 @@ HANDLERS.set("mcp_call", async (args) => {
   });
 });
 HANDLERS.set("mcp_search", async (args) => {
-  // 官方注册表（registry.modelcontextprotocol.io）只读代理。
-  const value = args as { search?: unknown; limit?: unknown } | null;
-  return mcpSearch(typeof value?.search === "string" ? value.search : null, typeof value?.limit === "number" ? value.limit : null);
+  // 注册表只读代理：默认官方 registry，可指向自建目录（控制面 /api/market/mcp）。
+  // origin 可显式传入（设置里配的地址），否则由 GREYWORK_MCP_REGISTRY_URL 决定。
+  const value = args as { search?: unknown; limit?: unknown; origin?: unknown } | null;
+  return mcpSearch(
+    typeof value?.search === "string" ? value.search : null,
+    typeof value?.limit === "number" ? value.limit : null,
+    typeof value?.origin === "string" ? value.origin : null,
+  );
 });
 HANDLERS.set("plugin_mcp_call", async (args) => {
   // 插件 mcp.connect 代理：白名单复核 + 配额 + 插件档位超时。
@@ -569,9 +577,20 @@ HANDLERS.set("plugin_mcp_call", async (args) => {
   });
 });
 
+/**
+ * 技能市场地址：默认内置聚合站；`GREYWORK_SKILLS_ORIGIN` 或渲染端显式给的 origin
+ * 可以指向自建目录（控制面 `/api/skills` 与 `/api/download/...` 就是 skills.sh 协议）。
+ */
+function skillsOrigin(override: unknown): string {
+  const explicit = typeof override === "string" ? override.trim() : "";
+  if (explicit !== "") return explicit.replace(/\/+$/, "");
+  const fromEnv = (process.env.GREYWORK_SKILLS_ORIGIN ?? "").trim();
+  return (fromEnv === "" ? "https://greywork-skills.pages.dev" : fromEnv).replace(/\/+$/, "");
+}
+
 HANDLERS.set("skills_search", async (args) => {
   const value = args as { origin?: unknown; query?: unknown } | null;
-  const origin = typeof value?.origin === "string" && value.origin.trim() !== "" ? value.origin : "https://greywork-skills.pages.dev";
+  const origin = skillsOrigin(value?.origin);
   const query = typeof value?.query === "string" ? value.query.trim() : "";
   if (query === "") throw new Error("query is empty");
   const response = await fetch(`${origin}/api/skills?q=${encodeURIComponent(query)}`, { signal: AbortSignal.timeout(15_000) });
@@ -580,7 +599,7 @@ HANDLERS.set("skills_search", async (args) => {
 });
 HANDLERS.set("skills_download", async (args) => {
   const value = args as { origin?: unknown; entryRef?: unknown } | null;
-  const origin = typeof value?.origin === "string" && value.origin.trim() !== "" ? value.origin : "https://greywork-skills.pages.dev";
+  const origin = skillsOrigin(value?.origin);
   const entryRef = typeof value?.entryRef === "string" ? value.entryRef : "";
   const parts = entryRef.split("/");
   if (parts.length !== 3) throw new Error("invalid entry ref (expect owner/repo/slug)");
@@ -1382,6 +1401,50 @@ HANDLERS.set("db_settings_sync", async (args, ctx) => {
   if (settings === undefined) throw new CommandError(400, "缺少参数 settings");
   ctx.db.syncSettings(settings);
   return null;
+});
+
+/* ===== 控制面接入（桌面端 ↔ back/grey） ===== */
+
+HANDLERS.set("control_plane_status", async (_args, ctx) => ctx.controlPlane.status());
+
+HANDLERS.set("control_plane_connect", async (args, ctx) => {
+  const input = (args ?? {}) as Record<string, unknown>;
+  const optional = (value: unknown): string | undefined => (typeof value === "string" && value.trim() !== "" ? value.trim() : undefined);
+  const baseUrl = optional(input.baseUrl);
+  if (!baseUrl) throw new CommandError(400, "缺少参数 baseUrl");
+  try {
+    return await ctx.controlPlane.configure({
+      baseUrl,
+      token: optional(input.token),
+      email: optional(input.email),
+      code: optional(input.code),
+      deviceName: optional(input.deviceName),
+    });
+  } catch (error) {
+    // 控制面错误一律 400 + 原文：界面上直接展示「入场码无效 / 连不上」这类原因。
+    if (error instanceof ControlPlaneError) throw new CommandError(400, error.message);
+    throw error;
+  }
+});
+
+HANDLERS.set("control_plane_disconnect", async (_args, ctx) => {
+  try {
+    return ctx.controlPlane.clear();
+  } catch (error) {
+    if (error instanceof ControlPlaneError) throw new CommandError(409, error.message);
+    throw error;
+  }
+});
+
+HANDLERS.set("control_plane_run_once", async (args, ctx) => {
+  const raw = (args as { limit?: unknown } | null)?.limit;
+  const limit = typeof raw === "number" && Number.isFinite(raw) ? Math.min(Math.max(Math.floor(raw), 1), 50) : undefined;
+  try {
+    return await ctx.controlPlane.runOnce(limit);
+  } catch (error) {
+    if (error instanceof ControlPlaneError) throw new CommandError(400, error.message);
+    throw error;
+  }
 });
 
 export function isMigrated(name: string): boolean {

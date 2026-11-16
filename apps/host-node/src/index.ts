@@ -24,6 +24,7 @@ import { WorkspaceAccess } from "./workspace-access.js";
 import { EventBus } from "./events.js";
 import { AcpHost } from "./acp.js";
 import { ChannelRuntime } from "./channel-runtime.js";
+import { ControlPlaneRuntime } from "./control-plane.js";
 import { LlmStreamHost } from "./llm.js";
 import { LlmAgentHost } from "./llm-agent.js";
 import { RagIndexHost } from "./rag.js";
@@ -107,6 +108,9 @@ async function main(): Promise<void> {
   const llmAgent = new LlmAgentHost(bus, access);
   const rag = new RagIndexHost(db);
   const terminal = new TerminalHost(bus, access);
+  // 控制面接入：配置来自数据目录里的 control-plane.json，或 GREYWORK_CONTROL_URL + TOKEN。
+  // 未配置时不发任何网络请求（start 里直接返回），服务端态也照常工作。
+  const controlPlane = new ControlPlaneRuntime({ dataDir: config.dataDir, version: config.version, db });
   const { server, close } = createHostServer({
     config,
     sessions,
@@ -115,6 +119,7 @@ async function main(): Promise<void> {
     access,
     acp,
     channels,
+    controlPlane,
     db,
     dataDir: config.dataDir,
     // 白名单扩展面：headless 冻结列表来自配置（GREYWORK_AGENT_PROGRAMS，DB 是客户端可写的，
@@ -134,6 +139,7 @@ async function main(): Promise<void> {
     server.listen(config.port, config.host, () => resolve());
   });
   console.log(`[host-node] 监听 http://${config.host}:${config.port}（version=${config.version}）`);
+  controlPlane.start();
   if (!config.passwordHash && !config.password) {
     console.warn("[host-node] 未配置 GREYWORK_PASSWORD / GREYWORK_PASSWORD_HASH：登录必定失败（这是刻意的 fail-closed）");
   }
@@ -145,6 +151,7 @@ async function main(): Promise<void> {
     console.log(`[host-node] 关闭（${reason}）`);
     terminal.disposeAll();
     channels.stopAll();
+    controlPlane.stop();
     await close();
     db.close();
     process.exit(0);
