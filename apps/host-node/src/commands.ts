@@ -1387,7 +1387,18 @@ HANDLERS.set("llm_agent_start", async (args, ctx) => {
     clientToken: typeof value.clientToken === "string" ? value.clientToken : null,
     // 工具的工作目录：渲染端给当前工作区根，缺省回落到授权面默认根。
     cwd: typeof value.cwd === "string" ? value.cwd : null,
+    // 权限档位：read-only 不暴露写工具，workspace 每次写都要确认，full 直接放行。
+    permissionTier: typeof value.permissionTier === "string" ? value.permissionTier : null,
   });
+});
+HANDLERS.set("llm_agent_permission_respond", async (args, ctx) => {
+  // 写操作确认卡的回执；optionId=null/deny 表示拒绝。
+  const value = args as { requestId?: unknown; optionId?: unknown } | null;
+  if (typeof value?.requestId !== "number") throw missingField("requestId");
+  const optionId = typeof value.optionId === "string" ? value.optionId : null;
+  const accepted = ctx.llmAgent.respondPermission(value.requestId, optionId);
+  if (!accepted) throw new CommandError(404, "没有待裁决的写请求（可能已超时或回合已结束）");
+  return null;
 });
 HANDLERS.set("llm_agent_stop", async (args, ctx) => {
   // 中止进行中的 agent 回合并回收句柄。

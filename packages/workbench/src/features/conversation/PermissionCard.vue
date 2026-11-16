@@ -83,6 +83,14 @@ const commandText = computed(() => {
   return raw ? clipPermissionDetail(raw) : null;
 });
 
+/** 本机 agent 的写请求会带 diff：让用户在批之前看到到底改哪几行。 */
+const diffText = computed(() => {
+  const pending = agent.pendingPermission as { diff?: unknown } | null;
+  const diff = typeof pending?.diff === "string" ? pending.diff : "";
+  if (diff === "") return null;
+  return diff.length > 4000 ? diff.slice(0, 4000) + "\n… 已截断" : diff;
+});
+
 const toolCallId = computed(() => agent.pendingPermission?.toolCallId ?? "");
 
 const options = computed(() => toPermissionPanelOptions(agent.pendingPermission?.options ?? []));
@@ -186,6 +194,11 @@ const traceDetail = computed(() => {
         data-testid="permission-command"
         class="mt-1.5 max-h-24 overflow-auto whitespace-pre-wrap break-all rounded-[calc(8px*var(--gw-radius-scale))] bg-panel-2 px-2 py-1.5 font-mono text-[11px] leading-snug text-foreground"
         >{{ commandText }}</pre>
+      <pre
+        v-if="diffText"
+        data-testid="permission-diff"
+        class="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-[calc(8px*var(--gw-radius-scale))] bg-panel-2 px-2 py-1.5 font-mono text-[11px] leading-snug text-foreground"
+        >{{ diffText }}</pre>
       <div v-if="paths.length" class="mt-1.5" data-testid="permission-paths">
         <span class="text-[10.5px] text-dim2">{{ t("chatView.permission.paths") }}</span>
         <ul class="m-0 mt-0.5 flex list-none flex-col gap-0.5 pl-0">

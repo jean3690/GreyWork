@@ -52,6 +52,7 @@ export class HostLlmTransport implements LlmClient {
       maxRounds: params.maxRounds ?? null,
       clientToken: params.clientToken ?? "",
       cwd: params.cwd ?? null,
+      permissionTier: params.permissionTier ?? null,
     });
   }
 

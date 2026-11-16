@@ -1116,6 +1116,12 @@
     "binary": false
   },
   {
+    "name": "llm_agent_permission_respond",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
     "name": "control_plane_status",
     "auth": "required",
     "desktopOnly": false,

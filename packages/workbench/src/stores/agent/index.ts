@@ -106,6 +106,8 @@ export const useAgentStore = defineStore("agent", () => {
     prepareResend: turn.prepareResend,
     stopAcp: runtime.stopAcp,
     respondPermission: runtime.respondPermission,
+    armPermission: runtime.armPermission,
+    dismissPendingPermission: runtime.dismissPendingPermission,
     probeMcpServer: runtime.probeMcpServer,
   };
 });

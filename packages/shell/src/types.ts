@@ -20,8 +20,9 @@ export interface ModelProviderConfig {
    */
   headers?: Record<string, string>;
   /**
-   * 该供应商是否走本机 agent 回合（模型可用只读工具：read_file / list_dir / search_text /
-   * git_log / git_status / git_diff）。
+   * 该供应商是否走本机 agent 回合。只读档位下工具是 read_file / list_dir / search_text /
+   * git_log / git_status / git_diff；workspace 档位额外给 write_file / edit_file（每次弹确认），
+   * full 档位自动放行写入。
    *
    * 缺省 false = 单轮问答。逐供应商配置而不是全局开关，因为 tool calling 是**端点/模型**
    * 的能力：有的网关不支持 `tools` 会直接 400，而同一时刻另一个供应商完全正常。

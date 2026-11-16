@@ -1,7 +1,16 @@
 /** LLM 直连传输抽象：宿主托管（Electron 壳 / 自托管服务端）走宿主命令，web 无直连通道。 */
 
 export interface LlmEventEnvelope {
-  kind: "llm-delta" | "llm-thinking-delta" | "llm-done" | "llm-error" | "llm-tool-call" | "llm-tool-result";
+  kind:
+    | "llm-delta"
+    | "llm-thinking-delta"
+    | "llm-done"
+    | "llm-error"
+    | "llm-tool-call"
+    | "llm-tool-result"
+    // 本机 agent 的写操作确认：与 ACP 的 permission-request 同形（多一个 source）。
+    | "permission-request"
+    | "permission-resolved";
   payload: {
     delta?: string;
     message?: string;
@@ -77,6 +86,8 @@ export interface LlmAgentParams extends LlmChatParams {
   maxRounds?: number;
   /** 工具的工作目录（工作区根，绝对路径）；缺省由宿主回落到授权面默认根。 */
   cwd?: string | null;
+  /** 权限档位（read-only / workspace / full）：决定写工具是否暴露、是否弹确认。 */
+  permissionTier?: string | null;
 }
 
 /** 连接参数：模型发现 / 向量 / 语音转写共用（都是打同一个 OpenAI 兼容端点）。 */

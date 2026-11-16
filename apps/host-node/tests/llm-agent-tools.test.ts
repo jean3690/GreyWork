@@ -5,12 +5,12 @@
  * 收尾回合）另有覆盖；这里钉住的是「工具返回什么、越界怎么拒、依赖目录要不要跳」。
  */
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { executeTool } from "../src/llm-agent.js";
+import { executeTool, type ToolPolicy } from "../src/llm-agent.js";
 import { WorkspaceAccess } from "../src/workspace-access.js";
 
 function makeWorkspace(): { root: string; access: WorkspaceAccess } {
@@ -25,6 +25,10 @@ function makeWorkspace(): { root: string; access: WorkspaceAccess } {
   access.authorizeSelectedPath(root);
   return { root, access };
 }
+
+/** 写策略：auto = 不问直接写；ask = 走确认回调；deny = 只读。 */
+const autoWrite: ToolPolicy = { write: "auto", confirm: async () => true };
+const askWrite = (allow: boolean): ToolPolicy => ({ write: "ask", confirm: async () => allow });
 
 describe("本机 agent 工具面", () => {
   it("search_text 命中源码但不扫 node_modules", async () => {
@@ -80,5 +84,81 @@ describe("本机 agent 工具面", () => {
     const result = await executeTool(access, root, "rm_rf", {});
     expect(result.error).toContain("search_text");
     expect(result.error).toContain("git_diff");
+  });
+
+  it("只读档位下 write_file 被拒且不落盘", async () => {
+    const { root, access } = makeWorkspace();
+    const target = path.join(root, "src", "new.ts");
+    const result = await executeTool(access, root, "write_file", { path: "src/new.ts", content: "export {}\n" });
+    expect(result.error).toContain("只读");
+    expect(existsSync(target)).toBe(false);
+  });
+
+  it("auto 档位直接写盘，工具结果带 diff", async () => {
+    const { root, access } = makeWorkspace();
+    const result = await executeTool(access, root, "write_file", { path: "src/new.ts", content: "export const a = 1;\n" }, autoWrite);
+    expect(result.error).toBeNull();
+    expect(result.summary).toContain("写入 src/new.ts");
+    expect(result.content).toContain("+ export const a = 1;");
+    expect(readFileSync(path.join(root, "src", "new.ts"), "utf8")).toBe("export const a = 1;\n");
+  });
+
+  it("edit_file 要求 old_text 唯一，replace_all 才能全改", async () => {
+    const { root, access } = makeWorkspace();
+    writeFileSync(path.join(root, "dup.txt"), "x\nx\n");
+
+    const ambiguous = await executeTool(access, root, "edit_file", { path: "dup.txt", old_text: "x", new_text: "y" }, autoWrite);
+    expect(ambiguous.error).toContain("出现了 2 次");
+    expect(readFileSync(path.join(root, "dup.txt"), "utf8")).toBe("x\nx\n");
+
+    const all = await executeTool(
+      access,
+      root,
+      "edit_file",
+      { path: "dup.txt", old_text: "x", new_text: "y", replace_all: true },
+      autoWrite,
+    );
+    expect(all.error).toBeNull();
+    expect(readFileSync(path.join(root, "dup.txt"), "utf8")).toBe("y\ny\n");
+  });
+
+  it("ask 档位被拒时文件一点不动，且确认回调能拿到 diff", async () => {
+    const { root, access } = makeWorkspace();
+    const target = path.join(root, "src", "app.ts");
+    const before = readFileSync(target, "utf8");
+    const seen: string[] = [];
+    const policy: ToolPolicy = {
+      write: "ask",
+      confirm: async (request) => {
+        seen.push(request.title + "\n" + request.diff);
+        return false;
+      },
+    };
+
+    const result = await executeTool(
+      access,
+      root,
+      "edit_file",
+      { path: "src/app.ts", old_text: "needle = 1", new_text: "needle = 2" },
+      policy,
+    );
+    expect(result.error).toContain("用户拒绝");
+    expect(readFileSync(target, "utf8")).toBe(before);
+    expect(seen[0]).toContain("写入 src/app.ts");
+    expect(seen[0]).toContain("- const needle = 1;");
+    expect(seen[0]).toContain("+ const needle = 2;");
+  });
+
+  it("ask 档位允许时正常落盘", async () => {
+    const { root, access } = makeWorkspace();
+    const result = await executeTool(
+      access,
+      root,
+      "edit_file",
+      { path: "src/app.ts", old_text: "needle = 1", new_text: "needle = 2" },
+      askWrite(true),
+    );
+    expect(result.error).toBeNull();
+    expect(readFileSync(path.join(root, "src", "app.ts"), "utf8")).toContain("needle = 2");
   });
 });

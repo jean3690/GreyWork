@@ -153,6 +153,7 @@ describe("HostLlmTransport", () => {
       maxRounds: 8,
       clientToken: "turn-a",
       cwd: "/work/project",
+      permissionTier: null,
     });
     vi.unstubAllGlobals();
   });

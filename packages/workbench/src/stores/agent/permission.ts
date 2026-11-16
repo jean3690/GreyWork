@@ -9,6 +9,7 @@ import type { AcpPermissionOptionInfo, AcpPermissionRequestPayload } from "@grey
 // 走 ./permissions 子路径而不是包根：那是无依赖的纯分类层。包根会连带拉起 client.ts
 // （@tauri-apps/api / ACP SDK），而权限分类在测试里必须能独立于传输层加载。
 import { classifyAcpPermission, safeAllowOnceId } from "@greywork/acp/permissions";
+import { invoke } from "@greywork/host-ipc";
 import { acp } from "../../lib/acp-client";
 import { permissionCommand } from "../../lib/permission-detail";
 import { notify } from "../notice";
@@ -166,7 +167,16 @@ export function createPermissionGate(state: AgentStoreState): PermissionGateApi 
     // 且不会把 markdown 流切断。
     writePermissionTrace(permissionTrace(pending, optionId ? (option?.name ?? optionId) : null, "user"));
     try {
-      await acp.respondPermission(pending.requestId, optionId);
+      // 两套宿主共用一个卡片：本机 agent 回合的写请求回 llm_agent_permission_respond，
+      // ACP 的仍走 acp_permission_respond（payload.source 是唯一区分点）。
+      if ((pending as { source?: string }).source === "llm") {
+        await invoke("llm_agent_permission_respond", {
+          requestId: pending.requestId,
+          optionId: optionId === null ? null : "allow",
+        });
+      } else {
+        await acp.respondPermission(pending.requestId, optionId);
+      }
     } catch (error) {
       if (state.locals.acpStream && state.locals.acpThreadId) {
         state.chat.appendMessageContent(

@@ -39,6 +39,8 @@ export interface RuntimeApi {
   stopAcp(): Promise<void>;
   restartAcpRuntime(): Promise<string | null>;
   respondPermission(optionId: string | null): Promise<void>;
+  /** 非 ACP 来源（本机 agent 回合）的权限请求：复用同一张卡与同一套超时。 */
+  armPermission(payload: AcpPermissionRequestPayload): void;
   probeMcpServer(config: McpServerConfig): Promise<{ report?: McpProbeReport; error?: string }>;
   dismissPendingPermission(): void;
   /** 取消一个协议层子代理的当前工作；返回是否已发出（需其宣告了 capabilities.cancel）。 */
@@ -691,6 +693,7 @@ export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi 
     stopAcp,
     restartAcpRuntime,
     respondPermission: gate.respond,
+    armPermission: gate.arm,
     probeMcpServer,
     dismissPendingPermission: gate.dismiss,
     cancelSubagent: subagents.cancel,

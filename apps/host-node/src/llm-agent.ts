@@ -21,6 +21,9 @@ import type { WorkspaceAccess } from "./workspace-access.js";
 /** 连接挂着但长时间无字节，按错误终止（与纯聊天路径同源的空闲超时）。 */
 const IDLE_TIMEOUT_MS = 60_000;
 
+/** 写操作确认窗口（ms）：与 ACP 权限卡同一 120s，超时按拒绝处理。 */
+const PERMISSION_CONFIRM_TIMEOUT_MS = 120_000;
+
 /** 工具回合的默认上限（12 轮覆盖典型的「摸现状 → 定位 → 交叉验证」长路径）。 */
 export const DEFAULT_MAX_ROUNDS = 12;
 
@@ -72,6 +75,11 @@ export interface AgentStartArgs {
    * 传了就必须在授权面内 —— 宿主不会因为「是模型要求的」就放宽。
    */
   cwd?: string | null;
+  /**
+   * 权限档位（read-only / workspace / full）：决定写工具是否暴露、是否弹确认。
+   * 缺省 = read-only（宿主不替用户放宽）。
+   */
+  permissionTier?: string | null;
 }
 
 interface AgentTurn {
@@ -86,6 +94,10 @@ interface AgentTurn {
   maxRounds: number;
   clientToken: string;
   cwd: string;
+  /** 本回合的写操作策略（由权限档位映射）。 */
+  policy: ToolPolicy;
+  /** 本回合还没裁决的写请求，回合中止时统一按拒绝收场。 */
+  pendingPermissions: Set<number>;
 }
 
 interface ToolCall {
@@ -103,7 +115,99 @@ interface ToolOutput {
 
 /* ===== 工具的 openai function schema ===== */
 
-function toolSchemas(): Record<string, unknown>[] {
+/** 写操作的放行策略：由权限档位决定（read-only / workspace / full）。 */
+export interface ToolPolicy {
+  write: "deny" | "ask" | "auto";
+  /** 询问用户是否允许这次写入；ask 模式下拒绝/超时都返回 false。 */
+  confirm(request: { title: string; paths: string[]; diff: string }): Promise<boolean>;
+}
+
+/** 缺省策略：不允许写（其它调用方与单测拿到的都是这个安全默认）。 */
+export const DEFAULT_TOOL_POLICY: ToolPolicy = {
+  write: "deny",
+  confirm: async () => false,
+};
+
+/** 行级 diff（公共前后缀裁剪）：够给用户看清改了哪几行，不做完整 LCS。 */
+export function lineDiff(before: string, after: string): string {
+  if (before === after) return "（内容无变化）";
+  const oldLines = before.split("\n");
+  const newLines = after.split("\n");
+  let prefix = 0;
+  while (prefix < oldLines.length && prefix < newLines.length && oldLines[prefix] === newLines[prefix]) prefix += 1;
+  let suffix = 0;
+  while (
+    suffix < oldLines.length - prefix &&
+    suffix < newLines.length - prefix &&
+    oldLines[oldLines.length - 1 - suffix] === newLines[newLines.length - 1 - suffix]
+  ) {
+    suffix += 1;
+  }
+  const removed = oldLines.slice(prefix, oldLines.length - suffix);
+  const added = newLines.slice(prefix, newLines.length - suffix);
+  const budget = 40;
+  const rows: string[] = [];
+  if (prefix > 0) rows.push("  … 前 " + prefix + " 行未变");
+  for (const line of removed.slice(0, budget)) rows.push("- " + line);
+  for (const line of added.slice(0, budget)) rows.push("+ " + line);
+  if (removed.length > budget || added.length > budget) rows.push("  … 改动过长，已截断");
+  return rows.join("\n");
+}
+
+/** 权限档位 → 写策略。缺省（没传/不认识）按只读处理，宿主不替用户放宽。 */
+function resolvePermission(tier: string | null | undefined): "deny" | "ask" | "auto" {
+  const value = (tier ?? "").trim();
+  if (value === "full") return "auto";
+  if (value === "workspace") return "ask";
+  return "deny";
+}
+
+/** 文件不存在/不是文本时给 null（写操作会整体覆盖，不关心旧内容）。 */
+function readTextOrNull(access: WorkspaceAccess, target: string): string | null {
+  try {
+    return access.readTextFile(target);
+  } catch {
+    return null;
+  }
+}
+
+function countOccurrences(haystack: string, needle: string): number {
+  let count = 0;
+  let index = haystack.indexOf(needle);
+  while (index !== -1) {
+    count += 1;
+    index = haystack.indexOf(needle, index + needle.length);
+  }
+  return count;
+}
+
+function diffStat(before: string, after: string): string {
+  let added = 0;
+  let removed = 0;
+  for (const row of lineDiff(before, after).split("\n")) {
+    if (row.startsWith("+ ")) added += 1;
+    else if (row.startsWith("- ")) removed += 1;
+  }
+  return "（+" + added + "/-" + removed + " 行）";
+}
+
+/** 写之前的闸门：deny 直接拒，ask 弹确认卡，auto 放行。返回非 null = 这次调用失败。 */
+async function gateWrite(policy: ToolPolicy, relative: string, before: string, after: string, target: string): Promise<ToolOutput | null> {
+  if (policy.write === "deny") {
+    return failed("当前权限档位是只读，不能写文件（设置 → 运行模式 可调整）。把改动写进回复，让用户自己应用。", target);
+  }
+  if (policy.write === "auto") {
+    return null;
+  }
+  const allowed = await policy.confirm({
+    title: "写入 " + relative,
+    paths: [relative],
+    diff: lineDiff(before, after),
+  });
+  return allowed ? null : failed("用户拒绝了这次写入：" + relative, target);
+}
+
+function toolSchemas(allowWrite: boolean): Record<string, unknown>[] {
   return [
     {
       type: "function",
@@ -184,6 +288,49 @@ function toolSchemas(): Record<string, unknown>[] {
             staged: { type: "boolean", description: "为 true 时看暂存区（--cached）。" },
           },
           required: [],
+        },
+      },
+    },
+    ...(allowWrite ? writeToolSchemas() : []),
+  ];
+}
+
+/**
+ * 写工具只在非只读档位下暴露：模型看不到就不会去试。
+ * 真正落盘前还要过 {@link ToolPolicy}（ask 档位会弹确认卡）。
+ */
+function writeToolSchemas(): Record<string, unknown>[] {
+  return [
+    {
+      type: "function",
+      function: {
+        name: "write_file",
+        description:
+          "把内容写入工作区里的文件（不存在则新建，存在则整体覆盖）。适合新建文件；改已有文件优先用 edit_file，避免把没读过的内容覆盖掉。",
+        parameters: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "文件路径（相对工作区根）。" },
+            content: { type: "string", description: "完整文件内容。" },
+          },
+          required: ["path", "content"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "edit_file",
+        description: "按文本替换修改一个已存在的文件：old_text 必须在文件里唯一出现（否则用 replace_all）。改之前先 read_file 看清原文。",
+        parameters: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "文件路径（相对工作区根）。" },
+            old_text: { type: "string", description: "要被替换的原文，必须逐字匹配（含缩进）。" },
+            new_text: { type: "string", description: "替换后的内容；空串表示删除这段。" },
+            replace_all: { type: "boolean", description: "为 true 时替换所有出现位置。" },
+          },
+          required: ["path", "old_text", "new_text"],
         },
       },
     },
@@ -325,7 +472,13 @@ function searchWorkspace(
  * 工具执行入口。导出是为了单测能直接喂工具名/入参，
  * 不用起一个假模型端点绕整圈（整圈的协议细节另有覆盖）。
  */
-export async function executeTool(access: WorkspaceAccess, cwd: string, name: string, input: Record<string, unknown>): Promise<ToolOutput> {
+export async function executeTool(
+  access: WorkspaceAccess,
+  cwd: string,
+  name: string,
+  input: Record<string, unknown>,
+  policy: ToolPolicy = DEFAULT_TOOL_POLICY,
+): Promise<ToolOutput> {
   try {
     if (name === "read_file") {
       const path = anchorToRoot(cwd, argStr(input, "path"));
@@ -439,6 +592,55 @@ export async function executeTool(access: WorkspaceAccess, cwd: string, name: st
         error: null,
         summary: "读取 diff（" + [...text].length + " 字符" + (staged ? "，暂存区" : "") + "）",
         path: filePath === null ? cwd : filePath,
+      };
+    }
+    if (name === "write_file") {
+      const target = anchorToRoot(cwd, argStr(input, "path"));
+      const content = typeof input.content === "string" ? input.content : "";
+      const relative = path.relative(cwd, target) || target;
+      const before = readTextOrNull(access, target);
+      const verdict = await gateWrite(policy, relative, before ?? "", content, target);
+      if (verdict !== null) {
+        return verdict;
+      }
+      access.writeTextFile(target, content);
+      const diff = lineDiff(before ?? "", content);
+      return {
+        content: "已写入 " + relative + "\n\n" + diff,
+        error: null,
+        summary: "写入 " + relative + diffStat(before ?? "", content),
+        path: target,
+      };
+    }
+    if (name === "edit_file") {
+      const target = anchorToRoot(cwd, argStr(input, "path"));
+      const oldText = argStr(input, "old_text");
+      const newText = typeof input.new_text === "string" ? input.new_text : "";
+      const replaceAll = input.replace_all === true;
+      const relative = path.relative(cwd, target) || target;
+      if (oldText === "") {
+        return failed("edit_file 的 old_text 不能为空；要新建文件用 write_file", target);
+      }
+      const before = access.readTextFile(target);
+      const occurrences = countOccurrences(before, oldText);
+      if (occurrences === 0) {
+        return failed("old_text 在文件里逐字匹配不到（注意缩进、换行与全角半角）。先 read_file 看清原文再改。", target);
+      }
+      if (occurrences > 1 && !replaceAll) {
+        return failed("old_text 在文件里出现了 " + occurrences + " 次，无法确定改哪一处；扩大上下文，或显式传 replace_all。", target);
+      }
+      const after = replaceAll ? before.split(oldText).join(newText) : before.replace(oldText, newText);
+      const verdict = await gateWrite(policy, relative, before, after, target);
+      if (verdict !== null) {
+        return verdict;
+      }
+      access.writeTextFile(target, after);
+      const diff = lineDiff(before, after);
+      return {
+        content: "已修改 " + relative + "\n\n" + diff,
+        error: null,
+        summary: "修改 " + relative + diffStat(before, after),
+        path: target,
       };
     }
     if (name === "") {
@@ -580,6 +782,12 @@ function reasoningEffort(value: string): string | null {
 export class LlmAgentHost {
   private nextId = 0;
   private readonly tasks = new Map<number, AbortController>();
+  /** 待裁决的写请求：requestId → 结算函数（respond / 超时 / 中止都走 settle）。 */
+  private readonly pendingPermissions = new Map<
+    number,
+    { resolve: (allow: boolean) => void; timer: ReturnType<typeof setTimeout>; turn: AgentTurn }
+  >();
+  private nextPermissionId = 1;
 
   constructor(
     private readonly bus: EventBus,
@@ -600,6 +808,7 @@ export class LlmAgentHost {
       throw new Error("messages 不能为空");
     }
     const requestId = this.nextId++;
+    const permission = resolvePermission(args.permissionTier);
     const turn: AgentTurn = {
       baseUrl,
       model,
@@ -612,6 +821,11 @@ export class LlmAgentHost {
       maxRounds: Math.min(Math.max(args.maxRounds ?? DEFAULT_MAX_ROUNDS, 1), HARD_MAX_ROUNDS),
       clientToken: args.clientToken ?? "",
       cwd: resolveCwd(this.access, args.cwd),
+      pendingPermissions: new Set<number>(),
+      policy: {
+        write: permission,
+        confirm: (request) => this.confirmPermission(turn, request),
+      },
     };
     const controller = new AbortController();
     this.tasks.set(requestId, controller);
@@ -622,12 +836,64 @@ export class LlmAgentHost {
     return requestId;
   }
 
-  /** 中止进行中的 agent 回合并回收句柄。 */
+  /** 中止进行中的 agent 回合并回收句柄；挂在确认卡上的写请求按拒绝收场。 */
   stop(requestId: number): void {
     const controller = this.tasks.get(requestId);
     if (!controller) throw new Error("unknown llm agent request " + requestId);
     this.tasks.delete(requestId);
     controller.abort();
+    for (const [permissionId, entry] of [...this.pendingPermissions]) {
+      if (entry.resolve === undefined) continue;
+      if (entry.turn.pendingPermissions.has(permissionId)) this.settlePermission(permissionId, false);
+    }
+  }
+
+  /** 用户对写请求的裁决；optionId=null/deny 表示拒绝。 */
+  respondPermission(requestId: number, optionId: string | null): boolean {
+    if (!this.pendingPermissions.has(requestId)) return false;
+    this.settlePermission(requestId, optionId === "allow");
+    return true;
+  }
+
+  /** 结算一次写请求：清超时、移出表、回传结果，并通知前端收卡。 */
+  private settlePermission(requestId: number, allow: boolean): void {
+    const entry = this.pendingPermissions.get(requestId);
+    if (!entry) return;
+    clearTimeout(entry.timer);
+    this.pendingPermissions.delete(requestId);
+    entry.turn.pendingPermissions.delete(requestId);
+    entry.resolve(allow);
+    this.emit(entry.turn.clientToken, "permission-resolved", { requestId, allow });
+  }
+
+  /** 写操作前的确认：emit 一张与 ACP 同形的卡，等用户点选或超时。 */
+  private confirmPermission(turn: AgentTurn, request: { title: string; paths: string[]; diff: string }): Promise<boolean> {
+    const requestId = this.nextPermissionId++;
+    turn.pendingPermissions.add(requestId);
+    const settled = new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => this.settlePermission(requestId, false), PERMISSION_CONFIRM_TIMEOUT_MS);
+      timer.unref?.();
+      this.pendingPermissions.set(requestId, { resolve, timer, turn });
+    });
+    this.emit(turn.clientToken, "permission-request", {
+      requestId,
+      sessionId: null,
+      auto: false,
+      chosen: null,
+      toolCallId: "write-" + requestId,
+      title: request.title,
+      kind: "edit",
+      locations: request.paths,
+      options: [
+        { optionId: "allow", name: "允许本次写入", kind: "allow_once" },
+        { optionId: "deny", name: "拒绝", kind: "reject_once" },
+      ],
+      // 渲染端据此判断该走 llm_agent_permission_respond 还是 acp_permission_respond。
+      source: "llm",
+      diff: request.diff,
+      rawInput: { diff: request.diff },
+    });
+    return settled;
   }
 
   /** 跑完一个 agent 回合。所有出口都保证发出 llm-done 或 llm-error。 */
@@ -643,7 +909,7 @@ export class LlmAgentHost {
   }
 
   private async drive(turn: AgentTurn, controller: AbortController): Promise<void> {
-    const schemas = toolSchemas();
+    const schemas = toolSchemas(turn.policy.write !== "deny");
     const history: Record<string, unknown>[] = [...turn.messages];
     const accumulator = new ToolCallAccumulator();
     const apiKey = resolveApiKey(turn.apiKeyEnv);
@@ -704,7 +970,7 @@ export class LlmAgentHost {
       for (const call of outcome.calls) {
         const input = parseArguments(call.arguments);
         this.emit(turn.clientToken, "llm-tool-call", { id: call.id, name: call.name, input, round });
-        const output = await executeTool(this.access, turn.cwd, call.name, input);
+        const output = await executeTool(this.access, turn.cwd, call.name, input, turn.policy);
         this.emit(turn.clientToken, "llm-tool-result", {
           id: call.id,
           ok: output.error === null,

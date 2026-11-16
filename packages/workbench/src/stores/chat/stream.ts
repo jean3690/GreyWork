@@ -19,6 +19,7 @@ import { resolveWorkspaceRoot } from "../../lib/workspace-dir";
 import { isAskSettled } from "../../lib/ask-question";
 import { llmToolEventToActivity, mergeToolActivities } from "../../lib/tool-activity";
 import { t, tid, uid, clearSim } from "./shared";
+import type { AcpPermissionRequestPayload } from "@greywork/acp";
 import type { PermissionTrace, ThreadMessage, ToolActivity } from "../../types";
 import type { ChatStoreState } from "./state";
 import type { SessionApi } from "./session";
@@ -164,6 +165,18 @@ export function createStreamSlice({ state, getSession, getDemo }: StreamDeps): S
         if (!streamingInto) return;
         const activity = llmToolEventToActivity(event.kind === "llm-tool-call" ? "call" : "result", event.payload);
         if (activity) appendTools([activity], streamingInto.id);
+      } else if (event.kind === "permission-request") {
+        // 本机 agent 回合的写操作确认：与 ACP 共用一张卡（payload.source 决定回执走哪条命令）。
+        // 动态 import 是为了避开 stores/agent → stores/chat 的循环依赖。
+        const payload = event.payload as unknown as AcpPermissionRequestPayload;
+        void import("../agent").then(({ useAgentStore }) => useAgentStore().armPermission(payload));
+      } else if (event.kind === "permission-resolved") {
+        // 宿主侧超时/中止时卡自己收掉；用户点选的那条前端已先行 dismiss，这里是幂等的。
+        const requestId = (event.payload as { requestId?: number }).requestId;
+        void import("../agent").then(({ useAgentStore }) => {
+          const agent = useAgentStore();
+          if (agent.pendingPermission?.requestId === requestId) agent.dismissPendingPermission();
+        });
       } else if (event.kind === "llm-done") {
         finishStream();
       } else if (event.kind === "llm-error") {
@@ -224,7 +237,13 @@ export function createStreamSlice({ state, getSession, getDemo }: StreamDeps): S
         clientToken: activeTurnToken,
       };
       llmRequestId = activeTurnIsAgent
-        ? await llm.agentRun({ ...request, maxRounds: provider.agentMaxRounds, cwd: await agentCwd() })
+        ? await llm.agentRun({
+            ...request,
+            maxRounds: provider.agentMaxRounds,
+            cwd: await agentCwd(),
+            // 权限档位决定宿主暴露哪些工具、写操作要不要弹确认卡。
+            permissionTier: settingsStore.permissionTier,
+          })
         : await llm.chat(request);
     } catch (error) {
       message.content = `[LLM 调用失败] ${error instanceof Error ? error.message : String(error)}`;
