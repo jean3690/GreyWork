@@ -175,10 +175,10 @@ describe("HTTP 契约", () => {
     expect(response.headers.get("set-cookie")).toBeNull();
   });
 
-  it("/api/commands 返回 194 条，只有已迁移的命令标 available", async () => {
+  it("/api/commands 返回 195 条，只有已迁移的命令标 available", async () => {
     const response = await fetch(`${base}/api/commands`, { headers: { cookie } });
     const list = (await response.json()) as { name: string; available: boolean; desktopOnly: boolean }[];
-    expect(list).toHaveLength(194);
+    expect(list).toHaveLength(195);
     const defaultRoot = list.find((item) => item.name === "store_default_root");
     expect(defaultRoot?.available).toBe(true);
     // 桌面专属命令任何宿主都不可调用。

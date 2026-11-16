@@ -146,7 +146,16 @@ const activeProvider = computed(() => settings.modelProviders.find((provider) =>
 
 /** 当前编辑中的供应商 id（跟随选中项）与字段草稿。 */
 const providerDraftId = ref<string | null>(null);
-const providerDraft = ref({ name: "", baseUrl: "", model: "", apiKeyEnv: "", headersText: "", temperature: "", maxTokens: "" });
+const providerDraft = ref({
+  name: "",
+  baseUrl: "",
+  model: "",
+  apiKeyEnv: "",
+  headersText: "",
+  temperature: "",
+  maxTokens: "",
+  contextTokens: "",
+});
 /** 草稿相对 store 有未保存改动时置真（简单脏检查，切走即丢——字段少，不做自动保存）。 */
 const providerDraftDirty = ref(false);
 /** Headers 文本解析错误（保存前就地拦截，不写进库）。 */
@@ -169,6 +178,7 @@ function syncProviderDraft(): void {
     headersText: formatHeaderText(provider.headers),
     temperature: provider.temperature === undefined ? "" : String(provider.temperature),
     maxTokens: provider.maxTokens === undefined ? "" : String(provider.maxTokens),
+    contextTokens: provider.contextTokens === undefined ? "" : String(provider.contextTokens),
   };
   providerDraftDirty.value = false;
   providerDraftError.value = null;
@@ -243,6 +253,18 @@ function saveProviderDraft(): void {
     providerDraftError.value = maxTokens.error;
     return;
   }
+  const contextTokens = parseOptionalNumber(
+    providerDraft.value.contextTokens,
+    AGENT_CONTEXT_TOKENS_RANGE.min,
+    AGENT_CONTEXT_TOKENS_RANGE.max,
+    "上下文预算",
+  );
+  if (contextTokens.error) {
+    providerDraftError.value = contextTokens.error;
+    return;
+  }
+  const previousBaseUrl = normalizeUrl(current.baseUrl ?? "");
+  const nextBaseUrl = normalizeUrl(providerDraft.value.baseUrl);
   settings.upsertModelProvider({
     ...current,
     name: providerDraft.value.name.trim() || current.name,
@@ -252,9 +274,20 @@ function saveProviderDraft(): void {
     headers: Object.keys(parsed.headers).length > 0 ? parsed.headers : undefined,
     temperature: temperature.value,
     maxTokens: maxTokens.value,
+    contextTokens: contextTokens.value,
   });
   providerDraftDirty.value = false;
   providerDraftError.value = null;
+  // 改了 baseUrl：把旧地址上的密钥迁过来（密钥按 baseUrl 归属，不迁就得重填）。
+  if (hostAvailable && previousBaseUrl !== "" && previousBaseUrl !== nextBaseUrl) {
+    void invoke<{ moved: boolean }>("llm_secret_move", { from: previousBaseUrl, to: nextBaseUrl })
+      .then(async (result) => {
+        if (!result.moved) return;
+        secretHint.value = "密钥已跟随新地址迁移";
+        await refreshSecrets();
+      })
+      .catch(() => undefined);
+  }
 }
 
 /** 启用/停用一台模型供应商（此前列表只显示状态、无法开关，预设的 Ollama 因此用不起来）。 */
@@ -312,6 +345,20 @@ function onAddProviderSave(payload: ModelProviderDraftPayload): void {
   });
   settings.selectModelProvider(id);
   addProviderOpen.value = false;
+  // 新增时顺手填的 key：直接写宿主密钥库（不经过设置快照），失败只提示、不拦创建。
+  if (hostAvailable && payload.apiKey && payload.baseUrl.trim() !== "") {
+    void invoke<{ masked: string }>("llm_secret_set", {
+      baseUrl: payload.baseUrl.trim(),
+      apiKey: payload.apiKey,
+    })
+      .then(async (result) => {
+        secretHint.value = "已保存到宿主：" + result.masked;
+        await refreshSecrets();
+      })
+      .catch((error: unknown) => {
+        secretHint.value = error instanceof Error ? error.message : String(error);
+      });
+  }
 }
 
 function removeActiveProvider(): void {
@@ -623,8 +670,21 @@ async function removeAgentDraft(): Promise<void> {
             @input="providerDraftDirty = true"
           />
         </div>
+        <label class="flex items-center gap-2">
+          <span class="w-24 shrink-0 text-[11.5px] text-dim2">上下文预算</span>
+          <input
+            v-model="providerDraft.contextTokens"
+            inputmode="numeric"
+            class="min-w-0 flex-1 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-1.5 font-mono text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-line-2"
+            :placeholder="`留空 = 全局 ${settings.agentContextTokens}`"
+            data-testid="provider-context-tokens"
+            @input="providerDraftDirty = true"
+          />
+          <span class="shrink-0 text-[10.5px] text-dim2">tokens</span>
+        </label>
         <p class="text-[10.5px] leading-relaxed text-dim2">
           采样参数缺省不发送（由服务端默认值决定）。本地模型（Ollama / vLLM 等）常用温度 0–0.7、最大 token 限长。
+          上下文预算按供应商覆盖上面的全局值 —— 多供应商回退时各用各的窗口。
         </p>
         <label class="flex items-start gap-2.5">
           <input

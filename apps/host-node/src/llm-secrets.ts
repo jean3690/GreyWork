@@ -80,6 +80,24 @@ export function setSecret(baseUrl: string, apiKey: string): { masked: string } {
   return { masked: maskSecret(value) };
 }
 
+/**
+ * 把密钥从旧 baseUrl 迁到新 baseUrl（用户改了供应商地址时用）。
+ * 目标已有密钥时以源为准覆盖 —— 改了地址说明还是同一个供应商。
+ */
+export function moveSecret(fromBaseUrl: string, toBaseUrl: string): { moved: boolean } {
+  const from = normalizeBaseUrlKey(fromBaseUrl);
+  const to = normalizeBaseUrlKey(toBaseUrl);
+  if (from === "" || to === "" || from === to) return { moved: false };
+  const current = load();
+  const source = current[from];
+  if (!source) return { moved: false };
+  const next = { ...current };
+  delete next[from];
+  next[to] = { apiKey: source.apiKey, updatedAt: Date.now() };
+  persist(next);
+  return { moved: true };
+}
+
 export function clearSecret(baseUrl: string): boolean {
   const key = normalizeBaseUrlKey(baseUrl);
   const current = load();

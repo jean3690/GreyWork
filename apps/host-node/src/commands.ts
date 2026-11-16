@@ -43,7 +43,7 @@ import { saveChannelCredentials, loadChannelCredentials } from "./channel-creden
 import { telegramSend } from "./channel-telegram.js";
 import { readSheet, type ReadSheetArgs } from "./sheet.js";
 import { mcpCall, mcpProbe, mcpSearch, pluginMcpCall } from "./mcp.js";
-import { clearSecret, listSecrets, setSecret } from "./llm-secrets.js";
+import { clearSecret, listSecrets, moveSecret, setSecret } from "./llm-secrets.js";
 import {
   convertToPdf,
   discoverSoffice,
@@ -1383,6 +1383,14 @@ HANDLERS.set("llm_secret_clear", async (args) => {
   const value = args as { baseUrl?: unknown } | null;
   if (typeof value?.baseUrl !== "string" || value.baseUrl.trim() === "") throw missingField("baseUrl");
   return { cleared: clearSecret(value.baseUrl) };
+});
+
+HANDLERS.set("llm_secret_move", async (args) => {
+  // 供应商改了 baseUrl：把旧地址上的密钥迁过去，省得让用户重填。
+  const value = args as { from?: unknown; to?: unknown } | null;
+  if (typeof value?.from !== "string" || value.from.trim() === "") throw missingField("from");
+  if (typeof value?.to !== "string" || value.to.trim() === "") throw missingField("to");
+  return moveSecret(value.from, value.to);
 });
 
 HANDLERS.set("llm_secret_status", async () => {

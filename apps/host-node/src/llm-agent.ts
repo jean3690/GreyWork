@@ -86,6 +86,8 @@ export interface AgentProviderTarget {
   temperature?: number | null;
   maxTokens?: number | null;
   reasoningEffort?: string | null;
+  /** 该供应商的上下文窗口（tokens）；缺省沿用全局预算。 */
+  contextTokens?: number | null;
 }
 
 /** 内部用的归一化供应商（字段都已落成非空/显式 null）。 */
@@ -97,6 +99,7 @@ interface ProviderTarget {
   temperature: number | null;
   maxTokens: number | null;
   reasoningEffort: string;
+  contextTokens: number | null;
 }
 
 /**
@@ -159,8 +162,10 @@ interface AgentTurn {
   mcpServers: AgentMcpServer[];
   /** 探测到的 MCP 工具（drive 开始时解析，toolSchemas 与调用都读它）。 */
   mcpTools: McpToolBinding[];
-  /** 本回合的上下文预算（tokens）。 */
+  /** 本回合**当前生效**的上下文预算（tokens）：切换供应商时跟着换。 */
   contextTokens: number;
+  /** 全局预算（供应商没单独给时用它）。 */
+  defaultContextTokens: number;
   /** 本回合可尝试的供应商（有序），以及当前正在用的下标。 */
   providers: ProviderTarget[];
   activeProvider: number;
@@ -583,6 +588,7 @@ function normalizeProviders(args: AgentStartArgs): ProviderTarget[] {
     temperature: typeof item.temperature === "number" ? item.temperature : null,
     maxTokens: typeof item.maxTokens === "number" ? item.maxTokens : null,
     reasoningEffort: item.reasoningEffort ?? "",
+    contextTokens: typeof item.contextTokens === "number" ? item.contextTokens : null,
   }));
 }
 
@@ -597,6 +603,8 @@ function applyProvider(turn: AgentTurn, index: number): void {
   turn.temperature = target.temperature;
   turn.maxTokens = target.maxTokens;
   turn.reasoningEffort = target.reasoningEffort;
+  // 上下文窗口按模型走：切换供应商时预算跟着换，别用小模型的额度去压大模型。
+  turn.contextTokens = Math.max(target.contextTokens ?? turn.defaultContextTokens, MIN_CONTEXT_TOKENS);
 }
 
 function resolveCwd(access: WorkspaceAccess, raw: string | null | undefined): string {
@@ -1110,6 +1118,13 @@ export class LlmAgentHost {
     const requestId = this.nextId++;
     const permission = resolvePermission(args.permissionTier);
     const cwd = resolveCwd(this.access, args.cwd);
+    // 全局预算；具体供应商若带自己的 contextTokens，applyProvider 会覆盖生效值。
+    const defaultBudget = Math.max(
+      typeof args.contextTokens === "number" && Number.isFinite(args.contextTokens)
+        ? Math.floor(args.contextTokens)
+        : DEFAULT_CONTEXT_TOKENS,
+      MIN_CONTEXT_TOKENS,
+    );
     const messages = args.messages.map((message) => ({ role: message.role, content: message.content }));
     // 技能索引只放系统提示（id + 名称 + 一句话），正文由模型按需 read_skill。
     const skillIndex = skillIndexPrompt(listSkills(this.access, cwd));
@@ -1131,12 +1146,8 @@ export class LlmAgentHost {
       mcpTools: [],
       providers: normalizeProviders(args),
       activeProvider: 0,
-      contextTokens: Math.max(
-        typeof args.contextTokens === "number" && Number.isFinite(args.contextTokens)
-          ? Math.floor(args.contextTokens)
-          : DEFAULT_CONTEXT_TOKENS,
-        MIN_CONTEXT_TOKENS,
-      ),
+      contextTokens: defaultBudget,
+      defaultContextTokens: defaultBudget,
       policy: {
         write: permission,
         // 命令执行比写文件危险一档：只在 full 档 + 可信宿主暴露，且永远逐条确认。

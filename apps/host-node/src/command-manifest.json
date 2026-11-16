@@ -1128,6 +1128,12 @@
     "binary": false
   },
   {
+    "name": "llm_secret_move",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
     "name": "llm_secret_status",
     "auth": "required",
     "desktopOnly": false,

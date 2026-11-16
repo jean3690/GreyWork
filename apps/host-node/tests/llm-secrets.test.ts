@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import {
   clearSecret,
+  moveSecret,
   configureSecretStore,
   listSecrets,
   maskSecret,
@@ -64,6 +65,16 @@ describe("供应商密钥", () => {
 
     configureSecretStore(dir); // 模拟重启：清缓存重读
     expect(secretFor(BASE)).toBe("sk-persist-1234567890");
+  });
+
+  it("改了 baseUrl 时密钥能迁过去（源写入目标、源删除）", () => {
+    setSecret(BASE, "sk-move-1234567890");
+    expect(moveSecret(BASE, "https://new.example.test/v1").moved).toBe(true);
+    expect(secretFor(BASE)).toBeNull();
+    expect(secretFor("https://new.example.test/v1")).toBe("sk-move-1234567890");
+    // 源上没有密钥 / 地址相同：不动
+    expect(moveSecret(BASE, "https://other.test/v1").moved).toBe(false);
+    expect(moveSecret("https://new.example.test/v1/", "https://new.example.test/v1").moved).toBe(false);
   });
 
   it("缺 baseUrl / 空 key 拒绝写入", () => {

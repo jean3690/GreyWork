@@ -31,4 +31,9 @@ export interface ModelProviderConfig {
   agentMode?: boolean;
   /** agent 回合的工具调用轮数上限；缺省用宿主默认值。 */
   agentMaxRounds?: number;
+  /**
+   * 该供应商的上下文预算（tokens）。缺省沿用设置里的全局预算 ——
+   * 多供应商回退时按当前生效的供应商取值，避免拿小模型的窗口去压大模型。
+   */
+  contextTokens?: number;
 }

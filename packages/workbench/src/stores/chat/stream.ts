@@ -246,6 +246,7 @@ export function createStreamSlice({ state, getSession, getDemo }: StreamDeps): S
         temperature: item.temperature ?? null,
         maxTokens: item.maxTokens ?? null,
         reasoningEffort: resolveLocalEffort(localReasoningOverride.value, item),
+        contextTokens: item.contextTokens ?? null,
       }));
       llmRequestId = activeTurnIsAgent
         ? await llm.agentRun({
