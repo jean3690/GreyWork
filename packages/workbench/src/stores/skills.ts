@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
-import { hasHostCommands } from "@greywork/host-ipc";
+import { hasHostCommands, invoke } from "@greywork/host-ipc";
 import { joinPath } from "@greywork/core";
 import {
   createSkillsShSource,
@@ -143,10 +143,14 @@ function upsertRecord(records: SkillInstallRecord[], record: SkillInstallRecord)
   return [...rest, record];
 }
 
-/** 根据设置中的技能源条目构建适配器（内置 skills.sh + 自定义 API 源）。
+/** 根据设置中的技能源条目构建适配器（内置 skills.sh + 自定义 API 源 + 本控制面）。
  * 默认 skills.sh 不传 origin（宿主走默认端点），自定义端点才带 origin。 */
-function buildSourceAdapters(settings: ReturnType<typeof useSettingsStore>, transport: SkillsMarketTransport): SkillSourceAdapter[] {
-  return settings.skillSources
+function buildSourceAdapters(
+  settings: ReturnType<typeof useSettingsStore>,
+  transport: SkillsMarketTransport,
+  controlPlaneOrigin: string | null,
+): SkillSourceAdapter[] {
+  const adapters = settings.skillSources
     .filter((source) => source.enabled)
     .map((entry) =>
       createSkillsShSource(transport, {
@@ -157,6 +161,25 @@ function buildSourceAdapters(settings: ReturnType<typeof useSettingsStore>, tran
         scopeSource: entry.type === "github" && entry.repo ? entry.repo : undefined,
       }),
     );
+  // 控制面已经接入时自动带上它的技能目录：地址来自宿主（token 不出宿主），
+  // 用户手动把同一个地址加成自定义源时不重复请求。
+  const trimmedOrigin = (controlPlaneOrigin ?? "").replace(/\/+$/, "");
+  const alreadyConfigured =
+    trimmedOrigin !== "" &&
+    settings.skillSources.some(
+      (source) => source.enabled && source.type === "api" && (source.url ?? "").replace(/\/+$/, "") === trimmedOrigin,
+    );
+  if (trimmedOrigin !== "" && !alreadyConfigured) {
+    adapters.unshift(
+      createSkillsShSource(transport, {
+        id: "control-plane",
+        label: "本控制面",
+        description: trimmedOrigin,
+        origin: trimmedOrigin,
+      }),
+    );
+  }
+  return adapters;
 }
 
 export const useSkillsStore = defineStore("skills", () => {
@@ -191,6 +214,30 @@ export const useSkillsStore = defineStore("skills", () => {
   const discoverError = ref("");
   /** 当前正在安装/卸载的 skillId（按钮 loading 态）。 */
   const busyId = ref<string | null>(null);
+
+  /**
+   * 控制面地址（本控制面的技能目录）：只取宿主 `control_plane_status` 里的 baseUrl，
+   * token 留在宿主。探测一次即可 —— 用户改了控制面地址会重启/重连，重新打开面板时再取。
+   */
+  const controlPlaneOrigin = ref<string | null>(null);
+  let controlPlaneProbe: Promise<void> | null = null;
+
+  async function ensureControlPlaneSource(): Promise<void> {
+    if (!hostAvailable || controlPlaneProbe) {
+      if (controlPlaneProbe) await controlPlaneProbe;
+      return;
+    }
+    controlPlaneProbe = (async () => {
+      try {
+        const status = await invoke<{ configured: boolean; baseUrl: string | null }>("control_plane_status");
+        controlPlaneOrigin.value = status.configured ? status.baseUrl : null;
+      } catch {
+        // 老宿主 / 未接入：没有这条源，不影响其它源。
+        controlPlaneOrigin.value = null;
+      }
+    })();
+    await controlPlaneProbe;
+  }
 
   const records = ref<SkillInstallRecord[]>(loadRecords());
   const recordBySkillId = computed(() => new Map(records.value.map((record) => [record.skillId, record])));
@@ -271,7 +318,8 @@ export const useSkillsStore = defineStore("skills", () => {
     }
     searching.value = true;
     try {
-      const adapters = buildSourceAdapters(settings, transport);
+      await ensureControlPlaneSource();
+      const adapters = buildSourceAdapters(settings, transport, controlPlaneOrigin.value);
       if (adapters.length === 0) {
         // 没有启用的源 → 回退内置默认
         discoverResults.value = await builtInMarket.search(trimmed);

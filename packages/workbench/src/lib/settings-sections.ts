@@ -13,6 +13,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   { key: "appearance", icon: "sun" },
   { key: "mode", icon: "hammer" },
   { key: "services", icon: "earth" },
+  { key: "controlplane", icon: "shield" },
   { key: "localai", icon: "search" },
   { key: "system", icon: "setting" },
   { key: "mcp", icon: "terminal" },

@@ -236,6 +236,8 @@ export interface SavedSettings {
   /** 运行模式；未接入的档位（cloud）也照存，由 UI 负责标注它不生效。 */
   runMode?: RunMode;
   mcpServers?: McpServerEntry[];
+  /** 自定义 MCP registry 地址；空 = 官方 registry（或宿主的 GREYWORK_MCP_REGISTRY_URL）。 */
+  mcpRegistryUrl?: string;
   /** 用户自定义技能市场源。 */
   skillSources?: SkillSourceEntry[];
   /** 多智能体编排并发度（同时跑的回合上限）；1-8，越界静默回落 2。 */

@@ -238,3 +238,15 @@ describe("SettingsView 服务分区", () => {
     expect(wrapper.find('[data-testid="office-provider-wps365"]').exists()).toBe(true);
   });
 });
+
+describe("SettingsView 控制面分区", () => {
+  it("渲染接入表单；浏览器态如实说明没有宿主", async () => {
+    const { wrapper } = await mountSettings("controlplane");
+    expect(wrapper.get("h1").text()).toBe("控制面");
+    expect(wrapper.text()).toContain("浏览器预览态，没有宿主进程");
+    expect(wrapper.find('[data-testid="controlplane-base-url"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="controlplane-code"]').exists()).toBe(true);
+    // 没有宿主就没有接入这一说：按钮必须是真的禁用，而不是点了没反应。
+    expect(wrapper.find('[data-testid="controlplane-connect"]').attributes("disabled")).toBeDefined();
+  });
+});

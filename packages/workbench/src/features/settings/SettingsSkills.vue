@@ -301,7 +301,8 @@ function confirmResetSources(): void {
     <div class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-4">
       <div class="mb-1 text-[13px] font-medium text-foreground">发现</div>
       <p class="mb-3 text-[11px] leading-relaxed text-dim2">
-        跨所有已启用源并行搜索（默认 skills.sh；上方自定义源）。已装技能目录里出现的技能会标「已安装」。
+        跨所有已启用源并行搜索（默认 skills.sh；上方自定义源；控制面已接入时自动带上「本控制面」）。
+        已装技能目录里出现的技能会标「已安装」。
       </p>
       <div class="mb-2 flex items-center gap-2">
         <input

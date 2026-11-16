@@ -54,11 +54,23 @@ const rows = computed<RegistryRow[]>(() =>
   })),
 );
 
+/** 生效的 registry 地址：设置里填了就用它，否则由宿主决定（官方 / GREYWORK_MCP_REGISTRY_URL）。 */
+const registryUrl = computed(() => settings.mcpRegistryUrl.trim());
+const effectiveOrigin = computed(() => registryUrl.value || "https://registry.modelcontextprotocol.io");
+
+/** 地址改了立刻落盘（下次打开面板还是这个源），已搜过就顺手重搜，避免「表格还是旧源的结果」。 */
+function commitRegistryUrl(event: Event): void {
+  const value = (event.target as HTMLInputElement).value;
+  if (value.trim() === registryUrl.value) return;
+  settings.setMcpRegistryUrl(value);
+  if (searched.value) void runSearch();
+}
+
 async function runSearch(): Promise<void> {
   error.value = null;
   searching.value = true;
   try {
-    results.value = await searchMcpRegistry(query.value);
+    results.value = await searchMcpRegistry(query.value, 40, registryUrl.value || null);
     searched.value = true;
   } catch (cause) {
     results.value = [];
@@ -98,9 +110,9 @@ function onOpenChange(next: boolean): void {
     >
       <div class="flex items-center justify-between px-4 pb-2 pt-3.5">
         <div class="min-w-0">
-          <DialogTitle class="text-[13px] font-medium text-foreground">MCP Registry · 官方</DialogTitle>
+          <DialogTitle class="text-[13px] font-medium text-foreground"> MCP Registry · {{ registryUrl ? "自定义" : "官方" }} </DialogTitle>
           <DialogDescription class="mt-0.5 text-[10.5px] text-dim2">
-            registry.modelcontextprotocol.io · 登记 = 写入本机 MCP 服务器列表
+            {{ effectiveOrigin }} · 登记 = 写入本机 MCP 服务器列表
           </DialogDescription>
         </div>
         <button
@@ -114,6 +126,19 @@ function onOpenChange(next: boolean): void {
       </div>
 
       <div class="min-h-0 flex-1 space-y-2 overflow-y-auto px-4 pb-4 pt-1">
+        <!-- registry 地址：留空 = 宿主默认（官方 registry / GREYWORK_MCP_REGISTRY_URL）。 -->
+        <label class="flex items-center gap-2">
+          <span class="w-14 shrink-0 text-[10.5px] text-dim2">Registry</span>
+          <input
+            :value="registryUrl"
+            class="min-w-0 flex-1 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2.5 py-1.5 font-mono text-[11px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
+            placeholder="https://registry.modelcontextprotocol.io（留空走默认）"
+            :disabled="!hostAvailable"
+            data-testid="mcp-registry-url"
+            @change="commitRegistryUrl"
+            @keydown.enter.prevent="commitRegistryUrl"
+          />
+        </label>
         <div class="flex items-center gap-2">
           <input
             v-model="query"
@@ -137,7 +162,7 @@ function onOpenChange(next: boolean): void {
           v-if="!hostAvailable"
           class="rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2.5 py-1.5 text-[11px] leading-relaxed text-dim2"
         >
-          浏览器预览态无宿主命令，官方 Registry 浏览需要桌面版。
+          浏览器预览态无宿主命令，Registry 浏览需要桌面版。
         </p>
         <p v-else-if="error" class="text-[11px] text-destructive">{{ error }}</p>
         <p v-else-if="searched && results.length === 0 && !searching" class="px-1 text-[11px] text-dim2">没有匹配的服务器。</p>

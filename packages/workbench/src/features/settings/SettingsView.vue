@@ -15,6 +15,7 @@ import PluginSettingsPane from "@/features/settings/PluginSettingsPane.vue";
 import LocalAiSettingsPane from "@/features/settings/LocalAiSettingsPane.vue";
 import ModeSettingsPane from "@/features/settings/ModeSettingsPane.vue";
 import ServicesSettingsPane from "@/features/settings/ServicesSettingsPane.vue";
+import ControlPlaneSettingsPane from "@/features/settings/ControlPlaneSettingsPane.vue";
 import SettingsSkills from "@/features/settings/SettingsSkills.vue";
 import SystemSettingsPane from "@/features/settings/SystemSettingsPane.vue";
 import TeamSettingsPane from "@/features/settings/TeamSettingsPane.vue";
@@ -34,6 +35,7 @@ const SECTION_KEYS = [
   "appearance",
   "mode",
   "services",
+  "controlplane",
   "localai",
   "system",
   "mcp",
@@ -68,6 +70,7 @@ onMounted(() => {
     <ModeSettingsPane v-else-if="section === 'mode'" />
     <PluginSettingsPane v-else-if="section === 'plugins'" />
     <ServicesSettingsPane v-else-if="section === 'services'" />
+    <ControlPlaneSettingsPane v-else-if="section === 'controlplane'" />
     <LocalAiSettingsPane v-else-if="section === 'localai'" />
     <SystemSettingsPane v-else-if="section === 'system'" />
     <McpPane v-else-if="section === 'mcp'" />

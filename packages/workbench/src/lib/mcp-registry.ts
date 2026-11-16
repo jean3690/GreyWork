@@ -82,13 +82,16 @@ export function registryEntryToDraft(entry: McpRegistryEntry): McpRegistryDraft 
 }
 
 /** 搜索官方注册表。仅桌面态可用（宿主命令 mcp_search；浏览器态无代理直连）。 */
-export async function searchMcpRegistry(query: string, limit = 40): Promise<McpRegistryEntry[]> {
+export async function searchMcpRegistry(query: string, limit = 40, origin?: string | null): Promise<McpRegistryEntry[]> {
   if (!hasHostCommands()) {
     throw new Error("MCP registry browsing requires the desktop host");
   }
   const trimmed = query.trim();
+  const registry = (origin ?? "").trim();
   return invoke<McpRegistryEntry[]>("mcp_search", {
     search: trimmed || null,
     limit,
+    // 空 = 宿主默认（官方 registry 或 GREYWORK_MCP_REGISTRY_URL）。
+    origin: registry === "" ? null : registry,
   });
 }

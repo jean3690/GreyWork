@@ -1068,6 +1068,7 @@ export const enUS: MessageSchema = {
       appearance: { title: "Appearance", desc: "Theme, dark mode, UI scale and corner radius" },
       mode: { title: "Run mode", desc: "Execution tier and permission policy" },
       services: { title: "Services", desc: "Third-party cloud services and credentials" },
+      controlplane: { title: "Control plane", desc: "Join back/grey: host registration, heartbeat and cloud task claims" },
       localai: { title: "Local AI", desc: "Workspace semantic retrieval (RAG) and speech-to-text (STT)" },
       system: { title: "System", desc: "Environment info and sandbox" },
       mcp: { title: "MCP", desc: "External tool servers: declared to the agent, connected by it" },

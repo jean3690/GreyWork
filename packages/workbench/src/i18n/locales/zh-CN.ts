@@ -1053,6 +1053,7 @@ export const zhCN = {
       appearance: { title: "外观", desc: "主题、深色模式、界面字号与圆角" },
       mode: { title: "运行模式", desc: "执行档位与权限策略" },
       services: { title: "服务", desc: "第三方云端服务的接入与凭证" },
+      controlplane: { title: "控制面", desc: "接入 back/grey：宿主注册、心跳与云端任务认领" },
       localai: { title: "本地 AI", desc: "工作区语义检索（RAG）与语音转写（STT）" },
       system: { title: "系统", desc: "环境信息与沙盒" },
       mcp: { title: "MCP", desc: "外部工具服务器：声明给 agent，由 agent 连接" },

@@ -121,6 +121,11 @@ export const useSettingsStore = defineStore("settings", () => {
   );
   /** 用户自定义技能市场源。 */
   const skillSources = ref<SkillSourceEntry[]>(DEFAULT_SKILL_SOURCES.map((source) => ({ ...source })));
+  /**
+   * 自定义 MCP registry 地址；空串 = 走宿主默认（官方 registry，或 GREYWORK_MCP_REGISTRY_URL）。
+   * 与 mcpServers 分开存：地址是「去哪儿搜」，服务器列表是「装了什么」。
+   */
+  const mcpRegistryUrl = ref<string>("");
   /** 远程助手 · 各通道开关（登录凭证在宿主，不在快照里）。 */
   const remoteAssist = ref<RemoteAssistPrefs>({
     replyMode: DEFAULT_REMOTE_ASSIST.replyMode,
@@ -257,6 +262,9 @@ export const useSettingsStore = defineStore("settings", () => {
     }
     // 本地 AI：缺字段落默认（旧快照读入后就是「全关」）。
     localAi.value = normalizeLocalAi(saved.localAi);
+    if (typeof saved.mcpRegistryUrl === "string") {
+      mcpRegistryUrl.value = saved.mcpRegistryUrl.trim();
+    }
     if (Array.isArray(saved.skillSources)) {
       skillSources.value = saved.skillSources
         .filter((source) => source && typeof source.id === "string" && typeof source.label === "string" && SKILL_SOURCE_TYPES[source.type])
@@ -309,6 +317,7 @@ export const useSettingsStore = defineStore("settings", () => {
       runMode: runMode.value,
       workspaceDir: workspaceDir.value,
       mcpServers: mcpServers.value,
+      mcpRegistryUrl: mcpRegistryUrl.value,
       skillSources: skillSources.value,
       serviceProviders: serviceProviders.value,
       selectedOfficeProviderId: selectedOfficeProviderId.value,
@@ -472,6 +481,12 @@ export const useSettingsStore = defineStore("settings", () => {
     persist();
   }
 
+  /** 自定义 MCP registry 地址；空串恢复默认（官方）。 */
+  function setMcpRegistryUrl(url: string): void {
+    mcpRegistryUrl.value = url.trim();
+    persist();
+  }
+
   /* ===== 技能市场源管理 ===== */
 
   /** 新增或按 id 覆盖一个技能市场源。 */
@@ -560,6 +575,7 @@ export const useSettingsStore = defineStore("settings", () => {
     selectedModelProviderId,
     modelProviders,
     mcpServers,
+    mcpRegistryUrl,
     enabledMcpServers,
     upsertMcpServer,
     removeMcpServer,
@@ -567,6 +583,7 @@ export const useSettingsStore = defineStore("settings", () => {
     setMcpServerEnabled,
     setAllMcpServersEnabled,
     resetMcpServers,
+    setMcpRegistryUrl,
     skillSources,
     upsertSkillSource,
     removeSkillSource,
