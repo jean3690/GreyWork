@@ -14,6 +14,7 @@
 import { authHeaders, endpointUrl, resolveApiKey, truncate, type LlmChatMessage } from "./llm.js";
 import path from "node:path";
 
+import { listSkills, readSkill, skillIndexPrompt } from "./agent-skills.js";
 import { gitDiff, gitLog, gitStatus } from "./git.js";
 import { shellRun } from "./shell-run.js";
 import type { EventBus } from "./events.js";
@@ -272,6 +273,20 @@ function toolSchemas(allowWrite: boolean, allowShell: boolean): Record<string, u
             regex: { type: "boolean", description: "为 true 时把 query 当正则表达式解析。" },
           },
           required: ["query"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "read_skill",
+        description: "读取工作区里一份技能的完整说明（SKILL.md）。系统提示里只列了技能名与一句话说明，需要按某个技能做事时先读它。",
+        parameters: {
+          type: "object",
+          properties: {
+            skill_id: { type: "string", description: "技能 id（即 .agents/skills 下的目录名）。" },
+          },
+          required: ["skill_id"],
         },
       },
     },
@@ -586,6 +601,17 @@ export async function executeTool(
         path: base,
       };
     }
+    if (name === "read_skill") {
+      const id = argStr(input, "skill_id");
+      const skill = readSkill(access, cwd, id);
+      const files = skill.files.length > 0 ? "\n\n（该技能目录下的文件：" + skill.files.join("、") + "）" : "";
+      return {
+        content: clampOutput(skill.text + files),
+        error: null,
+        summary: "读取技能 " + id,
+        path: path.join(cwd, ".agents", "skills", id),
+      };
+    }
     if (name === "git_status") {
       const items = await gitStatus(access, cwd);
       if (items.length === 0) {
@@ -714,7 +740,7 @@ export async function executeTool(
     return failed(
       "没有名为 " +
         name +
-        " 的工具。可用工具：read_file（读文本文件）、list_dir（列目录）、search_text（搜关键字）、git_log（最近提交）、git_status（改动清单）、git_diff（改动内容）",
+        " 的工具。可用工具：read_file（读文本文件）、list_dir（列目录）、search_text（搜关键字）、read_skill（读技能说明）、git_log（最近提交）、git_status（改动清单）、git_diff（改动内容）",
       null,
     );
   } catch (error) {
@@ -876,18 +902,23 @@ export class LlmAgentHost {
     }
     const requestId = this.nextId++;
     const permission = resolvePermission(args.permissionTier);
+    const cwd = resolveCwd(this.access, args.cwd);
+    const messages = args.messages.map((message) => ({ role: message.role, content: message.content }));
+    // 技能索引只放系统提示（id + 名称 + 一句话），正文由模型按需 read_skill。
+    const skillIndex = skillIndexPrompt(listSkills(this.access, cwd));
+    if (skillIndex !== null) messages.unshift({ role: "system", content: skillIndex });
     const turn: AgentTurn = {
       baseUrl,
       model,
       apiKeyEnv: args.apiKeyEnv ?? "",
-      messages: args.messages.map((message) => ({ role: message.role, content: message.content })),
+      messages,
       reasoningEffort: args.reasoningEffort ?? "",
       headers: args.headers ?? {},
       temperature: args.temperature ?? null,
       maxTokens: args.maxTokens ?? null,
       maxRounds: Math.min(Math.max(args.maxRounds ?? DEFAULT_MAX_ROUNDS, 1), HARD_MAX_ROUNDS),
       clientToken: args.clientToken ?? "",
-      cwd: resolveCwd(this.access, args.cwd),
+      cwd,
       pendingPermissions: new Set<number>(),
       policy: {
         write: permission,
