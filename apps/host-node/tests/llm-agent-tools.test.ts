@@ -27,8 +27,9 @@ function makeWorkspace(): { root: string; access: WorkspaceAccess } {
 }
 
 /** 写策略：auto = 不问直接写；ask = 走确认回调；deny = 只读。 */
-const autoWrite: ToolPolicy = { write: "auto", confirm: async () => true };
-const askWrite = (allow: boolean): ToolPolicy => ({ write: "ask", confirm: async () => allow });
+const autoWrite: ToolPolicy = { write: "auto", shell: "deny", confirm: async () => true };
+const askWrite = (allow: boolean): ToolPolicy => ({ write: "ask", shell: "deny", confirm: async () => allow });
+const askShell = (allow: boolean): ToolPolicy => ({ write: "deny", shell: "ask", confirm: async () => allow });
 
 describe("本机 agent 工具面", () => {
   it("search_text 命中源码但不扫 node_modules", async () => {
@@ -129,6 +130,7 @@ describe("本机 agent 工具面", () => {
     const seen: string[] = [];
     const policy: ToolPolicy = {
       write: "ask",
+      shell: "deny",
       confirm: async (request) => {
         seen.push(request.title + "\n" + request.diff);
         return false;
@@ -160,5 +162,45 @@ describe("本机 agent 工具面", () => {
     );
     expect(result.error).toBeNull();
     expect(readFileSync(path.join(root, "src", "app.ts"), "utf8")).toContain("needle = 2");
+  });
+
+  it("shell=deny 时 run_shell 不可用", async () => {
+    const { root, access } = makeWorkspace();
+    const result = await executeTool(access, root, "run_shell", { command: "echo hi" }, autoWrite);
+    expect(result.error).toContain("full 档位");
+  });
+
+  it("run_shell 允许时执行命令并带回输出", async () => {
+    const { root, access } = makeWorkspace();
+    const result = await executeTool(access, root, "run_shell", { command: 'node -e "console.log(41 + 1)"' }, askShell(true));
+    expect(result.error).toBeNull();
+    expect(result.content).toContain("42");
+    expect(result.summary).toContain("退出码 0");
+  });
+
+  it("run_shell 被拒时命令不执行", async () => {
+    const { root, access } = makeWorkspace();
+    writeFileSync(path.join(root, "touch.cjs"), "require('fs').writeFileSync('ran.txt','1');\n");
+    const seen: string[] = [];
+    const policy: ToolPolicy = {
+      write: "deny",
+      shell: "ask",
+      confirm: async (request) => {
+        seen.push(request.command ?? "");
+        return false;
+      },
+    };
+    const result = await executeTool(access, root, "run_shell", { command: "node touch.cjs" }, policy);
+    expect(result.error).toContain("用户拒绝");
+    expect(existsSync(path.join(root, "ran.txt"))).toBe(false);
+    expect(seen[0]).toBe("node touch.cjs");
+  });
+
+  it("非零退出码把输出一起带回（测试失败要看日志）", async () => {
+    const { root, access } = makeWorkspace();
+    writeFileSync(path.join(root, "fail.cjs"), "console.log('boom');\nprocess.exit(2);\n");
+    const result = await executeTool(access, root, "run_shell", { command: "node fail.cjs" }, askShell(true));
+    expect(result.error).toContain("退出码 2");
+    expect(result.content).toContain("boom");
   });
 });

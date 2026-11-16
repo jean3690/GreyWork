@@ -15,6 +15,7 @@ import { authHeaders, endpointUrl, resolveApiKey, truncate, type LlmChatMessage 
 import path from "node:path";
 
 import { gitDiff, gitLog, gitStatus } from "./git.js";
+import { shellRun } from "./shell-run.js";
 import type { EventBus } from "./events.js";
 import type { WorkspaceAccess } from "./workspace-access.js";
 
@@ -115,16 +116,22 @@ interface ToolOutput {
 
 /* ===== 工具的 openai function schema ===== */
 
-/** 写操作的放行策略：由权限档位决定（read-only / workspace / full）。 */
+/** 写/执行操作的放行策略：由权限档位决定（read-only / workspace / full）。 */
 export interface ToolPolicy {
   write: "deny" | "ask" | "auto";
-  /** 询问用户是否允许这次写入；ask 模式下拒绝/超时都返回 false。 */
-  confirm(request: { title: string; paths: string[]; diff: string }): Promise<boolean>;
+  /**
+   * 命令执行：只在本机可信宿主 + full 档位给 "ask"（每次都要确认），
+   * 其它情况一律 "deny" —— 与 shell_run 的 TRUSTED_HOST_ONLY 同口径。
+   */
+  shell: "deny" | "ask";
+  /** 询问用户是否允许这次写入/执行；拒绝或超时都返回 false。 */
+  confirm(request: { title: string; paths: string[]; diff: string; command?: string; kind?: "edit" | "execute" }): Promise<boolean>;
 }
 
-/** 缺省策略：不允许写（其它调用方与单测拿到的都是这个安全默认）。 */
+/** 缺省策略：不允许写也不允许执行（其它调用方与单测拿到的都是这个安全默认）。 */
 export const DEFAULT_TOOL_POLICY: ToolPolicy = {
   write: "deny",
+  shell: "deny",
   confirm: async () => false,
 };
 
@@ -207,7 +214,7 @@ async function gateWrite(policy: ToolPolicy, relative: string, before: string, a
   return allowed ? null : failed("用户拒绝了这次写入：" + relative, target);
 }
 
-function toolSchemas(allowWrite: boolean): Record<string, unknown>[] {
+function toolSchemas(allowWrite: boolean, allowShell: boolean): Record<string, unknown>[] {
   return [
     {
       type: "function",
@@ -292,6 +299,29 @@ function toolSchemas(allowWrite: boolean): Record<string, unknown>[] {
       },
     },
     ...(allowWrite ? writeToolSchemas() : []),
+    ...(allowShell ? shellToolSchemas() : []),
+  ];
+}
+
+/** 命令执行：只在「本机可信宿主 + full 档位」暴露，且每次都要用户点头。 */
+function shellToolSchemas(): Record<string, unknown>[] {
+  return [
+    {
+      type: "function",
+      function: {
+        name: "run_shell",
+        description:
+          "在工作区目录里执行一条命令（跑测试、看构建输出、查 git 状态等）。非交互：不要用它开 vim/top 这类 TUI。每次执行都要用户确认。",
+        parameters: {
+          type: "object",
+          properties: {
+            command: { type: "string", description: "要执行的命令（整条传给 shell）。" },
+            timeout_secs: { type: "integer", description: "超时秒数，默认 120，上限 900。" },
+          },
+          required: ["command"],
+        },
+      },
+    },
   ];
 }
 
@@ -643,6 +673,41 @@ export async function executeTool(
         path: target,
       };
     }
+    if (name === "run_shell") {
+      if (policy.shell === "deny") {
+        return failed("当前不允许执行命令：需要 设置 → 运行模式 的 full 档位，且必须是本机可信宿主（服务端模式不开放）。", cwd);
+      }
+      const command = argStr(input, "command").trim();
+      if (command === "") {
+        return failed("run_shell 需要非空 command", cwd);
+      }
+      if (command.length > 2000) {
+        return failed("命令过长（上限 2000 字符）；把它写成脚本文件再用 run_shell 执行", cwd);
+      }
+      const rawTimeout = input.timeout_secs;
+      const timeoutSecs =
+        typeof rawTimeout === "number" && Number.isFinite(rawTimeout) ? Math.min(Math.max(Math.floor(rawTimeout), 5), 900) : 120;
+      const allowed = await policy.confirm({
+        title: "执行命令",
+        paths: [cwd],
+        diff: "",
+        command,
+        kind: "execute",
+      });
+      if (!allowed) {
+        return failed("用户拒绝了这条命令：" + command, cwd);
+      }
+      const result = await shellRun(command, cwd, timeoutSecs * 1000);
+      const footer = result.timedOut ? "已超时（" + timeoutSecs + "s）" : "退出码 " + String(result.exitCode);
+      const header = "$ " + command + "\n（" + footer + "，" + (result.durationMs / 1000).toFixed(1) + "s）";
+      const body = result.output.trim() === "" ? "（无输出）" : result.output;
+      return {
+        content: clampOutput(header + "\n\n" + body + (result.truncated ? "\n\n[输出已截断]" : "")),
+        error: result.timedOut ? "命令超时" : result.exitCode === 0 ? null : "命令退出码 " + String(result.exitCode),
+        summary: "执行命令（" + footer + "）：" + truncate(command, 60),
+        path: cwd,
+      };
+    }
     if (name === "") {
       return failed("这次调用没有工具名（name 为空），请重新发起并指明要用哪个工具", null);
     }
@@ -792,6 +857,8 @@ export class LlmAgentHost {
   constructor(
     private readonly bus: EventBus,
     private readonly access: WorkspaceAccess,
+    /** 本机可信宿主：只有它才允许把 run_shell 暴露给模型（与 shell_run 的门禁同口径）。 */
+    private readonly options: { trusted?: boolean } = {},
   ) {}
 
   private emit(token: string, kind: string, payload: Record<string, unknown>): void {
@@ -824,6 +891,8 @@ export class LlmAgentHost {
       pendingPermissions: new Set<number>(),
       policy: {
         write: permission,
+        // 命令执行比写文件危险一档：只在 full 档 + 可信宿主暴露，且永远逐条确认。
+        shell: this.options.trusted === true && permission === "auto" ? "ask" : "deny",
         confirm: (request) => this.confirmPermission(turn, request),
       },
     };
@@ -867,7 +936,10 @@ export class LlmAgentHost {
   }
 
   /** 写操作前的确认：emit 一张与 ACP 同形的卡，等用户点选或超时。 */
-  private confirmPermission(turn: AgentTurn, request: { title: string; paths: string[]; diff: string }): Promise<boolean> {
+  private confirmPermission(
+    turn: AgentTurn,
+    request: { title: string; paths: string[]; diff: string; command?: string; kind?: "edit" | "execute" },
+  ): Promise<boolean> {
     const requestId = this.nextPermissionId++;
     turn.pendingPermissions.add(requestId);
     const settled = new Promise<boolean>((resolve) => {
@@ -880,9 +952,9 @@ export class LlmAgentHost {
       sessionId: null,
       auto: false,
       chosen: null,
-      toolCallId: "write-" + requestId,
+      toolCallId: "local-" + requestId,
       title: request.title,
-      kind: "edit",
+      kind: request.kind ?? "edit",
       locations: request.paths,
       options: [
         { optionId: "allow", name: "允许本次写入", kind: "allow_once" },
@@ -891,7 +963,8 @@ export class LlmAgentHost {
       // 渲染端据此判断该走 llm_agent_permission_respond 还是 acp_permission_respond。
       source: "llm",
       diff: request.diff,
-      rawInput: { diff: request.diff },
+      // rawInput.command 让卡片能显示「要跑什么」；写入类没有命令，留 diff。
+      rawInput: request.command === undefined ? { diff: request.diff } : { command: request.command },
     });
     return settled;
   }
@@ -909,7 +982,7 @@ export class LlmAgentHost {
   }
 
   private async drive(turn: AgentTurn, controller: AbortController): Promise<void> {
-    const schemas = toolSchemas(turn.policy.write !== "deny");
+    const schemas = toolSchemas(turn.policy.write !== "deny", turn.policy.shell !== "deny");
     const history: Record<string, unknown>[] = [...turn.messages];
     const accumulator = new ToolCallAccumulator();
     const apiKey = resolveApiKey(turn.apiKeyEnv);

@@ -105,7 +105,8 @@ async function main(): Promise<void> {
   const acp = new AcpHost(bus, access);
   const channels = new ChannelRuntime(bus, config.dataDir);
   const llm = new LlmStreamHost(bus);
-  const llmAgent = new LlmAgentHost(bus, access);
+  // trusted = 本机可信宿主：只有它才把 run_shell 暴露给模型（与 shell_run 的门禁同口径）。
+  const llmAgent = new LlmAgentHost(bus, access, { trusted: config.trustedHost });
   const rag = new RagIndexHost(db);
   const terminal = new TerminalHost(bus, access);
   // 控制面接入：配置来自数据目录里的 control-plane.json，或 GREYWORK_CONTROL_URL + TOKEN。
