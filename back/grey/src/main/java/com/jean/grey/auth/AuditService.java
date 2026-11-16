@@ -28,11 +28,15 @@ public class AuditService {
 	public static final String ACTION_CHANNEL_STATUS = "channel_status";
 	public static final String ACTION_ADMIN_PASSWORD_CHANGE = "admin_password_change";
 	public static final String ACTION_ADMIN_LOGIN = "admin_login";
+	public static final String ACTION_CATALOG_UPSERT = "catalog_upsert";
+	public static final String ACTION_CATALOG_STATUS = "catalog_status";
+	public static final String ACTION_CATALOG_DELETE = "catalog_delete";
 
 	public static final String TARGET_USER = "user";
 	public static final String TARGET_DEVICE = "device";
 	public static final String TARGET_ENROLL_CODE = "enroll_code";
 	public static final String TARGET_CHANNEL = "channel";
+	public static final String TARGET_CATALOG = "catalog";
 
 	private static final int MAX_LIST_LIMIT = 200;
 

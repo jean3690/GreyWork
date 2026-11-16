@@ -1,0 +1,44 @@
+{
+  "servers": [
+    {
+      "name": "io.greywork/memory",
+      "title": "本地记忆",
+      "description": "跨会话保存事实与偏好；数据只落在本机文件里（官方 memory 服务器）",
+      "version": "0.1.0",
+      "repository": {
+        "url": "https://github.com/modelcontextprotocol/servers"
+      },
+      "packages": [
+        {
+          "registryType": "npm",
+          "identifier": "@modelcontextprotocol/server-memory",
+          "version": "latest",
+          "environmentVariables": [
+            {
+              "name": "MEMORY_FILE_PATH"
+            }
+          ]
+        }
+      ],
+      "remotes": []
+    },
+    {
+      "name": "io.greywork/fetch",
+      "title": "网页抓取",
+      "description": "把网页正文转成 Markdown 供模型阅读（官方 fetch 服务器）",
+      "version": "0.1.0",
+      "repository": {
+        "url": "https://github.com/modelcontextprotocol/servers"
+      },
+      "packages": [
+        {
+          "registryType": "pypi",
+          "identifier": "mcp-server-fetch",
+          "version": "latest",
+          "environmentVariables": []
+        }
+      ],
+      "remotes": []
+    }
+  ]
+}

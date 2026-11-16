@@ -1,0 +1,34 @@
+{
+  "skills": [
+    {
+      "ref": "greywork/skills/todo-scan",
+      "skillId": "todo-scan",
+      "name": "TODO 扫描",
+      "description": "扫描工作区里的 TODO / FIXME / XXX，按有无责任人汇总成清单",
+      "installs": 128,
+      "files": [
+        {
+          "path": "SKILL.md",
+          "contents": "---\nname: todo-scan\ndescription: 扫描工作区里的 TODO / FIXME / XXX，按有无责任人汇总成清单\n---\n\n# TODO 扫描\n\n## 何时使用\n\n用户问「还有哪些没做完」「TODO 积压多少」「谁欠着活」时。\n\n## 步骤\n\n1. 列出工作区里的 `TODO`、`FIXME`、`XXX`（跳过 `node_modules`、`dist`、`target`、`.git`）。\n2. 逐条记录：`文件:行号`、注释原文、是否带责任人（`TODO(name):` 形式）。\n3. 按「有责任人 / 无责任人」两栏输出表格，末尾补一行统计。\n\n## 输出约定\n\n- 只列真实代码注释，不列被注释掉的整段代码；\n- 超过 50 条时只给前 50 条 + 总数；\n- 不臆造责任人，没有就留空。\n"
+        },
+        {
+          "path": "examples.md",
+          "contents": "# 输出示例\n\n| 位置 | 内容 | 责任人 |\n| --- | --- | --- |\n| `src/app.ts:42` | 补齐登录失败提示 | 张三 |\n| `src/db.ts:118` | 连接池上限需要压测确认 | — |\n"
+        }
+      ]
+    },
+    {
+      "ref": "greywork/skills/release-notes",
+      "skillId": "release-notes",
+      "name": "发版说明生成",
+      "description": "按 git log 归纳本次发版的特性、修复与破坏性变更",
+      "installs": 86,
+      "files": [
+        {
+          "path": "SKILL.md",
+          "contents": "---\nname: release-notes\ndescription: 按 git log 归纳本次发版的特性、修复与破坏性变更\n---\n\n# 发版说明\n\n## 何时使用\n\n准备打 tag、要给用户写更新日志、或需要回顾「这两个版本之间改了什么」时。\n\n## 步骤\n\n1. 取区间：`git log --oneline <上一个 tag>..HEAD`；没有 tag 时让用户给起点。\n2. 按提交类型分组：`feat` → 新特性，`fix` → 修复，`perf` → 性能，其余归入「其他」。\n3. 破坏性变更（提交正文含 `BREAKING CHANGE` 或 `!:`）单独置顶，写清迁移动作。\n4. 同一模块的多条提交合并成一句话，不逐条照抄提交标题。\n\n## 输出约定\n\n- 面向使用者描述影响，不复述实现细节；\n- 每条不超过一行，必要时补一句迁移提示；\n- 空分组不输出。\n"
+        }
+      ]
+    }
+  ]
+}

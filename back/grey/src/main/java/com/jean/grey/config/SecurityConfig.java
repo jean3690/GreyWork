@@ -34,6 +34,11 @@ public class SecurityConfig {
 						.requestMatchers(HttpMethod.POST, "/api/channels/webhook/*").permitAll()
 					// 运维台登录本身必须匿名可达（它就是拿 token 的入口），其余 /api/admin/** 仍要 admin。
 					.requestMatchers(HttpMethod.POST, "/api/admin/auth/login").permitAll()
+						// 能力目录（技能 / MCP 预设）是随版本发布的公开内容：桌面端在「技能源」里
+						// 填控制面地址就能装，不需要登录态，也不含任何用户数据。
+						.requestMatchers(HttpMethod.GET, "/api/skills", "/api/download/**",
+								"/api/market/mcp/**")
+						.permitAll()
 						.requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
 						// 运维台页面（Vue SPA 产物 + 同源 fetch）公开可取：页面不含数据，数据面在 /api/admin/**。
 						.requestMatchers("/admin", "/admin/", "/admin/**").permitAll()
