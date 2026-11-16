@@ -1392,6 +1392,8 @@ HANDLERS.set("llm_agent_start", async (args, ctx) => {
     permissionTier: typeof value.permissionTier === "string" ? value.permissionTier : null,
     // 已启用的 MCP 服务器：与 ACP 会话同一份配置，宿主探测 tools/list 后注册成工具。
     mcpServers: Array.isArray(value.mcpServers) ? (value.mcpServers as AgentMcpServer[]) : null,
+    // 上下文预算：渲染端可给（模型窗口小的端点），缺省由宿主取 32k。
+    contextTokens: typeof value.contextTokens === "number" ? value.contextTokens : null,
   });
 });
 HANDLERS.set("llm_agent_permission_respond", async (args, ctx) => {

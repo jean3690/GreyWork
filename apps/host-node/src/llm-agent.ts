@@ -36,6 +36,20 @@ export const HARD_MAX_ROUNDS = 32;
 
 /** 单次工具输出送进模型上下文的字符上限（12k 字符 ≈ 3-4k token）。 */
 const MAX_TOOL_OUTPUT_CHARS = 12_000;
+
+/** 上下文预算：默认 32k tokens（多数本地/云模型的常用窗口），可由 contextTokens 覆盖。 */
+const DEFAULT_CONTEXT_TOKENS = 32_000;
+const MIN_CONTEXT_TOKENS = 4_000;
+/**
+ * 保留最近的**工具结果**条数不变（不是最近的 N 条消息）。
+ * 按消息条数保护会被 tool/assistant 成对结构稀释：三次读文件就占满 6 条，
+ * 结果一条都折不了，预算形同虚设。
+ */
+const KEEP_RECENT_TOOL_MESSAGES = 2;
+/** 折叠后保留的开头字符数（够模型认出「这是哪次调用的结果」）。 */
+const FOLDED_PREFIX_CHARS = 300;
+/** 折叠标记：重复折叠时据此跳过，避免把占位符再折一次。 */
+const FOLDED_MARK = "[较早的工具结果已折叠]";
 /** git_log 默认返回条数。 */
 const DEFAULT_GIT_LOG_LIMIT = 20;
 /** 目录列举的条目数上限。 */
@@ -86,6 +100,8 @@ export interface AgentStartArgs {
   permissionTier?: string | null;
   /** 已启用的 MCP 服务器（与 ACP 会话用的是同一份配置）。 */
   mcpServers?: AgentMcpServer[] | null;
+  /** 上下文预算（tokens）；缺省 32000，低于 4000 按 4000 兜底。 */
+  contextTokens?: number | null;
 }
 
 interface AgentTurn {
@@ -106,6 +122,8 @@ interface AgentTurn {
   mcpServers: AgentMcpServer[];
   /** 探测到的 MCP 工具（drive 开始时解析，toolSchemas 与调用都读它）。 */
   mcpTools: McpToolBinding[];
+  /** 本回合的上下文预算（tokens）。 */
+  contextTokens: number;
   /** 本回合还没裁决的写请求，回合中止时统一按拒绝收场。 */
   pendingPermissions: Set<number>;
 }
@@ -152,6 +170,58 @@ export const DEFAULT_TOOL_POLICY: ToolPolicy = {
   mcp: "deny",
   confirm: async () => false,
 };
+
+/**
+ * 粗略 token 估算：ASCII 约 4 字符/token，非 ASCII（中文等）约 1 字符/token。
+ * 不用真 tokenizer —— 这里只做「预算护栏」，估偏 20% 不影响正确性，只影响折叠的早晚。
+ */
+export function estimateContextTokens(value: string): number {
+  let ascii = 0;
+  let other = 0;
+  for (const char of value) {
+    if (char.charCodeAt(0) < 128) ascii += 1;
+    else other += 1;
+  }
+  return Math.ceil(ascii / 4) + other;
+}
+
+function messageText(message: Record<string, unknown>): string {
+  const content = message.content;
+  if (typeof content === "string") return content;
+  if (content === null || content === undefined) return "";
+  return JSON.stringify(content);
+}
+
+/**
+ * 超预算时就地折叠较早的工具结果（返回折叠条数）。
+ *
+ * 三条硬约束：
+ * - **只折叠、不删除**：tool_call 与 tool 消息必须成对，删一条就会被端点判 400；
+ * - 只动 role=tool 的内容：assistant 的 tool_calls、system、user 一律不碰；
+ * - 最近的 KEEP_RECENT_MESSAGES 条保持原样，当前推理链不被截断。
+ */
+export function compactHistory(history: Record<string, unknown>[], budgetTokens: number): number {
+  const budget = Math.max(budgetTokens, MIN_CONTEXT_TOKENS);
+  let total = 0;
+  for (const message of history) total += estimateContextTokens(messageText(message)) + 8;
+  if (total <= budget) return 0;
+  let folded = 0;
+  const toolIndexes = history.map((message, index) => (message.role === "tool" ? index : -1)).filter((index) => index >= 0);
+  const protectedIndexes = new Set(toolIndexes.slice(-KEEP_RECENT_TOOL_MESSAGES));
+  for (let index = 0; index < history.length && total > budget; index += 1) {
+    const message = history[index];
+    if (message.role !== "tool" || protectedIndexes.has(index)) continue;
+    const text = messageText(message);
+    if (text.startsWith(FOLDED_MARK)) continue;
+    const head = [...text].slice(0, FOLDED_PREFIX_CHARS).join("");
+    const replacement = FOLDED_MARK + " " + head + (head.length < text.length ? " …" : "");
+    const saved = estimateContextTokens(text) - estimateContextTokens(replacement);
+    message.content = replacement;
+    total -= saved;
+    folded += 1;
+  }
+  return folded;
+}
 
 /** 行级 diff（公共前后缀裁剪）：够给用户看清改了哪几行，不做完整 LCS。 */
 export function lineDiff(before: string, after: string): string {
@@ -970,6 +1040,12 @@ export class LlmAgentHost {
       pendingPermissions: new Set<number>(),
       mcpServers: args.mcpServers ?? [],
       mcpTools: [],
+      contextTokens: Math.max(
+        typeof args.contextTokens === "number" && Number.isFinite(args.contextTokens)
+          ? Math.floor(args.contextTokens)
+          : DEFAULT_CONTEXT_TOKENS,
+        MIN_CONTEXT_TOKENS,
+      ),
       policy: {
         write: permission,
         // 命令执行比写文件危险一档：只在 full 档 + 可信宿主暴露，且永远逐条确认。
@@ -1074,6 +1150,11 @@ export class LlmAgentHost {
 
     // round < maxRounds 是工具回合；最后一轮是收尾回合（tool_choice: none）。
     for (let round = 0; round <= turn.maxRounds; round += 1) {
+      // 每轮请求前压一次：工具结果越滚越多，等到撞 400 再处理就来不及了。
+      const folded = compactHistory(history, turn.contextTokens);
+      if (folded > 0) {
+        console.log(`[agent] 上下文超预算，折叠了 ${folded} 条较早的工具结果`);
+      }
       const body: Record<string, unknown> = {
         model: turn.model,
         stream: true,
