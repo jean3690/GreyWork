@@ -165,7 +165,8 @@ export function llmToolEventToActivity(kind: "call" | "result", payload: LlmTool
   const toolCallId = typeof payload.id === "string" ? payload.id : "";
   if (!toolCallId) return null;
   const name = typeof payload.name === "string" ? payload.name : "";
-  // 首版工具面全是只读（read_file / list_dir / git_log），故 kind 恒为 read；
+  // 工具面全是只读（read_file / list_dir / search_text / git_log / git_status / git_diff），
+  // 故 kind 恒为 read；
   // 将来加写工具时按名字分流，与 ACP 侧 `resolveToolKind` 同一套判据。
   const base = {
     toolCallId,

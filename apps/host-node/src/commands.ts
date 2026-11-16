@@ -1385,6 +1385,8 @@ HANDLERS.set("llm_agent_start", async (args, ctx) => {
     maxTokens: typeof value.maxTokens === "number" ? value.maxTokens : null,
     maxRounds: typeof value.maxRounds === "number" ? value.maxRounds : null,
     clientToken: typeof value.clientToken === "string" ? value.clientToken : null,
+    // 工具的工作目录：渲染端给当前工作区根，缺省回落到授权面默认根。
+    cwd: typeof value.cwd === "string" ? value.cwd : null,
   });
 });
 HANDLERS.set("llm_agent_stop", async (args, ctx) => {

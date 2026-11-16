@@ -12,7 +12,9 @@
  * - 触顶后要收尾回合：追加一次 tool_choice 为 none 的收尾请求，而不是直接掐断。
  */
 import { authHeaders, endpointUrl, resolveApiKey, truncate, type LlmChatMessage } from "./llm.js";
-import { gitLog } from "./git.js";
+import path from "node:path";
+
+import { gitDiff, gitLog, gitStatus } from "./git.js";
 import type { EventBus } from "./events.js";
 import type { WorkspaceAccess } from "./workspace-access.js";
 
@@ -32,6 +34,28 @@ const DEFAULT_GIT_LOG_LIMIT = 20;
 /** 目录列举的条目数上限。 */
 const MAX_DIR_ENTRIES = 200;
 
+/** search_text：跳过的目录（依赖/产物/版本库，扫它们只会烧上下文）。 */
+const SEARCH_IGNORED_DIRS = new Set([
+  ".git",
+  "node_modules",
+  "dist",
+  "build",
+  "target",
+  "coverage",
+  ".next",
+  ".nuxt",
+  ".venv",
+  "venv",
+  "__pycache__",
+  ".turbo",
+  ".cache",
+]);
+/** 单次搜索扫过的文件数上限与命中数上限。 */
+const MAX_SEARCH_FILES = 2000;
+const MAX_SEARCH_MATCHES = 80;
+/** 跳过超大文件（生成的 JSON / 压缩包对定位没帮助）。 */
+const MAX_SEARCH_FILE_BYTES = 512 * 1024;
+
 export interface AgentStartArgs {
   baseUrl: string;
   model: string;
@@ -43,6 +67,11 @@ export interface AgentStartArgs {
   maxTokens?: number | null;
   maxRounds?: number | null;
   clientToken?: string | null;
+  /**
+   * 本轮的工作区根（绝对路径）。缺省 = 授权面默认根（~/.greyWork）。
+   * 传了就必须在授权面内 —— 宿主不会因为「是模型要求的」就放宽。
+   */
+  cwd?: string | null;
 }
 
 interface AgentTurn {
@@ -56,6 +85,7 @@ interface AgentTurn {
   maxTokens: number | null;
   maxRounds: number;
   clientToken: string;
+  cwd: string;
 }
 
 interface ToolCall {
@@ -117,6 +147,46 @@ function toolSchemas(): Record<string, unknown>[] {
         },
       },
     },
+    {
+      type: "function",
+      function: {
+        name: "search_text",
+        description:
+          "在工作区里按关键字搜索文本，返回「文件:行号: 内容」。这是定位代码的第一手段：先用它找到出处，再 read_file 读全文。默认跳过 node_modules / dist / target 等目录。",
+        parameters: {
+          type: "object",
+          properties: {
+            query: { type: "string", description: "要搜的文本；默认按字面量匹配（不区分大小写）。" },
+            path: { type: "string", description: "限定搜索的子目录，省略时搜整个工作区。" },
+            regex: { type: "boolean", description: "为 true 时把 query 当正则表达式解析。" },
+          },
+          required: ["query"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "git_status",
+        description: "列出工作区未提交的改动（新增 / 修改 / 删除 / 未跟踪）。先看它再决定 diff 哪个文件。",
+        parameters: { type: "object", properties: {}, required: [] },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "git_diff",
+        description: "读取工作区未提交改动的 diff 文本。可只取一个文件，也可看已暂存（staged）的版本。",
+        parameters: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "只看这个文件（相对工作区根）。" },
+            staged: { type: "boolean", description: "为 true 时看暂存区（--cached）。" },
+          },
+          required: [],
+        },
+      },
+    },
   ];
 }
 
@@ -151,9 +221,20 @@ function argStr(input: Record<string, unknown>, key: string): string {
 }
 
 /** 把模型给的路径锚成绝对路径：相对的挂在工作区根下（.. 交给 resolveExisting 拦）。 */
-function anchorToRoot(access: WorkspaceAccess, raw: string): string {
+function anchorToRoot(cwd: string, raw: string): string {
   if (raw.startsWith("/") || /^[A-Za-z]:[\\/]/.test(raw)) return raw;
-  return access.root + "/" + raw.replace(/^\/+/, "");
+  return path.join(cwd, raw.replace(/^[\\/]+/, ""));
+}
+
+/**
+ * 解析本轮工作区根：给了就必须是**已授权且存在**的目录（listDir 走 resolveExisting，
+ * 越界或不存在直接抛错）；没给回落到授权面默认根。
+ */
+function resolveCwd(access: WorkspaceAccess, raw: string | null | undefined): string {
+  const candidate = (raw ?? "").trim();
+  if (candidate === "") return access.root;
+  access.listDir(candidate);
+  return candidate.replace(/[\\/]+$/, "");
 }
 
 function optionalLimit(input: Record<string, unknown>): number | null {
@@ -166,10 +247,88 @@ function optionalLimit(input: Record<string, unknown>): number | null {
 }
 
 /** 执行一次工具调用。未知工具名返回错误而不是崩掉回合：模型经常编造工具名。 */
-async function executeTool(access: WorkspaceAccess, name: string, input: Record<string, unknown>): Promise<ToolOutput> {
+interface SearchResult {
+  lines: string[];
+  files: number;
+  hits: number;
+  truncated: boolean;
+}
+
+/**
+ * 在工作区里逐文件扫关键字。返回「相对路径:行号: 内容」——
+ * 模型拿到这种行能直接定位，不用再猜文件名。
+ *
+ * 三个防爆走样的闸门：跳过依赖/产物目录、单文件 ≤512KB、命中与文件数都有上限。
+ * 另用 visited 挡住软链接成环（目录项已解析过链接，环会表现为重复路径）。
+ */
+function searchWorkspace(
+  access: WorkspaceAccess,
+  root: string,
+  query: string,
+  options: { regex: boolean; maxMatches: number },
+): SearchResult {
+  let matcher: RegExp;
+  try {
+    matcher = new RegExp(options.regex ? query : query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+  } catch (error) {
+    throw new Error("正则表达式不合法：" + (error as Error).message, { cause: error });
+  }
+  const lines: string[] = [];
+  const visited = new Set<string>();
+  const queue: { dir: string; depth: number }[] = [{ dir: root, depth: 0 }];
+  visited.add(root);
+  let files = 0;
+  let hits = 0;
+  let truncated = false;
+  while (queue.length > 0 && !truncated) {
+    const current = queue.shift();
+    if (!current) break;
+    const entries = access.listDir(current.dir);
+    for (const entry of entries) {
+      if (truncated) break;
+      if (entry.kind === "directory") {
+        if (SEARCH_IGNORED_DIRS.has(entry.name) || current.depth >= 24 || visited.has(entry.path)) continue;
+        visited.add(entry.path);
+        queue.push({ dir: entry.path, depth: current.depth + 1 });
+        continue;
+      }
+      if (entry.size === null || entry.size > MAX_SEARCH_FILE_BYTES) continue;
+      if (files >= MAX_SEARCH_FILES) {
+        truncated = true;
+        break;
+      }
+      files += 1;
+      let text: string;
+      try {
+        text = access.readTextFile(entry.path);
+      } catch {
+        // 二进制 / 无权限 / 编码不合法：按「不是文本」跳过，不打断整次搜索。
+        continue;
+      }
+      const relative = path.relative(root, entry.path) || entry.name;
+      const rows = text.split("\n");
+      for (let index = 0; index < rows.length; index += 1) {
+        if (!matcher.test(rows[index])) continue;
+        hits += 1;
+        lines.push(relative + ":" + (index + 1) + ": " + rows[index].trim().slice(0, 200));
+        if (hits >= options.maxMatches) {
+          truncated = true;
+          break;
+        }
+      }
+    }
+  }
+  return { lines, files, hits, truncated };
+}
+
+/**
+ * 工具执行入口。导出是为了单测能直接喂工具名/入参，
+ * 不用起一个假模型端点绕整圈（整圈的协议细节另有覆盖）。
+ */
+export async function executeTool(access: WorkspaceAccess, cwd: string, name: string, input: Record<string, unknown>): Promise<ToolOutput> {
   try {
     if (name === "read_file") {
-      const path = anchorToRoot(access, argStr(input, "path"));
+      const path = anchorToRoot(cwd, argStr(input, "path"));
       const text = access.readTextFile(path);
       return {
         content: clampOutput(text),
@@ -179,7 +338,7 @@ async function executeTool(access: WorkspaceAccess, name: string, input: Record<
       };
     }
     if (name === "list_dir") {
-      const path = input.path === undefined || input.path === null ? access.root : anchorToRoot(access, argStr(input, "path"));
+      const path = input.path === undefined || input.path === null ? cwd : anchorToRoot(cwd, argStr(input, "path"));
       const entries = access.listDir(path);
       const total = entries.length;
       const shown = Math.min(total, MAX_DIR_ENTRIES);
@@ -195,7 +354,7 @@ async function executeTool(access: WorkspaceAccess, name: string, input: Record<
     }
     if (name === "git_log") {
       const limit = optionalLimit(input) ?? DEFAULT_GIT_LOG_LIMIT;
-      const root = access.root;
+      const root = cwd;
       const commits = await gitLog(access, root, limit, null);
       if (commits.length === 0) {
         return {
@@ -213,10 +372,84 @@ async function executeTool(access: WorkspaceAccess, name: string, input: Record<
       }
       return { content: text, error: null, summary: "读取最近 " + limit + " 条提交（" + commits.length + " 条）", path: root };
     }
+    if (name === "search_text") {
+      const query = argStr(input, "query");
+      if (query.trim() === "") {
+        return failed("search_text 需要非空的 query", null);
+      }
+      const base = input.path === undefined || input.path === null || input.path === "" ? cwd : anchorToRoot(cwd, argStr(input, "path"));
+      // 先探一下目录：路径不存在要报错，而不是「搜到 0 条」让模型误以为文件里没有。
+      access.listDir(base);
+      const found = searchWorkspace(access, base, query, {
+        regex: input.regex === true,
+        maxMatches: MAX_SEARCH_MATCHES,
+      });
+      if (found.hits === 0) {
+        return {
+          content: `没有命中。已扫 ${found.files} 个文件（跳过依赖/产物目录）。可以换关键字，或先用 list_dir 摸结构。`,
+          error: null,
+          summary: '搜索 "' + query + '"（0 条 / ' + found.files + " 个文件）",
+          path: base,
+        };
+      }
+      let text = found.lines.join("\n");
+      if (found.truncated) {
+        text += "\n\n[已截断：命中数达到上限 " + MAX_SEARCH_MATCHES + " 条。缩小 path 或换更具体的关键字]";
+      }
+      return {
+        content: clampOutput(text),
+        error: null,
+        summary: '搜索 "' + query + '"（' + found.hits + " 条 / " + found.files + " 个文件）",
+        path: base,
+      };
+    }
+    if (name === "git_status") {
+      const items = await gitStatus(access, cwd);
+      if (items.length === 0) {
+        return {
+          content: "工作区没有未提交的改动。",
+          error: null,
+          summary: "读取改动清单（干净）",
+          path: cwd,
+        };
+      }
+      const shown = items.slice(0, MAX_DIR_ENTRIES);
+      const text = shown.map((item) => item.status + " " + (item.staged ? "[已暂存] " : "") + item.path).join("\n");
+      return {
+        content: clampOutput(text),
+        error: null,
+        summary: "读取改动清单（" + items.length + " 项）",
+        path: cwd,
+      };
+    }
+    if (name === "git_diff") {
+      const filePath = input.path === undefined || input.path === null || input.path === "" ? null : argStr(input, "path");
+      const staged = input.staged === true;
+      const text = await gitDiff(access, cwd, filePath, staged);
+      if (text.trim() === "") {
+        return {
+          content: "没有可显示的 diff（未跟踪的新文件不会出现在 git diff 里；已暂存的改动需要 staged=true）。",
+          error: null,
+          summary: "读取 diff（空）",
+          path: filePath === null ? cwd : filePath,
+        };
+      }
+      return {
+        content: clampOutput(text),
+        error: null,
+        summary: "读取 diff（" + [...text].length + " 字符" + (staged ? "，暂存区" : "") + "）",
+        path: filePath === null ? cwd : filePath,
+      };
+    }
     if (name === "") {
       return failed("这次调用没有工具名（name 为空），请重新发起并指明要用哪个工具", null);
     }
-    return failed("没有名为 " + name + " 的工具。可用工具：read_file（读文本文件）、list_dir（列目录）、git_log（最近提交）", null);
+    return failed(
+      "没有名为 " +
+        name +
+        " 的工具。可用工具：read_file（读文本文件）、list_dir（列目录）、search_text（搜关键字）、git_log（最近提交）、git_status（改动清单）、git_diff（改动内容）",
+      null,
+    );
   } catch (error) {
     return failed((error as Error).message, null);
   }
@@ -378,6 +611,7 @@ export class LlmAgentHost {
       maxTokens: args.maxTokens ?? null,
       maxRounds: Math.min(Math.max(args.maxRounds ?? DEFAULT_MAX_ROUNDS, 1), HARD_MAX_ROUNDS),
       clientToken: args.clientToken ?? "",
+      cwd: resolveCwd(this.access, args.cwd),
     };
     const controller = new AbortController();
     this.tasks.set(requestId, controller);
@@ -470,7 +704,7 @@ export class LlmAgentHost {
       for (const call of outcome.calls) {
         const input = parseArguments(call.arguments);
         this.emit(turn.clientToken, "llm-tool-call", { id: call.id, name: call.name, input, round });
-        const output = await executeTool(this.access, call.name, input);
+        const output = await executeTool(this.access, turn.cwd, call.name, input);
         this.emit(turn.clientToken, "llm-tool-result", {
           id: call.id,
           ok: output.error === null,

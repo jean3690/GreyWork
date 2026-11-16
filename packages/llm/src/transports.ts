@@ -65,7 +65,8 @@ export interface LlmChatParams {
 }
 
 /**
- * 本机 agent 回合：模型可用只读工具（read_file / list_dir / git_log），
+ * 本机 agent 回合：模型可用只读工具（read_file / list_dir / search_text / git_log /
+ * git_status / git_diff），
  * 由宿主在自己的授权面内执行，直到它给出结论。
  *
  * 与 `LlmChatParams` 的差异只在工具回合上限上；其余字段同义（`clientToken` 同样
@@ -74,6 +75,8 @@ export interface LlmChatParams {
 export interface LlmAgentParams extends LlmChatParams {
   /** 工具回合上限；缺省由宿主取默认值，上限由宿主硬夹。 */
   maxRounds?: number;
+  /** 工具的工作目录（工作区根，绝对路径）；缺省由宿主回落到授权面默认根。 */
+  cwd?: string | null;
 }
 
 /** 连接参数：模型发现 / 向量 / 语音转写共用（都是打同一个 OpenAI 兼容端点）。 */

@@ -15,6 +15,7 @@
 import { buildLlmHistory, localReasoningOverride, resolveLocalEffort } from "../chat-llm";
 import { selectLlmProvider } from "../../lib/llm-provider";
 import { retrieveContext, transcribeAttachment, type LocalAiDeps } from "../../lib/local-ai";
+import { resolveWorkspaceRoot } from "../../lib/workspace-dir";
 import { isAskSettled } from "../../lib/ask-question";
 import { llmToolEventToActivity, mergeToolActivities } from "../../lib/tool-activity";
 import { t, tid, uid, clearSim } from "./shared";
@@ -22,6 +23,19 @@ import type { PermissionTrace, ThreadMessage, ToolActivity } from "../../types";
 import type { ChatStoreState } from "./state";
 import type { SessionApi } from "./session";
 import type { DemoApi } from "./demo";
+
+/**
+ * agent 回合的工具工作目录 = 当前会话/工作区根。解析不出来就交 null，
+ * 由宿主回落到授权面默认根（与加这个参数之前的行为一致）。
+ */
+async function agentCwd(): Promise<string | null> {
+  try {
+    const resolved = await resolveWorkspaceRoot();
+    return resolved.dir;
+  } catch {
+    return null;
+  }
+}
 
 export interface StreamDeps {
   state: ChatStoreState;
@@ -209,7 +223,9 @@ export function createStreamSlice({ state, getSession, getDemo }: StreamDeps): S
         maxTokens: provider.maxTokens,
         clientToken: activeTurnToken,
       };
-      llmRequestId = activeTurnIsAgent ? await llm.agentRun({ ...request, maxRounds: provider.agentMaxRounds }) : await llm.chat(request);
+      llmRequestId = activeTurnIsAgent
+        ? await llm.agentRun({ ...request, maxRounds: provider.agentMaxRounds, cwd: await agentCwd() })
+        : await llm.chat(request);
     } catch (error) {
       message.content = `[LLM 调用失败] ${error instanceof Error ? error.message : String(error)}`;
       sessionStore.markDirty();

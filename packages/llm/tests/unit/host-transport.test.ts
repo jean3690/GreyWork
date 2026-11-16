@@ -128,7 +128,7 @@ describe("HostLlmTransport", () => {
     vi.unstubAllGlobals();
   });
 
-  it("agentRun 打到 llm_agent_start，参数形状与 chat 一致外加 maxRounds", async () => {
+  it("agentRun 打到 llm_agent_start，参数形状与 chat 一致外加 maxRounds / cwd", async () => {
     h.invoke.mockResolvedValue(9);
     vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "server" });
     const transport = new HostLlmTransport();
@@ -138,6 +138,7 @@ describe("HostLlmTransport", () => {
       messages: [{ role: "user", content: "看看 src" }],
       clientToken: "turn-a",
       maxRounds: 8,
+      cwd: "/work/project",
     });
     expect(id).toBe(9);
     expect(h.invoke).toHaveBeenCalledWith("llm_agent_start", {
@@ -151,6 +152,7 @@ describe("HostLlmTransport", () => {
       maxTokens: null,
       maxRounds: 8,
       clientToken: "turn-a",
+      cwd: "/work/project",
     });
     vi.unstubAllGlobals();
   });
@@ -160,7 +162,7 @@ describe("HostLlmTransport", () => {
     vi.stubGlobal("window", { __GREYWORK_RUNTIME__: "server" });
     const transport = new HostLlmTransport();
     await transport.agentRun({ baseUrl: "http://x", model: "m", messages: [] });
-    expect(h.invoke).toHaveBeenCalledWith("llm_agent_start", expect.objectContaining({ maxRounds: null }));
+    expect(h.invoke).toHaveBeenCalledWith("llm_agent_start", expect.objectContaining({ maxRounds: null, cwd: null }));
     vi.unstubAllGlobals();
   });
 
