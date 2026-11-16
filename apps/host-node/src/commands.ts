@@ -35,6 +35,7 @@ import { ragIndexBuild, ragSearch } from "./rag.js";
 import { listWorktrees, provisionWorktree, releaseWorktree, restoreWorktree, snapshotWorktree } from "./worktree.js";
 import { chatComplete, embed, listModels, transcribe, type LlmChatMessage, type LlmStreamHost } from "./llm.js";
 import type { AgentStartArgs, LlmAgentHost } from "./llm-agent.js";
+import type { AgentMcpServer } from "./agent-mcp.js";
 import type { AcpHost } from "./acp.js";
 import { validateDirKey } from "./plugin-market.js";
 import { getBot } from "./wechat-channel.js";
@@ -1389,6 +1390,8 @@ HANDLERS.set("llm_agent_start", async (args, ctx) => {
     cwd: typeof value.cwd === "string" ? value.cwd : null,
     // 权限档位：read-only 不暴露写工具，workspace 每次写都要确认，full 直接放行。
     permissionTier: typeof value.permissionTier === "string" ? value.permissionTier : null,
+    // 已启用的 MCP 服务器：与 ACP 会话同一份配置，宿主探测 tools/list 后注册成工具。
+    mcpServers: Array.isArray(value.mcpServers) ? (value.mcpServers as AgentMcpServer[]) : null,
   });
 });
 HANDLERS.set("llm_agent_permission_respond", async (args, ctx) => {

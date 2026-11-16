@@ -14,6 +14,8 @@
 import { authHeaders, endpointUrl, resolveApiKey, truncate, type LlmChatMessage } from "./llm.js";
 import path from "node:path";
 
+import type { AgentMcpServer, McpToolBinding } from "./agent-mcp.js";
+import { callMcpTool, mcpToolSchemas, resolveMcpTools } from "./agent-mcp.js";
 import { listSkills, readSkill, skillIndexPrompt } from "./agent-skills.js";
 import { gitDiff, gitLog, gitStatus } from "./git.js";
 import { shellRun } from "./shell-run.js";
@@ -82,6 +84,8 @@ export interface AgentStartArgs {
    * 缺省 = read-only（宿主不替用户放宽）。
    */
   permissionTier?: string | null;
+  /** 已启用的 MCP 服务器（与 ACP 会话用的是同一份配置）。 */
+  mcpServers?: AgentMcpServer[] | null;
 }
 
 interface AgentTurn {
@@ -98,6 +102,10 @@ interface AgentTurn {
   cwd: string;
   /** 本回合的写操作策略（由权限档位映射）。 */
   policy: ToolPolicy;
+  /** 本回合要接入的 MCP 服务器（来自渲染端的已启用清单）。 */
+  mcpServers: AgentMcpServer[];
+  /** 探测到的 MCP 工具（drive 开始时解析，toolSchemas 与调用都读它）。 */
+  mcpTools: McpToolBinding[];
   /** 本回合还没裁决的写请求，回合中止时统一按拒绝收场。 */
   pendingPermissions: Set<number>;
 }
@@ -125,14 +133,23 @@ export interface ToolPolicy {
    * 其它情况一律 "deny" —— 与 shell_run 的 TRUSTED_HOST_ONLY 同口径。
    */
   shell: "deny" | "ask";
+  /** MCP 工具：read-only 不暴露，workspace 每次确认，full 直接放行。 */
+  mcp: "deny" | "ask" | "auto";
   /** 询问用户是否允许这次写入/执行；拒绝或超时都返回 false。 */
-  confirm(request: { title: string; paths: string[]; diff: string; command?: string; kind?: "edit" | "execute" }): Promise<boolean>;
+  confirm(request: {
+    title: string;
+    paths: string[];
+    diff: string;
+    command?: string;
+    kind?: "edit" | "execute" | "tool";
+  }): Promise<boolean>;
 }
 
 /** 缺省策略：不允许写也不允许执行（其它调用方与单测拿到的都是这个安全默认）。 */
 export const DEFAULT_TOOL_POLICY: ToolPolicy = {
   write: "deny",
   shell: "deny",
+  mcp: "deny",
   confirm: async () => false,
 };
 
@@ -215,7 +232,7 @@ async function gateWrite(policy: ToolPolicy, relative: string, before: string, a
   return allowed ? null : failed("用户拒绝了这次写入：" + relative, target);
 }
 
-function toolSchemas(allowWrite: boolean, allowShell: boolean): Record<string, unknown>[] {
+function toolSchemas(allowWrite: boolean, allowShell: boolean, mcpSchemas: Record<string, unknown>[]): Record<string, unknown>[] {
   return [
     {
       type: "function",
@@ -315,6 +332,7 @@ function toolSchemas(allowWrite: boolean, allowShell: boolean): Record<string, u
     },
     ...(allowWrite ? writeToolSchemas() : []),
     ...(allowShell ? shellToolSchemas() : []),
+    ...mcpSchemas,
   ];
 }
 
@@ -523,6 +541,7 @@ export async function executeTool(
   name: string,
   input: Record<string, unknown>,
   policy: ToolPolicy = DEFAULT_TOOL_POLICY,
+  mcpTools: McpToolBinding[] = [],
 ): Promise<ToolOutput> {
   try {
     if (name === "read_file") {
@@ -734,6 +753,35 @@ export async function executeTool(
         path: cwd,
       };
     }
+    const binding = mcpTools.find((candidate) => candidate.toolName === name);
+    if (binding) {
+      if (policy.mcp === "deny") {
+        return failed("当前档位不允许调用 MCP 工具（只读档位）。需要时让用户切到 workspace / full。", cwd);
+      }
+      if (policy.mcp === "ask") {
+        const allowed = await policy.confirm({
+          title: "调用 " + binding.server.name + " / " + binding.tool,
+          paths: [],
+          diff: "",
+          command: binding.tool + " " + JSON.stringify(input),
+          kind: "tool",
+        });
+        if (!allowed) {
+          return failed("用户拒绝了这次 MCP 调用：" + binding.server.name + "/" + binding.tool, cwd);
+        }
+      }
+      try {
+        const report = await callMcpTool(binding, input);
+        return {
+          content: clampOutput(report.text.trim() === "" ? "（工具没有返回文本）" : report.text),
+          error: report.isError ? "MCP 工具返回错误" : null,
+          summary: "调用 " + binding.server.name + "/" + binding.tool,
+          path: cwd,
+        };
+      } catch (error) {
+        return failed("MCP 调用失败：" + (error as Error).message, cwd);
+      }
+    }
     if (name === "") {
       return failed("这次调用没有工具名（name 为空），请重新发起并指明要用哪个工具", null);
     }
@@ -920,10 +968,14 @@ export class LlmAgentHost {
       clientToken: args.clientToken ?? "",
       cwd,
       pendingPermissions: new Set<number>(),
+      mcpServers: args.mcpServers ?? [],
+      mcpTools: [],
       policy: {
         write: permission,
         // 命令执行比写文件危险一档：只在 full 档 + 可信宿主暴露，且永远逐条确认。
         shell: this.options.trusted === true && permission === "auto" ? "ask" : "deny",
+        // MCP 工具：只读档位不暴露；workspace 每次确认；full 放行（与写文件同档）。
+        mcp: permission === "auto" ? "auto" : permission === "ask" ? "ask" : "deny",
         confirm: (request) => this.confirmPermission(turn, request),
       },
     };
@@ -969,7 +1021,7 @@ export class LlmAgentHost {
   /** 写操作前的确认：emit 一张与 ACP 同形的卡，等用户点选或超时。 */
   private confirmPermission(
     turn: AgentTurn,
-    request: { title: string; paths: string[]; diff: string; command?: string; kind?: "edit" | "execute" },
+    request: { title: string; paths: string[]; diff: string; command?: string; kind?: "edit" | "execute" | "tool" },
   ): Promise<boolean> {
     const requestId = this.nextPermissionId++;
     turn.pendingPermissions.add(requestId);
@@ -1013,7 +1065,9 @@ export class LlmAgentHost {
   }
 
   private async drive(turn: AgentTurn, controller: AbortController): Promise<void> {
-    const schemas = toolSchemas(turn.policy.write !== "deny", turn.policy.shell !== "deny");
+    // MCP 工具要探一次 tools/list（stdio 服务器冷启动会拉起 npx/uvx），结果按配置缓存 10 分钟。
+    turn.mcpTools = turn.policy.mcp === "deny" ? [] : await resolveMcpTools(turn.mcpServers);
+    const schemas = toolSchemas(turn.policy.write !== "deny", turn.policy.shell !== "deny", mcpToolSchemas(turn.mcpTools));
     const history: Record<string, unknown>[] = [...turn.messages];
     const accumulator = new ToolCallAccumulator();
     const apiKey = resolveApiKey(turn.apiKeyEnv);
@@ -1074,7 +1128,7 @@ export class LlmAgentHost {
       for (const call of outcome.calls) {
         const input = parseArguments(call.arguments);
         this.emit(turn.clientToken, "llm-tool-call", { id: call.id, name: call.name, input, round });
-        const output = await executeTool(this.access, turn.cwd, call.name, input, turn.policy);
+        const output = await executeTool(this.access, turn.cwd, call.name, input, turn.policy, turn.mcpTools);
         this.emit(turn.clientToken, "llm-tool-result", {
           id: call.id,
           ok: output.error === null,

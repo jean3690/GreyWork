@@ -29,6 +29,8 @@ export interface McpHeader {
 export interface McpToolInfo {
   name: string;
   description?: string | null;
+  /** tools/list 里的 inputSchema；缺省 = 无参数。 */
+  inputSchema?: Record<string, unknown> | null;
 }
 
 export interface McpProbeReport {
@@ -134,14 +136,19 @@ function parseBodyResult(body: string, id: number): Record<string, unknown> {
 }
 
 function extractTools(result: Record<string, unknown>): McpToolInfo[] {
-  const tools = result.tools as { name?: unknown; description?: unknown }[] | undefined;
+  const tools = result.tools as { name?: unknown; description?: unknown; inputSchema?: unknown }[] | undefined;
   if (!Array.isArray(tools)) return [];
   const out: McpToolInfo[] = [];
   for (const tool of tools) {
     if (typeof tool.name !== "string") continue;
+    const schema =
+      tool.inputSchema !== null && typeof tool.inputSchema === "object" && !Array.isArray(tool.inputSchema)
+        ? (tool.inputSchema as Record<string, unknown>)
+        : null;
     out.push({
       name: tool.name,
       description: typeof tool.description === "string" ? tool.description : null,
+      inputSchema: schema,
     });
   }
   return out;

@@ -88,6 +88,8 @@ export interface LlmAgentParams extends LlmChatParams {
   cwd?: string | null;
   /** 权限档位（read-only / workspace / full）：决定写工具是否暴露、是否弹确认。 */
   permissionTier?: string | null;
+  /** 已启用的 MCP 服务器：宿主会探测其工具并注册成模型可调函数。 */
+  mcpServers?: unknown[] | null;
 }
 
 /** 连接参数：模型发现 / 向量 / 语音转写共用（都是打同一个 OpenAI 兼容端点）。 */

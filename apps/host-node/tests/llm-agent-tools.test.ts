@@ -27,9 +27,19 @@ function makeWorkspace(): { root: string; access: WorkspaceAccess } {
 }
 
 /** 写策略：auto = 不问直接写；ask = 走确认回调；deny = 只读。 */
-const autoWrite: ToolPolicy = { write: "auto", shell: "deny", confirm: async () => true };
-const askWrite = (allow: boolean): ToolPolicy => ({ write: "ask", shell: "deny", confirm: async () => allow });
-const askShell = (allow: boolean): ToolPolicy => ({ write: "deny", shell: "ask", confirm: async () => allow });
+const autoWrite: ToolPolicy = { write: "auto", shell: "deny", mcp: "deny", confirm: async () => true };
+const askWrite = (allow: boolean): ToolPolicy => ({
+  write: "ask",
+  shell: "deny",
+  mcp: "deny",
+  confirm: async () => allow,
+});
+const askShell = (allow: boolean): ToolPolicy => ({
+  write: "deny",
+  shell: "ask",
+  mcp: "deny",
+  confirm: async () => allow,
+});
 
 describe("本机 agent 工具面", () => {
   it("search_text 命中源码但不扫 node_modules", async () => {
@@ -131,6 +141,7 @@ describe("本机 agent 工具面", () => {
     const policy: ToolPolicy = {
       write: "ask",
       shell: "deny",
+      mcp: "deny",
       confirm: async (request) => {
         seen.push(request.title + "\n" + request.diff);
         return false;
@@ -185,6 +196,7 @@ describe("本机 agent 工具面", () => {
     const policy: ToolPolicy = {
       write: "deny",
       shell: "ask",
+      mcp: "deny",
       confirm: async (request) => {
         seen.push(request.command ?? "");
         return false;

@@ -154,6 +154,7 @@ describe("HostLlmTransport", () => {
       clientToken: "turn-a",
       cwd: "/work/project",
       permissionTier: null,
+      mcpServers: null,
     });
     vi.unstubAllGlobals();
   });

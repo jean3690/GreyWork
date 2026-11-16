@@ -243,6 +243,8 @@ export function createStreamSlice({ state, getSession, getDemo }: StreamDeps): S
             cwd: await agentCwd(),
             // 权限档位决定宿主暴露哪些工具、写操作要不要弹确认卡。
             permissionTier: settingsStore.permissionTier,
+            // MCP：与 ACP 会话用同一份「已启用服务器」清单，由宿主探测工具并注入。
+            mcpServers: settingsStore.enabledMcpServers,
           })
         : await llm.chat(request);
     } catch (error) {
