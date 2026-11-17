@@ -8,6 +8,7 @@ export interface SettingsSection {
 }
 
 export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
+  { key: "account", icon: "peoples" },
   { key: "agent", icon: "robot" },
   { key: "assistant", icon: "magic" },
   { key: "appearance", icon: "sun" },

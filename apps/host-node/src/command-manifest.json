@@ -1158,6 +1158,18 @@
     "binary": false
   },
   {
+    "name": "control_plane_account",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "control_plane_logout",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
     "name": "control_plane_connect",
     "auth": "required",
     "desktopOnly": false,

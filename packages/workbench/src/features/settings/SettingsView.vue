@@ -16,6 +16,7 @@ import LocalAiSettingsPane from "@/features/settings/LocalAiSettingsPane.vue";
 import ModeSettingsPane from "@/features/settings/ModeSettingsPane.vue";
 import ServicesSettingsPane from "@/features/settings/ServicesSettingsPane.vue";
 import ControlPlaneSettingsPane from "@/features/settings/ControlPlaneSettingsPane.vue";
+import UserAccountPane from "@/features/account/UserAccountPane.vue";
 import SettingsSkills from "@/features/settings/SettingsSkills.vue";
 import SystemSettingsPane from "@/features/settings/SystemSettingsPane.vue";
 import TeamSettingsPane from "@/features/settings/TeamSettingsPane.vue";
@@ -30,6 +31,7 @@ const { t } = useI18n();
 const agent = useAgentStore();
 
 const SECTION_KEYS = [
+  "account",
   "agent",
   "assistant",
   "appearance",
@@ -64,7 +66,8 @@ onMounted(() => {
       <p class="mt-1 text-[12px] text-dim2">{{ meta.desc }}</p>
     </header>
 
-    <AgentSettingsPane v-if="section === 'agent'" @close="emit('close')" />
+    <UserAccountPane v-if="section === 'account'" />
+    <AgentSettingsPane v-else-if="section === 'agent'" @close="emit('close')" />
     <AssistantSettingsPane v-else-if="section === 'assistant'" />
     <AppearanceSettingsPane v-else-if="section === 'appearance'" />
     <ModeSettingsPane v-else-if="section === 'mode'" />

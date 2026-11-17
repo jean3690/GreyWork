@@ -9,6 +9,7 @@
 // 弹层被 Portal 到 body，弹层相关断言一律查 document.body。
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
+import { createPinia } from "pinia";
 
 const host = vi.hoisted(() => ({
   runtimeMode: vi.fn<() => string>(() => "server"),
@@ -21,16 +22,18 @@ vi.mock("@greywork/host-ipc", () => ({
   hasNativeShell: host.hasNativeShell,
   logout: host.logout,
   declareFront: () => undefined,
+  hasHostCommands: () => false,
 }));
 
 import SiderFooter from "@/features/shell/SiderFooter.vue";
 import { i18n } from "@/i18n";
+import { appEvents } from "@/events";
 
 const mounted: VueWrapper[] = [];
 
 async function mountFooter(): Promise<VueWrapper> {
   const wrapper = mount(SiderFooter, {
-    global: { plugins: [i18n] },
+    global: { plugins: [createPinia(), i18n] },
     attachTo: document.body,
   });
   mounted.push(wrapper);
@@ -57,13 +60,16 @@ afterEach(() => {
 });
 
 describe("SiderFooter · 账户行", () => {
-  it("显示身份标签，点击上报导航意图", async () => {
+  it("显示账号入口，点击打开用户账号设置", async () => {
     const wrapper = await mountFooter();
     const row = wrapper.get('[data-testid="sider-account"]');
 
-    expect(row.text()).toContain("本机用户");
+    const opened = vi.fn();
+    const off = appEvents.on("settings:open", opened);
+    expect(row.text()).toContain("用户账号");
     await row.trigger("click");
-    expect(wrapper.emitted("navigate")).toEqual([["/assistants"]]);
+    expect(opened).toHaveBeenCalledWith({ section: "account" });
+    off();
   });
 
   it("设置入口仍然只上报打开设置", async () => {

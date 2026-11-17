@@ -42,6 +42,13 @@ afterEach(() => {
 });
 
 describe("SettingsView", () => {
+  it("account 分区显示账号入口，浏览器预览明确提示需要宿主", async () => {
+    const { wrapper } = await mountSettings("account");
+    expect(wrapper.text()).toContain("用户账号");
+    expect(wrapper.text()).toContain("浏览器预览中无法登录");
+    expect(wrapper.find('[data-testid="account-login-form"]').exists()).toBe(true);
+  });
+
   it("agent 分区渲染默认模型供应商区", async () => {
     const { wrapper } = await mountSettings("agent");
     expect(wrapper.text()).toContain("Agent");

@@ -12,20 +12,8 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import { hasHostCommands, invoke } from "@greywork/host-ipc";
 import { useNoticeStore } from "@/stores/notice";
-
-/** 与 host-node 的 ControlPlaneStatus 逐字段对齐（宿主不回传 token）。 */
-interface ControlPlaneStatus {
-  configured: boolean;
-  source: "env" | "file" | null;
-  baseUrl: string | null;
-  email: string | null;
-  registered: boolean;
-  tickSecs: number;
-  lastHeartbeatAt: number | null;
-  lastClaimAt: number | null;
-  lastError: string | null;
-  lastOutcome: { name: string; ok: boolean; detail: string } | null;
-}
+import { useUserAccountStore } from "@/stores/user-account";
+import type { ControlPlaneStatus } from "@/lib/control-plane";
 
 interface Outcome {
   name: string;
@@ -34,6 +22,7 @@ interface Outcome {
 }
 
 const notice = useNoticeStore();
+const account = useUserAccountStore();
 const hostAvailable = hasHostCommands();
 
 const status = ref<ControlPlaneStatus | null>(null);
@@ -84,6 +73,8 @@ async function connect(): Promise<void> {
         : { baseUrl: form.baseUrl.trim(), token: form.token.trim() };
     const next = await invoke<ControlPlaneStatus>("control_plane_connect", payload);
     status.value = next;
+    account.acceptStatus(next);
+    void account.refresh();
     if (next.registered) {
       notice.success("已接入控制面", "宿主已注册，运维台的宿主页会显示在线");
       form.code = "";
@@ -125,6 +116,7 @@ async function disconnect(): Promise<void> {
   error.value = "";
   try {
     status.value = await invoke<ControlPlaneStatus>("control_plane_disconnect");
+    account.acceptStatus(status.value);
     notice.info("已断开控制面", "宿主不再注册/心跳，云端任务不会被本机认领");
   } catch (cause) {
     error.value = message(cause);

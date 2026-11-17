@@ -48,6 +48,18 @@ export interface ControlPlaneStatus {
   lastOutcome: { name: string; ok: boolean; detail: string } | null;
 }
 
+/** Java /api/auth/me 的公开身份；不包含 token。用户 ID 是字符串，避免 Long 精度丢失。 */
+export interface ControlPlaneSession {
+  user: { id: string; email: string; displayName: string | null; role: string };
+  device: { id: string | number; name: string; platform: string };
+}
+
+export interface ControlPlaneAccount {
+  status: ControlPlaneStatus;
+  session: ControlPlaneSession | null;
+  error: string | null;
+}
+
 /** 控制面 DueView（camelCase，与 Java 的 record 对齐）。 */
 export interface ControlDue {
   id: number;
@@ -61,7 +73,14 @@ export interface ControlDue {
 }
 
 /** 控制面调用的统一错误：消息直接给用户看（含状态码与可操作提示）。 */
-export class ControlPlaneError extends Error {}
+export class ControlPlaneError extends Error {
+  constructor(
+    message: string,
+    readonly status?: number,
+  ) {
+    super(message);
+  }
+}
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -152,6 +171,7 @@ function describeFailure(status: number, action: string, body: string): string {
 export interface EnrollInput {
   code: string;
   email: string;
+  displayName?: string;
   deviceName?: string;
   platform?: string;
 }
@@ -168,6 +188,7 @@ export class ControlPlaneClient {
     const body = {
       code: input.code.trim(),
       email: input.email.trim(),
+      ...(input.displayName?.trim() ? { displayName: input.displayName.trim() } : {}),
       deviceName: input.deviceName?.trim() || "GreyWork 桌面端",
       platform: input.platform?.trim() || "desktop",
     };
@@ -221,9 +242,40 @@ export class ControlPlaneClient {
     }
     if (!response.ok) {
       const text = await response.text().catch(() => "");
-      throw new ControlPlaneError(describeFailure(response.status, pathname, text));
+      throw new ControlPlaneError(describeFailure(response.status, pathname, text), response.status);
     }
     return response;
+  }
+
+  async me(): Promise<ControlPlaneSession> {
+    const response = await this.call("GET", "/api/auth/me");
+    const value = (await response.json()) as Partial<ControlPlaneSession>;
+    if (
+      !value.user ||
+      typeof value.user.id !== "string" ||
+      typeof value.user.email !== "string" ||
+      typeof value.user.role !== "string" ||
+      !value.device ||
+      !["string", "number"].includes(typeof value.device.id) ||
+      typeof value.device.name !== "string" ||
+      typeof value.device.platform !== "string"
+    ) {
+      throw new ControlPlaneError("控制面返回的用户或设备信息不完整，请检查后端版本");
+    }
+    // 只转发公开字段，不能把后端响应里的额外凭据带到渲染端。
+    return {
+      user: {
+        id: value.user.id,
+        email: value.user.email,
+        displayName: typeof value.user.displayName === "string" ? value.user.displayName : null,
+        role: value.user.role,
+      },
+      device: { id: value.device.id, name: value.device.name, platform: value.device.platform },
+    };
+  }
+
+  async logout(): Promise<void> {
+    await this.call("POST", "/api/auth/logout");
   }
 
   /** 注册/更新当前设备为宿主（按设备 upsert）。 */
@@ -369,6 +421,43 @@ export class ControlPlaneRuntime {
     };
   }
 
+  /** 身份每次向 Java 核验：不能把「有配置」或「宿主在线」误当成用户已登录。 */
+  async account(): Promise<ControlPlaneAccount> {
+    const active = this.active();
+    if (!active) return { status: this.status(), session: null, error: null };
+    try {
+      const session = await new ControlPlaneClient(active.baseUrl, active.token).me();
+      if (this.active()?.token !== active.token || this.active()?.baseUrl !== active.baseUrl) {
+        return { status: this.status(), session: null, error: null };
+      }
+      return { status: this.status(), session, error: null };
+    } catch (error) {
+      if (this.active()?.token !== active.token || this.active()?.baseUrl !== active.baseUrl) {
+        return { status: this.status(), session: null, error: null };
+      }
+      if (error instanceof ControlPlaneError && error.status === 401) this.stop();
+      return { status: this.status(), session: null, error: message(error) };
+    }
+  }
+
+  /** 先撤销 Java 会话，再删除本机凭据。网络失败不伪装成已登出，401 则可安全清理。 */
+  async logout(): Promise<ControlPlaneStatus> {
+    if (envOverride()) {
+      throw new ControlPlaneError("当前账号由环境变量管理：请移除 GREYWORK_CONTROL_URL / GREYWORK_CONTROL_TOKEN 后重启");
+    }
+    const active = this.active();
+    if (!active) return this.clear();
+    try {
+      await new ControlPlaneClient(active.baseUrl, active.token).logout();
+    } catch (error) {
+      if (!(error instanceof ControlPlaneError && error.status === 401)) throw error;
+    }
+    if (this.active()?.token !== active.token || this.active()?.baseUrl !== active.baseUrl) {
+      throw new ControlPlaneError("账号已切换，请重新确认要退出的账号");
+    }
+    return this.clear();
+  }
+
   /** 进程启动时调用：有配置就直接开始心跳（失败按 tick 重试，不阻塞启动）。 */
   start(): void {
     const active = this.active();
@@ -411,6 +500,7 @@ export class ControlPlaneRuntime {
     token?: string;
     email?: string;
     code?: string;
+    displayName?: string;
     deviceName?: string;
   }): Promise<ControlPlaneStatus> {
     if (envOverride()) {
@@ -428,6 +518,7 @@ export class ControlPlaneRuntime {
       const session = await ControlPlaneClient.enroll(baseUrl, {
         code,
         email,
+        displayName: input.displayName,
         deviceName: input.deviceName,
       });
       token = session.token;
@@ -456,6 +547,7 @@ export class ControlPlaneRuntime {
     if (!client) throw new ControlPlaneError("控制面未配置");
     await client.register(this.name, this.options.version, []);
     await client.heartbeat();
+    if (this.client !== client) return;
     this.registered = true;
     this.lastHeartbeatAt = Date.now();
     this.lastError = null;
@@ -486,6 +578,7 @@ export class ControlPlaneRuntime {
       try {
         await this.connectOnce();
       } catch (error) {
+        if (signal.aborted) return;
         this.registered = false;
         this.lastError = message(error);
         console.error("[control-plane] 心跳失败：" + this.lastError);

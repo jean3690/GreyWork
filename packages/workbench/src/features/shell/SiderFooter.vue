@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { hasNativeShell, logout, runtimeMode } from "@greywork/host-ipc";
 import ConfirmDialog from "@/features/settings/ConfirmDialog.vue";
 import Icon from "@/features/shared/Icon.vue";
 import GwButton from "@/features/shared/GwButton.vue";
+import { appEvents } from "@/events";
+import { useUserAccountStore } from "@/stores/user-account";
 
 const { t } = useI18n();
 
@@ -25,7 +27,11 @@ const rowClass = "h-[34px] w-full justify-start gap-2 px-2 text-[13px] hover:bg-
  */
 const canSignOut = computed(() => runtimeMode() === "server" && !hasNativeShell());
 
-const accountLabel = computed(() => t("account.label"));
+const account = useUserAccountStore();
+const accountLabel = computed(() => account.session?.user.displayName || account.session?.user.email || t("userAccount.entry"));
+onMounted(() => {
+  void account.refresh();
+});
 /** 头像占位取身份标签首字，中英两语言都不为空。 */
 const avatarChar = computed(() => accountLabel.value.slice(0, 1));
 
@@ -63,7 +69,7 @@ async function confirmSignOut(): Promise<void> {
         radius="xl"
         :class="[rowClass, 'min-w-0 flex-1']"
         data-testid="sider-account"
-        @click="emit('navigate', '/assistants')"
+        @click="appEvents.emit('settings:open', { section: 'account' })"
       >
         <span class="grid size-5 shrink-0 place-items-center rounded-full bg-panel font-medium text-dim">
           <span class="text-[10px]">{{ avatarChar }}</span>

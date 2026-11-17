@@ -1476,6 +1476,17 @@ HANDLERS.set("db_settings_sync", async (args, ctx) => {
 
 HANDLERS.set("control_plane_status", async (_args, ctx) => ctx.controlPlane.status());
 
+HANDLERS.set("control_plane_account", async (_args, ctx) => ctx.controlPlane.account());
+
+HANDLERS.set("control_plane_logout", async (_args, ctx) => {
+  try {
+    return await ctx.controlPlane.logout();
+  } catch (error) {
+    if (error instanceof ControlPlaneError) throw new CommandError(400, error.message);
+    throw error;
+  }
+});
+
 HANDLERS.set("control_plane_connect", async (args, ctx) => {
   const input = (args ?? {}) as Record<string, unknown>;
   const optional = (value: unknown): string | undefined => (typeof value === "string" && value.trim() !== "" ? value.trim() : undefined);
@@ -1487,6 +1498,7 @@ HANDLERS.set("control_plane_connect", async (args, ctx) => {
       token: optional(input.token),
       email: optional(input.email),
       code: optional(input.code),
+      displayName: optional(input.displayName),
       deviceName: optional(input.deviceName),
     });
   } catch (error) {

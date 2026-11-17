@@ -9,7 +9,7 @@ import { existsSync, mkdtempSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ControlPlaneError, ControlPlaneRuntime } from "../src/control-plane.js";
 import { Db } from "../src/db.js";
@@ -76,6 +76,7 @@ function due(overrides: Record<string, unknown> = {}): Record<string, unknown> {
 const cleanups: (() => Promise<void>)[] = [];
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   while (cleanups.length > 0) {
     const close = cleanups.pop();
     if (close) await close();
@@ -133,6 +134,94 @@ function runtimeWith(db: Db, dataDir: string, tickSecs = 3600): ControlPlaneRunt
 }
 
 describe("control plane", () => {
+  const identity = {
+    user: { id: "9223372036854775806", email: "u@grey.local", displayName: "Jean", role: "USER" },
+    device: { id: 7, name: "工作电脑", platform: "desktop" },
+  };
+
+  async function accountServer(meStatus = 200, logoutStatus = 204): Promise<Fake> {
+    const server = await listen((request, response) => {
+      expect(request.headers.authorization).toBe("Bearer tok-account");
+      if (request.url === "/api/auth/me") {
+        response
+          .writeHead(meStatus, { "content-type": "application/json" })
+          .end(
+            JSON.stringify(meStatus === 200 ? { ...identity, token: "must-not-leak" } : { code: "session_stale", message: "登录态已失效" }),
+          );
+        return;
+      }
+      if (request.url === "/api/auth/logout") {
+        response.writeHead(logoutStatus).end();
+        return;
+      }
+      response.writeHead(204).end();
+    });
+    cleanups.push(server.close);
+    return server;
+  }
+
+  function accountRuntime(): { runtime: ControlPlaneRuntime; dataDir: string; db: Db } {
+    const dataDir = mkdtempSync(path.join(tmpdir(), "gw-account-"));
+    const db = new Db(path.join(dataDir, "greywork.db"));
+    cleanups.push(async () => db.close());
+    return { runtime: runtimeWith(db, dataDir), dataDir, db };
+  }
+
+  it("账号从 Java 核验，重启后可恢复身份，Long ID 与凭据隔离", async () => {
+    const control = await accountServer();
+    const { runtime, dataDir, db } = accountRuntime();
+    expect((await runtime.account()).session).toBeNull();
+    await runtime.configure({ baseUrl: control.origin, token: "tok-account" });
+    const account = await runtime.account();
+    expect(account.session).toEqual(identity);
+    expect(JSON.stringify(account)).not.toMatch(/tok-account|must-not-leak/);
+    runtime.stop();
+    const restored = runtimeWith(db, dataDir);
+    expect((await restored.account()).session?.user.id).toBe(identity.user.id);
+    expect(control.calls.some((call) => call.method === "GET" && call.path === "/api/auth/me")).toBe(true);
+  });
+
+  it("账号被吊销时不展示旧身份，并停止心跳", async () => {
+    const control = await accountServer(401);
+    const { runtime } = accountRuntime();
+    await runtime.configure({ baseUrl: control.origin, token: "tok-account" });
+    const account = await runtime.account();
+    expect(account.session).toBeNull();
+    expect(account.error).toContain("登录态失效");
+    expect(account.status).toMatchObject({ configured: true, registered: false });
+  });
+
+  it("退出先撤销 Java 会话，再清除本机配置", async () => {
+    const control = await accountServer();
+    const { runtime, dataDir } = accountRuntime();
+    await runtime.configure({ baseUrl: control.origin, token: "tok-account" });
+    expect(await runtime.logout()).toMatchObject({ configured: false, registered: false });
+    expect(control.calls.some((call) => call.method === "POST" && call.path === "/api/auth/logout")).toBe(true);
+    expect(existsSync(path.join(dataDir, "control-plane.json"))).toBe(false);
+    expect((await runtime.account()).session).toBeNull();
+  });
+
+  it("退出失败保留凭据供重试，已失效的会话允许清理", async () => {
+    const failed = await accountServer(200, 503);
+    const { runtime, dataDir } = accountRuntime();
+    await runtime.configure({ baseUrl: failed.origin, token: "tok-account" });
+    await expect(runtime.logout()).rejects.toThrow("503");
+    expect(existsSync(path.join(dataDir, "control-plane.json"))).toBe(true);
+    const expired = await accountServer(401, 401);
+    await runtime.configure({ baseUrl: expired.origin, token: "tok-account" });
+    expect((await runtime.logout()).configured).toBe(false);
+  });
+
+  it("环境变量管理的账号只能查看，不能从界面撤销", async () => {
+    const control = await accountServer();
+    vi.stubEnv("GREYWORK_CONTROL_URL", control.origin);
+    vi.stubEnv("GREYWORK_CONTROL_TOKEN", "tok-account");
+    const { runtime } = accountRuntime();
+    expect((await runtime.account()).session).toEqual(identity);
+    await expect(runtime.logout()).rejects.toThrow("环境变量");
+    expect(control.calls.some((call) => call.path === "/api/auth/logout")).toBe(false);
+  });
+
   it("接入 → 注册 → 心跳 → 认领 → 模型直连 → 回执", async () => {
     const control = await fakeControlPlane([due()]);
     const model = await fakeModel("云端问候：早上好");
@@ -213,9 +302,21 @@ describe("control plane", () => {
     const db = new Db(path.join(dataDir, "greywork.db"));
     const runtime = runtimeWith(db, dataDir);
 
-    const status = await runtime.configure({ baseUrl: control.origin, email: "u@grey.local", code: "ABC123" });
+    const status = await runtime.configure({
+      baseUrl: control.origin,
+      email: "u@grey.local",
+      code: "ABC123",
+      displayName: "Jean",
+      deviceName: "工作电脑",
+    });
     const enroll = control.calls.find((call) => call.path === "/api/auth/enroll");
-    expect(enroll?.body).toMatchObject({ code: "ABC123", email: "u@grey.local", platform: "desktop" });
+    expect(enroll?.body).toMatchObject({
+      code: "ABC123",
+      email: "u@grey.local",
+      platform: "desktop",
+      displayName: "Jean",
+      deviceName: "工作电脑",
+    });
     // 心跳 401：配置保留、错误可见、registered 回到 false
     expect(status.configured).toBe(true);
     expect(status.registered).toBe(false);

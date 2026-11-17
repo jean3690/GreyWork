@@ -60,7 +60,7 @@ describe("ControlPlaneSettingsPane", () => {
     await wrapper.get('[data-testid="controlplane-connect"]').trigger("click");
     await flushPromises();
 
-    expect(invoke).toHaveBeenLastCalledWith("control_plane_connect", {
+    expect(invoke).toHaveBeenCalledWith("control_plane_connect", {
       baseUrl: "http://127.0.0.1:8080",
       email: "u@grey.local",
       code: "ABC123",
@@ -78,7 +78,7 @@ describe("ControlPlaneSettingsPane", () => {
     await wrapper.get('[data-testid="controlplane-connect"]').trigger("click");
     await flushPromises();
 
-    expect(invoke).toHaveBeenLastCalledWith("control_plane_connect", {
+    expect(invoke).toHaveBeenCalledWith("control_plane_connect", {
       baseUrl: "http://localhost:8080",
       token: "tok-9",
     });
