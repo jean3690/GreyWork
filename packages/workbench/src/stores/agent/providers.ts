@@ -13,7 +13,6 @@ import { agentsBackend, type AgentProviderRow } from "../../lib/agents-backend";
 import { notify } from "../notice";
 import { useCommandCapabilitiesStore } from "../command-capabilities";
 import {
-  acpDefaultConfigValues,
   detectProgramOf,
   isCustomAgentProvider,
   newCustomProviderId,
@@ -373,14 +372,12 @@ export function createProvidersSlice({ state, getRuntime }: ProvidersDeps): Prov
     return await runtime().connectAcp();
   }
 
-  /** 回放工作区记忆配置期间置真，抑制 setAcpConfig 的自反写入（对齐原闭包变量）。 */
-  const replayingConfig = state.locals;
-
   /**
    * 应用某工作区记住的 ACP 后端与会话配置，再以全局默认兜底。
    *
    * 层级：工作区记忆 > 全局默认 > 后端出厂值。工作区**完全无记录**且存在全局默认时，
    * 默认仍然生效（新工作区不至于裸奔）；两者都为空才真正「不动当前状态」。
+   * 逐项下发与「回放不写回记忆」的细节在 runtime.replayWorkspaceConfig（新建会话也走同一份）。
    */
   async function applyWorkspaceAgentConfig(workspaceId: string | null): Promise<void> {
     const remembered = state.workspace.agentConfigOf(workspaceId);
@@ -393,24 +390,7 @@ export function createProvidersSlice({ state, getRuntime }: ProvidersDeps): Prov
       if (failure) return; // 连不上就停在错误态，别再拿旧 handle 回放配置
     }
     if (state.acpHandle.value === null) return;
-    const values = remembered?.configValues ?? {};
-    const defaults = acpDefaultConfigValues.value;
-    if (Object.keys(values).length === 0 && Object.keys(defaults).length === 0) return;
-    replayingConfig.replayingConfig = true;
-    try {
-      for (const [configId, value] of Object.entries(values)) {
-        const option = state.acpConfigOptions.value.find((candidate) => candidate.id === configId && candidate.type === "select");
-        if (option) await runtime().setAcpConfig(configId, value);
-      }
-      // 全局默认兜底：只补工作区记忆没表态的键（记忆 > 默认 > 出厂值）
-      for (const [configId, value] of Object.entries(defaults)) {
-        if (configId in values) continue;
-        const option = state.acpConfigOptions.value.find((candidate) => candidate.id === configId && candidate.type === "select");
-        if (option) await runtime().setAcpConfig(configId, value);
-      }
-    } finally {
-      replayingConfig.replayingConfig = false;
-    }
+    await runtime().replayWorkspaceConfig(workspaceId);
   }
 
   // 切工作区即换「这个项目的干活方式」；immediate 关掉，避免启动就抢着建连接。

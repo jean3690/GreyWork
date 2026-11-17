@@ -1333,6 +1333,41 @@ describe("权限临时降级与每工作区配置记忆", () => {
     expect(workspaceStore.agentConfigOf(workspace.id)?.configValues).toEqual({ effort: "high" });
   });
 
+  it("对话前选的模型带进新会话：新建会话回填上一会话的当前选择", async () => {
+    const modelOptions = (currentValue: string) => [
+      {
+        id: "model",
+        name: "Model",
+        type: "select",
+        currentValue,
+        options: [
+          { value: "default-a", name: "Default A" },
+          { value: "picked", name: "Picked" },
+        ],
+      },
+    ];
+    h.startAgent.mockResolvedValue(7);
+    h.openSession.mockResolvedValue({ sessionId: "pre", configOptions: modelOptions("default-a") });
+    h.setSessionConfig.mockImplementation((_handle: number, configId: string, value: string) =>
+      Promise.resolve(modelOptions(configId === "model" ? String(value) : "default-a")),
+    );
+    const agentStore = useAgentStore();
+    await agentStore.activateAcpProvider("opencode");
+    await agentStore.setAcpConfig("model", "picked");
+    expect(agentStore.acpConfigOptions[0]?.currentValue).toBe("picked");
+
+    // 新对话首回合：session/new 只回后端出厂值，宿主应把刚才的选择再下发一次
+    h.setSessionConfig.mockClear();
+    const chat = useChatStore();
+    useSessionStore().createSession(null, "新对话");
+    chat.activeThreadId = useSessionStore().activeSessionId!;
+    await agentStore.dispatchToAcp("开始干活");
+
+    expect(h.openSession).toHaveBeenCalledTimes(2);
+    expect(h.setSessionConfig).toHaveBeenCalledWith(7, "model", "picked");
+    expect(agentStore.acpConfigOptions[0]?.currentValue).toBe("picked");
+  });
+
   it("工作区没有记忆时回放是 no-op（不动当前后端选择）", async () => {
     const workspaceStore = useWorkspaceStore();
     const agentStore = useAgentStore();

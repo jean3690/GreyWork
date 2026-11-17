@@ -20,7 +20,7 @@ import { appEvents } from "../../events";
 import { notify } from "../notice";
 import { createPermissionGate } from "./permission";
 import { createSubagentSlice } from "./subagent";
-import { CONNECT_ABORTED, t, looksLikeMissingBinary } from "./shared";
+import { CONNECT_ABORTED, acpDefaultConfigValues, t, looksLikeMissingBinary } from "./shared";
 import type { AgentStoreState, SubagentMessage, SubagentTranscript } from "./state";
 import type { TurnApi } from "./turn";
 import type { PermissionTrace } from "../../types";
@@ -33,6 +33,8 @@ export interface RuntimeDeps {
 export interface RuntimeApi {
   startAcpSession(threadId?: string | null): Promise<string | null>;
   setAcpConfig(configId: string, value: string | boolean): Promise<string | null>;
+  /** 应用某工作区记住的会话配置（工作区记忆 > 全局默认），可叠加一份「当前选择」先行值。 */
+  replayWorkspaceConfig(workspaceId: string | null, carried?: Record<string, string>): Promise<void>;
   applyPermissionTier(): Promise<string | null>;
   setTempReadOnly(on: boolean): Promise<string | null>;
   connectAcp(): Promise<string | null>;
@@ -421,6 +423,54 @@ export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi 
     return CONNECT_ABORTED;
   }
 
+  /** 当前配置快照里可下发的 select 值（configId → 值）；布尔型开关不进这份表。 */
+  function selectedConfigValues(options: readonly AcpSessionConfigOption[]): Record<string, string> {
+    const values: Record<string, string> = {};
+    for (const entry of options) {
+      if (entry.type !== "select") continue;
+      if (typeof entry.currentValue === "string" && entry.currentValue) values[entry.id] = entry.currentValue;
+    }
+    return values;
+  }
+
+  /**
+   * 把一组值下发到当前会话：只认后端确实暴露、且候选里存在的项。
+   *
+   * 候选校验是防「跨 provider / 跨版本」的旧值：记忆里可能存着别的后端的模型 id，
+   * 无脑下发会让后端整条 set_config_option 报错。回放期间置 replayingConfig ——
+   * 这些值是读来的，不该再被写回工作区记忆。
+   */
+  async function applyConfigValues(values: Record<string, string>): Promise<void> {
+    const entries = Object.entries(values);
+    if (entries.length === 0) return;
+    const previous = locals.replayingConfig;
+    locals.replayingConfig = true;
+    try {
+      for (const [configId, value] of entries) {
+        const option = state.acpConfigOptions.value.find((candidate) => candidate.id === configId && candidate.type === "select");
+        if (!option) continue;
+        if (option.options?.length && !option.options.some((choice) => String(choice.value) === value)) continue;
+        await setAcpConfig(configId, value);
+      }
+    } finally {
+      locals.replayingConfig = previous;
+    }
+  }
+
+  /**
+   * 应用「这个工作区怎么干活」：工作区记忆 > 全局默认 > 后端出厂值。
+   *
+   * `carried` 是调用方带过来的一份**当前选择**（新建会话时从上一会话快照取），
+   * 优先级夹在中间：它比记忆旧（记忆是用户对项目的表态），但比全局默认新。
+   */
+  async function replayWorkspaceConfig(workspaceId: string | null, carried: Record<string, string> = {}): Promise<void> {
+    await applyConfigValues({
+      ...acpDefaultConfigValues.value,
+      ...carried,
+      ...(state.workspace.agentConfigOf(workspaceId)?.configValues ?? {}),
+    });
+  }
+
   /**
    * 建一条 ACP 会话并绑定到 `threadId`（null = 尚未落到具体对话，如设置页主动连接）。
    * 返回错误文案（null = 成功）。
@@ -460,6 +510,10 @@ export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi 
       const binding = threadId !== null ? (state.session.getSession(threadId)?.acp ?? null) : null;
       const canRestore = binding !== null && binding.providerId === provider.id && binding.cwd === workspace;
 
+      // 换对话前抓一份「用户当前选择」：首页配置块里刚选的模型 / 思考强度只存在旧会话上，
+      // 新会话的 session/new 只会带回后端出厂值 —— 不主动带过去就会被无声改回默认。
+      const carriedConfig = selectedConfigValues(state.acpConfigOptions.value);
+
       // 换对话前释放上一条 ACP 会话：agent 进程复用，但旧会话会一直占着 MCP 连接 /
       // 索引缓存。agent 未声明 session/close 时宿主返回 false（不是错误），静默跳过。
       // 目标就是当前会话时不能关——那会把要恢复的上下文一起丢掉。
@@ -497,6 +551,11 @@ export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi 
         // 建会话时把启用的 MCP 服务器声明给 agent；宿主按后端能力过滤，
         // 被跳过的原因回灌到 acpMcpSkipped 供设置页明示（不静默丢配置）。
         adoptOpenedSession(await acp.openSession(state.acpHandle.value, workspace, state.settings.enabledMcpServers), threadId);
+        // 新会话只有后端出厂值：把用户的选择叠回去（上一会话的当前值 > 全局默认，工作区记忆最高）。
+        // 恢复会话不走这里 —— 它的 config options 本来就是上次那份。
+        const configWorkspaceId =
+          threadId !== null ? (state.session.getSession(threadId)?.workspaceId ?? null) : state.workspace.activeWorkspaceId;
+        await replayWorkspaceConfig(configWorkspaceId, carriedConfig);
       }
       if (abortConnecting) return await abortInFlightStart();
 
@@ -687,6 +746,7 @@ export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi 
   return {
     startAcpSession,
     setAcpConfig,
+    replayWorkspaceConfig,
     applyPermissionTier,
     setTempReadOnly,
     connectAcp,
