@@ -175,7 +175,7 @@ export function createHostServer(options: HostServerOptions): { server: Server; 
 
       // 静态 SPA 是公开的（页面本身不含数据），与 Rust 的 `/api/**` 门禁边界一致。
       if (options.staticRoot && (method === "GET" || method === "HEAD") && !pathname.startsWith("/api/")) {
-        return serveStatic(options.staticRoot, pathname, response);
+        return serveStatic(options.staticRoot, pathname, response, method);
       }
 
       // 以下端点都要求会话。

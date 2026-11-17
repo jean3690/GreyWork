@@ -1,5 +1,6 @@
 import { defineConfig } from "vitest/config";
 import path from "path";
+import { availableParallelism } from "node:os";
 import vue from "@vitejs/plugin-vue";
 
 // 对齐 GreyWork 的 tests/ 集中布局：
@@ -9,7 +10,7 @@ import vue from "@vitejs/plugin-vue";
 //   src/features/**/__tests__/*.dom.test.ts    附加组件测试（随 feature 目录存放）
 //   tests/vitest.setup.ts / tests/vitest.dom.setup.ts  各环境共享 setup
 // 环境不再用 `// @vitest-environment` 文件头注释，而是按文件后缀 + projects 配置分流。
-const srcRoot = path.resolve(__dirname, "src");
+const srcRoot = path.resolve(import.meta.dirname, "src");
 
 export default defineConfig({
   plugins: [vue()],
@@ -19,6 +20,9 @@ export default defineConfig({
     },
   },
   test: {
+    // DOM 大列表与懒加载视图会争用 CPU / 内存，别按高核机器全开导致 5s 用例随机超时。
+    // 低核 CI 保持原有并发上限；需要更高并发时仍可用 CLI --maxWorkers 覆盖。
+    maxWorkers: Math.min(4, availableParallelism()),
     projects: [
       // node 环境：纯逻辑单测
       {
@@ -46,7 +50,7 @@ export default defineConfig({
       provider: "v8",
       // 只统计业务源码；测试已移出 src，天然不参与。src/mocks 是测试夹具不是产品代码，
       // 100% 覆盖只会虚高总量（之前 fixtures 的 67 条语句被算进分母）。
-      include: ["src/**"],
+      include: ["src/**/*.{ts,tsx,js,jsx,vue}"],
       exclude: ["src/index.ts", "src/types.ts", "src/**/*.d.ts", "src/i18n/**", "src/**/*.test.ts", "src/mocks/**"],
       // 2026-08-26 起基线注释见旧 vitest.config；测试迁移到 tests/ 后 coverage 只覆盖业务代码，
       // 数值重新测量后在此登记（见 2026-09-02 迁移说明）。

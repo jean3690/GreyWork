@@ -13,7 +13,7 @@ import { ChannelRuntime } from "../src/channel-runtime.js";
 import { ControlPlaneRuntime } from "../src/control-plane.js";
 import { Db } from "../src/db.js";
 import { RagIndexHost } from "../src/rag.js";
-import { isDenied, listCommands } from "../src/commands.js";
+import { COMMANDS, isDenied, listCommands } from "../src/commands.js";
 import { EventBus } from "../src/events.js";
 import { LlmStreamHost } from "../src/llm.js";
 import { LlmAgentHost } from "../src/llm-agent.js";
@@ -175,10 +175,11 @@ describe("HTTP 契约", () => {
     expect(response.headers.get("set-cookie")).toBeNull();
   });
 
-  it("/api/commands 返回 195 条，只有已迁移的命令标 available", async () => {
+  it("/api/commands 返回完整命令清单，只有已迁移的命令标 available", async () => {
     const response = await fetch(`${base}/api/commands`, { headers: { cookie } });
     const list = (await response.json()) as { name: string; available: boolean; desktopOnly: boolean }[];
-    expect(list).toHaveLength(195);
+    expect(list).toHaveLength(COMMANDS.length);
+    expect(list.find((item) => item.name === "llm_agent_probe")?.available).toBe(true);
     const defaultRoot = list.find((item) => item.name === "store_default_root");
     expect(defaultRoot?.available).toBe(true);
     // 桌面专属命令任何宿主都不可调用。
@@ -1090,6 +1091,16 @@ describe("HTTP 契约", () => {
 
     const fallback = await fetch(`${base}/deep/link`);
     expect(await fallback.text()).toContain("greywork-host-node");
+  });
+
+  it("静态路由透传 HEAD 方法，并保留安全响应头", async () => {
+    const response = await fetch(`${base}/assets/app.js`, { method: "HEAD" });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("text/javascript; charset=utf-8");
+    expect(response.headers.get("content-length")).toBe(String(Buffer.byteLength("console.log(1)")));
+    expect(response.headers.get("cache-control")).toContain("immutable");
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(await response.text()).toBe("");
   });
 
   it("安全响应头随每个响应下发", async () => {
