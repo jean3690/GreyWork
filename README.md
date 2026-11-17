@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/jean3690/GreyWork/actions/workflows/ci.yml/badge.svg)](https://github.com/jean3690/GreyWork/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-![Electron](https://img.shields.io/badge/Electron-30-47848F)
+![Electron](https://img.shields.io/badge/Electron-45-47848F)
 ![Vue 3](https://img.shields.io/badge/Vue-3-42B883)
 
 A desktop-first AI agent workspace for developers who think in code, diagrams, and multi-agent workflows.
@@ -124,6 +124,7 @@ the full doc index is [docs/README.md](docs/README.md).
 git clone https://github.com/jean3690/GreyWork.git
 cd GreyWork
 pnpm install
+pnpm build:desktop     # first launch needs the static entry; Vite handles subsequent renderer edits
 pnpm electron:dev:all   # compile the Node host, then launch the desktop app
 pnpm electron:dev       # Electron only: reuses the existing apps/host-node/dist build
 ```

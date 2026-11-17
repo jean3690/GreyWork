@@ -304,24 +304,31 @@ are best-effort — a lagging subscriber skips old events, never replays them.
 
 ### Static hosting (SPA)
 
-Set `GREYWORK_STATIC_DIR` (or `static_dir` in `server.json`) to the built frontend output
+Set `GREYWORK_STATIC_DIR` to the built frontend output
 (`apps/desktop/dist`) and the server serves the UI from the same origin. Unset, the server is
-API-only. The directory must contain `index.html`; if it doesn't, **startup fails hard** — the
+API-only. The directory must contain a regular `index.html` file whose real path stays inside
+the resolved static root; if it doesn't, **startup fails hard** — the
 container health probe hits `/api/health`, which stays green even while the UI 404s, so a warning
 here would let a broken image ship as "healthy".
 
-| Path          | Source                       | `Cache-Control`                              |
-| ------------- | ---------------------------- | -------------------------------------------- |
-| `/`           | `index.html`                 | `no-cache` (deploys take effect immediately) |
-| `/assets/*`   | Vite content-hashed chunks   | `public, max-age=31536000, immutable`        |
-| anything else | `pdfjs/`, `vscode-icons/`, … | `no-cache` (cacheable, must revalidate)      |
-| unknown path  | —                            | plain `404`                                  |
+| Path                         | Source                       | `Cache-Control`                              |
+| ---------------------------- | ---------------------------- | -------------------------------------------- |
+| `/`                          | `index.html`                 | `no-cache` (deploys take effect immediately) |
+| `/assets/*`                  | Vite content-hashed chunks   | `public, max-age=31536000, immutable`        |
+| anything else                | `pdfjs/`, `vscode-icons/`, … | `no-cache` (cacheable, must revalidate)      |
+| unknown / out-of-root path   | `index.html` fallback        | `no-cache`                                   |
+| malformed URL encoding / NUL | empty `400` response         | `no-store`                                   |
 
 Design notes:
 
-- **No SPA catch-all.** The frontend uses hash routing (`createWebHashHistory`), so deep links
-  resolve client-side and `/` is the only HTML route the server must serve. A catch-all would turn
-  mistyped asset paths into `200` + `index.html`, polluting caches and hiding errors.
+- **Compatibility fallback.** Unknown paths (including missing assets) return `200` + `index.html`,
+  preserving the existing host contract. The fallback uses the entry's `no-cache` policy, not the
+  requested asset path's immutable policy.
+- **Real-path boundary.** URL paths are decoded once, then both lexical paths and symlink targets
+  are checked against the canonical root. Links within the root remain usable; links outside it
+  cannot publish private files. The static directory must contain only public deployment resources.
+- **HEAD and stream lifecycle.** HEAD returns the same file headers without opening a read stream.
+  Read failures terminate only the affected response; disconnecting clients destroy their streams.
 - **Static routes are unauthenticated by construction** — auth is checked per API handler, and the
   static routes never call it (the login page must load before login).
 - **No static compression.** The Node host streams files as-is — there is no gzip / brotli layer, so
@@ -440,6 +447,10 @@ shared with the Electron / bundled-runtime caches.
 
 ## Native model agent loop (`apps/host-node/src/llm-agent.ts`)
 
+Third-party provider setup, compatibility parameters and the tool round-trip probe are documented
+in [agent-loop.md](agent-loop.md). Chat and native agents share request construction and response
+parsing; only native agents execute tools.
+
 Three conversation paths share one OpenAI-compatible transport (`apps/host-node/src/llm.ts`) and
 differ only in what they declare to the model:
 
@@ -451,10 +462,11 @@ differ only in what they declare to the model:
 
 ### Why the loop runs in the host
 
-The tool surface is read-only, so every call is auto-approved under all three permission tiers —
-no interactive confirmation branch exists. That is what lets the loop live in the host: the
-renderer and the remote-assistant pipeline (`stores/remote-assistant/pipeline.ts`) drive the same
-`llm_agent_start` command, and aborting is `AbortController.abort()` exactly as in `llm_chat_stop`.
+The host owns the workspace authorization surface and tool execution. Read-only tools run directly;
+write and MCP tools follow the configured permission tier, and shell commands require a trusted
+local host plus per-command confirmation. The renderer drives `llm_agent_start`; remote-assistant
+LLM replies currently use single-turn `llm_chat_start`. Aborting cancels the model request, rejects
+only this turn's pending permissions and prevents subsequent tool calls.
 
 ### Trust boundary
 
@@ -472,10 +484,10 @@ authorization ledger is.
 ### Protocol details worth knowing
 
 - **Streaming `tool_calls` are fragmented.** `function.arguments` arrives token by token, tagged
-  by `index`. `ToolCallAccumulator` reassembles per index; reading only the last chunk yields
-  truncated JSON. `take()` clears the accumulator so a reused accumulator cannot append a new
-  round's `index:0` onto the previous call's arguments.
-- **Missing `id` / `name` is synthesized, not dropped.** The assistant message is constructed
+  by `index`. `readChatResponse` reassembles names and arguments per index; reading only the last
+  chunk yields truncated JSON. Each response has its own accumulator, so a new round cannot append
+  its `index:0` onto the previous call's arguments.
+- **Missing `id` is synthesized; missing `name` produces a tool error.** The assistant message is constructed
   host-side, so a synthesized id keeps the `assistant.tool_calls` ↔ `tool.tool_call_id` pairing
   self-consistent. Dropping the call instead would leave the model without a tool result and
   looping on the same request.

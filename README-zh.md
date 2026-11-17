@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/jean3690/GreyWork/actions/workflows/ci.yml/badge.svg)](https://github.com/jean3690/GreyWork/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-![Electron](https://img.shields.io/badge/Electron-30-47848F)
+![Electron](https://img.shields.io/badge/Electron-45-47848F)
 ![Vue 3](https://img.shields.io/badge/Vue-3-42B883)
 
 面向开发者的桌面优先 AI Agent 工作台 —— 用代码、图表与多智能体协作来思考。
@@ -19,7 +19,8 @@ GreyWork 把外部编码智能体（走 **Agent Client Protocol**）与本机 Op
 
 - ACP（Agent Client Protocol）后端：接入外部智能体、管理会话、向 agent 声明 MCP 服务器；
   会话配置项（模型 / 思考强度 / 会话模式）由后端探测得出，也能逐项覆盖。
-- 本机模型管线：OpenAI 兼容的流式供应商，支持自定义请求头（可用 `{{ENV}}` 占位）与思考强度控制。
+- 本机模型管线：OpenAI 兼容的第三方供应商，支持自定义网关路径、请求头、JSON 参数与流式开关；
+  原生 Agent Loop 可自主调用工具，接入与权限说明见 [docs/agent-loop.md](docs/agent-loop.md)。
 - 权限模型：三档（只读 / 工作区 / 完全访问），宿主拦截越界路径与只读档下的写 / 执行操作；
   「始终允许」按工具类别在单次会话内记忆；每次裁决都在消息流里留一条只读**权限留痕**，
   说明批了什么、谁批的、为什么没问。
@@ -117,6 +118,7 @@ greyWork/
 git clone https://github.com/jean3690/GreyWork.git
 cd GreyWork
 pnpm install
+pnpm build:desktop     # 首次启动需生成静态入口；之后渲染层由 Vite 热更新
 pnpm electron:dev:all   # 编译 Node 宿主再起桌面端（首次 / 改过宿主代码用这个）
 pnpm electron:dev       # 只起 Electron：直接用已有的 apps/host-node/dist
 ```
