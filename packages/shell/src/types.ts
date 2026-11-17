@@ -13,6 +13,10 @@ export interface ModelProviderConfig {
   temperature?: number;
   /** 单轮最大输出 token；缺省不传。 */
   maxTokens?: number;
+  /** 默认流式；不支持 SSE 的第三方网关可关闭。 */
+  stream?: boolean;
+  /** OpenAI 兼容网关的扩展 JSON 参数；不可覆盖模型、消息、工具和 stream。 */
+  extraBody?: Record<string, unknown>;
   /**
    * 附加请求头（自定义 baseurl 网关常见的鉴权/标记头）。
    * 值支持 `{{ENV_VAR}}` 占位符，由宿主在发请求时从环境变量解析 ——

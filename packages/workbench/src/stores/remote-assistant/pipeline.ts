@@ -93,7 +93,7 @@ export function createPipelineSlice({ state, getStatus, getPeers }: PipelineDeps
       if (!activeToken || event.payload.clientToken !== activeToken) return;
       if (event.kind === "llm-delta") replyBuffer += event.payload.delta ?? "";
       else if (event.kind === "llm-done") finishTurn(null);
-      else finishTurn(event.payload.message ?? "unknown");
+      else if (event.kind === "llm-error") finishTurn(event.payload.message ?? "unknown");
     });
   }
 
@@ -569,6 +569,8 @@ export function createPipelineSlice({ state, getStatus, getPeers }: PipelineDeps
         headers: provider.headers,
         temperature: provider.temperature,
         maxTokens: provider.maxTokens,
+        stream: provider.stream,
+        extraBody: provider.extraBody,
       });
       await deliver(peer, sessionId, turn, replyToken);
     } finally {

@@ -211,8 +211,10 @@ export function createStreamSlice({ state, getSession, getDemo }: StreamDeps): S
     runningSessionId.value = targetThread;
     streamingInto = message;
     streamingMessageId.value = message.id;
-    await ensureLlmListener();
+    activeTurnToken = tid();
+    const token = activeTurnToken;
     try {
+      await ensureLlmListener();
       // 工作区检索（未启用/无命中返回 undefined）；语音附件转写（未启用返回 null → 路径引用）。
       const contextBlock = await retrieveContext(localAi, intentText);
       const history = await buildLlmHistory(
@@ -220,11 +222,12 @@ export function createStreamSlice({ state, getSession, getDemo }: StreamDeps): S
         20,
         { contextBlock, transcribe: (attachment) => transcribeAttachment(localAi, attachment) },
       );
-      activeTurnToken = tid();
+      if (activeTurnToken !== token) return;
       // agent 模式逐供应商开启：tool calling 是端点能力，不是全局开关（见
       // ModelProviderConfig.agentMode）。走 agent 回合时宿主会多发两个工具事件 kind，
       // 已在 ensureLlmListener 里接上。
       activeTurnIsAgent = provider.agentMode === true;
+      const isAgent = activeTurnIsAgent;
       const request = {
         baseUrl: provider.baseUrl ?? "",
         model: provider.model,
@@ -234,7 +237,9 @@ export function createStreamSlice({ state, getSession, getDemo }: StreamDeps): S
         headers: provider.headers,
         temperature: provider.temperature,
         maxTokens: provider.maxTokens,
-        clientToken: activeTurnToken,
+        stream: provider.stream,
+        extraBody: provider.extraBody,
+        clientToken: token,
       };
       // 多供应商回退链：主供应商 + 其它开了 Agent 模式的启用项（回退关闭时只发主供应商）。
       const chain = settingsStore.agentFallback ? buildAgentProviderChain(settingsStore.modelProviders, provider.id) : [provider];
@@ -247,12 +252,16 @@ export function createStreamSlice({ state, getSession, getDemo }: StreamDeps): S
         maxTokens: item.maxTokens ?? null,
         reasoningEffort: resolveLocalEffort(localReasoningOverride.value, item),
         contextTokens: item.contextTokens ?? null,
+        stream: item.stream,
+        extraBody: item.extraBody,
       }));
-      llmRequestId = activeTurnIsAgent
+      const cwd = isAgent ? await agentCwd() : null;
+      if (activeTurnToken !== token) return;
+      const requestId = isAgent
         ? await llm.agentRun({
             ...request,
             maxRounds: provider.agentMaxRounds,
-            cwd: await agentCwd(),
+            cwd,
             // 权限档位决定宿主暴露哪些工具、写操作要不要弹确认卡。
             permissionTier: settingsStore.permissionTier,
             // MCP：与 ACP 会话用同一份「已启用服务器」清单，由宿主探测工具并注入。
@@ -261,7 +270,14 @@ export function createStreamSlice({ state, getSession, getDemo }: StreamDeps): S
             contextTokens: settingsStore.agentContextTokens,
           })
         : await llm.chat(request);
+      if (activeTurnToken !== token) {
+        // 获取句柄期间用户已取消（或事件先于 start 响应收尾）；不留下后台回合。
+        void (isAgent ? llm.stopAgent(requestId) : llm.stop(requestId)).catch(() => undefined);
+        return;
+      }
+      llmRequestId = requestId;
     } catch (error) {
+      if (activeTurnToken !== token) return;
       message.content = `[LLM 调用失败] ${error instanceof Error ? error.message : String(error)}`;
       sessionStore.markDirty();
       finishStream();
@@ -272,14 +288,11 @@ export function createStreamSlice({ state, getSession, getDemo }: StreamDeps): S
   function abortGeneration(): void {
     if (llmRequestId !== null) {
       // 句柄表按回合类型分开，stop 必须走对的那一个（见 activeTurnIsAgent 的注释）。
-      if (activeTurnIsAgent) void llm.stopAgent(llmRequestId);
-      else void llm.stop(llmRequestId);
-      return;
+      if (activeTurnIsAgent) void llm.stopAgent(llmRequestId).catch(() => undefined);
+      else void llm.stop(llmRequestId).catch(() => undefined);
     }
     clearSim();
-    busy.value = false;
-    runningSessionId.value = null;
-    streamingMessageId.value = null;
+    finishStream();
   }
 
   /**

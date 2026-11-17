@@ -375,6 +375,16 @@ beforeEach(() => {
 });
 
 describe("入站路由 → 自动回复门禁", () => {
+  it("第三方推理增量不是错误事件；扩展参数保持透传", async () => {
+    chatLlm.selectLlmProvider.mockReturnValue(provider({ stream: false, extraBody: { top_p: 0.8 } }));
+    const h = build();
+    h.pipeline.onDingTalkInbound({ peerId: "u1", nick: "阿甲", text: "在吗", msgType: "text", at: 100 } as never);
+    await vi.waitFor(() => expect(h.llm.chat).toHaveBeenCalled());
+    expect(h.llm.chat).toHaveBeenCalledWith(expect.objectContaining({ stream: false, extraBody: { top_p: 0.8 } }));
+    h.llm.emit({ kind: "llm-thinking-delta", payload: { clientToken: h.llm.lastToken(), delta: "thinking" } });
+    await driveLlmTurn(h, "回答");
+    await vi.waitFor(() => expect(backends.dingtalk).toHaveBeenCalledWith("u1", "回答"));
+  });
   it("autoReply 开：文本入站跑 LLM 回合并把纯文本经原通道回发", async () => {
     const h = build();
     h.pipeline.onDingTalkInbound({ peerId: "u1", nick: "阿甲", text: "在吗", msgType: "text", at: 100 } as never);

@@ -1,15 +1,17 @@
 /**
  * LLM 侧的四条聚合命令：模型清单、向量化、单轮补全、语音转写。
  *
- * 都按「OpenAI 兼容端点」实现（`/v1` 缺省补、已带版本段则直拼），凭证只认**环境变量名**，
- * 请求头支持 `{{ENV}}` 占位符由宿主解析 —— 插件/渲染端永远拿不到 key。
+ * 都按 OpenAI 兼容端点实现（裸域名补 `/v1`，显式网关路径原样使用）。凭证来自
+ * 宿主密钥库或环境变量，请求头支持 `{{ENV}}` 占位符 —— 插件/渲染端拿不到已存 key。
  *
- * 流式聊天（`llm_chat_start` / `llm_agent_start`）需要事件总线与可中止句柄，放在下一批。
+ * 流式聊天与原生 agent 共用请求构建、连接和响应解析。
  */
 import { statSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { basename } from "node:path";
 
 import { secretFor } from "./llm-secrets.js";
+import { readChatResponse } from "./llm-response.js";
 
 import type { EventBus } from "./events.js";
 import type { WorkspaceAccess } from "./workspace-access.js";
@@ -21,12 +23,114 @@ export interface LlmChatMessage {
   content: unknown;
 }
 
-/** 拼接 openai 兼容端点：baseUrl 已带 `/v1` 这类版本段就直拼，否则补 `/v1`。 */
+/** 裸域名补 /v1；显式路径原样保留（兼容 /api/v1、/compatible-mode/v1 等网关）。 */
 export function endpointUrl(baseUrl: string, subPath: string): string {
-  const trimmed = baseUrl.trim().replace(/\/+$/, "");
-  const last = trimmed.split("/").pop() ?? "";
-  const hasVersion = last.length >= 2 && last.startsWith("v") && /^\d+$/.test(last.slice(1));
-  return hasVersion ? `${trimmed}/${subPath}` : `${trimmed}/v1/${subPath}`;
+  const url = new URL(baseUrl.trim());
+  if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.hash) {
+    throw new Error("Base URL 必须是 HTTP(S) 地址，且不能包含账号密码或片段");
+  }
+  const base = url.pathname.replace(/\/+$/, "").replace(/\/(chat\/completions|models|embeddings|audio\/transcriptions)$/, "");
+  url.pathname = `${base || "/v1"}/${subPath}`;
+  return url.toString();
+}
+
+export interface ChatRequestOptions {
+  model: string;
+  reasoningEffort?: string | null;
+  temperature?: number | null;
+  maxTokens?: number | null;
+  stream?: boolean | null;
+  extraBody?: Record<string, unknown> | null;
+}
+
+/** 供应商扩展参数不能替换宿主管理的消息、工具或模型。null 可移除不支持的采样字段。 */
+export function buildChatBody(options: ChatRequestOptions, messages: unknown[]): Record<string, unknown> {
+  const extra = options.extraBody ?? {};
+  if (typeof extra !== "object" || Array.isArray(extra)) throw new Error("自定义请求参数必须是 JSON 对象");
+  for (const key of ["model", "messages", "tools", "tool_choice", "stream", "functions", "function_call", "n"]) {
+    if (Object.hasOwn(extra, key)) throw new Error(`自定义请求参数不能覆盖 ${key}`);
+  }
+  const body: Record<string, unknown> = { model: options.model, messages, stream: options.stream !== false };
+  const effort = reasoningEffort(options.reasoningEffort ?? "");
+  if (effort !== null) body.reasoning_effort = effort;
+  if (typeof options.temperature === "number") body.temperature = options.temperature;
+  if (typeof options.maxTokens === "number") body.max_tokens = options.maxTokens;
+  Object.assign(body, extra);
+  if (Object.hasOwn(extra, "max_completion_tokens")) delete body.max_tokens;
+  for (const key of Object.keys(body)) if (body[key] === null) delete body[key];
+  return body;
+}
+
+/** 请求头等待超时与响应体空闲超时分开，长时间持续输出不应被 60s 总时长误杀。 */
+export async function fetchChatResponse(
+  connection: { baseUrl: string; apiKeyEnv?: string | null; headers?: Record<string, string> | null },
+  body: Record<string, unknown>,
+  signal: AbortSignal,
+): Promise<Response> {
+  const timeout = new AbortController();
+  const timer = setTimeout(() => timeout.abort(new Error("llm endpoint connection timeout (60s)")), 60_000);
+  try {
+    return await fetch(endpointUrl(connection.baseUrl, "chat/completions"), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...authHeaders(resolveApiKey(connection.apiKeyEnv, connection.baseUrl), connection.headers ?? {}),
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.any([signal, timeout.signal]),
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** 合成工具回填自检：不访问工作区、不执行模型请求的任何真实工具。 */
+export async function probeAgentModel(
+  args: ChatRequestOptions & { baseUrl: string; apiKeyEnv?: string | null; headers?: Record<string, string> },
+): Promise<{ ok: true; model: string }> {
+  if (!args.model.trim()) throw new Error("请先填写模型 ID");
+  const signal = AbortSignal.timeout(120_000);
+  const messages: Record<string, unknown>[] = [
+    { role: "user", content: "Call greywork_probe with value=greywork, then reply with the tool result verbatim." },
+  ];
+  const tools = [
+    {
+      type: "function",
+      function: {
+        name: "greywork_probe",
+        description: "A harmless tool calling compatibility test.",
+        parameters: { type: "object", properties: { value: { type: "string" } }, required: ["value"] },
+      },
+    },
+  ];
+  const send = async (choice: unknown) => {
+    const body = { ...buildChatBody(args, messages), tools, tool_choice: choice };
+    const response = await fetchChatResponse(args, body, signal);
+    if (!response.ok) throw new Error(`工具调用测试失败：HTTP ${response.status} ${truncate(await response.text(), 200)}`);
+    return readChatResponse(response, signal);
+  };
+  const first = await send("auto");
+  const call = first.calls[0];
+  if (first.calls.length !== 1 || call?.name !== "greywork_probe")
+    throw new Error("模型未返回测试工具调用，请确认模型和网关支持 tool calling");
+  let input: { value?: unknown };
+  try {
+    input = JSON.parse(call.arguments) as { value?: unknown };
+  } catch {
+    throw new Error("模型返回的工具参数不是合法 JSON");
+  }
+  if (input?.value !== "greywork") throw new Error("模型未正确生成工具参数");
+  const result = `greywork_probe_${randomUUID()}`;
+  messages.push({
+    role: "assistant",
+    content: first.content,
+    ...(first.reasoning ? { [first.reasoningField]: first.reasoning } : {}),
+    tool_calls: [{ id: call.id, type: "function", function: { name: call.name, arguments: call.arguments } }],
+  });
+  messages.push({ role: "tool", tool_call_id: call.id, content: result });
+  const last = await send("none");
+  if (last.calls.length || !last.content.includes(result)) throw new Error("模型未正确读取工具回填结果或未遵守 tool_choice=none");
+  return { ok: true, model: args.model };
 }
 
 /** 解析请求头里的 `{{ENV}}` 占位符；变量缺失就报错，绝不把模板原样发出去。 */
@@ -246,37 +350,27 @@ export class LlmStreamHost {
 
   constructor(private readonly bus: EventBus) {}
 
-  async start(args: {
-    baseUrl: string;
-    model: string;
-    apiKeyEnv?: string | null;
-    messages: LlmChatMessage[];
-    reasoningEffort?: string;
-    headers?: Record<string, string>;
-    temperature?: number | null;
-    maxTokens?: number | null;
-    clientToken?: string | null;
-  }): Promise<number> {
+  async start(
+    args: ChatRequestOptions & {
+      baseUrl: string;
+      model: string;
+      apiKeyEnv?: string | null;
+      messages: LlmChatMessage[];
+      reasoningEffort?: string;
+      headers?: Record<string, string>;
+      temperature?: number | null;
+      maxTokens?: number | null;
+      clientToken?: string | null;
+    },
+  ): Promise<number> {
     const baseUrl = args.baseUrl.trim();
     if (baseUrl === "" || args.model.trim() === "") throw new Error("base_url and model are required");
-    const apiKey = resolveApiKey(args.apiKeyEnv, baseUrl);
-    const body: Record<string, unknown> = {
-      model: args.model,
-      stream: true,
-      messages: args.messages.map((message) => ({ role: message.role, content: message.content })),
-    };
-    const effort = reasoningEffort(args.reasoningEffort ?? "");
-    if (effort !== null) body.reasoning_effort = effort;
-    if (typeof args.temperature === "number") body.temperature = args.temperature;
-    if (typeof args.maxTokens === "number") body.max_tokens = args.maxTokens;
-
+    const body = buildChatBody(
+      args,
+      args.messages.map((message) => ({ role: message.role, content: message.content })),
+    );
     const controller = new AbortController();
-    const response = await fetch(endpointUrl(baseUrl, "chat/completions"), {
-      method: "POST",
-      headers: { "content-type": "application/json", ...authHeaders(apiKey, args.headers) },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
+    const response = await fetchChatResponse(args, body, controller.signal);
     if (!response.ok) {
       const text = await response.text().catch(() => "");
       throw new Error(`llm endpoint returned ${response.status}: ${truncate(text, 200)}${RESPONSE_READ_HINT}`);
@@ -303,89 +397,12 @@ export class LlmStreamHost {
   }
 
   private async consume(requestId: number, response: Response, token: string, controller: AbortController): Promise<void> {
-    const flush = (kind: string, text: string) => {
-      if (text !== "") this.emit(token, kind, { delta: text });
-    };
-    let content = "";
-    let thinking = "";
-    const finish = () => {
-      flush("llm-delta", content);
-      flush("llm-thinking-delta", thinking);
-      content = "";
-      thinking = "";
-    };
-
     try {
-      const contentType = response.headers.get("content-type") ?? "";
-      if (!contentType.includes("text/event-stream")) {
-        // 服务端忽略 stream：整包 JSON 也要按增量语义发一次。
-        const payload = (await readJson(response)) as { choices?: { message?: { content?: unknown } }[] };
-        const text = payload?.choices?.[0]?.message?.content;
-        if (typeof text === "string" && text !== "") {
-          content = text;
-          finish();
-        }
-        this.emit(token, "llm-done", {});
-        return;
-      }
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error("响应没有可读流");
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let timer: NodeJS.Timeout | null = null;
-      const schedule = () => {
-        if (timer !== null) return;
-        timer = setTimeout(() => {
-          timer = null;
-          finish();
-        }, 30);
-      };
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        let newline = buffer.indexOf("\n");
-        while (newline >= 0) {
-          const line = buffer.slice(0, newline).trim();
-          buffer = buffer.slice(newline + 1);
-          newline = buffer.indexOf("\n");
-          if (!line.startsWith("data:")) continue;
-          const payload = line.slice(5).trim();
-          if (payload === "[DONE]") {
-            if (timer !== null) clearTimeout(timer);
-            finish();
-            this.emit(token, "llm-done", {});
-            return;
-          }
-          try {
-            const parsed = JSON.parse(payload) as {
-              choices?: { delta?: { content?: unknown; reasoning_content?: unknown; reasoning?: unknown } }[];
-              error?: { message?: unknown };
-            };
-            if (typeof parsed.error?.message === "string") throw new Error(parsed.error.message);
-            const delta = parsed.choices?.[0]?.delta;
-            if (typeof delta?.content === "string") {
-              content += delta.content;
-              schedule();
-            }
-            const reason =
-              typeof delta?.reasoning_content === "string"
-                ? delta.reasoning_content
-                : typeof delta?.reasoning === "string"
-                  ? delta.reasoning
-                  : "";
-            if (reason !== "") {
-              thinking += reason;
-              schedule();
-            }
-          } catch (error) {
-            if (error instanceof SyntaxError) continue;
-            throw error;
-          }
-        }
-      }
-      if (timer !== null) clearTimeout(timer);
-      finish();
+      const outcome = await readChatResponse(response, controller.signal, {
+        onText: (delta) => this.emit(token, "llm-delta", { delta }),
+        onThinking: (delta) => this.emit(token, "llm-thinking-delta", { delta }),
+      });
+      if (!outcome.content.trim()) throw new Error("模型没有返回正文");
       this.emit(token, "llm-done", {});
     } catch (error) {
       if (controller.signal.aborted) return;

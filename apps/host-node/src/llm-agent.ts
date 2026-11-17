@@ -3,15 +3,15 @@
  * 移植 crates/greywork-host/src/services/llm/agent/（mod + runner + tools）。
  *
  * 与纯聊天（llm.ts::LlmStreamHost）的关系：大脑是用户自己的模型端点，工具面由宿主
- * 提供**并在自己的授权面内执行** —— 只读三件套（读文件 / 列目录 / 最近提交），
- * 全部复用 WorkspaceAccess 与 gitLog，不存在第二套 allow-list。因此无需交互式
- * 权限确认，循环可以在宿主侧自主推进。
+ * 提供**并在自己的授权面内执行**。读写文件复用 WorkspaceAccess；写入、MCP 和命令
+ * 按权限档位放行或请求用户确认，循环在宿主侧推进。
  *
  * 两个必须显式处理的协议细节（与 Rust 同款）：
  * - arguments 可能不是合法 JSON：解析失败就回空对象让 executeTool 报错，模型重发；
  * - 触顶后要收尾回合：追加一次 tool_choice 为 none 的收尾请求，而不是直接掐断。
  */
-import { authHeaders, endpointUrl, resolveApiKey, truncate, type LlmChatMessage } from "./llm.js";
+import { buildChatBody, endpointUrl, fetchChatResponse, truncate, type ChatRequestOptions, type LlmChatMessage } from "./llm.js";
+import { readChatResponse } from "./llm-response.js";
 import path from "node:path";
 
 import type { AgentMcpServer, McpToolBinding } from "./agent-mcp.js";
@@ -21,9 +21,6 @@ import { gitDiff, gitLog, gitStatus } from "./git.js";
 import { shellRun } from "./shell-run.js";
 import type { EventBus } from "./events.js";
 import type { WorkspaceAccess } from "./workspace-access.js";
-
-/** 连接挂着但长时间无字节，按错误终止（与纯聊天路径同源的空闲超时）。 */
-const IDLE_TIMEOUT_MS = 60_000;
 
 /** 写操作确认窗口（ms）：与 ACP 权限卡同一 120s，超时按拒绝处理。 */
 const PERMISSION_CONFIRM_TIMEOUT_MS = 120_000;
@@ -78,7 +75,7 @@ const MAX_SEARCH_MATCHES = 80;
 const MAX_SEARCH_FILE_BYTES = 512 * 1024;
 
 /** 一个可尝试的供应商（多供应商配置里的单个元素）。 */
-export interface AgentProviderTarget {
+export interface AgentProviderTarget extends ChatRequestOptions {
   baseUrl: string;
   model: string;
   apiKeyEnv?: string | null;
@@ -100,6 +97,8 @@ interface ProviderTarget {
   maxTokens: number | null;
   reasoningEffort: string;
   contextTokens: number | null;
+  stream: boolean;
+  extraBody: Record<string, unknown>;
 }
 
 /**
@@ -112,7 +111,7 @@ export function canFailover(status: number): boolean {
   return status === 401 || status === 403 || status === 408 || status === 425 || status === 429 || status >= 500;
 }
 
-export interface AgentStartArgs {
+export interface AgentStartArgs extends ChatRequestOptions {
   baseUrl: string;
   model: string;
   apiKeyEnv?: string | null;
@@ -153,6 +152,8 @@ interface AgentTurn {
   headers: Record<string, string>;
   temperature: number | null;
   maxTokens: number | null;
+  stream: boolean;
+  extraBody: Record<string, unknown>;
   maxRounds: number;
   clientToken: string;
   cwd: string;
@@ -171,12 +172,6 @@ interface AgentTurn {
   activeProvider: number;
   /** 本回合还没裁决的写请求，回合中止时统一按拒绝收场。 */
   pendingPermissions: Set<number>;
-}
-
-interface ToolCall {
-  id: string;
-  name: string;
-  arguments: string;
 }
 
 interface ToolOutput {
@@ -248,7 +243,7 @@ function messageText(message: Record<string, unknown>): string {
 export function compactHistory(history: Record<string, unknown>[], budgetTokens: number): number {
   const budget = Math.max(budgetTokens, MIN_CONTEXT_TOKENS);
   let total = 0;
-  for (const message of history) total += estimateContextTokens(messageText(message)) + 8;
+  for (const message of history) total += estimateContextTokens(JSON.stringify(message)) + 8;
   if (total <= budget) return 0;
   let folded = 0;
   const toolIndexes = history.map((message, index) => (message.role === "tool" ? index : -1)).filter((index) => index >= 0);
@@ -578,6 +573,8 @@ function normalizeProviders(args: AgentStartArgs): ProviderTarget[] {
             temperature: args.temperature,
             maxTokens: args.maxTokens,
             reasoningEffort: args.reasoningEffort,
+            stream: args.stream,
+            extraBody: args.extraBody,
           },
         ];
   return source.map((item) => ({
@@ -588,7 +585,9 @@ function normalizeProviders(args: AgentStartArgs): ProviderTarget[] {
     temperature: typeof item.temperature === "number" ? item.temperature : null,
     maxTokens: typeof item.maxTokens === "number" ? item.maxTokens : null,
     reasoningEffort: item.reasoningEffort ?? "",
-    contextTokens: typeof item.contextTokens === "number" ? item.contextTokens : null,
+    contextTokens: typeof item.contextTokens === "number" && Number.isFinite(item.contextTokens) ? Math.floor(item.contextTokens) : null,
+    stream: item.stream !== false,
+    extraBody: item.extraBody ?? {},
   }));
 }
 
@@ -603,6 +602,8 @@ function applyProvider(turn: AgentTurn, index: number): void {
   turn.temperature = target.temperature;
   turn.maxTokens = target.maxTokens;
   turn.reasoningEffort = target.reasoningEffort;
+  turn.stream = target.stream;
+  turn.extraBody = target.extraBody;
   // 上下文窗口按模型走：切换供应商时预算跟着换，别用小模型的额度去压大模型。
   turn.contextTokens = Math.max(target.contextTokens ?? turn.defaultContextTokens, MIN_CONTEXT_TOKENS);
 }
@@ -838,7 +839,8 @@ export async function executeTool(
     }
     if (name === "write_file") {
       const target = anchorToRoot(cwd, argStr(input, "path"));
-      const content = typeof input.content === "string" ? input.content : "";
+      if (typeof input.content !== "string") return failed("参数 content 必须是字符串（清空文件需显式传空字符串）", target);
+      const content = input.content;
       const relative = path.relative(cwd, target) || target;
       const before = readTextOrNull(access, target);
       const verdict = await gateWrite(policy, relative, before ?? "", content, target);
@@ -857,7 +859,8 @@ export async function executeTool(
     if (name === "edit_file") {
       const target = anchorToRoot(cwd, argStr(input, "path"));
       const oldText = argStr(input, "old_text");
-      const newText = typeof input.new_text === "string" ? input.new_text : "";
+      if (typeof input.new_text !== "string") return failed("参数 new_text 必须是字符串（删除文本需显式传空字符串）", target);
+      const newText = input.new_text;
       const replaceAll = input.replace_all === true;
       const relative = path.relative(cwd, target) || target;
       if (oldText === "") {
@@ -963,131 +966,12 @@ export async function executeTool(
   }
 }
 
-/* ===== SSE 增量与工具调用分片 ===== */
-
-interface SseDelta {
-  content: string | null;
-  reasoning: string | null;
-  toolCallChunks: { index: number; id: string | null; name: string | null; arguments: string | null }[];
-}
-
-function parseSseDelta(data: string): SseDelta | null {
-  let value: Record<string, unknown>;
-  try {
-    value = JSON.parse(data) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-  const choices = value.choices as Record<string, unknown>[] | undefined;
-  const delta = choices?.[0]?.delta as Record<string, unknown> | undefined;
-  if (!delta) return null;
-  const pick = (key: string): string | null => {
-    const text = delta[key];
-    return typeof text === "string" && text !== "" ? text : null;
-  };
-  const rawCalls = Array.isArray(delta.tool_calls) ? delta.tool_calls : [];
-  const toolCallChunks = rawCalls
-    .map((chunk) => {
-      const record = chunk as { index?: unknown; id?: unknown; function?: { name?: unknown; arguments?: unknown } };
-      if (typeof record.index !== "number") return null;
-      const fn = record.function ?? {};
-      return {
-        index: record.index,
-        id: typeof record.id === "string" && record.id !== "" ? record.id : null,
-        name: typeof fn.name === "string" && fn.name !== "" ? fn.name : null,
-        arguments: typeof fn.arguments === "string" && fn.arguments !== "" ? fn.arguments : null,
-      };
-    })
-    .filter((chunk): chunk is { index: number; id: string | null; name: string | null; arguments: string | null } => chunk !== null);
-  return {
-    content: pick("content"),
-    reasoning: pick("reasoning_content") ?? pick("reasoning"),
-    toolCallChunks,
-  };
-}
-
-/** 按 index 归位拼接一个回合里的工具调用分片；缺 id / 缺 name 合成兜底。 */
-class ToolCallAccumulator {
-  private readonly calls = new Map<number, { id: string | null; name: string | null; arguments: string }>();
-  private synthSeq = 0;
-
-  push(chunks: { index: number; id: string | null; name: string | null; arguments: string | null }[]): void {
-    for (const chunk of chunks) {
-      const call = this.calls.get(chunk.index) ?? { id: null, name: null, arguments: "" };
-      this.calls.set(chunk.index, call);
-      if (chunk.id !== null) call.id = chunk.id;
-      if (chunk.name !== null) call.name = chunk.name;
-      if (chunk.arguments !== null) call.arguments += chunk.arguments;
-    }
-  }
-
-  take(): ToolCall[] {
-    const indexes = [...this.calls.keys()].sort((a, b) => a - b);
-    const out: ToolCall[] = [];
-    for (const index of indexes) {
-      const call = this.calls.get(index)!;
-      this.calls.delete(index);
-      const id = call.id ?? "call_synth_" + index + "_" + ++this.synthSeq;
-      out.push({ id, name: call.name ?? "", arguments: call.arguments });
-    }
-    return out;
-  }
-}
-
-function contentFromCompletion(body: Record<string, unknown>): string {
-  const choices = body.choices as Record<string, unknown>[] | undefined;
-  const content = (choices?.[0]?.message as Record<string, unknown> | undefined)?.content;
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) {
-    return content
-      .map((part) => (part as { text?: unknown }).text)
-      .filter((text): text is string => typeof text === "string")
-      .join("");
-  }
-  return "";
-}
-
-function toolCallsFromCompletion(body: Record<string, unknown>): ToolCall[] {
-  const choices = body.choices as Record<string, unknown>[] | undefined;
-  const items = (choices?.[0]?.message as Record<string, unknown> | undefined)?.tool_calls;
-  if (!Array.isArray(items)) return [];
-  const accumulator = new ToolCallAccumulator();
-  accumulator.push(
-    items.map((item, index) => {
-      const record = item as { id?: unknown; function?: { name?: unknown; arguments?: unknown } };
-      const fn = record.function ?? {};
-      return {
-        index,
-        id: typeof record.id === "string" && record.id !== "" ? record.id : null,
-        name: typeof fn.name === "string" && fn.name !== "" ? fn.name : null,
-        arguments: typeof fn.arguments === "string" && fn.arguments !== "" ? fn.arguments : null,
-      };
-    }),
-  );
-  return accumulator.take();
-}
-
 /* ===== 宿主状态与回合循环 ===== */
-
-function reasoningEffort(value: string): string | null {
-  switch (value.trim().toLowerCase()) {
-    case "low":
-      return "low";
-    case "medium":
-      return "medium";
-    case "high":
-      return "high";
-    case "max":
-      return "high";
-    default:
-      return null;
-  }
-}
 
 /** 本机 agent 回合的宿主状态：请求 id 分配 + 可中止的任务句柄（与纯聊天流独立）。 */
 export class LlmAgentHost {
   private nextId = 0;
-  private readonly tasks = new Map<number, AbortController>();
+  private readonly tasks = new Map<number, { controller: AbortController; turn: AgentTurn }>();
   /** 待裁决的写请求：requestId → 结算函数（respond / 超时 / 中止都走 settle）。 */
   private readonly pendingPermissions = new Map<
     number,
@@ -1112,6 +996,7 @@ export class LlmAgentHost {
     const baseUrl = args.baseUrl.trim();
     const model = args.model.trim();
     if (baseUrl === "" || model === "") throw new Error("base_url and model are required");
+    endpointUrl(baseUrl, "chat/completions");
     if (!Array.isArray(args.messages) || args.messages.length === 0) {
       throw new Error("messages 不能为空");
     }
@@ -1126,6 +1011,11 @@ export class LlmAgentHost {
       MIN_CONTEXT_TOKENS,
     );
     const messages = args.messages.map((message) => ({ role: message.role, content: message.content }));
+    messages.unshift({
+      role: "system",
+      content:
+        "你是 GreyWork 工作区助手。根据用户任务自主使用可用工具，工具结果回填后继续处理，完成后给出结论。先搜索和读取再修改文件；保留已有未提交改动，不覆盖未读内容。写入、命令和 MCP 必须遵守宿主权限与用户裁决，被拒绝后不得尝试绕过。工具返回失败时可修正参数，但不要重复无效调用。不要声称执行了没有成功返回的工具。",
+    });
     // 技能索引只放系统提示（id + 名称 + 一句话），正文由模型按需 read_skill。
     const skillIndex = skillIndexPrompt(listSkills(this.access, cwd));
     if (skillIndex !== null) messages.unshift({ role: "system", content: skillIndex });
@@ -1138,7 +1028,9 @@ export class LlmAgentHost {
       headers: args.headers ?? {},
       temperature: args.temperature ?? null,
       maxTokens: args.maxTokens ?? null,
-      maxRounds: Math.min(Math.max(args.maxRounds ?? DEFAULT_MAX_ROUNDS, 1), HARD_MAX_ROUNDS),
+      stream: args.stream !== false,
+      extraBody: args.extraBody ?? {},
+      maxRounds: Math.min(Math.max(Number.isFinite(args.maxRounds) ? Math.floor(args.maxRounds!) : DEFAULT_MAX_ROUNDS, 1), HARD_MAX_ROUNDS),
       clientToken: args.clientToken ?? "",
       cwd,
       pendingPermissions: new Set<number>(),
@@ -1160,7 +1052,7 @@ export class LlmAgentHost {
     // 先把主供应商的字段摊到 turn 上；失败切换时再换。
     applyProvider(turn, 0);
     const controller = new AbortController();
-    this.tasks.set(requestId, controller);
+    this.tasks.set(requestId, { controller, turn });
     void this.run(turn, controller).finally(() => {
       // 回合结束时自己摘掉句柄：长跑会话不会攒下大量已完成句柄。
       this.tasks.delete(requestId);
@@ -1170,14 +1062,11 @@ export class LlmAgentHost {
 
   /** 中止进行中的 agent 回合并回收句柄；挂在确认卡上的写请求按拒绝收场。 */
   stop(requestId: number): void {
-    const controller = this.tasks.get(requestId);
-    if (!controller) throw new Error("unknown llm agent request " + requestId);
+    const task = this.tasks.get(requestId);
+    if (!task) throw new Error("unknown llm agent request " + requestId);
     this.tasks.delete(requestId);
-    controller.abort();
-    for (const [permissionId, entry] of [...this.pendingPermissions]) {
-      if (entry.resolve === undefined) continue;
-      if (entry.turn.pendingPermissions.has(permissionId)) this.settlePermission(permissionId, false);
-    }
+    task.controller.abort();
+    for (const permissionId of [...task.turn.pendingPermissions]) this.settlePermission(permissionId, false);
   }
 
   /** 用户对写请求的裁决；optionId=null/deny 表示拒绝。 */
@@ -1240,6 +1129,8 @@ export class LlmAgentHost {
       if (controller.signal.aborted) return;
       this.emit(turn.clientToken, "llm-error", { message: (error as Error).message });
       return;
+    } finally {
+      for (const permissionId of [...turn.pendingPermissions]) this.settlePermission(permissionId, false);
     }
     if (!controller.signal.aborted) this.emit(turn.clientToken, "llm-done", {});
   }
@@ -1256,15 +1147,7 @@ export class LlmAgentHost {
       const body = buildBody();
       let response: Response | null = null;
       try {
-        response = await fetch(endpointUrl(turn.baseUrl, "chat/completions"), {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            ...authHeaders(resolveApiKey(turn.apiKeyEnv, turn.baseUrl), turn.headers),
-          },
-          body: JSON.stringify(body),
-          signal: controller.signal,
-        });
+        response = await fetchChatResponse(turn, body, controller.signal);
       } catch (error) {
         if (controller.signal.aborted) throw error;
         lastError = "llm request failed: " + (error as Error).message;
@@ -1296,10 +1179,10 @@ export class LlmAgentHost {
     turn.mcpTools = turn.policy.mcp === "deny" ? [] : await resolveMcpTools(turn.mcpServers);
     const schemas = toolSchemas(turn.policy.write !== "deny", turn.policy.shell !== "deny", mcpToolSchemas(turn.mcpTools));
     const history: Record<string, unknown>[] = [...turn.messages];
-    const accumulator = new ToolCallAccumulator();
 
     // round < maxRounds 是工具回合；最后一轮是收尾回合（tool_choice: none）。
     for (let round = 0; round <= turn.maxRounds; round += 1) {
+      controller.signal.throwIfAborted();
       // 每轮请求前压一次：工具结果越滚越多，等到撞 400 再处理就来不及了。
       const folded = compactHistory(history, turn.contextTokens);
       if (folded > 0) {
@@ -1307,28 +1190,22 @@ export class LlmAgentHost {
       }
       // 请求体随「当前供应商」变化：失败切换后要按新供应商的模型/参数重建。
       const buildBody = (): Record<string, unknown> => {
-        const body: Record<string, unknown> = {
-          model: turn.model,
-          stream: true,
-          messages: history,
-        };
-        const effort = reasoningEffort(turn.reasoningEffort);
-        if (effort !== null) body.reasoning_effort = effort;
-        if (turn.temperature !== null) body.temperature = turn.temperature;
-        if (turn.maxTokens !== null) body.max_tokens = turn.maxTokens;
+        compactHistory(history, turn.contextTokens);
+        const body = buildChatBody(turn, history);
         body.tools = schemas;
         body.tool_choice = round < turn.maxRounds ? "auto" : "none";
         return body;
       };
 
       const response = await this.sendRound(turn, controller, buildBody);
-      const outcome = await this.drainRound(response, turn, controller, accumulator);
+      const outcome = await readChatResponse(response, controller.signal, {
+        onText: (delta) => this.emit(turn.clientToken, "llm-delta", { delta }),
+        onThinking: (delta) => this.emit(turn.clientToken, "llm-thinking-delta", { delta }),
+      });
 
       // 没有工具调用 = 模型给出了最终答复，收尾。
       if (outcome.calls.length === 0) {
-        if (round === turn.maxRounds && outcome.content.trim() === "") {
-          throw new Error("工具回合用了满 " + turn.maxRounds + " 轮仍未给出结论；可提高回合上限或缩小问题范围");
-        }
+        if (outcome.content.trim() === "") throw new Error("模型没有返回正文或工具调用；请检查模型能力和最大输出 token");
         return;
       }
       if (round === turn.maxRounds) {
@@ -1340,6 +1217,7 @@ export class LlmAgentHost {
       history.push({
         role: "assistant",
         content: outcome.content,
+        ...(outcome.reasoning ? { [outcome.reasoningField]: outcome.reasoning } : {}),
         tool_calls: outcome.calls.map((call) => ({
           id: call.id,
           type: "function",
@@ -1348,9 +1226,11 @@ export class LlmAgentHost {
       });
 
       for (const call of outcome.calls) {
+        controller.signal.throwIfAborted();
         const input = parseArguments(call.arguments);
         this.emit(turn.clientToken, "llm-tool-call", { id: call.id, name: call.name, input, round });
         const output = await executeTool(this.access, turn.cwd, call.name, input, turn.policy, turn.mcpTools);
+        controller.signal.throwIfAborted();
         this.emit(turn.clientToken, "llm-tool-result", {
           id: call.id,
           ok: output.error === null,
@@ -1367,119 +1247,6 @@ export class LlmAgentHost {
         });
       }
     }
-  }
-
-  /** 消费一个回合的流，边下发正文 / 思考边把工具调用分片喂给累积器。 */
-  private async drainRound(
-    response: Response,
-    turn: AgentTurn,
-    controller: AbortController,
-    accumulator: ToolCallAccumulator,
-  ): Promise<{ content: string; calls: ToolCall[] }> {
-    const contentType = response.headers.get("content-type") ?? "";
-    if (!contentType.includes("text/event-stream")) {
-      // 非流式：一次性拿全文与全部调用（端点忽略 stream 时）。
-      const text = await response.text();
-      let body: Record<string, unknown>;
-      try {
-        body = JSON.parse(text) as Record<string, unknown>;
-      } catch {
-        throw new Error("响应不是合法 JSON: " + truncate(text, 200));
-      }
-      const content = contentFromCompletion(body);
-      if (content !== "") this.emit(turn.clientToken, "llm-delta", { delta: content });
-      return { content, calls: toolCallsFromCompletion(body) };
-    }
-
-    const reader = response.body?.getReader();
-    if (!reader) throw new Error("响应没有可读流");
-    const decoder = new TextDecoder();
-    let content = "";
-    let contentBatch = "";
-    let thinkingBatch = "";
-    let flushTimer: NodeJS.Timeout | null = null;
-    let idleTimer: NodeJS.Timeout | null = null;
-    let idleMessage: string | null = null;
-    const armIdle = () => {
-      if (idleTimer !== null) clearTimeout(idleTimer);
-      // 空闲超时：拿不到新字节就主动断流（以错误收场，循环会把错误上报）。
-      idleTimer = setTimeout(() => {
-        idleMessage = "llm endpoint idle timeout (" + IDLE_TIMEOUT_MS / 1000 + "s)";
-        controller.abort();
-      }, IDLE_TIMEOUT_MS);
-    };
-    const flush = () => {
-      if (contentBatch !== "") {
-        this.emit(turn.clientToken, "llm-delta", { delta: contentBatch });
-        contentBatch = "";
-      }
-      if (thinkingBatch !== "") {
-        this.emit(turn.clientToken, "llm-thinking-delta", { delta: thinkingBatch });
-        thinkingBatch = "";
-      }
-    };
-    const schedule = () => {
-      if (flushTimer !== null) return;
-      flushTimer = setTimeout(() => {
-        flushTimer = null;
-        flush();
-      }, 30);
-    };
-    armIdle();
-
-    let buffer = "";
-    let streamError: Error | null = null;
-    try {
-      for (;;) {
-        const { done, value } = await reader.read();
-        armIdle();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        let newline = buffer.indexOf("\n");
-        while (newline >= 0) {
-          const line = buffer.slice(0, newline).trim();
-          buffer = buffer.slice(newline + 1);
-          newline = buffer.indexOf("\n");
-          if (!line.startsWith("data:")) continue;
-          const payload = line.slice(5).trim();
-          if (payload === "[DONE]") {
-            if (idleTimer !== null) clearTimeout(idleTimer);
-            if (flushTimer !== null) clearTimeout(flushTimer);
-            flush();
-            return { content, calls: accumulator.take() };
-          }
-          let parsed: { error?: { message?: unknown } } & Record<string, unknown>;
-          try {
-            parsed = JSON.parse(payload) as { error?: { message?: unknown } } & Record<string, unknown>;
-          } catch {
-            continue;
-          }
-          if (typeof parsed.error?.message === "string") throw new Error(parsed.error.message);
-          const delta = parseSseDelta(payload);
-          if (delta === null) continue;
-          if (delta.content !== null) {
-            content += delta.content;
-            contentBatch += delta.content;
-            schedule();
-          }
-          if (delta.reasoning !== null) {
-            thinkingBatch += delta.reasoning;
-            schedule();
-          }
-          if (delta.toolCallChunks.length > 0) accumulator.push(delta.toolCallChunks);
-        }
-      }
-    } catch (error) {
-      streamError = error as Error;
-    } finally {
-      if (idleTimer !== null) clearTimeout(idleTimer);
-      if (flushTimer !== null) clearTimeout(flushTimer);
-      // 终止之前必须把缓冲发出去，否则本轮最后一段正文会丢。
-      flush();
-    }
-    if (idleMessage !== null) throw new Error(idleMessage);
-    if (streamError !== null) throw streamError;
-    return { content, calls: accumulator.take() };
   }
 }
 

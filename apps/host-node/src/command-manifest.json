@@ -186,6 +186,12 @@
     "binary": false
   },
   {
+    "name": "llm_agent_probe",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
     "name": "llm_agent_stop",
     "auth": "required",
     "desktopOnly": false,

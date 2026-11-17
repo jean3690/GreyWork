@@ -33,7 +33,16 @@ import {
 import os from "node:os";
 import { ragIndexBuild, ragSearch } from "./rag.js";
 import { listWorktrees, provisionWorktree, releaseWorktree, restoreWorktree, snapshotWorktree } from "./worktree.js";
-import { chatComplete, embed, listModels, transcribe, type LlmChatMessage, type LlmStreamHost } from "./llm.js";
+import {
+  chatComplete,
+  embed,
+  listModels,
+  probeAgentModel,
+  transcribe,
+  type ChatRequestOptions,
+  type LlmChatMessage,
+  type LlmStreamHost,
+} from "./llm.js";
 import type { AgentProviderTarget, AgentStartArgs, LlmAgentHost } from "./llm-agent.js";
 import type { AgentMcpServer } from "./agent-mcp.js";
 import type { AcpHost } from "./acp.js";
@@ -1169,6 +1178,8 @@ HANDLERS.set("llm_chat_start", async (args, ctx) => {
     headers?: unknown;
     temperature?: unknown;
     maxTokens?: unknown;
+    stream?: unknown;
+    extraBody?: unknown;
     clientToken?: unknown;
   } | null;
   if (typeof value?.baseUrl !== "string" || typeof value?.model !== "string" || !Array.isArray(value.messages)) {
@@ -1183,6 +1194,8 @@ HANDLERS.set("llm_chat_start", async (args, ctx) => {
     headers: (value.headers ?? undefined) as Record<string, string> | undefined,
     temperature: typeof value.temperature === "number" ? value.temperature : null,
     maxTokens: typeof value.maxTokens === "number" ? value.maxTokens : null,
+    stream: typeof value.stream === "boolean" ? value.stream : undefined,
+    extraBody: value.extraBody as Record<string, unknown> | undefined,
     clientToken: typeof value.clientToken === "string" ? value.clientToken : null,
   });
 });
@@ -1200,6 +1213,11 @@ HANDLERS.set("llm_list_models", async (args) => {
     apiKeyEnv: typeof value.apiKeyEnv === "string" ? value.apiKeyEnv : null,
     headers: (value.headers ?? undefined) as Record<string, string> | undefined,
   });
+});
+HANDLERS.set("llm_agent_probe", async (args) => {
+  const value = args as (ChatRequestOptions & { baseUrl: string; apiKeyEnv?: string; headers?: Record<string, string> }) | null;
+  if (typeof value?.baseUrl !== "string" || typeof value?.model !== "string") throw new CommandError(400, "缺少参数 baseUrl / model");
+  return probeAgentModel(value);
 });
 HANDLERS.set("llm_embed", async (args) => {
   const value = args as {
@@ -1414,6 +1432,8 @@ HANDLERS.set("llm_agent_start", async (args, ctx) => {
     temperature: typeof value.temperature === "number" ? value.temperature : null,
     maxTokens: typeof value.maxTokens === "number" ? value.maxTokens : null,
     maxRounds: typeof value.maxRounds === "number" ? value.maxRounds : null,
+    stream: typeof value.stream === "boolean" ? value.stream : undefined,
+    extraBody: value.extraBody,
     clientToken: typeof value.clientToken === "string" ? value.clientToken : null,
     // 工具的工作目录：渲染端给当前工作区根，缺省回落到授权面默认根。
     cwd: typeof value.cwd === "string" ? value.cwd : null,

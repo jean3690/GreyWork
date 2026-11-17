@@ -163,6 +163,49 @@ describe("AgentSettingsPane · 按需下载安装按钮", () => {
 });
 
 describe("AgentSettingsPane · 模型供应商的 agent 模式开关", () => {
+  it("同一供应商切换模式不丢密钥草稿，切到另一供应商时清空以免串 key", async () => {
+    (window as unknown as Record<string, unknown>).__GREYWORK_RUNTIME__ = "server";
+    const wrapper = await mountPane(false);
+    const settings = useSettingsStore();
+    settings.selectModelProvider(settings.modelProviders[0].id);
+    await nextTick();
+    await wrapper.get('[data-testid="provider-secret-input"]').setValue("test-key-draft");
+    await wrapper.get('[data-testid="provider-agent-mode"]').setValue(true);
+    expect((wrapper.get('[data-testid="provider-secret-input"]').element as HTMLInputElement).value).toBe("test-key-draft");
+    settings.selectModelProvider(settings.modelProviders[1].id);
+    await nextTick();
+    expect((wrapper.get('[data-testid="provider-secret-input"]').element as HTMLInputElement).value).toBe("");
+  });
+  it("兼容性参数保存到供应商；开关 Agent 模式不丢未保存草稿", async () => {
+    const wrapper = await mountPane(false);
+    const settings = useSettingsStore();
+    const first = settings.modelProviders[0];
+    settings.upsertModelProvider({ ...first, baseUrl: "https://gateway.example/api", model: "custom" });
+    settings.selectModelProvider(first.id);
+    await nextTick();
+    await wrapper.get('[data-testid="provider-extra-body"]').setValue('{"max_completion_tokens":8192}');
+    await wrapper.get('[data-testid="provider-stream"]').setValue(false);
+    await wrapper.get('[data-testid="provider-agent-mode"]').setValue(true);
+    expect((wrapper.get('[data-testid="provider-extra-body"]').element as HTMLTextAreaElement).value).toContain("8192");
+    await wrapper.get('[data-testid="provider-draft-save"]').trigger("click");
+    expect(settings.modelProviders.find((p) => p.id === first.id)).toMatchObject({
+      stream: false,
+      extraBody: { max_completion_tokens: 8192 },
+      agentMode: true,
+    });
+  });
+  it("非法自定义请求参数不能持久化", async () => {
+    const wrapper = await mountPane(false);
+    const settings = useSettingsStore();
+    const first = settings.modelProviders[0];
+    settings.upsertModelProvider({ ...first, baseUrl: "https://gateway.example", model: "custom" });
+    settings.selectModelProvider(first.id);
+    await nextTick();
+    await wrapper.get('[data-testid="provider-extra-body"]').setValue('{"messages":[]}');
+    await wrapper.get('[data-testid="provider-draft-save"]').trigger("click");
+    expect(wrapper.get('[data-testid="provider-draft-error"]').text()).toContain("messages");
+    expect(settings.modelProviders.find((p) => p.id === first.id)?.extraBody).toBeUndefined();
+  });
   it("默认关闭；勾选即时落盘并展开轮数上限，关掉后收起", async () => {
     const wrapper = await mountPane(false);
     const settings = useSettingsStore();

@@ -3,11 +3,12 @@
  * 模型供应商新增弹窗（受控，仅新增）。
  *
  * 收集字段后 emit `save(payload)`，父级补 id/kind/enabled 再落库并选中。
- * API key 只填**环境变量名**（值由宿主从启动进程的环境里读），不落明文。
+ * API key 可直接写入宿主密钥库，也可填写环境变量名，不进入设置快照。
  */
 import { ref, watch } from "vue";
 import CloseIcon from "@/features/shared/Icon.vue";
 import { parseHeaderText } from "@/stores/agent/shared";
+import { validateModelConnection } from "@/lib/model-provider-config";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 
 export interface ModelProviderDraftPayload {
@@ -18,6 +19,7 @@ export interface ModelProviderDraftPayload {
   /** 直接填的 key（可选）：父级会写进宿主密钥库，不随设置快照落盘。 */
   apiKey?: string;
   headers?: Record<string, string>;
+  agentMode: boolean;
 }
 
 const props = defineProps<{
@@ -28,11 +30,11 @@ const props = defineProps<{
 
 const emit = defineEmits<{ save: [payload: ModelProviderDraftPayload]; cancel: [] }>();
 
-const draft = ref({ name: "", baseUrl: "", model: "", apiKeyEnv: "CUSTOM_LLM_API_KEY", apiKey: "", headersText: "" });
+const draft = ref({ name: "", baseUrl: "", model: "", apiKeyEnv: "CUSTOM_LLM_API_KEY", apiKey: "", headersText: "", agentMode: true });
 const error = ref<string | null>(null);
 
 function resetDraft(): void {
-  draft.value = { name: "", baseUrl: "", model: "", apiKeyEnv: "CUSTOM_LLM_API_KEY", apiKey: "", headersText: "" };
+  draft.value = { name: "", baseUrl: "", model: "", apiKeyEnv: "CUSTOM_LLM_API_KEY", apiKey: "", headersText: "", agentMode: true };
   error.value = null;
 }
 
@@ -54,6 +56,11 @@ function save(): void {
     return;
   }
   // 请求头在保存前解析：非法行就地报错，不写进库（宿主发请求时还会解析一次占位符）。
+  const connectionError = validateModelConnection(draft.value.baseUrl, draft.value.model);
+  if (connectionError) {
+    error.value = connectionError;
+    return;
+  }
   const parsed = parseHeaderText(draft.value.headersText);
   if (parsed.error) {
     error.value = parsed.error;
@@ -67,6 +74,7 @@ function save(): void {
     apiKeyEnv: draft.value.apiKeyEnv.trim(),
     apiKey: draft.value.apiKey.trim() || undefined,
     headers: Object.keys(parsed.headers).length > 0 ? parsed.headers : undefined,
+    agentMode: draft.value.agentMode,
   });
 }
 
@@ -96,7 +104,7 @@ function onOpenChange(next: boolean): void {
 
       <div class="min-h-0 flex-1 space-y-2.5 overflow-y-auto px-4 pb-4 pt-1">
         <DialogDescription class="text-[11px] leading-relaxed text-dim2">
-          新建一台 OpenAI 兼容的模型供应商。建好后在下方列表里选中它，即可继续改推理等级等配置。
+          接入支持 Chat Completions 的第三方模型或网关。模型 ID 可手动填写，不必能拉取 /models。
         </DialogDescription>
         <label class="flex flex-col gap-1">
           <span class="text-[11px] text-dim2">名称</span>
@@ -162,6 +170,15 @@ function onOpenChange(next: boolean): void {
           再从同一终端启动 GreyWork。请求头里的敏感值写
           <code v-pre class="font-mono">{{ ENV_VAR }}</code> 占位符，发送时由宿主解析，绝不明文落盘。
         </p>
+        <label class="flex items-start gap-2 text-[11px] text-foreground">
+          <input
+            v-model="draft.agentMode"
+            type="checkbox"
+            data-testid="provider-new-agent-mode"
+            class="size-4 shrink-0 accent-[var(--accent)]"
+          />
+          <span>启用 Agent 模式（需要模型支持工具调用；仅聊天可取消勾选）。保存后可测试工具调用和调整兼容性参数。</span>
+        </label>
         <p v-if="error" class="text-[11px] text-destructive">{{ error }}</p>
       </div>
 

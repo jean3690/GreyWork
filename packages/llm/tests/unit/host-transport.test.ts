@@ -178,4 +178,19 @@ describe("HostLlmTransport", () => {
     expect(h.invoke).toHaveBeenCalledWith("llm_agent_stop", { requestId: 9 });
     vi.unstubAllGlobals();
   });
+  it("chat 和 agentRun 透传第三方网关扩展参数与流式开关", async () => {
+    h.invoke.mockResolvedValue(1);
+    const transport = new HostLlmTransport();
+    const params = {
+      baseUrl: "https://gateway.example/openai",
+      model: "custom",
+      messages: [],
+      stream: false,
+      extraBody: { max_completion_tokens: 8192 },
+    };
+    await transport.chat(params);
+    await transport.agentRun(params);
+    for (const cmd of ["llm_chat_start", "llm_agent_start"])
+      expect(h.invoke).toHaveBeenCalledWith(cmd, expect.objectContaining({ stream: false, extraBody: params.extraBody }));
+  });
 });

@@ -31,6 +31,8 @@ export class HostLlmTransport implements LlmClient {
       headers: params.headers ?? {},
       temperature: params.temperature ?? null,
       maxTokens: params.maxTokens ?? null,
+      ...(params.stream !== undefined ? { stream: params.stream } : {}),
+      ...(params.extraBody !== undefined ? { extraBody: params.extraBody } : {}),
       clientToken: params.clientToken ?? "",
     });
   }
@@ -50,6 +52,8 @@ export class HostLlmTransport implements LlmClient {
       temperature: params.temperature ?? null,
       maxTokens: params.maxTokens ?? null,
       maxRounds: params.maxRounds ?? null,
+      ...(params.stream !== undefined ? { stream: params.stream } : {}),
+      ...(params.extraBody !== undefined ? { extraBody: params.extraBody } : {}),
       clientToken: params.clientToken ?? "",
       cwd: params.cwd ?? null,
       permissionTier: params.permissionTier ?? null,

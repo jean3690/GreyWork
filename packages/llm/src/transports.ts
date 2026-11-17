@@ -6,6 +6,7 @@ export interface LlmEventEnvelope {
     | "llm-thinking-delta"
     | "llm-done"
     | "llm-error"
+    | "llm-provider-switch"
     | "llm-tool-call"
     | "llm-tool-result"
     // 本机 agent 的写操作确认：与 ACP 的 permission-request 同形（多一个 source）。
@@ -32,6 +33,9 @@ export interface LlmEventEnvelope {
     path?: string | null;
     /** `llm-tool-result`：输出的截断预览（完整内容不回传事件，事件是全局广播的）。 */
     preview?: string;
+    from?: string;
+    to?: string;
+    reason?: string;
   };
 }
 
@@ -64,6 +68,8 @@ export interface LlmChatParams {
   temperature?: number;
   /** 单轮最大输出 token。缺省不传（由服务端默认值决定）。 */
   maxTokens?: number;
+  stream?: boolean;
+  extraBody?: Record<string, unknown>;
   /**
    * 本轮流水的调用方令牌，宿主原样回灌进每条事件。
    *

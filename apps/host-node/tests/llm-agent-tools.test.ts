@@ -113,6 +113,15 @@ describe("本机 agent 工具面", () => {
     expect(result.content).toContain("+ export const a = 1;");
     expect(readFileSync(path.join(root, "src", "new.ts"), "utf8")).toBe("export const a = 1;\n");
   });
+  it("缺少内容参数不会被当成空字符串而删掉原文件", async () => {
+    const { root, access } = makeWorkspace();
+    const before = readFileSync(path.join(root, "outside.txt"), "utf8");
+    const write = await executeTool(access, root, "write_file", { path: "outside.txt" }, autoWrite);
+    const edit = await executeTool(access, root, "edit_file", { path: "outside.txt", old_text: "outside" }, autoWrite);
+    expect(write.error).toContain("content");
+    expect(edit.error).toContain("new_text");
+    expect(readFileSync(path.join(root, "outside.txt"), "utf8")).toBe(before);
+  });
 
   it("edit_file 要求 old_text 唯一，replace_all 才能全改", async () => {
     const { root, access } = makeWorkspace();

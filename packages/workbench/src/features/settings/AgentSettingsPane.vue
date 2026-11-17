@@ -11,6 +11,8 @@ import Hint from "@/features/shared/Hint.vue";
 import IconPicker from "@/features/shared/IconPicker.vue";
 import AgentProviderFormDialog, { type AgentProviderDraftPayload } from "@/features/settings/AgentProviderFormDialog.vue";
 import ModelProviderFormDialog, { type ModelProviderDraftPayload } from "@/features/settings/ModelProviderFormDialog.vue";
+import ModelProviderCompatibility from "@/features/settings/ModelProviderCompatibility.vue";
+import { parseModelExtraBody, validateModelConnection } from "@/lib/model-provider-config";
 import { formatHeaderText, parseHeaderText } from "@/stores/agent/shared";
 import { useAgentStore } from "@/stores/agent";
 import { useCommandCapabilitiesStore } from "@/stores/command-capabilities";
@@ -155,7 +157,22 @@ const providerDraft = ref({
   temperature: "",
   maxTokens: "",
   contextTokens: "",
+  stream: true,
+  extraBodyText: "",
 });
+const compatibilityConnection = computed(() => {
+  const headers = parseHeaderText(providerDraft.value.headersText);
+  return {
+    baseUrl: providerDraft.value.baseUrl.trim(),
+    model: providerDraft.value.model.trim(),
+    apiKeyEnv: providerDraft.value.apiKeyEnv.trim(),
+    headers: headers.headers,
+    temperature: providerDraft.value.temperature.trim() ? Number(providerDraft.value.temperature) : undefined,
+    maxTokens: providerDraft.value.maxTokens.trim() ? Number(providerDraft.value.maxTokens) : undefined,
+    reasoningEffort: activeProvider.value?.reasoningEffort,
+  };
+});
+const compatibilityError = computed(() => parseHeaderText(providerDraft.value.headersText).error);
 /** 草稿相对 store 有未保存改动时置真（简单脏检查，切走即丢——字段少，不做自动保存）。 */
 const providerDraftDirty = ref(false);
 /** Headers 文本解析错误（保存前就地拦截，不写进库）。 */
@@ -179,6 +196,8 @@ function syncProviderDraft(): void {
     temperature: provider.temperature === undefined ? "" : String(provider.temperature),
     maxTokens: provider.maxTokens === undefined ? "" : String(provider.maxTokens),
     contextTokens: provider.contextTokens === undefined ? "" : String(provider.contextTokens),
+    stream: provider.stream !== false,
+    extraBodyText: provider.extraBody ? JSON.stringify(provider.extraBody, null, 2) : "",
   };
   providerDraftDirty.value = false;
   providerDraftError.value = null;
@@ -228,6 +247,11 @@ watch(
   activeProvider,
   (provider) => {
     if (!provider) return;
+    if (providerDraftId.value === provider.id && providerDraftDirty.value) return;
+    if (providerDraftId.value !== provider.id) {
+      secretDraft.value = "";
+      secretHint.value = "";
+    }
     providerDraftId.value = provider.id;
     syncProviderDraft();
   },
@@ -237,6 +261,16 @@ watch(
 function saveProviderDraft(): void {
   const current = settings.modelProviders.find((provider) => provider.id === providerDraftId.value);
   if (!current) return;
+  const connectionError = validateModelConnection(providerDraft.value.baseUrl, providerDraft.value.model);
+  if (connectionError) {
+    providerDraftError.value = connectionError;
+    return;
+  }
+  const extraBody = parseModelExtraBody(providerDraft.value.extraBodyText);
+  if (extraBody.error) {
+    providerDraftError.value = extraBody.error;
+    return;
+  }
   // 请求头在保存前解析：非法行就地报错，不写进库（宿主发请求时还会解析一次占位符）。
   const parsed = parseHeaderText(providerDraft.value.headersText);
   if (parsed.error) {
@@ -275,6 +309,8 @@ function saveProviderDraft(): void {
     temperature: temperature.value,
     maxTokens: maxTokens.value,
     contextTokens: contextTokens.value,
+    stream: providerDraft.value.stream,
+    extraBody: extraBody.value,
   });
   providerDraftDirty.value = false;
   providerDraftError.value = null;
@@ -342,6 +378,7 @@ function onAddProviderSave(payload: ModelProviderDraftPayload): void {
     apiKeyEnv: payload.apiKeyEnv,
     headers: payload.headers,
     enabled: true,
+    agentMode: payload.agentMode,
   });
   settings.selectModelProvider(id);
   addProviderOpen.value = false;
@@ -573,6 +610,9 @@ async function removeAgentDraft(): Promise<void> {
         <datalist id="provider-model-options">
           <option v-for="option in modelOptions" :key="option" :value="option" />
         </datalist>
+        <p class="text-[10.5px] leading-relaxed text-dim2">
+          模型 ID 可手动填写；网关不支持 /models 不影响聊天或 Agent 模式。显式路径会原样使用，裸域名才补 /v1。
+        </p>
         <p v-if="probeError" class="text-[11px] text-dim2" data-testid="provider-probe-error">
           {{ probeError }}
         </p>
@@ -695,11 +735,10 @@ async function removeAgentDraft(): Promise<void> {
             @change="setProviderAgentMode(($event.target as HTMLInputElement).checked)"
           />
           <span class="min-w-0">
-            <span class="block text-[11.5px] text-foreground">Agent 模式（模型可用只读工具）</span>
+            <span class="block text-[11.5px] text-foreground">Agent 模式（模型自主调用工具）</span>
             <span class="block text-[10.5px] leading-relaxed text-dim2">
-              开启后该供应商走多轮工具回合：模型可调 <code class="font-mono">read_file</code> / <code class="font-mono">list_dir</code> /
-              <code class="font-mono">git_log</code>，在 GreyWork 自己的授权面内执行，直到给出结论。 端点不支持 tool calling
-              时请保持关闭（会返回 400）。
+              开启后模型可读文件、搜索文本、查看 Git 和读取技能；workspace 档位可编辑文件（逐次确认），full 档位可写文件和调用 MCP。
+              命令执行仅在本机可信宿主的 full 档位开放，且每次确认。请先测试工具调用；不支持的端点保持关闭。
             </span>
           </span>
         </label>
@@ -714,7 +753,15 @@ async function removeAgentDraft(): Promise<void> {
             @change="setProviderAgentRounds(($event.target as HTMLInputElement).value)"
           />
         </div>
-        <p v-if="providerDraftError" class="text-[11px] text-destructive">{{ providerDraftError }}</p>
+        <ModelProviderCompatibility
+          :key="activeProvider.id"
+          v-model:stream="providerDraft.stream"
+          v-model:extra-body-text="providerDraft.extraBodyText"
+          :connection="compatibilityConnection"
+          :connection-error="compatibilityError"
+          @change="providerDraftDirty = true"
+        />
+        <p v-if="providerDraftError" data-testid="provider-draft-error" class="text-[11px] text-destructive">{{ providerDraftError }}</p>
         <div class="flex items-center justify-between gap-2">
           <button
             type="button"
@@ -735,6 +782,7 @@ async function removeAgentDraft(): Promise<void> {
               type="button"
               class="h-7 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] bg-accent px-3 text-[11.5px] font-medium text-accent-ink transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
               :disabled="!providerDraftDirty"
+              data-testid="provider-draft-save"
               @click="saveProviderDraft"
             >
               保存

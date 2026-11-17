@@ -1,5 +1,6 @@
 export { createLlmClient, LlmUnavailableError } from "./client";
 export type {
+  LlmAgentParams,
   LlmChatMessage,
   LlmChatParams,
   LlmClient,
