@@ -25,13 +25,23 @@ import { channelsFeature } from "@/features/channels/spec";
 import { automationFeature } from "@/features/automation/spec";
 import { teamFeature } from "@/features/team/spec";
 import { pluginsFeature } from "@/features/plugins/spec";
+import { cloudFeature } from "@/features/cloud/spec";
 
 export const ALL_FEATURES_FRONT: FrontSpec = {
   id: "desktop",
   label: "桌面端（全特性）",
   // 顺序 = 路由注册顺序，因此它同时决定「同一路径多匹配时谁赢」。
   // 逐项与拆分前 router/index.ts 的数组顺序一致，改动这里等于悄悄改路由优先级。
-  features: [guidFeature, conversationFeature, assistantsFeature, channelsFeature, automationFeature, teamFeature, pluginsFeature],
+  features: [
+    guidFeature,
+    conversationFeature,
+    assistantsFeature,
+    channelsFeature,
+    automationFeature,
+    teamFeature,
+    pluginsFeature,
+    cloudFeature,
+  ],
   shell: {
     panels: { sider: true, preview: true, workspace: true, activity: true, terminal: true },
     // 托盘与关窗守卫是**桌面壳独有**的宿主集成：纯服务端自托管与 Web 预览里既没有托盘，

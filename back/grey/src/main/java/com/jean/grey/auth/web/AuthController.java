@@ -21,6 +21,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;import tools.jackson.databind.annotation.JsonSerialize;
@@ -60,7 +61,10 @@ public class AuthController {
 			String displayName, String role) {
 	}
 
-	public record DeviceView(Long id, String name, String platform) {
+	public record DeviceView(@JsonSerialize(using = ToStringSerializer.class) Long id, String name, String platform) {
+	}
+
+	public record ProfileRequest(@NotBlank @Size(max = 128) String displayName) {
 	}
 
 	public record SessionView(String token, UserView user, DeviceView device) {
@@ -119,6 +123,14 @@ public class AuthController {
 			throw ApiException.unauthorized("session_stale", "登录态已失效");
 		}
 		return new MeView(userView(user), deviceView(device));
+	}
+
+	/** 只允许修改自己的昵称，邮箱和角色不由客户端写入。 */
+	@PatchMapping("/me")
+	public MeView updateProfile(@AuthenticationPrincipal AuthPrincipal principal,
+			@Valid @RequestBody ProfileRequest request) {
+		authService.updateDisplayName(principal.userId(), request.displayName());
+		return me(principal);
 	}
 
 	private static UserView userView(AppUser user) {

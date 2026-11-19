@@ -24,7 +24,8 @@ describe("grey router", { timeout: 20_000 }, () => {
   it("已注册页面原样放行", async () => {
     expect(await navigate("/guid")).toBe("/guid");
     expect(await navigate("/assistants")).toBe("/assistants");
-    expect(await navigate("/scheduled")).toBe("/scheduled");
+    expect(await navigate("/scheduled")).toBe("/more/tasks");
+    expect(await navigate("/more/drive")).toBe("/more/drive");
     expect(await navigate("/team")).toBe("/team");
   });
 

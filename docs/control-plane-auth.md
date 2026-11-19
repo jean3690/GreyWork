@@ -167,6 +167,10 @@ GREY_ADMIN_PASSWORD=change-me-please \
 | DELETE | `/api/admin/users/{id}/sessions`                               | 踢下线：只清会话，账号保持 active；回 `{ "devices": n }` |
 | DELETE | `/api/admin/users/{id}/devices/{deviceId}`                     | 吊销单台设备（归属校验在 service 层）                    |
 
+`PATCH /api/admin/users/{id}` 一次只能提交 `status` 或 `role`，同时提交会返回 400 `ambiguous_update`，不再静默忽略字段。
+运维台阻止禁用自己、确认期间重复提交；搜索与详情忽略旧请求结果，吊销设备的确认期间切换抽屉也不会改动其他用户。
+修改角色后会同步刷新已打开的详情。密码登录的用户与设备 ID 和列表保持一致，均为字符串。
+
 ### 资源
 
 | 方法 | 路径                              | 说明                                                                          |

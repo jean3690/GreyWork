@@ -47,10 +47,10 @@ public class AdminAuthController {
 			@NotBlank @Size(min = 8, max = 72) String newPassword) {
 	}
 
-	public record UserView(Long id, String email, String displayName, String role) {
+	public record UserView(@tools.jackson.databind.annotation.JsonSerialize(using = tools.jackson.databind.ser.std.ToStringSerializer.class) Long id, String email, String displayName, String role) {
 	}
 
-	public record DeviceView(Long id, String name, String platform) {
+	public record DeviceView(@tools.jackson.databind.annotation.JsonSerialize(using = tools.jackson.databind.ser.std.ToStringSerializer.class) Long id, String name, String platform) {
 	}
 
 	public record SessionView(String token, UserView user, DeviceView device) {

@@ -28,7 +28,7 @@ public class StorageController {
 	}
 
 	public record CreateUploadRequest(String name, String contentType, Long sizeBytes,
-			String sha256, String visibility) {
+			String sha256, String visibility, String kind) {
 	}
 
 	@GetMapping("/config")
@@ -42,7 +42,7 @@ public class StorageController {
 			@RequestBody CreateUploadRequest request) {
 		return storageService.createUpload(principal.userId(), request.name(),
 				request.contentType(), request.sizeBytes(), request.sha256(),
-				request.visibility());
+				request.visibility(), request.kind());
 	}
 
 	@PostMapping("/objects/{id}/complete")
@@ -54,8 +54,9 @@ public class StorageController {
 	@GetMapping("/objects")
 	public List<StorageService.ObjectView> list(
 			@AuthenticationPrincipal AuthPrincipal principal,
-			@RequestParam(defaultValue = "50") int limit) {
-		return storageService.list(principal.userId(), limit);
+			@RequestParam(defaultValue = "50") int limit,
+			@RequestParam(required = false) String kind) {
+		return storageService.list(principal.userId(), limit, kind);
 	}
 
 	@GetMapping("/objects/{id}")

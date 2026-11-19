@@ -2,7 +2,7 @@
  * 自动化任务确认卡：确认 → automation store 落一条任务且卡片转「已创建」只读态；
  * createdId 存在时再点无效（会话回放/连点都不会重复建）；取消移除提案。
  */
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 
@@ -10,6 +10,9 @@ import AutomationConfirmCard from "@/features/conversation/AutomationConfirmCard
 import { i18n } from "@/i18n";
 import { useAutomationStore } from "@/stores/automation";
 import type { ThreadMessage } from "@/types";
+import { pendingCloudTaskDraft } from "@/features/cloud/task-draft";
+const router = vi.hoisted(() => ({ push: vi.fn() }));
+vi.mock("vue-router", async (original) => ({ ...(await original()), useRouter: () => router }));
 
 function messageOf(draft: ThreadMessage["scheduleDraft"]): ThreadMessage {
   return { id: "m1", role: "assistant", content: "已提议", ts: Date.now(), scheduleDraft: draft };
@@ -27,6 +30,8 @@ function mountCard(message: ThreadMessage) {
 
 beforeEach(() => {
   localStorage.clear();
+  pendingCloudTaskDraft.value = null;
+  router.push.mockReset();
 });
 
 describe("AutomationConfirmCard", () => {
@@ -38,16 +43,20 @@ describe("AutomationConfirmCard", () => {
     expect(wrapper.find('[data-testid="schedule-confirm"]').exists()).toBe(true);
   });
 
-  it("确认：automation 落一条启用任务，卡片转已创建只读态", async () => {
+  it("确认：只将草稿交给云端编辑器，云端保存成功后才标记已创建", async () => {
     const { wrapper, message } = mountCard(messageOf({ name: "日报", intent: "生成日报", cron: "0 9 * * *" }));
     const automation = useAutomationStore();
     const before = automation.list.length;
     await wrapper.get('[data-testid="schedule-confirm"]').trigger("click");
     await flushPromises();
 
-    expect(automation.list).toHaveLength(before + 1);
-    expect(automation.list[0]).toMatchObject({ name: "日报", intent: "生成日报", cron: "0 9 * * *", enabled: true });
-    expect(message.scheduleDraft?.createdId).toBe(automation.list[0].id);
+    expect(automation.list).toHaveLength(before);
+    expect(router.push).toHaveBeenCalledWith("/more/tasks");
+    expect(pendingCloudTaskDraft.value).toMatchObject({ name: "日报", intent: "生成日报", cron: "0 9 * * *" });
+    expect(message.scheduleDraft?.createdId).toBeUndefined();
+    pendingCloudTaskDraft.value?.onCreated("at-cloud-created");
+    await flushPromises();
+    expect(message.scheduleDraft?.createdId).toBe("at-cloud-created");
     expect(wrapper.find('[data-testid="schedule-confirm"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="schedule-created-badge"]').exists()).toBe(true);
   });

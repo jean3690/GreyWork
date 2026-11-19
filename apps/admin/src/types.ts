@@ -9,7 +9,7 @@ export interface UserSummary {
 }
 
 export interface DeviceSummary {
-  id: number;
+  id: string;
   name: string;
   platform: string;
 }

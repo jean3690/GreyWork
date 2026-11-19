@@ -16,6 +16,8 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import tools.jackson.databind.annotation.JsonSerialize;
+import tools.jackson.databind.ser.std.ToStringSerializer;
 
 @RestController
 @RequestMapping("/api/devices")
@@ -29,7 +31,7 @@ public class DeviceController {
 		this.tokenService = tokenService;
 	}
 
-	public record DeviceItem(Long id, String name, String platform, LocalDateTime lastSeenAt,
+	public record DeviceItem(@JsonSerialize(using = ToStringSerializer.class) Long id, String name, String platform, LocalDateTime lastSeenAt,
 			LocalDateTime createdAt, boolean current) {
 	}
 

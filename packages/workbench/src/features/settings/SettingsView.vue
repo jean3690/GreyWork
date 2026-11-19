@@ -6,7 +6,6 @@
  */
 import { computed, onMounted } from "vue";
 import { useI18n } from "vue-i18n";
-import StorageSettings from "@/features/settings/StorageSettings.vue";
 import AgentSettingsPane from "@/features/settings/AgentSettingsPane.vue";
 import AppearanceSettingsPane from "@/features/settings/AppearanceSettingsPane.vue";
 import AssistantSettingsPane from "@/features/settings/AssistantSettingsPane.vue";
@@ -14,7 +13,6 @@ import McpPane from "@/features/settings/McpPane.vue";
 import PluginSettingsPane from "@/features/settings/PluginSettingsPane.vue";
 import LocalAiSettingsPane from "@/features/settings/LocalAiSettingsPane.vue";
 import ModeSettingsPane from "@/features/settings/ModeSettingsPane.vue";
-import ServicesSettingsPane from "@/features/settings/ServicesSettingsPane.vue";
 import ControlPlaneSettingsPane from "@/features/settings/ControlPlaneSettingsPane.vue";
 import UserAccountPane from "@/features/account/UserAccountPane.vue";
 import SettingsSkills from "@/features/settings/SettingsSkills.vue";
@@ -36,14 +34,12 @@ const SECTION_KEYS = [
   "assistant",
   "appearance",
   "mode",
-  "services",
   "controlplane",
   "localai",
   "system",
   "mcp",
   "skills",
   "plugins",
-  "storage",
   "team",
 ] as const;
 type SectionKey = (typeof SECTION_KEYS)[number];
@@ -72,13 +68,11 @@ onMounted(() => {
     <AppearanceSettingsPane v-else-if="section === 'appearance'" />
     <ModeSettingsPane v-else-if="section === 'mode'" />
     <PluginSettingsPane v-else-if="section === 'plugins'" />
-    <ServicesSettingsPane v-else-if="section === 'services'" />
     <ControlPlaneSettingsPane v-else-if="section === 'controlplane'" />
     <LocalAiSettingsPane v-else-if="section === 'localai'" />
     <SystemSettingsPane v-else-if="section === 'system'" />
     <McpPane v-else-if="section === 'mcp'" />
     <SettingsSkills v-else-if="section === 'skills'" />
-    <StorageSettings v-else-if="section === 'storage'" />
     <TeamSettingsPane v-else-if="section === 'team'" />
   </section>
 </template>

@@ -40,6 +40,18 @@ public class AuthService {
 	}
 
 	@Transactional
+	public void updateDisplayName(Long userId, String displayName) {
+		String name = displayName == null ? "" : displayName.strip();
+		if (name.isBlank() || name.length() > 128) {
+			throw ApiException.badRequest("display_name_invalid", "显示名称须为 1 至 128 个字符");
+		}
+		requireActive(appUserMapper.selectById(userId));
+		// 只更新昵称，避免把并发的禁用或角色变更覆盖回去。
+		appUserMapper.update(null, Wrappers.<AppUser>lambdaUpdate()
+				.eq(AppUser::getId, userId).set(AppUser::getDisplayName, name));
+	}
+
+	@Transactional
 	public Enrolled enroll(String rawCode, String email, String displayName, String deviceName,
 			String platform) {
 		String normalizedEmail = Emails.normalize(email);

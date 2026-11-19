@@ -42,7 +42,8 @@ describe("MinimalSider 极简侧栏", () => {
     expect(wrapper.find('[data-testid="grey-minimal-sider"]').exists()).toBe(true);
     // 快捷入口沿用 buildNavItems（内置三项），与完整 Sider 同源
     expect(wrapper.text()).toContain("团队");
-    expect(wrapper.text()).toContain("自动化任务");
+    expect(wrapper.text()).toContain("更多");
+    expect(wrapper.text()).not.toContain("自动化任务");
     // 「会话」段头（默认 zh-CN）
     expect(wrapper.get('[data-testid="grey-minimal-sider"]').text()).toContain("会话");
     expect(wrapper.find('[data-testid="minimal-session-sort"]').exists()).toBe(true);

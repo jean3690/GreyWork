@@ -17,11 +17,11 @@ function frontWithout(...ids: readonly string[]): FrontSpec {
 
 describe("nav-items", () => {
   it("默认前端的入口固定三项且顺序稳定", () => {
-    expect(builtinNavItems(ALL_FEATURES_FRONT).map((item) => item.path)).toEqual(["/assistants", "/scheduled", "/team"]);
+    expect(builtinNavItems(ALL_FEATURES_FRONT).map((item) => item.path)).toEqual(["/assistants", "/team", "/more"]);
   });
 
   it("前端未启用的特性不贡献入口（去掉 team 就少一项，且顺序不乱）", () => {
-    expect(builtinNavItems(frontWithout("team")).map((item) => item.path)).toEqual(["/assistants", "/scheduled"]);
+    expect(builtinNavItems(frontWithout("team")).map((item) => item.path)).toEqual(["/assistants", "/more"]);
   });
 
   it("不带 nav 的特性（guid / conversation / channels / plugins）不进侧栏", () => {

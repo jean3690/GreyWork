@@ -191,6 +191,85 @@ describe("control plane", () => {
     expect(account.status).toMatchObject({ configured: true, registered: false });
   });
 
+  it("资料、设备和会话操作按 Java 契约转发，超长 ID 不截断且不泄漏额外字段", async () => {
+    const id = "9223372036854775805";
+    let name = "Jean";
+    let revoked = false;
+    const control = await listen((request, response) => {
+      expect(request.headers.authorization).toBe("Bearer tok-account");
+      if (request.url === "/api/auth/me" && request.method === "PATCH") {
+        name = "新昵称";
+        response.writeHead(200).end("{}");
+      } else if (request.url === "/api/auth/me") {
+        response.writeHead(200).end(JSON.stringify({ ...identity, user: { ...identity.user, displayName: name } }));
+      } else if (request.url === "/api/devices") {
+        response.writeHead(200).end(
+          JSON.stringify(
+            revoked
+              ? []
+              : [
+                  {
+                    id,
+                    name: "手机",
+                    platform: "phone",
+                    current: false,
+                    lastSeenAt: "2026-11-18T10:00:00",
+                    createdAt: null,
+                    token: "secret-must-not-leak",
+                  },
+                ],
+          ),
+        );
+      } else {
+        if (request.url === `/api/devices/${id}`) revoked = true;
+        response.writeHead(204).end();
+      }
+    });
+    cleanups.push(control.close);
+    const { runtime } = accountRuntime();
+    await runtime.configure({ baseUrl: control.origin, token: "tok-account" });
+    const list = await runtime.manageAccount("devices");
+    expect(list.devices?.[0]?.id).toBe(id);
+    expect(JSON.stringify(list)).not.toMatch(/tok-account|secret-must-not-leak/);
+    expect((await runtime.manageAccount("profile", " 新昵称 ")).session?.user.displayName).toBe("新昵称");
+    expect(control.calls.find((call) => call.method === "PATCH")?.body).toEqual({ displayName: "新昵称" });
+    await runtime.manageAccount("revokeOthers");
+    expect(control.calls.some((call) => call.method === "DELETE" && call.path === "/api/auth/sessions?includeCurrent=false")).toBe(true);
+    expect((await runtime.manageAccount("revokeDevice", id)).devices).toEqual([]);
+    expect(control.calls.some((call) => call.method === "DELETE" && call.path === `/api/devices/${id}`)).toBe(true);
+    expect((await runtime.manageAccount("revokeDevice", "7")).error).toContain("当前设备");
+    expect((await runtime.manageAccount("revokeDevice", "007")).error).toContain("ID 无效");
+    expect((await runtime.manageAccount("revokeDevice", "../auth/logout")).error).toContain("ID 无效");
+    expect((await runtime.manageAccount("profile", " ")).error).toContain("显示名称");
+    expect(control.calls.filter((call) => call.method === "DELETE")).toHaveLength(2);
+  });
+
+  it("设备加载失败可重试，401 清空身份并停止运行时", async () => {
+    let status = 503;
+    const control = await listen((request, response) => {
+      if (request.url === "/api/auth/me") response.writeHead(200).end(JSON.stringify(identity));
+      else if (request.url === "/api/devices") response.writeHead(status).end('{"message":"暂不可用"}');
+      else response.writeHead(204).end();
+    });
+    cleanups.push(control.close);
+    const { runtime } = accountRuntime();
+    await runtime.configure({ baseUrl: control.origin, token: "tok-account" });
+    expect(await runtime.manageAccount("devices")).toMatchObject({ session: identity, error: expect.stringContaining("503") });
+    status = 401;
+    expect(await runtime.manageAccount("devices")).toMatchObject({ session: null, status: { registered: false } });
+  });
+
+  it("环境管理拒绝资料和设备修改，也拒绝退出其他设备", async () => {
+    const control = await accountServer();
+    vi.stubEnv("GREYWORK_CONTROL_URL", control.origin);
+    vi.stubEnv("GREYWORK_CONTROL_TOKEN", "tok-account");
+    const { runtime } = accountRuntime();
+    for (const action of ["profile", "revokeDevice", "revokeOthers"] as const) {
+      await expect(runtime.manageAccount(action, "7")).rejects.toThrow("环境变量");
+    }
+    expect(control.calls).toHaveLength(0);
+  });
+
   it("退出先撤销 Java 会话，再清除本机配置", async () => {
     const control = await accountServer();
     const { runtime, dataDir } = accountRuntime();
@@ -255,7 +334,7 @@ describe("control plane", () => {
     expect(outcomes[0]).toMatchObject({ name: "每日简报", ok: true, output: "云端问候：早上好" });
 
     const claim = control.calls.find((call) => call.path === "/api/hosts/me/automation/claim");
-    expect(claim?.body).toEqual({ limit: 3 });
+    expect(claim?.body).toEqual({ limit: 1 });
     const finish = control.calls.find((call) => call.path === "/api/hosts/me/automation/due/101/finish");
     expect(finish?.body).toMatchObject({ status: "ok", output: "云端问候：早上好" });
     expect(String(finish?.body?.detail)).toContain("云端问候");

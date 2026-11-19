@@ -244,6 +244,63 @@ class ControlPlaneApiTest {
 	}
 
 	@Test
+	void userCanEditOnlyOwnProfileAndDeviceIdsRemainExact() throws Exception {
+		JsonNode current = enroll("profile-owner@grey.local", "desktop");
+		JsonNode other = enroll("profile-other@grey.local", "phone");
+		assertThat(current.get("user").get("id").isString()).isTrue();
+		assertThat(current.get("device").get("id").isString()).isTrue();
+		String bearer = bearerOf(current);
+		String email = current.get("user").get("email").asString();
+
+		mockMvc.perform(patch("/api/auth/me").header("Authorization", bearer)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"displayName\":\"  新昵称  \"}"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.user.displayName").value("新昵称"))
+				.andExpect(jsonPath("$.user.email").value(email))
+				.andExpect(jsonPath("$.user.role").value("user"))
+				.andExpect(jsonPath("$.device.id").value(current.get("device").get("id").asString()));
+		mockMvc.perform(get("/api/auth/me").header("Authorization", bearerOf(other)))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.user.displayName").value(other.get("user").get("displayName").asString()));
+		for (String body : new String[] { "{}", "{\"displayName\":\"  \"}",
+				"{\"displayName\":\"" + "x".repeat(129) + "\"}" }) {
+			mockMvc.perform(patch("/api/auth/me").header("Authorization", bearer)
+					.contentType(MediaType.APPLICATION_JSON).content(body))
+					.andExpect(status().isBadRequest());
+		}
+		mockMvc.perform(patch("/api/auth/me").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"displayName\":\"anonymous\"}"))
+				.andExpect(status().isUnauthorized());
+		mockMvc.perform(get("/api/devices").header("Authorization", bearer))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$[0].id").value(current.get("device").get("id").asString()))
+				.andExpect(jsonPath("$[0].current").value(true));
+		mockMvc.perform(delete("/api/devices/" + other.get("device").get("id").asString())
+				.header("Authorization", bearer)).andExpect(status().isNotFound());
+		mockMvc.perform(get("/api/auth/me").header("Authorization", bearerOf(other)))
+				.andExpect(status().isOk());
+	}
+
+	@Test
+	void adminLoginKeepsExactIdsAndRejectsAmbiguousUserUpdates() throws Exception {
+		JsonNode admin = json(mockMvc.perform(post("/api/admin/auth/login")
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"email\":\"ops@grey.local\",\"password\":\"AdminPass123\"}"))
+				.andExpect(status().isCreated()).andReturn());
+		assertThat(admin.get("user").get("id").isString()).isTrue();
+		assertThat(admin.get("device").get("id").isString()).isTrue();
+		JsonNode target = enroll("ambiguous-update@grey.local", "desktop");
+		String targetId = target.get("user").get("id").asString();
+		mockMvc.perform(patch("/api/admin/users/" + targetId)
+				.header("Authorization", bearerOf(admin)).contentType(MediaType.APPLICATION_JSON)
+				.content("{\"role\":\"admin\",\"status\":\"disabled\"}"))
+				.andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("ambiguous_update"));
+		mockMvc.perform(get("/api/auth/me").header("Authorization", bearerOf(target)))
+				.andExpect(status().isOk()).andExpect(jsonPath("$.user.role").value("user"));
+	}
+
+	@Test
 	void hostsShardChannelsAndRouteWebhooks() throws Exception {
 		String owner = "hosts@grey.local";
 		JsonNode primary = enroll(owner, "server");
@@ -896,7 +953,7 @@ class ControlPlaneApiTest {
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.status").value("ready"));
 
-		// 大小谎报会被 complete 拦下
+		// Content-Length 绑定到签名：大小谎报在 RustFS PUT 阶段就会被拦下。
 		MvcResult lying = mockMvc.perform(post("/api/storage/uploads")
 						.header("Authorization", bearer)
 						.contentType(MediaType.APPLICATION_JSON)
@@ -905,17 +962,17 @@ class ControlPlaneApiTest {
 								"""))
 				.andReturn();
 		long liarId = json(lying).get("id").asLong();
-		// 真的上传 11 字节，再按声明的 5 字节去 complete → 大小不一致
+		// 真的上传 11 字节，声明为 5 字节 → 签名不一致，对象不会写入。
 		var liarPut = java.net.http.HttpRequest
 				.newBuilder(URI.create(json(lying).get("uploadUrl").asString()))
 				.header("Content-Type", "application/octet-stream")
 				.PUT(java.net.http.HttpRequest.BodyPublishers.ofByteArray(payload))
 				.build();
-		client.send(liarPut, java.net.http.HttpResponse.BodyHandlers.ofString());
+		assertThat(client.send(liarPut, java.net.http.HttpResponse.BodyHandlers.ofString()).statusCode()).isEqualTo(403);
 		mockMvc.perform(post("/api/storage/objects/" + liarId + "/complete")
 						.header("Authorization", bearer))
 				.andExpect(status().isBadRequest())
-				.andExpect(jsonPath("$.code").value("size_mismatch"));
+				.andExpect(jsonPath("$.code").value("object_not_uploaded"));
 
 		MvcResult dl = mockMvc.perform(get("/api/storage/objects/" + objectId + "/download")
 						.header("Authorization", bearer))
@@ -946,6 +1003,96 @@ class ControlPlaneApiTest {
 						.header("Authorization", bearer))
 				.andExpect(status().isNotFound());
 		client.close();
+	}
+
+	@Test
+	void storageLibraryIsPrivateAndSupportsEmptyFiles() throws Exception {
+		JsonNode session = enroll("library-test@grey.local", "desktop");
+		String bearer = "Bearer " + session.get("token").asString();
+		JsonNode ticket = json(mockMvc.perform(post("/api/storage/uploads")
+				.header("Authorization", bearer).contentType(MediaType.APPLICATION_JSON)
+				.content("{\"name\":\"empty.txt\",\"sizeBytes\":0,\"kind\":\"library\"}"))
+				.andExpect(status().isOk()).andReturn());
+		assertThat(ticket.get("id").isString()).isTrue();
+		try (var client = java.net.http.HttpClient.newHttpClient()) {
+			var request = java.net.http.HttpRequest.newBuilder(URI.create(ticket.get("uploadUrl").asString()))
+					.header("Content-Type", "application/octet-stream")
+					.PUT(java.net.http.HttpRequest.BodyPublishers.ofByteArray(new byte[0])).build();
+			assertThat(client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString()).statusCode()).isEqualTo(200);
+		}
+		mockMvc.perform(post("/api/storage/objects/" + ticket.get("id").asString() + "/complete")
+				.header("Authorization", bearer)).andExpect(status().isOk())
+				.andExpect(jsonPath("$.kind").value("library")).andExpect(jsonPath("$.visibility").value("private"));
+		mockMvc.perform(get("/api/storage/objects").param("kind", "library").header("Authorization", bearer))
+				.andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(1));
+		mockMvc.perform(get("/api/storage/objects").param("kind", "file").header("Authorization", bearer))
+				.andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(0));
+		mockMvc.perform(get("/api/storage/objects").param("kind", "invalid").header("Authorization", bearer))
+				.andExpect(status().isBadRequest());
+	}
+
+	@Test
+	void automationOfflinePoliciesAndCancellation() throws Exception {
+		JsonNode session = enroll("offline-policies@grey.local", "desktop");
+		String bearer = "Bearer " + session.get("token").asString();
+		String userId = session.get("user").get("id").asString();
+		for (String policy : java.util.List.of("replay", "skip")) {
+			JsonNode task = json(mockMvc.perform(post("/api/automation/tasks").header("Authorization", bearer)
+					.contentType(MediaType.APPLICATION_JSON).content("""
+						{"name":"offline","intent":"test","cronExpr":"* * * * *","execution":"host","enabled":true,"offlinePolicy":"%s"}
+						""".formatted(policy))).andExpect(status().isOk()).andReturn());
+			String taskId = task.get("id").asString();
+			jdbc.update("UPDATE automation_task SET next_run_at = ? WHERE user_id = ? AND id = ?", LocalDateTime.now().minusMinutes(1), userId, taskId);
+			automationScheduler.tick();
+			assertThat(jdbc.queryForObject("SELECT status FROM automation_due WHERE user_id = ? AND task_id = ?", String.class, userId, taskId))
+					.isEqualTo("skip".equals(policy) ? "skipped" : "pending");
+			mockMvc.perform(post("/api/automation/tasks/" + taskId + "/disable").header("Authorization", bearer)).andExpect(status().isOk());
+			if ("replay".equals(policy)) assertThat(jdbc.queryForObject("SELECT status FROM automation_due WHERE user_id = ? AND task_id = ?", String.class, userId, taskId)).isEqualTo("cancelled");
+		}
+		mockMvc.perform(post("/api/automation/tasks").header("Authorization", bearer).contentType(MediaType.APPLICATION_JSON)
+				.content("{\"name\":\"invalid\",\"intent\":\"test\",\"cronExpr\":\"* * * * *\",\"execution\":\"host\",\"enabled\":true,\"offlinePolicy\":\"bad\"}"))
+				.andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("offline_policy_invalid"));
+		mockMvc.perform(get("/api/hosts/me/automation/events")).andExpect(status().isUnauthorized());
+	}
+
+	@Test
+	void automationScheduleSwitchClearsOldFieldsAndValidatesDeviceOwner() throws Exception {
+		JsonNode session = enroll("schedule-switch@grey.local", "desktop");
+		String bearer = "Bearer " + session.get("token").asString();
+		JsonNode task = json(mockMvc.perform(post("/api/automation/tasks").header("Authorization", bearer)
+				.contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"switch\",\"intent\":\"test\",\"cronExpr\":\"0 9 * * *\",\"execution\":\"host\",\"enabled\":true}"))
+				.andExpect(status().isOk()).andReturn());
+		String id = task.get("id").asString();
+		mockMvc.perform(put("/api/automation/tasks/" + id).header("Authorization", bearer).contentType(MediaType.APPLICATION_JSON)
+				.content("""
+					{"name":"once","intent":"test","onceAt":"%s","execution":"host","enabled":true,"offlinePolicy":"skip"}
+					""".formatted(LocalDateTime.now().plusDays(1)))).andExpect(status().isOk());
+		mockMvc.perform(get("/api/automation/tasks").header("Authorization", bearer)).andExpect(status().isOk())
+				.andExpect(jsonPath("$[0].cronExpr").doesNotExist()).andExpect(jsonPath("$[0].onceAt").exists())
+				.andExpect(jsonPath("$[0].offlinePolicy").value("skip"));
+		mockMvc.perform(post("/api/automation/tasks").header("Authorization", bearer).contentType(MediaType.APPLICATION_JSON)
+				.content("{\"name\":\"other-device\",\"intent\":\"test\",\"cronExpr\":\"0 9 * * *\",\"execution\":\"host\",\"enabled\":true,\"hostDeviceId\":\"9223372036854775806\"}"))
+				.andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("host_unknown"));
+	}
+
+	@Test
+	void automationSseNotifiesRegisteredDevice() throws Exception {
+		JsonNode session = enroll("sse-notify@grey.local", "desktop");
+		String bearer = "Bearer " + session.get("token").asString();
+		mockMvc.perform(put("/api/hosts/me").header("Authorization", bearer).contentType(MediaType.APPLICATION_JSON)
+				.content("{\"name\":\"sse-test\",\"version\":\"test\",\"capabilities\":[]}"))
+				.andExpect(status().isOk());
+		MvcResult events = mockMvc.perform(get("/api/hosts/me/automation/events").header("Authorization", bearer))
+				.andExpect(status().isOk()).andReturn();
+		assertThat(events.getRequest().isAsyncStarted()).isTrue();
+		assertThat(events.getResponse().getContentAsString()).contains("event:ready");
+		JsonNode task = json(mockMvc.perform(post("/api/automation/tasks").header("Authorization", bearer).contentType(MediaType.APPLICATION_JSON)
+				.content("{\"name\":\"notify\",\"intent\":\"test\",\"cronExpr\":\"* * * * *\",\"execution\":\"host\",\"enabled\":true}"))
+				.andExpect(status().isOk()).andReturn());
+		jdbc.update("UPDATE automation_task SET next_run_at = ? WHERE user_id = ? AND id = ?", LocalDateTime.now().minusMinutes(1), session.get("user").get("id").asString(), task.get("id").asString());
+		automationScheduler.tick();
+		assertThat(events.getResponse().getContentAsString()).contains("event:due");
+		events.getRequest().getAsyncContext().complete();
 	}
 
 	private String login(String deviceName, String platform) throws Exception {

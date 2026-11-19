@@ -30,6 +30,7 @@ import { i18n } from "@/i18n";
 import { notify } from "@/stores/notice";
 import { useFileTreeStore, type FileTreeNode } from "@/stores/fileTree";
 import { usePreviewStore } from "@/stores/preview";
+import WorkspaceCloudButton from "@/features/cloud/WorkspaceCloudButton.vue";
 
 const tree = useFileTreeStore();
 const preview = usePreviewStore();
@@ -505,6 +506,7 @@ onMounted(() => {
             {{ tree.mode === "disk" ? tree.root : t("preview.fileTree.vfsLabel") }}
           </span>
         </Hint>
+        <WorkspaceCloudButton v-if="tree.mode === 'disk' && tree.bound" :root="tree.root" />
         <Hint v-if="canBind" :text="tree.bound ? t('preview.fileTree.rebindHint') : t('preview.fileTree.bindHint')" multiline>
           <button
             type="button"

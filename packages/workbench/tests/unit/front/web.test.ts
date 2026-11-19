@@ -24,12 +24,12 @@ describe("WEB_FRONT", () => {
     expect(WEB_FRONT.label).not.toBe("");
   });
 
-  it("特性集恰好是 guid / conversation / automation / plugins，顺序即路由优先级", () => {
+  it("特性集包含云端功能，顺序即路由优先级", () => {
     // 顺序是有意义的（先注册者赢同一路径多匹配），所以用精确数组而不是集合比较：
     // 顺带把「谁被加进来/挪了位置」都变成一次显式的评审。
     // plugins 是有意取用的（对标 vscode.dev 的浏览器端插件体验）：运行时纯前端，
     // 安装通道走 `plugin_market_*`（全部 desktop:false）；排除它才是需要评审的改动。
-    expect(idsOf(WEB_FRONT)).toEqual(["guid", "conversation", "automation", "plugins"]);
+    expect(idsOf(WEB_FRONT)).toEqual(["guid", "conversation", "automation", "plugins", "cloud"]);
   });
 
   it("不启用 channels：浏览器里开一个标签页，不该替用户把六条 IM 通道拨上线", () => {

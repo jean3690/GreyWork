@@ -20,6 +20,7 @@
 | ------ | ----------------------------------------- | ---- | -------------------------------------------------------------- |
 | POST   | `/api/auth/enroll`                        | 匿名 | `{ code, email, displayName?, deviceName, platform }` → token  |
 | GET    | `/api/auth/me`                            | 是   | 当前用户 + 当前设备（含 `role`）                               |
+| PATCH  | `/api/auth/me`                            | 是   | `{ displayName }` 更新本人昵称（1–128 字符）；回当前用户与设备 |
 | POST   | `/api/auth/logout`                        | 是   | 撤销当前 token（204）                                          |
 | DELETE | `/api/auth/sessions?includeCurrent=false` | 是   | 撤销其他设备（或全撤）的会话，回 `{ devices, currentRevoked }` |
 | GET    | `/api/devices`                            | 是   | 当前用户的设备清单，含 `current` 标记                          |
@@ -28,6 +29,9 @@
 | GET    | `/api/auth/oidc/{provider}/authorize`     | 匿名 | 302 到身份源；需 `redirect`（白名单内）                        |
 | GET    | `/api/auth/oidc/{provider}/callback`      | 匿名 | 302 回客户端并附 `ticket`                                      |
 | POST   | `/api/auth/oidc/exchange`                 | 匿名 | `{ ticket }` → 与 enroll 相同的 session                        |
+
+用户和设备 ID 在入场码登录、密码登录、当前身份及设备列表响应中均按字符串返回，避免浏览器截断 Long ID。
+昵称更新仅修改该字段，不写入客户端提交的邮箱或角色；设备吊销验证归属，跨用户请求返回 404。
 
 ## 增量同步
 
@@ -92,6 +96,8 @@
 
 ## 对象存储
 
+客户端入口、RustFS 部署和云端任务离线策略见 [cloud-client.md](cloud-client.md)。
+
 | 方法   | 路径                                 | 说明                                 |
 | ------ | ------------------------------------ | ------------------------------------ |
 | GET    | `/api/storage/config`                | 是否启用、单对象上限等（登录后可读） |
@@ -117,12 +123,18 @@
 桌面端与 headless 宿主共用 `apps/host-node/src/control-plane.ts`，控制面只负责「注册 / 心跳 /
 排队 / 记录」，出站调用仍归宿主：
 
-| 命令                       | 用途                                                                                     |
-| -------------------------- | ---------------------------------------------------------------------------------------- |
-| `control_plane_status`     | 当前是否配置、是否已注册、上次心跳/认领、最近结果与错误（不含 token）                    |
-| `control_plane_connect`    | `{ baseUrl, token }` 或 `{ baseUrl, email, code }`（入场码换 token）；保存后立刻注册一次 |
-| `control_plane_run_once`   | 手动跑一轮：注册 → 认领 → 执行 → 回执                                                    |
-| `control_plane_disconnect` | 删除本地接入配置并停掉定时链                                                             |
+| 命令                            | 用途                                                                                     |
+| ------------------------------- | ---------------------------------------------------------------------------------------- |
+| `control_plane_status`          | 当前是否配置、是否已注册、上次心跳/认领、最近结果与错误（不含 token）                    |
+| `control_plane_connect`         | `{ baseUrl, token }` 或 `{ baseUrl, email, code }`（入场码换 token）；保存后立刻注册一次 |
+| `control_plane_run_once`        | 手动跑一轮：注册 → 认领 → 执行 → 回执                                                    |
+| `control_plane_disconnect`      | 删除本地接入配置并停掉定时链                                                             |
+| `control_plane_account`         | 核验当前账号，仅返回公开身份与连接状态                                                   |
+| `control_plane_logout`          | 先撤销服务器 token，再清除本机连接；网络失败保留凭据                                     |
+| `control_plane_profile_update`  | `{ displayName }` 更新当前账号昵称                                                       |
+| `control_plane_devices`         | 当前账号设备列表与身份，设备 ID 保持字符串                                               |
+| `control_plane_device_revoke`   | `{ deviceId }` 吊销其他设备，宿主拒绝当前设备                                            |
+| `control_plane_sessions_revoke` | 退出其他设备，固定 `includeCurrent=false`                                                |
 
 - 配置优先级：`GREYWORK_CONTROL_URL` + `GREYWORK_CONTROL_TOKEN`（同时给出才生效）>
   `<dataDir>/control-plane.json`（0600，由设置里的「控制面」分区写入）。

@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { onMounted, shallowRef } from "vue";
+import { computed, onMounted, shallowRef, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import type { AccountLoginInput } from "@/lib/control-plane";
+import type { AccountLoginInput, ControlPlaneDevice } from "@/lib/control-plane";
 import { useUserAccountStore } from "@/stores/user-account";
 import { useNoticeStore } from "@/stores/notice";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -9,25 +9,61 @@ import GwButton from "@/features/shared/GwButton.vue";
 import ConfirmDialog from "@/features/settings/ConfirmDialog.vue";
 import AccountLoginForm from "./AccountLoginForm.vue";
 import AccountProfileCard from "./AccountProfileCard.vue";
+import AccountProfileForm from "./AccountProfileForm.vue";
+import AccountDevicesCard from "./AccountDevicesCard.vue";
 
 const { t } = useI18n();
 const account = useUserAccountStore();
 const notice = useNoticeStore();
-const confirmOpen = shallowRef(false);
+const confirmation = shallowRef<{ kind: "logout" | "device" | "others"; device?: ControlPlaneDevice } | null>(null);
+watch([() => account.status?.baseUrl, () => account.session?.user.id, () => account.session?.device.id], () => {
+  confirmation.value = null;
+});
+const confirmationText = computed(() => {
+  if (confirmation.value?.kind === "device")
+    return {
+      title: t("userAccount.revokeDeviceTitle"),
+      hint: t("userAccount.revokeDeviceHint", { name: confirmation.value.device?.name }),
+      label: t("userAccount.revokeDevice"),
+    };
+  if (confirmation.value?.kind === "others")
+    return { title: t("userAccount.revokeOthers"), hint: t("userAccount.revokeOthersHint"), label: t("userAccount.revokeOthers") };
+  return { title: t("userAccount.logoutTitle"), hint: t("userAccount.logoutHint"), label: t("userAccount.logout") };
+});
 
 async function login(input: AccountLoginInput): Promise<void> {
-  if (await account.login(input)) notice.success(t("userAccount.loginSuccess"));
-}
-
-async function logout(): Promise<void> {
-  if (await account.logout()) {
-    confirmOpen.value = false;
-    notice.info(t("userAccount.logoutSuccess"));
+  if (await account.login(input)) {
+    notice.success(t("userAccount.loginSuccess"));
+    await account.loadDevices();
   }
 }
 
+async function confirm(): Promise<void> {
+  const selected = confirmation.value;
+  if (!selected) return;
+  const ok =
+    selected.kind === "logout"
+      ? await account.logout()
+      : selected.kind === "device" && selected.device
+        ? await account.revokeDevice(selected.device.id)
+        : await account.revokeOtherSessions();
+  if (ok) {
+    confirmation.value = null;
+    notice.info(t(selected.kind === "logout" ? "userAccount.logoutSuccess" : "userAccount.sessionsRevoked"));
+  }
+}
+
+async function refresh(): Promise<void> {
+  await account.refresh();
+  await account.loadDevices();
+}
+
+async function saveProfile(name: string): Promise<void> {
+  if (await account.saveProfile(name)) notice.success(t("userAccount.profileSaved"));
+}
+
 onMounted(() => {
-  void account.refresh();
+  void refresh();
 });
 </script>
 
@@ -52,9 +88,26 @@ onMounted(() => {
       :status="account.status"
       :busy="account.busy"
       :env-managed="account.envManaged"
-      @refresh="account.refresh()"
-      @logout="confirmOpen = true"
+      @refresh="refresh"
+      @logout="confirmation = { kind: 'logout' }"
     />
+    <template v-if="account.session">
+      <AccountProfileForm
+        :display-name="account.session.user.displayName"
+        :busy="account.busy"
+        :disabled="account.envManaged"
+        @save="saveProfile"
+      />
+      <AccountDevicesCard
+        :devices="account.devices"
+        :loaded="account.devicesLoaded"
+        :busy="account.busy"
+        :disabled="account.envManaged"
+        @refresh="account.loadDevices()"
+        @revoke="confirmation = { kind: 'device', device: $event }"
+        @revoke-others="confirmation = { kind: 'others' }"
+      />
+    </template>
     <template v-else>
       <div v-if="account.available" class="flex items-center justify-between gap-2">
         <span class="text-[12px] text-dim2">{{ account.busy ? t("userAccount.working") : t("userAccount.notLoggedIn") }}</span>
@@ -73,19 +126,19 @@ onMounted(() => {
         variant="danger"
         :disabled="account.busy"
         data-testid="account-logout"
-        @click="confirmOpen = true"
+        @click="confirmation = { kind: 'logout' }"
         >{{ t("userAccount.logout") }}</GwButton
       >
     </template>
 
     <ConfirmDialog
-      v-if="confirmOpen"
-      :title="t('userAccount.logoutTitle')"
-      :message="t('userAccount.logoutHint')"
-      :confirm-label="t('userAccount.logout')"
+      v-if="confirmation"
+      :title="confirmationText.title"
+      :message="confirmationText.hint"
+      :confirm-label="confirmationText.label"
       :busy="account.busy"
-      @confirm="logout"
-      @cancel="confirmOpen = false"
+      @confirm="confirm"
+      @cancel="confirmation = null"
     />
   </div>
 </template>

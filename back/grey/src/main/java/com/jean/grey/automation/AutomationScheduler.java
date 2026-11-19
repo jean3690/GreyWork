@@ -32,16 +32,21 @@ public class AutomationScheduler {
 	private final CloudAutomationRunner cloudRunner;
 	private final AutomationProperties properties;
 	private final ExecutorService cloudExecutor;
+	private final com.jean.grey.host.HostService hostService;
+	private final AutomationNotifications notifications;
 
 	public AutomationScheduler(AutomationService automationService,
 			AutomationDueMapper dueMapper, AutomationRunMapper runMapper,
-			CloudAutomationRunner cloudRunner, AutomationProperties properties) {
+			CloudAutomationRunner cloudRunner, AutomationProperties properties,
+			com.jean.grey.host.HostService hostService, AutomationNotifications notifications) {
 		this.automationService = automationService;
 		this.dueMapper = dueMapper;
 		this.runMapper = runMapper;
 		this.cloudRunner = cloudRunner;
 		this.properties = properties;
 		this.cloudExecutor = Executors.newVirtualThreadPerTaskExecutor();
+		this.hostService = hostService;
+		this.notifications = notifications;
 	}
 
 	@Scheduled(fixedDelayString = "${grey.automation.tick-ms:30000}")
@@ -78,8 +83,28 @@ public class AutomationScheduler {
 			due.setModel(task.getModel());
 			due.setDueAt(task.getNextRunAt());
 			due.setStatus("pending");
+			boolean skip = "host".equals(task.getExecution()) && "skip".equals(task.getOfflinePolicy())
+					&& !hostService.hasOnlineExecutor(task.getUserId(), task.getHostDeviceId());
+			if (skip) {
+				due.setStatus("skipped");
+				due.setFinishedAt(now);
+			}
 			try {
 				dueMapper.insert(due);
+				if (skip) {
+					AutomationRun run = new AutomationRun();
+					run.setUserId(task.getUserId());
+					run.setTaskId(task.getId());
+					run.setName(task.getName());
+					run.setMode("host");
+					run.setStatus("skipped");
+					run.setDetail("触发时执行设备离线，按任务设置跳过");
+					run.setStartedAt(now);
+					run.setFinishedAt(now);
+					runMapper.insert(run);
+				} else if ("host".equals(task.getExecution())) {
+					notifications.notifyDue(task.getUserId(), task.getHostDeviceId());
+				}
 			}
 			catch (DuplicateKeyException ex) {
 				// (user_id, task_id, due_at) 幂等：同一触发点只入队一次
@@ -187,7 +212,7 @@ public class AutomationScheduler {
 	private void cleanRetention(LocalDateTime now) {
 		LocalDateTime cutoff = now.minusDays(properties.retentionDays());
 		dueMapper.delete(Wrappers.<AutomationDue>lambdaQuery()
-				.in(AutomationDue::getStatus, "done", "failed")
+				.in(AutomationDue::getStatus, "done", "ok", "failed", "skipped", "cancelled")
 				.lt(AutomationDue::getFinishedAt, cutoff));
 		runMapper.delete(Wrappers.<AutomationRun>lambdaQuery()
 				.lt(AutomationRun::getFinishedAt, cutoff));

@@ -55,16 +55,16 @@ public class StorageService {
 			long presignTtlSeconds, String reason) {
 	}
 
-	public record UploadTicket(Long id, String objectKey, String uploadUrl, String method,
+	public record UploadTicket(String id, String objectKey, String uploadUrl, String method,
 			String contentType) {
 	}
 
-	public record ObjectView(Long id, String bucket, String objectKey, String name,
+	public record ObjectView(String id, String bucket, String objectKey, String name,
 			String contentType, Long sizeBytes, String sha256, String kind, String visibility,
 			String status, LocalDateTime createdAt) {
 
 		static ObjectView of(StorageObject row) {
-			return new ObjectView(row.getId(), row.getBucket(), row.getObjectKey(),
+			return new ObjectView(row.getId().toString(), row.getBucket(), row.getObjectKey(),
 					row.getName(), row.getContentType(), row.getSizeBytes(), row.getSha256(),
 					row.getKind(), row.getVisibility(), row.getStatus(), row.getCreatedAt());
 		}
@@ -85,13 +85,22 @@ public class StorageService {
 	/** 创建上传票据：先落 pending 元数据，再给一条预签名 PUT。 */
 	public UploadTicket createUpload(Long userId, String name, String contentType,
 			Long sizeBytes, String sha256, String visibility) {
+		return createUpload(userId, name, contentType, sizeBytes, sha256, visibility, "file");
+	}
+
+	public UploadTicket createUpload(Long userId, String name, String contentType,
+			Long sizeBytes, String sha256, String visibility, String kind) {
 		requireActive();
+		String collection = kind == null ? "file" : kind;
+		if (!java.util.Set.of("file", "library").contains(collection)) {
+			throw ApiException.badRequest("kind_invalid", "kind 只支持 file / library");
+		}
 		if (name == null || name.isBlank()) {
 			throw ApiException.badRequest("name_required", "文件名不能为空");
 		}
 		long size = sizeBytes == null ? 0 : sizeBytes;
-		if (size <= 0) {
-			throw ApiException.badRequest("size_invalid", "sizeBytes 必须为正数");
+		if (sizeBytes == null || size < 0) {
+			throw ApiException.badRequest("size_invalid", "sizeBytes 必须为非负数");
 		}
 		if (size > properties.maxObjectBytes()) {
 			throw ApiException.badRequest("object_too_large",
@@ -113,7 +122,7 @@ public class StorageService {
 		row.setContentType(type);
 		row.setSizeBytes(size);
 		row.setSha256(sha256 == null || sha256.isBlank() ? null : sha256.toLowerCase(Locale.ROOT));
-		row.setKind("file");
+		row.setKind(collection);
 		row.setVisibility("public".equals(visibility) ? "public" : "private");
 		row.setStatus("pending");
 		row.setSource("upload");
@@ -129,9 +138,10 @@ public class StorageService {
 								.bucket(properties.bucket())
 								.key(key)
 								.contentType(type)
+								.contentLength(size)
 								.build())
 						.build());
-		return new UploadTicket(row.getId(), key, presigned.url().toString(), "PUT", type);
+		return new UploadTicket(row.getId().toString(), key, presigned.url().toString(), "PUT", type);
 	}
 
 	/** 客户端 PUT 完成后回执：HEAD 校验实际大小，落 ready。 */
@@ -169,8 +179,16 @@ public class StorageService {
 	}
 
 	public List<ObjectView> list(Long userId, int limit) {
+		return list(userId, limit, null);
+	}
+
+	public List<ObjectView> list(Long userId, int limit, String kind) {
+		if (kind != null && !java.util.Set.of("file", "library").contains(kind)) {
+			throw ApiException.badRequest("kind_invalid", "kind 只支持 file / library");
+		}
 		return mapper.selectList(Wrappers.<StorageObject>lambdaQuery()
 				.eq(StorageObject::getUserId, userId)
+				.eq(kind != null, StorageObject::getKind, kind)
 				.orderByDesc(StorageObject::getCreatedAt)
 				.last("LIMIT " + Math.clamp(limit, 1, 200)))
 				.stream().map(ObjectView::of).toList();
@@ -196,6 +214,8 @@ public class StorageService {
 								.getObjectRequest(GetObjectRequest.builder()
 										.bucket(row.getBucket())
 										.key(row.getObjectKey())
+										.responseContentDisposition(org.springframework.http.ContentDisposition
+												.attachment().filename(row.getName(), java.nio.charset.StandardCharsets.UTF_8).build().toString())
 										.build())
 								.build());
 		return new DownloadTicket(presigned.url().toString(),

@@ -1152,6 +1152,42 @@
     "binary": false
   },
   {
+    "name": "cloud_request",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "cloud_upload_file",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "control_plane_devices",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "control_plane_profile_update",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "control_plane_device_revoke",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
+    "name": "control_plane_sessions_revoke",
+    "auth": "required",
+    "desktopOnly": false,
+    "binary": false
+  },
+  {
     "name": "control_plane_status",
     "auth": "required",
     "desktopOnly": false,

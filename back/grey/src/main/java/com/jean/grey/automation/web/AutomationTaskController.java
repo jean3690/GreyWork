@@ -22,9 +22,23 @@ import org.springframework.web.bind.annotation.RestController;
 public class AutomationTaskController {
 
 	private final AutomationService automationService;
+	private final com.jean.grey.host.HostService hostService;
+	private final com.jean.grey.config.AutomationProperties properties;
 
-	public AutomationTaskController(AutomationService automationService) {
+	public AutomationTaskController(AutomationService automationService,
+			com.jean.grey.host.HostService hostService, com.jean.grey.config.AutomationProperties properties) {
 		this.automationService = automationService;
+		this.hostService = hostService;
+		this.properties = properties;
+	}
+
+	@GetMapping("/config")
+	public java.util.Map<String, Object> config() {
+		return java.util.Map.of("zone", properties.scheduleZone().getId(), "tickMs", properties.tickMs());
+	}
+
+	private void validateHost(Long userId, AutomationService.TaskInput input) {
+		if (input.hostDeviceId() != null) hostService.requireOwned(userId, input.hostDeviceId());
 	}
 
 	public record PreviewRequest(AutomationService.TaskInput task) {
@@ -39,6 +53,7 @@ public class AutomationTaskController {
 	@PostMapping
 	public AutomationService.TaskView create(@AuthenticationPrincipal AuthPrincipal principal,
 			@RequestBody AutomationService.TaskInput input) {
+		validateHost(principal.userId(), input);
 		return automationService.create(principal.userId(), input);
 	}
 
@@ -46,6 +61,7 @@ public class AutomationTaskController {
 	public AutomationService.TaskView update(@AuthenticationPrincipal AuthPrincipal principal,
 			@PathVariable String taskId,
 			@RequestBody AutomationService.TaskInput input) {
+		validateHost(principal.userId(), input);
 		return automationService.update(principal.userId(), taskId, input);
 	}
 

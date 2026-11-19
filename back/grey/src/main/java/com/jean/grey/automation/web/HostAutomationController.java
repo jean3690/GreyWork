@@ -31,14 +31,23 @@ public class HostAutomationController {
 	private final AutomationScheduler scheduler;
 	private final AutomationDueMapper dueMapper;
 	private final HostService hostService;
+	private final com.jean.grey.automation.AutomationNotifications notifications;
 
 	public HostAutomationController(AutomationService automationService,
 			AutomationScheduler scheduler, AutomationDueMapper dueMapper,
-			HostService hostService) {
+			HostService hostService, com.jean.grey.automation.AutomationNotifications notifications) {
 		this.automationService = automationService;
 		this.scheduler = scheduler;
 		this.dueMapper = dueMapper;
 		this.hostService = hostService;
+		this.notifications = notifications;
+	}
+
+	@org.springframework.web.bind.annotation.GetMapping(value = "/events", produces = "text/event-stream")
+	public org.springframework.web.servlet.mvc.method.annotation.SseEmitter events(
+			@AuthenticationPrincipal AuthPrincipal principal) {
+		hostService.heartbeat(principal.userId(), principal.deviceId());
+		return notifications.subscribe(principal.userId(), principal.deviceId());
 	}
 
 	public record ClaimRequest(int limit) {
@@ -57,7 +66,7 @@ public class HostAutomationController {
 		List<AutomationDue> claimed = new ArrayList<>();
 		for (int i = 0; i < limit; i++) {
 			if (dueMapper.claimOne(principal.userId(), principal.deviceId(),
-					LocalDateTime.now()) == 0) {
+					automationService.now()) == 0) {
 				break;
 			}
 			// claimOne 只回影响行数，重新按 (userId, 最新认领) 取回详情

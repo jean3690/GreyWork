@@ -44,6 +44,9 @@ public class AutomationTask {
 
 	private boolean enabled;
 
+	/** replay = 上线后补跑；skip = 触发时无在线执行设备则跳过。 */
+	private String offlinePolicy;
+
 	private LocalDateTime lastRunAt;
 
 	/** 调度器按这个字段扫到期任务。 */

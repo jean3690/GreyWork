@@ -31,11 +31,12 @@ import { guidFeature } from "@/features/guid/spec";
 import { conversationFeature } from "@/features/conversation/spec";
 import { automationFeature } from "@/features/automation/spec";
 import { pluginsFeature } from "@/features/plugins/spec";
+import { cloudFeature } from "@/features/cloud/spec";
 
 export const WEB_FRONT: FrontSpec = {
   id: "web",
   label: "Web 端",
-  features: [guidFeature, conversationFeature, automationFeature, pluginsFeature],
+  features: [guidFeature, conversationFeature, automationFeature, pluginsFeature, cloudFeature],
   shell: {
     panels: { sider: true, preview: true, workspace: true, activity: true, terminal: true },
     wiring: ["queueBridge", "hostNotifications"],

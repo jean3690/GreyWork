@@ -23,7 +23,7 @@ public interface AutomationDueMapper extends BaseMapper<AutomationDue> {
 			WHERE id = (
 			    SELECT id FROM (
 			        SELECT id FROM automation_due
-			        WHERE user_id = #{userId}
+				WHERE user_id = #{userId}
 			          AND execution = 'host'
 			          AND status = 'pending'
 			          AND due_at <= #{now}
@@ -31,7 +31,7 @@ public interface AutomationDueMapper extends BaseMapper<AutomationDue> {
 			        ORDER BY due_at, id
 			        LIMIT 1
 			    ) t
-			)
+			) AND status = 'pending'
 			""")
 	int claimOne(@Param("userId") Long userId, @Param("hostDeviceId") Long hostDeviceId,
 			@Param("now") LocalDateTime now);

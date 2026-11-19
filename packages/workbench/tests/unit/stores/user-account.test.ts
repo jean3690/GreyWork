@@ -107,4 +107,53 @@ describe("user account", () => {
     expect(await store.login({ baseUrl: "http://localhost:8080", email: "u@grey.local", code: "ABC" })).toBe(false);
     expect(invoke).not.toHaveBeenCalled();
   });
+
+  it("昵称保存同步共享身份，设备 ID 原样转发，当前设备不能被吊销", async () => {
+    const store = useUserAccountStore();
+    invoke.mockResolvedValue(linked);
+    await store.refresh();
+    invoke.mockResolvedValue({ ...linked, session: { ...linked.session, user: { ...linked.session!.user, displayName: "New" } } });
+    expect(await store.saveProfile(" New ")).toBe(true);
+    expect(store.session?.user.displayName).toBe("New");
+    expect(invoke).toHaveBeenCalledWith("control_plane_profile_update", { displayName: "New" });
+    invoke.mockClear();
+    expect(await store.revokeDevice("7")).toBe(false);
+    expect(invoke).not.toHaveBeenCalled();
+    await store.revokeDevice("9223372036854775805");
+    expect(invoke).toHaveBeenCalledWith("control_plane_device_revoke", { deviceId: "9223372036854775805" });
+  });
+
+  it("设备请求的晚到结果不能恢复已断开的身份", async () => {
+    const store = useUserAccountStore();
+    invoke.mockResolvedValue(linked);
+    await store.refresh();
+    let resolve: (value: ControlPlaneAccount) => void = () => {};
+    invoke.mockImplementation(
+      () =>
+        new Promise<ControlPlaneAccount>((done) => {
+          resolve = done;
+        }),
+    );
+    const request = store.loadDevices();
+    store.acceptStatus(idle);
+    resolve({ ...linked, devices: [] });
+    expect(await request).toBe(false);
+    expect(store.session).toBeNull();
+    expect(store.devicesLoaded).toBe(false);
+  });
+
+  it("设备管理发现 401 清空身份和设备，网络失败保留身份", async () => {
+    const store = useUserAccountStore();
+    const device = { id: "7", name: "pc", platform: "desktop", current: true, lastSeenAt: null, createdAt: null };
+    invoke.mockResolvedValue({ ...linked, devices: [device] });
+    await store.refresh();
+    expect(store.devices).toEqual([device]);
+    invoke.mockResolvedValue({ ...linked, error: "服务器不可达" });
+    expect(await store.loadDevices()).toBe(false);
+    expect(store.session).toEqual(linked.session);
+    invoke.mockResolvedValue({ ...linked, session: null, error: "401 登录态失效" });
+    expect(await store.revokeOtherSessions()).toBe(false);
+    expect(store.session).toBeNull();
+    expect(store.devices).toEqual([]);
+  });
 });

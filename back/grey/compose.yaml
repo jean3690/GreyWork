@@ -31,10 +31,10 @@ services:
   rustfs:
     image: "rustfs/rustfs:latest"
     environment:
-      - "RUSTFS_ACCESS_KEY=greywork"
-      - "RUSTFS_SECRET_KEY=greywork-secret"
+      - "RUSTFS_ACCESS_KEY=${GREY_S3_ACCESS_KEY:-greywork}"
+      - "RUSTFS_SECRET_KEY=${GREY_S3_SECRET_KEY:-greywork-secret}"
     ports:
-      - "9000"
+      - "${GREY_RUSTFS_PORT:-9000}:9000"
     volumes:
       - "rustfs-data:/data"
 

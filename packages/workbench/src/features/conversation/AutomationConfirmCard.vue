@@ -14,9 +14,8 @@ import { useRouter } from "vue-router";
 import { describeCron } from "@/lib/cron";
 import { useTurnActive } from "@/lib/turn-activity";
 import { useAgentStore } from "@/stores/agent";
-import { useAutomationStore } from "@/stores/automation";
+import { pendingCloudTaskDraft } from "@/features/cloud/task-draft";
 import { useChatStore } from "@/stores/chat";
-import { useWorkspaceStore } from "@/stores/workspace";
 import Icon from "@/features/shared/Icon.vue";
 import type { ThreadMessage } from "@/types";
 
@@ -25,9 +24,7 @@ const props = defineProps<{ threadId: string; message: ThreadMessage }>();
 const { t } = useI18n();
 const router = useRouter();
 const agent = useAgentStore();
-const automation = useAutomationStore();
 const chat = useChatStore();
-const workspaceStore = useWorkspaceStore();
 
 const draft = computed(() => props.message.scheduleDraft);
 const createdId = computed(() => draft.value?.createdId);
@@ -50,21 +47,14 @@ const triggerText = computed<string | null>(() => {
 function confirm(): void {
   const current = draft.value;
   if (!current || createdId.value || busy.value) return;
-  const task = automation.add({
+  pendingCloudTaskDraft.value = {
     name: current.name,
     intent: current.intent,
     cron: current.cron ?? null,
     onceAt: current.onceAt ?? null,
-    enabled: true,
-    lastRun: 0,
-    running: false,
-    // 跟随当前路由：ACP 会话里提议的任务带工具执行，Local 管线任务走本机模型
-    acpProviderId: agent.routeToAcp ? agent.selectedProviderId : null,
-  });
-  // 落在当前工作区：绑定写在专属会话上，任务到期即在那个工作区里跑。
-  automation.setTaskWorkspace(task.id, workspaceStore.activeWorkspaceId);
-  // 走 chat store 落库（与 markAskAnswered 同一约定），不在组件里直接改 prop
-  chat.markScheduleCreated(props.threadId, props.message, task.id);
+    onCreated: (id) => chat.markScheduleCreated(props.threadId, props.message, id),
+  };
+  void router.push("/more/tasks");
 }
 
 function cancel(): void {
@@ -131,7 +121,9 @@ function goScheduled(): void {
 
     <!-- 待确认 -->
     <div v-if="!settled" class="flex items-center justify-end gap-2">
-      <span class="mr-auto text-[10.5px] text-dim2">{{ t("chatView.scheduleCard.hint") }}</span>
+      <span class="mr-auto text-[10.5px] text-dim2"
+        >到云端任务页选择设备、离线策略并确认。{{ agent.routeToAcp ? "当前云端客户端执行器不支持 ACP / 工具。" : "" }}</span
+      >
       <button
         type="button"
         data-testid="schedule-cancel"
@@ -149,7 +141,7 @@ function goScheduled(): void {
         @click="confirm"
       >
         <Icon name="check" :size="12" />
-        {{ t("chatView.scheduleCard.confirm") }}
+        配置云端任务
       </button>
     </div>
   </div>

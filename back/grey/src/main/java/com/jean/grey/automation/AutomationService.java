@@ -47,12 +47,18 @@ public class AutomationService {
 
 	public record TaskInput(String name, String schedule, String cronExpr, LocalDateTime onceAt,
 			String acpProviderId, String target, String intent, String execution,
-			Long hostDeviceId, String model, boolean enabled) {
+			Long hostDeviceId, String model, boolean enabled, String offlinePolicy) {
+		public TaskInput(String name, String schedule, String cronExpr, LocalDateTime onceAt,
+				String acpProviderId, String target, String intent, String execution,
+				Long hostDeviceId, String model, boolean enabled) {
+			this(name, schedule, cronExpr, onceAt, acpProviderId, target, intent, execution,
+					hostDeviceId, model, enabled, "replay");
+		}
 	}
 
 	public record TaskView(String id, String name, String schedule, String cronExpr,
 			LocalDateTime onceAt, String acpProviderId, String target, String intent,
-			String execution, Long hostDeviceId, String model, boolean enabled,
+			String execution, String hostDeviceId, String model, boolean enabled, String offlinePolicy,
 			LocalDateTime lastRunAt, LocalDateTime nextRunAt, LocalDateTime createdAt,
 			LocalDateTime updatedAt) {
 
@@ -60,27 +66,27 @@ public class AutomationService {
 			return new TaskView(task.getId(), task.getName(), task.getSchedule(),
 					task.getCronExpr(), task.getOnceAt(), task.getAcpProviderId(),
 					task.getTarget(), task.getIntent(), task.getExecution(),
-					task.getHostDeviceId(), task.getModel(), task.isEnabled(),
+					task.getHostDeviceId() == null ? null : task.getHostDeviceId().toString(), task.getModel(), task.isEnabled(), task.getOfflinePolicy(),
 					task.getLastRunAt(), task.getNextRunAt(), task.getCreatedAt(),
 					task.getUpdatedAt());
 		}
 	}
 
-	public record DueView(Long id, String taskId, String name, String target, String intent,
+	public record DueView(String id, String taskId, String name, String target, String intent,
 			String acpProviderId, String model, LocalDateTime dueAt) {
 
 		public static DueView of(AutomationDue due) {
-			return new DueView(due.getId(), due.getTaskId(), due.getName(), due.getTarget(),
+			return new DueView(due.getId().toString(), due.getTaskId(), due.getName(), due.getTarget(),
 					due.getIntent(), due.getAcpProviderId(), due.getModel(), due.getDueAt());
 		}
 	}
 
-	public record RunView(Long id, String taskId, String name, String status, String detail,
+	public record RunView(String id, String taskId, String name, String status, String detail,
 			String sessionId, String mode, String output, Long artifactObjectId,
 			LocalDateTime startedAt, LocalDateTime finishedAt, LocalDateTime createdAt) {
 
 		static RunView of(AutomationRun run) {
-			return new RunView(run.getId(), run.getTaskId(), run.getName(), run.getStatus(),
+			return new RunView(run.getId().toString(), run.getTaskId(), run.getName(), run.getStatus(),
 					run.getDetail(), run.getSessionId(), run.getMode(), run.getOutput(),
 					run.getArtifactObjectId(), run.getStartedAt(), run.getFinishedAt(),
 					run.getCreatedAt());
@@ -112,7 +118,24 @@ public class AutomationService {
 		AutomationTask task = requireOwned(userId, taskId);
 		applyInput(task, input);
 		task.setNextRunAt(computeNextRun(task, LocalDateTime.now(zone).minusSeconds(1)));
-		taskMapper.updateById(task);
+		// 可空字段必须显式写 NULL，切换循环/一次性或取消绑定时不能保留旧值。
+		taskMapper.update(null, Wrappers.<AutomationTask>lambdaUpdate()
+				.eq(AutomationTask::getUserId, userId).eq(AutomationTask::getId, taskId)
+				.set(AutomationTask::getName, task.getName())
+				.set(AutomationTask::getSchedule, task.getSchedule())
+				.set(AutomationTask::getTarget, task.getTarget())
+				.set(AutomationTask::getIntent, task.getIntent())
+				.set(AutomationTask::getExecution, task.getExecution())
+				.set(AutomationTask::isEnabled, task.isEnabled())
+				.set(AutomationTask::getOfflinePolicy, task.getOfflinePolicy())
+				.set(AutomationTask::getUpdatedAt, LocalDateTime.now(zone))
+				.set(AutomationTask::getCronExpr, task.getCronExpr())
+				.set(AutomationTask::getOnceAt, task.getOnceAt())
+				.set(AutomationTask::getAcpProviderId, task.getAcpProviderId())
+				.set(AutomationTask::getHostDeviceId, task.getHostDeviceId())
+				.set(AutomationTask::getModel, task.getModel())
+				.set(AutomationTask::getNextRunAt, task.getNextRunAt()));
+		if (!task.isEnabled()) cancelPending(userId, taskId);
 		return TaskView.of(task);
 	}
 
@@ -123,16 +146,29 @@ public class AutomationService {
 		task.setNextRunAt(enabled
 				? computeNextRun(task, LocalDateTime.now(zone).minusSeconds(1))
 				: null);
-		taskMapper.updateById(task);
+		taskMapper.update(null, Wrappers.<AutomationTask>lambdaUpdate()
+				.eq(AutomationTask::getUserId, userId).eq(AutomationTask::getId, taskId)
+				.set(AutomationTask::isEnabled, enabled)
+				.set(AutomationTask::getUpdatedAt, LocalDateTime.now(zone))
+				.set(AutomationTask::getNextRunAt, task.getNextRunAt()));
+		if (!enabled) cancelPending(userId, taskId);
 		return TaskView.of(task);
 	}
 
 	@Transactional
 	public void delete(Long userId, String taskId) {
 		requireOwned(userId, taskId);
-		AutomationTask stub = new AutomationTask();
-		stub.setId(taskId);
-		taskMapper.deleteById(stub);
+		cancelPending(userId, taskId);
+		taskMapper.delete(Wrappers.<AutomationTask>lambdaQuery()
+				.eq(AutomationTask::getUserId, userId).eq(AutomationTask::getId, taskId));
+	}
+
+	private void cancelPending(Long userId, String taskId) {
+		dueMapper.update(null, Wrappers.<AutomationDue>lambdaUpdate()
+				.eq(AutomationDue::getUserId, userId).eq(AutomationDue::getTaskId, taskId)
+				.eq(AutomationDue::getStatus, "pending")
+				.set(AutomationDue::getStatus, "cancelled")
+				.set(AutomationDue::getFinishedAt, LocalDateTime.now(zone)));
 	}
 
 	public List<TaskView> list(Long userId) {
@@ -140,6 +176,10 @@ public class AutomationService {
 				.eq(AutomationTask::getUserId, userId)
 				.orderByDesc(AutomationTask::getCreatedAt))
 				.stream().map(TaskView::of).toList();
+	}
+
+	public LocalDateTime now() {
+		return LocalDateTime.now(zone);
 	}
 
 	public List<RunView> runs(Long userId, String taskId, int limit) {
@@ -228,6 +268,10 @@ public class AutomationService {
 	}
 
 	private void applyInput(AutomationTask task, TaskInput input) {
+		String policy = input.offlinePolicy() == null ? "replay" : input.offlinePolicy();
+		if (!Set.of("replay", "skip").contains(policy)) {
+			throw ApiException.badRequest("offline_policy_invalid", "offlinePolicy 只支持 replay / skip");
+		}
 		if (input.intent() == null || input.intent().isBlank()) {
 			throw ApiException.badRequest("intent_required", "intent 不能为空");
 		}
@@ -246,6 +290,17 @@ public class AutomationService {
 			throw ApiException.badRequest("schedule_required",
 					"需要有效的 cronExpr 或 onceAt 之一");
 		}
+		if (cron != null && once != null) {
+			throw ApiException.badRequest("schedule_conflict", "cronExpr 与 onceAt 不能同时设置");
+		}
+		if (once != null && input.enabled() && !once.isAfter(LocalDateTime.now(zone))) {
+			throw ApiException.badRequest("once_in_past", "启用一次性任务时必须选择未来的执行时间");
+		}
+		if (input.name() != null && input.name().length() > 128
+				|| input.schedule() != null && input.schedule().length() > 128
+				|| input.target() != null && input.target().length() > 255) {
+			throw ApiException.badRequest("task_field_too_long", "任务名称、排期或目标超出长度限制");
+		}
 		task.setName(input.name() == null ? "" : input.name().trim());
 		task.setSchedule(input.schedule() == null ? "" : input.schedule().trim());
 		task.setCronExpr(cron == null ? null : cron.normalized());
@@ -257,6 +312,7 @@ public class AutomationService {
 		task.setHostDeviceId(input.hostDeviceId());
 		task.setModel(trimToNull(input.model()));
 		task.setEnabled(input.enabled());
+		task.setOfflinePolicy(policy);
 	}
 
 	private Cron5 parseCron(TaskInput input) {

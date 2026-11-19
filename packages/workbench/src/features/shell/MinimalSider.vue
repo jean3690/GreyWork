@@ -104,7 +104,11 @@ const onlyActiveWorkspace = ref(false);
         v-for="item in navItems"
         :key="item.path"
         class="flex h-8 cursor-pointer items-center gap-2 rounded-[calc(7px*var(--gw-radius-scale))] px-2 text-[12.5px] transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-cyan"
-        :class="route.path === item.path ? 'bg-panel text-foreground' : 'text-dim hover:bg-panel hover:text-foreground'"
+        :class="
+          route.path === item.path || (item.path === '/more' && route.path.startsWith('/more/'))
+            ? 'bg-panel text-foreground'
+            : 'text-dim hover:bg-panel hover:text-foreground'
+        "
         @click="emit('navigate', item.path)"
       >
         <Icon :name="item.icon" :size="14" class="shrink-0 text-dim2" />

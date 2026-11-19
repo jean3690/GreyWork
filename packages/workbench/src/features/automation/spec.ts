@@ -5,6 +5,5 @@ import type { Feature } from "@/front/types";
 
 export const automationFeature: Feature = {
   id: "automation",
-  routes: [{ path: "/scheduled", component: () => import("@/features/automation/AutomationView.vue") }],
-  nav: [{ path: "/scheduled", label: "自动化任务", icon: "alarm-clock" }],
+  routes: [{ path: "/scheduled", redirect: "/more/tasks" }],
 };

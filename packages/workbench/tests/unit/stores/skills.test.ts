@@ -4,6 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as GreyWorkCore from "@greywork/core";
 import { createPinia, setActivePinia } from "pinia";
 import { parseSkillFrontmatter, resolveSkillsRoot, useSkillsStore } from "@/stores/skills";
+import { effectScope } from "vue";
+import { useCloudCatalog } from "@/features/cloud/useCloudCatalog";
+import { useUserAccountStore } from "@/stores/user-account";
 
 vi.mock("@greywork/host-ipc", async (importOriginal) => ({
   ...(await importOriginal()),
@@ -64,6 +67,14 @@ function host(marketResults: unknown[] = []): void {
         return [{ id: "ffmpeg-media", name: "ffmpeg 媒体处理", description: "转码 / 截取 / 抽帧", files: ["SKILL.md"] }];
       case "skills_install_bundled":
         return { dir: "/ws/proj/.agents/skills/ffmpeg-media", filesWritten: 1 };
+      case "cloud_request":
+        return (args as { path?: string })?.path?.startsWith("/api/download/")
+          ? { files: [{ path: "SKILL.md", contents: "# cloud skill" }], hash: "cloud-snapshot" }
+          : [];
+      case "db_settings_load":
+        return null;
+      case "db_settings_sync":
+        return null;
       default:
         throw new Error(`unexpected host command: ${cmd}`);
     }
@@ -229,5 +240,128 @@ describe("skills store 内置技能", () => {
     const store = useSkillsStore();
     await expect(store.installBundled("nope")).rejects.toThrow("不是内置技能");
     expect(store.busyId).toBeNull();
+  });
+});
+
+describe("云端技能安装记录", () => {
+  const entry = {
+    ref: "greywork/skills/tdd",
+    skillId: "tdd",
+    name: "Cloud TDD",
+    installs: 0,
+    source: "greywork",
+    downloadable: true,
+    origin: "https://cloud.test",
+  };
+  function catalog() {
+    useUserAccountStore().session = {
+      user: { id: "1", email: "test@example.local", displayName: null, role: "user" },
+      device: { id: "2", name: "test", platform: "desktop" },
+    };
+    const scope = effectScope();
+    return { scope, catalog: scope.run(() => useCloudCatalog())! };
+  }
+  it("首次云端安装维护记录，重载后更新仍使用原云端来源", async () => {
+    host();
+    const store = useSkillsStore();
+    const mounted = catalog();
+    try {
+      await mounted.catalog.install(entry);
+      expect(store.recordBySkillId.get("tdd")).toMatchObject({ ref: entry.ref, hash: "cloud-snapshot", origin: entry.origin });
+      setActivePinia(createPinia());
+      const restored = useSkillsStore();
+      expect(restored.recordBySkillId.get("tdd")).toMatchObject({ ref: entry.ref, origin: entry.origin });
+      await restored.updateInstalled("tdd");
+      expect(invokeMock).toHaveBeenCalledWith("skills_download", { entryRef: entry.ref, origin: entry.origin });
+    } finally {
+      mounted.scope.stop();
+    }
+  });
+  it("云端覆盖同名技能时替换旧市场记录", async () => {
+    host();
+    const store = useSkillsStore();
+    await store.installFromMarket({ ...entry, ref: "old/source/tdd", origin: undefined });
+    const mounted = catalog();
+    try {
+      await mounted.catalog.install(entry);
+      expect(store.records).toHaveLength(1);
+      expect(store.records[0]).toMatchObject({ ref: entry.ref, hash: "cloud-snapshot", origin: entry.origin });
+    } finally {
+      mounted.scope.stop();
+    }
+  });
+  it("安装失败不替换原记录，并释放共享 busy 状态", async () => {
+    host();
+    const store = useSkillsStore();
+    await store.installFromMarket({ ...entry, ref: "old/source/tdd", origin: undefined });
+    const respond = invokeMock.getMockImplementation()!;
+    invokeMock.mockImplementation(async (command, args) => {
+      if (command === "skills_install") throw new Error("write failed");
+      return respond(command, args);
+    });
+    const mounted = catalog();
+    try {
+      await mounted.catalog.install(entry);
+      expect(mounted.catalog.error.value).toContain("write failed");
+      expect(store.recordBySkillId.get("tdd")?.ref).toBe("old/source/tdd");
+      expect(store.busyId).toBeNull();
+    } finally {
+      mounted.scope.stop();
+    }
+  });
+  it("云端安装与设置页安装/卸载共用 busy 锁", async () => {
+    host();
+    const store = useSkillsStore();
+    const mounted = catalog();
+    let started!: () => void;
+    let finish!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const respond = invokeMock.getMockImplementation()!;
+    invokeMock.mockImplementation(async (command, args) => {
+      if (command === "skills_install") {
+        started();
+        await pending;
+      }
+      return respond(command, args);
+    });
+    const installing = mounted.catalog.install(entry);
+    await entered;
+    try {
+      expect(store.busyId).toBe("tdd");
+      await expect(store.uninstallSkill("notes")).rejects.toThrow("正在进行");
+      await expect(store.installFromMarket({ ...entry, skillId: "notes" })).rejects.toThrow("正在进行");
+      await expect(store.installBundled("ffmpeg-media")).rejects.toThrow("正在进行");
+      expect(invokeMock).not.toHaveBeenCalledWith("skills_uninstall", expect.anything());
+    } finally {
+      finish();
+      await installing;
+      mounted.scope.stop();
+    }
+    expect(store.busyId).toBeNull();
+  });
+  it("复用安装入口后仍按当前工作区落盘，不沿用设置页的旧缓存", async () => {
+    host();
+    const store = useSkillsStore();
+    await store.refreshInstalled();
+    const root = vi
+      .spyOn(await import("@/lib/workspace-dir"), "resolveWorkspaceRoot")
+      .mockResolvedValue({ dir: "/ws/current", bound: true });
+    const mounted = catalog();
+    try {
+      await mounted.catalog.install(entry);
+      expect(invokeMock).toHaveBeenCalledWith("skills_install", {
+        workspaceRoot: "/ws/current",
+        skillId: "tdd",
+        files: [{ path: "SKILL.md", contents: "# cloud skill" }],
+      });
+    } finally {
+      root.mockRestore();
+      mounted.scope.stop();
+    }
   });
 });

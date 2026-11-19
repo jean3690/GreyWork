@@ -92,6 +92,7 @@ import type { SessionFileStore, WorkspaceDir } from "./session-store.js";
 import type { RagIndexHost } from "./rag.js";
 import type { TerminalHost } from "./terminal.js";
 import type { WorkspaceAccess } from "./workspace-access.js";
+import { uploadWorkspaceFile } from "./cloud.js";
 
 export interface CommandMeta {
   name: string;
@@ -1474,9 +1475,34 @@ HANDLERS.set("db_settings_sync", async (args, ctx) => {
 
 /* ===== 控制面接入（桌面端 ↔ back/grey） ===== */
 
+HANDLERS.set("cloud_request", async (args, ctx) => {
+  const input = args as { method?: unknown; path?: unknown; body?: unknown } | null;
+  if (typeof input?.method !== "string" || typeof input.path !== "string") throw new CommandError(400, "缺少云端接口参数");
+  return ctx.controlPlane.cloudRequest(input.method, input.path, input.body);
+});
+
+HANDLERS.set("cloud_upload_file", async (args, ctx) => {
+  const kind = (args as { kind?: unknown } | null)?.kind;
+  if (typeof kind !== "string") throw new CommandError(400, "缺少存储分类");
+  return uploadWorkspaceFile(ctx.controlPlane, ctx.access, pathArg(args), kind);
+});
+
 HANDLERS.set("control_plane_status", async (_args, ctx) => ctx.controlPlane.status());
 
 HANDLERS.set("control_plane_account", async (_args, ctx) => ctx.controlPlane.account());
+
+HANDLERS.set("control_plane_devices", async (_args, ctx) => ctx.controlPlane.manageAccount("devices"));
+HANDLERS.set("control_plane_profile_update", async (args, ctx) => {
+  const value = (args as { displayName?: unknown } | null)?.displayName;
+  if (typeof value !== "string") throw missingField("displayName");
+  return ctx.controlPlane.manageAccount("profile", value);
+});
+HANDLERS.set("control_plane_device_revoke", async (args, ctx) => {
+  const value = (args as { deviceId?: unknown } | null)?.deviceId;
+  if (typeof value !== "string") throw missingField("deviceId");
+  return ctx.controlPlane.manageAccount("revokeDevice", value);
+});
+HANDLERS.set("control_plane_sessions_revoke", async (_args, ctx) => ctx.controlPlane.manageAccount("revokeOthers"));
 
 HANDLERS.set("control_plane_logout", async (_args, ctx) => {
   try {

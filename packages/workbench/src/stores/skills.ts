@@ -10,6 +10,7 @@ import {
   type BundledSkillMeta,
   type MarketSkillEntry,
   type SkillSourceAdapter,
+  type SkillSnapshot,
   type SkillsMarketTransport,
 } from "@greywork/plugins";
 import { useSettingsStore } from "./settings";
@@ -44,6 +45,8 @@ export interface SkillInstallRecord {
   skillId: string;
   hash: string;
   installedAt: number;
+  /** 下载来源随记录保留，更新不能回落到另一台服务器的同名技能。 */
+  origin?: string;
 }
 
 export interface SkillsWorkspace {
@@ -110,12 +113,13 @@ export async function scanSkills(dir: string): Promise<InstalledSkill[]> {
   return skills;
 }
 
-function isRecord(value: { ref?: unknown; skillId?: unknown; hash?: unknown; installedAt?: unknown }): boolean {
+function isRecord(value: { ref?: unknown; skillId?: unknown; hash?: unknown; installedAt?: unknown; origin?: unknown }): boolean {
   return (
     typeof value?.ref === "string" &&
     typeof value?.skillId === "string" &&
     typeof value?.hash === "string" &&
-    typeof value?.installedAt === "number"
+    typeof value?.installedAt === "number" &&
+    (value.origin === undefined || typeof value.origin === "string")
   );
 }
 
@@ -298,9 +302,10 @@ export const useSkillsStore = defineStore("skills", () => {
 
   /** 安装一份内置技能（内容由宿主按 id 取，已装即覆盖更新）。 */
   async function installBundled(skillId: string): Promise<void> {
-    const ws = await requireHostWorkspace();
+    if (busyId.value !== null) throw new Error("技能安装或卸载正在进行，请稍后重试");
     busyId.value = skillId;
     try {
+      const ws = await requireHostWorkspace();
       await transport.installBundled(ws.root.dir, skillId);
       await refreshInstalled();
     } finally {
@@ -345,19 +350,20 @@ export const useSkillsStore = defineStore("skills", () => {
     }
   }
 
-  /** 安装（skillId 已存在 = 覆盖更新；按 entry.origin 路由到对应源下载）。 */
-  async function installFromMarket(entry: MarketSkillEntry): Promise<void> {
-    const ws = await requireHostWorkspace();
+  /** 市场/云端共用安装事务：下载、落盘、记录和 busy 状态不能各自维护。 */
+  async function installMarketSnapshot(entry: MarketSkillEntry, download: () => Promise<SkillSnapshot>): Promise<void> {
+    if (busyId.value !== null) throw new Error("技能安装或卸载正在进行，请稍后重试");
     busyId.value = entry.skillId;
     try {
-      // 直接走 transport 下载（origin 由条目携带，走对应源端点）
-      const snapshot = parseSnapshot(await transport.download(entry.ref, entry.origin));
+      const ws = await requireHostWorkspace();
+      const snapshot = await download();
       await transport.install(ws.root.dir, entry.skillId, snapshot.files);
       records.value = upsertRecord(records.value, {
         ref: entry.ref,
         skillId: entry.skillId,
         hash: snapshot.hash,
         installedAt: Date.now(),
+        ...(entry.origin ? { origin: entry.origin } : {}),
       });
       saveRecords(records.value);
       await refreshInstalled();
@@ -366,11 +372,21 @@ export const useSkillsStore = defineStore("skills", () => {
     }
   }
 
+  /** 已下载的云端快照仍走同一安装/记账入口，宿主继续执行两阶段文件校验。 */
+  function installFromSnapshot(entry: MarketSkillEntry, snapshot: SkillSnapshot): Promise<void> {
+    return installMarketSnapshot(entry, async () => snapshot);
+  }
+
+  function installFromMarket(entry: MarketSkillEntry): Promise<void> {
+    return installMarketSnapshot(entry, async () => parseSnapshot(await transport.download(entry.ref, entry.origin)));
+  }
+
   /** 卸载已安装技能（只删技能根目录，宿主侧有 skillId 白名单收敛）。 */
   async function uninstallSkill(skillId: string): Promise<void> {
-    const ws = await requireHostWorkspace();
+    if (busyId.value !== null) throw new Error("技能安装或卸载正在进行，请稍后重试");
     busyId.value = skillId;
     try {
+      const ws = await requireHostWorkspace();
       await transport.uninstall(ws.root.dir, skillId);
       records.value = records.value.filter((record) => record.skillId !== skillId);
       saveRecords(records.value);
@@ -391,13 +407,16 @@ export const useSkillsStore = defineStore("skills", () => {
       installs: 0,
       source: "",
       downloadable: true,
+      origin: record.origin,
     });
   }
 
   async function requireHostWorkspace(): Promise<SkillsWorkspace> {
     if (!hostAvailable) throw new Error("skills install/uninstall requires the desktop host");
-    const ws = await ensureWorkspace();
-    if (!ws) throw new Error(installedError.value || "workspace root unavailable");
+    // 操作发生时重新解析，不能把首次打开设置页的缓存当成当前工作区。
+    const ws = await resolveSkillsRoot();
+    workspace.value = ws;
+    workspaceResolved.value = true;
     return ws;
   }
 
@@ -432,6 +451,7 @@ export const useSkillsStore = defineStore("skills", () => {
     refreshBundled,
     searchDiscover,
     installFromMarket,
+    installFromSnapshot,
     installBundled,
     updateInstalled,
     uninstallSkill,

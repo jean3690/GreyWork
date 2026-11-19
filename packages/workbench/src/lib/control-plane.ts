@@ -21,6 +21,16 @@ export interface ControlPlaneAccount {
   status: ControlPlaneStatus;
   session: ControlPlaneSession | null;
   error: string | null;
+  devices?: ControlPlaneDevice[];
+}
+
+export interface ControlPlaneDevice {
+  id: string;
+  name: string;
+  platform: string;
+  lastSeenAt: string | null;
+  createdAt: string | null;
+  current: boolean;
 }
 
 export interface AccountLoginInput {

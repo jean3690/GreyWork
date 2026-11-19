@@ -143,4 +143,67 @@ describe("用户账号", () => {
     expect(pane.get("#account-email").attributes("disabled")).toBeDefined();
     expect(host.invoke).not.toHaveBeenCalled();
   });
+
+  it("修改昵称后侧栏同步，空白或未修改的昵称不能提交", async () => {
+    host.invoke.mockResolvedValue(linked);
+    const { pane, footer } = await mountPane(true);
+    expect(pane.get('[data-testid="account-save-profile"]').attributes("disabled")).toBeDefined();
+    await pane.get("#account-display-name").setValue(" ");
+    expect(pane.get('[data-testid="account-save-profile"]').attributes("disabled")).toBeDefined();
+    await pane.get("#account-display-name").setValue(" New Name ");
+    host.invoke.mockResolvedValue({
+      ...linked,
+      session: { ...linked.session, user: { ...linked.session!.user, displayName: "New Name" } },
+    });
+    await pane.get('[data-testid="account-profile-form"]').trigger("submit");
+    await flushPromises();
+    expect(host.invoke).toHaveBeenCalledWith("control_plane_profile_update", { displayName: "New Name" });
+    expect(footer?.get('[data-testid="sider-account"]').text()).toContain("New Name");
+  });
+
+  it("标记当前设备，其他设备需确认后吊销，取消退出其他设备不发请求", async () => {
+    const phoneId = "9223372036854775805";
+    const devices = [
+      { id: "7", name: "工作电脑", platform: "desktop", current: true, lastSeenAt: null, createdAt: null },
+      { id: phoneId, name: "手机", platform: "phone", current: false, lastSeenAt: "2026-11-18T10:00:00", createdAt: null },
+    ];
+    host.invoke.mockResolvedValue({ ...linked, devices });
+    const { pane } = await mountPane();
+    expect(pane.findAll('[data-testid="account-device-revoke"]')).toHaveLength(1);
+    expect(pane.get('[data-device-id="7"]').text()).toContain("当前设备");
+    await pane.get('[data-testid="account-device-revoke"]').trigger("click");
+    await flushPromises();
+    expect(host.invoke).not.toHaveBeenCalledWith("control_plane_device_revoke", expect.anything());
+    host.invoke.mockResolvedValue({ ...linked, devices: [devices[0]] });
+    document.body.querySelectorAll<HTMLButtonElement>('[data-slot="alert-dialog-content"] button')[1]!.click();
+    await flushPromises();
+    expect(host.invoke).toHaveBeenCalledWith("control_plane_device_revoke", { deviceId: phoneId });
+    expect(pane.find(`[data-device-id="${phoneId}"]`).exists()).toBe(false);
+    host.invoke.mockResolvedValue({ ...linked, devices });
+    await pane.get('[data-testid="account-devices-refresh"]').trigger("click");
+    await flushPromises();
+    await pane.get('[data-testid="account-revoke-others"]').trigger("click");
+    await flushPromises();
+    document.body.querySelectorAll<HTMLButtonElement>('[data-slot="alert-dialog-content"] button')[0]!.click();
+    await flushPromises();
+    expect(host.invoke).not.toHaveBeenCalledWith("control_plane_sessions_revoke");
+    await pane.get('[data-testid="account-revoke-others"]').trigger("click");
+    await flushPromises();
+    document.body.querySelectorAll<HTMLButtonElement>('[data-slot="alert-dialog-content"] button')[1]!.click();
+    await flushPromises();
+    expect(host.invoke).toHaveBeenCalledWith("control_plane_sessions_revoke");
+    expect(pane.find('[data-testid="account-profile"]').exists()).toBe(true);
+  });
+
+  it("环境管理账号禁止资料和设备写操作", async () => {
+    host.invoke.mockResolvedValue({
+      ...linked,
+      status: { ...linked.status, source: "env" },
+      devices: [{ id: "8", name: "手机", platform: "phone", current: false, lastSeenAt: null, createdAt: null }],
+    });
+    const { pane } = await mountPane();
+    expect(pane.get("#account-display-name").attributes("disabled")).toBeDefined();
+    expect(pane.get('[data-testid="account-device-revoke"]').attributes("disabled")).toBeDefined();
+    expect(pane.get('[data-testid="account-revoke-others"]').attributes("disabled")).toBeDefined();
+  });
 });

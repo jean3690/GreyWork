@@ -32,7 +32,7 @@ public class HostService {
 		this.objectMapper = objectMapper;
 	}
 
-	public record HostView(Long deviceId, String name, String version, boolean alive,
+	public record HostView(String deviceId, String name, String version, boolean alive,
 			long bindings) {
 	}
 
@@ -75,7 +75,7 @@ public class HostService {
 				.eq(HostInstance::getUserId, userId)
 				.orderByAsc(HostInstance::getCreatedAt))
 				.stream()
-				.map(host -> new HostView(host.getDeviceId(), host.getName(), host.getVersion(),
+				.map(host -> new HostView(host.getDeviceId().toString(), host.getName(), host.getVersion(),
 						isAlive(host.getDeviceId()), channelBindingMapper.selectCount(
 								Wrappers.<ChannelBinding>lambdaQuery()
 										.eq(ChannelBinding::getHostDeviceId, host.getDeviceId()))))
@@ -88,6 +88,14 @@ public class HostService {
 			throw ApiException.badRequest("host_unknown", "目标宿主不存在或不属于当前用户");
 		}
 		return host;
+	}
+
+	public boolean hasOnlineExecutor(Long userId, Long deviceId) {
+		if (deviceId != null) {
+			HostInstance host = hostInstanceMapper.selectById(deviceId);
+			return host != null && userId.equals(host.getUserId()) && isAlive(deviceId);
+		}
+		return oldestAlive(userId) != null;
 	}
 
 	/**

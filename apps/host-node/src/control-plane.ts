@@ -15,11 +15,12 @@ import path from "node:path";
 
 import type { Db } from "./db.js";
 import { authHeaders, endpointUrl, resolveApiKey, truncate } from "./llm.js";
+import { validateCloudRequest } from "./cloud.js";
 
 /** 心跳/认领 tick 间隔（秒）。 */
 export const DEFAULT_TICK_SECS = 30;
 /** 每轮最多认领数：执行是串行的，多认只会把租约拖到超时。 */
-export const MAX_CLAIM_PER_TICK = 3;
+export const MAX_CLAIM_PER_TICK = 1;
 /** 单条执行上限（秒）：默认 25min，给控制面 30min 认领租约留回收缓冲。 */
 export const DEFAULT_TIMEOUT_SECS = 1500;
 
@@ -30,7 +31,7 @@ export interface StoredControlPlane {
   baseUrl: string;
   token: string;
   email: string | null;
-  deviceId: number | null;
+  deviceId: string | number | null;
   linkedAt: number | null;
 }
 
@@ -58,11 +59,21 @@ export interface ControlPlaneAccount {
   status: ControlPlaneStatus;
   session: ControlPlaneSession | null;
   error: string | null;
+  devices?: ControlPlaneDevice[];
+}
+
+export interface ControlPlaneDevice {
+  id: string;
+  name: string;
+  platform: string;
+  lastSeenAt: string | null;
+  createdAt: string | null;
+  current: boolean;
 }
 
 /** 控制面 DueView（camelCase，与 Java 的 record 对齐）。 */
 export interface ControlDue {
-  id: number;
+  id: string | number;
   taskId: string;
   name: string;
   target: string;
@@ -80,6 +91,14 @@ export class ControlPlaneError extends Error {
   ) {
     super(message);
   }
+}
+
+/** 仅宿主内部使用的云端操作上下文：多步操作固定凭据，换号/断开时统一取消。 */
+export interface CloudConnection {
+  readonly signal: AbortSignal;
+  request(method: string, pathname: string, body?: unknown): Promise<unknown>;
+  /** 已发放票据的失败清理固定使用原会话，不跟随新账号，也不复用已取消的信号。 */
+  cleanupUpload(objectId: string): Promise<void>;
 }
 
 function message(error: unknown): string {
@@ -100,7 +119,7 @@ function readStored(dataDir: string): StoredControlPlane | null {
       baseUrl: parsed.baseUrl,
       token: parsed.token,
       email: typeof parsed.email === "string" ? parsed.email : null,
-      deviceId: typeof parsed.deviceId === "number" ? parsed.deviceId : null,
+      deviceId: typeof parsed.deviceId === "string" || typeof parsed.deviceId === "number" ? parsed.deviceId : null,
       linkedAt: typeof parsed.linkedAt === "number" ? parsed.linkedAt : null,
     };
   } catch {
@@ -184,7 +203,7 @@ export class ControlPlaneClient {
   ) {}
 
   /** 入场码换取登录态：桌面端第一次接入控制面走这条。 */
-  static async enroll(baseUrl: string, input: EnrollInput): Promise<{ token: string; email: string; deviceId: number | null }> {
+  static async enroll(baseUrl: string, input: EnrollInput): Promise<{ token: string; email: string; deviceId: string | number | null }> {
     const body = {
       code: input.code.trim(),
       email: input.email.trim(),
@@ -222,11 +241,11 @@ export class ControlPlaneClient {
     return {
       token: parsed.token,
       email: typeof parsed.user?.email === "string" ? parsed.user.email : body.email,
-      deviceId: typeof parsed.device?.id === "number" ? parsed.device.id : null,
+      deviceId: typeof parsed.device?.id === "string" || typeof parsed.device?.id === "number" ? parsed.device.id : null,
     };
   }
 
-  private async call(method: string, pathname: string, body?: unknown): Promise<Response> {
+  private async call(method: string, pathname: string, body?: unknown, signal?: AbortSignal): Promise<Response> {
     const headers: Record<string, string> = { authorization: "Bearer " + this.token };
     if (body !== undefined) headers["content-type"] = "application/json";
     let response: Response;
@@ -235,7 +254,7 @@ export class ControlPlaneClient {
         method,
         headers,
         body: body === undefined ? undefined : JSON.stringify(body),
-        signal: AbortSignal.timeout(20_000),
+        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20_000)]) : AbortSignal.timeout(20_000),
       });
     } catch (error) {
       throw new ControlPlaneError(pathname + " 请求失败：" + message(error));
@@ -245,6 +264,41 @@ export class ControlPlaneClient {
       throw new ControlPlaneError(describeFailure(response.status, pathname, text), response.status);
     }
     return response;
+  }
+
+  async cloudRequest(method: string, pathname: string, body?: unknown, signal?: AbortSignal): Promise<unknown> {
+    validateCloudRequest(method, pathname);
+    const response = await this.call(method, pathname, body, signal);
+    const text = await response.text();
+    return text ? JSON.parse(text) : null;
+  }
+
+  async notifications(signal: AbortSignal, wake: () => void): Promise<void> {
+    const response = await fetch(this.baseUrl + "/api/hosts/me/automation/events", {
+      headers: { authorization: "Bearer " + this.token, accept: "text/event-stream" },
+      signal,
+    });
+    if (!response.ok || !response.body) throw new ControlPlaneError("云端通知连接失败", response.status);
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let pending = "";
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) return;
+        pending += decoder.decode(value, { stream: true });
+        let newline: number;
+        while ((newline = pending.indexOf("\n")) >= 0) {
+          const line = pending.slice(0, newline).trim();
+          pending = pending.slice(newline + 1);
+          if (line === "event:due" || line === "event: due" || line === "event:ready" || line === "event: ready") wake();
+        }
+        if (pending.length > 8192) throw new ControlPlaneError("云端通知帧过大");
+      }
+    } finally {
+      await reader.cancel().catch(() => {});
+      reader.releaseLock();
+    }
   }
 
   async me(): Promise<ControlPlaneSession> {
@@ -278,6 +332,43 @@ export class ControlPlaneClient {
     await this.call("POST", "/api/auth/logout");
   }
 
+  async updateProfile(displayName: string): Promise<void> {
+    await this.call("PATCH", "/api/auth/me", { displayName });
+  }
+
+  async devices(): Promise<ControlPlaneDevice[]> {
+    const payload: unknown = await (await this.call("GET", "/api/devices")).json();
+    if (!Array.isArray(payload)) throw new ControlPlaneError("控制面返回的设备列表不完整");
+    return payload.map((item: Partial<ControlPlaneDevice>) => {
+      if (
+        !item ||
+        typeof item.id !== "string" ||
+        !/^\d+$/.test(item.id) ||
+        typeof item.name !== "string" ||
+        typeof item.platform !== "string" ||
+        typeof item.current !== "boolean"
+      ) {
+        throw new ControlPlaneError("控制面返回的设备信息不完整，请更新后端版本");
+      }
+      return {
+        id: item.id,
+        name: item.name,
+        platform: item.platform,
+        current: item.current,
+        lastSeenAt: typeof item.lastSeenAt === "string" ? item.lastSeenAt : null,
+        createdAt: typeof item.createdAt === "string" ? item.createdAt : null,
+      };
+    });
+  }
+
+  async revokeDevice(id: string): Promise<void> {
+    await this.call("DELETE", `/api/devices/${encodeURIComponent(id)}`);
+  }
+
+  async revokeOtherSessions(): Promise<void> {
+    await this.call("DELETE", "/api/auth/sessions?includeCurrent=false");
+  }
+
   /** 注册/更新当前设备为宿主（按设备 upsert）。 */
   async register(name: string, version: string, capabilities: string[] = []): Promise<void> {
     await this.call("PUT", "/api/hosts/me", { name, version, capabilities });
@@ -295,7 +386,7 @@ export class ControlPlaneClient {
   }
 
   async finish(
-    dueId: number,
+    dueId: string | number,
     input: { status: "ok" | "failed"; detail: string; sessionId: string | null; output: string | null },
   ): Promise<void> {
     await this.call("POST", `/api/hosts/me/automation/due/${dueId}/finish`, input);
@@ -373,6 +464,8 @@ export class ControlPlaneRuntime {
   private lastOutcome: ControlPlaneStatus["lastOutcome"] = null;
   private readonly tickSecs: number;
   private readonly timeoutSecs: number;
+  private claiming = false;
+  private readonly cloudOperations = new Set<AbortController>();
 
   constructor(
     private readonly options: {
@@ -421,6 +514,44 @@ export class ControlPlaneRuntime {
     };
   }
 
+  async cloudRequest(method: string, pathname: string, body?: unknown): Promise<unknown> {
+    return this.withCloudConnection((connection) => connection.request(method, pathname, body));
+  }
+
+  async withCloudConnection<T>(run: (connection: CloudConnection) => Promise<T>): Promise<T> {
+    const active = this.active();
+    if (!active) throw new ControlPlaneError("请先登录服务器账号");
+    const client = new ControlPlaneClient(active.baseUrl, active.token);
+    const controller = new AbortController();
+    const changed = (): ControlPlaneError => new ControlPlaneError("账号连接已改变，云端操作已停止，请重试");
+    const assertCurrent = (): void => {
+      if (controller.signal.aborted || this.active()?.token !== active.token || this.active()?.baseUrl !== active.baseUrl) throw changed();
+    };
+    const connection: CloudConnection = {
+      signal: controller.signal,
+      request: async (method, pathname, body) => {
+        assertCurrent();
+        const result = await client.cloudRequest(method, pathname, body, controller.signal);
+        assertCurrent();
+        return result;
+      },
+      cleanupUpload: async (objectId) => {
+        await client.cloudRequest("DELETE", `/api/storage/objects/${objectId}`);
+      },
+    };
+    this.cloudOperations.add(controller);
+    try {
+      const result = await run(connection);
+      assertCurrent();
+      return result;
+    } catch (error) {
+      if (controller.signal.aborted) throw changed();
+      throw error;
+    } finally {
+      this.cloudOperations.delete(controller);
+    }
+  }
+
   /** 身份每次向 Java 核验：不能把「有配置」或「宿主在线」误当成用户已登录。 */
   async account(): Promise<ControlPlaneAccount> {
     const active = this.active();
@@ -437,6 +568,44 @@ export class ControlPlaneRuntime {
       }
       if (error instanceof ControlPlaneError && error.status === 401) this.stop();
       return { status: this.status(), session: null, error: message(error) };
+    }
+  }
+
+  /** 账号管理固定走白名单操作，凭据及后端额外字段均不出宿主。 */
+  async manageAccount(action: "devices" | "profile" | "revokeDevice" | "revokeOthers", value?: string): Promise<ControlPlaneAccount> {
+    const active = this.active();
+    if (!active) throw new ControlPlaneError("请先登录服务器账号");
+    if (action !== "devices" && active.source === "env") throw new ControlPlaneError("当前账号由环境变量管理，不能从界面修改");
+    const unchanged = (): boolean => this.active()?.token === active.token && this.active()?.baseUrl === active.baseUrl;
+    const client = new ControlPlaneClient(active.baseUrl, active.token);
+    let session: ControlPlaneSession | null = null;
+    try {
+      session = await client.me();
+      if (!unchanged()) throw new ControlPlaneError("账号已切换，请重试");
+      if (action === "profile") {
+        const name = value?.trim() ?? "";
+        if (!name || name.length > 128) throw new ControlPlaneError("显示名称须为 1 至 128 个字符");
+        await client.updateProfile(name);
+        session = await client.me();
+        if (!unchanged()) throw new ControlPlaneError("账号已切换，请重试");
+        return { status: this.status(), session, error: null };
+      } else if (action === "revokeDevice") {
+        if (!value || !/^[1-9]\d{0,18}$/.test(value)) throw new ControlPlaneError("设备 ID 无效");
+        if (value === String(session.device.id)) throw new ControlPlaneError("请使用退出服务器账号来退出当前设备");
+        await client.revokeDevice(value);
+      } else if (action === "revokeOthers") {
+        await client.revokeOtherSessions();
+      }
+      const devices = await client.devices();
+      if (!unchanged()) throw new ControlPlaneError("账号已切换，请重试");
+      return { status: this.status(), session, devices, error: null };
+    } catch (error) {
+      if (!unchanged()) return { status: this.status(), session: null, error: "账号已切换，请重试" };
+      if (error instanceof ControlPlaneError && error.status === 401) {
+        this.stop();
+        session = null;
+      }
+      return { status: this.status(), session, error: message(error) };
     }
   }
 
@@ -471,6 +640,7 @@ export class ControlPlaneRuntime {
   }
 
   stop(): void {
+    for (const operation of this.cloudOperations) operation.abort();
     this.controller?.abort();
     this.controller = null;
     this.client = null;
@@ -509,7 +679,7 @@ export class ControlPlaneRuntime {
     const baseUrl = normalizeBaseUrl(input.baseUrl);
     let token = (input.token ?? "").trim();
     let email = (input.email ?? "").trim() || null;
-    let deviceId: number | null = null;
+    let deviceId: string | number | null = null;
     if (token === "") {
       const code = (input.code ?? "").trim();
       if (code === "" || email === null) {
@@ -557,7 +727,7 @@ export class ControlPlaneRuntime {
   async runOnce(limit = MAX_CLAIM_PER_TICK): Promise<{ status: ControlPlaneStatus; outcomes: Outcome[] }> {
     if (!this.client) throw new ControlPlaneError("控制面未配置");
     await this.connectOnce();
-    const outcomes = await this.claimRound(new AbortController().signal, limit);
+    const outcomes = await this.claimRound(this.controller?.signal ?? new AbortController().signal, limit);
     return { status: this.status(), outcomes };
   }
 
@@ -568,6 +738,26 @@ export class ControlPlaneRuntime {
     const signal = controller.signal;
     void this.heartbeatLoop(signal);
     void this.claimLoop(signal);
+    void this.notificationLoop(signal);
+  }
+
+  private async notificationLoop(signal: AbortSignal): Promise<void> {
+    while (!signal.aborted) {
+      const client = this.client;
+      if (client && this.registered) {
+        try {
+          await client.notifications(signal, () => {
+            if (!signal.aborted && this.client === client)
+              void this.claimRound(signal, 1).catch((error) => {
+                this.lastError = message(error);
+              });
+          });
+        } catch {
+          // 老服务器、不支持 SSE 的反向代理及断线：认领轮询仍继续工作。
+        }
+      }
+      await sleep(5_000, signal);
+    }
   }
 
   /** 心跳：未注册先注册，失败就退回「未注册」，下个 tick 重试。 */
@@ -601,9 +791,20 @@ export class ControlPlaneRuntime {
   }
 
   private async claimRound(signal: AbortSignal, limit: number): Promise<Outcome[]> {
+    if (this.claiming || signal.aborted) return [];
+    this.claiming = true;
+    try {
+      return await this.claimRoundInner(signal, limit);
+    } finally {
+      this.claiming = false;
+    }
+  }
+
+  private async claimRoundInner(signal: AbortSignal, limit: number): Promise<Outcome[]> {
     const client = this.client;
     if (!client) return [];
-    const dues = await client.claim(limit);
+    const dues = await client.claim(Math.min(limit, 1));
+    if (signal.aborted || this.client !== client) return [];
     this.lastClaimAt = Date.now();
     const outcomes: Outcome[] = [];
     for (const due of dues) {

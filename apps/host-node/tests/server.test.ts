@@ -4,7 +4,7 @@ import { createServer as createHttpServer } from "node:http";
 import type { AddressInfo, AddressInfo as NodeAddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
 
 import { LoginThrottle, SessionStore, passwordChecker } from "../src/auth.js";
@@ -204,6 +204,34 @@ describe("HTTP 契约", () => {
     const root = (await response.json()) as string;
     // 测试把默认根换成临时工作区（生产是 ~/.greyWork）；只校验「回的是授权根本体」。
     expect(root).toBe(realpathSync(workspaceDir));
+  });
+
+  it.each([
+    ["control_plane_devices", {}, "devices", undefined],
+    ["control_plane_profile_update", { displayName: "Jean" }, "profile", "Jean"],
+    ["control_plane_device_revoke", { deviceId: "9223372036854775806" }, "revokeDevice", "9223372036854775806"],
+    ["control_plane_sessions_revoke", {}, "revokeOthers", undefined],
+  ] as const)("账号命令 %s 经真实 HTTP/dispatch 入口可达", async (command, args, action, value) => {
+    const result = { status: controlPlane.status(), session: null, error: null };
+    const manage = vi.spyOn(controlPlane, "manageAccount").mockResolvedValue(result);
+    try {
+      const response = await fetch(`${base}/api/command`, {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ command, args }),
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual(result);
+      if (value === undefined) expect(manage).toHaveBeenCalledWith(action);
+      else expect(manage).toHaveBeenCalledWith(action, value);
+      expect(listCommands(true).find((item) => item.name === command)).toMatchObject({
+        available: true,
+        auth: "required",
+        desktopOnly: false,
+      });
+    } finally {
+      manage.mockRestore();
+    }
   });
 
   it("未知命令 404、桌面专属 403（错误信封一致）", async () => {

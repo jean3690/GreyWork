@@ -29,7 +29,7 @@ public class AdminUserController {
 		this.accountAdminService = accountAdminService;
 	}
 
-	/** 一次最多改一个字段：status 或 role，二者都给时优先 role；都为空由方法体报错。 */
+	/** 一次只改一个字段，拒绝静默忽略另一项。 */
 	public record UpdateUserRequest(String status, String role) {
 	}
 
@@ -52,6 +52,9 @@ public class AdminUserController {
 	@PatchMapping("/{id}")
 	public UserItem update(@AuthenticationPrincipal AuthPrincipal principal, @PathVariable Long id,
 			@RequestBody UpdateUserRequest request) {
+		if (request.role() != null && request.status() != null) {
+			throw ApiException.badRequest("ambiguous_update", "status 与 role 一次只能修改一个");
+		}
 		if (request.role() != null && !request.role().isBlank()) {
 			return accountAdminService.changeRole(principal.userId(), id, request.role());
 		}

@@ -29,7 +29,7 @@ export interface NavItem {
 }
 
 /** 可被前端取舍的功能块。id 取 `features/<id>/` 的目录名。 */
-export type FeatureId = "guid" | "conversation" | "assistants" | "channels" | "automation" | "team" | "plugins";
+export type FeatureId = "guid" | "conversation" | "assistants" | "channels" | "automation" | "team" | "plugins" | "cloud";
 
 export interface Feature {
   id: FeatureId;
