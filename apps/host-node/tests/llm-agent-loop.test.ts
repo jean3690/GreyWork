@@ -2,6 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EventBus } from "../src/events.js";
 import { LlmAgentHost } from "../src/llm-agent.js";
@@ -29,7 +30,7 @@ const terminal = (token = "turn") =>
   events.find((event) => event.payload.clientToken === token && ["llm-done", "llm-error"].includes(event.kind));
 
 beforeEach(() => {
-  root = mkdtempSync("/tmp/opencode/gw-agent-loop-");
+  root = mkdtempSync(path.join(tmpdir(), "gw-agent-loop-"));
   writeFileSync(path.join(root, "a.txt"), "before");
   const access = new WorkspaceAccess(root, path.join(root, "ledger.json"));
   access.authorizeSelectedPath(root);

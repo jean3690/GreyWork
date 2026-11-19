@@ -1,5 +1,6 @@
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { uploadWorkspaceFile } from "../src/cloud.js";
@@ -37,7 +38,7 @@ describe("上传会话归属", () => {
   it.each(["switch", "disconnect", "unchanged"])("PUT 期间 %s 保持原票据的会话归属", async (action) => {
     vi.stubEnv("GREYWORK_CONTROL_URL", "");
     vi.stubEnv("GREYWORK_CONTROL_TOKEN", "");
-    const dataDir = mkdtempSync("/tmp/opencode/gw-upload-session-");
+    const dataDir = mkdtempSync(path.join(tmpdir(), "gw-upload-session-"));
     const filename = path.join(dataDir, "report.txt");
     writeFileSync(filename, "original bytes");
     const db = new Db(path.join(dataDir, "test.db"));
