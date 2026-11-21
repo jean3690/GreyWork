@@ -110,7 +110,7 @@ jobs:
       # 内置运行时（git / opencode / rg / fd / jq）按 runtime-versions.json 的哈希做缓存：
       # 未变版本时 electron:prep 的 runtime:fetch 直接命中缓存，省去每平台 ~150MB 的下载。
       - name: Cache bundled runtimes
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: node_modules/.cache/greywork-runtime
           key: greywork-runtime-${{ matrix.os }}-${{ hashFiles('scripts/runtime-versions.json') }}
