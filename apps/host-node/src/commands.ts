@@ -93,6 +93,7 @@ import type { RagIndexHost } from "./rag.js";
 import type { TerminalHost } from "./terminal.js";
 import type { WorkspaceAccess } from "./workspace-access.js";
 import { uploadWorkspaceFile } from "./cloud.js";
+import { javaGatewayProvider, type ModelGatewaySession } from "./model-gateway.js";
 
 export interface CommandMeta {
   name: string;

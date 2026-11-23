@@ -20,6 +20,8 @@ import { AGENT_CONTEXT_TOKENS_RANGE, useSettingsStore } from "@/stores/settings"
 import { useTerminalStore } from "@/stores/terminal";
 import { hasHostCommands, invoke, runtimeMode } from "@greywork/host-ipc";
 import { i18n } from "@/i18n";
+import JavaModelGatewayPane from "./JavaModelGatewayPane.vue";
+import { isJavaModelGateway } from "@/lib/java-model-gateway";
 
 const t = i18n.global.t;
 
@@ -143,6 +145,7 @@ void capabilities.ensureCatalog();
 const agentCatalogReadOnly = computed(() => runtimeMode() === "server" && capabilities.available("db_agents_sync") !== true);
 
 const activeProvider = computed(() => settings.modelProviders.find((provider) => provider.id === settings.selectedModelProviderId));
+const activeJavaGateway = computed(() => isJavaModelGateway(activeProvider.value?.baseUrl));
 
 // ---------- 模型供应商编辑 ----------
 
@@ -304,8 +307,8 @@ function saveProviderDraft(): void {
     name: providerDraft.value.name.trim() || current.name,
     baseUrl: providerDraft.value.baseUrl.trim(),
     model: providerDraft.value.model.trim(),
-    apiKeyEnv: providerDraft.value.apiKeyEnv.trim(),
-    headers: Object.keys(parsed.headers).length > 0 ? parsed.headers : undefined,
+    apiKeyEnv: activeJavaGateway.value ? undefined : providerDraft.value.apiKeyEnv.trim(),
+    headers: activeJavaGateway.value ? undefined : Object.keys(parsed.headers).length > 0 ? parsed.headers : undefined,
     temperature: temperature.value,
     maxTokens: maxTokens.value,
     contextTokens: contextTokens.value,
@@ -471,6 +474,7 @@ async function removeAgentDraft(): Promise<void> {
 
 <template>
   <div class="flex flex-col gap-4">
+    <JavaModelGatewayPane />
     <div class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-4">
       <div class="mb-3 flex items-center justify-between gap-2">
         <span class="text-[13px] font-medium text-foreground">默认模型供应商</span>
@@ -582,6 +586,7 @@ async function removeAgentDraft(): Promise<void> {
           <span class="w-20 shrink-0 text-[11.5px] text-dim2">Base URL</span>
           <input
             v-model="providerDraft.baseUrl"
+            :readonly="activeJavaGateway"
             class="min-w-0 flex-1 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-1.5 font-mono text-[12px] text-foreground outline-none focus:border-line-2"
             placeholder="https://api.openai.com/v1"
             @input="providerDraftDirty = true"
@@ -619,77 +624,82 @@ async function removeAgentDraft(): Promise<void> {
         <p v-else-if="modelOptions.length > 0" class="text-[11px] text-dim2" data-testid="provider-probe-ok">
           已从服务取到 {{ modelOptions.length }} 个模型，点模型输入框可下拉选择。
         </p>
-        <label class="flex items-center gap-2">
-          <span class="w-20 shrink-0 text-[11.5px] text-dim2">API Key 环境变量</span>
-          <input
-            v-model="providerDraft.apiKeyEnv"
-            class="min-w-0 flex-1 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-1.5 font-mono text-[12px] text-foreground outline-none focus:border-line-2"
-            placeholder="OPENAI_API_KEY"
-            @input="providerDraftDirty = true"
-          />
-        </label>
-        <p class="text-[10.5px] leading-relaxed text-dim2">
-          二选一：直接填下面的 API Key（存宿主数据目录，0600，不回显），或先
-          <code class="font-mono">export {{ providerDraft.apiKeyEnv || "OPENAI_API_KEY" }}=…</code> 再从同一终端启动 GreyWork。直填的 key
-          优先于环境变量；浏览器/演示模式只认直填。
+        <p v-if="activeJavaGateway" class="text-[11px] text-dim2">
+          Java 网关连接自动跟随当前账号服务器，凭据由宿主注入，无需本机 API Key 或自定义鉴权头。
         </p>
-        <label class="flex items-center gap-2">
-          <span class="w-20 shrink-0 text-[11.5px] text-dim2">API Key</span>
-          <input
-            v-model="secretDraft"
-            type="password"
-            autocomplete="off"
-            class="min-w-0 flex-1 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-1.5 font-mono text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-line-2 disabled:opacity-60"
-            placeholder="sk-…（粘贴后点右侧保存）"
-            :disabled="!hostAvailable || secretBusy"
-            data-testid="provider-secret-input"
-            @keydown.enter.prevent="saveSecret"
-          />
-          <button
-            type="button"
-            class="h-7 shrink-0 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] bg-accent px-2.5 text-[11px] font-medium text-accent-ink transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-            :disabled="!hostAvailable || secretBusy"
-            data-testid="provider-secret-save"
-            @click="saveSecret"
-          >
-            保存
-          </button>
-          <button
-            v-if="draftSecret?.saved"
-            type="button"
-            class="h-7 shrink-0 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground disabled:opacity-50"
-            :disabled="secretBusy"
-            data-testid="provider-secret-clear"
-            @click="clearSecret"
-          >
-            清除
-          </button>
-        </label>
-        <p class="text-[10.5px] leading-relaxed text-dim2" data-testid="provider-secret-status">
-          <template v-if="draftSecret?.saved">
-            当前已存密钥：<code class="font-mono">{{ draftSecret.masked }}</code
-            >（存在宿主，界面不回显明文）
-          </template>
-          <template v-else>未存密钥：将回退到环境变量或匿名请求。</template>
-          <span v-if="secretHint" class="ml-1 text-foreground">{{ secretHint }}</span>
-        </p>
-        <label class="flex gap-2">
-          <span class="w-20 shrink-0 pt-1.5 text-[11.5px] text-dim2">自定义 Headers</span>
-          <textarea
-            v-model="providerDraft.headersText"
-            rows="3"
-            spellcheck="false"
-            class="min-w-0 flex-1 resize-y rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-1.5 font-mono text-[11.5px] text-foreground outline-none placeholder:text-dim2 focus:border-line-2"
-            placeholder="每行一条 Key: Value，如 X-Custom-Auth: {{MY_TOKEN}}"
-            data-testid="provider-draft-headers"
-            @input="providerDraftDirty = true"
-          />
-        </label>
-        <p class="text-[10.5px] leading-relaxed text-dim2">
-          附加到每次模型请求的 HTTP 头（自定义网关的鉴权 / 标记头）。敏感值写
-          <code v-pre class="font-mono">{{ ENV_VAR }}</code> 占位符，发送时由宿主从环境变量解析，绝不明文落盘；空行与
-          <code class="font-mono">#</code> 开头的行忽略。
-        </p>
+        <template v-else>
+          <label class="flex items-center gap-2">
+            <span class="w-20 shrink-0 text-[11.5px] text-dim2">API Key 环境变量</span>
+            <input
+              v-model="providerDraft.apiKeyEnv"
+              class="min-w-0 flex-1 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-1.5 font-mono text-[12px] text-foreground outline-none focus:border-line-2"
+              placeholder="OPENAI_API_KEY"
+              @input="providerDraftDirty = true"
+            />
+          </label>
+          <p class="text-[10.5px] leading-relaxed text-dim2">
+            二选一：直接填下面的 API Key（存宿主数据目录，0600，不回显），或先
+            <code class="font-mono">export {{ providerDraft.apiKeyEnv || "OPENAI_API_KEY" }}=…</code> 再从同一终端启动 GreyWork。直填的 key
+            优先于环境变量；浏览器/演示模式只认直填。
+          </p>
+          <label class="flex items-center gap-2">
+            <span class="w-20 shrink-0 text-[11.5px] text-dim2">API Key</span>
+            <input
+              v-model="secretDraft"
+              type="password"
+              autocomplete="off"
+              class="min-w-0 flex-1 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-1.5 font-mono text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-line-2 disabled:opacity-60"
+              placeholder="sk-…（粘贴后点右侧保存）"
+              :disabled="!hostAvailable || secretBusy"
+              data-testid="provider-secret-input"
+              @keydown.enter.prevent="saveSecret"
+            />
+            <button
+              type="button"
+              class="h-7 shrink-0 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] bg-accent px-2.5 text-[11px] font-medium text-accent-ink transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+              :disabled="!hostAvailable || secretBusy"
+              data-testid="provider-secret-save"
+              @click="saveSecret"
+            >
+              保存
+            </button>
+            <button
+              v-if="draftSecret?.saved"
+              type="button"
+              class="h-7 shrink-0 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 text-[11px] text-dim transition-colors hover:border-line-2 hover:text-foreground disabled:opacity-50"
+              :disabled="secretBusy"
+              data-testid="provider-secret-clear"
+              @click="clearSecret"
+            >
+              清除
+            </button>
+          </label>
+          <p class="text-[10.5px] leading-relaxed text-dim2" data-testid="provider-secret-status">
+            <template v-if="draftSecret?.saved">
+              当前已存密钥：<code class="font-mono">{{ draftSecret.masked }}</code
+              >（存在宿主，界面不回显明文）
+            </template>
+            <template v-else>未存密钥：将回退到环境变量或匿名请求。</template>
+            <span v-if="secretHint" class="ml-1 text-foreground">{{ secretHint }}</span>
+          </p>
+          <label class="flex gap-2">
+            <span class="w-20 shrink-0 pt-1.5 text-[11.5px] text-dim2">自定义 Headers</span>
+            <textarea
+              v-model="providerDraft.headersText"
+              rows="3"
+              spellcheck="false"
+              class="min-w-0 flex-1 resize-y rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-1.5 font-mono text-[11.5px] text-foreground outline-none placeholder:text-dim2 focus:border-line-2"
+              placeholder="每行一条 Key: Value，如 X-Custom-Auth: {{MY_TOKEN}}"
+              data-testid="provider-draft-headers"
+              @input="providerDraftDirty = true"
+            />
+          </label>
+          <p class="text-[10.5px] leading-relaxed text-dim2">
+            附加到每次模型请求的 HTTP 头（自定义网关的鉴权 / 标记头）。敏感值写
+            <code v-pre class="font-mono">{{ ENV_VAR }}</code> 占位符，发送时由宿主从环境变量解析，绝不明文落盘；空行与
+            <code class="font-mono">#</code> 开头的行忽略。
+          </p>
+        </template>
         <div class="flex items-center gap-2">
           <span class="w-20 shrink-0 text-[11.5px] text-dim2">采样温度</span>
           <input

@@ -1,3 +1,5 @@
+import { isJavaModelGateway } from "./java-model-gateway";
+
 /** 与宿主 buildChatBody 的保留字段一致：扩展参数不应接管 agent 的控制流。 */
 const RESERVED_BODY_KEYS = ["model", "messages", "tools", "tool_choice", "stream", "functions", "function_call", "n"];
 
@@ -17,6 +19,7 @@ export function parseModelExtraBody(text: string): { value?: Record<string, unkn
 }
 
 export function validateModelConnection(baseUrl: string, model: string): string | null {
+  if (isJavaModelGateway(baseUrl)) return model.trim() ? null : "请填写模型 ID";
   if (!baseUrl.trim()) return "请填写 Base URL";
   try {
     const url = new URL(baseUrl.trim());

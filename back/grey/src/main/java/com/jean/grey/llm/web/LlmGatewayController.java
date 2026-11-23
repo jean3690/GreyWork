@@ -5,6 +5,8 @@ import com.jean.grey.llm.LlmGatewayService;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import java.util.Map;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
@@ -24,6 +26,12 @@ public class LlmGatewayController {
 			@RequestHeader(value = "X-Grey-Provider", required = false) String provider,
 			@RequestBody byte[] body, HttpServletResponse response) {
 		gatewayService.forward(principal.userId(), provider, body, response);
+	}
+
+	@GetMapping("/v1/models")
+	public Map<String, Object> models(@AuthenticationPrincipal AuthPrincipal principal,
+			@RequestHeader("X-Grey-Provider") String provider) {
+		return gatewayService.models(principal.userId(), provider);
 	}
 
 }

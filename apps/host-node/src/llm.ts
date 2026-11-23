@@ -12,6 +12,7 @@ import { basename } from "node:path";
 
 import { secretFor } from "./llm-secrets.js";
 import { readChatResponse } from "./llm-response.js";
+import { javaGatewayProvider, type ModelGatewayFactory, type ModelGatewaySession } from "./model-gateway.js";
 
 import type { EventBus } from "./events.js";
 import type { WorkspaceAccess } from "./workspace-access.js";
@@ -66,10 +67,16 @@ export async function fetchChatResponse(
   connection: { baseUrl: string; apiKeyEnv?: string | null; headers?: Record<string, string> | null },
   body: Record<string, unknown>,
   signal: AbortSignal,
+  gateway?: ModelGatewaySession,
 ): Promise<Response> {
   const timeout = new AbortController();
   const timer = setTimeout(() => timeout.abort(new Error("llm endpoint connection timeout (60s)")), 60_000);
   try {
+    const provider = javaGatewayProvider(connection.baseUrl);
+    if (provider !== null) {
+      if (!gateway) throw new Error("Java 模型网关不可用，请登录服务器账号");
+      return await gateway.request(provider, body, AbortSignal.any([signal, timeout.signal]));
+    }
     return await fetch(endpointUrl(connection.baseUrl, "chat/completions"), {
       method: "POST",
       headers: {
@@ -87,6 +94,7 @@ export async function fetchChatResponse(
 /** 合成工具回填自检：不访问工作区、不执行模型请求的任何真实工具。 */
 export async function probeAgentModel(
   args: ChatRequestOptions & { baseUrl: string; apiKeyEnv?: string | null; headers?: Record<string, string> },
+  gateway?: ModelGatewaySession,
 ): Promise<{ ok: true; model: string }> {
   if (!args.model.trim()) throw new Error("请先填写模型 ID");
   const signal = AbortSignal.timeout(120_000);
@@ -105,7 +113,7 @@ export async function probeAgentModel(
   ];
   const send = async (choice: unknown) => {
     const body = { ...buildChatBody(args, messages), tools, tool_choice: choice };
-    const response = await fetchChatResponse(args, body, signal);
+    const response = await fetchChatResponse(args, body, signal, gateway);
     if (!response.ok) throw new Error(`工具调用测试失败：HTTP ${response.status} ${truncate(await response.text(), 200)}`);
     return readChatResponse(response, signal);
   };
@@ -190,13 +198,25 @@ async function readJson(response: Response): Promise<unknown> {
 }
 
 /** `GET /models`：兼容 OpenAI `data[].id` 与 Ollama `models[].name`。 */
-export async function listModels(args: {
-  baseUrl: string;
-  apiKeyEnv?: string | null;
-  headers?: Record<string, string>;
-}): Promise<string[]> {
+export async function listModels(
+  args: {
+    baseUrl: string;
+    apiKeyEnv?: string | null;
+    headers?: Record<string, string>;
+  },
+  gateway?: ModelGatewaySession,
+): Promise<string[]> {
   const baseUrl = args.baseUrl.trim();
   if (baseUrl === "") throw new Error("base_url is required");
+  const provider = javaGatewayProvider(baseUrl);
+  if (provider !== null) {
+    if (!gateway) throw new Error("Java 模型网关不可用，请登录服务器账号");
+    const response = await gateway.request(provider, null, AbortSignal.timeout(30_000));
+    if (!response.ok) throw new Error(`Java 模型列表返回 ${response.status}: ${truncate(await response.text(), 200)}`);
+    const payload = (await response.json()) as { data?: { id?: unknown }[] };
+    if (!Array.isArray(payload.data)) throw new Error("Java 后端返回的模型列表不完整");
+    return [...new Set(payload.data.flatMap((item) => (typeof item.id === "string" ? [item.id] : [])))].sort();
+  }
   const apiKey = resolveApiKey(args.apiKeyEnv, baseUrl);
   const response = await fetch(endpointUrl(baseUrl, "models"), {
     headers: authHeaders(apiKey, args.headers),
@@ -227,6 +247,7 @@ export async function embed(args: {
 }): Promise<EmbedResult> {
   const baseUrl = args.baseUrl.trim();
   const model = args.model.trim();
+  if (javaGatewayProvider(baseUrl) !== null) throw new Error("Java 模型网关暂不支持向量化，请配置独立 embedding 供应商");
   if (baseUrl === "" || model === "") throw new Error("base_url and model are required");
   if (args.input.length === 0) return { embeddings: [], dim: 0, model };
   const apiKey = resolveApiKey(args.apiKeyEnv, baseUrl);
@@ -263,17 +284,19 @@ function reasoningEffort(value: string): string | null {
 }
 
 /** 聚合式单轮补全：SSE 与整包 JSON 两种响应都收；只回正文（思考链不进产物）。 */
-export async function chatComplete(args: {
-  baseUrl: string;
-  model: string;
-  apiKeyEnv?: string | null;
-  messages: LlmChatMessage[];
-  reasoningEffort?: string;
-  headers?: Record<string, string>;
-}): Promise<string> {
+export async function chatComplete(
+  args: {
+    baseUrl: string;
+    model: string;
+    apiKeyEnv?: string | null;
+    messages: LlmChatMessage[];
+    reasoningEffort?: string;
+    headers?: Record<string, string>;
+  },
+  gateway?: ModelGatewaySession,
+): Promise<string> {
   const baseUrl = args.baseUrl.trim();
   if (baseUrl === "") throw new Error("base_url is required");
-  const apiKey = resolveApiKey(args.apiKeyEnv, baseUrl);
   const body: Record<string, unknown> = {
     model: args.model,
     stream: true,
@@ -282,11 +305,7 @@ export async function chatComplete(args: {
   const effort = reasoningEffort(args.reasoningEffort ?? "");
   if (effort !== null) body.reasoning_effort = effort;
 
-  const response = await fetch(endpointUrl(baseUrl, "chat/completions"), {
-    method: "POST",
-    headers: { "content-type": "application/json", ...authHeaders(apiKey, args.headers) },
-    body: JSON.stringify(body),
-  });
+  const response = await fetchChatResponse(args, body, AbortSignal.timeout(600_000), gateway);
   if (!response.ok) {
     const text = await response.text().catch(() => "");
     throw new Error(`llm endpoint returned ${response.status}: ${truncate(text, 200)}${RESPONSE_READ_HINT}`);
@@ -348,7 +367,10 @@ export class LlmStreamHost {
   private nextId = 0;
   private readonly streams = new Map<number, AbortController>();
 
-  constructor(private readonly bus: EventBus) {}
+  constructor(
+    private readonly bus: EventBus,
+    private readonly gatewayFactory?: ModelGatewayFactory,
+  ) {}
 
   async start(
     args: ChatRequestOptions & {
@@ -370,15 +392,23 @@ export class LlmStreamHost {
       args.messages.map((message) => ({ role: message.role, content: message.content })),
     );
     const controller = new AbortController();
-    const response = await fetchChatResponse(args, body, controller.signal);
+    const gateway = javaGatewayProvider(baseUrl) !== null ? this.gatewayFactory?.() : undefined;
+    let response: Response;
+    try {
+      response = await fetchChatResponse(args, body, controller.signal, gateway);
+    } catch (error) {
+      gateway?.close();
+      throw error;
+    }
     if (!response.ok) {
       const text = await response.text().catch(() => "");
+      gateway?.close();
       throw new Error(`llm endpoint returned ${response.status}: ${truncate(text, 200)}${RESPONSE_READ_HINT}`);
     }
     const requestId = this.nextId++;
     this.streams.set(requestId, controller);
     const token = (args.clientToken ?? "").trim();
-    void this.consume(requestId, response, token, controller);
+    void this.consume(requestId, response, token, controller, gateway);
     return requestId;
   }
 
@@ -396,7 +426,13 @@ export class LlmStreamHost {
     this.bus.broadcast("llm://event", { kind, payload });
   }
 
-  private async consume(requestId: number, response: Response, token: string, controller: AbortController): Promise<void> {
+  private async consume(
+    requestId: number,
+    response: Response,
+    token: string,
+    controller: AbortController,
+    gateway?: ModelGatewaySession,
+  ): Promise<void> {
     try {
       const outcome = await readChatResponse(response, controller.signal, {
         onText: (delta) => this.emit(token, "llm-delta", { delta }),
@@ -409,6 +445,7 @@ export class LlmStreamHost {
       this.emit(token, "llm-error", { message: (error as Error).message });
     } finally {
       this.streams.delete(requestId);
+      gateway?.close();
     }
   }
 }
@@ -429,6 +466,7 @@ export async function transcribe(
 ): Promise<{ text: string }> {
   const baseUrl = args.baseUrl.trim();
   if (baseUrl === "") throw new Error("base_url is required");
+  if (javaGatewayProvider(baseUrl) !== null) throw new Error("Java 模型网关暂不支持语音转写，请配置独立 STT 供应商");
   const file = access.resolveExisting(args.path);
   const size = statSync(file).size;
   if (size === 0) throw new Error("音频文件为空");

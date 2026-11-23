@@ -13,6 +13,7 @@
 import { buildChatBody, endpointUrl, fetchChatResponse, truncate, type ChatRequestOptions, type LlmChatMessage } from "./llm.js";
 import { readChatResponse } from "./llm-response.js";
 import path from "node:path";
+import { javaGatewayProvider, type ModelGatewayFactory, type ModelGatewaySession } from "./model-gateway.js";
 
 import type { AgentMcpServer, McpToolBinding } from "./agent-mcp.js";
 import { callMcpTool, mcpToolSchemas, resolveMcpTools } from "./agent-mcp.js";
@@ -144,6 +145,8 @@ export interface AgentStartArgs extends ChatRequestOptions {
 }
 
 interface AgentTurn {
+  gateway?: ModelGatewaySession;
+  gatewayOnAbort?: () => void;
   baseUrl: string;
   model: string;
   apiKeyEnv: string;
@@ -983,7 +986,7 @@ export class LlmAgentHost {
     private readonly bus: EventBus,
     private readonly access: WorkspaceAccess,
     /** 本机可信宿主：只有它才允许把 run_shell 暴露给模型（与 shell_run 的门禁同口径）。 */
-    private readonly options: { trusted?: boolean } = {},
+    private readonly options: { trusted?: boolean; gatewayFactory?: ModelGatewayFactory } = {},
   ) {}
 
   private emit(token: string, kind: string, payload: Record<string, unknown>): void {
@@ -996,7 +999,7 @@ export class LlmAgentHost {
     const baseUrl = args.baseUrl.trim();
     const model = args.model.trim();
     if (baseUrl === "" || model === "") throw new Error("base_url and model are required");
-    endpointUrl(baseUrl, "chat/completions");
+    if (javaGatewayProvider(baseUrl) === null) endpointUrl(baseUrl, "chat/completions");
     if (!Array.isArray(args.messages) || args.messages.length === 0) {
       throw new Error("messages 不能为空");
     }
@@ -1052,6 +1055,7 @@ export class LlmAgentHost {
     // 先把主供应商的字段摊到 turn 上；失败切换时再换。
     applyProvider(turn, 0);
     const controller = new AbortController();
+    this.ensureGateway(turn, controller);
     this.tasks.set(requestId, { controller, turn });
     void this.run(turn, controller).finally(() => {
       // 回合结束时自己摘掉句柄：长跑会话不会攒下大量已完成句柄。
@@ -1131,6 +1135,8 @@ export class LlmAgentHost {
       return;
     } finally {
       for (const permissionId of [...turn.pendingPermissions]) this.settlePermission(permissionId, false);
+      if (turn.gatewayOnAbort) turn.gateway?.signal.removeEventListener("abort", turn.gatewayOnAbort);
+      turn.gateway?.close();
     }
     if (!controller.signal.aborted) this.emit(turn.clientToken, "llm-done", {});
   }
@@ -1147,9 +1153,11 @@ export class LlmAgentHost {
       const body = buildBody();
       let response: Response | null = null;
       try {
-        response = await fetchChatResponse(turn, body, controller.signal);
+        this.ensureGateway(turn, controller);
+        response = await fetchChatResponse(turn, body, controller.signal, turn.gateway);
       } catch (error) {
         if (controller.signal.aborted) throw error;
+        if (javaGatewayProvider(turn.baseUrl) !== null && !turn.gateway) throw error;
         lastError = "llm request failed: " + (error as Error).message;
       }
       if (response !== null) {
@@ -1157,7 +1165,8 @@ export class LlmAgentHost {
         const text = await response.text().catch(() => "");
         lastError =
           "llm endpoint returned " + response.status + ": " + truncate(text, 200) + "（检查 Base URL 是否正确、本地服务是否在运行）";
-        if (!canFailover(response.status)) throw new Error(lastError);
+        if (!canFailover(response.status) || (javaGatewayProvider(turn.baseUrl) !== null && response.status === 401))
+          throw new Error(lastError);
       }
       const next = turn.activeProvider + 1;
       if (next >= turn.providers.length) {
@@ -1172,6 +1181,18 @@ export class LlmAgentHost {
         reason: truncate(lastError, 200),
       });
     }
+  }
+
+  private ensureGateway(turn: AgentTurn, controller: AbortController): void {
+    if (javaGatewayProvider(turn.baseUrl) === null || turn.gateway) return;
+    turn.gateway = this.options.gatewayFactory?.();
+    if (!turn.gateway) throw new Error("请先登录 Java 服务器账号，再使用模型网关");
+    turn.gatewayOnAbort = () => {
+      if (!controller.signal.aborted) this.emit(turn.clientToken, "llm-error", { message: "账号连接已改变，Java 模型对话已停止" });
+      controller.abort();
+      for (const permissionId of [...turn.pendingPermissions]) this.settlePermission(permissionId, false);
+    };
+    turn.gateway.signal.addEventListener("abort", turn.gatewayOnAbort, { once: true });
   }
 
   private async drive(turn: AgentTurn, controller: AbortController): Promise<void> {

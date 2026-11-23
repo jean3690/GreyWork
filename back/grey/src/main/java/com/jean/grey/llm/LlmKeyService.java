@@ -41,6 +41,18 @@ public class LlmKeyService {
 	public record ResolvedKey(Long id, String provider, String baseUrl, String secret) {
 	}
 
+	/** 客户端发现仅需供应商名字与标签，不下发 key/id/baseUrl。 */
+	public record ProviderView(String provider, List<String> labels) {
+	}
+
+	public List<ProviderView> providers(Long userId) {
+		var active = list(userId).stream().filter(key -> "active".equals(key.status())).toList();
+		return active.stream().map(KeyView::provider).distinct().sorted()
+				.map(provider -> new ProviderView(provider, active.stream()
+						.filter(key -> provider.equals(key.provider())).map(KeyView::label).distinct().toList()))
+				.toList();
+	}
+
 	public KeyView create(Long userId, String provider, String label, String baseUrl, String apiKey) {
 		if (!PROVIDERS.contains(provider)) {
 			throw ApiException.badRequest("provider_unknown", "不支持的供应商: " + provider);

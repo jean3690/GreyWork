@@ -14,7 +14,8 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import path from "node:path";
 
 import type { Db } from "./db.js";
-import { authHeaders, endpointUrl, resolveApiKey, truncate } from "./llm.js";
+import { fetchChatResponse, truncate } from "./llm.js";
+import { javaGatewayProvider, type ModelGatewaySession } from "./model-gateway.js";
 import { validateCloudRequest } from "./cloud.js";
 
 /** 心跳/认领 tick 间隔（秒）。 */
@@ -254,6 +255,7 @@ export class ControlPlaneClient {
         method,
         headers,
         body: body === undefined ? undefined : JSON.stringify(body),
+        redirect: "error",
         signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20_000)]) : AbortSignal.timeout(20_000),
       });
     } catch (error) {
@@ -271,6 +273,22 @@ export class ControlPlaneClient {
     const response = await this.call(method, pathname, body, signal);
     const text = await response.text();
     return text ? JSON.parse(text) : null;
+  }
+
+  /** 固定目的地和请求头：不接受渲染端 URL/Authorization，也不跟随重定向。 */
+  async modelRequest(provider: string, body: Record<string, unknown> | null, signal: AbortSignal): Promise<Response> {
+    return fetch(this.baseUrl + (body === null ? "/v1/models" : "/v1/chat/completions"), {
+      method: body === null ? "GET" : "POST",
+      headers: {
+        authorization: "Bearer " + this.token,
+        "X-Grey-Provider": provider,
+        accept: "text/event-stream, application/json",
+        ...(body === null ? {} : { "content-type": "application/json" }),
+      },
+      body: body === null ? undefined : JSON.stringify(body),
+      redirect: "error",
+      signal,
+    });
   }
 
   async notifications(signal: AbortSignal, wake: () => void): Promise<void> {
@@ -516,6 +534,29 @@ export class ControlPlaneRuntime {
 
   async cloudRequest(method: string, pathname: string, body?: unknown): Promise<unknown> {
     return this.withCloudConnection((connection) => connection.request(method, pathname, body));
+  }
+
+  openModelGateway(): ModelGatewaySession {
+    const active = this.active();
+    if (!active) throw new ControlPlaneError("请先登录 Java 服务器账号，再使用模型网关");
+    const client = new ControlPlaneClient(active.baseUrl, active.token);
+    const controller = new AbortController();
+    this.cloudOperations.add(controller);
+    return {
+      signal: controller.signal,
+      request: async (provider, body, signal) => {
+        // 多轮工具回合期间也固定账号；即使已切换到一个新账号，也不能继续发送旧对话。
+        javaGatewayProvider("greywork://java/" + provider);
+        if (controller.signal.aborted || this.active()?.token !== active.token || this.active()?.baseUrl !== active.baseUrl) {
+          throw new ControlPlaneError("账号连接已改变，Java 模型请求已停止，请重新发起对话");
+        }
+        return client.modelRequest(provider, body, AbortSignal.any([signal, controller.signal]));
+      },
+      close: () => {
+        this.cloudOperations.delete(controller);
+        controller.abort();
+      },
+    };
   }
 
   async withCloudConnection<T>(run: (connection: CloudConnection) => Promise<T>): Promise<T> {
@@ -866,29 +907,33 @@ export class ControlPlaneRuntime {
     const timer = setTimeout(() => controller.abort(), this.timeoutSecs * 1000);
     timer.unref?.();
     try {
-      const apiKey = resolveApiKey(provider.apiKeyEnv);
-      const body: Record<string, unknown> = {
-        model: (due.model ?? "").trim() || provider.model,
-        stream: false,
-        messages: [{ role: "user", content: due.intent }],
-      };
-      if (typeof provider.temperature === "number") body.temperature = provider.temperature;
-      if (typeof provider.maxTokens === "number") body.max_tokens = provider.maxTokens;
-      if ((provider.reasoningEffort ?? "") !== "") body.reasoning_effort = provider.reasoningEffort;
-      const response = await fetch(endpointUrl(baseUrl, "chat/completions"), {
-        method: "POST",
-        headers: { "content-type": "application/json", ...authHeaders(apiKey, provider.headers) },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
-      if (!response.ok) {
-        const text = await response.text().catch(() => "");
-        return { name, ok: false, detail: `模型端点返回 ${response.status}: ${truncate(text, 180)}` };
+      const gateway = javaGatewayProvider(baseUrl) !== null ? this.openModelGateway() : undefined;
+      try {
+        const body: Record<string, unknown> = {
+          model: (due.model ?? "").trim() || provider.model,
+          stream: false,
+          messages: [{ role: "user", content: due.intent }],
+        };
+        if (typeof provider.temperature === "number") body.temperature = provider.temperature;
+        if (typeof provider.maxTokens === "number") body.max_tokens = provider.maxTokens;
+        if ((provider.reasoningEffort ?? "") !== "") body.reasoning_effort = provider.reasoningEffort;
+        const response = await fetchChatResponse(
+          { baseUrl, apiKeyEnv: provider.apiKeyEnv, headers: provider.headers },
+          body,
+          controller.signal,
+          gateway,
+        );
+        if (!response.ok) {
+          const text = await response.text().catch(() => "");
+          return { name, ok: false, detail: `模型端点返回 ${response.status}: ${truncate(text, 180)}` };
+        }
+        const payload = (await response.json()) as { choices?: { message?: { content?: unknown } }[] };
+        const content = normalizeContent(payload.choices?.[0]?.message?.content).trim();
+        if (content === "") return { name, ok: false, detail: "模型返回空内容" };
+        return { name, ok: true, detail: truncate(content, 200), output: content };
+      } finally {
+        gateway?.close();
       }
-      const payload = (await response.json()) as { choices?: { message?: { content?: unknown } }[] };
-      const content = normalizeContent(payload.choices?.[0]?.message?.content).trim();
-      if (content === "") return { name, ok: false, detail: "模型返回空内容" };
-      return { name, ok: true, detail: truncate(content, 200), output: content };
     } catch (error) {
       if (controller.signal.aborted) {
         return { name, ok: false, detail: signal.aborted ? "宿主正在关闭，任务未完成" : `执行超时（${this.timeoutSecs} 秒上限）` };

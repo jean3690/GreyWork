@@ -14,9 +14,11 @@ export function validateCloudRequest(method: string, pathname: string): void {
       /^\/api\/automation\/tasks(?:\/(config|runs))?$/,
       /^\/api\/hosts$/,
       /^\/api\/skills$/,
+      /^\/api\/llm\/providers$/,
       /^\/api\/download\/[a-zA-Z0-9_-]+\/[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_-]+$/,
     ],
     POST: [
+      /^\/api\/llm\/keys$/,
       /^\/api\/storage\/uploads$/,
       /^\/api\/storage\/objects\/[1-9]\d{0,18}\/complete$/,
       /^\/api\/automation\/tasks$/,

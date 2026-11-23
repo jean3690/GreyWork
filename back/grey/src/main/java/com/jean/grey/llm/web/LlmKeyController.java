@@ -51,6 +51,11 @@ public class LlmKeyController {
 		return keyService.list(principal.userId());
 	}
 
+	@GetMapping("/providers")
+	public List<LlmKeyService.ProviderView> providers(@AuthenticationPrincipal AuthPrincipal principal) {
+		return keyService.providers(principal.userId());
+	}
+
 	@DeleteMapping("/keys/{id}")
 	@ResponseStatus(HttpStatus.NO_CONTENT)
 	public void delete(@AuthenticationPrincipal AuthPrincipal principal, @PathVariable Long id) {

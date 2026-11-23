@@ -12,6 +12,9 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -41,8 +44,47 @@ public class LlmGatewayService {
 		this.objectMapper = objectMapper;
 		this.http = HttpClient.newBuilder()
 				.connectTimeout(Duration.ofSeconds(10))
-				.followRedirects(HttpClient.Redirect.NORMAL)
+				.followRedirects(HttpClient.Redirect.NEVER)
 				.build();
+	}
+
+	/** 只暴露模型 ID；上游鉴权与供应商选择在 Java 内完成。 */
+	public Map<String, Object> models(Long userId, String provider) {
+		if (provider == null || !LlmKeyService.PROVIDERS.contains(provider)) {
+			throw ApiException.badRequest("provider_unknown", "请选择有效的供应商");
+		}
+		LlmKeyService.ResolvedKey key = keyService.pick(userId, provider);
+		try {
+			HttpRequest request = HttpRequest.newBuilder(URI.create(key.baseUrl() + "/models"))
+					.timeout(Duration.ofSeconds(20)).header("Accept", "application/json")
+					.header("Authorization", "Bearer " + key.secret()).GET().build();
+			HttpResponse<InputStream> result = http.send(request, HttpResponse.BodyHandlers.ofInputStream());
+			try (var input = result.body()) {
+				if (result.statusCode() != 200) {
+					throw new ApiException(HttpStatus.BAD_GATEWAY, "models_unavailable",
+							"上游模型列表返回 " + result.statusCode() + "，可手动填写模型 ID 后聊天");
+				}
+				byte[] bytes = input.readNBytes(1024 * 1024 + 1);
+				if (bytes.length > 1024 * 1024) throw new ApiException(HttpStatus.BAD_GATEWAY, "models_invalid", "模型列表过大");
+				JsonNode payload = parse(bytes);
+				if (payload == null || !payload.has("data") || !payload.get("data").isArray()) {
+					throw new ApiException(HttpStatus.BAD_GATEWAY, "models_invalid", "上游模型列表格式不兼容，可手动填写模型 ID");
+				}
+				List<String> ids = new ArrayList<>();
+				for (JsonNode item : payload.get("data")) {
+					if (item.hasNonNull("id") && item.get("id").isString()) ids.add(item.get("id").asString());
+				}
+				return Map.of("object", "list", "data", ids.stream().filter(id -> !id.isBlank()).distinct().sorted()
+						.map(id -> Map.of("id", id, "object", "model")).toList());
+			}
+		}
+		catch (InterruptedException ex) {
+			Thread.currentThread().interrupt();
+			throw new ApiException(HttpStatus.BAD_GATEWAY, "upstream_interrupted", "模型列表请求被中断");
+		}
+		catch (IOException ex) {
+			throw new ApiException(HttpStatus.BAD_GATEWAY, "upstream_unreachable", "无法获取模型列表，可手动填写模型 ID");
+		}
 	}
 
 	public void forward(Long userId, String providerHint, byte[] body, HttpServletResponse response) {

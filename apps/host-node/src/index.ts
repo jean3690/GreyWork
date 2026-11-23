@@ -107,14 +107,15 @@ async function main(): Promise<void> {
   const store = new SessionFileStore(access);
   const acp = new AcpHost(bus, access);
   const channels = new ChannelRuntime(bus, config.dataDir);
-  const llm = new LlmStreamHost(bus);
+  // 控制面接入：配置来自数据目录里的 control-plane.json，或 GREYWORK_CONTROL_URL + TOKEN。
+  // 未配置时不发任何网络请求；模型网关同样由控制面运行时持有凭据。
+  const controlPlane = new ControlPlaneRuntime({ dataDir: config.dataDir, version: config.version, db });
+  const gatewayFactory = () => controlPlane.openModelGateway();
+  const llm = new LlmStreamHost(bus, gatewayFactory);
   // trusted = 本机可信宿主：只有它才把 run_shell 暴露给模型（与 shell_run 的门禁同口径）。
-  const llmAgent = new LlmAgentHost(bus, access, { trusted: config.trustedHost });
+  const llmAgent = new LlmAgentHost(bus, access, { trusted: config.trustedHost, gatewayFactory });
   const rag = new RagIndexHost(db);
   const terminal = new TerminalHost(bus, access);
-  // 控制面接入：配置来自数据目录里的 control-plane.json，或 GREYWORK_CONTROL_URL + TOKEN。
-  // 未配置时不发任何网络请求（start 里直接返回），服务端态也照常工作。
-  const controlPlane = new ControlPlaneRuntime({ dataDir: config.dataDir, version: config.version, db });
   const { server, close } = createHostServer({
     config,
     sessions,
