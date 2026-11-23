@@ -133,6 +133,38 @@ pnpm electron:dev       # 只起 Electron：直接用已有的 apps/host-node/di
 
 ## 常用命令
 
+### 一键启动 Java + 桌面客户端
+
+```bash
+pnpm dev:all
+```
+
+脚本 `scripts/start-dev.mjs` 自动加载 `back/grey/.env`（终端环境优先，不覆盖文件），检查 Java
+控制面，未运行时用 Maven 启动并等待就绪，再构建桌面界面、Node 宿主和 Electron，打开客户端。
+Java 运维台直接访问启动日志中的 `/admin` 地址，不另外启动管理端 Vite。
+`.env` 按 `KEY=value` 读取，不执行其中的 Shell 命令，Java 配置不会下发给桌面客户端。
+环境变量中的账号 token 只有在原 `GREYWORK_CONTROL_URL` 与目标地址一致时才继承；切换后端地址
+不会把旧 token 转发到新服务器，也不会清除应用里已有的账号配置，请在账号页手动接入目标服务器。
+
+首次需要 Node 22.22+、pnpm、JDK 25 和 Docker（或已配置的外部 MySQL / Redis）；先执行
+`pnpm install`。如需配置管理员/模型网关，可手动从 `back/grey/.env.example` 创建
+`back/grey/.env`；脚本不会生成、覆盖或旋转管理员密码与 `GREY_MASTER_KEY`。
+
+- `pnpm dev:all --skip-build`：刚构建过时快速启动，缺少产物会报错。
+- `pnpm dev:all --no-backend`：只复用已有 Java 后端。
+- `pnpm dev:all --backend-url http://192.168.1.10:8080`：复用指定后端，不启动该地址上的服务。
+- `pnpm dev:all --backend-only`：只启动/检查 Java。
+- `pnpm dev:all --timeout 600`：首次下载后端依赖时增加等待时间。
+- `pnpm dev:all --help`：查看帮助。
+
+默认使用已构建 SPA，不启动 Vite 1420，因此这条命令没有渲染层热更新；开发热更仍用原来的
+`pnpm electron:dev:all`。启动前请退出旧桌面客户端，以便新构建生效。健康的已有 Java 后端会被
+复用，修改过 Java 源码时应自行停止并重启旧后端。
+
+Ctrl+C 只停止本次脚本启动的进程组，不按端口杀进程、不删除数据。默认将 Docker 依赖生命周期设为
+`start-only`，保留 MySQL / Redis / RustFS；如终端或 `.env` 显式配置了 Spring 的生命周期则遵循该配置。
+脚本验证可运行 `pnpm test:startup`，不需要启动实际 Java/Electron。
+
 | 命令                    | 说明                                                                   |
 | ----------------------- | ---------------------------------------------------------------------- |
 | `pnpm dev`              | 桌面端渲染层 Vite 开发服务器（预览态）                                 |
