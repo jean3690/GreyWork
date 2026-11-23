@@ -8,7 +8,7 @@
  * - 搜索走宿主命令 mcp_search（浏览器态无宿主代理，如实说明不可用）；
  * - 卡片只给「登记 / 已登记」，真正的字段编辑在表单弹窗里（与设置 → MCP 同一条落库路径）。
  */
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, onScopeDispose, ref, watch } from "vue";
 import { i18n } from "@/i18n";
 import { hasHostCommands } from "@greywork/host-ipc";
 import { useSettingsStore } from "@/stores/settings";
@@ -16,6 +16,7 @@ import { registryEntryToDraft, searchMcpRegistry, type McpRegistryDraft, type Mc
 import Icon from "@/features/shared/Icon.vue";
 import { Skeleton } from "@/components/ui/skeleton";
 import McpFormDialog, { type McpDraftPayload, type McpFormPreset } from "@/features/settings/McpFormDialog.vue";
+import McpRegistrySource from "@/features/settings/McpRegistrySource.vue";
 
 const t = i18n.global.t;
 const settings = useSettingsStore();
@@ -27,6 +28,11 @@ const searching = ref(false);
 const error = ref<string | null>(null);
 const searched = ref(false);
 let timer: ReturnType<typeof setTimeout> | null = null;
+let searchRevision = 0;
+onScopeDispose(() => {
+  searchRevision += 1;
+  if (timer) clearTimeout(timer);
+});
 
 interface RegistryRow {
   entry: McpRegistryEntry;
@@ -58,16 +64,20 @@ const rows = computed<RegistryRow[]>(() =>
 const registeredCount = computed(() => settings.mcpServers.length);
 
 async function runSearch(): Promise<void> {
+  const revision = ++searchRevision;
   error.value = null;
   searching.value = true;
   try {
-    results.value = await searchMcpRegistry(query.value);
+    const entries = await searchMcpRegistry(query.value, 40, settings.mcpRegistryUrl);
+    if (revision !== searchRevision) return;
+    results.value = entries;
     searched.value = true;
   } catch (cause) {
+    if (revision !== searchRevision) return;
     results.value = [];
     error.value = String(cause);
   } finally {
-    searching.value = false;
+    if (revision === searchRevision) searching.value = false;
   }
 }
 
@@ -79,6 +89,12 @@ function onQueryInput(): void {
 onMounted(() => {
   if (hostAvailable) void runSearch();
 });
+watch(
+  () => settings.mcpRegistryUrl,
+  () => {
+    if (hostAvailable) void runSearch();
+  },
+);
 
 // ---------- 登记弹窗（与设置 → MCP 共用同一个表单组件与落库路径） ----------
 const editorOpen = ref(false);
@@ -127,6 +143,12 @@ function draftReason(row: RegistryRow): string {
 
 <template>
   <div data-testid="market-mcp-section">
+    <McpRegistrySource
+      class="mb-3"
+      :model-value="settings.mcpRegistryUrl"
+      :disabled="!hostAvailable"
+      @update:model-value="settings.setMcpRegistryUrl"
+    />
     <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
       <div class="relative min-w-0 flex-1">
         <Icon name="search" :size="13" class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-dim2" />

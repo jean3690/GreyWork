@@ -108,6 +108,16 @@ async function render(component: unknown): Promise<VueWrapper> {
 }
 
 describe("插件市场 · MCP 专区", () => {
+  it("市场使用设置里的来源，切回默认 Java 后端也立即重新搜索", async () => {
+    const settings = useSettingsStore();
+    settings.setMcpRegistryUrl("https://custom-registry.test");
+    const wrapper = await render(McpMarketSection);
+    expect(invokeMock).toHaveBeenCalledWith("mcp_search", { search: null, limit: 40, origin: "https://custom-registry.test" });
+    await wrapper.get('[data-testid="mcp-registry-source"]').findAll("button")[0].trigger("click");
+    await flushPromises();
+    expect(settings.mcpRegistryUrl).toBe("");
+    expect(invokeMock).toHaveBeenCalledWith("mcp_search", { search: null, limit: 40, origin: null });
+  });
   it("搜索列出注册表条目；登记走表单弹窗并写进本机服务器列表", async () => {
     const wrapper = await render(McpMarketSection);
     await vi.waitFor(() => expect(wrapper.find('[data-testid="market-mcp-ac.inference.sh/mcp"]').exists()).toBe(true));
@@ -146,6 +156,38 @@ describe("插件市场 · MCP 专区", () => {
 });
 
 describe("插件市场 · 技能专区", () => {
+  it("Java 后端失败可见，其他已启用源的结果仍可安装", async () => {
+    useSettingsStore().setSkillSourceEnabled("skills-sh", true);
+    const respond = invokeMock.getMockImplementation()!;
+    invokeMock.mockImplementation(async (command, args) => {
+      if (command === "skills_search" && !(args as { origin?: string })?.origin) throw new Error("HTTP 503");
+      return respond(command, args);
+    });
+    const wrapper = await render(SkillsMarketSection);
+    await wrapper.get('[data-testid="market-skills-search"]').setValue("tdd");
+    await wrapper.get('[data-testid="market-skills-search"]').trigger("keydown.enter");
+    await flushPromises();
+    expect(wrapper.get('[data-testid="market-skills-error"]').text()).toContain("503");
+    expect(wrapper.get('[data-testid="market-skill-install-tdd"]').attributes("disabled")).toBeUndefined();
+  });
+  it("市场安装二次确认保留来源，第三方条目不误从 Java 后端下载", async () => {
+    const respond = invokeMock.getMockImplementation()!;
+    invokeMock.mockImplementation(async (command, args) => {
+      const result = await respond(command, args);
+      return command === "skills_search"
+        ? [{ ref: "other/repo/notes", skill_id: "notes", name: "Notes", origin: "https://third-party.test", downloadable: true }]
+        : result;
+    });
+    const wrapper = await render(SkillsMarketSection);
+    await wrapper.get('[data-testid="market-skills-search"]').setValue("notes");
+    await wrapper.get('[data-testid="market-skills-search"]').trigger("keydown.enter");
+    await flushPromises();
+    expect(wrapper.text()).toContain("https://third-party.test");
+    await wrapper.get('[data-testid="market-skill-install-notes"]').trigger("click");
+    await wrapper.get('[data-testid="market-skills-confirm-yes"]').trigger("click");
+    await flushPromises();
+    expect(invokeMock).toHaveBeenCalledWith("skills_download", { entryRef: "other/repo/notes", origin: "https://third-party.test" });
+  });
   it("已安装来自磁盘扫描；搜索 → 安装二次确认 → 宿主写盘", async () => {
     const wrapper = await render(SkillsMarketSection);
 

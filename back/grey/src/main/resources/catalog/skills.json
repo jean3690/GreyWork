@@ -29,6 +29,53 @@
           "contents": "---\nname: release-notes\ndescription: 按 git log 归纳本次发版的特性、修复与破坏性变更\n---\n\n# 发版说明\n\n## 何时使用\n\n准备打 tag、要给用户写更新日志、或需要回顾「这两个版本之间改了什么」时。\n\n## 步骤\n\n1. 取区间：`git log --oneline <上一个 tag>..HEAD`；没有 tag 时让用户给起点。\n2. 按提交类型分组：`feat` → 新特性，`fix` → 修复，`perf` → 性能，其余归入「其他」。\n3. 破坏性变更（提交正文含 `BREAKING CHANGE` 或 `!:`）单独置顶，写清迁移动作。\n4. 同一模块的多条提交合并成一句话，不逐条照抄提交标题。\n\n## 输出约定\n\n- 面向使用者描述影响，不复述实现细节；\n- 每条不超过一行，必要时补一句迁移提示；\n- 空分组不输出。\n"
         }
       ]
+    },
+    {
+      "ref": "greywork/tests/demo-hello",
+      "skillId": "demo-hello",
+      "name": "测试下载 · 问候技能",
+      "description": "用户请求测试技能下载、验证 demo-hello 安装或生成测试问候时使用，输出固定安装成功标记。",
+      "installs": 0,
+      "files": [
+        {
+          "path": "SKILL.md",
+          "contents": "---\nname: demo-hello\ndescription: 用户请求测试技能下载、验证 demo-hello 安装或生成测试问候时使用。\ndisable-model-invocation: true\n---\n\n# 测试问候\n\n1. 从用户输入提取称呼；未提供称呼时使用「测试用户」。\n2. 输出一行：`你好，{称呼}！GreyWork 技能下载测试成功。`\n3. 再输出独立一行：`DEMO_SKILL_OK:demo-hello:v1`。\n\n完成标准：两行均已输出，称呼与输入一致。只验证当前技能可被读取，不声称已验证网络、数据库或其他工具。\n"
+        }
+      ]
+    },
+    {
+      "ref": "greywork/tests/demo-checklist",
+      "skillId": "demo-checklist",
+      "name": "测试下载 · 验收清单",
+      "description": "用户指定 demo-checklist 或请求生成下载验收清单时使用，验证技能附带模板文件可被读取。",
+      "installs": 0,
+      "files": [
+        {
+          "path": "SKILL.md",
+          "contents": "---\nname: demo-checklist\ndescription: 用户指定 demo-checklist 或请求生成下载验收清单时使用，验证附带模板文件可被读取。\ndisable-model-invocation: true\n---\n\n# 下载验收清单\n\n1. 读取本技能目录的 `templates/checklist.md`。\n2. 原样输出模板，保持所有复选框未勾选。\n3. 用户提供实际测试结果后，只勾选有明确证据的项目；失败项目保留未勾选并注明原因。\n4. 输出 `DEMO_SKILL_OK:demo-checklist:v1`。\n\n完成标准：模板的四个项目和标记均已输出。模板读取失败时报告缺失路径，不伪造模板或成功标记。\n"
+        },
+        {
+          "path": "templates/checklist.md",
+          "contents": "# Java 目录下载验收\n\n- [ ] 默认来源指向预期 Java 后端\n- [ ] Skills 搜索能找到 demo-hello\n- [ ] 下载并安装后可读取 SKILL.md 与附带模板\n- [ ] 测试 MCP 可以握手、列出工具并返回正确结果\n"
+        }
+      ]
+    },
+    {
+      "ref": "greywork/tests/demo-summary",
+      "skillId": "demo-summary",
+      "name": "测试下载 · 三行摘要",
+      "description": "用户指定 demo-summary 或请求用测试技能摘要一段文字时使用，验证嵌套参考文件与中文内容完整下载。",
+      "installs": 0,
+      "files": [
+        {
+          "path": "SKILL.md",
+          "contents": "---\nname: demo-summary\ndescription: 用户指定 demo-summary 或请求用测试技能摘要一段文字时使用。\ndisable-model-invocation: true\n---\n\n# 三行摘要\n\n1. 用户未提供待摘要文字时，请其提供文字，等待后再继续。\n2. 读取 `references/output-format.md`，按其三个标签输出摘要；每行不超过 40 个汉字。\n3. 只提炼输入中明确出现的信息，缺失项写「未提供」。\n4. 输出 `DEMO_SKILL_OK:demo-summary:v1`。\n\n完成标准：三个标签顺序与参考文件一致，内容均可追溯到输入，并有成功标记。参考文件缺失时报告错误，结束本次验证。\n"
+        },
+        {
+          "path": "references/output-format.md",
+          "contents": "# 输出格式\n\n主题：输入文字讨论的主要对象。\n要点：输入中最重要的事实。\n下一步：输入明确要求的后续动作；未要求时写「未提供」。\n"
+        }
+      ]
     }
   ]
 }

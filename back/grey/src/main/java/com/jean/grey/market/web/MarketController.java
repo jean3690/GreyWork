@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 /**
  * 能力目录端点（匿名可读：目录是随版本发布的公开内容，不含用户数据）。
@@ -48,7 +49,8 @@ public class MarketController {
 	@GetMapping("/api/market/mcp/v0/servers")
 	public Map<String, Object> mcpServers(@RequestParam(name = "search", defaultValue = "") String search,
 			@RequestParam(name = "limit", defaultValue = "20") int limit) {
-		return catalog.searchMcp(search, limit);
+		return catalog.searchMcp(search, limit,
+				ServletUriComponentsBuilder.fromCurrentContextPath().build().toUriString());
 	}
 
 }

@@ -30,6 +30,31 @@ describe("ACP 品牌图标", () => {
 });
 
 describe("settings 持久化", () => {
+  it("旧技能源快照补上 Java 默认源，保留第三方配置且往返不重复添加", () => {
+    const thirdParty = [
+      { id: "skills-sh", label: "Skills Directory", type: "api", url: "https://www.skills.sh", enabled: true },
+      { id: "custom", label: "Custom", type: "api", url: "https://custom.test", enabled: false },
+    ];
+    storage.set("greywork.settings", JSON.stringify({ skillSources: thirdParty, mcpRegistryUrl: "https://registry.test" }));
+    const settings = useSettingsStore();
+    expect(settings.skillSources).toEqual([
+      { id: "java-backend", label: "Java 后端（默认）", type: "backend", enabled: true },
+      ...thirdParty,
+    ]);
+    expect(settings.mcpRegistryUrl).toBe("https://registry.test");
+    settings.removeSkillSource("java-backend");
+    expect(settings.skillSources).toHaveLength(3);
+    settings.setSkillSourceEnabled("java-backend", false);
+    setActivePinia(createPinia());
+    expect(useSettingsStore().skillSources).toHaveLength(3);
+    expect(useSettingsStore().skillSources[0].enabled).toBe(false);
+    useSettingsStore().resetSkillSources();
+    expect(
+      useSettingsStore()
+        .skillSources.filter((source) => source.enabled)
+        .map((source) => source.type),
+    ).toEqual(["backend"]);
+  });
   it("persist 后主题、模式、字号与圆角往返一致", () => {
     const settings = useSettingsStore();
     const provider = settings.modelProviders[0];

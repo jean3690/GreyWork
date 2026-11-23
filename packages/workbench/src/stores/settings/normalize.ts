@@ -205,4 +205,4 @@ export const FONT_SIZE_VALUES: Record<FontSize, true> = { small: true, medium: t
 export const RADIUS_VALUES: Record<Radius, true> = { none: true, small: true, large: true };
 export const RUN_MODE_VALUES: Record<RunMode, true> = { local: true, worktree: true, cloud: true };
 export const MCP_TRANSPORTS: Record<McpServerEntry["transport"], true> = { http: true, sse: true, stdio: true };
-export const SKILL_SOURCE_TYPES: Record<SkillSourceEntry["type"], true> = { api: true, github: true };
+export const SKILL_SOURCE_TYPES: Record<SkillSourceEntry["type"], true> = { backend: true, api: true, github: true };

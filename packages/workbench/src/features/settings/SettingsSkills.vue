@@ -7,7 +7,7 @@
  * .claude/skills/&lt;skillId&gt; 链接供 claude-code 使用。宿主不注入会话上下文，
  * 装完新建/重启 agent 会话生效（codex 没有技能目录机制，不受影响）。
  */
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { joinPath } from "@greywork/core";
 import type { MarketSkillEntry } from "@greywork/plugins";
 import { useSkillsStore, type InstalledSkill } from "@/stores/skills";
@@ -108,7 +108,9 @@ const sourceFormOpen = ref(false);
 const sourceEditEntry = ref<SkillSourceEntry | null>(null);
 const resetSourceTarget = ref(false);
 
-const existingSourceLabels = settings.skillSources.map((s) => s.label);
+const existingSourceLabels = computed(() =>
+  settings.skillSources.filter((source) => source.id !== sourceEditEntry.value?.id).map((source) => source.label),
+);
 
 function openAddSource(): void {
   sourceEditEntry.value = null;
@@ -155,8 +157,8 @@ function confirmResetSources(): void {
         </span>
       </div>
       <p class="mb-3 text-[11px] leading-relaxed text-dim2">
-        技能搜索与安装的来源。内置 skills.sh 无法删除；自定义 API 端点需兼容 skills.sh
-        协议（<code>/api/search</code>、<code>/api/download</code>）。
+        默认从 Java 后端搜索和下载，地址随账号服务器自动更新（未配置时使用本地 8080，专用环境变量可覆盖）。 可启用 Skills Directory
+        或添加第三方 API / GitHub 源。API 需提供 <code>/api/skills</code> 或 <code>/api/search</code>，以及 <code>/api/download</code>。
       </p>
       <div class="flex flex-col gap-1.5">
         <div
@@ -166,10 +168,10 @@ function confirmResetSources(): void {
         >
           <span class="min-w-0 flex-1 text-[12px] text-foreground">{{ entry.label }}</span>
           <span class="shrink-0 rounded-full border border-line px-1.5 py-px font-mono text-[10px] text-dim2">
-            {{ entry.type === "api" ? "API" : "GitHub" }}
+            {{ entry.type === "backend" ? "默认" : entry.type === "api" ? "API" : "GitHub" }}
           </span>
           <span class="shrink-0 max-w-[140px] truncate font-mono text-[10px] text-dim2">
-            {{ entry.type === "api" ? entry.url : entry.repo }}
+            {{ entry.type === "backend" ? "跟随 Java 后端" : entry.type === "api" ? entry.url : entry.repo }}
           </span>
           <label class="flex shrink-0 cursor-pointer items-center gap-1 text-[11px] text-dim">
             <input
@@ -181,6 +183,7 @@ function confirmResetSources(): void {
             />
           </label>
           <button
+            v-if="entry.type !== 'backend'"
             type="button"
             class="shrink-0 rounded-[calc(8px*var(--gw-radius-scale))] border border-line px-2 py-1 text-[11px] text-dim transition-colors hover:text-foreground"
             @click="openEditSource(entry)"
@@ -188,6 +191,7 @@ function confirmResetSources(): void {
             编辑
           </button>
           <button
+            v-if="entry.type !== 'backend'"
             type="button"
             class="shrink-0 rounded-[calc(8px*var(--gw-radius-scale))] border border-line px-2 py-1 text-[11px] text-dim transition-colors hover:text-destructive"
             @click="settings.removeSkillSource(entry.id)"
@@ -301,7 +305,7 @@ function confirmResetSources(): void {
     <div class="rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-4">
       <div class="mb-1 text-[13px] font-medium text-foreground">发现</div>
       <p class="mb-3 text-[11px] leading-relaxed text-dim2">
-        跨所有已启用源并行搜索（默认 skills.sh；上方自定义源；控制面已接入时自动带上「本控制面」）。
+        跨所有已启用源并行搜索（默认 Java 后端，可同时启用第三方源），安装和更新保留条目的实际来源。
         已装技能目录里出现的技能会标「已安装」。
       </p>
       <div class="mb-2 flex items-center gap-2">
@@ -328,7 +332,11 @@ function confirmResetSources(): void {
       </p>
 
       <div v-if="skills.discoverResults.length > 0" class="flex flex-col gap-2">
-        <div v-for="entry in skills.discoverResults" :key="entry.ref" class="rounded-[calc(10px*var(--gw-radius-scale))] bg-panel-2 p-2.5">
+        <div
+          v-for="entry in skills.discoverResults"
+          :key="`${entry.origin ?? ''}:${entry.ref}`"
+          class="rounded-[calc(10px*var(--gw-radius-scale))] bg-panel-2 p-2.5"
+        >
           <div class="flex items-start gap-2">
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-1.5">
@@ -342,6 +350,7 @@ function confirmResetSources(): void {
                 >
               </div>
               <p class="mt-0.5 truncate font-mono text-[10px] text-dim2">{{ entry.ref }}</p>
+              <p v-if="entry.origin" class="mt-0.5 truncate font-mono text-[10px] text-dim2" :title="entry.origin">{{ entry.origin }}</p>
             </div>
             <button
               type="button"
@@ -409,7 +418,7 @@ function confirmResetSources(): void {
     <ConfirmDialog
       v-if="resetSourceTarget"
       title="恢复默认技能源？"
-      message="将移除所有自定义源，仅保留内置 skills.sh。此操作不可撤销。"
+      message="将移除所有自定义源，恢复 Java 后端默认源和未启用的 Skills Directory。此操作不可撤销。"
       confirm-label="恢复默认"
       @confirm="confirmResetSources"
       @cancel="resetSourceTarget = false"

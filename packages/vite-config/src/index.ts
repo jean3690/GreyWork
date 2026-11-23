@@ -207,6 +207,12 @@ export function defineFrontConfig(options: FrontConfigOptions = {}): UserConfig 
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/market-api\/skills/, ""),
         },
+        // 无宿主预览的默认目录同样走 Java 后端；与 /api 的本地宿主代理分开。
+        "/market-api/backend": {
+          target: process.env.GREYWORK_CONTROL_URL || "http://127.0.0.1:8080",
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/market-api\/backend/, ""),
+        },
         "/market-api/mcp": {
           target: "https://registry.modelcontextprotocol.io",
           changeOrigin: true,

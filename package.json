@@ -25,6 +25,7 @@
     "electron:typecheck": "pnpm --filter @greywork/electron typecheck",
     "runtime:fetch": "node scripts/fetch-runtimes.mjs",
     "runtime:list": "node scripts/fetch-runtimes.mjs --list",
+    "market:test-packages": "node scripts/build-market-test-mcp.mjs",
     "electron:prep": "pnpm run runtime:fetch && pnpm run build:desktop && pnpm --filter @greywork/host-node build && node scripts/electron-host-bundle.mjs && pnpm --filter @greywork/electron build",
     "electron:host-bundle": "node scripts/electron-host-bundle.mjs",
     "electron:package": "pnpm run electron:prep && pnpm --filter @greywork/electron package",

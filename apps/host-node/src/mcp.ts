@@ -10,6 +10,7 @@
  */
 import { spawn } from "node:child_process";
 import path from "node:path";
+import { marketOrigin } from "./market-sources.js";
 
 /** MCP stdio 探活允许的运行时入口（basename），与 Rust `ALLOWED_MCP_RUNTIMES` 同名单。 */
 export const ALLOWED_MCP_RUNTIMES = new Set(["npx", "bunx", "uvx", "node"]);
@@ -542,18 +543,9 @@ export async function pluginMcpCall(request: PluginMcpCallRequest): Promise<Plug
 /* ===== 官方注册表只读代理（mcp_registry.rs 移植） ===== */
 
 /**
- * registry 地址：默认官方，可用 GREYWORK_MCP_REGISTRY_URL 指向自建目录
+ * registry 地址：默认 Java 后端，可用 GREYWORK_MCP_REGISTRY_URL 指向第三方目录
  * （控制面的 `/api/market/mcp` 就按官方 `/v0/servers` 形状响应）。
  */
-const DEFAULT_REGISTRY_ORIGIN = "https://registry.modelcontextprotocol.io";
-
-function registryOrigin(override?: string | null): string {
-  const explicit = (override ?? "").trim();
-  if (explicit !== "") return explicit.replace(/\/+$/, "");
-  const fromEnv = (process.env.GREYWORK_MCP_REGISTRY_URL ?? "").trim();
-  return (fromEnv === "" ? DEFAULT_REGISTRY_ORIGIN : fromEnv).replace(/\/+$/, "");
-}
-
 export interface McpRemoteEndpoint {
   transport: string;
   url: string;
@@ -650,7 +642,7 @@ export function normalizeRegistry(body: unknown): McpRegistryEntry[] {
   return entries;
 }
 
-/** 搜索注册表（默认官方，可指向自建目录）；search 为空时返回前 N 条。 */
+/** 搜索注册表（默认 Java 后端，可指向第三方目录）；search 为空时返回前 N 条。 */
 export async function mcpSearch(
   search: string | null | undefined,
   limit: number | null | undefined,
@@ -662,12 +654,13 @@ export async function mcpSearch(
   if (term) params.set("search", term);
   let response: Response;
   try {
-    response = await fetch(`${registryOrigin(origin)}/v0/servers?${params.toString()}`, {
+    response = await fetch(`${marketOrigin("mcp", origin)}/v0/servers?${params.toString()}`, {
       signal: AbortSignal.timeout(10_000),
     });
   } catch (error) {
     throw new Error(`registry request failed: ${(error as Error).message}`, { cause: error });
   }
+  if (!response.ok) throw new Error(`registry search returned ${response.status}`);
   let body: unknown;
   try {
     body = JSON.parse(await response.text());

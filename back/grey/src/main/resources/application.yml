@@ -40,6 +40,9 @@ server:
   port: 8080
 
 grey:
+  catalog:
+    # 一次性补充测试 Skills / MCP；仅添加缺失测试 ref，不覆盖已有条目。
+    import-demos: ${GREY_CATALOG_IMPORT_DEMOS:false}
   auth:
     # 留空则首次启动随机生成并打到日志；设置后每次启动都与该值对齐（方便自托管）
     enroll-code: ${GREY_ENROLL_CODE:}

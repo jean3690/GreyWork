@@ -98,6 +98,48 @@ class CatalogServiceTest {
 		assertThat(service.searchSkills("")).hasSize(1);
 	}
 
+	@Test
+	@DisplayName("现有库可补入测试条目，重复导入不覆盖已编辑或已停用的内容")
+	void importsDemosWithoutOverwriting() {
+		addSkill("greywork/skills/custom", "custom", "已有技能", true);
+		addMcp("io.greywork/custom", "已有 MCP");
+		addSkill("greywork/tests/demo-hello", "demo-hello", "用户已修改", false);
+		var seed = new CatalogSeedBootstrap(new CatalogBundled(mapper), repository, mapper, true);
+		seed.run(null);
+		assertThat(repository.count("skill")).isEqualTo(4);
+		assertThat(repository.count("mcp")).isEqualTo(3);
+		seed.run(null);
+		assertThat(repository.count("skill")).isEqualTo(4);
+		var existing = repository.findByRef("skill", "greywork/tests/demo-hello").orElseThrow();
+		assertThat(existing.getName()).isEqualTo("用户已修改");
+		assertThat(existing.getEnabled()).isFalse();
+	}
+
+	@Test
+	@DisplayName("未打开导入开关时不改已有目录")
+	void existingCatalogIsUntouchedByDefault() {
+		addSkill("greywork/skills/custom", "custom", "已有技能", true);
+		addMcp("io.greywork/custom", "已有 MCP");
+		new CatalogSeedBootstrap(new CatalogBundled(mapper), repository, mapper, false).run(null);
+		assertThat(repository.count("skill")).isEqualTo(1);
+		assertThat(repository.count("mcp")).isEqualTo(1);
+	}
+
+	@Test
+	@DisplayName("真实测试种子可搜索下载，并将自托管包地址展开为当前后端 URL")
+	void demosCanBeDownloaded() {
+		new CatalogSeedBootstrap(new CatalogBundled(mapper), repository, mapper, false).run(null);
+		assertThat(service.searchSkills("demo")).hasSize(3);
+		var snapshot = service.downloadSkill("greywork", "tests", "demo-checklist");
+		assertThat(snapshot.get("hash").toString()).hasSize(64);
+		assertThat(snapshot.get("files").toString()).contains("SKILL.md", "templates/checklist.md");
+		var response = mapper.writeValueAsString(service.searchMcp("demo", 10, "https://java.test/grey/"));
+		assertThat(response).contains("https://java.test/grey/api/market/mcp/packages/greywork-demo-echo-0.1.0.tgz",
+				"https://java.test/grey/api/market/mcp/packages/greywork-demo-math-0.1.0.tgz");
+		assertThat(mapper.writeValueAsString(service.searchMcp("记忆", 10, "https://java.test")))
+				.contains("@modelcontextprotocol/server-memory");
+	}
+
 	private void addSkill(String ref, String skillId, String name, boolean enabled) {
 		CatalogItem item = item("skill", ref, skillId, name, 7, enabled);
 		item.setPayload(mapper.writeValueAsString(new SkillPayload(List.of(

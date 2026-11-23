@@ -1,6 +1,6 @@
 // Web 预览环境市场通道：经本地 Vite 代理（同源）绕开 CORS。
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createBuiltinSources, createSkillsShSource } from "../../../src/sources/skills-sh";
+import { createBuiltinSources, createSkillsShSource, SKILLS_SH_DEFAULT_ORIGIN } from "../../../src/sources/skills-sh";
 import { createSkillsTransport, MARKET_API_BASE, WebSkillsTransport } from "../../../src/sources/web-transport";
 
 const SEARCH_RAW = {
@@ -36,7 +36,7 @@ describe("WebSkillsTransport", () => {
       return url.includes("/api/search") ? SEARCH_RAW : { files: [{ path: "SKILL.md", contents: "ok" }], hash: "h" };
     });
     const transport = new WebSkillsTransport();
-    const source = createSkillsShSource(transport, { id: "s", label: "S", description: "" });
+    const source = createSkillsShSource(transport, { id: "s", label: "S", description: "", origin: SKILLS_SH_DEFAULT_ORIGIN });
 
     const entries = await source.search("lark");
     expect(entries.map((entry) => entry.skillId)).toEqual(["lark-doc", "git-commit"]);
@@ -55,8 +55,26 @@ describe("WebSkillsTransport", () => {
     });
     const transport = new WebSkillsTransport();
     await transport.search("tdd 测试");
-    expect(seen[0]).toBe(`${MARKET_API_BASE}/skills/api/search?q=tdd%20%E6%B5%8B%E8%AF%95`);
+    expect(seen[0]).toBe(`${MARKET_API_BASE}/backend/api/skills?q=tdd%20%E6%B5%8B%E8%AF%95`);
     await expect(transport.download("bad/ref")).rejects.toThrow(/not a downloadable/i);
+  });
+
+  it("默认搜索和下载代理到 Java 后端并归一 snake_case 数组", async () => {
+    const seen: string[] = [];
+    installFetch(async (url) => {
+      seen.push(url);
+      return url.includes("/api/skills")
+        ? [{ ref: "greywork/skills/example", skill_id: "example", name: "Example", installs: 0, source: "greywork", downloadable: true }]
+        : { files: [{ path: "SKILL.md", contents: "# example" }], hash: "java" };
+    });
+    const source = createSkillsShSource(new WebSkillsTransport(), { id: "java", label: "Java", description: "" });
+    const entries = await source.search("example");
+    expect(entries[0]).toMatchObject({ ref: "greywork/skills/example", skillId: "example" });
+    expect((await source.download(entries[0])).hash).toBe("java");
+    expect(seen).toEqual([
+      `${MARKET_API_BASE}/backend/api/skills?q=example`,
+      `${MARKET_API_BASE}/backend/api/download/greywork/skills/example`,
+    ]);
   });
 
   it("rejects install/uninstall with a desktop-only error", async () => {

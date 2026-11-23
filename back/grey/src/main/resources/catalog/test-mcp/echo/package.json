@@ -1,0 +1,16 @@
+{
+  "name": "greywork-demo-echo",
+  "version": "0.1.0",
+  "description": "GreyWork Java 目录下载测试：文本回显 MCP",
+  "type": "module",
+  "bin": {
+    "greywork-demo-echo": "server.mjs"
+  },
+  "files": [
+    "server.mjs"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT"
+}

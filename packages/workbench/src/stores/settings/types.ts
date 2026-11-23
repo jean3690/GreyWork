@@ -93,8 +93,8 @@ export interface SkillSourceEntry {
   id: string;
   /** 显示名称。 */
   label: string;
-  /** 源类型：api = 兼容 skills.sh 的 HTTP API；github = GitHub 仓库直引。 */
-  type: "api" | "github";
+  /** backend 跟随宿主的 Java 后端；api 为自定义目录；github 按第三方仓库过滤。 */
+  type: "backend" | "api" | "github";
   /** API 端点 URL（type=api 时必填）。 */
   url?: string;
   /** GitHub owner/repo（type=github 时必填）。 */
@@ -102,9 +102,10 @@ export interface SkillSourceEntry {
   enabled: boolean;
 }
 
-/** 内置默认技能源（skills.sh 聚合索引）。 */
+/** 默认 Java 后端；第三方聚合索引保留为可选来源，不默认外联。 */
 export const DEFAULT_SKILL_SOURCES: readonly SkillSourceEntry[] = [
-  { id: "skills-sh", label: "Skills Directory", type: "api", url: "https://www.skills.sh", enabled: true },
+  { id: "java-backend", label: "Java 后端（默认）", type: "backend", enabled: true },
+  { id: "skills-sh", label: "Skills Directory", type: "api", url: "https://www.skills.sh", enabled: false },
 ];
 
 /**

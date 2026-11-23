@@ -1,0 +1,16 @@
+{
+  "name": "greywork-demo-math",
+  "version": "0.1.0",
+  "description": "GreyWork Java 目录下载测试：加法与乘法 MCP",
+  "type": "module",
+  "bin": {
+    "greywork-demo-math": "server.mjs"
+  },
+  "files": [
+    "server.mjs"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT"
+}

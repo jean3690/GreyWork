@@ -9,7 +9,7 @@ export interface MarketSkillEntry {
   installs: number;
   source: string;
   downloadable: boolean;
-  /** 条目所属源的自定义 origin（覆盖默认 skills.sh 时设置；下载走该源）。 */
+  /** 实际目录地址；宿主搜索返回默认 Java 地址，自定义源显式给出，下载与更新保持同源。 */
   origin?: string;
 }
 
@@ -21,6 +21,8 @@ export interface SkillSnapshotFile {
 export interface SkillSnapshot {
   files: SkillSnapshotFile[];
   hash: string;
+  /** 宿主盖章的实际下载地址（第三方快照自身的同名字段不作为路由依据）。 */
+  origin?: string;
 }
 
 /** 随宿主二进制发布的内置技能条目（内容已编译进宿主，不联网）。 */
@@ -32,14 +34,14 @@ export interface BundledSkillMeta {
   files: string[];
 }
 
-/** 技能市场传输抽象（Web 通道经 vite 代理；宿主命令已移除）。 */
+/** 技能市场传输抽象（Web 预览经 Vite 代理；桌面/headless 经宿主命令）。 */
 export interface SkillsMarketTransport {
   available(): boolean;
   /** 安装/卸载是否可用（Web 预览无宿主文件写入通道）。 */
   installable(): boolean;
-  /** origin 为空时走默认市场（skills.sh）。 */
+  /** origin 为空时走默认 Java 后端目录。 */
   search(query: string, origin?: string): Promise<unknown>;
-  /** origin 为空时走默认市场（skills.sh）。 */
+  /** origin 为空时走默认 Java 后端目录。 */
   download(entryRef: string, origin?: string): Promise<unknown>;
   install(workspaceRoot: string, skillId: string, files: SkillSnapshotFile[]): Promise<{ dir: string; filesWritten: number }>;
   uninstall(workspaceRoot: string, skillId: string): Promise<void>;

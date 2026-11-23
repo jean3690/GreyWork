@@ -30,6 +30,11 @@ services:
       # 只在服务端态生效——桌面壳的 CSP 写死在打包配置里，仅支持三个预设厂商。
       # 非 http(s)://host[:port] 形态的项会被丢弃并在日志里点名（防它改写整条 CSP）。
       GREYWORK_FRAME_ORIGINS: "${GREYWORK_FRAME_ORIGINS:-}"
+      # Java 公共目录默认地址（容器内的 127.0.0.1 不代表宿主机，请填写可达的 Java 服务地址）。
+      GREYWORK_CONTROL_URL: "${GREYWORK_CONTROL_URL:-}"
+      GREYWORK_CONTROL_TOKEN: "${GREYWORK_CONTROL_TOKEN:-}"
+      GREYWORK_SKILLS_ORIGIN: "${GREYWORK_SKILLS_ORIGIN:-}"
+      GREYWORK_MCP_REGISTRY_URL: "${GREYWORK_MCP_REGISTRY_URL:-}"
       # 自动化任务：置 1 则**本容器**是执行者，到点即跑，不需要一直开着浏览器或自己的电脑。
       # 注意任务建在服务端库内（桌面端建的任务不在这份库里），见 docs/packaging.md。
       GREYWORK_AUTOMATION_HOST_PRIMARY: "${GREYWORK_AUTOMATION_HOST_PRIMARY:-0}"

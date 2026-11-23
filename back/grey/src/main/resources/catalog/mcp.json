@@ -39,6 +39,36 @@
         }
       ],
       "remotes": []
+    },
+    {
+      "name": "io.greywork.demo/echo",
+      "title": "测试下载 · 文本回显 MCP",
+      "description": "Java 后端自己托管的零依赖 npm 测试包，提供 demo_echo 工具。输入文字原样返回，无需密钥，不读写用户文件。",
+      "version": "0.1.0",
+      "packages": [
+        {
+          "registryType": "npm",
+          "identifier": "/api/market/mcp/packages/greywork-demo-echo-0.1.0.tgz",
+          "version": "0.1.0",
+          "environmentVariables": []
+        }
+      ],
+      "remotes": []
+    },
+    {
+      "name": "io.greywork.demo/math",
+      "title": "测试下载 · 简单计算 MCP",
+      "description": "Java 后端自己托管的零依赖 npm 测试包，提供 demo_add 和 demo_multiply 工具。无需密钥，不访问网络或用户文件。",
+      "version": "0.1.0",
+      "packages": [
+        {
+          "registryType": "npm",
+          "identifier": "/api/market/mcp/packages/greywork-demo-math-0.1.0.tgz",
+          "version": "0.1.0",
+          "environmentVariables": []
+        }
+      ],
+      "remotes": []
     }
   ]
 }

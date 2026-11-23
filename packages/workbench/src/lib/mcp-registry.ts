@@ -91,7 +91,7 @@ export async function searchMcpRegistry(query: string, limit = 40, origin?: stri
   return invoke<McpRegistryEntry[]>("mcp_search", {
     search: trimmed || null,
     limit,
-    // 空 = 宿主默认（官方 registry 或 GREYWORK_MCP_REGISTRY_URL）。
+    // 空 = 宿主默认（Java 后端或 GREYWORK_MCP_REGISTRY_URL）。
     origin: registry === "" ? null : registry,
   });
 }

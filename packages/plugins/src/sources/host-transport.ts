@@ -17,6 +17,7 @@ interface HostSkillEntry {
   installs: number;
   source: string;
   downloadable: boolean;
+  origin?: string;
 }
 
 /** Rust SkillSnapshot 形状；files/hash 键名与 Web 一致，可直接透传。 */
@@ -35,6 +36,7 @@ export function wrapHostSearch(items: HostSkillEntry[]): { skills: unknown[] } {
       installs: item.installs,
       source: item.source,
       downloadable: item.downloadable,
+      origin: item.origin,
     })),
   };
 }

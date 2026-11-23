@@ -7,12 +7,13 @@
  * remote 归一（streamable-http → http，其次 sse）；无 remote 的 npm/pypi 包推出
  * `npx -y` / `uvx` 的 stdio 草稿；其余类型不可登记。
  */
-import { computed, ref, watch } from "vue";
+import { computed, onScopeDispose, ref, watch } from "vue";
 import { hasHostCommands } from "@greywork/host-ipc";
 import { useSettingsStore } from "@/stores/settings";
 import { registryEntryToDraft, searchMcpRegistry, type McpRegistryDraft, type McpRegistryEntry } from "@/lib/mcp-registry";
 import Icon from "@/features/shared/Icon.vue";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import McpRegistrySource from "./McpRegistrySource.vue";
 
 const props = defineProps<{ open: boolean }>();
 const emit = defineEmits<{ close: []; register: [entry: McpRegistryEntry] }>();
@@ -27,6 +28,11 @@ const error = ref<string | null>(null);
 const searched = ref(false);
 
 let timer: ReturnType<typeof setTimeout> | null = null;
+let searchRevision = 0;
+onScopeDispose(() => {
+  searchRevision += 1;
+  if (timer) clearTimeout(timer);
+});
 
 /** 已登记过的服务器名集合：登记按钮变「已登记」。 */
 const registeredNames = computed(() => new Set(settings.mcpServers.map((server) => server.name)));
@@ -56,27 +62,26 @@ const rows = computed<RegistryRow[]>(() =>
 
 /** 生效的 registry 地址：设置里填了就用它，否则由宿主决定（官方 / GREYWORK_MCP_REGISTRY_URL）。 */
 const registryUrl = computed(() => settings.mcpRegistryUrl.trim());
-const effectiveOrigin = computed(() => registryUrl.value || "https://registry.modelcontextprotocol.io");
-
-/** 地址改了立刻落盘（下次打开面板还是这个源），已搜过就顺手重搜，避免「表格还是旧源的结果」。 */
-function commitRegistryUrl(event: Event): void {
-  const value = (event.target as HTMLInputElement).value;
-  if (value.trim() === registryUrl.value) return;
-  settings.setMcpRegistryUrl(value);
-  if (searched.value) void runSearch();
-}
+const effectiveOrigin = computed(() => registryUrl.value || "Java 后端（自动跟随服务器地址）");
+watch(registryUrl, () => {
+  if (props.open && hostAvailable) void runSearch();
+});
 
 async function runSearch(): Promise<void> {
+  const revision = ++searchRevision;
   error.value = null;
   searching.value = true;
   try {
-    results.value = await searchMcpRegistry(query.value, 40, registryUrl.value || null);
+    const entries = await searchMcpRegistry(query.value, 40, registryUrl.value || null);
+    if (revision !== searchRevision) return;
+    results.value = entries;
     searched.value = true;
   } catch (cause) {
+    if (revision !== searchRevision) return;
     results.value = [];
     error.value = String(cause);
   } finally {
-    searching.value = false;
+    if (revision === searchRevision) searching.value = false;
   }
 }
 
@@ -88,8 +93,14 @@ function onQueryInput(): void {
 watch(
   () => props.open,
   (open) => {
-    if (open && !searched.value && hostAvailable) void runSearch();
+    if (open && hostAvailable) void runSearch();
+    if (!open) {
+      searchRevision += 1;
+      searching.value = false;
+      if (timer) clearTimeout(timer);
+    }
   },
+  { immediate: true },
 );
 
 function titleOf(entry: McpRegistryEntry): string {
@@ -110,7 +121,9 @@ function onOpenChange(next: boolean): void {
     >
       <div class="flex items-center justify-between px-4 pb-2 pt-3.5">
         <div class="min-w-0">
-          <DialogTitle class="text-[13px] font-medium text-foreground"> MCP Registry · {{ registryUrl ? "自定义" : "官方" }} </DialogTitle>
+          <DialogTitle class="text-[13px] font-medium text-foreground">
+            MCP Registry · {{ registryUrl ? "自定义" : "Java 后端" }}
+          </DialogTitle>
           <DialogDescription class="mt-0.5 text-[10.5px] text-dim2">
             {{ effectiveOrigin }} · 登记 = 写入本机 MCP 服务器列表
           </DialogDescription>
@@ -126,19 +139,7 @@ function onOpenChange(next: boolean): void {
       </div>
 
       <div class="min-h-0 flex-1 space-y-2 overflow-y-auto px-4 pb-4 pt-1">
-        <!-- registry 地址：留空 = 宿主默认（官方 registry / GREYWORK_MCP_REGISTRY_URL）。 -->
-        <label class="flex items-center gap-2">
-          <span class="w-14 shrink-0 text-[10.5px] text-dim2">Registry</span>
-          <input
-            :value="registryUrl"
-            class="min-w-0 flex-1 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2.5 py-1.5 font-mono text-[11px] text-foreground outline-none placeholder:text-dim2 focus:border-accent"
-            placeholder="https://registry.modelcontextprotocol.io（留空走默认）"
-            :disabled="!hostAvailable"
-            data-testid="mcp-registry-url"
-            @change="commitRegistryUrl"
-            @keydown.enter.prevent="commitRegistryUrl"
-          />
-        </label>
+        <McpRegistrySource :model-value="registryUrl" :disabled="!hostAvailable" @update:model-value="settings.setMcpRegistryUrl" />
         <div class="flex items-center gap-2">
           <input
             v-model="query"

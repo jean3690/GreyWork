@@ -103,6 +103,11 @@ public class CatalogService {
 
 	/** MCP 预设：输出官方 registry 的 {servers:[{server:…,_meta:…}]} 形状。 */
 	public Map<String, Object> searchMcp(String search, int limit) {
+		return searchMcp(search, limit, "");
+	}
+
+	/** Java 自托管 npm 包的相对地址，按当前控制面 URL 展开（不写死 localhost）。 */
+	public Map<String, Object> searchMcp(String search, int limit, String baseUrl) {
 		String needle = search == null ? "" : search.trim().toLowerCase(Locale.ROOT);
 		int capped = Math.clamp(limit <= 0 ? 20 : limit, 1, MAX_LIMIT);
 		List<Map<String, Object>> items = repository.listEnabled("mcp").stream()
@@ -111,7 +116,7 @@ public class CatalogService {
 				.filter(server -> needle.isEmpty() || contains(server.name(), needle)
 						|| contains(server.title(), needle) || contains(server.description(), needle))
 				.limit(capped)
-				.map(CatalogService::registryItem)
+				.map(server -> registryItem(server, baseUrl))
 				.toList();
 		Map<String, Object> body = new LinkedHashMap<>();
 		body.put("servers", items);
@@ -161,7 +166,7 @@ public class CatalogService {
 		return item;
 	}
 
-	private static Map<String, Object> registryItem(McpServer server) {
+	private static Map<String, Object> registryItem(McpServer server, String baseUrl) {
 		Map<String, Object> detail = new LinkedHashMap<>();
 		detail.put("name", server.name());
 		detail.put("title", server.title());
@@ -170,7 +175,7 @@ public class CatalogService {
 		detail.put("repository", server.repository() == null ? null : Map.of("url", server.repository().url()));
 		McpPackage first = server.packages() == null || server.packages().isEmpty() ? null
 				: server.packages().getFirst();
-		detail.put("packages", first == null ? List.of() : List.of(packageInfo(first)));
+		detail.put("packages", first == null ? List.of() : List.of(packageInfo(first, baseUrl)));
 		McpRemote firstRemote = server.remotes() == null || server.remotes().isEmpty() ? null
 				: server.remotes().getFirst();
 		detail.put("remotes", firstRemote == null ? List.of()
@@ -181,10 +186,15 @@ public class CatalogService {
 		return item;
 	}
 
-	private static Map<String, Object> packageInfo(McpPackage pkg) {
+	private static Map<String, Object> packageInfo(McpPackage pkg, String baseUrl) {
 		Map<String, Object> info = new LinkedHashMap<>();
 		info.put("registryType", pkg.registryType());
-		info.put("identifier", pkg.identifier());
+		String identifier = pkg.identifier();
+		if ("npm".equals(pkg.registryType()) && identifier != null
+				&& identifier.startsWith("/api/market/mcp/packages/") && !baseUrl.isBlank()) {
+			identifier = baseUrl.replaceAll("/+$", "") + identifier;
+		}
+		info.put("identifier", identifier);
 		info.put("version", pkg.version());
 		info.put("environmentVariables", pkg.environmentVariables() == null ? List.of() : pkg.environmentVariables());
 		return info;

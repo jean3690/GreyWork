@@ -146,7 +146,8 @@ function onOpenChange(next: boolean): void {
             placeholder="https://my-registry.example.com"
           />
           <p class="text-[10px] leading-relaxed text-dim2">
-            需兼容 skills.sh 协议：<code>/api/search?q=…</code> 和 <code>/api/download/{owner}/{repo}/{skill}</code>。
+            搜索支持 <code>/api/skills?q=…</code>（Java 后端）或 <code>/api/search?q=…</code>（skills.sh）； 下载提供
+            <code>/api/download/{owner}/{repo}/{skill}</code>。
           </p>
         </template>
 

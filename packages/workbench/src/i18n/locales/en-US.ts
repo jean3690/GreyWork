@@ -1367,7 +1367,7 @@ export const enUS: MessageSchema = {
     mcpUnsupportedTransport: "Remote transport {transports} is not supported yet",
     mcpUnsupportedPackages: "Package types {types} cannot be registered in one click (only npm / pypi)",
     mcpNoDraft: "This entry has nothing to register automatically",
-    skillsSearchPlaceholder: "Search skills (skills.sh and other enabled sources)",
+    skillsSearchPlaceholder: "Search skills (Java backend and other enabled sources)",
     skillsInstallHint: "Skills live in the workspace skills directory (ACP agents pick them up on new sessions):",
     skillsRefresh: "Refresh",
     skillsScanning: "Scanning…",

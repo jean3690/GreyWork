@@ -1,7 +1,8 @@
 import { fetchJson } from "@greywork/core";
 import { hasHostCommands } from "@greywork/host-ipc";
 import type { BundledSkillMeta, SkillSnapshotFile, SkillsMarketTransport } from "./types";
-import { HostSkillsTransport } from "./host-transport";
+import { HostSkillsTransport, wrapHostSearch } from "./host-transport";
+import { SKILLS_SH_DEFAULT_ORIGIN } from "./skills-sh";
 
 /**
  * 市场通道：浏览器直连外部市场被 CORS 拦截（两端均无
@@ -23,19 +24,28 @@ export class WebSkillsTransport implements SkillsMarketTransport {
   }
 
   async search(query: string, origin?: string): Promise<unknown> {
-    const base = origin ? origin.replace(/\/+$/, "") : MARKET_API_BASE;
-    const prefix = origin ? "" : "/skills";
-    return fetchJson(`${base}${prefix}/api/search?q=${encodeURIComponent(query)}`, "skills market");
+    const base = origin?.replace(/\/+$/, "");
+    const official = base === SKILLS_SH_DEFAULT_ORIGIN || base === "https://skills.sh";
+    const endpoint = !base ? `${MARKET_API_BASE}/backend` : official ? `${MARKET_API_BASE}/skills` : base;
+    const paths = official ? ["search"] : ["skills", "search"];
+    let response: Response | undefined;
+    for (const path of paths) {
+      response = await fetch(`${endpoint}/api/${path}?q=${encodeURIComponent(query)}`, { signal: AbortSignal.timeout(15_000) });
+      if (response.status !== 404) break;
+    }
+    if (!response?.ok) throw new Error(`skills market: HTTP ${response?.status}`);
+    const raw: unknown = await response.json();
+    return Array.isArray(raw) ? wrapHostSearch(raw) : raw;
   }
 
   async download(entryRef: string, origin?: string): Promise<unknown> {
     const parts = entryRef.split("/");
     if (parts.length !== 3) throw new Error(`ref is not a downloadable repo skill (expect owner/repo/skill): ${entryRef}`);
     const encoded = parts.map((part) => encodeURIComponent(part)).join("/");
-    if (origin) {
+    if (origin && origin.replace(/\/+$/, "") !== SKILLS_SH_DEFAULT_ORIGIN && origin.replace(/\/+$/, "") !== "https://skills.sh") {
       return fetchJson(`${origin.replace(/\/+$/, "")}/api/download/${encoded}`, "skills market");
     }
-    return fetchJson(`${MARKET_API_BASE}/skills/api/download/${encoded}`, "skills market");
+    return fetchJson(`${MARKET_API_BASE}/${origin ? "skills" : "backend"}/api/download/${encoded}`, "skills market");
   }
 
   install(workspaceRoot: string, skillId: string, _files: SkillSnapshotFile[]): Promise<{ dir: string; filesWritten: number }> {

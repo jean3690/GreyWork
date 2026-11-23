@@ -127,7 +127,7 @@ export const useSettingsStore = defineStore("settings", () => {
   /** 用户自定义技能市场源。 */
   const skillSources = ref<SkillSourceEntry[]>(DEFAULT_SKILL_SOURCES.map((source) => ({ ...source })));
   /**
-   * 自定义 MCP registry 地址；空串 = 走宿主默认（官方 registry，或 GREYWORK_MCP_REGISTRY_URL）。
+   * 自定义 MCP registry 地址；空串 = 走宿主默认（Java 后端，或 GREYWORK_MCP_REGISTRY_URL）。
    * 与 mcpServers 分开存：地址是「去哪儿搜」，服务器列表是「装了什么」。
    */
   const mcpRegistryUrl = ref<string>("");
@@ -282,6 +282,10 @@ export const useSettingsStore = defineStore("settings", () => {
         .filter((source) => source && typeof source.id === "string" && typeof source.label === "string" && SKILL_SOURCE_TYPES[source.type])
         .map((source) => ({ ...source, enabled: source.enabled === true }));
       if (skillSources.value.length === 0) skillSources.value = DEFAULT_SKILL_SOURCES.map((source) => ({ ...source }));
+      // 升级旧快照时补上默认后端，但保留所有第三方来源及其启用状态。
+      if (!skillSources.value.some((source) => source.type === "backend")) {
+        skillSources.value.unshift({ ...DEFAULT_SKILL_SOURCES[0] });
+      }
     }
     // 通道偏好：缺省即启用（「自动连接 / 自动回复」是通道常态），只有显式 false 才关；
     // 「答复其他联系人」相反 —— 只有显式 true 才放行。
@@ -508,7 +512,7 @@ export const useSettingsStore = defineStore("settings", () => {
     persist();
   }
 
-  /** 自定义 MCP registry 地址；空串恢复默认（官方）。 */
+  /** 自定义 MCP registry 地址；空串恢复默认（Java 后端）。 */
   function setMcpRegistryUrl(url: string): void {
     mcpRegistryUrl.value = url.trim();
     persist();
@@ -525,6 +529,7 @@ export const useSettingsStore = defineStore("settings", () => {
   }
 
   function removeSkillSource(id: string): void {
+    if (skillSources.value.some((source) => source.id === id && source.type === "backend")) return;
     skillSources.value = skillSources.value.filter((source) => source.id !== id);
     persist();
   }

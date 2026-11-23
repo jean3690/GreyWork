@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 插件市场 · 技能专区：搜索 skills.sh 并把技能装进工作区 `.agents/skills/`。
+ * 插件市场 · 技能专区：搜索 Java 后端及第三方源，把技能装进工作区 `.agents/skills/`。
  *
  * 数据面完全交给 `useSkillsStore`（已安装 = 磁盘扫描、内置 = 宿主二进制目录、
  * 发现 = 跨启用源搜索、安装/更新/卸载 = 宿主写盘）——设置 → 技能 与这里共用
@@ -20,7 +20,7 @@ const actionError = ref("");
 /** 二次确认对象：安装 / 安装(内置) / 更新(市场) / 更新(已装记录) / 卸载。 */
 const confirm = ref<
   | null
-  | { kind: "install"; ref: string; skillId: string; name: string; downloadable: boolean }
+  | { kind: "install"; ref: string; skillId: string; name: string; downloadable: boolean; origin?: string }
   | { kind: "installBundled"; id: string; name: string }
   | { kind: "update"; skill: InstalledSkill }
   | { kind: "uninstall"; skill: InstalledSkill }
@@ -54,11 +54,11 @@ function installedOf(skillId: string): InstalledSkill | undefined {
 
 async function performInstall(): Promise<void> {
   if (!confirm.value || confirm.value.kind !== "install") return;
-  const { ref: entryRef, skillId, name, downloadable } = confirm.value;
+  const { ref: entryRef, skillId, name, downloadable, origin } = confirm.value;
   confirm.value = null;
   actionError.value = "";
   try {
-    await skills.installFromMarket({ ref: entryRef, skillId, name, installs: 0, source: "", downloadable });
+    await skills.installFromMarket({ ref: entryRef, skillId, name, installs: 0, source: "", downloadable, origin });
   } catch (error) {
     actionError.value = String(error);
   }
@@ -146,6 +146,10 @@ async function performUninstall(): Promise<void> {
         <h2 class="text-[13px] font-semibold text-foreground">{{ t("market.skillsInstalled") }}</h2>
         <span class="font-mono text-[10px] text-dim2">{{ skills.installed.length }}</span>
       </div>
+
+      <p v-if="skills.discoverError" class="mb-2 whitespace-pre-line text-[11px] text-destructive" data-testid="market-skills-error">
+        {{ skills.discoverError }}
+      </p>
       <p
         v-if="skills.installed.length === 0"
         class="rounded-[calc(12px*var(--gw-radius-scale))] border border-dashed border-line-2 bg-panel/50 px-4 py-6 text-center text-[11.5px] text-dim2"
@@ -275,7 +279,7 @@ async function performUninstall(): Promise<void> {
       <div v-else-if="skills.discoverResults.length" class="grid gap-3 md:grid-cols-2">
         <article
           v-for="entry in skills.discoverResults"
-          :key="entry.ref"
+          :key="`${entry.origin ?? ''}:${entry.ref}`"
           class="flex min-h-28 flex-col rounded-[calc(14px*var(--gw-radius-scale))] border border-line bg-panel p-4 transition-colors hover:border-line-2"
           :data-testid="`market-skill-${entry.skillId}`"
         >
@@ -296,6 +300,7 @@ async function performUninstall(): Promise<void> {
                 </span>
               </div>
               <p class="mt-0.5 truncate font-mono text-[9.5px] text-dim2">{{ entry.ref }}</p>
+              <p v-if="entry.origin" class="mt-0.5 truncate font-mono text-[9.5px] text-dim2" :title="entry.origin">{{ entry.origin }}</p>
             </div>
           </div>
 
@@ -315,6 +320,7 @@ async function performUninstall(): Promise<void> {
                   skillId: entry.skillId,
                   name: entry.name,
                   downloadable: entry.downloadable,
+                  origin: entry.origin,
                 }
               "
             >
@@ -325,7 +331,7 @@ async function performUninstall(): Promise<void> {
       </div>
 
       <div
-        v-else-if="query.trim() !== '' && !skills.searching"
+        v-else-if="query.trim() !== '' && !skills.searching && !skills.discoverError"
         class="grid min-h-40 place-items-center rounded-[calc(14px*var(--gw-radius-scale))] border border-dashed border-line-2 bg-panel/50 px-6 text-center"
       >
         <p class="text-[12px] font-medium text-foreground">{{ t("market.skillsNoResults") }}</p>

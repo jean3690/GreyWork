@@ -7,6 +7,7 @@ import { parseSkillFrontmatter, resolveSkillsRoot, useSkillsStore } from "@/stor
 import { effectScope } from "vue";
 import { useCloudCatalog } from "@/features/cloud/useCloudCatalog";
 import { useUserAccountStore } from "@/stores/user-account";
+import { useSettingsStore } from "@/stores/settings";
 
 vi.mock("@greywork/host-ipc", async (importOriginal) => ({
   ...(await importOriginal()),
@@ -156,6 +157,81 @@ describe("skills store 市场安装/卸载", () => {
 
     await store.searchDiscover("");
     expect(store.discoverResults).toEqual([]);
+  });
+
+  it("新设置只启用 Java 后端；第三方可显式启用且下载保持原来源", async () => {
+    host([{ ref: "a/b/c", skill_id: "c", name: "C", origin: "https://java.test", downloadable: true }]);
+    const settings = useSettingsStore();
+    const store = useSkillsStore();
+    expect(settings.skillSources.filter((source) => source.enabled).map((source) => source.type)).toEqual(["backend"]);
+    await store.searchDiscover("c");
+    expect(invokeMock.mock.calls.filter(([name]) => name === "skills_search")).toHaveLength(1);
+    const entry = store.discoverResults[0];
+    expect(entry.origin).toBe("https://java.test");
+    await store.installFromMarket(entry);
+    await store.updateInstalled("c");
+    expect(invokeMock).toHaveBeenCalledWith("skills_download", { entryRef: "a/b/c", origin: "https://java.test" });
+    settings.setSkillSourceEnabled("skills-sh", true);
+    invokeMock.mockClear();
+    await store.searchDiscover("c");
+    expect(invokeMock).toHaveBeenCalledWith("skills_search", { query: "c", origin: "https://www.skills.sh" });
+    expect(store.discoverResults).toHaveLength(2); // 同 ref 不同来源不能互相覆盖
+  });
+
+  it("来源失败时显示错误，停用全部来源时不回退到外部市场", async () => {
+    host();
+    const store = useSkillsStore();
+    const settings = useSettingsStore();
+    const respond = invokeMock.getMockImplementation()!;
+    invokeMock.mockImplementation(async (command, args) => {
+      if (command === "skills_search") throw new Error("HTTP 503");
+      return respond(command, args);
+    });
+    await store.searchDiscover("c");
+    expect(store.discoverError).toContain("Java 后端");
+    expect(store.discoverError).toContain("503");
+    settings.skillSources.forEach((source) => settings.setSkillSourceEnabled(source.id, false));
+    invokeMock.mockClear();
+    await store.searchDiscover("c");
+    expect(invokeMock).not.toHaveBeenCalledWith("skills_search", expect.anything());
+    expect(store.discoverResults).toEqual([]);
+  });
+
+  it("晚到的旧查询不会覆盖新结果或恢复已清空的查询", async () => {
+    host();
+    let finish!: (value: unknown) => void;
+    const old = new Promise((resolve) => {
+      finish = resolve;
+    });
+    const respond = invokeMock.getMockImplementation()!;
+    invokeMock.mockImplementation(async (command, args) => {
+      if (command === "skills_search") return old;
+      return respond(command, args);
+    });
+    const store = useSkillsStore();
+    const pending = store.searchDiscover("old");
+    await store.searchDiscover("");
+    finish([{ ref: "a/b/old", skill_id: "old", downloadable: true }]);
+    await pending;
+    expect(store.discoverResults).toEqual([]);
+    expect(store.searching).toBe(false);
+  });
+
+  it("无来源的旧安装记录不能随默认地址变化误更新；新快照补存宿主实际来源", async () => {
+    host();
+    storage.set("greywork.skills.installed", JSON.stringify([{ ref: MARKET_ITEM.ref, skillId: "tdd", hash: "old", installedAt: 1 }]));
+    const store = useSkillsStore();
+    await expect(store.updateInstalled("tdd")).rejects.toThrow("旧安装记录未保存下载来源");
+    expect(invokeMock).not.toHaveBeenCalledWith("skills_download", expect.anything());
+    const respond = invokeMock.getMockImplementation()!;
+    invokeMock.mockImplementation(async (command, args) => {
+      const result = await respond(command, args);
+      return command === "skills_download" ? { ...(result as object), origin: "https://java.test" } : result;
+    });
+    await store.installFromMarket(MARKET_ITEM);
+    expect(store.recordBySkillId.get("tdd")?.origin).toBe("https://java.test");
+    await store.updateInstalled("tdd");
+    expect(invokeMock).toHaveBeenCalledWith("skills_download", { entryRef: MARKET_ITEM.ref, origin: "https://java.test" });
   });
 
   it("installs through download + host write, records hash, and refreshes the list", async () => {

@@ -36,8 +36,8 @@ export function mapSearchResponse(raw: unknown, options?: { scopeSource?: string
       name: strAt(item, "name") ?? skillId,
       installs: numAt(item, "installs"),
       source,
-      downloadable: ref.split("/").length === 3,
-      origin: options?.origin,
+      downloadable: item.downloadable !== false && ref.split("/").length === 3,
+      origin: options?.origin ?? strAt(item, "origin"),
     });
   }
   return out;
@@ -53,7 +53,7 @@ export function parseSnapshot(raw: unknown): SkillSnapshot {
     if (!path || typeof entry.contents !== "string") continue;
     files.push({ path, contents: entry.contents });
   }
-  return { files, hash: typeof raw.hash === "string" ? raw.hash : "" };
+  return { files, hash: typeof raw.hash === "string" ? raw.hash : "", ...(typeof raw.origin === "string" ? { origin: raw.origin } : {}) };
 }
 
 /** 基于 skills.sh 协议（search/download 同源）的源。
@@ -62,17 +62,18 @@ export function createSkillsShSource(
   transport: SkillsMarketTransport,
   options: { id: string; label: string; description: string; scopeSource?: string; origin?: string },
 ): SkillSourceAdapter {
+  const origin = options.origin?.trim().replace(/\/+$/, "") || undefined;
   return {
     id: options.id,
     label: options.label,
     description: options.description,
     async search(query: string): Promise<MarketSkillEntry[]> {
-      const raw = await transport.search(query, options.origin);
-      return mapSearchResponse(raw, { scopeSource: options.scopeSource, origin: options.origin });
+      const raw = await transport.search(query, origin);
+      return mapSearchResponse(raw, { scopeSource: options.scopeSource, origin });
     },
     async download(entry: MarketSkillEntry): Promise<SkillSnapshot> {
       if (!entry.downloadable) throw new Error(`site source is not downloadable: ${entry.ref}`);
-      return parseSnapshot(await transport.download(entry.ref, entry.origin ?? options.origin));
+      return parseSnapshot(await transport.download(entry.ref, entry.origin ?? origin));
     },
   };
 }
@@ -84,12 +85,14 @@ export function createBuiltinSources(transport: SkillsMarketTransport): SkillSou
       id: "skills-sh",
       label: "Skills Directory",
       description: "skills.sh 全量聚合索引（GitHub 仓库源）",
+      origin: SKILLS_SH_DEFAULT_ORIGIN,
     }),
     createSkillsShSource(transport, {
       id: "feishu-lark",
       label: "飞书 Lark",
       description: "飞书官方办公技能 · larksuite/cli · 中英双语",
       scopeSource: "larksuite/cli",
+      origin: SKILLS_SH_DEFAULT_ORIGIN,
     }),
   ];
 }

@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
-import { hasHostCommands, invoke } from "@greywork/host-ipc";
+import { hasHostCommands } from "@greywork/host-ipc";
 import { joinPath } from "@greywork/core";
 import {
   createSkillsShSource,
@@ -24,7 +24,7 @@ import { listDir, readTextFile } from "../state/workspaceFiles";
  *    放进来的技能），读各 SKILL.md frontmatter 拿 name/description；
  * 2. 内置：随宿主二进制发布的技能目录（`skills_bundled_list`），不联网，
  *    装进同一目录（内容由宿主按 id 取，渲染端不传文件）；
- * 3. 发现：skills.sh 官方市场搜索 → 下载快照 → 宿主写盘（install 覆盖即更新）。
+ * 3. 发现：Java 后端（默认）及已启用第三方源 → 下载快照 → 宿主写盘。
  *
  * 安装目标都是 ACP agent（opencode / claude-code / codex 等）的原生技能目录，
  * 装完新开会话即被识别。浏览器态（无宿主）只读不写。
@@ -147,56 +147,30 @@ function upsertRecord(records: SkillInstallRecord[], record: SkillInstallRecord)
   return [...rest, record];
 }
 
-/** 根据设置中的技能源条目构建适配器（内置 skills.sh + 自定义 API 源 + 本控制面）。
- * 默认 skills.sh 不传 origin（宿主走默认端点），自定义端点才带 origin。 */
-function buildSourceAdapters(
-  settings: ReturnType<typeof useSettingsStore>,
-  transport: SkillsMarketTransport,
-  controlPlaneOrigin: string | null,
-): SkillSourceAdapter[] {
-  const adapters = settings.skillSources
+/** 默认后端不传地址，由宿主实时解析；第三方必须显式指定，不能误走当前后端。 */
+function buildSourceAdapters(settings: ReturnType<typeof useSettingsStore>, transport: SkillsMarketTransport): SkillSourceAdapter[] {
+  return settings.skillSources
     .filter((source) => source.enabled)
     .map((entry) =>
       createSkillsShSource(transport, {
         id: entry.id,
         label: entry.label,
-        description: entry.type === "api" ? (entry.url ?? entry.id) : `GitHub 仓库：${entry.repo ?? entry.id}`,
-        origin: entry.type === "api" && entry.url && entry.url !== SKILLS_SH_DEFAULT_ORIGIN ? entry.url : undefined,
+        description:
+          entry.type === "backend"
+            ? "跟随 Java 后端地址"
+            : entry.type === "api"
+              ? (entry.url ?? entry.id)
+              : `GitHub 仓库：${entry.repo ?? entry.id}`,
+        origin: entry.type === "api" ? entry.url : entry.type === "github" ? SKILLS_SH_DEFAULT_ORIGIN : undefined,
         scopeSource: entry.type === "github" && entry.repo ? entry.repo : undefined,
       }),
     );
-  // 控制面已经接入时自动带上它的技能目录：地址来自宿主（token 不出宿主），
-  // 用户手动把同一个地址加成自定义源时不重复请求。
-  const trimmedOrigin = (controlPlaneOrigin ?? "").replace(/\/+$/, "");
-  const alreadyConfigured =
-    trimmedOrigin !== "" &&
-    settings.skillSources.some(
-      (source) => source.enabled && source.type === "api" && (source.url ?? "").replace(/\/+$/, "") === trimmedOrigin,
-    );
-  if (trimmedOrigin !== "" && !alreadyConfigured) {
-    adapters.unshift(
-      createSkillsShSource(transport, {
-        id: "control-plane",
-        label: "本控制面",
-        description: trimmedOrigin,
-        origin: trimmedOrigin,
-      }),
-    );
-  }
-  return adapters;
 }
 
 export const useSkillsStore = defineStore("skills", () => {
   /** 运行时自适应的市场传输（桌面 = 宿主 IPC；浏览器 = Web 直连/仅浏览）。 */
   const transport: SkillsMarketTransport = createSkillsTransport();
   const settings = useSettingsStore();
-
-  /** 内置默认源（兼容旧单源调用）。 */
-  const builtInMarket = createSkillsShSource(transport, {
-    id: "skills-sh",
-    label: "Skills Directory",
-    description: "skills.sh 全量聚合索引",
-  });
 
   const hostAvailable = hasHostCommands();
   const workspace = ref<SkillsWorkspace | null>(null);
@@ -216,32 +190,9 @@ export const useSkillsStore = defineStore("skills", () => {
   const searching = ref(false);
   const discoverResults = ref<MarketSkillEntry[]>([]);
   const discoverError = ref("");
+  let discoverRevision = 0;
   /** 当前正在安装/卸载的 skillId（按钮 loading 态）。 */
   const busyId = ref<string | null>(null);
-
-  /**
-   * 控制面地址（本控制面的技能目录）：只取宿主 `control_plane_status` 里的 baseUrl，
-   * token 留在宿主。探测一次即可 —— 用户改了控制面地址会重启/重连，重新打开面板时再取。
-   */
-  const controlPlaneOrigin = ref<string | null>(null);
-  let controlPlaneProbe: Promise<void> | null = null;
-
-  async function ensureControlPlaneSource(): Promise<void> {
-    if (!hostAvailable || controlPlaneProbe) {
-      if (controlPlaneProbe) await controlPlaneProbe;
-      return;
-    }
-    controlPlaneProbe = (async () => {
-      try {
-        const status = await invoke<{ configured: boolean; baseUrl: string | null }>("control_plane_status");
-        controlPlaneOrigin.value = status.configured ? status.baseUrl : null;
-      } catch {
-        // 老宿主 / 未接入：没有这条源，不影响其它源。
-        controlPlaneOrigin.value = null;
-      }
-    })();
-    await controlPlaneProbe;
-  }
 
   const records = ref<SkillInstallRecord[]>(loadRecords());
   const recordBySkillId = computed(() => new Map(records.value.map((record) => [record.skillId, record])));
@@ -315,38 +266,45 @@ export const useSkillsStore = defineStore("skills", () => {
 
   /** 市场搜索（跨所有启用源并行搜索，结果合并去重）。 */
   async function searchDiscover(query: string): Promise<void> {
+    const revision = ++discoverRevision;
     const trimmed = query.trim();
     discoverError.value = "";
     if (!trimmed) {
       discoverResults.value = [];
+      searching.value = false;
       return;
     }
     searching.value = true;
     try {
-      await ensureControlPlaneSource();
-      const adapters = buildSourceAdapters(settings, transport, controlPlaneOrigin.value);
+      const adapters = buildSourceAdapters(settings, transport);
       if (adapters.length === 0) {
-        // 没有启用的源 → 回退内置默认
-        discoverResults.value = await builtInMarket.search(trimmed);
+        // 用户停用了所有来源，不偷偷重新启用任何市场。
+        discoverResults.value = [];
         return;
       }
       const batches = await Promise.allSettled(adapters.map((adapter) => adapter.search(trimmed)));
+      if (revision !== discoverRevision) return;
+      discoverError.value = batches
+        .flatMap((batch, index) => (batch.status === "rejected" ? [`${adapters[index].label}: ${String(batch.reason)}`] : []))
+        .join("\n");
       const seen = new Set<string>();
       const merged: MarketSkillEntry[] = [];
       for (const batch of batches) {
         if (batch.status !== "fulfilled") continue;
         for (const entry of batch.value) {
-          if (seen.has(entry.ref)) continue;
-          seen.add(entry.ref);
+          const key = `${entry.origin ?? ""}\n${entry.ref}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
           merged.push(entry);
         }
       }
       discoverResults.value = merged;
     } catch (error) {
+      if (revision !== discoverRevision) return;
       discoverResults.value = [];
       discoverError.value = String(error);
     } finally {
-      searching.value = false;
+      if (revision === discoverRevision) searching.value = false;
     }
   }
 
@@ -357,13 +315,14 @@ export const useSkillsStore = defineStore("skills", () => {
     try {
       const ws = await requireHostWorkspace();
       const snapshot = await download();
+      const origin = entry.origin || snapshot.origin;
       await transport.install(ws.root.dir, entry.skillId, snapshot.files);
       records.value = upsertRecord(records.value, {
         ref: entry.ref,
         skillId: entry.skillId,
         hash: snapshot.hash,
         installedAt: Date.now(),
-        ...(entry.origin ? { origin: entry.origin } : {}),
+        ...(origin ? { origin } : {}),
       });
       saveRecords(records.value);
       await refreshInstalled();
@@ -400,6 +359,7 @@ export const useSkillsStore = defineStore("skills", () => {
   async function updateInstalled(skillId: string): Promise<void> {
     const record = recordBySkillId.value.get(skillId);
     if (!record) throw new Error(`skill has no market record to update: ${skillId}`);
+    if (!record.origin) throw new Error("旧安装记录未保存下载来源，请从原市场重新安装一次后再更新，避免误从当前 Java 后端下载同名技能");
     await installFromMarket({
       ref: record.ref,
       skillId: record.skillId,
@@ -428,7 +388,6 @@ export const useSkillsStore = defineStore("skills", () => {
 
   return {
     transport,
-    builtInMarket,
     hostAvailable,
     workspace,
     workspaceResolved,

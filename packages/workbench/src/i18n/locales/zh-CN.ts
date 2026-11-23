@@ -1337,7 +1337,7 @@ export const zhCN = {
     mcpUnsupportedTransport: "远程端点传输 {transports} 暂不支持",
     mcpUnsupportedPackages: "包类型 {types} 暂不支持一键登记（仅支持 npm / pypi）",
     mcpNoDraft: "该条目没有可用于一键登记的信息",
-    skillsSearchPlaceholder: "搜索技能（skills.sh 等已启用源）",
+    skillsSearchPlaceholder: "搜索技能（Java 后端及其他已启用源）",
     skillsInstallHint: "技能装在工作区技能目录（ACP agent 新开会话即识别）：",
     skillsRefresh: "刷新",
     skillsScanning: "扫描中…",

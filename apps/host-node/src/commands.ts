@@ -93,6 +93,8 @@ import type { RagIndexHost } from "./rag.js";
 import type { TerminalHost } from "./terminal.js";
 import type { WorkspaceAccess } from "./workspace-access.js";
 import { uploadWorkspaceFile } from "./cloud.js";
+import { marketOrigin } from "./market-sources.js";
+import { searchSkills } from "./skills-market.js";
 import { javaGatewayProvider, type ModelGatewaySession } from "./model-gateway.js";
 
 export interface CommandMeta {
@@ -543,14 +545,13 @@ HANDLERS.set("mcp_call", async (args) => {
     timeoutSecs: typeof value.timeoutSecs === "number" ? value.timeoutSecs : null,
   });
 });
-HANDLERS.set("mcp_search", async (args) => {
-  // 注册表只读代理：默认官方 registry，可指向自建目录（控制面 /api/market/mcp）。
-  // origin 可显式传入（设置里配的地址），否则由 GREYWORK_MCP_REGISTRY_URL 决定。
+HANDLERS.set("mcp_search", async (args, ctx) => {
+  // 默认 Java 目录，显式来源与专用环境变量仍可覆盖；目录请求不携带账号凭据。
   const value = args as { search?: unknown; limit?: unknown; origin?: unknown } | null;
   return mcpSearch(
     typeof value?.search === "string" ? value.search : null,
     typeof value?.limit === "number" ? value.limit : null,
-    typeof value?.origin === "string" ? value.origin : null,
+    marketOrigin("mcp", value?.origin, ctx.controlPlane.status().baseUrl),
   );
 });
 HANDLERS.set("plugin_mcp_call", async (args) => {
@@ -590,36 +591,28 @@ HANDLERS.set("plugin_mcp_call", async (args) => {
   });
 });
 
-/**
- * 技能市场地址：默认内置聚合站；`GREYWORK_SKILLS_ORIGIN` 或渲染端显式给的 origin
- * 可以指向自建目录（控制面 `/api/skills` 与 `/api/download/...` 就是 skills.sh 协议）。
- */
-function skillsOrigin(override: unknown): string {
-  const explicit = typeof override === "string" ? override.trim() : "";
-  if (explicit !== "") return explicit.replace(/\/+$/, "");
-  const fromEnv = (process.env.GREYWORK_SKILLS_ORIGIN ?? "").trim();
-  return (fromEnv === "" ? "https://greywork-skills.pages.dev" : fromEnv).replace(/\/+$/, "");
-}
-
-HANDLERS.set("skills_search", async (args) => {
+HANDLERS.set("skills_search", async (args, ctx) => {
   const value = args as { origin?: unknown; query?: unknown } | null;
-  const origin = skillsOrigin(value?.origin);
+  const origin = marketOrigin("skills", value?.origin, ctx.controlPlane.status().baseUrl);
   const query = typeof value?.query === "string" ? value.query.trim() : "";
   if (query === "") throw new Error("query is empty");
-  const response = await fetch(`${origin}/api/skills?q=${encodeURIComponent(query)}`, { signal: AbortSignal.timeout(15_000) });
-  if (!response.ok) throw new Error(`skills search returned ${response.status}`);
-  return response.json();
+  return searchSkills(origin, query);
 });
-HANDLERS.set("skills_download", async (args) => {
+HANDLERS.set("skills_download", async (args, ctx) => {
   const value = args as { origin?: unknown; entryRef?: unknown } | null;
-  const origin = skillsOrigin(value?.origin);
+  const origin = marketOrigin("skills", value?.origin, ctx.controlPlane.status().baseUrl);
   const entryRef = typeof value?.entryRef === "string" ? value.entryRef : "";
   const parts = entryRef.split("/");
-  if (parts.length !== 3) throw new Error("invalid entry ref (expect owner/repo/slug)");
-  const url = `${origin}/api/download/${parts[0]}/${parts[1]}/${parts[2]}`;
+  if (parts.length !== 3 || parts.some((part) => !/^[a-zA-Z0-9_.-]+$/.test(part) || part === "." || part === "..")) {
+    throw new Error("invalid entry ref (expect owner/repo/slug)");
+  }
+  const url = `${origin}/api/download/${parts.map(encodeURIComponent).join("/")}`;
   const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
   if (!response.ok) throw new Error(`skills download returned ${response.status}`);
-  return response.json();
+  const snapshot = (await response.json()) as { files?: unknown; hash?: unknown } | null;
+  if (!snapshot || !Array.isArray(snapshot.files)) throw new Error("invalid snapshot payload");
+  // 原始下载地址由宿主盖章，旧调用方没有 entry.origin 时也能正确记账。
+  return { ...snapshot, origin };
 });
 
 HANDLERS.set("skills_bundled_list", async () => []);
@@ -1207,19 +1200,34 @@ HANDLERS.set("llm_chat_stop", async (args, ctx) => {
   return ctx.llm.stop(requestId);
 });
 
-HANDLERS.set("llm_list_models", async (args) => {
+async function withModelGateway<T>(baseUrl: string, ctx: CommandContext, run: (gateway?: ModelGatewaySession) => Promise<T>): Promise<T> {
+  const gateway = javaGatewayProvider(baseUrl) !== null ? ctx.controlPlane.openModelGateway() : undefined;
+  try {
+    return await run(gateway);
+  } finally {
+    gateway?.close();
+  }
+}
+
+HANDLERS.set("llm_list_models", async (args, ctx) => {
   const value = args as { baseUrl?: unknown; apiKeyEnv?: unknown; headers?: unknown } | null;
   if (typeof value?.baseUrl !== "string") throw new CommandError(400, "缺少参数 baseUrl");
-  return listModels({
-    baseUrl: value.baseUrl,
-    apiKeyEnv: typeof value.apiKeyEnv === "string" ? value.apiKeyEnv : null,
-    headers: (value.headers ?? undefined) as Record<string, string> | undefined,
-  });
+  const baseUrl = value.baseUrl;
+  return withModelGateway(baseUrl, ctx, (gateway) =>
+    listModels(
+      {
+        baseUrl,
+        apiKeyEnv: typeof value.apiKeyEnv === "string" ? value.apiKeyEnv : null,
+        headers: (value.headers ?? undefined) as Record<string, string> | undefined,
+      },
+      gateway,
+    ),
+  );
 });
-HANDLERS.set("llm_agent_probe", async (args) => {
+HANDLERS.set("llm_agent_probe", async (args, ctx) => {
   const value = args as (ChatRequestOptions & { baseUrl: string; apiKeyEnv?: string; headers?: Record<string, string> }) | null;
   if (typeof value?.baseUrl !== "string" || typeof value?.model !== "string") throw new CommandError(400, "缺少参数 baseUrl / model");
-  return probeAgentModel(value);
+  return withModelGateway(value.baseUrl, ctx, (gateway) => probeAgentModel(value, gateway));
 });
 HANDLERS.set("llm_embed", async (args) => {
   const value = args as {
@@ -1240,7 +1248,7 @@ HANDLERS.set("llm_embed", async (args) => {
     input: Array.isArray(value.input) ? (value.input as string[]) : [],
   });
 });
-HANDLERS.set("llm_chat_complete", async (args) => {
+HANDLERS.set("llm_chat_complete", async (args, ctx) => {
   const value = args as {
     baseUrl?: unknown;
     model?: unknown;
@@ -1252,14 +1260,20 @@ HANDLERS.set("llm_chat_complete", async (args) => {
   if (typeof value?.baseUrl !== "string" || typeof value?.model !== "string" || !Array.isArray(value.messages)) {
     throw new CommandError(400, "缺少参数 baseUrl / model / messages");
   }
-  return chatComplete({
-    baseUrl: value.baseUrl,
-    model: value.model,
-    apiKeyEnv: typeof value.apiKeyEnv === "string" ? value.apiKeyEnv : null,
-    messages: value.messages as LlmChatMessage[],
-    reasoningEffort: typeof value.reasoningEffort === "string" ? value.reasoningEffort : "",
-    headers: (value.headers ?? undefined) as Record<string, string> | undefined,
-  });
+  const { baseUrl, model } = value;
+  return withModelGateway(baseUrl, ctx, (gateway) =>
+    chatComplete(
+      {
+        baseUrl,
+        model,
+        apiKeyEnv: typeof value.apiKeyEnv === "string" ? value.apiKeyEnv : null,
+        messages: value.messages as LlmChatMessage[],
+        reasoningEffort: typeof value.reasoningEffort === "string" ? value.reasoningEffort : "",
+        headers: (value.headers ?? undefined) as Record<string, string> | undefined,
+      },
+      gateway,
+    ),
+  );
 });
 HANDLERS.set("llm_transcribe", async (args, ctx) => {
   const value = args as {
