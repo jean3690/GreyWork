@@ -148,7 +148,7 @@ export class WebSocketTransport implements AcpTransport {
     this.available = Boolean(options?.url);
   }
 
-  async startAgent(_agentCmd: string, _tier: PermissionTier, _env?: Record<string, string>): Promise<number> {
+  async startAgent(_agentCmd: string, _tier: PermissionTier, _env?: Record<string, string>, _cwd?: string): Promise<number> {
     const ctx = await this.ensureConnected();
     await ctx.request(AGENT_METHODS.initialize, {
       protocolVersion: 1,
@@ -385,7 +385,7 @@ export class WebSocketTransport implements AcpTransport {
 export interface AcpClient {
   readonly transportId: "tauri-ipc" | "websocket";
   isAvailable(): boolean;
-  startAgent(agentCmd: string, tier: PermissionTier, env?: Record<string, string>): Promise<number>;
+  startAgent(agentCmd: string, tier: PermissionTier, env?: Record<string, string>, cwd?: string): Promise<number>;
   /** 建会话；`mcpServers` 随 session/new 声明给 agent，由 agent 连接并合并工具面。 */
   openSession(handle: number, cwd: string, mcpServers?: readonly McpServerConfig[]): Promise<AcpSessionOpened>;
   /** 恢复已存在会话（宿主优先 session/resume，其次 session/load）；失败时由调用方回落 openSession。 */
@@ -429,7 +429,7 @@ export function createAcpClient(transport?: AcpTransport): AcpClient {
       const current = active();
       return current.available ?? current.id === "tauri-ipc";
     },
-    startAgent: (cmd, tier, env) => active().startAgent(cmd, tier, env),
+    startAgent: (cmd, tier, env, cwd) => active().startAgent(cmd, tier, env, cwd),
     openSession: (handle, cwd, mcpServers) => active().openSession(handle, cwd, mcpServers),
     loadSession: (handle, cwd, sessionId, mcpServers) => active().loadSession(handle, cwd, sessionId, mcpServers),
     closeSession: (handle, sessionId) => active().closeSession(handle, sessionId),

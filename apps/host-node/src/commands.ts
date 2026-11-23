@@ -654,7 +654,7 @@ HANDLERS.set("web_fetch", async (args) => {
 });
 
 HANDLERS.set("acp_start", async (args, ctx) => {
-  const value = args as { agentCmd?: unknown; tier?: unknown; env?: unknown } | null;
+  const value = args as { agentCmd?: unknown; tier?: unknown; env?: unknown; cwd?: unknown } | null;
   if (typeof value?.agentCmd !== "string") throw new CommandError(400, "缺少参数 agentCmd");
   const extra = ctx.extraPrograms(ctx.trustedHost);
   return ctx.acp.start(
@@ -662,6 +662,7 @@ HANDLERS.set("acp_start", async (args, ctx) => {
     value.agentCmd,
     typeof value.tier === "string" ? value.tier : null,
     (value.env ?? undefined) as Record<string, string> | undefined,
+    typeof value.cwd === "string" ? value.cwd : null,
   );
 });
 /** 按需下载 ACP agent（可信宿主专属）：只接受白名单 id，不接受包名 / 版本 / 命令。 */

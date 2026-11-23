@@ -22,4 +22,14 @@ describe("AcpHost · 启动失败", () => {
     await expect(host.start([], "opencode acp", "workspace", { PATH: "" })).rejects.toThrow(/agent 启动失败/);
     expect(host.sessionCount()).toBe(0);
   });
+
+  it("进程 cwd 必须在授权面内：越界路径直接拒绝，不静默回落到授权根", async () => {
+    const outside = mkdtempSync(path.join(tmpdir(), "gw-acp-outside-"));
+    try {
+      await expect(host.start([], "opencode acp", "workspace", { PATH: "" }, outside)).rejects.toThrow(/授权/);
+      expect(host.sessionCount()).toBe(0);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
 });

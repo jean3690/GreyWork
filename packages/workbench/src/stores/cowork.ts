@@ -597,7 +597,7 @@ export const useCoworkStore = defineStore("cowork", () => {
     let handle: number | null = null;
     try {
       const workspace = await isolateForRun(activeConversationFolder() ?? (await resolveWorkspaceDir()));
-      handle = await acp.startAgent(provider.command, settings.effectivePermissionTier);
+      handle = await acp.startAgent(provider.command, settings.effectivePermissionTier, undefined, workspace);
       const opened = await acp.openSession(handle, workspace);
       providerOptions.value = { ...providerOptions.value, [providerId]: opened.configOptions ?? [] };
     } catch {
@@ -658,7 +658,7 @@ export const useCoworkStore = defineStore("cowork", () => {
         const provider = providerOf(member);
         if (!provider) return t("errors.acpNotSelected");
         const session = sessionStore.createSession(workspaceStore.activeWorkspaceId, `${member.name} · ${trimmed}`);
-        const handle = await acp.startAgent(provider.command, settings.effectivePermissionTier);
+        const handle = await acp.startAgent(provider.command, settings.effectivePermissionTier, undefined, workspace);
         // 每个成员位都拿到同一批本轮启用的 MCP 服务器：协作里各人的工具面应当一致。
         const opened = await acp.openSession(handle, workspace, mcpServers);
         for (const name of opened.mcpServers ?? []) declaredNames.add(name);

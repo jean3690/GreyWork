@@ -225,6 +225,7 @@ export class AcpHost {
     agentCmd: string,
     tier: string | null,
     envVars: Record<string, string> | undefined,
+    cwd?: string | null,
   ): Promise<number> {
     const command = validateSpawnCommand(agentCmd, extraPrograms);
     const timeoutMs = handshakeTimeoutSecs(command) * 1000;
@@ -233,13 +234,13 @@ export class AcpHost {
     // Windows 上 npm 全局命令（npx / opencode / claude …）是 .cmd 包装，spawn 直接执行会 ENOENT；
     // 交给 shell 解析才能命中 PATHEXT。命令本身已过白名单与 shell 元字符校验。
     const useShell = process.platform === "win32";
+    // 进程 cwd 必须是授权面内的路径：不能继承宿主的 process.cwd()（Electron 开发态会落到
+    // 仓库里的某个包目录），也不能直接用渲染端给的字符串。会话 workspace 由 acp_new_session
+    // 的 cwd 下发，但 CodeBuddy 这类后端不读它、只认进程 cwd，所以这里也用同一个工作区，
+    // 让会话落到绑定文件夹；缺省（未传 / 尚未建会话）回落授权根。
+    const spawnCwd = typeof cwd === "string" && cwd.trim() !== "" ? this.access.resolveExisting(cwd) : this.access.root;
     const proc = spawn(useShell ? command : parts[0], useShell ? [] : parts.slice(1), {
-      // 不能继承宿主的 process.cwd()：Electron 开发态从 apps/electron 起 sidecar，agent 的
-      // 进程 cwd 会变成仓库里的某个包目录，用它跑 shell / 写相对路径会把文件落到工作区之外
-      // （authorization 面只有 ~/.greyWork 与用户选过的目录，发文件时因此被拒）。
-      // 会话真正的 workspace 由 acp_new_session 的 cwd 下发；这里给授权根做兜底，
-      // 保证即使 agent 忽略 session cwd，相对路径也落在可发送的授权面内。
-      cwd: this.access.root,
+      cwd: spawnCwd,
       env: { ...process.env, ...envVars },
       stdio: ["pipe", "pipe", "pipe"],
       detached: process.platform !== "win32",

@@ -17,8 +17,8 @@ const EVENT_NAME = "acp://event";
 export class HostCommandTransport implements AcpTransport {
   readonly id = "tauri-ipc" as const;
 
-  async startAgent(agentCmd: string, tier: PermissionTier, env?: Record<string, string>): Promise<number> {
-    return invoke<number>("acp_start", { agentCmd, tier, env });
+  async startAgent(agentCmd: string, tier: PermissionTier, env?: Record<string, string>, cwd?: string): Promise<number> {
+    return invoke<number>("acp_start", { agentCmd, tier, env, cwd });
   }
 
   async setPermissionTier(handle: number, tier: PermissionTier): Promise<void> {

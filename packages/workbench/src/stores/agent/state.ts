@@ -61,6 +61,8 @@ export interface AgentStoreLocals {
   acpThreadId: string | null;
   /** 当前 ACP 会话服务的对话 id（null = 尚未绑定到具体对话）。 */
   acpSessionThreadId: string | null;
+  /** 当前 agent 进程 spawn 时的工作区（进程 cwd）；换工作区要换进程。 */
+  acpSpawnCwd: string | null;
   /** 回放工作区记忆配置期间置真，抑制 setAcpConfig 的自反写入。 */
   replayingConfig: boolean;
   /** 已注入 schedule 围栏说明的 ACP 会话 id（每会话一次；adoptOpenedSession 重置）。 */
@@ -157,6 +159,7 @@ export function createAgentStoreState(): AgentStoreState {
       acpStream: null,
       acpThreadId: null,
       acpSessionThreadId: null,
+      acpSpawnCwd: null,
       replayingConfig: false,
       scheduleHintInjectedFor: null,
       hostHintInjectedFor: null,

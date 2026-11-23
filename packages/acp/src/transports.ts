@@ -169,8 +169,10 @@ export interface AcpTransport {
   /**
    * 启动 agent 进程。`env` 是该后端的启动环境变量（设置里配的 API key 之类）：
    * 桌面宿主净化后注入子进程；远程传输没有本地进程可注入，参数被忽略。
+   * `cwd` 是本次会话的工作区：进程 cwd 也设到这里，供不读 session/new cwd 的
+   * 后端（如 CodeBuddy）兜底；省略时宿主用授权根。
    */
-  startAgent(agentCmd: string, tier: PermissionTier, env?: Record<string, string>): Promise<number>;
+  startAgent(agentCmd: string, tier: PermissionTier, env?: Record<string, string>, cwd?: string): Promise<number>;
   /**
    * 改写在途会话的权限档位（临时降级/回升）。桌面宿主按 handle 存档位并在每条
    * 权限请求上重新读取，因此改档立即生效、不必重启 agent 进程。

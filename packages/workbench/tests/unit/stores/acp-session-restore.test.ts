@@ -26,7 +26,7 @@ vi.mock("@greywork/acp", () => ({
   createAcpClient: () =>
     ({
       isAvailable: () => h.isAvailable(),
-      startAgent: (cmd: string, tier: string) => h.startAgent(cmd, tier),
+      startAgent: (cmd: string, tier: string, env?: Record<string, string>, cwd?: string) => h.startAgent(cmd, tier, env, cwd),
       openSession: (handle: number, cwd: string, mcpServers?: unknown) => h.openSession(handle, cwd, mcpServers),
       loadSession: (handle: number, cwd: string, sessionId: string, mcpServers?: unknown) =>
         h.loadSession(handle, cwd, sessionId, mcpServers),
@@ -167,6 +167,30 @@ describe("ACP 会话惰性恢复", () => {
 
     expect(h.loadSession).not.toHaveBeenCalled();
     expect(h.openSession).toHaveBeenCalledWith(7, "/home/test", []);
+  });
+
+  it("工作区变了 → 结束旧进程并用新工作区重新 spawn", async () => {
+    const sessionStore = useSessionStore();
+    const agentStore = useAgentStore();
+    const settings = useSettingsStore();
+    const first = sessionStore.createSession(null, "工作区 A");
+    const second = sessionStore.createSession(null, "工作区 B");
+    h.startAgent.mockResolvedValueOnce(7).mockResolvedValueOnce(8);
+
+    await agentStore.dispatchToAcp("第一轮", [], [], first.id);
+    expect(h.startAgent).toHaveBeenLastCalledWith(expect.any(String), expect.any(String), expect.anything(), "/home/test");
+    emit({ kind: "prompt-done", payload: { turnId: 1, response: {} } });
+
+    settings.workspaceDir = "/home/test-2";
+    h.openSession.mockResolvedValueOnce({ sessionId: "session-b", configOptions: [] });
+    await agentStore.dispatchToAcp("第二轮", [], [], second.id);
+
+    // 进程 cwd 就是 CodeBuddy 这类后端的工作区：不换进程就仍停留在旧目录。
+    expect(h.stop).toHaveBeenCalledWith(7, undefined);
+    expect(h.startAgent).toHaveBeenCalledTimes(2);
+    expect(h.startAgent).toHaveBeenLastCalledWith(expect.any(String), expect.any(String), expect.anything(), "/home/test-2");
+    expect(h.openSession).toHaveBeenLastCalledWith(8, "/home/test-2", []);
+    expect(h.prompt).toHaveBeenLastCalledWith(8, expect.stringContaining("第二轮"));
   });
 
   it("无绑定 → 走 openSession（既有行为不变）", async () => {

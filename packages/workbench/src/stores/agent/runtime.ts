@@ -345,6 +345,10 @@ export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi 
           });
         }
       } else if (event.kind === "stopped") {
+        // 换工作区会主动结束旧进程：它的 stopped 事件可能晚于新进程启动，
+        // 只认当前 handle 的事件，避免把新进程的句柄/状态一起清掉。
+        const stoppedHandle = (event.payload as { handle?: unknown } | null)?.handle;
+        if (typeof stoppedHandle === "number" && stoppedHandle !== state.acpHandle.value) return;
         state.chat.flushPendingContent();
         if (locals.acpStream && locals.acpThreadId) {
           state.chat.appendMessageContent(locals.acpStream.id, `\n\n${t("chat.stopped")}`, locals.acpThreadId);
@@ -357,6 +361,7 @@ export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi 
         state.acpHandle.value = null;
         state.acpSessionId.value = null;
         locals.acpSessionThreadId = null;
+        locals.acpSpawnCwd = null;
         state.acpConfigOptions.value = [];
         state.acpModes.value = null;
         state.acpImageSupport.value = null;
@@ -414,6 +419,7 @@ export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi 
     state.acpHandle.value = null;
     state.acpSessionId.value = null;
     locals.acpSessionThreadId = null;
+    locals.acpSpawnCwd = null;
     state.acpConfigOptions.value = [];
     state.acpModes.value = null;
     state.acpImageSupport.value = null;
@@ -497,11 +503,35 @@ export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi 
       return error instanceof Error ? error.message : String(error);
     }
     await ensureListener();
+    // 进程 cwd 决定「不读 session/new cwd」的后端（如 CodeBuddy）的实际工作区：
+    // 目标工作区变了就必须换进程，否则新会话仍落在首次 spawn 的目录里。
+    if (state.acpHandle.value !== null && locals.acpSpawnCwd !== workspace) {
+      const stale = state.acpHandle.value;
+      state.acpHandle.value = null;
+      state.acpSessionId.value = null;
+      locals.acpSessionThreadId = null;
+      locals.acpSpawnCwd = null;
+      state.acpConfigOptions.value = [];
+      state.acpModes.value = null;
+      state.acpImageSupport.value = null;
+      state.acpUsage.value = null;
+      state.acpStreamId.value = null;
+      locals.acpStream = null;
+      locals.acpThreadId = null;
+      subagents.reset();
+      gate.dismiss();
+      try {
+        await acp.stop(stale);
+      } catch {
+        // 释放失败不影响重建：下一步会 spawn 新进程。
+      }
+    }
     const reusedProcess = state.acpHandle.value !== null;
     if (!reusedProcess) state.acpStatus.value = "connecting";
     try {
-      // 已有进程就只在它上面另开会话，不再 spawn 第二个 CLI。
-      state.acpHandle.value ??= await acp.startAgent(provider.command, state.settings.effectivePermissionTier, provider.env);
+      // 已有进程就只在它上面另开会话，不再 spawn 第二个 CLI；进程 cwd 同步指向本会话工作区。
+      state.acpHandle.value ??= await acp.startAgent(provider.command, state.settings.effectivePermissionTier, provider.env, workspace);
+      locals.acpSpawnCwd = workspace;
       if (abortConnecting) return await abortInFlightStart();
 
       // 惰性恢复：当前对话若落盘了 ACP 绑定、且 provider/cwd 仍一致，先尝试恢复
@@ -578,6 +608,7 @@ export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi 
       if (!reusedProcess) {
         state.acpConnected.value = false;
         state.acpHandle.value = null;
+        locals.acpSpawnCwd = null;
         state.acpConfigOptions.value = [];
         state.acpModes.value = null;
         state.acpUsage.value = null;
@@ -709,6 +740,7 @@ export function createRuntimeSlice({ state, getTurn }: RuntimeDeps): RuntimeApi 
     state.acpHandle.value = null;
     state.acpSessionId.value = null;
     locals.acpSessionThreadId = null;
+    locals.acpSpawnCwd = null;
     state.acpConfigOptions.value = [];
     state.acpModes.value = null;
     state.acpUsage.value = null;
