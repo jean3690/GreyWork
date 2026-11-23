@@ -176,7 +176,9 @@ function describeFailure(status: number, action: string, body: string): string {
       : status === 404
         ? "（设备或任务不存在，可能已被吊销/回收）"
         : status === 409
-          ? "（任务已被其他宿主认领或状态已变化）"
+          ? action.startsWith("/api/sync/")
+            ? "（同步冲突：云端设置已被其他设备修改）"
+            : "（任务已被其他宿主认领或状态已变化）"
           : "";
   let detail = body.trim();
   try {

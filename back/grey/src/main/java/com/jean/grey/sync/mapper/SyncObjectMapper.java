@@ -26,9 +26,10 @@ public interface SyncObjectMapper {
 
 	@Update("""
 			UPDATE sync_object
-			SET revision = #{revision}, deleted = #{deleted}, payload = #{payload}, updated_at = #{updatedAt}
-			WHERE user_id = #{userId} AND kind = #{kind} AND object_id = #{objectId}
+			SET revision = #{object.revision}, deleted = #{object.deleted}, payload = #{object.payload}, updated_at = #{object.updatedAt}
+			WHERE user_id = #{object.userId} AND kind = #{object.kind} AND object_id = #{object.objectId}
+			  AND revision = #{baseRevision}
 			""")
-	int update(SyncObject object);
+	int update(@Param("object") SyncObject object, @Param("baseRevision") Long baseRevision);
 
 }

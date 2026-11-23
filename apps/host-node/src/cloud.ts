@@ -15,6 +15,7 @@ export function validateCloudRequest(method: string, pathname: string): void {
       /^\/api\/hosts$/,
       /^\/api\/skills$/,
       /^\/api\/llm\/providers$/,
+      /^\/api\/sync\/preferences$/,
       /^\/api\/download\/[a-zA-Z0-9_-]+\/[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_-]+$/,
     ],
     POST: [
@@ -24,7 +25,7 @@ export function validateCloudRequest(method: string, pathname: string): void {
       /^\/api\/automation\/tasks$/,
       /^\/api\/automation\/tasks\/at-[a-zA-Z0-9-]+\/(enable|disable)$/,
     ],
-    PUT: [/^\/api\/automation\/tasks\/at-[a-zA-Z0-9-]+$/],
+    PUT: [/^\/api\/automation\/tasks\/at-[a-zA-Z0-9-]+$/, /^\/api\/sync\/preferences$/],
     DELETE: [/^\/api\/storage\/objects\/[1-9]\d{0,18}$/, /^\/api\/automation\/tasks\/at-[a-zA-Z0-9-]+$/],
   };
   if (!routes[method]?.some((route) => route.test(url.pathname))) throw new Error("不允许访问该云端接口");

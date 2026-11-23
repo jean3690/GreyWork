@@ -15,6 +15,8 @@ describe("云端接口边界", () => {
     ["GET", "/api/download/greywork/skills/example"],
     ["GET", "/api/llm/providers"],
     ["POST", "/api/llm/keys"],
+    ["GET", "/api/sync/preferences"],
+    ["PUT", "/api/sync/preferences"],
   ])("允许用户端 %s %s", (method, path) => expect(() => validateCloudRequest(method, path)).not.toThrow());
   it.each([
     ["GET", "https://evil.invalid/api/hosts"],
@@ -29,6 +31,9 @@ describe("云端接口边界", () => {
     ["GET", "/api/llm/keys"],
     ["GET", "/api/llm/usage"],
     ["POST", "/v1/chat/completions"],
+    ["GET", "/api/sync/changes"],
+    ["PUT", "/api/sync/objects/settings/arbitrary"],
+    ["DELETE", "/api/sync/preferences"],
   ])("拒绝代理越界 %s %s", (method, path) => expect(() => validateCloudRequest(method, path)).toThrow());
   it("存储未启用时不读取本地文件", async () => {
     const connection: CloudConnection = {

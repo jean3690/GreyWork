@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.springframework.http.HttpStatus;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,10 +24,12 @@ public class SyncService {
 
 	private final SyncObjectMapper syncObjectMapper;
 	private final SyncChangeMapper syncChangeMapper;
+	private final PreferencesCodec preferences;
 
-	public SyncService(SyncObjectMapper syncObjectMapper, SyncChangeMapper syncChangeMapper) {
+	public SyncService(SyncObjectMapper syncObjectMapper, SyncChangeMapper syncChangeMapper, PreferencesCodec preferences) {
 		this.syncObjectMapper = syncObjectMapper;
 		this.syncChangeMapper = syncChangeMapper;
+		this.preferences = preferences;
 	}
 
 	public record ChangeView(String kind, String objectId, Long revision, boolean deleted,
@@ -37,6 +40,13 @@ public class SyncService {
 	}
 
 	public record PushResult(String kind, String objectId, Long revision) {
+	}
+
+	public ChangeView get(Long userId, String kind, String objectId) {
+		requireKind(kind);
+		var current = syncObjectMapper.find(userId, kind, objectId);
+		return current == null ? null : new ChangeView(kind, objectId, current.getRevision(),
+				Boolean.TRUE.equals(current.getDeleted()), current.getPayload());
 	}
 
 	public PullResult pull(Long userId, long since, int limit) {
@@ -60,6 +70,7 @@ public class SyncService {
 	public PushResult push(Long userId, String kind, String objectId, Long baseRevision,
 			String payload) {
 		requireKind(kind);
+		if (PreferencesCodec.KIND.equals(kind) && PreferencesCodec.OBJECT_ID.equals(objectId)) payload = preferences.sanitize(payload);
 		return save(userId, kind, objectId, baseRevision, payload, false);
 	}
 
@@ -92,14 +103,16 @@ public class SyncService {
 			created.setDeleted(deleted);
 			created.setPayload(payload);
 			created.setUpdatedAt(now);
-			syncObjectMapper.insert(created);
+			try { syncObjectMapper.insert(created); }
+			catch (DuplicateKeyException error) { throw lostRace(); }
 		}
 		else {
 			current.setRevision(change.getId());
 			current.setDeleted(deleted);
 			current.setPayload(payload);
 			current.setUpdatedAt(now);
-			syncObjectMapper.update(current);
+			// CAS 与版本检查在数据库同一条 UPDATE 中完成。失败抛异常，事务也回滚本次 change。
+			if (syncObjectMapper.update(current, baseRevision) != 1) throw lostRace();
 		}
 		return new PushResult(kind, objectId, change.getId());
 	}
@@ -110,6 +123,10 @@ public class SyncService {
 		if (java.util.Objects.equals(expected, baseRevision)) {
 			return;
 		}
+		throw conflict(current);
+	}
+
+	private static ApiException conflict(SyncObject current) {
 		Map<String, Object> details = new LinkedHashMap<>();
 		if (current == null) {
 			details.put("current", null);
@@ -121,8 +138,14 @@ public class SyncService {
 			snapshot.put("payload", current.getPayload());
 			details.put("current", snapshot);
 		}
-		throw new ApiException(HttpStatus.CONFLICT, "sync_conflict",
+		return new ApiException(HttpStatus.CONFLICT, "sync_conflict",
 				"对象已被其他设备修改，请先拉取再重试", details);
+	}
+
+	private static ApiException lostRace() {
+		// 当前事务的快照/一级缓存可能仍是旧行，不把它冒充成最新版本；回滚后由客户端重新 GET。
+		return new ApiException(HttpStatus.CONFLICT, "sync_conflict",
+				"对象已被其他设备修改，请先拉取再重试", Map.of("reload", true));
 	}
 
 	private static void requireKind(String kind) {

@@ -244,6 +244,60 @@ class ControlPlaneApiTest {
 	}
 
 	@Test
+	void preferencesSyncIsSafeAndAccountScoped() throws Exception {
+		String email = "prefs-" + UUID.randomUUID() + "@grey.local";
+		String first = "Bearer " + enroll(email, "desktop").get("token").asString();
+		String second = "Bearer " + enroll(email, "phone").get("token").asString();
+		mockMvc.perform(get("/api/sync/preferences").header("Authorization", first))
+				.andExpect(status().isOk()).andExpect(jsonPath("$.revision").isEmpty());
+		String payload = "{\"schemaVersion\":1,\"theme\":\"github\",\"colorMode\":\"light\",\"fontSize\":\"large\",\"radius\":\"large\",\"locale\":\"en-US\",\"permissionTier\":\"full\",\"apiKey\":\"must-not-sync\",\"workspaceDir\":\"/private\"}";
+		MvcResult created = mockMvc.perform(put("/api/sync/preferences").header("Authorization", first)
+				.contentType(MediaType.APPLICATION_JSON).content("{\"baseRevision\":null,\"payload\":" + payload + "}"))
+				.andExpect(status().isOk()).andReturn();
+		assertThat(json(created).get("revision").isString()).isTrue();
+		String revision = json(created).get("revision").asString();
+		MvcResult read = mockMvc.perform(get("/api/sync/preferences").header("Authorization", second))
+				.andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(revision))
+				.andExpect(jsonPath("$.payload.theme").value("github")).andReturn();
+		assertThat(read.getResponse().getContentAsString()).doesNotContain("apiKey", "permissionTier", "workspaceDir", "must-not-sync");
+		mockMvc.perform(put("/api/sync/preferences").header("Authorization", second).contentType(MediaType.APPLICATION_JSON)
+				.content("{\"baseRevision\":null,\"payload\":" + payload + "}"))
+				.andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("sync_conflict"));
+		String other = "Bearer " + enroll("prefs-other-" + UUID.randomUUID() + "@grey.local", "desktop").get("token").asString();
+		mockMvc.perform(get("/api/sync/preferences").header("Authorization", other))
+				.andExpect(status().isOk()).andExpect(jsonPath("$.revision").isEmpty());
+		mockMvc.perform(get("/api/sync/preferences")).andExpect(status().isUnauthorized());
+	}
+
+	@Test
+	void preferencesSyncConcurrentPushesHaveOneWinner() throws Exception {
+		String email = "prefs-race-" + UUID.randomUUID() + "@grey.local";
+		JsonNode session = enroll(email, "desktop");
+		long userId = session.get("user").get("id").asLong();
+		String first = "Bearer " + session.get("token").asString();
+		String second = "Bearer " + enroll(email, "phone").get("token").asString();
+		String prefs = "{\"schemaVersion\":1,\"theme\":\"codex\",\"colorMode\":\"dark\",\"fontSize\":\"medium\",\"radius\":\"small\",\"locale\":\"zh-CN\"}";
+		MvcResult created = mockMvc.perform(put("/api/sync/preferences").header("Authorization", first)
+				.contentType(MediaType.APPLICATION_JSON).content("{\"baseRevision\":null,\"payload\":" + prefs + "}"))
+				.andExpect(status().isOk()).andReturn();
+		String version = json(created).get("revision").asString();
+		var start = new java.util.concurrent.CountDownLatch(1);
+		try (var executor = java.util.concurrent.Executors.newFixedThreadPool(2)) {
+			var futures = java.util.stream.Stream.of(first, second).map(token -> executor.submit(() -> {
+				start.await();
+				return mockMvc.perform(put("/api/sync/preferences").header("Authorization", token)
+						.contentType(MediaType.APPLICATION_JSON).content("{\"baseRevision\":\"" + version + "\",\"payload\":" + prefs + "}"))
+						.andReturn().getResponse().getStatus();
+			})).toList();
+			start.countDown();
+			assertThat(java.util.List.of(futures.get(0).get(30, TimeUnit.SECONDS), futures.get(1).get(30, TimeUnit.SECONDS)))
+					.containsExactlyInAnyOrder(200, 409);
+		}
+		// 失败提交必须回滚它插入的历史行，不能留下一个未成功更新对象的 change。
+		assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM sync_change WHERE user_id = ?", Long.class, userId)).isEqualTo(2L);
+	}
+
+	@Test
 	void userCanEditOnlyOwnProfileAndDeviceIdsRemainExact() throws Exception {
 		JsonNode current = enroll("profile-owner@grey.local", "desktop");
 		JsonNode other = enroll("profile-other@grey.local", "phone");

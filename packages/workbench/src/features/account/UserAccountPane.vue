@@ -11,6 +11,7 @@ import AccountLoginForm from "./AccountLoginForm.vue";
 import AccountProfileCard from "./AccountProfileCard.vue";
 import AccountProfileForm from "./AccountProfileForm.vue";
 import AccountDevicesCard from "./AccountDevicesCard.vue";
+import PreferencesSyncPane from "./PreferencesSyncPane.vue";
 
 const { t } = useI18n();
 const account = useUserAccountStore();
@@ -107,6 +108,7 @@ onMounted(() => {
         @revoke="confirmation = { kind: 'device', device: $event }"
         @revoke-others="confirmation = { kind: 'others' }"
       />
+      <PreferencesSyncPane />
     </template>
     <template v-else>
       <div v-if="account.available" class="flex items-center justify-between gap-2">

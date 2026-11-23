@@ -20,6 +20,37 @@ export const enUS: MessageSchema = {
     signOutMessage: "You will need to enter the access password again to continue.",
     signOutConfirm: "Sign out",
   },
+  preferencesSync: {
+    title: "Multi-device preferences",
+    busy: "Syncing…",
+    pending: "Local preferences pending",
+    synced: "Matches the confirmed version",
+    description:
+      "Syncs theme, color mode, font size, radius, and language only. Operations are manual; keys, workspace paths, permissions, and model/MCP runtime state stay local.",
+    loginHint: "Sign in to a Java server to sync preferences. The server URL must not contain credentials or query parameters.",
+    baseline: "Confirmed version",
+    cloudVersion: "Cloud version",
+    none: "None",
+    unknown: "Not checked",
+    conflict:
+      "The cloud has an unconfirmed version. Applying or replacing it requires confirmation; another version change will reject the operation.",
+    check: "Check cloud",
+    push: "Push local preferences",
+    apply: "Apply cloud preferences",
+    keep: "Keep local and push",
+    applyTitle: "Apply cloud preferences?",
+    keepTitle: "Keep local and update the cloud?",
+    applyHint:
+      "Replaces only theme, color mode, font size, radius, and language. Workspace paths, permissions, keys, and model/MCP configuration stay local. Further changes require another confirmation.",
+    keepHint:
+      "Updates the cloud version shown here with these five local preferences. Other devices must pull manually. If the cloud has changed again, this operation fails rather than forcing an overwrite.",
+    confirmApply: "Apply cloud",
+    confirmKeep: "Confirm local push",
+    field: "Preference",
+    local: "Local",
+    cloud: "Cloud",
+    fields: { theme: "Theme", colorMode: "Color mode", fontSize: "Font size", radius: "Radius", locale: "Language" },
+  },
   userAccount: {
     entry: "User account",
     loginTitle: "Sign in to GreyWork",

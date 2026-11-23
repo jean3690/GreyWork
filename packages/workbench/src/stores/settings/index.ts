@@ -13,6 +13,7 @@ import { settingsBackend } from "../../lib/settings-backend";
 import { applyAppearance as applyAppearanceToDom } from "../../lib/theme";
 import { notify } from "../notice";
 import { i18n, type AppLocale } from "../../i18n";
+import { parsePublicPreferences } from "../../lib/preferences-sync";
 import {
   DEFAULT_CHANNEL_PREFS,
   DEFAULT_LOCAL_AI,
@@ -185,6 +186,18 @@ export const useSettingsStore = defineStore("settings", () => {
 
   function setRadius(value: Radius): void {
     radius.value = value;
+    applyAppearance();
+    persist();
+  }
+
+  /** 云端只可应用五项显示偏好；路径、权限、凭据和模型/MCP 状态均保持本机原值。 */
+  function applySyncedPreferences(raw: unknown): void {
+    const value = parsePublicPreferences(raw);
+    theme.value = value.theme;
+    colorMode.value = value.colorMode;
+    fontSize.value = value.fontSize;
+    radius.value = value.radius;
+    locale.value = value.locale;
     applyAppearance();
     persist();
   }
@@ -606,6 +619,7 @@ export const useSettingsStore = defineStore("settings", () => {
     setFontSize,
     radius,
     setRadius,
+    applySyncedPreferences,
     setRunMode,
     locale,
     selectedModelProviderId,

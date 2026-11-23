@@ -86,7 +86,9 @@ describe("用户账号", () => {
     expect(pane.text()).toContain("工作电脑");
     expect(pane.text()).toContain("管理员");
     expect(footer?.get('[data-testid="sider-account"]').text()).toContain("Jean");
-    expect(window.localStorage.length).toBe(0);
+    // 同步面板会加载本机设置缓存，但账号/入场码不能因此进入 localStorage，也不能自动写入同步基线。
+    expect(Array.from({ length: window.localStorage.length }, (_, index) => window.localStorage.key(index))).toEqual(["greywork.settings"]);
+    expect(window.localStorage.getItem("greywork.settings")).not.toContain("ABC123");
   });
 
   it("登录失败展示错误，入场码不继续留在输入框", async () => {
