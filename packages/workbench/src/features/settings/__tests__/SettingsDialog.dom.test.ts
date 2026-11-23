@@ -50,6 +50,17 @@ describe("SettingsDialog", () => {
     expect(dialog().find('[data-testid="settings-nav-agent"]').attributes("aria-current")).toBeUndefined();
   });
 
+  it("左栏按分组渲染：组标题与各分区条目同屏", async () => {
+    await mountDialog("appearance");
+    const text = dialog().text();
+    for (const label of ["通用", "智能体", "扩展能力", "连接与协作"]) {
+      expect(text).toContain(label);
+    }
+    // 分组只是视觉分层，条目本身的 testid / 点击行为不变。
+    expect(dialog().find('[data-testid="settings-nav-mcp"]').exists()).toBe(true);
+    expect(dialog().find('[data-testid="settings-nav-controlplane"]').exists()).toBe(true);
+  });
+
   it("点左栏条目只向上报新的分区（开关留在 Shell）", async () => {
     const wrapper = await mountDialog("agent");
     await dialog().find('[data-testid="settings-nav-team"]').trigger("click");

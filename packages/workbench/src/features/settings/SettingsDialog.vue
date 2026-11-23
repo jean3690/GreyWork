@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useI18n } from "vue-i18n";
-import { SETTINGS_SECTIONS } from "@/lib/settings-sections";
+import { SETTINGS_SECTION_GROUPS } from "@/lib/settings-sections";
 import Icon from "@/features/shared/Icon.vue";
 import SettingsView from "@/features/settings/SettingsView.vue";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
@@ -20,8 +20,8 @@ const props = defineProps<{ open: boolean; section: string }>();
 const emit = defineEmits<{ "update:open": [open: boolean]; "update:section": [section: string] }>();
 
 /** 只列 key 与图标；文案统一取 settings.sections.*.title（与 SettingsView 的头部同源）。
- *  清单在 lib/settings-sections：标题栏搜索读同一份。 */
-const sections = SETTINGS_SECTIONS;
+ *  分组与清单在 lib/settings-sections：标题栏搜索读同一份扁平清单。 */
+const groups = SETTINGS_SECTION_GROUPS;
 
 const { t } = useI18n();
 
@@ -75,19 +75,24 @@ function rowClass(active: boolean): string {
 
       <div class="flex min-h-0 flex-1 overflow-hidden border-t border-line">
         <nav class="w-[132px] shrink-0 overflow-y-auto border-r border-line px-2 py-2 sm:w-[168px]">
-          <button
-            v-for="item in sections"
-            :key="item.key"
-            :class="rowClass(props.section === item.key)"
-            :data-testid="`settings-nav-${item.key}`"
-            :aria-current="props.section === item.key ? 'page' : undefined"
-            @click="select(item.key)"
-          >
-            <span class="grid size-5 place-items-center rounded-[calc(5px*var(--gw-radius-scale))] bg-panel text-dim">
-              <Icon :name="item.icon" :size="14" />
-            </span>
-            <span class="min-w-0 flex-1 truncate">{{ t(`settings.sections.${item.key}.title`) }}</span>
-          </button>
+          <div v-for="(group, index) in groups" :key="group.key" :class="index > 0 ? 'mt-3' : ''">
+            <p class="mb-1 px-2 text-[10px] font-medium tracking-wide text-dim2">
+              {{ t(`settings.groups.${group.key}`) }}
+            </p>
+            <button
+              v-for="item in group.sections"
+              :key="item.key"
+              :class="rowClass(props.section === item.key)"
+              :data-testid="`settings-nav-${item.key}`"
+              :aria-current="props.section === item.key ? 'page' : undefined"
+              @click="select(item.key)"
+            >
+              <span class="grid size-5 place-items-center rounded-[calc(5px*var(--gw-radius-scale))] bg-panel text-dim">
+                <Icon :name="item.icon" :size="14" />
+              </span>
+              <span class="min-w-0 flex-1 truncate">{{ t(`settings.sections.${item.key}.title`) }}</span>
+            </button>
+          </div>
         </nav>
 
         <div class="min-h-0 flex-1 overflow-hidden">

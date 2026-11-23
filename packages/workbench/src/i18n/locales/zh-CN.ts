@@ -1142,6 +1142,13 @@ export const zhCN = {
       storage: { title: "存储", desc: "会话落盘与远端同步" },
       team: { title: "团队", desc: "成员与协作空间" },
     },
+    /** 侧栏分组小标题；组与组内条目都在 lib/settings-sections。 */
+    groups: {
+      general: "通用",
+      agent: "智能体",
+      extensions: "扩展能力",
+      collaboration: "连接与协作",
+    },
     plugins: {
       empty: "还没有插件声明设置项。安装带 settingsSchema 的插件后会出现在这里。",
       saved: "已保存",

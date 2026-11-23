@@ -1168,6 +1168,13 @@ export const enUS: MessageSchema = {
       storage: { title: "Storage", desc: "Session persistence and remote sync" },
       team: { title: "Team", desc: "Members and collaboration spaces" },
     },
+    /** Sidebar group headings; groups and their sections live in lib/settings-sections. */
+    groups: {
+      general: "General",
+      agent: "Agent",
+      extensions: "Extensions",
+      collaboration: "Connections & collaboration",
+    },
     plugins: {
       empty: "No installed plugin declares settings yet. Plugins with settingsSchema show up here.",
       saved: "Saved",
