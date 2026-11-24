@@ -11,6 +11,8 @@ dist/
 AGENTS.md
 AGENT.md
 CLAUDE.md
+*.docx
+*.doc
 *.log
 # 日志轮转目录：*.log 盖不住同目录的 .<hash>-audit.json（winston-daily-rotate-file 的轮转元数据）
 logs/
