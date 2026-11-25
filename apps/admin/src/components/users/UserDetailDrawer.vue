@@ -20,7 +20,7 @@ const emit = defineEmits<{ revoke: [device: DeviceItem] }>();
             }}</el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="注册来源">{{
-            detail.providers.length ? detail.providers.join(" / ") : "入场码"
+            detail.providers.length ? detail.providers.join(" / ") : "邮箱密码"
           }}</el-descriptions-item>
           <el-descriptions-item label="设备数">{{ detail.deviceCount }}</el-descriptions-item>
           <el-descriptions-item label="最近活跃">{{ formatDateTime(detail.lastActiveAt) }}</el-descriptions-item>

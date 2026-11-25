@@ -4,9 +4,9 @@
 | ------------------------------------------------------------------ | ---------------------------------------------------------------------- |
 | [architecture.md](architecture.md)                                 | 仓库分层、依赖方向、前端 / 宿主 / 控制面边界、构建与测试               |
 | [agent-loop.md](agent-loop.md)                                     | 原生 Agent Loop、第三方模型接入、兼容性参数、工具调用自检与权限        |
-| [control-plane-auth.md](control-plane-auth.md)                     | 控制面登录（密码 / 入场码 / OIDC）、角色、运维台、运维端点、故障排查   |
+| [control-plane-auth.md](control-plane-auth.md)                     | 控制面登录（邮箱密码 / OIDC）、角色、运维台、运维端点、故障排查   |
 | [control-plane-api.md](control-plane-api.md)                       | 控制面业务接口一览（同步 / 宿主 / 通道 / 模型 / 市场 / 自动化 / 存储） |
-| [demo-walkthrough.md](demo-walkthrough.md)                         | 运维台答辩演示脚本（准备 → 登录 → 签发码 → 用户/设备 → 审计）          |
+| [demo-walkthrough.md](demo-walkthrough.md)                         | 运维台答辩演示脚本（准备 → 登录 → 客户端注册 → 用户/设备 → 审计）          |
 | [packaging.md](packaging.md)                                       | 桌面安装包、浏览器端托管、Java 控制面打包、Docker 自托管               |
 | [node-backend-migration.md](node-backend-migration.md)             | 后端从 Rust 迁到 Node 的方案、阶段与进度（P0 已完成）                  |
 | [plugin-authoring.md](plugin-authoring.md)                         | 插件 manifest、能力授权、声明式 UI 与宿主 API                          |

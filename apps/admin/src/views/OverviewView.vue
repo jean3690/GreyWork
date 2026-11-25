@@ -45,7 +45,6 @@ const facts = computed(() => {
   return [
     { label: "在线宿主", value: value.hosts.alive + " / " + value.hosts.total },
     { label: "活跃设备（24h）", value: value.devices.active24h + " / " + value.devices.total },
-    { label: "可用入场码", value: String(value.codes.active) },
     { label: "模型密钥", value: String(value.llm.keys) },
     { label: "管理员", value: value.users.admins + " / " + value.users.total },
     { label: "7 天审计动作", value: String(value.audit.total7d) },
@@ -108,7 +107,7 @@ onMounted(load);
         <StatCard
           label="今日审计动作"
           :value="String(data.audit.today)"
-          :hint="'可用入场码 ' + data.codes.active + ' · 今日签发 ' + data.codes.issuedToday"
+          :hint="'7 天累计 ' + data.audit.total7d"
           tone="amber"
         >
           <template #icon

@@ -3,13 +3,9 @@ package com.jean.grey.auth;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.jean.grey.account.entity.AppUser;
 import com.jean.grey.account.mapper.AppUserMapper;
-import com.jean.grey.auth.entity.EnrollmentCode;
 import com.jean.grey.auth.entity.UserDevice;
-import com.jean.grey.auth.mapper.EnrollmentCodeMapper;
 import com.jean.grey.auth.mapper.UserDeviceMapper;
 import com.jean.grey.common.ApiException;
-import com.jean.grey.common.Emails;
-import com.jean.grey.common.Hashes;
 import java.time.LocalDateTime;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -18,17 +14,15 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class AuthService {
 
-	private final EnrollmentCodeMapper enrollmentCodeMapper;
 	private final AppUserMapper appUserMapper;
 	private final UserDeviceMapper userDeviceMapper;
 	private final TokenService tokenService;
 	private final RolePolicy rolePolicy;
 	private final int maxDevices;
 
-	public AuthService(EnrollmentCodeMapper enrollmentCodeMapper, AppUserMapper appUserMapper,
+	public AuthService(AppUserMapper appUserMapper,
 			UserDeviceMapper userDeviceMapper, TokenService tokenService, RolePolicy rolePolicy,
 			@Value("${grey.auth.max-devices:20}") int maxDevices) {
-		this.enrollmentCodeMapper = enrollmentCodeMapper;
 		this.appUserMapper = appUserMapper;
 		this.userDeviceMapper = userDeviceMapper;
 		this.tokenService = tokenService;
@@ -51,45 +45,7 @@ public class AuthService {
 				.eq(AppUser::getId, userId).set(AppUser::getDisplayName, name));
 	}
 
-	@Transactional
-	public Enrolled enroll(String rawCode, String email, String displayName, String deviceName,
-			String platform) {
-		String normalizedEmail = Emails.normalize(email);
-		if (normalizedEmail == null) {
-			throw ApiException.badRequest("email_invalid", "邮箱不能为空");
-		}
-		EnrollmentCode code = enrollmentCodeMapper.selectOne(Wrappers.<EnrollmentCode>lambdaQuery()
-				.eq(EnrollmentCode::getCodeHash, Hashes.sha256Hex(rawCode)));
-		if (code == null || code.getUsedAt() != null || code.getExpiresAt().isBefore(LocalDateTime.now())) {
-			throw ApiException.unauthorized("enroll_code_invalid", "入场码无效或已过期");
-		}
-		int claimed = enrollmentCodeMapper.update(null, Wrappers.<EnrollmentCode>lambdaUpdate()
-				.set(EnrollmentCode::getUsedAt, LocalDateTime.now())
-				.eq(EnrollmentCode::getId, code.getId())
-				.isNull(EnrollmentCode::getUsedAt));
-		if (claimed != 1) {
-			throw ApiException.unauthorized("enroll_code_used", "入场码已被使用");
-		}
-
-		AppUser user = findByEmail(normalizedEmail);
-		if (user == null) {
-			user = new AppUser();
-			user.setEmail(normalizedEmail);
-			user.setDisplayName(displayName == null || displayName.isBlank() ? normalizedEmail : displayName);
-			user.setStatus("active");
-			user.setRole(rolePolicy.roleFor(normalizedEmail));
-			appUserMapper.insert(user);
-		}
-		else if (!normalizedEmail.equals(user.getEmail())) {
-			// 历史行可能是大小写混杂的写法：顺手归一化，避免下次再建出第二个账号。
-			user.setEmail(normalizedEmail);
-			appUserMapper.updateById(user);
-		}
-
-		return issueSession(user.getId(), deviceName, platform);
-	}
-
-	/** 所有登录方式（入场码 / OIDC）最终都走这里：建设备 + 发 token。 */
+	/** 所有登录方式（密码 / OIDC）最终都走这里：建设备 + 发 token。 */
 	public Enrolled issueSession(Long userId, String deviceName, String platform) {
 		AppUser user = appUserMapper.selectById(userId);
 		requireActive(user);
@@ -107,8 +63,7 @@ public class AuthService {
 	 * 账号可用性：**所有登录方式与每个带 token 的请求**都以这里为准。
 	 *
 	 * 以前 status / deleted_at 只有字段没有读者，禁用账号等于没禁用 —— 这里补上，
-	 * 并且把「已删除」与「非 active」统一成 403（对已登录用户是明确拒绝，对未登录者
-	 * 也拿不到「这个邮箱存不存在」之外的信息，因为入场码已经证明了来源可信）。
+	 * 并且把「已删除」与「非 active」统一成 403（对已登录用户是明确拒绝）。
 	 */
 	public void requireActive(AppUser user) {
 		if (user == null) {
@@ -143,20 +98,9 @@ public class AuthService {
 	}
 
 	/**
-	 * 按邮箱找用户：用 LOWER(email) 比较而不是 eq(email)。
-	 *
-	 * 历史库里可能已有大小写混杂的行（归一化之前的写入），等值查询会让同一个人开出第二个
-	 * 账号；这里用下界比较命中老行，再在 enroll 里把该行改写成归一化形式。
-	 */
-	private AppUser findByEmail(String normalizedEmail) {
-		return appUserMapper.selectOne(Wrappers.<AppUser>query()
-				.apply("LOWER(email) = {0}", normalizedEmail));
-	}
-
-	/**
 	 * 设备数上限：超出时淘汰**最久没出现**的设备（按注册时间，新的在后），并吊销其会话。
 	 *
-	 * 为什么要有：每次入场码 / OIDC 登录都会插一行设备，没有上限时一台机器反复重装会攒出
+	 * 为什么要有：每次密码 / OIDC 登录都会插一行设备，没有上限时一台机器反复重装会攒出
 	 * 几十行垃圾，运维面的设备列表也就失去意义。淘汰最老的而保留刚登记的，符合「这台还在用」。
 	 */
 	private void pruneDevices(Long userId, Long keepDeviceId) {

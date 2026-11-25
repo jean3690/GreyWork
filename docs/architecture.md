@@ -204,7 +204,7 @@ The control plane is intentionally a **separate stack** from the desktop product
   produces a jar that serves `/admin` without Node. Routing is hash-based (`/admin/#/users`), so the
   server only needs the single `/admin` → `index.html` mapping in `AdminPageController`.
 - **Separate auth surface.** The console logs in with an admin-only email + password
-  (`app_user.password_hash`, bcrypt); normal clients still use one-time enrollment codes or OIDC.
+  (`app_user.password_hash`, bcrypt); normal clients sign in with email + password (open registration) or OIDC.
   All data endpoints stay behind `ROLE_ADMIN` and mutations are written to `audit_log`.
 - **Deployment shape.** Java service (JRE 25 + MySQL + Redis) next to — not inside — the Node host.
   Env vars, endpoints and troubleshooting live in

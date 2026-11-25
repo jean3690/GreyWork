@@ -48,7 +48,7 @@ describe("http", () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(http.delete("/api/admin/enroll-codes/1")).resolves.toBeUndefined();
+    await expect(http.delete("/api/admin/users/1")).resolves.toBeUndefined();
   });
 
   it("401 清会话并广播事件，错误体映射成 ApiError", async () => {

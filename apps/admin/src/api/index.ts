@@ -6,9 +6,7 @@ import type {
   CatalogItemView,
   ChannelItem,
   DeviceItem,
-  EnrollCodeItem,
   HostItem,
-  IssuedCode,
   LlmKeyItem,
   LlmUsageOverview,
   Overview,
@@ -58,16 +56,6 @@ export const adminApi = {
   },
   revokeDevice(id: string, deviceId: string): Promise<void> {
     return http.delete<void>("/api/admin/users/" + id + "/devices/" + deviceId);
-  },
-
-  enrollCodes(): Promise<EnrollCodeItem[]> {
-    return http.get<EnrollCodeItem[]>("/api/admin/enroll-codes");
-  },
-  issueEnrollCode(expiresInHours: number): Promise<IssuedCode> {
-    return http.post<IssuedCode>("/api/admin/enroll-codes", { expiresInHours });
-  },
-  revokeEnrollCode(id: string): Promise<void> {
-    return http.delete<void>("/api/admin/enroll-codes/" + id);
   },
 
   hosts(): Promise<HostItem[]> {

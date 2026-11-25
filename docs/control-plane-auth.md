@@ -7,15 +7,15 @@
 
 ## 登录
 
-三条路径（运维台密码 / 入场码 / OIDC），最终都落到 `AuthService.issueSession`：
+三条路径（用户密码 / 运维台密码 / OIDC），最终都落到 `AuthService.issueSession`：
 
 | 方式     | 入口                                                                    | 凭据                                                      |
 | -------- | ----------------------------------------------------------------------- | --------------------------------------------------------- |
-| 账号密码 | `POST /api/admin/auth/login` `{ email, password }`                      | **仅 admin 账号**；bcrypt 哈希存 `app_user.password_hash` |
-| 入场码   | `POST /api/auth/enroll` `{ code, email, deviceName, platform }`         | 一次性码（默认 24h，`GREY_ENROLL_CODE` 或自动生成打日志） |
+| 用户密码 | `POST /api/auth/register`（注册即登录）/ `POST /api/auth/login` `{ email, password, deviceName, platform }` | 开放注册；bcrypt 哈希存 `app_user.password_hash`          |
+| 运维台密码 | `POST /api/admin/auth/login` `{ email, password }`                      | **仅 admin 账号**；与用户密码同一套 bcrypt 存储           |
 | OIDC     | `GET /api/auth/oidc/{provider}/authorize` → callback → `POST /exchange` | 身份源（配置见 `grey.oidc.providers`）                    |
 
-管理员首次部署不需要先换入场码：启动时 `AdminCredentialBootstrap` 会为
+管理员首次部署不需要任何前置步骤：启动时 `AdminCredentialBootstrap` 会为
 `GREY_ADMIN_EMAILS` 里的每个邮箱建号（若不存在）、提为 admin、并写入初始密码。
 
 ```bash
@@ -25,15 +25,15 @@ GREY_ADMIN_PASSWORD="change-me-please"   # 留空则随机生成并打印到启�
 
 - 已有密码的账号**不会被重启覆盖**；改密码走运维台「账户设置 → 修改密码」，或
   `POST /api/admin/auth/password`。
-- 忘记密码：清掉库里的 `password_hash` 后重启（重新种初始密码），或用入场码登录
-  取得 admin token 后调用修改密码接口。
-- 密码登录失败与入场码失败**分开限流**（`grey:auth:admin-login-fail:*`），
+- 忘记密码：清掉库里的 `password_hash` 后重启（重新种初始密码）。
+- 普通用户与运维台的密码登录失败**分开限流**（`grey:auth:login-fail:*` /
+  `grey:auth:admin-login-fail:*`），
   互不影响；失败文案统一为「邮箱或密码不正确」，不暴露账号是否存在。
 - 运维台每次登录也登记一台设备（名称「运维台」、平台 `web`），同样受
   `GREY_MAX_DEVICES` 上限约束；超出时淘汰最久没用的那台，不影响其它客户端。
 
 - 邮箱统一 trim + 小写，按 `LOWER(email)` 查找；`A@x.com` 与 `a@x.com` 是同一个账号。
-- 入场码连续失败会限流：默认 10 次 / 10 分钟（`GREY_ENROLL_MAX_FAILURES`），只计失败、成功清零。
+- 密码登录连续失败会限流：默认 10 次 / 10 分钟（`GREY_LOGIN_MAX_FAILURES`），只计失败、成功清零。
 - 账号 `status` 非 `active`（或被逻辑删除）时：不能登录（403 `user_disabled`），存量 token 立即失效。
 
 登录态是一枚不透明 token（Redis 里只存 sha256），`Authorization: Bearer <token>`。
@@ -71,7 +71,6 @@ GREY_ADMIN_EMAILS="ops@example.com,boss@example.com"
 | ---------- | ------------------------------------------------------------------------- |
 | 概览       | 用户 / 宿主 / 通道 / token / 审计五组指标，近 7 天趋势，最近 8 条运维动作 |
 | 用户与设备 | 搜索、详情、启用禁用、升降角色、踢下线、逐台吊销设备                      |
-| 入场码     | 按有效期签发（1h / 24h / 7d / 30d）、一键复制明文、撤销未使用的码         |
 | 宿主       | 跨用户查看实例、在线状态、版本、承载通道数                                |
 | 通道绑定   | 跨用户查看平台 / 账号 / 归属宿主 / 有效状态，管理员可硬停用               |
 | 模型与用量 | 密钥元数据（密文不出库）、7 天请求与 token、按供应商拆分                  |
@@ -107,7 +106,7 @@ GREY_ADMIN_PASSWORD=change-me-please \
 
 1. 打开 <http://localhost:8080/admin>，用上面的邮箱 + 密码登录；
 2. 「概览」确认用户 / 宿主 / 通道 / token 四组数字都有值（空库时是 0，属正常）；
-3. 「入场码」签发一枚 24h 码，复制给客户端完成首次 `/api/auth/enroll`；
+3. 客户端「用户账号」用邮箱密码登录；没有账号就点「注册并连接」（开放注册，注册即登录）；
 4. 客户端登录后，用户与设备页能看到该账号；宿主页要等客户端注册宿主后才有数据；
 5. 「审计日志」能看到刚才的签发、登录与启停动作。
 
@@ -134,11 +133,9 @@ GREY_ADMIN_PASSWORD=change-me-please \
 | ---- | -------------------------- | ----------------------------------------------------------- |
 | POST | `/api/admin/auth/login`    | 匿名；`{ email, password }` → `{ token, user, device }`     |
 | POST | `/api/admin/auth/password` | 已登录管理员改密码；`{ currentPassword, newPassword }`      |
-| GET  | `/api/admin/overview`      | 首页聚合（用户/设备/入场码/宿主/通道/模型/审计 + 7 天趋势） |
+| GET  | `/api/admin/overview`      | 首页聚合（用户/设备/宿主/通道/模型/审计 + 7 天趋势）        |
 
-`/api/admin/overview` 的响应（字段名与 `apps/admin/src/types.ts` 一一对应）：
-
-```json
+`/api/admin/overview` 的响应（字段名与 `apps/admin/src/types.ts` 一一对应）：```json
 {
   "users": { "total": 42, "active": 40, "disabled": 2, "admins": 2, "newToday": 3, "new7d": 11 },
   "devices": { "total": 57, "active24h": 12 },
@@ -186,24 +183,16 @@ GREY_ADMIN_PASSWORD=change-me-please \
 存储与自动化是**只读**视图：容量口径只含 `status=ready`（pending 是签了票据没回执的空壳，单独计数）；
 逾期未认领 = `status=pending AND due_at < now`，它比 pending 总量更能说明调度是否卡住。
 
-### 入场码
-
-| 方法   | 路径                                                 | 说明                                                                  |
-| ------ | ---------------------------------------------------- | --------------------------------------------------------------------- |
-| GET    | `/api/admin/enroll-codes`                            | 最近 100 条，只回 `hashPrefix`（前 8 位）与 `active / used / expired` |
-| POST   | `/api/admin/enroll-codes` `{ "expiresInHours": 24 }` | 签发；**明文只在这次响应里出现一次**                                  |
-| DELETE | `/api/admin/enroll-codes/{id}`                       | 只允许撤销未使用的码；用过的要保留作审计线索                          |
-
 ## 演示
 
-答辩用的完整动线（准备 → 登录 → 签发入场码 → 用户/设备 → 通道 → 审计 → 收尾话术）见
+答辩用的完整动线（准备 → 登录 → 客户端注册接入 → 用户/设备 → 通道 → 审计 → 收尾话术）见
 [demo-walkthrough.md](demo-walkthrough.md)。
 
 ## 已知边界
 
 - 没有 token 轮换：token 是固定串，靠滑动 TTL + 撤销入口控制生命周期；真要「换 token」得
   先有能持久化新 token 的客户端。
-- 没有「记住我」与多因素：管理员密码是长期凭据，建议置于 TLS 反代之后；入场码本身
-  仍是普通用户的第二因素。
-- 没有邮箱验证：入场码本身就是准入门槛（`enroll` 会按邮箱建号）。
+- 没有「记住我」与多因素：密码是长期凭据，建议置于 TLS 反代之后。
+- 开放注册没有邮箱验证：能连到控制面的来源都能注册账号；公网部署建议配 TLS 反代 +
+  审计兜底，必要时按来源地址加网络层限制。
 - 没有细粒度权限点：两档角色 + URL 前缀门禁；出现第三方协作用户再谈。

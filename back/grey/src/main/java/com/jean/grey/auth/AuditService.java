@@ -9,7 +9,7 @@ import java.util.List;
 import org.springframework.stereotype.Service;
 
 /**
- * 运维操作审计：任何会改变用户/设备/入场码状态的 admin 动作都记一笔。
+ * 运维操作审计：任何会改变用户/设备状态的 admin 动作都记一笔。
  *
  * 写入失败不阻断主流程——审计是「旁路证据」，不能因为写日志失败就把禁用账号、踢人
  * 这类关键操作一起搞砸；所以 record 吞掉异常、只打日志。读取用 list，按时间倒序，
@@ -23,8 +23,6 @@ public class AuditService {
 	public static final String ACTION_USER_ROLE_CHANGE = "user_role_change";
 	public static final String ACTION_USER_SESSIONS_REVOKE = "user_sessions_revoke";
 	public static final String ACTION_DEVICE_REVOKE = "device_revoke";
-	public static final String ACTION_ENROLL_CODE_ISSUE = "enroll_code_issue";
-	public static final String ACTION_ENROLL_CODE_REVOKE = "enroll_code_revoke";
 	public static final String ACTION_CHANNEL_STATUS = "channel_status";
 	public static final String ACTION_ADMIN_PASSWORD_CHANGE = "admin_password_change";
 	public static final String ACTION_ADMIN_LOGIN = "admin_login";
@@ -34,7 +32,6 @@ public class AuditService {
 
 	public static final String TARGET_USER = "user";
 	public static final String TARGET_DEVICE = "device";
-	public static final String TARGET_ENROLL_CODE = "enroll_code";
 	public static final String TARGET_CHANNEL = "channel";
 	public static final String TARGET_CATALOG = "catalog";
 

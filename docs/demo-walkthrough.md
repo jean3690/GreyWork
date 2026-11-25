@@ -17,7 +17,7 @@ GREY_MASTER_KEY=$(openssl rand -base64 32) \
 ./mvnw spring-boot:run
 ```
 
-启动日志里会打印一枚自动生成的入场码（`GREY_ENROLL_CODE` 留空时），复制备用。
+启动日志里确认 `PasswordCredentialService` 已为 `GREY_ADMIN_EMAILS` 里的账号种好密码（随机密码会打印一次）。
 
 检查：
 
@@ -46,20 +46,16 @@ curl -s http://localhost:8080/actuator/health
 
 空库时数字是 0，属正常；不要在这里停顿解释「为什么没有数据」，直接进入下一步制造数据。
 
-## 3. 签发入场码 + 客户端入场（约 3 分钟）
+## 3. 客户端注册接入（约 3 分钟）
 
-在「入场码」页：
-
-1. 有效期选 24 小时 → 「签发新码」；
-2. 复制明文（只显示一次，库里是 sha256）；
-3. 用 curl 模拟普通客户端入场：
+用 curl 模拟普通客户端注册（开放注册，注册即登录）：
 
 ```bash
-curl -s -X POST http://localhost:8080/api/auth/enroll \
+curl -s -X POST http://localhost:8080/api/auth/register \
   -H 'Content-Type: application/json' \
   -d '{
-    "code": "刚才复制的入场码",
     "email": "demo@example.com",
+    "password": "DemoPass123",
     "displayName": "演示用户",
     "deviceName": "demo-laptop",
     "platform": "desktop"
@@ -73,10 +69,19 @@ TOKEN='粘贴上一步返回的 token'
 curl -s http://localhost:8080/api/auth/me -H "Authorization: Bearer $TOKEN"
 ```
 
+再重复一次同样的请求，展示「邮箱已注册」的 409 防护：
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' -X POST http://localhost:8080/api/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{"email": "demo@example.com", "password": "DemoPass123", "deviceName": "d", "platform": "desktop"}'
+```
+
 讲解点：
 
-- 入场码一次性、24h 过期、失败有独立限流（10 次 / 10 分钟）。
-- 同一邮箱会复用账号，设备单独登记；超过设备上限会淘汰最久没出现的那台。
+- 注册即登录：拿到的 token 与密码登录是同一种会话；密码只存 bcrypt，不落明文。
+- 同一邮箱重复注册回 409，引导去登录；登录失败有独立限流（10 次 / 10 分钟）。
+- 同一邮箱换设备登录会复用账号，设备单独登记；超过设备上限会淘汰最久没出现的那台。
 - 角色来自邮箱名单，不是「第一个注册的人就是管理员」。
 
 ## 4. 用户与设备（约 3 分钟）
@@ -113,13 +118,13 @@ curl -s http://localhost:8080/api/auth/me -H "Authorization: Bearer $TOKEN"
 
 打开「审计日志」：
 
-- 按目标类型 `user` / `enroll_code` / `channel` 过滤；
-- 指出刚才的动作都在：签发入场码、禁用/启用、踢下线、吊销设备、运维台登录；
+- 按目标类型 `user` / `device` / `channel` 过滤；
+- 指出刚才的动作都在：注册登录、禁用/启用、踢下线、吊销设备、运维台登录；
 - 说明审计只追加、不软删，操作者邮箱是写入时快照。
 
 ## 8. 收尾话术
 
-- 认证：密码 / 入场码 / OIDC 三条路径最终都走 `issueSession`，权限只有 URL 前缀
+- 认证：用户密码 / 运维台密码 / OIDC 三条路径最终都走 `issueSession`，权限只有 URL 前缀
   `/api/admin/**` + `ROLE_ADMIN`。
 - 数据：MySQL 存业务，Redis 存 token/心跳/限流，Flyway 管 schema。
 - 前端：运维台与产品前端完全解耦，构建产物随 jar 发布，部署只需要 JRE + MySQL + Redis。
@@ -130,6 +135,6 @@ curl -s http://localhost:8080/api/auth/me -H "Authorization: Bearer $TOKEN"
 | --------------------- | ----------------------------------------------------------------------------------- |
 | 8080 被占             | `SERVER_PORT=8081 ./mvnw spring-boot:run`，前端用 `GREY_PUBLIC_BASE_URL` 与代理对齐 |
 | 想要全新数据          | `docker compose down -v`（会删本地库与对象存储卷）                                  |
-| 忘记管理员密码        | 清空该账号 `app_user.password_hash` 后重启，或先用入场码换 token 调改密接口         |
+| 忘记管理员密码        | 清空该账号 `app_user.password_hash` 后重启（重新种初始密码）                        |
 | 运维台白屏            | 确认 `static/admin/index.html` 存在；`mvn clean package` 后重试                     |
-| 演示时不方便手打 curl | 提前把命令贴在讲稿里，只替换入场码                                                  |
+| 演示时不方便手打 curl | 提前把命令贴在讲稿里，只替换邮箱和密码                                              |

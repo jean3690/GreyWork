@@ -33,12 +33,6 @@ export const router = createRouter({
           meta: { title: "用户与设备", subtitle: "搜索、启停、调整角色、管理会话" },
         },
         {
-          path: "enroll-codes",
-          name: "enroll-codes",
-          component: () => import("../views/EnrollCodesView.vue"),
-          meta: { title: "入场码", subtitle: "签发一次性准入凭据" },
-        },
-        {
           path: "hosts",
           name: "hosts",
           component: () => import("../views/HostsView.vue"),

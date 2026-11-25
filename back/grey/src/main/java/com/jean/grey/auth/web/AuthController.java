@@ -52,14 +52,6 @@ public class AuthController {
 		this.rateLimiter = rateLimiter;
 	}
 
-	public record EnrollRequest(
-			@NotBlank String code,
-			@NotBlank @Email String email,
-			@Size(max = 128) String displayName,
-			@NotBlank @Size(max = 128) String deviceName,
-			@NotBlank @Size(max = 32) String platform) {
-	}
-
 	/** 登录密码不在 DTO 上卡长度：错误密码要回 401 的统一文案，而不是 400 的长度提示。 */
 	public record LoginRequest(
 			@NotBlank @Email String email,
@@ -92,30 +84,9 @@ public class AuthController {
 	public record MeView(UserView user, DeviceView device) {
 	}
 
-	@PostMapping("/enroll")
-	@ResponseStatus(HttpStatus.CREATED)
-	public SessionView enroll(@Valid @RequestBody EnrollRequest request, HttpServletRequest http) {
-		// 入场码是唯一能在未登录态被猜的凭据：连续失败到阈值就先拦住这个来源，
-		// 免得接口变成「猜码 + 顺带建号」的入口。成功一次即清零。
-		String client = http.getRemoteAddr();
-		rateLimiter.assertAllowed(client);
-		try {
-			AuthService.Enrolled enrolled = authService.enroll(request.code(), request.email(),
-					request.displayName(), request.deviceName(), request.platform());
-			rateLimiter.clear(client);
-			return new SessionView(enrolled.token(), userView(enrolled.user()), deviceView(enrolled.device()));
-		}
-		catch (ApiException ex) {
-			if (ex.getStatus() == HttpStatus.UNAUTHORIZED) {
-				rateLimiter.recordFailure(client);
-			}
-			throw ex;
-		}
-	}
-
 	/**
 	 * 邮箱密码登录：普通用户的常规入口（管理员走 /api/admin/auth/login，口径相同）。
-	 * 失败按独立作用域限流，不与入场码互相牵连。
+	 * 失败按独立作用域限流，不与运维台登录互相牵连。
 	 */
 	@PostMapping("/login")
 	public SessionView login(@Valid @RequestBody LoginRequest request, HttpServletRequest http) {
@@ -136,7 +107,7 @@ public class AuthController {
 	}
 
 	/**
-	 * 开放注册：邮箱 + 密码直接建号并当场登录（注册即登录，与入场码同一种会话）。
+	 * 开放注册：邮箱 + 密码直接建号并当场登录（注册即登录，与密码登录同一种会话）。
 	 * 注册不设限流 —— 它没有可猜的凭据，失败只有参数错误与邮箱冲突两种。
 	 */
 	@PostMapping("/register")

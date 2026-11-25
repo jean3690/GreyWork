@@ -96,7 +96,7 @@ async function submit(): Promise<void> {
           <el-button class="submit" type="primary" :loading="loading" native-type="submit" @click="submit"> 进入运维台 </el-button>
         </el-form>
 
-        <p class="foot">普通用户请使用客户端的入场码登录，这里不接受普通账号。</p>
+        <p class="foot">普通用户请使用客户端的邮箱密码登录，这里不接受普通账号。</p>
       </div>
     </section>
   </div>

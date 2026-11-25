@@ -39,20 +39,6 @@ export interface DeviceItem {
   createdAt: string;
 }
 
-export interface EnrollCodeItem {
-  id: string;
-  hashPrefix: string;
-  expiresAt: string;
-  usedAt: string | null;
-  createdAt: string;
-  status: "active" | "used" | "expired" | string;
-}
-
-export interface IssuedCode {
-  code: string;
-  item: EnrollCodeItem;
-}
-
 export interface AuditLog {
   id: number;
   actorId: number | null;
@@ -67,7 +53,6 @@ export interface AuditLog {
 export interface Overview {
   users: { total: number; active: number; disabled: number; admins: number; newToday: number; new7d: number };
   devices: { total: number; active24h: number };
-  codes: { active: number; used: number; expired: number; issuedToday: number };
   hosts: { total: number; alive: number; bindings: number };
   channels: { total: number; active: number; degraded: number; disabled: number };
   llm: { keys: number; requests7d: number; tokens7d: number; tokensToday: number };

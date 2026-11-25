@@ -11,8 +11,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.jean.grey.account.entity.AppUser;
 import com.jean.grey.account.mapper.AppUserMapper;
-import com.jean.grey.auth.entity.EnrollmentCode;
-import com.jean.grey.auth.mapper.EnrollmentCodeMapper;
 import com.jean.grey.common.Hashes;
 import java.net.URI;
 import java.time.LocalDateTime;
@@ -155,9 +153,6 @@ class ControlPlaneApiTest {
 
 	@Autowired
 	org.springframework.jdbc.core.JdbcTemplate jdbc;
-
-	@Autowired
-	EnrollmentCodeMapper enrollmentCodeMapper;
 
 	@Autowired
 	AppUserMapper appUserMapper;
@@ -1223,11 +1218,12 @@ class ControlPlaneApiTest {
 		mockMvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + token))
 				.andExpect(status().isUnauthorized());
 
-		mockMvc.perform(post("/api/auth/enroll")
+		// 禁用后密码登录同样被挡（注册会 409，登录才是明确的 403 拒绝）。
+		mockMvc.perform(post("/api/auth/login")
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
-								{"code":"%s","email":"disabled@grey.local","deviceName":"second","platform":"server"}
-								""".formatted(newCode())))
+								{"email":"disabled@grey.local","password":"%s","deviceName":"second","platform":"server"}
+								""".formatted(passwordFor("disabled@grey.local"))))
 				.andExpect(status().isForbidden())
 				.andExpect(jsonPath("$.code").value("user_disabled"));
 	}
@@ -1321,29 +1317,29 @@ class ControlPlaneApiTest {
 
 	/** 连续失败到阈值后先 429；成功一次会清零，所以正常用户不会被误伤。 */
 	@Test
-	void enrollFailuresAreRateLimited() throws Exception {
+	void loginFailuresAreRateLimited() throws Exception {
 		String client = "127.0.0.1";
-		redis.delete("grey:auth:enroll-fail:" + client);
+		redis.delete("grey:auth:login-fail:" + client);
 
 		try {
 			for (int attempt = 0; attempt < 10; attempt++) {
-				mockMvc.perform(post("/api/auth/enroll")
+				mockMvc.perform(post("/api/auth/login")
 								.contentType(MediaType.APPLICATION_JSON)
 								.content("""
-										{"code":"WRONG-CODE","email":"brute@grey.local","deviceName":"x","platform":"server"}
+										{"email":"brute@grey.local","password":"wrong-pass","deviceName":"x","platform":"server"}
 										"""))
 						.andExpect(status().isUnauthorized());
 			}
-			mockMvc.perform(post("/api/auth/enroll")
+			mockMvc.perform(post("/api/auth/login")
 							.contentType(MediaType.APPLICATION_JSON)
 							.content("""
-									{"code":"WRONG-CODE","email":"brute@grey.local","deviceName":"x","platform":"server"}
+									{"email":"brute@grey.local","password":"wrong-pass","deviceName":"x","platform":"server"}
 									"""))
 					.andExpect(status().isTooManyRequests())
-					.andExpect(jsonPath("$.code").value("enroll_rate_limited"));
+					.andExpect(jsonPath("$.code").value("login_rate_limited"));
 		}
 		finally {
-			redis.delete("grey:auth:enroll-fail:" + client);
+			redis.delete("grey:auth:login-fail:" + client);
 		}
 	}
 
@@ -1361,12 +1357,14 @@ class ControlPlaneApiTest {
 				.andExpect(status().isUnauthorized());
 	}
 
-	// ---------- 运维面（/api/admin/**）：角色门禁 + 用户管理 + 入场码签发 ----------
+	// ---------- 运维面（/api/admin/**）：角色门禁 + 用户管理 ----------
 
 	private static final String ADMIN_EMAIL = "admin@grey.local";
+	/** 启动引导种进去的运维台密码（见类上的 grey.auth.admin-password 配置）。 */
+	private static final String ADMIN_PASSWORD = "AdminPass123";
 
 	private String adminToken() throws Exception {
-		return enroll(ADMIN_EMAIL, "server").get("token").asString();
+		return login(ADMIN_EMAIL, ADMIN_PASSWORD, "server").get("token").asString();
 	}
 
 	private String bearerOf(JsonNode session) {
@@ -1378,10 +1376,10 @@ class ControlPlaneApiTest {
 		JsonNode member = enroll("member@grey.local", "desktop");
 		mockMvc.perform(get("/api/admin/users").header("Authorization", bearerOf(member)))
 				.andExpect(status().isForbidden());
-		mockMvc.perform(post("/api/admin/enroll-codes").header("Authorization", bearerOf(member)))
+		mockMvc.perform(get("/api/admin/overview").header("Authorization", bearerOf(member)))
 				.andExpect(status().isForbidden());
 
-		JsonNode admin = enroll(ADMIN_EMAIL, "server");
+		JsonNode admin = login(ADMIN_EMAIL, ADMIN_PASSWORD, "server");
 		// 名单命中的账号在登录时就拿到 admin 角色（大小写不敏感）。
 		assertThat(admin.get("user").get("role").asString()).isEqualTo("admin");
 		mockMvc.perform(get("/api/admin/users").header("Authorization", bearerOf(admin)))
@@ -1393,7 +1391,7 @@ class ControlPlaneApiTest {
 	void adminCanDisableUserButNotThemselves() throws Exception {
 		JsonNode victim = enroll("victim@grey.local", "desktop");
 		long victimId = victim.get("user").get("id").asLong();
-		JsonNode admin = enroll(ADMIN_EMAIL, "server");
+		JsonNode admin = login(ADMIN_EMAIL, ADMIN_PASSWORD, "server");
 
 		mockMvc.perform(patch("/api/admin/users/" + victimId)
 						.header("Authorization", bearerOf(admin))
@@ -1420,56 +1418,6 @@ class ControlPlaneApiTest {
 	}
 
 	@Test
-	void adminCanIssueAndRevokeEnrollmentCodes() throws Exception {
-		String adminBearer = "Bearer " + adminToken();
-
-		MvcResult issued = mockMvc.perform(post("/api/admin/enroll-codes")
-						.header("Authorization", adminBearer)
-						.contentType(MediaType.APPLICATION_JSON)
-						.content("""
-								{"expiresInHours":2}
-								"""))
-				.andExpect(status().isCreated())
-				.andExpect(jsonPath("$.item.status").value("active"))
-				.andReturn();
-		JsonNode payload = json(issued);
-		String code = payload.get("code").asString();
-		long codeId = payload.get("item").get("id").asLong();
-		// 列表只回哈希前缀（8 位），不回明文。
-		mockMvc.perform(get("/api/admin/enroll-codes").header("Authorization", adminBearer))
-				.andExpect(status().isOk())
-				.andExpect(jsonPath("$[0].hashPrefix").isString())
-				.andExpect(jsonPath("$[0].code").doesNotExist());
-
-		// 签发的码能直接登录。
-		mockMvc.perform(post("/api/auth/enroll")
-						.contentType(MediaType.APPLICATION_JSON)
-						.content("""
-								{"code":"%s","email":"issued@grey.local","deviceName":"d","platform":"server"}
-								""".formatted(code)))
-				.andExpect(status().isCreated());
-
-		// 已用过的码不能撤销（审计线索）；未用过的可以，撤销后即失效。
-		mockMvc.perform(delete("/api/admin/enroll-codes/" + codeId).header("Authorization", adminBearer))
-				.andExpect(status().isBadRequest())
-				.andExpect(jsonPath("$.code").value("enroll_code_used"));
-
-		MvcResult spare = mockMvc.perform(post("/api/admin/enroll-codes").header("Authorization", adminBearer))
-				.andExpect(status().isCreated())
-				.andReturn();
-		JsonNode sparePayload = json(spare);
-		mockMvc.perform(delete("/api/admin/enroll-codes/" + sparePayload.get("item").get("id").asLong())
-						.header("Authorization", adminBearer))
-				.andExpect(status().isNoContent());
-		mockMvc.perform(post("/api/auth/enroll")
-						.contentType(MediaType.APPLICATION_JSON)
-						.content("""
-								{"code":"%s","email":"revoked@grey.local","deviceName":"d","platform":"server"}
-								""".formatted(sparePayload.get("code").asString())))
-				.andExpect(status().isUnauthorized());
-	}
-
-	@Test
 	void adminCanKickSessionsWithoutDisablingTheAccount() throws Exception {
 		JsonNode victim = enroll("kick@grey.local", "desktop");
 		long victimId = victim.get("user").get("id").asLong();
@@ -1481,13 +1429,13 @@ class ControlPlaneApiTest {
 
 		mockMvc.perform(get("/api/auth/me").header("Authorization", bearerOf(victim)))
 				.andExpect(status().isUnauthorized());
-		// 账号本身仍可用：重新入场没有任何障碍。
-		mockMvc.perform(post("/api/auth/enroll")
+		// 账号本身仍可用：重新登录没有任何障碍。
+		mockMvc.perform(post("/api/auth/login")
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
-								{"code":"%s","email":"kick@grey.local","deviceName":"second","platform":"server"}
-								""".formatted(newCode())))
-				.andExpect(status().isCreated());
+								{"email":"kick@grey.local","password":"%s","deviceName":"second","platform":"server"}
+								""".formatted(passwordFor("kick@grey.local"))))
+				.andExpect(status().isOk());
 	}
 
 
@@ -1575,7 +1523,7 @@ void userCanRevokeOtherSessionsButStaySignedIn() throws Exception {
 	void adminCanChangeUserRoleButNotSelf() throws Exception {
 		JsonNode target = enroll("roleuser@grey.local", "desktop");
 		long targetId = target.get("user").get("id").asLong();
-		JsonNode admin = enroll(ADMIN_EMAIL, "server");
+		JsonNode admin = login(ADMIN_EMAIL, ADMIN_PASSWORD, "server");
 		long adminId = admin.get("user").get("id").asLong();
 		String adminBearer = bearerOf(admin);
 
@@ -1727,7 +1675,7 @@ void userCanRevokeOtherSessionsButStaySignedIn() throws Exception {
 				VALUES (?, ?, '运维可见任务', 'done', 'host', ?)
 				""", userId, "ops-visible-task", now.minusHours(2));
 
-		String bearer = bearerOf(enroll(ADMIN_EMAIL, "server"));
+		String bearer = bearerOf(login(ADMIN_EMAIL, ADMIN_PASSWORD, "server"));
 
 		JsonNode storage = json(mockMvc.perform(get("/api/admin/storage")
 						.header("Authorization", bearer))
@@ -1771,24 +1719,43 @@ void userCanRevokeOtherSessionsButStaySignedIn() throws Exception {
 				""", userId, taskId, dueAt, at);
 	}
 
+	/** 测试账号的确定性密码：邮箱落库前会归一化成小写，这里必须同口径，否则二次登录对不上。 */
+	private String passwordFor(String email) {
+		return "Passw0rd-" + email.trim().toLowerCase(java.util.Locale.ROOT);
+	}
+
 	private JsonNode enroll(String email, String platform) throws Exception {
-		MvcResult result = mockMvc.perform(post("/api/auth/enroll")
+		String body = """
+				{"email":"%s","password":"%s","deviceName":"test","platform":"%s"}
+				""".formatted(email, passwordFor(email), platform);
+		MvcResult result = mockMvc.perform(post("/api/auth/register")
 						.contentType(MediaType.APPLICATION_JSON)
-						.content("""
-								{"code":"%s","email":"%s","deviceName":"test","platform":"%s"}
-								""".formatted(newCode(), email, platform)))
-				.andExpect(status().isCreated())
+						.content(body))
 				.andReturn();
+		if (result.getResponse().getStatus() == 409) {
+			// 邮箱已注册（跨用例复用 / 引导种过的账号）：退回密码登录。
+			result = mockMvc.perform(post("/api/auth/login")
+							.contentType(MediaType.APPLICATION_JSON)
+							.content(body))
+					.andReturn();
+		}
+		if (result.getResponse().getStatus() >= 300) {
+			throw new IllegalStateException("测试账号注册/登录失败：" + result.getResponse().getContentAsString());
+		}
 		return json(result);
 	}
 
-	private String newCode() {
-		String raw = "CODE-" + UUID.randomUUID();
-		EnrollmentCode code = new EnrollmentCode();
-		code.setCodeHash(Hashes.sha256Hex(raw));
-		code.setExpiresAt(LocalDateTime.now().plusHours(1));
-		enrollmentCodeMapper.insert(code);
-		return raw;
+	private JsonNode login(String email, String password, String platform) throws Exception {
+		MvcResult result = mockMvc.perform(post("/api/auth/login")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{"email":"%s","password":"%s","deviceName":"test","platform":"%s"}
+								""".formatted(email, password, platform)))
+				.andReturn();
+		if (result.getResponse().getStatus() >= 300) {
+			throw new IllegalStateException("测试账号登录失败：" + result.getResponse().getContentAsString());
+		}
+		return json(result);
 	}
 
 	private JsonNode json(MvcResult result) throws Exception {

@@ -7,18 +7,19 @@
 ## 通用约定
 
 - Base URL 默认 `http://localhost:8080`。
-- 认证：`Authorization: Bearer <token>`（入场码 / 密码 / OIDC 三种登录最终都发同一种 token）。
+- 认证：`Authorization: Bearer <token>`（密码 / OIDC 等登录方式最终都发同一种 token）。
 - 未登录 → `401`；已登录但角色不够 `/api/admin/**` → `403`。
 - 错误体：`{ "code": "snake_case", "message": "中文说明" }`；参数校验失败额外带 `fields`。
 - 时间字段：服务端时区的 ISO-8601（`LocalDateTime`），不做 UTC 标记。
-- 匿名可访问：`POST /api/auth/enroll`、`/api/auth/oidc/**`、`POST /api/channels/webhook/*`、
+- 匿名可访问：`POST /api/auth/login`、`POST /api/auth/register`、`/api/auth/oidc/**`、`POST /api/channels/webhook/*`、
   `/actuator/health`、`POST /api/admin/auth/login`、`/admin/**`（页面本身）。
 
 ## 认证与设备
 
 | 方法   | 路径                                      | 认证 | 说明                                                           |
 | ------ | ----------------------------------------- | ---- | -------------------------------------------------------------- |
-| POST   | `/api/auth/enroll`                        | 匿名 | `{ code, email, displayName?, deviceName, platform }` → token  |
+| POST   | `/api/auth/login`                         | 匿名 | `{ email, password, deviceName, platform }` → token            |
+| POST   | `/api/auth/register`                      | 匿名 | `{ email, password, displayName?, deviceName, platform }` → token（注册即登录；邮箱重复 409） |
 | GET    | `/api/auth/me`                            | 是   | 当前用户 + 当前设备（含 `role`）                               |
 | PATCH  | `/api/auth/me`                            | 是   | `{ displayName }` 更新本人昵称（1–128 字符）；回当前用户与设备 |
 | POST   | `/api/auth/logout`                        | 是   | 撤销当前 token（204）                                          |
@@ -28,9 +29,9 @@
 | GET    | `/api/auth/oidc/providers`                | 匿名 | provider → 是否启用                                            |
 | GET    | `/api/auth/oidc/{provider}/authorize`     | 匿名 | 302 到身份源；需 `redirect`（白名单内）                        |
 | GET    | `/api/auth/oidc/{provider}/callback`      | 匿名 | 302 回客户端并附 `ticket`                                      |
-| POST   | `/api/auth/oidc/exchange`                 | 匿名 | `{ ticket }` → 与 enroll 相同的 session                        |
+| POST   | `/api/auth/oidc/exchange`                 | 匿名 | `{ ticket }` → 与密码登录相同的 session                        |
 
-用户和设备 ID 在入场码登录、密码登录、当前身份及设备列表响应中均按字符串返回，避免浏览器截断 Long ID。
+用户和设备 ID 在密码登录、注册、当前身份及设备列表响应中均按字符串返回，避免浏览器截断 Long ID。
 昵称更新仅修改该字段，不写入客户端提交的邮箱或角色；设备吊销验证归属，跨用户请求返回 404。
 
 ## 增量同步
@@ -113,7 +114,7 @@
 ## 运维面
 
 `/api/admin/**` 全部要求 `ROLE_ADMIN`，唯一的匿名入口是 `POST /api/admin/auth/login`。
-除用户 / 设备 / 入场码 / 通道 / 模型外，还有两块跨用户只读聚合：`GET /api/admin/storage`
+除用户 / 设备 / 通道 / 模型外，还有两块跨用户只读聚合：`GET /api/admin/storage`
 （容量与对象明细）与 `GET /api/admin/automation`（任务、积压与执行失败率），对应用户侧接口
 分别是「对象存储」与「自动化」两节。端点表、首次部署、故障排查见
 [control-plane-auth.md](control-plane-auth.md)。
@@ -126,7 +127,7 @@
 | 命令                            | 用途                                                                                     |
 | ------------------------------- | ---------------------------------------------------------------------------------------- |
 | `control_plane_status`          | 当前是否配置、是否已注册、上次心跳/认领、最近结果与错误（不含 token）                    |
-| `control_plane_connect`         | `{ baseUrl, token }` 或 `{ baseUrl, email, code }`（入场码换 token）；保存后立刻注册一次 |
+| `control_plane_connect`         | `{ baseUrl, token }` 或 `{ baseUrl, email, password, register? }`（邮箱密码登录/注册）；保存后立刻注册一次 |
 | `control_plane_run_once`        | 手动跑一轮：注册 → 认领 → 执行 → 回执                                                    |
 | `control_plane_disconnect`      | 删除本地接入配置并停掉定时链                                                             |
 | `control_plane_account`         | 核验当前账号，仅返回公开身份与连接状态                                                   |
@@ -142,7 +143,7 @@
 - 执行语义：**本机默认模型供应商的单轮直连**（OpenAI 兼容端点），不调 ACP、不给工具；
   绑定 `acpProviderId` 的任务直接回执 `failed`，留待应用内执行。没配模型供应商时同样回执失败，
   不会卡住认领链。
-- 渲染端入口：设置 → 控制面（`ControlPlaneSettingsPane.vue`），支持入场码接入、状态查看、
+- 渲染端入口：设置 → 控制面（`ControlPlaneSettingsPane.vue`），支持邮箱密码接入、状态查看、
   立即同步与断开；浏览器预览态如实置灰。
 
 ## 能力目录（技能 / MCP 预设）
@@ -159,7 +160,7 @@
 
 客户端接入方式（不需要改代码）：
 
-- **技能**：控制面接入后（设置 → 控制面 → 入场码），技能面板的「发现」里会自动多一条
+- **技能**：控制面接入后（设置 → 控制面），技能面板的「发现」里会自动多一条
   **本控制面** 源——地址取自宿主 `control_plane_status`，token 不出宿主，无需手填。
   也可手动加自定义源（类型 `api`、地址填控制面根），或用 `GREYWORK_SKILLS_ORIGIN` 改默认源。
   搜索/下载经宿主转发（`skills_search` / `skills_download`），安装仍走两阶段落盘校验。
@@ -187,5 +188,5 @@
 - 校验与宿主落盘规则同口径：skillId 小写 slug、ref 必须是 `owner/repo/skill` 且第三段等于 skillId、
   文件为相对路径、单文件 ≤256KB、≤128 个文件、必须有 `SKILL.md`；MCP 只接受 npm / pypi。
 - **管理端 id 一律以字符串下发**：雪花 id 超过 2^53，浏览器 `JSON.parse` 会把它四舍五入，
-  拿着截断后的 id 点编辑/删除必然 404。用户 / 设备 / 入场码 / 通道这几个视图同样按字符串下发。
+  拿着截断后的 id 点编辑/删除必然 404。用户 / 设备 / 通道这几个视图同样按字符串下发。
 - 每次增删改都写审计（`catalog_upsert` / `catalog_status` / `catalog_delete`，target = `catalog`）。

@@ -10,7 +10,6 @@ import {
   Lock,
   Monitor,
   SwitchButton,
-  Tickets,
   Timer,
   User,
 } from "@element-plus/icons-vue";
@@ -107,10 +106,6 @@ function navigate(): void {
         <el-menu-item index="/users">
           <el-icon><User /></el-icon>
           <span>用户与设备</span>
-        </el-menu-item>
-        <el-menu-item index="/enroll-codes">
-          <el-icon><Tickets /></el-icon>
-          <span>入场码</span>
         </el-menu-item>
 
         <p class="nav-group">资源</p>

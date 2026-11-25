@@ -6,10 +6,8 @@ import com.jean.grey.account.mapper.AppUserMapper;
 import com.jean.grey.auth.AuditService;
 import com.jean.grey.auth.RolePolicy;
 import com.jean.grey.auth.entity.AuditLog;
-import com.jean.grey.auth.entity.EnrollmentCode;
 import com.jean.grey.auth.mapper.AuditLogMapper;
 import com.jean.grey.auth.entity.UserDevice;
-import com.jean.grey.auth.mapper.EnrollmentCodeMapper;
 import com.jean.grey.auth.mapper.UserDeviceMapper;
 import com.jean.grey.channel.ChannelService;
 import com.jean.grey.channel.entity.ChannelBinding;
@@ -43,7 +41,6 @@ public class AdminOverviewService {
 
 	private final AppUserMapper appUserMapper;
 	private final UserDeviceMapper userDeviceMapper;
-	private final EnrollmentCodeMapper enrollmentCodeMapper;
 	private final HostInstanceMapper hostInstanceMapper;
 	private final HostService hostService;
 	private final ChannelBindingMapper channelBindingMapper;
@@ -54,13 +51,12 @@ public class AdminOverviewService {
 	private final AuditLogMapper auditLogMapper;
 
 	public AdminOverviewService(AppUserMapper appUserMapper, UserDeviceMapper userDeviceMapper,
-			EnrollmentCodeMapper enrollmentCodeMapper, HostInstanceMapper hostInstanceMapper,
+			HostInstanceMapper hostInstanceMapper,
 			HostService hostService, ChannelBindingMapper channelBindingMapper,
 			ChannelService channelService, LlmKeyMapper llmKeyMapper, LlmUsageMapper llmUsageMapper,
 			AuditService auditService, AuditLogMapper auditLogMapper) {
 		this.appUserMapper = appUserMapper;
 		this.userDeviceMapper = userDeviceMapper;
-		this.enrollmentCodeMapper = enrollmentCodeMapper;
 		this.hostInstanceMapper = hostInstanceMapper;
 		this.hostService = hostService;
 		this.channelBindingMapper = channelBindingMapper;
@@ -78,9 +74,6 @@ public class AdminOverviewService {
 	public record DeviceStats(long total, long active24h) {
 	}
 
-	public record CodeStats(long active, long used, long expired, long issuedToday) {
-	}
-
 	public record HostStats(long total, long alive, long bindings) {
 	}
 
@@ -96,7 +89,7 @@ public class AdminOverviewService {
 	public record TrendPoint(String date, long users, long audits, long llmRequests) {
 	}
 
-	public record Overview(UserStats users, DeviceStats devices, CodeStats codes, HostStats hosts,
+	public record Overview(UserStats users, DeviceStats devices, HostStats hosts,
 			ChannelStats channels, LlmStats llm, AuditStats audit, List<TrendPoint> trend,
 			List<AuditLog> recentAudits, LocalDateTime generatedAt) {
 	}
@@ -119,18 +112,6 @@ public class AdminOverviewService {
 		long deviceActive = userDeviceMapper.selectCount(Wrappers.<UserDevice>lambdaQuery()
 				.ge(UserDevice::getLastSeenAt, now.minusHours(24)));
 		DeviceStats devices = new DeviceStats(deviceTotal, deviceActive);
-
-		long codeUsed = enrollmentCodeMapper.selectCount(Wrappers.<EnrollmentCode>lambdaQuery()
-				.isNotNull(EnrollmentCode::getUsedAt));
-		long codeActive = enrollmentCodeMapper.selectCount(Wrappers.<EnrollmentCode>lambdaQuery()
-				.isNull(EnrollmentCode::getUsedAt)
-				.gt(EnrollmentCode::getExpiresAt, now));
-		long codeExpired = enrollmentCodeMapper.selectCount(Wrappers.<EnrollmentCode>lambdaQuery()
-				.isNull(EnrollmentCode::getUsedAt)
-				.le(EnrollmentCode::getExpiresAt, now));
-		long codeIssuedToday = enrollmentCodeMapper.selectCount(Wrappers.<EnrollmentCode>lambdaQuery()
-				.ge(EnrollmentCode::getCreatedAt, todayStart));
-		CodeStats codes = new CodeStats(codeActive, codeUsed, codeExpired, codeIssuedToday);
 
 		List<HostInstance> hosts = hostInstanceMapper.selectList(null);
 		long aliveHosts = hosts.stream()
@@ -161,7 +142,7 @@ public class AdminOverviewService {
 
 		AuditStats auditStats = new AuditStats(auditCountSince(todayStart), auditCountSince(weekStart));
 
-		return new Overview(users, devices, codes, hostStats, channelStats, llmStats, auditStats,
+		return new Overview(users, devices, hostStats, channelStats, llmStats, auditStats,
 				trend(weekStart), auditService.list(null, null, 8, 0L), now);
 	}
 
