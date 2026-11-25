@@ -1539,12 +1539,13 @@ HANDLERS.set("control_plane_connect", async (args, ctx) => {
       baseUrl,
       token: optional(input.token),
       email: optional(input.email),
-      code: optional(input.code),
+      password: optional(input.password),
+      register: input.register === true,
       displayName: optional(input.displayName),
       deviceName: optional(input.deviceName),
     });
   } catch (error) {
-    // 控制面错误一律 400 + 原文：界面上直接展示「入场码无效 / 连不上」这类原因。
+    // 控制面错误一律 400 + 原文：界面上直接展示「邮箱或密码不正确 / 连不上」这类原因。
     if (error instanceof ControlPlaneError) throw new CommandError(400, error.message);
     throw error;
   }

@@ -6,6 +6,7 @@ import com.jean.grey.auth.AuthPrincipal;
 import com.jean.grey.auth.AuthService;
 import com.jean.grey.auth.AuthRateLimiter;
 import com.jean.grey.auth.BearerTokenFilter;
+import com.jean.grey.auth.PasswordCredentialService;
 import com.jean.grey.auth.entity.UserDevice;
 import com.jean.grey.auth.mapper.UserDeviceMapper;
 import com.jean.grey.auth.TokenService;
@@ -37,21 +38,39 @@ public class AuthController {
 	private final TokenService tokenService;
 	private final UserDeviceMapper userDeviceMapper;
 	private final AppUserMapper appUserMapper;
+	private final PasswordCredentialService credentialService;
 	private final AuthRateLimiter rateLimiter;
 
 	public AuthController(AuthService authService, TokenService tokenService,
 			UserDeviceMapper userDeviceMapper, AppUserMapper appUserMapper,
-			AuthRateLimiter rateLimiter) {
+			PasswordCredentialService credentialService, AuthRateLimiter rateLimiter) {
 		this.authService = authService;
 		this.tokenService = tokenService;
 		this.userDeviceMapper = userDeviceMapper;
 		this.appUserMapper = appUserMapper;
+		this.credentialService = credentialService;
 		this.rateLimiter = rateLimiter;
 	}
 
 	public record EnrollRequest(
 			@NotBlank String code,
 			@NotBlank @Email String email,
+			@Size(max = 128) String displayName,
+			@NotBlank @Size(max = 128) String deviceName,
+			@NotBlank @Size(max = 32) String platform) {
+	}
+
+	/** 登录密码不在 DTO 上卡长度：错误密码要回 401 的统一文案，而不是 400 的长度提示。 */
+	public record LoginRequest(
+			@NotBlank @Email String email,
+			@NotBlank String password,
+			@NotBlank @Size(max = 128) String deviceName,
+			@NotBlank @Size(max = 32) String platform) {
+	}
+
+	public record RegisterRequest(
+			@NotBlank @Email String email,
+			@NotBlank String password,
 			@Size(max = 128) String displayName,
 			@NotBlank @Size(max = 128) String deviceName,
 			@NotBlank @Size(max = 32) String platform) {
@@ -92,6 +111,40 @@ public class AuthController {
 			}
 			throw ex;
 		}
+	}
+
+	/**
+	 * 邮箱密码登录：普通用户的常规入口（管理员走 /api/admin/auth/login，口径相同）。
+	 * 失败按独立作用域限流，不与入场码互相牵连。
+	 */
+	@PostMapping("/login")
+	public SessionView login(@Valid @RequestBody LoginRequest request, HttpServletRequest http) {
+		String client = http.getRemoteAddr();
+		rateLimiter.assertAllowed(AuthRateLimiter.SCOPE_LOGIN, client);
+		try {
+			AuthService.Enrolled enrolled = credentialService.loginUser(request.email(), request.password(),
+					request.deviceName(), request.platform());
+			rateLimiter.clear(AuthRateLimiter.SCOPE_LOGIN, client);
+			return new SessionView(enrolled.token(), userView(enrolled.user()), deviceView(enrolled.device()));
+		}
+		catch (ApiException ex) {
+			if (ex.getStatus() == HttpStatus.UNAUTHORIZED) {
+				rateLimiter.recordFailure(AuthRateLimiter.SCOPE_LOGIN, client);
+			}
+			throw ex;
+		}
+	}
+
+	/**
+	 * 开放注册：邮箱 + 密码直接建号并当场登录（注册即登录，与入场码同一种会话）。
+	 * 注册不设限流 —— 它没有可猜的凭据，失败只有参数错误与邮箱冲突两种。
+	 */
+	@PostMapping("/register")
+	@ResponseStatus(HttpStatus.CREATED)
+	public SessionView register(@Valid @RequestBody RegisterRequest request) {
+		AuthService.Enrolled enrolled = credentialService.register(request.email(), request.password(),
+				request.displayName(), request.deviceName(), request.platform());
+		return new SessionView(enrolled.token(), userView(enrolled.user()), deviceView(enrolled.device()));
 	}
 
 	@PostMapping("/logout")

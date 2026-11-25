@@ -2,7 +2,7 @@
 /**
  * 设置 · 控制面：把桌面宿主接入 back/grey（Java 控制面）。
  *
- * 三件事：接入（入场码或登录 token）、看状态、手动同步一轮。语义边界直接写在面板里，
+ * 三件事：接入（邮箱密码或登录 token）、看状态、手动同步一轮。语义边界直接写在面板里，
  * 而不是留给用户猜：
  * - 接入后宿主会注册并每 30s 心跳，运维台「宿主」页据此显示在线；
  * - 云端自动化任务由宿主认领执行，执行走**本机默认模型供应商**的单轮直连，
@@ -30,9 +30,9 @@ const busy = ref(false);
 const error = ref("");
 const form = reactive({
   baseUrl: "http://localhost:8080",
-  mode: "enroll" as "enroll" | "token",
+  mode: "password" as "password" | "token",
   email: "",
-  code: "",
+  password: "",
   token: "",
 });
 
@@ -41,7 +41,8 @@ const connected = computed(() => status.value?.registered === true);
 const canSubmit = computed(() => {
   if (busy.value || envManaged.value) return false;
   if (form.baseUrl.trim() === "") return false;
-  return form.mode === "enroll" ? form.email.trim() !== "" && form.code.trim() !== "" : form.token.trim() !== "";
+  if (form.mode === "password") return form.email.trim() !== "" && form.password.trim() !== "";
+  return form.token.trim() !== "";
 });
 
 function message(value: unknown): string {
@@ -62,22 +63,22 @@ async function refresh(): Promise<void> {
   }
 }
 
-async function connect(): Promise<void> {
+async function connect(register = false): Promise<void> {
   if (!canSubmit.value) return;
   busy.value = true;
   error.value = "";
   try {
     const payload =
-      form.mode === "enroll"
-        ? { baseUrl: form.baseUrl.trim(), email: form.email.trim(), code: form.code.trim() }
+      form.mode === "password"
+        ? { baseUrl: form.baseUrl.trim(), email: form.email.trim(), password: form.password, register: register || undefined }
         : { baseUrl: form.baseUrl.trim(), token: form.token.trim() };
     const next = await invoke<ControlPlaneStatus>("control_plane_connect", payload);
     status.value = next;
     account.acceptStatus(next);
     void account.refresh();
     if (next.registered) {
-      notice.success("已接入控制面", "宿主已注册，运维台的宿主页会显示在线");
-      form.code = "";
+      notice.success(register ? "已注册并接入控制面" : "已接入控制面", "宿主已注册，运维台的宿主页会显示在线");
+      form.password = "";
       form.token = "";
     } else {
       notice.error("配置已保存，但注册失败", next.lastError ?? "稍后会自动重试");
@@ -200,7 +201,7 @@ onMounted(refresh);
           data-testid="controlplane-mode"
           aria-label="凭据方式"
         >
-          <option value="enroll">入场码（推荐）</option>
+          <option value="password">邮箱密码（推荐）</option>
           <option value="token">登录 token</option>
         </select>
       </div>
@@ -217,7 +218,7 @@ onMounted(refresh);
           />
         </label>
 
-        <template v-if="form.mode === 'enroll'">
+        <template v-if="form.mode === 'password'">
           <label class="flex items-center gap-2">
             <span class="w-20 shrink-0 text-[11.5px] text-dim2">邮箱</span>
             <input
@@ -230,13 +231,15 @@ onMounted(refresh);
             />
           </label>
           <label class="flex items-center gap-2">
-            <span class="w-20 shrink-0 text-[11.5px] text-dim2">入场码</span>
+            <span class="w-20 shrink-0 text-[11.5px] text-dim2">密码</span>
             <input
-              v-model="form.code"
-              class="min-w-0 flex-1 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-1.5 font-mono text-[12px] uppercase text-foreground outline-none placeholder:text-dim2 focus:border-line-2 disabled:opacity-60"
-              placeholder="在运维台 → 入场码 签发"
+              v-model="form.password"
+              type="password"
+              class="min-w-0 flex-1 rounded-[calc(8px*var(--gw-radius-scale))] border border-line bg-panel-2 px-2 py-1.5 text-[12px] text-foreground outline-none placeholder:text-dim2 focus:border-line-2 disabled:opacity-60"
+              placeholder="至少 8 位"
+              autocomplete="current-password"
               :disabled="envManaged"
-              data-testid="controlplane-code"
+              data-testid="controlplane-password"
             />
           </label>
         </template>
@@ -262,11 +265,21 @@ onMounted(refresh);
           class="h-7 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] bg-accent px-3 text-[11.5px] font-medium text-accent-ink transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
           :disabled="!hostAvailable || !canSubmit"
           data-testid="controlplane-connect"
-          @click="connect"
+          @click="connect(false)"
         >
           {{ busy ? "处理中…" : "接入 / 保存" }}
         </button>
-        <span class="text-[11px] text-dim2">入场码可在运维台签发；接入后 token 只保存在宿主数据目录（0600）。</span>
+        <button
+          v-if="form.mode === 'password'"
+          type="button"
+          class="h-7 cursor-pointer rounded-[calc(7px*var(--gw-radius-scale))] border border-line bg-panel-2 px-3 text-[11.5px] text-dim transition-colors hover:border-line-2 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+          :disabled="!hostAvailable || !canSubmit"
+          data-testid="controlplane-register"
+          @click="connect(true)"
+        >
+          注册并接入
+        </button>
+        <span class="text-[11px] text-dim2">密码只在登录/注册时使用一次；接入后 token 落宿主数据目录（0600）。</span>
       </div>
     </div>
 

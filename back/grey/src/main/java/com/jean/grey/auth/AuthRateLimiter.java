@@ -26,6 +26,7 @@ import com.jean.grey.common.ApiException;
 public class AuthRateLimiter {
 
 	public static final String SCOPE_ENROLL = "enroll";
+	public static final String SCOPE_LOGIN = "login";
 	public static final String SCOPE_ADMIN = "admin-login";
 
 	private static final String KEY_PREFIX = "grey:auth:";
@@ -50,7 +51,8 @@ public class AuthRateLimiter {
 	public void assertAllowed(String scope, String client) {
 		String value = redis.opsForValue().get(key(scope, client));
 		if (value != null && parseInt(value) >= maxFailures) {
-			String code = SCOPE_ENROLL.equals(scope) ? "enroll_rate_limited" : "admin_login_rate_limited";
+			String code = SCOPE_ENROLL.equals(scope) ? "enroll_rate_limited"
+					: SCOPE_LOGIN.equals(scope) ? "login_rate_limited" : "admin_login_rate_limited";
 			throw new ApiException(HttpStatus.TOO_MANY_REQUESTS, code, "尝试次数过多，请稍后再试");
 		}
 	}

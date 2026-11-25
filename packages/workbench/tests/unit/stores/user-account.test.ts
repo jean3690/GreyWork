@@ -51,14 +51,14 @@ describe("user account", () => {
     expect(store.error).toContain("失效");
   });
 
-  it("入场码登录后刷新身份，退出后清空共享账号", async () => {
+  it("邮箱密码登录后刷新身份，退出后清空共享账号", async () => {
     invoke.mockImplementation(async (command: string) => {
       if (command === "control_plane_account") return linked;
       if (command === "control_plane_connect") return linked.status;
       return idle;
     });
     const store = useUserAccountStore();
-    const input = { baseUrl: "http://localhost:8080", email: "u@grey.local", code: "ABC123" };
+    const input = { baseUrl: "http://localhost:8080", email: "u@grey.local", password: "Passw0rd123" };
     expect(await store.login(input)).toBe(true);
     expect(invoke).toHaveBeenCalledWith("control_plane_connect", input);
     expect(await store.logout()).toBe(true);
@@ -104,7 +104,7 @@ describe("user account", () => {
     store.acceptStatus({ ...linked.status, source: "env" });
     invoke.mockClear();
     expect(await store.logout()).toBe(false);
-    expect(await store.login({ baseUrl: "http://localhost:8080", email: "u@grey.local", code: "ABC" })).toBe(false);
+    expect(await store.login({ baseUrl: "http://localhost:8080", email: "u@grey.local", password: "Passw0rd123" })).toBe(false);
     expect(invoke).not.toHaveBeenCalled();
   });
 

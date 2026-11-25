@@ -29,7 +29,8 @@ public class SecurityConfig {
 				.cors(cors -> cors.configurationSource(corsSource()))
 				.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 				.authorizeHttpRequests(auth -> auth
-						.requestMatchers(HttpMethod.POST, "/api/auth/enroll").permitAll()
+						.requestMatchers(HttpMethod.POST, "/api/auth/enroll", "/api/auth/login",
+							"/api/auth/register").permitAll()
 						.requestMatchers("/api/auth/oidc/**").permitAll()
 						.requestMatchers(HttpMethod.POST, "/api/channels/webhook/*").permitAll()
 					// 运维台登录本身必须匿名可达（它就是拿 token 的入口），其余 /api/admin/** 仍要 admin。

@@ -172,7 +172,7 @@ export function normalizeBaseUrl(raw: string): string {
 function describeFailure(status: number, action: string, body: string): string {
   const hint =
     status === 401
-      ? "（登录态失效：请重新用入场码接入，或更新 GREYWORK_CONTROL_TOKEN）"
+      ? "（登录态失效：请重新用邮箱密码接入，或更新 GREYWORK_CONTROL_TOKEN）"
       : status === 404
         ? "（设备或任务不存在，可能已被吊销/回收）"
         : status === 409
@@ -190,9 +190,11 @@ function describeFailure(status: number, action: string, body: string): string {
   return `${action} 失败：HTTP ${status}${hint}${detail === "" ? "" : " " + truncate(detail, 200)}`;
 }
 
-export interface EnrollInput {
-  code: string;
+export interface PasswordAuthInput {
   email: string;
+  password: string;
+  /** true = 开放注册（邮箱不存在就建号并登录）；缺省按登录处理。 */
+  register?: boolean;
   displayName?: string;
   deviceName?: string;
   platform?: string;
@@ -205,18 +207,19 @@ export class ControlPlaneClient {
     private readonly token: string,
   ) {}
 
-  /** 入场码换取登录态：桌面端第一次接入控制面走这条。 */
-  static async enroll(baseUrl: string, input: EnrollInput): Promise<{ token: string; email: string; deviceId: string | number | null }> {
+  /** 邮箱 + 密码换取登录态：桌面端第一次接入控制面走这条。 */
+  static async passwordAuth(baseUrl: string, input: PasswordAuthInput): Promise<{ token: string; email: string; deviceId: string | number | null }> {
+    const path = input.register ? "/api/auth/register" : "/api/auth/login";
     const body = {
-      code: input.code.trim(),
       email: input.email.trim(),
+      password: input.password,
       ...(input.displayName?.trim() ? { displayName: input.displayName.trim() } : {}),
       deviceName: input.deviceName?.trim() || "GreyWork 桌面端",
       platform: input.platform?.trim() || "desktop",
     };
     let response: Response;
     try {
-      response = await fetch(stripSlash(baseUrl) + "/api/auth/enroll", {
+      response = await fetch(stripSlash(baseUrl) + path, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
@@ -227,11 +230,14 @@ export class ControlPlaneClient {
     }
     const text = await response.text();
     if (!response.ok) {
-      // 入场码的 401 是「码不对」，不是「登录态失效」，这里必须给对提示。
+      // 401 是「凭据不对」，409 是「邮箱已注册」，都必须给对提示而不是笼统的失败。
       if (response.status === 401) {
-        throw new ControlPlaneError("入场码无效或已过期（可能已被使用，或未在运维台签发）");
+        throw new ControlPlaneError("邮箱或密码不正确");
       }
-      throw new ControlPlaneError(describeFailure(response.status, "入场码登录", text));
+      if (response.status === 409) {
+        throw new ControlPlaneError("该邮箱已注册，请直接登录");
+      }
+      throw new ControlPlaneError(describeFailure(response.status, input.register ? "注册" : "登录", text));
     }
     const parsed = JSON.parse(text) as {
       token?: unknown;
@@ -705,14 +711,15 @@ export class ControlPlaneRuntime {
   }
 
   /**
-   * 保存接入配置：给 token 直接用，给 email + 入场码则先换 token。
+   * 保存接入配置：给 token 直接用，给邮箱 + 密码则先登录 / 注册换 token。
    * 保存后立刻注册一次，把「连没连上」当场返回给界面，而不是让用户等心跳。
    */
   async configure(input: {
     baseUrl: string;
     token?: string;
     email?: string;
-    code?: string;
+    password?: string;
+    register?: boolean;
     displayName?: string;
     deviceName?: string;
   }): Promise<ControlPlaneStatus> {
@@ -724,13 +731,14 @@ export class ControlPlaneRuntime {
     let email = (input.email ?? "").trim() || null;
     let deviceId: string | number | null = null;
     if (token === "") {
-      const code = (input.code ?? "").trim();
-      if (code === "" || email === null) {
-        throw new ControlPlaneError("缺少凭据：填登录 token，或填邮箱 + 入场码");
+      const password = input.password ?? "";
+      if (password === "" || email === null) {
+        throw new ControlPlaneError("缺少凭据：填登录 token，或填邮箱 + 密码");
       }
-      const session = await ControlPlaneClient.enroll(baseUrl, {
-        code,
+      const session = await ControlPlaneClient.passwordAuth(baseUrl, {
         email,
+        password,
+        register: input.register,
         displayName: input.displayName,
         deviceName: input.deviceName,
       });

@@ -48,7 +48,7 @@ beforeEach(() => {
 });
 
 describe("ControlPlaneSettingsPane", () => {
-  it("入场码接入：命令参数与注册结果如实回显", async () => {
+  it("邮箱密码接入：命令参数与注册结果如实回显", async () => {
     invoke.mockImplementation(async (command: string) => (command === "control_plane_connect" ? linked : idle));
     const wrapper = mountPane();
     await flushPromises();
@@ -56,20 +56,38 @@ describe("ControlPlaneSettingsPane", () => {
 
     await wrapper.get('[data-testid="controlplane-base-url"]').setValue("http://127.0.0.1:8080");
     await wrapper.get('[data-testid="controlplane-email"]').setValue("u@grey.local");
-    await wrapper.get('[data-testid="controlplane-code"]').setValue("ABC123");
+    await wrapper.get('[data-testid="controlplane-password"]').setValue("Passw0rd123");
     await wrapper.get('[data-testid="controlplane-connect"]').trigger("click");
     await flushPromises();
 
     expect(invoke).toHaveBeenCalledWith("control_plane_connect", {
       baseUrl: "http://127.0.0.1:8080",
       email: "u@grey.local",
-      code: "ABC123",
+      password: "Passw0rd123",
     });
     expect(wrapper.text()).toContain("已接入控制面");
     expect(wrapper.text()).toContain("u@grey.local");
   });
 
-  it("token 方式接入：请求体只带 token，不带空邮箱/入场码", async () => {
+  it("注册并接入：同一命令带 register 标记，成功后清空密码", async () => {
+    invoke.mockImplementation(async (command: string) => (command === "control_plane_connect" ? linked : idle));
+    const wrapper = mountPane();
+    await flushPromises();
+    await wrapper.get('[data-testid="controlplane-email"]').setValue("new@grey.local");
+    await wrapper.get('[data-testid="controlplane-password"]').setValue("Passw0rd123");
+    await wrapper.get('[data-testid="controlplane-register"]').trigger("click");
+    await flushPromises();
+
+    expect(invoke).toHaveBeenCalledWith("control_plane_connect", {
+      baseUrl: "http://localhost:8080",
+      email: "new@grey.local",
+      password: "Passw0rd123",
+      register: true,
+    });
+    expect((wrapper.get('[data-testid="controlplane-password"]').element as HTMLInputElement).value).toBe("");
+  });
+
+  it("token 方式接入：请求体只带 token，不带空邮箱/密码", async () => {
     invoke.mockImplementation(async (command: string) => (command === "control_plane_connect" ? linked : idle));
     const wrapper = mountPane();
     await flushPromises();
@@ -87,16 +105,16 @@ describe("ControlPlaneSettingsPane", () => {
   it("宿主报错就地展示，不留「以为已接入」", async () => {
     invoke.mockImplementation(async (command: string) => {
       if (command === "control_plane_status") return idle;
-      throw new Error("入场码无效或已过期（可能已被使用，或未在运维台签发）");
+      throw new Error("邮箱或密码不正确");
     });
     const wrapper = mountPane();
     await flushPromises();
     await wrapper.get('[data-testid="controlplane-email"]').setValue("u@grey.local");
-    await wrapper.get('[data-testid="controlplane-code"]').setValue("bad");
+    await wrapper.get('[data-testid="controlplane-password"]').setValue("bad-pass");
     await wrapper.get('[data-testid="controlplane-connect"]').trigger("click");
     await flushPromises();
 
-    expect(wrapper.text()).toContain("入场码无效或已过期");
+    expect(wrapper.text()).toContain("邮箱或密码不正确");
     expect(wrapper.text()).toContain("未接入控制面");
   });
 

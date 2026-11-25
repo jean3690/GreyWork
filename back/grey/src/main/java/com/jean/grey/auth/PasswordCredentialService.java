@@ -17,17 +17,17 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * 运维台账号密码：管理员除入场码 / OIDC 外的第三种登录方式。
+ * 邮箱密码凭据：运维台管理员与普通用户共用的密码登录 + 开放注册。
  *
- * 只对 role=admin 的账号开放 —— 密码是长期凭据，普通用户仍走一次性入场码，
- * 不给整个控制面再开一个「长期口令可猜」的入口。
+ * 密码是长期凭据，与一次性入场码、OIDC 并列的第三种登录方式；注册即登录，
+ * 邮箱不存在就直接建号（开放注册，角色仍按 RolePolicy 名单定）。
  *
  * 密码只存 bcrypt：库被读走时拿不到明文；bcrypt 自带盐，不用另存 salt 列。
  */
 @Service
-public class AdminCredentialService {
+public class PasswordCredentialService {
 
-	private static final Logger log = LoggerFactory.getLogger(AdminCredentialService.class);
+	private static final Logger log = LoggerFactory.getLogger(PasswordCredentialService.class);
 
 	/** 与前端表单约束一致；bcrypt 只取前 72 字节，超长不再有意义。 */
 	private static final int MIN_PASSWORD_LENGTH = 8;
@@ -41,7 +41,7 @@ public class AdminCredentialService {
 	private final SecureRandom random = new SecureRandom();
 	private final String configuredPassword;
 
-	public AdminCredentialService(AppUserMapper appUserMapper, RolePolicy rolePolicy,
+	public PasswordCredentialService(AppUserMapper appUserMapper, RolePolicy rolePolicy,
 			AuthService authService, AuditService auditService,
 			@Value("${grey.auth.admin-password:}") String configuredPassword) {
 		this.appUserMapper = appUserMapper;
@@ -55,12 +55,12 @@ public class AdminCredentialService {
 	}
 
 	/**
-	 * 校验密码并签发会话。
+	 * 运维台登录：只对 role=admin 的账号放行。
 	 *
 	 * 所有失败都回同一个 401 文案：不区分「邮箱不存在 / 不是管理员 / 没设密码 / 密码错」，
 	 * 否则登录接口就成了账号枚举器。
 	 */
-	public AuthService.Enrolled login(String email, String password) {
+	public AuthService.Enrolled loginAdmin(String email, String password) {
 		AppUser user = findByEmail(Emails.normalize(email));
 		if (user == null || !RolePolicy.isAdminRole(user.getRole())
 				|| user.getPasswordHash() == null || user.getPasswordHash().isBlank()
@@ -74,6 +74,52 @@ public class AdminCredentialService {
 		auditService.record(user.getId(), AuditService.ACTION_ADMIN_LOGIN, AuditService.TARGET_USER,
 				user.getId(), "device=" + session.device().getId());
 		return session;
+	}
+
+	/**
+	 * 普通用户密码登录：不区分角色，只要有密码且账号可用。
+	 *
+	 * 与 loginAdmin 同一个 401 文案口径；设备与平台来自请求（桌面端总是带默认值）。
+	 */
+	public AuthService.Enrolled loginUser(String email, String password, String deviceName, String platform) {
+		AppUser user = findByEmail(Emails.normalize(email));
+		if (user == null || user.getPasswordHash() == null || user.getPasswordHash().isBlank()
+				|| !encoder.matches(password == null ? "" : password, user.getPasswordHash())) {
+			throw ApiException.unauthorized("login_invalid", "邮箱或密码不正确");
+		}
+		authService.requireActive(user);
+		return authService.issueSession(user.getId(), deviceName, platform);
+	}
+
+	/**
+	 * 开放注册：邮箱不存在就建号并当场签发会话（注册即登录）。
+	 *
+	 * 已注册的邮箱回 409，把「换个密码再注册」挡在门外；密码强度只卡长度（8-72），
+	 * 与 changePassword 同一口径。注册不记审计 —— 与入场码建号保持一致。
+	 */
+	@Transactional
+	public AuthService.Enrolled register(String email, String password, String displayName,
+			String deviceName, String platform) {
+		String normalizedEmail = Emails.normalize(email);
+		if (normalizedEmail == null) {
+			throw ApiException.badRequest("email_invalid", "邮箱不能为空");
+		}
+		String next = password == null ? "" : password;
+		if (next.length() < MIN_PASSWORD_LENGTH || next.length() > MAX_PASSWORD_LENGTH) {
+			throw ApiException.badRequest("password_invalid",
+					"密码长度需在 " + MIN_PASSWORD_LENGTH + "-" + MAX_PASSWORD_LENGTH + " 位之间");
+		}
+		if (findByEmail(normalizedEmail) != null) {
+			throw new ApiException(org.springframework.http.HttpStatus.CONFLICT, "email_exists", "该邮箱已注册，请直接登录");
+		}
+		AppUser user = new AppUser();
+		user.setEmail(normalizedEmail);
+		user.setDisplayName(displayName == null || displayName.isBlank() ? normalizedEmail : displayName);
+		user.setStatus("active");
+		user.setRole(rolePolicy.roleFor(normalizedEmail));
+		user.setPasswordHash(encoder.encode(next));
+		appUserMapper.insert(user);
+		return authService.issueSession(user.getId(), deviceName, platform);
 	}
 
 	/** 改密码：已设过密码的要先验旧密码；没设过（例如只走过入场码）允许直接设。 */

@@ -359,11 +359,11 @@ describe("control plane", () => {
     expect(status.registered).toBe(true);
   });
 
-  it("入场码换 token：成功后 token 落盘，401 给出可操作提示", async () => {
+  it("密码登录换 token：成功后 token 落盘，401 给出可操作提示", async () => {
     const control = await listen((request, response) => {
-      if (request.method === "POST" && request.url === "/api/auth/enroll") {
-        response.writeHead(201, { "content-type": "application/json" });
-        response.end(JSON.stringify({ token: "tok-enroll", user: { id: 1, email: "u@grey.local" }, device: { id: 7, name: "pc" } }));
+      if (request.method === "POST" && request.url === "/api/auth/login") {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ token: "tok-login", user: { id: 1, email: "u@grey.local" }, device: { id: 7, name: "pc" } }));
         return;
       }
       if (request.method === "PUT" && request.url === "/api/hosts/me") {
@@ -384,14 +384,14 @@ describe("control plane", () => {
     const status = await runtime.configure({
       baseUrl: control.origin,
       email: "u@grey.local",
-      code: "ABC123",
+      password: "Passw0rd123",
       displayName: "Jean",
       deviceName: "工作电脑",
     });
-    const enroll = control.calls.find((call) => call.path === "/api/auth/enroll");
-    expect(enroll?.body).toMatchObject({
-      code: "ABC123",
+    const login = control.calls.find((call) => call.path === "/api/auth/login");
+    expect(login?.body).toMatchObject({
       email: "u@grey.local",
+      password: "Passw0rd123",
       platform: "desktop",
       displayName: "Jean",
       deviceName: "工作电脑",
@@ -403,16 +403,49 @@ describe("control plane", () => {
     expect(status.email).toBe("u@grey.local");
   });
 
-  it("入场码被拒时抛出 ControlPlaneError 且不落盘", async () => {
-    const control = await listen((_request, response) => {
-      response.writeHead(401, { "content-type": "application/json" }).end(JSON.stringify({ code: "invalid_code", message: "入场码无效" }));
+  it("register=true 走注册端点：注册即登录", async () => {
+    const control = await listen((request, response) => {
+      if (request.method === "POST" && request.url === "/api/auth/register") {
+        response.writeHead(201, { "content-type": "application/json" });
+        response.end(JSON.stringify({ token: "tok-register", user: { id: 2, email: "new@grey.local" }, device: { id: 9, name: "pc" } }));
+        return;
+      }
+      if (request.method === "PUT" && request.url === "/api/hosts/me") {
+        response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ deviceId: 9, alive: true }));
+        return;
+      }
+      if (request.method === "POST" && request.url === "/api/hosts/me/heartbeat") {
+        response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ alive: true }));
+        return;
+      }
+      response.writeHead(404).end();
     });
     cleanups.push(control.close);
     const dataDir = mkdtempSync(path.join(tmpdir(), "gw-cp-"));
     const db = new Db(path.join(dataDir, "greywork.db"));
     const runtime = runtimeWith(db, dataDir);
 
-    await expect(runtime.configure({ baseUrl: control.origin, email: "u@grey.local", code: "bad" })).rejects.toBeInstanceOf(
+    const status = await runtime.configure({
+      baseUrl: control.origin,
+      email: "new@grey.local",
+      password: "Passw0rd123",
+      register: true,
+    });
+    expect(status.configured).toBe(true);
+    expect(status.registered).toBe(true);
+    expect(status.email).toBe("new@grey.local");
+  });
+
+  it("密码被拒时抛出 ControlPlaneError 且不落盘", async () => {
+    const control = await listen((_request, response) => {
+      response.writeHead(401, { "content-type": "application/json" }).end(JSON.stringify({ code: "login_invalid", message: "邮箱或密码不正确" }));
+    });
+    cleanups.push(control.close);
+    const dataDir = mkdtempSync(path.join(tmpdir(), "gw-cp-"));
+    const db = new Db(path.join(dataDir, "greywork.db"));
+    const runtime = runtimeWith(db, dataDir);
+
+    await expect(runtime.configure({ baseUrl: control.origin, email: "u@grey.local", password: "bad-pass" })).rejects.toBeInstanceOf(
       ControlPlaneError,
     );
     expect(existsSync(path.join(dataDir, "control-plane.json"))).toBe(false);

@@ -13,9 +13,9 @@ import org.springframework.stereotype.Component;
 @Order(2)
 public class AdminCredentialBootstrap implements ApplicationRunner {
 
-	private final AdminCredentialService credentialService;
+	private final PasswordCredentialService credentialService;
 
-	public AdminCredentialBootstrap(AdminCredentialService credentialService) {
+	public AdminCredentialBootstrap(PasswordCredentialService credentialService) {
 		this.credentialService = credentialService;
 	}
 

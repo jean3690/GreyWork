@@ -60,7 +60,7 @@ afterEach(() => {
 });
 
 describe("用户账号", () => {
-  it("入场码登录与 Java 参数一致，登录后侧栏同步显示身份", async () => {
+  it("邮箱密码登录与 Java 参数一致，登录后侧栏同步显示身份", async () => {
     host.invoke.mockImplementation(async (command: string) => {
       if (command === "control_plane_connect") return linked.status;
       return host.invoke.mock.calls.some(([name]) => name === "control_plane_connect")
@@ -70,7 +70,7 @@ describe("用户账号", () => {
     const { pane, footer } = await mountPane(true);
     expect(pane.get('[data-testid="account-login"]').attributes("disabled")).toBeDefined();
     await pane.get("#account-email").setValue(" u@grey.local ");
-    await pane.get("#account-code").setValue("ABC123");
+    await pane.get("#account-password").setValue("Passw0rd123");
     await pane.get("#account-name").setValue("Jean");
     await pane.get("#account-device").setValue("工作电脑");
     await pane.get('[data-testid="account-login-form"]').trigger("submit");
@@ -78,7 +78,7 @@ describe("用户账号", () => {
     expect(host.invoke).toHaveBeenCalledWith("control_plane_connect", {
       baseUrl: "http://localhost:8080",
       email: "u@grey.local",
-      code: "ABC123",
+      password: "Passw0rd123",
       displayName: "Jean",
       deviceName: "工作电脑",
     });
@@ -86,23 +86,46 @@ describe("用户账号", () => {
     expect(pane.text()).toContain("工作电脑");
     expect(pane.text()).toContain("管理员");
     expect(footer?.get('[data-testid="sider-account"]').text()).toContain("Jean");
-    // 同步面板会加载本机设置缓存，但账号/入场码不能因此进入 localStorage，也不能自动写入同步基线。
+    // 同步面板会加载本机设置缓存，但账号/密码不能因此进入 localStorage，也不能自动写入同步基线。
     expect(Array.from({ length: window.localStorage.length }, (_, index) => window.localStorage.key(index))).toEqual(["greywork.settings"]);
-    expect(window.localStorage.getItem("greywork.settings")).not.toContain("ABC123");
+    expect(window.localStorage.getItem("greywork.settings")).not.toContain("Passw0rd123");
   });
 
-  it("登录失败展示错误，入场码不继续留在输入框", async () => {
+  it("注册按钮走同一命令并带 register 标记", async () => {
     host.invoke.mockImplementation(async (command: string) => {
-      if (command === "control_plane_connect") throw new Error("入场码无效或已过期");
+      if (command === "control_plane_connect") return linked.status;
+      return host.invoke.mock.calls.some(([name]) => name === "control_plane_connect")
+        ? linked
+        : { status: idle, session: null, error: null };
+    });
+    const { pane } = await mountPane();
+    await pane.get("#account-email").setValue("new@grey.local");
+    await pane.get("#account-password").setValue("Passw0rd123");
+    await pane.get('[data-testid="account-register"]').trigger("click");
+    await flushPromises();
+    expect(host.invoke).toHaveBeenCalledWith("control_plane_connect", {
+      baseUrl: "http://localhost:8080",
+      email: "new@grey.local",
+      password: "Passw0rd123",
+      register: true,
+    });
+    // 注册成功后切到资料视图；密码不能落进 localStorage。
+    expect(pane.find('[data-testid="account-login-form"]').exists()).toBe(false);
+    expect(window.localStorage.getItem("greywork.settings") ?? "").not.toContain("Passw0rd123");
+  });
+
+  it("登录失败展示错误，密码不继续留在输入框", async () => {
+    host.invoke.mockImplementation(async (command: string) => {
+      if (command === "control_plane_connect") throw new Error("邮箱或密码不正确");
       return { status: idle, session: null, error: null };
     });
     const { pane } = await mountPane();
     await pane.get("#account-email").setValue("u@grey.local");
-    await pane.get("#account-code").setValue("bad");
+    await pane.get("#account-password").setValue("bad-pass");
     await pane.get('[data-testid="account-login-form"]').trigger("submit");
     await flushPromises();
-    expect(pane.get('[data-testid="account-error"]').text()).toContain("入场码无效");
-    expect((pane.get("#account-code").element as HTMLInputElement).value).toBe("");
+    expect(pane.get('[data-testid="account-error"]').text()).toContain("邮箱或密码不正确");
+    expect((pane.get("#account-password").element as HTMLInputElement).value).toBe("");
   });
 
   it("刷新发现登录态失效后回到登录表单，不继续展示旧身份", async () => {
@@ -113,7 +136,7 @@ describe("用户账号", () => {
     await flushPromises();
     expect(pane.find('[data-testid="account-profile"]').exists()).toBe(false);
     expect(pane.text()).toContain("登录态已失效");
-    expect(pane.find("#account-code").exists()).toBe(true);
+    expect(pane.find("#account-password").exists()).toBe(true);
   });
 
   it("退出二次确认后撤销服务器账号，不调用工作台访问密码登出", async () => {

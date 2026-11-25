@@ -1245,6 +1245,80 @@ class ControlPlaneApiTest {
 				.isEqualTo("case.user@grey.local");
 	}
 
+	/** 开放注册：注册即登录；重复注册 409；密码登录与 401 / 400 的口径。 */
+	@Test
+	void passwordRegisterAndLogin() throws Exception {
+		String email = "pwd-" + UUID.randomUUID() + "@grey.local";
+
+		// 注册即登录：拿到的就是可用会话，邮箱归一化落库。
+		MvcResult registered = mockMvc.perform(post("/api/auth/register")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{"email":"%s","password":"Passw0rd123","displayName":"Pwd User","deviceName":"pc","platform":"desktop"}
+								""".formatted(email)))
+				.andExpect(status().isCreated())
+				.andReturn();
+		JsonNode session = json(registered);
+		assertThat(session.get("token").asString()).isNotBlank();
+		String bearer = "Bearer " + session.get("token").asString();
+		mockMvc.perform(get("/api/auth/me").header("Authorization", bearer))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.user.email").value(email));
+
+		// 同一邮箱再注册：409，引导去登录而不是建出第二个账号。
+		mockMvc.perform(post("/api/auth/register")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{"email":"%s","password":"Passw0rd123","deviceName":"pc","platform":"desktop"}
+								""".formatted(email)))
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.code").value("email_exists"));
+
+		// 正确密码登录；密码错 / 没设密码统一 401 文案。
+		mockMvc.perform(post("/api/auth/login")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{"email":"%s","password":"Passw0rd123","deviceName":"phone","platform":"desktop"}
+								""".formatted(email)))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.token").isNotEmpty());
+		mockMvc.perform(post("/api/auth/login")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{"email":"%s","password":"wrong-pass","deviceName":"phone","platform":"desktop"}
+								""".formatted(email)))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.code").value("login_invalid"));
+		mockMvc.perform(post("/api/auth/login")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{"email":"nobody@grey.local","password":"Passw0rd123","deviceName":"phone","platform":"desktop"}
+								""".formatted()))
+				.andExpect(status().isUnauthorized());
+
+		// 注册密码强度只在 service 层卡：长度不足回 400 的统一文案。
+		mockMvc.perform(post("/api/auth/register")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{"email":"short-%s","password":"short","deviceName":"pc","platform":"desktop"}
+								""".formatted(email)))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.code").value("password_invalid"));
+
+		// 注册出来的账号被禁用后，密码登录同样被 403 挡住。
+		Long userId = session.get("user").get("id").asLong();
+		AppUser user = appUserMapper.selectById(userId);
+		user.setStatus("disabled");
+		appUserMapper.updateById(user);
+		mockMvc.perform(post("/api/auth/login")
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{"email":"%s","password":"Passw0rd123","deviceName":"phone","platform":"desktop"}
+								""".formatted(email)))
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.code").value("user_disabled"));
+	}
+
 	/** 连续失败到阈值后先 429；成功一次会清零，所以正常用户不会被误伤。 */
 	@Test
 	void enrollFailuresAreRateLimited() throws Exception {

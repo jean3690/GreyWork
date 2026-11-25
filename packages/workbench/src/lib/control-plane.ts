@@ -36,7 +36,9 @@ export interface ControlPlaneDevice {
 export interface AccountLoginInput {
   baseUrl: string;
   email: string;
-  code: string;
+  password: string;
+  /** true = 首次注册并登录（开放注册）；缺省按已有账号登录。 */
+  register?: boolean;
   displayName?: string;
   deviceName?: string;
 }

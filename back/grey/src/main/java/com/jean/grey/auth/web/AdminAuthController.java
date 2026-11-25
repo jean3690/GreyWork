@@ -1,6 +1,6 @@
 package com.jean.grey.auth.web;
 
-import com.jean.grey.auth.AdminCredentialService;
+import com.jean.grey.auth.PasswordCredentialService;
 import com.jean.grey.auth.AuthPrincipal;
 import com.jean.grey.auth.AuthRateLimiter;
 import com.jean.grey.auth.AuthService;
@@ -21,7 +21,7 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * 运维台登录（账号密码）。
  *
- * 与 /api/auth/enroll 的区别：入场码是**一次性**的，适合发给人；密码是长期凭据，
+ * 普通用户走 /api/auth/login；这里是同一套密码校验的 admin 专属入口：密码是长期凭据，
  * 只给 admin 账号，适合部署者自己反复登录运维台。两者最终都走 AuthService.issueSession，
  * 拿到的是同一种 token，门禁（ROLE_ADMIN）没有第二条路径。
  *
@@ -32,10 +32,10 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/admin/auth")
 public class AdminAuthController {
 
-	private final AdminCredentialService credentialService;
+	private final PasswordCredentialService credentialService;
 	private final AuthRateLimiter rateLimiter;
 
-	public AdminAuthController(AdminCredentialService credentialService, AuthRateLimiter rateLimiter) {
+	public AdminAuthController(PasswordCredentialService credentialService, AuthRateLimiter rateLimiter) {
 		this.credentialService = credentialService;
 		this.rateLimiter = rateLimiter;
 	}
@@ -62,7 +62,7 @@ public class AdminAuthController {
 		String client = http.getRemoteAddr();
 		rateLimiter.assertAllowed(AuthRateLimiter.SCOPE_ADMIN, client);
 		try {
-			AuthService.Enrolled enrolled = credentialService.login(request.email(), request.password());
+			AuthService.Enrolled enrolled = credentialService.loginAdmin(request.email(), request.password());
 			rateLimiter.clear(AuthRateLimiter.SCOPE_ADMIN, client);
 			return new SessionView(enrolled.token(),
 					new UserView(enrolled.user().getId(), enrolled.user().getEmail(),
