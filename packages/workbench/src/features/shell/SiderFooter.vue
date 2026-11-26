@@ -10,9 +10,10 @@ import { useUserAccountStore } from "@/stores/user-account";
 
 const { t } = useI18n();
 
-const emit = defineEmits<{ openSettings: []; navigate: [path: string] }>();
-
 /**
+ * 左下角只留账号入口：它和「设置」都落到同一个设置弹窗（账号分区），并排两个入口
+ * 只是重复。设置本身仍可从标题栏右键菜单 / 搜索打开。
+ *
  * 行按钮共享残留：GwButton 的 `subtle` 变体已给出 text-dim / hover:text-foreground /
  * 焦点环 / 过渡，这里只补行特有的尺寸与左对齐；`hover:bg-panel` 覆盖变体默认的 panel-2。
  */
@@ -56,13 +57,6 @@ async function confirmSignOut(): Promise<void> {
 
 <template>
   <div class="flex shrink-0 flex-col gap-0.5 border-t border-line-2 p-2">
-    <GwButton variant="subtle" radius="xl" :class="rowClass" data-testid="sider-settings" @click="emit('openSettings')">
-      <span class="grid size-5 place-items-center rounded-[calc(5px*var(--gw-radius-scale))] bg-panel text-dim">
-        <Icon name="setting" :size="14" />
-      </span>
-      {{ t(`settings.title`) }}
-    </GwButton>
-
     <div class="flex items-center gap-0.5">
       <GwButton
         variant="subtle"

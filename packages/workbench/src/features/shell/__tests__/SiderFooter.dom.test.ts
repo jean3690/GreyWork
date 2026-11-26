@@ -72,11 +72,11 @@ describe("SiderFooter · 账户行", () => {
     off();
   });
 
-  it("设置入口仍然只上报打开设置", async () => {
+  it("不再重复渲染设置入口：账号入口本身就会打开设置", async () => {
     const wrapper = await mountFooter();
 
-    await wrapper.get('[data-testid="sider-settings"]').trigger("click");
-    expect(wrapper.emitted("openSettings")).toHaveLength(1);
+    expect(wrapper.find('[data-testid="sider-settings"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="sider-account"]').exists()).toBe(true);
   });
 });
 

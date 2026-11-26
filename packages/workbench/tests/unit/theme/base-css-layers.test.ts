@@ -9,8 +9,10 @@ import { fileURLToPath } from "node:url";
 import { readFileSync } from "node:fs";
 
 const CSS_PATH = fileURLToPath(new URL("../../../src/theme/base.css", import.meta.url));
+const TAILWIND_PATH = fileURLToPath(new URL("../../../src/tailwind.css", import.meta.url));
 // 注释里会引用这些选择器（「别把 input { … } 写回无层区」），先剥掉免得自证其罪。
 const css = readFileSync(CSS_PATH, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+const tailwind = readFileSync(TAILWIND_PATH, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
 
 /** 拆出所有 `@layer <name> { … }` 块（花括号配对），同时留下「无层」残余。 */
 function splitLayers(source: string): { layers: Map<string, string>; unlayered: string } {
@@ -40,6 +42,15 @@ const { layers, unlayered } = splitLayers(css);
 const base = layers.get("base") ?? "";
 
 describe("base.css 的层叠契约", () => {
+  it("未指定颜色的边框使用主题 border，而不是文字颜色", () => {
+    const entry = splitLayers(tailwind);
+    expect(entry.layers.get("base")).toMatch(/\*,\s*::before,\s*::after\s*\{[^}]*border-color:\s*var\(--border\)/);
+    // 在 Tailwind 入口的 preflight 之后声明，避免被其 border 简写重置回 currentColor。
+    expect(tailwind.indexOf('@import "tailwindcss"')).toBeLessThan(tailwind.indexOf("border-color: var(--border)"));
+    // 默认边框色必须位于 base 层，不能压掉 border-line / border-destructive 等工具类。
+    expect(entry.unlayered).not.toMatch(/\*,\s*::before,\s*::after\s*\{[^}]*border-color/);
+  });
+
   it("表单控件兜底 reset 与全局焦点环都在 @layer base 里", () => {
     expect(base).not.toBe("");
 

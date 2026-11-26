@@ -399,13 +399,7 @@ function handleNewChat(): void {
       <!-- 侧栏（窄屏作抽屉悬浮；顶栏左栏开合键收起后整个隐去）。
            两道门缺一不可：`panels.sider` 是前端声明（这个前端有没有侧栏），
            `collapsed` 是用户当下的开合态。 -->
-      <MinimalSider
-        v-if="shellSpec.panels.sider && !collapsed"
-        :overlay="isMobile"
-        @new-chat="handleNewChat"
-        @navigate="navigate"
-        @open-settings="openSettings"
-      />
+      <MinimalSider v-if="shellSpec.panels.sider && !collapsed" :overlay="isMobile" @new-chat="handleNewChat" @navigate="navigate" />
       <!-- [内容区 + 预览 + 工作区] 组成一列：上行为被观测的 mainRow（宽度是两个面板 clamp 的依据）。
            顺序 = 会话 | 预览 | 工作区：预览紧挨会话（看产物的心智最近），工作区（文件树）在最右。
            工作区栏默认折叠（回旧单右栏布局），展开与否由 workspace store 的持久化开关决定。

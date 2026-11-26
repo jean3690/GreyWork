@@ -9,12 +9,24 @@
    （--radius 派生链、chrome 色族、动效基线、视口高度链）复制 N 份，必然漂移。它跟着组件源码
    一起住在 workbench 里，下面几条 @source 也就指回本包与各 app。
 
-   Preflight 仍是刻意省略的（只出 theme + utilities），免得重置 Naive UI 的基础样式。
+   本入口包含 Preflight；默认边框色的主题兜底要放在它之后（见下方 @layer base）。
    ⚠️ @source 的基准是**本文件所在目录**（tailwind v4 的规则），不是各 app 的 vite root ——
    所以这几条写的是「从这里出发」的相对路径。 */
 @source "./**/*.{vue,ts,js}";
 @source "../../../packages/*/src/**/*.{vue,ts,js}";
 @source "../../../apps/*/src/**/*.{vue,ts,js}";
+
+/* shadcn 的 Card / Alert 等只声明 border，默认颜色应取主题而非文字色。
+ * 必须放在本入口的 preflight 之后：它的 border: 0 solid 会重置 border-color，
+ * 放在更早加载的 theme/base.css 里仍会被盖回 currentColor（深色下就是白框）。
+ * 留在 base 层，保证 border-line / border-destructive 等工具类能正常覆盖。 */
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: var(--border);
+  }
+}
 
 /* shadcn 组件里的 dark: 变体对齐本项目的外观机制。
    Tailwind v4 默认把 dark: 解析成 prefers-color-scheme，而本项目的明暗由

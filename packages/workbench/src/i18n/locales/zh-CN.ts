@@ -294,6 +294,13 @@ export const zhCN = {
     agent: "Agent",
     agentLabel: "智能体",
     agentSwitchFailed: "切换后端失败：{name}",
+    /** 输入卡底排的后端下拉：本机模型（第三方供应商）与 ACP 后端并列。 */
+    modelAndBackend: "模型与后端",
+    localModels: "本机模型",
+    localAuto: "自动（首个可用）",
+    noLocalModels: "还没有启用的模型供应商，去设置 → Agent 启用。",
+    acpBackends: "ACP 后端",
+    noAcpBackends: "还没有启用的 ACP 后端。",
     workspaceFallback: "普通对话",
     workspaceLabel: "工作区",
     /** ACP 会话配置块：默认收起成一行摘要，点开才铺开完整配置簇。 */

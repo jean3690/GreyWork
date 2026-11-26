@@ -37,7 +37,7 @@ import logoUrl from "@/assets/logo.svg?url";
  * 因为不渲染协作嵌套区，这里**不**把协作成员位会话从历史里摘出去（摘了就没有别处展示它们）；
  * 完整 Sider 才会传 excludeSessionIds。
  */
-const emit = defineEmits<{ newChat: []; navigate: [path: string]; openSettings: [] }>();
+const emit = defineEmits<{ newChat: []; navigate: [path: string] }>();
 
 const props = defineProps<{
   /** 窄屏抽屉模式：absolute 悬浮于内容之上（配合遮罩），不挤占主区宽度 */
@@ -185,6 +185,6 @@ const onlyActiveWorkspace = ref(false);
       @navigate="emit('navigate', $event)"
     />
 
-    <SiderFooter @open-settings="emit('openSettings')" @navigate="emit('navigate', $event)" />
+    <SiderFooter />
   </aside>
 </template>

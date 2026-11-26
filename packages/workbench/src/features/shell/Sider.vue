@@ -120,7 +120,7 @@ const coworkSlotIds = computed(() => new Set(cowork.slots.map((slot) => slot.thr
 
       <GroupedHistory :active-session-id="activeSessionId" :exclude-session-ids="coworkSlotIds" @navigate="emit('navigate', $event)" />
 
-      <SiderFooter @open-settings="emit('openSettings')" @navigate="emit('navigate', $event)" />
+      <SiderFooter />
     </template>
   </aside>
 </template>

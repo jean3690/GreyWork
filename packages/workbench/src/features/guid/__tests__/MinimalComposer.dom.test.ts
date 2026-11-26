@@ -194,7 +194,7 @@ describe("MinimalComposer 配置下拉", () => {
     wrapper.unmount();
   });
 
-  it("Agent 胶囊：选择 ACP 后端走 activateAcpProvider（不再提供 Local 项）", async () => {
+  it("Agent 胶囊：选择 ACP 后端走 activateAcpProvider", async () => {
     const agent = useAgentStore();
     agent.agentProviders = [{ id: "codex", name: "Codex", kind: "acp", command: "codex", enabled: true }];
     const activateSpy = vi.spyOn(agent, "activateAcpProvider").mockResolvedValue(null);
@@ -203,11 +203,33 @@ describe("MinimalComposer 配置下拉", () => {
     await wrapper.get('[data-testid="minimal-composer-agent"]').trigger("click");
     await flushPromises();
     expect(document.body.textContent).toContain("Codex");
-    expect(document.body.querySelector('[data-testid="minimal-agent-local"]')).toBeNull();
 
     await menuItem("minimal-agent-codex").trigger("click");
     await flushPromises();
     expect(activateSpy).toHaveBeenCalledWith("codex");
+    wrapper.unmount();
+  });
+
+  it("Agent 胶囊：第三方模型供应商直接可选，选中后切回 Local 并持久化", async () => {
+    const agent = useAgentStore();
+    const settings = useSettingsStore();
+    agent.routeToAcp = true;
+    agent.selectedProviderId = "codex";
+    agent.agentProviders = [{ id: "codex", name: "Codex", kind: "acp", command: "codex", enabled: true }];
+    const local = settings.modelProviders.find((provider) => provider.id === "openai-compatible");
+    expect(local).toBeDefined();
+    const switchSpy = vi.spyOn(agent, "switchToLocalLlm").mockResolvedValue(undefined);
+
+    const wrapper = mountComposer();
+    await wrapper.get('[data-testid="minimal-composer-agent"]').trigger("click");
+    await flushPromises();
+    expect(document.body.textContent).toContain("本机模型");
+    expect(document.body.textContent).toContain(local!.name);
+
+    await menuItem(`minimal-model-${local!.id}`).trigger("click");
+    await flushPromises();
+    expect(switchSpy).toHaveBeenCalledTimes(1);
+    expect(settings.selectedModelProviderId).toBe(local!.id);
     wrapper.unmount();
   });
 });

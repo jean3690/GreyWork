@@ -305,6 +305,13 @@ export const enUS: MessageSchema = {
     agent: "Agent",
     agentLabel: "Agent",
     agentSwitchFailed: "Failed to switch backend: {name}",
+    /** Composer backend dropdown: local model providers and ACP backends side by side. */
+    modelAndBackend: "Model & backend",
+    localModels: "Local models",
+    localAuto: "Auto (first available)",
+    noLocalModels: "No model provider enabled. Enable one in Settings → Agent.",
+    acpBackends: "ACP backends",
+    noAcpBackends: "No ACP backend enabled.",
     workspaceFallback: "General",
     workspaceLabel: "Workspace",
     /** ACP session config block: collapsed to a summary row by default, expand for the full cluster. */

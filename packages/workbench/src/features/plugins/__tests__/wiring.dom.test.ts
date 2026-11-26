@@ -277,7 +277,10 @@ describe("Sider 插件分组（shellSidebar）", () => {
     const text = wrapper.text();
     expect(text.indexOf("更多")).toBeGreaterThanOrEqual(0);
     expect(text.indexOf("演示分组")).toBeGreaterThan(text.indexOf("更多"));
-    expect(text.indexOf("设置")).toBeGreaterThan(text.indexOf("演示分组"));
+    const regions = wrapper.get('[data-testid="sider-regions"]').element;
+    const account = wrapper.get('[data-testid="sider-account"]').element;
+    expect(regions.compareDocumentPosition(account) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(wrapper.find('[data-testid="sider-settings"]').exists()).toBe(false);
 
     // 停用 → 分组宿主整体消失
     await setPluginEnabled("ext.sidebar", false);

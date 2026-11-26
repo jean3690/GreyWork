@@ -58,11 +58,11 @@ describe("MinimalSider 极简侧栏", () => {
     expect(wrapper.emitted("newChat")).toHaveLength(1);
   });
 
-  it("页脚设置入口只上报 openSettings（极简也保留设置可达）", async () => {
+  it("页脚只保留账号入口，不再重复设置入口", async () => {
     const wrapper = await mountMinimalSider();
 
-    await wrapper.get('[data-testid="sider-settings"]').trigger("click");
-    expect(wrapper.emitted("openSettings")).toHaveLength(1);
+    expect(wrapper.find('[data-testid="sider-settings"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="sider-account"]').exists()).toBe(true);
   });
 });
 

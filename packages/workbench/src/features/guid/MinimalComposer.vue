@@ -10,12 +10,14 @@ import Hint from "@/features/shared/Hint.vue";
 import AcpSessionConfig from "@/features/conversation/AcpSessionConfig.vue";
 import AgentProviderIcon from "@/features/conversation/AgentProviderIcon.vue";
 import ContextUsageRing from "@/features/guid/ContextUsageRing.vue";
+import { selectLlmProvider } from "@/lib/llm-provider";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
@@ -68,14 +70,44 @@ const activeWorkspace = computed(
 );
 const workspaceName = computed(() => activeWorkspace.value?.name ?? null);
 
-/** 当前 ACP 后端（routeToAcp 时）；胶囊文案取它的名字，本地则显示 Local。 */
+/** 当前 ACP 后端（routeToAcp 时）；胶囊文案取它的名字，本地则显示当前模型供应商。 */
 const activeProvider = computed(() =>
   agent.routeToAcp ? (agent.agentProviders.find((provider) => provider.id === agent.selectedProviderId) ?? null) : null,
 );
-const agentLabel = computed(() => (agent.routeToAcp ? (activeProvider.value?.name ?? t("minimal.agent")) : "Local"));
 
 /** 只列已启用的后端（与设置页的 ACP 后端列表同一显隐语义：未启用的要先到设置里启用）。 */
 const enabledProviders = computed(() => agent.agentProviders.filter((provider) => provider.enabled));
+
+/**
+ * Local 路由下的第三方模型供应商。
+ *
+ * 此前这个胶囊只列 ACP 后端，Local 只能从设置页切回去 —— 一旦选了 ACP，会话里就没有
+ * 「用第三方模型」的入口。这里把供应商清单直接铺进同一个下拉：选任何一项都会切回
+ * Local 并记住选择，与设置页的「默认模型供应商」同一份数据。
+ */
+const AUTO_LOCAL = "__auto_local__";
+const localProviders = computed(() => settings.modelProviders.filter((provider) => provider.enabled));
+const activeLocalProvider = computed(() => selectLlmProvider(settings.modelProviders, settings.selectedModelProviderId));
+/** 显式选中且仍可用的供应商；否则落在「自动（首个可用）」。 */
+const localChoice = computed(() => {
+  if (agent.routeToAcp) return "";
+  const selected = settings.selectedModelProviderId;
+  if (selected && localProviders.value.some((provider) => provider.id === selected && provider.baseUrl?.trim() && provider.model.trim())) {
+    return selected;
+  }
+  return AUTO_LOCAL;
+});
+
+const agentLabel = computed(() => {
+  if (agent.routeToAcp) return activeProvider.value?.name ?? t("minimal.agent");
+  return activeLocalProvider.value ? `Local · ${activeLocalProvider.value.name}` : "Local";
+});
+
+/** 选第三方模型：切回 Local（若当前在 ACP），并把选择持久化到设置。 */
+async function pickModelProvider(id: string): Promise<void> {
+  if (agent.routeToAcp) await agent.switchToLocalLlm();
+  settings.selectModelProvider(id === AUTO_LOCAL ? null : id);
+}
 
 /* ===== ACP 会话配置块：输入卡下方，默认收起 =====
  * 配置簇（作用域 / 模型 / 思考强度 / 开关 / 设默认 / 重启）完整铺开时块很高，会把输入卡
@@ -252,10 +284,51 @@ function onTextareaInput(el: HTMLTextAreaElement): void {
                 <Icon name="down" :size="10" class="text-dim2" />
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent side="top" align="start" class="w-[220px] border-line">
+            <DropdownMenuContent side="top" align="start" class="w-[260px] border-line">
               <DropdownMenuLabel class="px-2 py-1 text-[10.5px] font-medium tracking-wide text-dim2 uppercase">
-                {{ t("minimal.agentLabel") }}
+                {{ t("minimal.modelAndBackend") }}
               </DropdownMenuLabel>
+
+              <!-- 本机模型：与设置页「默认模型供应商」同一份清单，选一项即切回 Local。 -->
+              <DropdownMenuLabel class="px-2 pb-1 pt-1.5 text-[10.5px] text-dim2">{{ t("minimal.localModels") }}</DropdownMenuLabel>
+              <DropdownMenuRadioGroup :model-value="localChoice">
+                <DropdownMenuRadioItem
+                  :value="AUTO_LOCAL"
+                  data-testid="minimal-model-auto"
+                  class="cursor-pointer gap-2 rounded-[calc(6px*var(--gw-radius-scale))] py-1.5 text-[12px]"
+                  :class="localChoice === AUTO_LOCAL ? 'text-foreground' : 'text-dim'"
+                  @select="pickModelProvider(AUTO_LOCAL)"
+                >
+                  <template #indicator-icon><span></span></template>
+                  <Icon name="magic" :size="12" class="shrink-0 text-dim" />
+                  <span class="min-w-0 flex-1 truncate">{{ t("minimal.localAuto") }}</span>
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem
+                  v-for="provider in localProviders"
+                  :key="provider.id"
+                  :value="provider.id"
+                  :disabled="!provider.baseUrl?.trim() || !provider.model.trim()"
+                  :data-testid="`minimal-model-${provider.id}`"
+                  class="cursor-pointer gap-2 rounded-[calc(6px*var(--gw-radius-scale))] py-1.5 text-[12px]"
+                  :class="[
+                    provider.id === settings.selectedModelProviderId ? 'text-foreground' : 'text-dim',
+                    !provider.baseUrl?.trim() || !provider.model.trim() ? 'opacity-50' : '',
+                  ]"
+                  @select="pickModelProvider(provider.id)"
+                >
+                  <template #indicator-icon><span></span></template>
+                  <Icon name="robot" :size="12" class="shrink-0 text-dim" />
+                  <span class="min-w-0 flex-1 truncate">{{ provider.name }}</span>
+                  <span class="max-w-[96px] shrink-0 truncate font-mono text-[10px] text-dim2">{{ provider.model }}</span>
+                </DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+              <p v-if="localProviders.length === 0" class="px-2 py-1.5 text-[11px] text-dim2">
+                {{ t("minimal.noLocalModels") }}
+              </p>
+
+              <DropdownMenuSeparator class="my-1 bg-line-2" />
+
+              <DropdownMenuLabel class="px-2 pb-1 text-[10.5px] text-dim2">{{ t("minimal.acpBackends") }}</DropdownMenuLabel>
               <DropdownMenuRadioGroup :model-value="agent.routeToAcp ? (agent.selectedProviderId ?? '__none__') : ''">
                 <DropdownMenuRadioItem
                   v-for="provider in enabledProviders"
@@ -271,6 +344,9 @@ function onTextareaInput(el: HTMLTextAreaElement): void {
                   <span class="min-w-0 flex-1 truncate">{{ provider.name }}</span>
                 </DropdownMenuRadioItem>
               </DropdownMenuRadioGroup>
+              <p v-if="enabledProviders.length === 0" class="px-2 py-1.5 text-[11px] text-dim2">
+                {{ t("minimal.noAcpBackends") }}
+              </p>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>

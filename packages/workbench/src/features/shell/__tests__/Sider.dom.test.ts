@@ -39,13 +39,10 @@ describe("Sider 新对话入口", () => {
     expect(wrapper.find('[data-testid="sider-brand-toggle"] img').exists()).toBe(true);
   });
 
-  it("设置入口只上报打开设置弹窗，不再切换路由", async () => {
+  it("页脚只保留账号入口，不再重复设置入口", async () => {
     const wrapper = await mountSider(false);
-    const initialPath = wrapper.vm.$route.path;
 
-    await wrapper.get('[data-testid="sider-settings"]').trigger("click");
-
-    expect(wrapper.emitted("openSettings")).toHaveLength(1);
-    expect(wrapper.vm.$route.path).toBe(initialPath);
+    expect(wrapper.find('[data-testid="sider-settings"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="sider-account"]').exists()).toBe(true);
   });
 });
